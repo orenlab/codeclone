@@ -1,2 +1,35 @@
-/codeclone.egg-info/
-/.venv/
+# Python packaging
+*.egg-info/
+codeclone.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+.env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Tool caches
+.cache/
+.codeclone-cache/
+.codeclone-baseline.json.bak
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Logs
+*.log
