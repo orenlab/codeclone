@@ -1,7 +1,11 @@
 # CodeClone
 
-**CodeClone** is an AST-based code clone detector for Python, focused on **architectural duplication**, not simple
-copy-paste.
+[![PyPI](https://img.shields.io/pypi/v/codeclone.svg)](https://pypi.org/project/codeclone/)
+[![Python](https://img.shields.io/pypi/pyversions/codeclone.svg)](https://pypi.org/project/codeclone/)
+[![License](https://img.shields.io/pypi/l/codeclone.svg)](LICENSE)
+
+**CodeClone** is an AST-based Python code clone detector that helps teams find architectural duplication and prevent new
+copy-paste via CI.
 
 It is designed to help teams:
 
