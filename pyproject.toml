@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codeclone"
+version = "0.1.0"
+description = "AST-based code clone detector for Python"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+  { name = "Den Rozhnovskiy", email = "pytelemonbot@mail.ru" }
+]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/orenlab/codeclone"
+Repository = "https://github.com/orenlab/codeclone"
+
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.0",
+]
+
+[project.scripts]
+codeclone = "codeclone.cli:main"
