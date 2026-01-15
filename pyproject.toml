@@ -1,28 +1,70 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "codeclone"
-version = "0.1.0"
-description = "AST-based code clone detector for Python"
+version = "1.0.0"
+description = "AST-based code clone detector for Python focused on architectural duplication"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
   { name = "Den Rozhnovskiy", email = "pytelemonbot@mail.ru" }
 ]
+maintainers = [
+  { name = "Den Rozhnovskiy", email = "pytelemonbot@mail.ru" }
+]
+
 requires-python = ">=3.10"
 dependencies = []
+
+keywords = [
+  "python",
+  "ast",
+  "code-clone",
+  "duplication",
+  "static-analysis",
+  "ci",
+  "architecture",
+]
+
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Software Development :: Code Generators",
+  "Topic :: Software Development :: Testing",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: OS Independent",
+]
 
 [project.urls]
 Homepage = "https://github.com/orenlab/codeclone"
 Repository = "https://github.com/orenlab/codeclone"
-
+Issues = "https://github.com/orenlab/codeclone/issues"
+Changelog = "https://github.com/orenlab/codeclone/releases"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.0.0",
+  "pytest>=9.0.0",
+  "build>=1.2.0",
+  "twine>=5.0.0",
 ]
 
 [project.scripts]
 codeclone = "codeclone.cli:main"
+
+[tool.setuptools]
+packages = ["codeclone"]
+
+[tool.setuptools.package-data]
+codeclone = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

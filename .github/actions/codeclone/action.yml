@@ -1,0 +1,39 @@
+name: CodeClone
+description: >
+  AST-based Python code clone detector focused on architectural duplication
+  and CI-friendly baseline enforcement.
+
+author: OrenLab
+
+branding:
+  icon: copy
+  color: blue
+
+inputs:
+  path:
+    description: "Path to the project root"
+    required: false
+    default: "."
+
+  fail-on-new:
+    description: "Fail if new code clones are detected"
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Install CodeClone
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install codeclone
+
+    - name: Run CodeClone
+      shell: bash
+      run: |
+        if [ "${{ inputs.fail-on-new }}" = "true" ]; then
+          codeclone "${{ inputs.path }}" --fail-on-new
+        else
+          codeclone "${{ inputs.path }}"
+        fi
