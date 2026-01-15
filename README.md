@@ -1,6 +1,7 @@
 # CodeClone
 
 [![PyPI](https://img.shields.io/pypi/v/codeclone.svg)](https://pypi.org/project/codeclone/)
+[![Downloads](https://img.shields.io/pypi/dm/codeclone.svg)](https://pypi.org/project/codeclone/)
 [![Python](https://img.shields.io/pypi/pyversions/codeclone.svg)](https://pypi.org/project/codeclone/)
 [![License](https://img.shields.io/pypi/l/codeclone.svg)](LICENSE)
 
