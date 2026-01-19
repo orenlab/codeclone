@@ -182,6 +182,9 @@ wheels = [
 name = "codeclone"
 version = "1.0.0"
 source = { editable = "." }
+dependencies = [
+    { name = "pygments" },
+]
 
 [package.optional-dependencies]
 dev = [
@@ -193,6 +196,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2.0" },
+    { name = "pygments", specifier = ">=2.19.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.0" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=5.0.0" },
 ]

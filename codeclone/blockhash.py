@@ -5,6 +5,7 @@ import hashlib
 
 from .normalize import NormalizationConfig, AstNormalizer
 
+
 def stmt_hash(stmt: ast.stmt, cfg: NormalizationConfig) -> str:
     normalizer = AstNormalizer(cfg)
     stmt = ast.fix_missing_locations(normalizer.visit(stmt))

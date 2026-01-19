@@ -1,0 +1,9 @@
+repos:
+-   repo: local
+    hooks:
+    -   id: codeclone
+        name: CodeClone
+        entry: codeclone
+        language: python
+        args: [".", "--fail-on-new"]
+        types: [python]
