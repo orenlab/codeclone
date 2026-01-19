@@ -1,0 +1,46 @@
+name: 🧠 CFG semantics discussion
+description: Discuss CFG behavior, limitations, or proposals
+title: "[CFG]: "
+labels: [ "cfg", "discussion" ]
+assignees: [ ]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This template is for **control-flow semantics discussions**.
+        Ideal for advanced users and contributors.
+
+  - type: input
+    id: version
+    attributes:
+      label: CodeClone version
+      placeholder: "1.1.0"
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Control-flow scenario
+      description: |
+        Describe the control-flow pattern:
+        - loops
+        - break / continue
+        - early return
+        - exceptions (current or proposed)
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_behavior
+    attributes:
+      label: Current CFG behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired_behavior
+    attributes:
+      label: Desired CFG behavior
+    validations:
+      required: true

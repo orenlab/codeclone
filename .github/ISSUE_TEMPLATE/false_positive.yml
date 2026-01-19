@@ -1,0 +1,46 @@
+name: ⚠️ False positive
+description: CodeClone detected a clone that should not be considered duplication
+title: "[False Positive]: "
+labels: [ "false-positive" ]
+assignees: [ ]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        CodeClone aims to be conservative.
+        This report helps us tune normalization and CFG semantics.
+
+  - type: input
+    id: version
+    attributes:
+      label: CodeClone version
+      placeholder: "1.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Code snippets detected as clones
+      description: Paste both snippets or a reduced example
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: reasoning
+    attributes:
+      label: Why these should NOT be considered clones?
+      description: |
+        Explain semantic or architectural differences
+        (e.g. different responsibilities, contracts, side effects).
+    validations:
+      required: true
+
+  - type: checkbox
+    id: cfg_related
+    attributes:
+      label: CFG-related?
+      options:
+        - label: Control flow structure differs meaningfully

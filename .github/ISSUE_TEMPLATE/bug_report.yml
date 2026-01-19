@@ -1,0 +1,65 @@
+name: 🐞 Bug report
+description: Incorrect clone detection, crashes, or broken reports
+title: "[Bug]: "
+labels: [ "bug" ]
+assignees: [ ]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug in **CodeClone**.
+        Please provide as much detail as possible — clone detection is sensitive to structure.
+
+  - type: input
+    id: version
+    attributes:
+      label: CodeClone version
+      description: Output of `codeclone --version`
+      placeholder: "1.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Function clone detection (Type-2)
+        - Block clone detection (Type-3-lite)
+        - CFG construction
+        - AST normalization
+        - HTML report
+        - CLI / baseline
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the incorrect behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction (code snippet)
+      description: |
+        Provide a minimal Python example.
+        Small snippets are preferred over screenshots.
+      render: python
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: CFG structure, HTML screenshots, logs, etc.

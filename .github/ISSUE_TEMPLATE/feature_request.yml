@@ -1,0 +1,46 @@
+name: ✨ Feature request
+description: Propose an enhancement to CodeClone
+title: "[Feature]: "
+labels: ["enhancement"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests should focus on **signal quality**, not quantity.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Feature category
+      options:
+        - Clone detection logic
+        - CFG semantics
+        - AST normalization
+        - HTML report / UX
+        - CLI / CI integration
+        - Performance
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What limitation are you hitting today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should CodeClone behave instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
