@@ -1,3 +1,11 @@
+"""
+CodeClone — AST and CFG-based code clone detector for Python
+focused on architectural duplication.
+
+Copyright (c) 2026 Den Rozhnovskiy
+Licensed under the MIT License.
+"""
+
 from __future__ import annotations
 
 import ast
@@ -8,6 +16,7 @@ from typing import Iterable
 # =========================
 # Core CFG structures
 # =========================
+
 
 @dataclass(eq=False)
 class Block:
@@ -48,15 +57,16 @@ class CFG:
 # CFG Builder
 # =========================
 
+
 class CFGBuilder:
     def __init__(self) -> None:
         self.cfg: CFG
         self.current: Block
 
     def build(
-            self,
-            qualname: str,
-            node: ast.FunctionDef | ast.AsyncFunctionDef,
+        self,
+        qualname: str,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
     ) -> CFG:
         self.cfg = CFG(qualname)
         self.current = self.cfg.entry
