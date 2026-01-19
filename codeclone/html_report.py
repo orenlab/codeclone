@@ -345,7 +345,7 @@ def build_html_report(
 
 <style>
 /* ============================
-   Pro UI/UX 2025 (static HTML)
+   CodeClone UI/UX
    ============================ */
 
 :root {{
