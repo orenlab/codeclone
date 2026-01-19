@@ -1,3 +1,11 @@
+"""
+CodeClone — AST and CFG-based code clone detector for Python
+focused on architectural duplication.
+
+Copyright (c) 2026 Den Rozhnovskiy
+Licensed under the MIT License.
+"""
+
 from __future__ import annotations
 
 import ast
@@ -18,13 +26,13 @@ class BlockUnit:
 
 
 def extract_blocks(
-        func_node: ast.AST,
-        *,
-        filepath: str,
-        qualname: str,
-        cfg: NormalizationConfig,
-        block_size: int,
-        max_blocks: int,
+    func_node: ast.AST,
+    *,
+    filepath: str,
+    qualname: str,
+    cfg: NormalizationConfig,
+    block_size: int,
+    max_blocks: int,
 ) -> list[BlockUnit]:
     body = getattr(func_node, "body", None)
     if not isinstance(body, list) or len(body) < block_size:
@@ -45,16 +53,18 @@ def extract_blocks(
         if last_start is not None and start - last_start < MIN_LINE_DISTANCE:
             continue
 
-        bh = "|".join(stmt_hashes[i:i + block_size])
+        bh = "|".join(stmt_hashes[i : i + block_size])
 
-        blocks.append(BlockUnit(
-            block_hash=bh,
-            filepath=filepath,
-            qualname=qualname,
-            start_line=start,
-            end_line=end,
-            size=block_size,
-        ))
+        blocks.append(
+            BlockUnit(
+                block_hash=bh,
+                filepath=filepath,
+                qualname=qualname,
+                start_line=start,
+                end_line=end,
+                size=block_size,
+            )
+        )
 
         last_start = start
         if len(blocks) >= max_blocks:

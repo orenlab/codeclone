@@ -1,9 +1,19 @@
+"""
+CodeClone — AST and CFG-based code clone detector for Python
+focused on architectural duplication.
+
+Copyright (c) 2026 Den Rozhnovskiy
+Licensed under the MIT License.
+"""
+
 from __future__ import annotations
 
 import hashlib
 
+
 def sha1(s: str) -> str:
     return hashlib.sha1(s.encode("utf-8")).hexdigest()
+
 
 def bucket_loc(loc: int) -> str:
     # Helps avoid grouping wildly different sizes if desired
