@@ -80,7 +80,7 @@ def process_file(
 def print_banner():
     console.print(
         Panel.fit(
-            "[bold white]CodeClone[/bold white] [dim]v1.2.0[/dim]\n"
+            "[bold white]CodeClone[/bold white] [dim]v1.2.1[/dim]\n"
             "[italic]Architectural duplication detector[/italic]",
             border_style="blue",
             padding=(0, 2),
