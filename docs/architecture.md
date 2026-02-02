@@ -39,6 +39,7 @@ Normalization removes non-structural noise:
 - variable names → `_VAR_`
 - constants → `_CONST_`
 - attributes → `_ATTR_`
+- syntactic sugar (e.g. `x += 1` → `x = x + 1`)
 - docstrings removed
 - type annotations removed
 
@@ -50,7 +51,7 @@ This ensures structural stability across refactors.
 
 - Built per-function using `CFGBuilder`.
 - Produces deterministic basic blocks.
-- Captures structural control flow (`if`, `for`, `while`).
+- Captures structural control flow (`if`, `for`, `while`, `try`, `with`, `match`).
 
 📄 See [docs/cfg.md](cfg.md) for full semantics.
 

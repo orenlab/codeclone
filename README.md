@@ -65,7 +65,12 @@ Typical use cases:
 
 - Each function is converted into a **Control Flow Graph**.
 - CFG nodes contain normalized AST statements.
-- CFG edges represent structural control flow (`if`, `for`, `while`).
+- CFG edges represent structural control flow:
+  - `if` / `else`
+  - `for` / `async for` / `while`
+  - `try` / `except` / `finally`
+  - `with` / `async with`
+  - `match` / `case` (Python 3.10+)
 - Current CFG semantics (v1):
   - `break` and `continue` are treated as statements (no jump targets),
   - after-blocks are explicit and always present,
@@ -117,14 +122,14 @@ Generate reports:
 
 ```bash
 codeclone . \
-  --json-out .cache/codeclone/report.json \
-  --text-out .cache/codeclone/report.txt
+  --json .cache/codeclone/report.json \
+  --text .cache/codeclone/report.txt
 ```
 
 Generate an HTML report:
 
 ```bash
-codeclone . --html-out .cache/codeclone/report.html
+codeclone . --html .cache/codeclone/report.html
 ```
 
 ---
@@ -197,6 +202,9 @@ repos:
 4. Compute stable CFG fingerprints.
 5. Detect function-level and block-level clones.
 6. Apply conservative filters to suppress noise.
+
+See the architectural overview:
+- [docs/architecture.md](docs/architecture.md)
 
 ---
 

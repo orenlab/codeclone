@@ -9,6 +9,8 @@ Licensed under the MIT License.
 from __future__ import annotations
 
 import ast
+import copy
+from ast import AST
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -83,12 +85,33 @@ class AstNormalizer(ast.NodeTransformer):
             node.value = "_CONST_"
         return node
 
+    def visit_AugAssign(self, node: ast.AugAssign) -> AST:
+        # Normalize x += 1 to x = x + 1
+        # This allows detecting clones where one uses += and another uses = +
+        # We transform AugAssign(target, op, value) to Assign([target], BinOp(target, op, value))
+
+        # Deepcopy target to avoid reuse issues in the AST
+        target_load = copy.deepcopy(node.target)
+        # Ensure context is Load() for the right-hand side usage
+        if hasattr(target_load, "ctx"):
+            target_load.ctx = ast.Load()
+
+        new_node = ast.Assign(
+            targets=[node.target],
+            value=ast.BinOp(left=target_load, op=node.op, right=node.value),
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+            end_lineno=getattr(node, "end_lineno", None),
+            end_col_offset=getattr(node, "end_col_offset", None),
+        )
+        return self.generic_visit(new_node)
+
 
 def normalized_ast_dump(func_node: ast.AST, cfg: NormalizationConfig) -> str:
     normalizer = AstNormalizer(cfg)
-    new_node = ast.fix_missing_locations(
-        normalizer.visit(ast.copy_location(func_node, func_node))
-    )
+    # Deepcopy to prevent side effects on the original AST
+    node_copy = copy.deepcopy(func_node)
+    new_node = ast.fix_missing_locations(normalizer.visit(node_copy))
     return ast.dump(new_node, annotate_fields=True, include_attributes=False)
 
 
@@ -99,9 +122,9 @@ def normalized_ast_dump_from_list(
     dumps: list[str] = []
 
     for node in nodes:
-        new_node = ast.fix_missing_locations(
-            normalizer.visit(ast.copy_location(node, node))
-        )
+        # Deepcopy to prevent side effects
+        node_copy = copy.deepcopy(node)
+        new_node = ast.fix_missing_locations(normalizer.visit(node_copy))
         dumps.append(ast.dump(new_node, annotate_fields=True, include_attributes=False))
 
     return ";".join(dumps)
