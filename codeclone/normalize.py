@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NormalizationConfig:
     ignore_docstrings: bool = True
     ignore_type_annotations: bool = True
@@ -25,17 +25,19 @@ class NormalizationConfig:
 
 
 class AstNormalizer(ast.NodeTransformer):
+    __slots__ = ("cfg",)
+
     def __init__(self, cfg: NormalizationConfig):
         super().__init__()
         self.cfg = cfg
 
-    def visit_FunctionDef(self, node: ast.FunctionDef):
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
         return self._visit_func(node)
 
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
         return self._visit_func(node)
 
-    def _visit_func(self, node: ast.FunctionDef | ast.AsyncFunctionDef):
+    def _visit_func(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> ast.AST:
         # Drop docstring
         if self.cfg.ignore_docstrings and node.body:
             first = node.body[0]
@@ -63,12 +65,12 @@ class AstNormalizer(ast.NodeTransformer):
 
         return self.generic_visit(node)
 
-    def visit_arg(self, node: ast.arg):
+    def visit_arg(self, node: ast.arg) -> ast.arg:
         if self.cfg.ignore_type_annotations:
             node.annotation = None
         return node
 
-    def visit_Name(self, node: ast.Name):
+    def visit_Name(self, node: ast.Name) -> ast.Name:
         if self.cfg.normalize_names:
             node.id = "_VAR_"
         return node
@@ -80,7 +82,7 @@ class AstNormalizer(ast.NodeTransformer):
             new_node.attr = "_ATTR_"
         return new_node
 
-    def visit_Constant(self, node: ast.Constant):
+    def visit_Constant(self, node: ast.Constant) -> ast.Constant:
         if self.cfg.normalize_constants:
             node.value = "_CONST_"
         return node
@@ -88,7 +90,8 @@ class AstNormalizer(ast.NodeTransformer):
     def visit_AugAssign(self, node: ast.AugAssign) -> AST:
         # Normalize x += 1 to x = x + 1
         # This allows detecting clones where one uses += and another uses = +
-        # We transform AugAssign(target, op, value) to Assign([target], BinOp(target, op, value))
+        # We transform AugAssign(target, op, value) to Assign([target],
+        # BinOp(target, op, value))
 
         # Deepcopy target to avoid reuse issues in the AST
         target_load = copy.deepcopy(node.target)
@@ -108,23 +111,27 @@ class AstNormalizer(ast.NodeTransformer):
 
 
 def normalized_ast_dump(func_node: ast.AST, cfg: NormalizationConfig) -> str:
+    """
+    Dump the normalized AST.
+    WARNING: This modifies the AST in-place for performance.
+    """
     normalizer = AstNormalizer(cfg)
-    # Deepcopy to prevent side effects on the original AST
-    node_copy = copy.deepcopy(func_node)
-    new_node = ast.fix_missing_locations(normalizer.visit(node_copy))
+    new_node = ast.fix_missing_locations(normalizer.visit(func_node))
     return ast.dump(new_node, annotate_fields=True, include_attributes=False)
 
 
 def normalized_ast_dump_from_list(
     nodes: Sequence[ast.AST], cfg: NormalizationConfig
 ) -> str:
+    """
+    Dump a list of AST nodes after normalization.
+    WARNING: This modifies the AST nodes in-place for performance.
+    """
     normalizer = AstNormalizer(cfg)
     dumps: list[str] = []
 
     for node in nodes:
-        # Deepcopy to prevent side effects
-        node_copy = copy.deepcopy(node)
-        new_node = ast.fix_missing_locations(normalizer.visit(node_copy))
+        new_node = ast.fix_missing_locations(normalizer.visit(node))
         dumps.append(ast.dump(new_node, annotate_fields=True, include_attributes=False))
 
     return ";".join(dumps)

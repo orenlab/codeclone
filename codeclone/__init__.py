@@ -6,7 +6,7 @@ Copyright (c) 2026 Den Rozhnovskiy
 Licensed under the MIT License.
 """
 
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("codeclone")

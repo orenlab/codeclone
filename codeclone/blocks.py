@@ -15,7 +15,7 @@ from .blockhash import stmt_hash
 from .normalize import NormalizationConfig
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BlockUnit:
     block_hash: str
     filepath: str
@@ -42,7 +42,8 @@ def extract_blocks(
 
     blocks: list[BlockUnit] = []
     last_start: int | None = None
-    MIN_LINE_DISTANCE = 5  # suppress overlapping windows
+    # Allow some overlap (50%), but at least 3 lines apart
+    min_line_distance = max(block_size // 2, 3)
 
     for i in range(len(stmt_hashes) - block_size + 1):
         start = getattr(body[i], "lineno", None)
@@ -50,7 +51,7 @@ def extract_blocks(
         if not start or not end:
             continue
 
-        if last_start is not None and start - last_start < MIN_LINE_DISTANCE:
+        if last_start is not None and start - last_start < min_line_distance:
             continue
 
         bh = "|".join(stmt_hashes[i : i + block_size])

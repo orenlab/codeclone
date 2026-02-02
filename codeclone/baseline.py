@@ -9,10 +9,13 @@ Licensed under the MIT License.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 
 class Baseline:
+    __slots__ = ("blocks", "functions", "path")
+
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.functions: set[str] = set()
@@ -45,14 +48,18 @@ class Baseline:
 
     @staticmethod
     def from_groups(
-        func_groups: dict, block_groups: dict, path: str | Path = ""
-    ) -> "Baseline":
+        func_groups: Mapping[str, object],
+        block_groups: Mapping[str, object],
+        path: str | Path = "",
+    ) -> Baseline:
         bl = Baseline(path)
         bl.functions = set(func_groups.keys())
         bl.blocks = set(block_groups.keys())
         return bl
 
-    def diff(self, func_groups: dict, block_groups: dict) -> tuple[set, set]:
+    def diff(
+        self, func_groups: Mapping[str, object], block_groups: Mapping[str, object]
+    ) -> tuple[set[str], set[str]]:
         new_funcs = set(func_groups.keys()) - self.functions
         new_blocks = set(block_groups.keys()) - self.blocks
         return new_funcs, new_blocks
