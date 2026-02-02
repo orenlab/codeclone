@@ -105,9 +105,9 @@ def _prefix_css(css: str, prefix: str) -> str:
             out_lines.append(line)
             continue
         if (
-            stripped.startswith("/*")
-            or stripped.startswith("*")
-            or stripped.startswith("*/")
+                stripped.startswith("/*")
+                or stripped.startswith("*")
+                or stripped.startswith("*/")
         ):
             out_lines.append(line)
             continue
@@ -126,13 +126,13 @@ def _prefix_css(css: str, prefix: str) -> str:
 
 
 def _render_code_block(
-    *,
-    filepath: str,
-    start_line: int,
-    end_line: int,
-    file_cache: _FileCache,
-    context: int,
-    max_lines: int,
+        *,
+        filepath: str,
+        start_line: int,
+        end_line: int,
+        file_cache: _FileCache,
+        context: int,
+        max_lines: int,
 ) -> _Snippet:
     lines = file_cache.get_lines(filepath)
 
@@ -164,13 +164,13 @@ def _render_code_block(
         filepath=filepath,
         start_line=start_line,
         end_line=end_line,
-        code_html=f'<pre class="codebox"><code>{body}</code></pre>',
+        code_html=f'<div class="codebox"><pre><code>{body}</code></pre></div>',
     )
 
 
-# ============================ 
+# ============================
 # HTML report builder
-# ============================ 
+# ============================
 
 
 def _escape(v: Any) -> str:
@@ -354,11 +354,41 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  flex-wrap: wrap;
   padding: 12px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+@media (max-width: 768px) {
+  .section-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .toolbar-left,
+  .toolbar-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+  
+  .search-wrap {
+    min-width: 0;
+    flex: 1;
+  }
 }
 
 .search-wrap {
@@ -414,6 +444,14 @@ body {
   align-items: center;
   gap: 8px;
   font-size: 13px;
+}
+
+.page-meta {
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  min-width: 80px;
+  text-align: center;
 }
 
 .pill {
@@ -503,12 +541,13 @@ body {
   grid-template-columns: 1fr 1fr;
   gap: 16px;
   margin-bottom: 16px;
+  min-width: 0; /* Allow grid items to shrink */
 }
 .item-pair:last-child {
   margin-bottom: 0;
 }
 
-@media (max-width: 1000px) {
+@media (max-width: 1200px) {
   .item-pair {
     grid-template-columns: 1fr;
   }
@@ -520,6 +559,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-width: 0; /* Allow flex items to shrink below content size */
 }
 
 .item-head {
@@ -542,13 +582,34 @@ body {
 
 .codebox {
   margin: 0;
-  padding: 12px;
+  padding: 0;
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.5;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
   background: var(--bg);
   flex: 1;
+  max-width: 100%;
+  max-height: 600px;
+}
+
+.codebox pre {
+  margin: 0;
+  padding: 12px;
+  white-space: pre;
+  word-wrap: normal;
+  overflow-wrap: normal;
+  min-width: max-content;
+}
+
+.codebox code {
+  display: block;
+  white-space: pre;
+  word-wrap: normal;
+  overflow-wrap: normal;
+  font-family: inherit;
+  font-size: inherit;
 }
 
 .empty {
@@ -754,12 +815,12 @@ ${block_section}
 
 
 def build_html_report(
-    *,
-    func_groups: dict[str, list[dict[str, Any]]],
-    block_groups: dict[str, list[dict[str, Any]]],
-    title: str = "CodeClone Report",
-    context_lines: int = 3,
-    max_snippet_lines: int = 220,
+        *,
+        func_groups: dict[str, list[dict[str, Any]]],
+        block_groups: dict[str, list[dict[str, Any]]],
+        title: str = "CodeClone Report",
+        context_lines: int = 3,
+        max_snippet_lines: int = 220,
 ) -> str:
     file_cache = _FileCache()
 
@@ -780,9 +841,9 @@ def build_html_report(
     pyg_dark = _prefix_css(pyg_dark_raw, "html[data-theme='dark']")
     pyg_light = _prefix_css(pyg_light_raw, "html[data-theme='light']")
 
-    # ============================ 
+    # ============================
     # Icons (Inline SVG)
-    # ============================ 
+    # ============================
     ICON_SEARCH = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>'
     ICON_X = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'
     ICON_CHEV_DOWN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>'
@@ -792,15 +853,15 @@ def build_html_report(
     ICON_PREV = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>'
     ICON_NEXT = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>'
 
-    # ---------------------------- 
+    # ----------------------------
     # Section renderer
     # ----------------------------
 
     def render_section(
-        section_id: str,
-        section_title: str,
-        groups: list[tuple[str, list[dict[str, Any]]]],
-        pill_cls: str,
+            section_id: str,
+            section_title: str,
+            groups: list[tuple[str, list[dict[str, Any]]]],
+            pill_cls: str,
     ) -> str:
         if not groups:
             return ""
@@ -904,9 +965,9 @@ def build_html_report(
         out.append("</section>")
         return "\n".join(out)
 
-    # ============================ 
+    # ============================
     # HTML Rendering
-    # ============================ 
+    # ============================
 
     empty_state_html = ""
     if not has_any:
