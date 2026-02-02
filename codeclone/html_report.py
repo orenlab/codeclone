@@ -21,6 +21,7 @@ from codeclone import __version__
 # Pairwise
 # ============================
 
+
 def pairwise(iterable: Iterable[Any]) -> Iterable[tuple[Any, Any]]:
     a, b = itertools.tee(iterable)
     next(b, None)
@@ -30,6 +31,7 @@ def pairwise(iterable: Iterable[Any]) -> Iterable[tuple[Any, Any]]:
 # ============================
 # Code snippet infrastructure
 # ============================
+
 
 @dataclass
 class _Snippet:
@@ -101,7 +103,11 @@ def _prefix_css(css: str, prefix: str) -> str:
         if not stripped:
             out_lines.append(line)
             continue
-        if stripped.startswith("/*") or stripped.startswith("*") or stripped.startswith("*/"):
+        if (
+            stripped.startswith("/*")
+            or stripped.startswith("*")
+            or stripped.startswith("*/")
+        ):
             out_lines.append(line)
             continue
         # Selector lines usually end with `{`
@@ -119,13 +125,13 @@ def _prefix_css(css: str, prefix: str) -> str:
 
 
 def _render_code_block(
-        *,
-        filepath: str,
-        start_line: int,
-        end_line: int,
-        file_cache: _FileCache,
-        context: int,
-        max_lines: int,
+    *,
+    filepath: str,
+    start_line: int,
+    end_line: int,
+    file_cache: _FileCache,
+    context: int,
+    max_lines: int,
 ) -> _Snippet:
     lines = file_cache.get_lines(filepath)
 
@@ -165,6 +171,7 @@ def _render_code_block(
 # HTML report builder
 # ============================
 
+
 def _escape(v: Any) -> str:
     return html.escape("" if v is None else str(v))
 
@@ -177,12 +184,12 @@ def _group_sort_key(items: list[dict[str, Any]]) -> tuple[int, int]:
 
 
 def build_html_report(
-        *,
-        func_groups: dict[str, list[dict[str, Any]]],
-        block_groups: dict[str, list[dict[str, Any]]],
-        title: str = "CodeClone Report",
-        context_lines: int = 3,
-        max_snippet_lines: int = 220,
+    *,
+    func_groups: dict[str, list[dict[str, Any]]],
+    block_groups: dict[str, list[dict[str, Any]]],
+    title: str = "CodeClone Report",
+    context_lines: int = 3,
+    max_snippet_lines: int = 220,
 ) -> str:
     file_cache = _FileCache()
 
@@ -208,10 +215,10 @@ def build_html_report(
     # ----------------------------
 
     def render_section(
-            section_id: str,
-            section_title: str,
-            groups: list[tuple[str, list[dict[str, Any]]]],
-            pill_cls: str,
+        section_id: str,
+        section_title: str,
+        groups: list[tuple[str, list[dict[str, Any]]]],
+        pill_cls: str,
     ) -> str:
         if not groups:
             return ""
@@ -303,11 +310,11 @@ def build_html_report(
                         '<div class="item">'
                         f'<div class="item-head">{_escape(item["qualname"])}</div>'
                         f'<div class="item-file">'
-                        f'{_escape(item["filepath"])}:'
-                        f'{item["start_line"]}-{item["end_line"]}'
-                        f'</div>'
-                        f'{snippet.code_html}'
-                        '</div>'
+                        f"{_escape(item['filepath'])}:"
+                        f"{item['start_line']}-{item['end_line']}"
+                        f"</div>"
+                        f"{snippet.code_html}"
+                        "</div>"
                     )
 
                 out.append("</div>")  # item-pair

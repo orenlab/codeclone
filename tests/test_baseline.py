@@ -56,7 +56,7 @@ def test_baseline_from_groups():
     func_groups = {"f1": [], "f2": []}
     block_groups = {"b1": []}
     bl = Baseline.from_groups(func_groups, block_groups, path="custom.json")
-    
+
     assert bl.functions == {"f1", "f2"}
     assert bl.blocks == {"b1"}
     assert bl.path == Path("custom.json")

@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 
 
-
 class Baseline:
     def __init__(self, path: str | Path):
         self.path = Path(path)

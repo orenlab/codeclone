@@ -15,7 +15,13 @@ from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TimeElapsedColumn,
+)
 from rich.table import Table
 from rich.theme import Theme
 
@@ -28,13 +34,15 @@ from .report import build_groups, build_block_groups, to_json, to_text
 from .scanner import iter_py_files, module_name_from_path
 
 # Custom theme for Rich
-custom_theme = Theme({
-    "info": "cyan",
-    "warning": "yellow",
-    "error": "bold red",
-    "success": "bold green",
-    "dim": "dim",
-})
+custom_theme = Theme(
+    {
+        "info": "cyan",
+        "warning": "yellow",
+        "error": "bold red",
+        "success": "bold green",
+        "dim": "dim",
+    }
+)
 console = Console(theme=custom_theme, width=200)
 
 
@@ -43,11 +51,11 @@ def expand_path(p: str) -> Path:
 
 
 def process_file(
-        filepath: str,
-        root: str,
-        cfg: NormalizationConfig,
-        min_loc: int,
-        min_stmt: int,
+    filepath: str,
+    root: str,
+    cfg: NormalizationConfig,
+    min_loc: int,
+    min_stmt: int,
 ) -> tuple[str, dict, list, list] | None:
     try:
         source = Path(filepath).read_text("utf-8")
@@ -207,7 +215,6 @@ def main() -> None:
                 files_to_process.append(fp)
 
     total_files = len(files_to_process)
-    cached_files = len(all_units)  # rough estimate, units != files, but logic holds
 
     # Processing phase
     if total_files > 0:
@@ -216,7 +223,12 @@ def main() -> None:
             with ProcessPoolExecutor(max_workers=args.processes) as executor:
                 futures = [
                     executor.submit(
-                        process_file, fp, str(root_path), cfg, args.min_loc, args.min_stmt
+                        process_file,
+                        fp,
+                        str(root_path),
+                        cfg,
+                        args.min_loc,
+                        args.min_stmt,
                     )
                     for fp in files_to_process
                 ]
@@ -235,14 +247,16 @@ def main() -> None:
                         all_blocks.extend([b.__dict__ for b in blocks])
         else:
             with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    BarColumn(),
-                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                    TimeElapsedColumn(),
-                    console=console,
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                TimeElapsedColumn(),
+                console=console,
             ) as progress:
-                task = progress.add_task(f"Analyzing {total_files} files...", total=total_files)
+                task = progress.add_task(
+                    f"Analyzing {total_files} files...", total=total_files
+                )
                 with ProcessPoolExecutor(max_workers=args.processes) as executor:
                     futures = [
                         executor.submit(
@@ -258,7 +272,7 @@ def main() -> None:
                     for future in as_completed(futures):
                         try:
                             result = future.result()
-                        except Exception as e:
+                        except Exception:
                             # Log error but keep progress bar moving?
                             # console.print might break progress bar layout, better to rely on rich logging or just skip
                             # console.print(f"[warning]Failed to process file: {e}[/warning]")
@@ -302,7 +316,9 @@ def main() -> None:
             )
 
     if args.update_baseline:
-        new_baseline = Baseline.from_groups(func_groups, block_groups, path=baseline_path)
+        new_baseline = Baseline.from_groups(
+            func_groups, block_groups, path=baseline_path
+        )
         new_baseline.save()
         console.print(f"[success]✔ Baseline updated:[/success] {baseline_path}")
         # When updating, we don't fail on new, we just saved the new state.
@@ -323,7 +339,9 @@ def main() -> None:
 
     if baseline_exists:
         style = "error" if new_clones_count > 0 else "success"
-        table.add_row("New Clones (vs Baseline)", f"[{style}]{new_clones_count}[/{style}]")
+        table.add_row(
+            "New Clones (vs Baseline)", f"[{style}]{new_clones_count}[/{style}]"
+        )
 
     console.print(table)
 

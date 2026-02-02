@@ -8,7 +8,7 @@ def run_cli(args, cwd=None):
     env = os.environ.copy()
     root_dir = Path(__file__).parents[1]
     env["PYTHONPATH"] = str(root_dir) + os.pathsep + env.get("PYTHONPATH", "")
-    
+
     # Try to find venv python
     venv_python = root_dir / ".venv" / "bin" / "python"
     executable = str(venv_python) if venv_python.exists() else sys.executable
@@ -18,7 +18,7 @@ def run_cli(args, cwd=None):
         capture_output=True,
         text=True,
         cwd=cwd,
-        env=env
+        env=env,
     )
 
 
@@ -43,17 +43,10 @@ def test_cli_baseline_missing_warning(tmp_path: Path):
     # Should print a warning when baseline is missing and --update-baseline is not set
     src = tmp_path / "a.py"
     src.write_text("def f(): pass")
-    
+
     baseline_file = tmp_path / "missing.json"
 
-    result = run_cli(
-        [
-            str(tmp_path),
-            "--baseline",
-            str(baseline_file),
-            "--no-progress"
-        ]
-    )
+    result = run_cli([str(tmp_path), "--baseline", str(baseline_file), "--no-progress"])
 
     assert result.returncode == 0
     assert "Baseline file not found at" in result.stdout
@@ -72,7 +65,7 @@ def f2():
     print("hello")
     return 1
 """)
-    
+
     baseline_file = tmp_path / "codeclone.baseline.json"
 
     # Update baseline
@@ -82,9 +75,11 @@ def f2():
             "--baseline",
             str(baseline_file),
             "--update-baseline",
-            "--min-loc", "1",
-            "--min-stmt", "1",
-            "--no-progress"
+            "--min-loc",
+            "1",
+            "--min-stmt",
+            "1",
+            "--no-progress",
         ]
     )
 
@@ -101,9 +96,11 @@ def f2():
             "--baseline",
             str(baseline_file),
             "--fail-on-new",
-            "--min-loc", "1",
-            "--min-stmt", "1",
-            "--no-progress"
+            "--min-loc",
+            "1",
+            "--min-stmt",
+            "1",
+            "--no-progress",
         ]
     )
     assert result2.returncode == 0

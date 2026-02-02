@@ -89,24 +89,20 @@ class AstNormalizer(ast.NodeTransformer):
         # Normalize x += 1 to x = x + 1
         # This allows detecting clones where one uses += and another uses = +
         # We transform AugAssign(target, op, value) to Assign([target], BinOp(target, op, value))
-        
+
         # Deepcopy target to avoid reuse issues in the AST
         target_load = copy.deepcopy(node.target)
         # Ensure context is Load() for the right-hand side usage
         if hasattr(target_load, "ctx"):
             target_load.ctx = ast.Load()
-            
+
         new_node = ast.Assign(
             targets=[node.target],
-            value=ast.BinOp(
-                left=target_load,
-                op=node.op,
-                right=node.value
-            ),
+            value=ast.BinOp(left=target_load, op=node.op, right=node.value),
             lineno=node.lineno,
             col_offset=node.col_offset,
             end_lineno=getattr(node, "end_lineno", None),
-            end_col_offset=getattr(node, "end_col_offset", None)
+            end_col_offset=getattr(node, "end_col_offset", None),
         )
         return self.generic_visit(new_node)
 
