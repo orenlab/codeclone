@@ -203,6 +203,9 @@ repos:
 5. Detect function-level and block-level clones.
 6. Apply conservative filters to suppress noise.
 
+See the architectural overview:
+- [docs/architecture.md](docs/architecture.md)
+
 ---
 
 ## Control Flow Graph (CFG)
