@@ -12,8 +12,8 @@ import json
 from typing import Any
 
 
-def build_groups(units: list[dict[str, Any]]) -> dict[str, list[dict]]:
-    groups: dict[str, list[dict]] = {}
+def build_groups(units: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    groups: dict[str, list[dict[str, Any]]] = {}
     for u in units:
         key = f"{u['fingerprint']}|{u['loc_bucket']}"
         groups.setdefault(key, []).append(u)
@@ -21,13 +21,13 @@ def build_groups(units: list[dict[str, Any]]) -> dict[str, list[dict]]:
 
 
 def build_block_groups(
-    blocks: list[dict], min_functions: int = 2
-) -> dict[str, list[dict]]:
-    groups: dict[str, list[dict]] = {}
+    blocks: list[dict[str, Any]], min_functions: int = 2
+) -> dict[str, list[dict[str, Any]]]:
+    groups: dict[str, list[dict[str, Any]]] = {}
     for b in blocks:
         groups.setdefault(b["block_hash"], []).append(b)
 
-    filtered: dict[str, list[dict]] = {}
+    filtered: dict[str, list[dict[str, Any]]] = {}
     for h, items in groups.items():
         functions = {i["qualname"] for i in items}
         if len(functions) >= min_functions:

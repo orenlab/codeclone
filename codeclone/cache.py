@@ -12,17 +12,21 @@ import json
 import os
 from dataclasses import asdict
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 class Cache:
-    def __init__(self, path: str):
+    def __init__(self, path: str | Path):
         self.path = Path(path)
-        self.data: dict = {"files": {}}
+        self.data: dict[str, Any] = {"files": {}}
 
     def load(self) -> None:
         if self.path.exists():
-            self.data = json.loads(self.path.read_text("utf-8"))
+            try:
+                self.data = json.loads(self.path.read_text("utf-8"))
+            except json.JSONDecodeError:
+                # If cache is corrupted, start fresh
+                self.data = {"files": {}}
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -31,10 +35,12 @@ class Cache:
             "utf-8",
         )
 
-    def get_file_entry(self, filepath: str) -> Optional[dict]:
+    def get_file_entry(self, filepath: str) -> Optional[dict[str, Any]]:
         return self.data.get("files", {}).get(filepath)
 
-    def put_file_entry(self, filepath: str, stat_sig: dict, units, blocks) -> None:
+    def put_file_entry(
+        self, filepath: str, stat_sig: dict[str, Any], units: list, blocks: list
+    ) -> None:
         self.data.setdefault("files", {})[filepath] = {
             "stat": stat_sig,
             "units": [asdict(u) for u in units],

@@ -131,3 +131,46 @@ def test_cfg_break_continue():
 
     for block in cfg.blocks:
         assert isinstance(block.successors, set)
+
+
+def test_cfg_try_finally():
+    source = """
+    def f():
+        try:
+            x = 1
+        except ValueError:
+            y = 2
+        finally:
+            z = 3
+    """
+    cfg = build_cfg_from_source(source)
+    # Entry -> TryBody -> Handler/Finally
+    # Just ensure we traversed it and have blocks
+    assert len(cfg.blocks) > 3
+
+
+def test_cfg_with():
+    source = """
+    def f():
+        with open("x") as f:
+            read()
+    """
+    cfg = build_cfg_from_source(source)
+    assert len(cfg.blocks) >= 3
+
+
+def test_cfg_match():
+    source = """
+    def f(x):
+        match x:
+            case 1:
+                return 1
+            case _:
+                return 2
+    """
+    try:
+        cfg = build_cfg_from_source(source)
+        assert len(cfg.blocks) >= 3
+    except SyntaxError:
+        # Python < 3.10
+        pass
