@@ -22,7 +22,11 @@ def cfg_to_str(cfg: CFG) -> str:
     for block in sorted(cfg.blocks, key=lambda b: b.id):
         succ = sorted(s.id for s in block.successors)
         lines.append(f"Block {block.id} -> [{', '.join(map(str, succ))}]")
-        lines.extend([f"  {ast.dump(stmt)}" for stmt in block.statements])
+        for stmt in block.statements:
+            dumped = ast.dump(stmt)
+            # Normalize across Python versions (empty Call keywords may be shown)
+            dumped = dumped.replace(", keywords=[]", "")
+            lines.append(f"  {dumped}")
     return "\n".join(lines)
 
 
