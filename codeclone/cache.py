@@ -8,47 +8,178 @@ Licensed under the MIT License.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
+import secrets
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, TypedDict, cast
+
+if TYPE_CHECKING:
+    from .blocks import BlockUnit
+    from .extractor import Unit
+
+from .errors import CacheError
+
+
+class FileStat(TypedDict):
+    mtime_ns: int
+    size: int
+
+
+class UnitDict(TypedDict):
+    qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    loc: int
+    stmt_count: int
+    fingerprint: str
+    loc_bucket: str
+
+
+class BlockDict(TypedDict):
+    block_hash: str
+    filepath: str
+    qualname: str
+    start_line: int
+    end_line: int
+    size: int
+
+
+class CacheEntry(TypedDict):
+    stat: FileStat
+    units: list[UnitDict]
+    blocks: list[BlockDict]
+
+
+class CacheData(TypedDict):
+    version: str
+    files: dict[str, CacheEntry]
 
 
 class Cache:
+    __slots__ = ("data", "load_warning", "path", "secret")
+    CACHE_VERSION = "1.0"
+
     def __init__(self, path: str | Path):
         self.path = Path(path)
-        self.data: dict[str, Any] = {"files": {}}
+        self.data: CacheData = {"version": self.CACHE_VERSION, "files": {}}
+        self.secret = self._load_secret()
+        self.load_warning: str | None = None
+
+    def _load_secret(self) -> bytes:
+        """Load or create cache signing secret."""
+        # Store secret in the same directory as the cache file, named .cache_secret
+        # If cache is at ~/.cache/codeclone/cache.json, secret is
+        # ~/.cache/codeclone/.cache_secret
+        secret_path = self.path.parent / ".cache_secret"
+        if secret_path.exists():
+            return secret_path.read_bytes()
+        else:
+            secret = secrets.token_bytes(32)
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                secret_path.write_bytes(secret)
+                # Set restrictive permissions on secret file (Unix only)
+                if os.name == "posix":
+                    secret_path.chmod(0o600)
+            except OSError:
+                pass
+            return secret
+
+    def _sign_data(self, data: Mapping[str, Any]) -> str:
+        """Create HMAC signature of cache data."""
+        # Sort keys for deterministic JSON serialization
+        data_str = json.dumps(data, sort_keys=True)
+        return hmac.new(self.secret, data_str.encode(), hashlib.sha256).hexdigest()
 
     def load(self) -> None:
-        if self.path.exists():
-            try:
-                self.data = json.loads(self.path.read_text("utf-8"))
-            except json.JSONDecodeError:
-                # If cache is corrupted, start fresh
-                self.data = {"files": {}}
+        if not self.path.exists():
+            return
+
+        try:
+            raw = json.loads(self.path.read_text("utf-8"))
+            stored_sig = raw.get("_signature")
+
+            # Extract data without signature for verification
+            data = {k: v for k, v in raw.items() if k != "_signature"}
+
+            # Verify signature
+            expected_sig = self._sign_data(data)
+            if stored_sig != expected_sig:
+                self.load_warning = "Cache signature mismatch; ignoring cache."
+                self.data = {"version": self.CACHE_VERSION, "files": {}}
+                return
+
+            if data.get("version") != self.CACHE_VERSION:
+                self.load_warning = (
+                    "Cache version mismatch "
+                    f"(found {data.get('version')}); ignoring cache."
+                )
+                self.data = {"version": self.CACHE_VERSION, "files": {}}
+                return
+
+            # Basic structure check
+            if not isinstance(data.get("files"), dict):
+                self.load_warning = "Cache format invalid; ignoring cache."
+                self.data = {"version": self.CACHE_VERSION, "files": {}}
+                return
+
+            self.data = cast(CacheData, data)
+            self.load_warning = None
+
+        except (json.JSONDecodeError, ValueError):
+            self.load_warning = "Cache corrupted; ignoring cache."
+            self.data = {"version": self.CACHE_VERSION, "files": {}}
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(self.data, ensure_ascii=False, indent=2),
-            "utf-8",
-        )
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def get_file_entry(self, filepath: str) -> Optional[dict[str, Any]]:
-        return self.data.get("files", {}).get(filepath)
+            # Add signature
+            data_with_sig = {**self.data, "_signature": self._sign_data(self.data)}
+
+            self.path.write_text(
+                json.dumps(data_with_sig, ensure_ascii=False, indent=2),
+                "utf-8",
+            )
+        except OSError as e:
+            raise CacheError(f"Failed to save cache: {e}") from e
+
+    def get_file_entry(self, filepath: str) -> CacheEntry | None:
+        entry = self.data["files"].get(filepath)
+
+        if entry is None:
+            return None
+
+        if not isinstance(entry, dict):
+            return None
+
+        required = {"stat", "units", "blocks"}
+        if not required.issubset(entry.keys()):
+            return None
+
+        return entry
 
     def put_file_entry(
-        self, filepath: str, stat_sig: dict[str, Any], units: list, blocks: list
+        self,
+        filepath: str,
+        stat_sig: FileStat,
+        units: list[Unit],
+        blocks: list[BlockUnit],
     ) -> None:
-        self.data.setdefault("files", {})[filepath] = {
+        self.data["files"][filepath] = {
             "stat": stat_sig,
-            "units": [asdict(u) for u in units],
-            "blocks": [asdict(b) for b in blocks],
+            "units": cast(list[UnitDict], cast(object, [asdict(u) for u in units])),
+            "blocks": cast(list[BlockDict], cast(object, [asdict(b) for b in blocks])),
         }
 
 
-def file_stat_signature(path: str) -> dict:
+def file_stat_signature(path: str) -> FileStat:
     st = os.stat(path)
     return {
         "mtime_ns": st.st_mtime_ns,

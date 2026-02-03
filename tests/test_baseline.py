@@ -1,16 +1,18 @@
-from pathlib import Path
 import json
+from pathlib import Path
+
 import pytest
+
 from codeclone.baseline import Baseline
 
 
-def test_baseline_diff():
+def test_baseline_diff() -> None:
     baseline = Baseline("dummy")
     baseline.functions = {"f1"}
     baseline.blocks = {"b1"}
 
-    func_groups = {"f1": [], "f2": []}
-    block_groups = {"b1": [], "b2": []}
+    func_groups: dict[str, object] = {"f1": [], "f2": []}
+    block_groups: dict[str, object] = {"b1": [], "b2": []}
 
     new_func, new_block = baseline.diff(func_groups, block_groups)
 
@@ -18,7 +20,7 @@ def test_baseline_diff():
     assert new_block == {"b2"}
 
 
-def test_baseline_io(tmp_path):
+def test_baseline_io(tmp_path: Path) -> None:
     f = tmp_path / "baseline.json"
     bl = Baseline(f)
     bl.functions = {"f1", "f2"}
@@ -29,6 +31,7 @@ def test_baseline_io(tmp_path):
     content = json.loads(f.read_text("utf-8"))
     assert content["functions"] == ["f1", "f2"]
     assert content["blocks"] == ["b1"]
+    assert "python_version" not in content
 
     bl2 = Baseline(f)
     bl2.load()
@@ -36,7 +39,7 @@ def test_baseline_io(tmp_path):
     assert bl2.blocks == {"b1"}
 
 
-def test_baseline_load_missing(tmp_path):
+def test_baseline_load_missing(tmp_path: Path) -> None:
     f = tmp_path / "non_existent.json"
     bl = Baseline(f)
     bl.load()
@@ -44,7 +47,7 @@ def test_baseline_load_missing(tmp_path):
     assert bl.blocks == set()
 
 
-def test_baseline_load_corrupted(tmp_path):
+def test_baseline_load_corrupted(tmp_path: Path) -> None:
     f = tmp_path / "corrupt.json"
     f.write_text("{invalid json", "utf-8")
     bl = Baseline(f)
@@ -52,11 +55,27 @@ def test_baseline_load_corrupted(tmp_path):
         bl.load()
 
 
-def test_baseline_from_groups():
-    func_groups = {"f1": [], "f2": []}
-    block_groups = {"b1": []}
+def test_baseline_from_groups() -> None:
+    func_groups: dict[str, object] = {"f1": [], "f2": []}
+    block_groups: dict[str, object] = {"b1": []}
     bl = Baseline.from_groups(func_groups, block_groups, path="custom.json")
 
     assert bl.functions == {"f1", "f2"}
     assert bl.blocks == {"b1"}
     assert bl.path == Path("custom.json")
+
+
+def test_baseline_python_version_roundtrip(tmp_path: Path) -> None:
+    f = tmp_path / "baseline.json"
+    bl = Baseline(f)
+    bl.functions = {"f1"}
+    bl.blocks = {"b1"}
+    bl.python_version = "3.13"
+    bl.save()
+
+    content = json.loads(f.read_text("utf-8"))
+    assert content["python_version"] == "3.13"
+
+    bl2 = Baseline(f)
+    bl2.load()
+    assert bl2.python_version == "3.13"

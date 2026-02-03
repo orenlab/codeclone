@@ -10,6 +10,16 @@ branding:
   color: blue
 
 inputs:
+  python-version:
+    description: "Python version to use"
+    required: false
+    default: "3.13"
+
+  package-version:
+    description: "CodeClone version from PyPI (empty = latest)"
+    required: false
+    default: ""
+
   path:
     description: "Path to the project root"
     required: false
@@ -20,20 +30,50 @@ inputs:
     required: false
     default: "true"
 
+  no-progress:
+    description: "Disable progress output"
+    required: false
+    default: "true"
+
+  require-baseline:
+    description: "Fail if codeclone.baseline.json is missing"
+    required: false
+    default: "true"
+
 runs:
   using: composite
   steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: pip
+
     - name: Install CodeClone
       shell: bash
       run: |
         python -m pip install --upgrade pip
-        pip install codeclone
+        if [ -n "${{ inputs.package-version }}" ]; then
+          pip install "codeclone==${{ inputs.package-version }}"
+        else
+          pip install codeclone
+        fi
+
+    - name: Verify baseline exists
+      if: ${{ inputs.require-baseline == 'true' }}
+      shell: bash
+      run: |
+        test -f "${{ inputs.path }}/codeclone.baseline.json"
 
     - name: Run CodeClone
       shell: bash
       run: |
+        extra=""
+        if [ "${{ inputs.no-progress }}" = "true" ]; then
+          extra="--no-progress"
+        fi
         if [ "${{ inputs.fail-on-new }}" = "true" ]; then
-          codeclone "${{ inputs.path }}" --fail-on-new
+          codeclone "${{ inputs.path }}" --fail-on-new $extra
         else
-          codeclone "${{ inputs.path }}"
+          codeclone "${{ inputs.path }}" $extra
         fi

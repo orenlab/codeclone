@@ -11,7 +11,7 @@ from __future__ import annotations
 import ast
 import hashlib
 
-from .normalize import NormalizationConfig, AstNormalizer
+from .normalize import AstNormalizer, NormalizationConfig
 
 
 def stmt_hash(stmt: ast.stmt, cfg: NormalizationConfig) -> str:

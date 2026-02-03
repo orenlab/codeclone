@@ -2,10 +2,11 @@
 
 [![PyPI](https://img.shields.io/pypi/v/codeclone.svg)](https://pypi.org/project/codeclone/)
 [![Downloads](https://img.shields.io/pypi/dm/codeclone.svg)](https://pypi.org/project/codeclone/)
+[![tests](https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/orenlab/codeclone/actions/workflows/tests.yml)
 [![Python](https://img.shields.io/pypi/pyversions/codeclone.svg)](https://pypi.org/project/codeclone/)
 [![License](https://img.shields.io/pypi/l/codeclone.svg)](LICENSE)
 
-**CodeClone** is a Python code clone detector based on **normalized AST and control-flow graphs (CFG)**.
+**CodeClone** is a Python code clone detector based on **normalized Python AST and Control Flow Graphs (CFG)**.
 It helps teams discover architectural duplication and prevent new copy-paste from entering the codebase via CI.
 
 CodeClone is designed to help teams:
@@ -14,15 +15,16 @@ CodeClone is designed to help teams:
 - identify architectural hotspots,
 - prevent *new* duplication via CI and pre-commit hooks.
 
-Unlike token- or text-based tools, CodeClone operates on **normalized Python AST and CFG**, making it robust against renaming,
-formatting, and minor refactoring.
+Unlike token- or text-based tools, CodeClone operates on **normalized Python AST and CFG**, making it robust against
+renaming, formatting, and minor refactoring.
 
 ---
 
 ## Why CodeClone?
 
 Most existing tools detect *textual* duplication.
-CodeClone detects **structural and block-level duplication**, which usually signals missing abstractions or architectural drift.
+CodeClone detects **structural and block-level duplication**, which usually signals missing abstractions or
+architectural drift.
 
 Typical use cases:
 
@@ -40,11 +42,11 @@ Typical use cases:
 - Detects functions and methods with identical **control-flow structure**.
 - Based on **Control Flow Graph (CFG)** fingerprinting.
 - Robust to:
-  - variable renaming,
-  - constant changes,
-  - attribute renaming,
-  - formatting differences,
-  - docstrings and type annotations.
+    - variable renaming,
+    - constant changes,
+    - attribute renaming,
+    - formatting differences,
+    - docstrings and type annotations.
 - Ideal for spotting architectural duplication across layers.
 
 ### Block-level clone detection (Type-3-lite)
@@ -52,29 +54,29 @@ Typical use cases:
 - Detects repeated **statement blocks** inside larger functions.
 - Uses sliding windows over CFG-normalized statement sequences.
 - Targets:
-  - validation blocks,
-  - guard clauses,
-  - repeated orchestration logic.
+    - validation blocks,
+    - guard clauses,
+    - repeated orchestration logic.
 - Carefully filtered to reduce noise:
-  - no overlapping windows,
-  - no clones inside the same function,
-  - no `__init__` noise,
-  - size and statement-count thresholds.
+    - no overlapping windows,
+    - no clones inside the same function,
+    - no `__init__` noise,
+    - size and statement-count thresholds.
 
 ### Control-Flow Awareness (CFG v1)
 
 - Each function is converted into a **Control Flow Graph**.
 - CFG nodes contain normalized AST statements.
 - CFG edges represent structural control flow:
-  - `if` / `else`
-  - `for` / `async for` / `while`
-  - `try` / `except` / `finally`
-  - `with` / `async with`
-  - `match` / `case` (Python 3.10+)
+    - `if` / `else`
+    - `for` / `async for` / `while`
+    - `try` / `except` / `finally`
+    - `with` / `async with`
+    - `match` / `case` (Python 3.10+)
 - Current CFG semantics (v1):
-  - `break` and `continue` are treated as statements (no jump targets),
-  - after-blocks are explicit and always present,
-  - focus is on **structural similarity**, not precise runtime semantics.
+    - `break` and `continue` are treated as statements (no jump targets),
+    - after-blocks are explicit and always present,
+    - focus is on **structural similarity**, not precise runtime semantics.
 
 This design keeps clone detection **stable, deterministic, and low-noise**.
 
@@ -83,6 +85,7 @@ This design keeps clone detection **stable, deterministic, and low-noise**.
 - AST + CFG normalization instead of token matching.
 - Conservative defaults tuned for real-world Python projects.
 - Explicit thresholds for size and statement count.
+- No probabilistic scoring or heuristic similarity thresholds.
 - Focus on *architectural duplication*, not micro-similarities.
 
 ### CI-friendly baseline mode
@@ -149,14 +152,26 @@ Commit the generated baseline file to the repository.
 ### 2. Use in CI
 
 ```bash
-codeclone . --fail-on-new
+codeclone . --fail-on-new --no-progress
 ```
 
 Behavior:
 
-- ✅ existing clones are allowed,
-- ❌ build fails if *new* clones appear,
-- ✅ refactoring that removes duplication is always allowed.
+- existing clones are allowed,
+- the build fails if *new* clones appear,
+- refactoring that removes duplication is always allowed.
+
+`--fail-on-new` exits with a non-zero code when new clones are detected.
+
+### Python Version Consistency for Baseline Checks
+
+Due to inherent differences in Python’s AST between interpreter versions, baseline
+generation and verification must be performed using the same Python version.
+
+This ensures deterministic and reproducible clone detection results.
+
+CI checks therefore pin baseline verification to a single Python version, while the
+test matrix continues to validate compatibility across Python 3.10–3.14.
 
 ---
 
@@ -164,14 +179,14 @@ Behavior:
 
 ```yaml
 repos:
--   repo: local
+  - repo: local
     hooks:
-    -   id: codeclone
+      - id: codeclone
         name: CodeClone
         entry: codeclone
         language: python
-        args: [".", "--fail-on-new"]
-        types: [python]
+        args: [ ".", "--fail-on-new" ]
+        types: [ python ]
 ```
 
 ---
@@ -204,6 +219,7 @@ repos:
 6. Apply conservative filters to suppress noise.
 
 See the architectural overview:
+
 - [docs/architecture.md](docs/architecture.md)
 
 ---
@@ -216,6 +232,7 @@ to improve structural clone detection robustness.
 The CFG is a **structural abstraction**, not a runtime execution model.
 
 See full design and semantics:
+
 - [docs/cfg.md](docs/cfg.md)
 
 ---

@@ -1,10 +1,13 @@
+import os
 import subprocess
 import sys
-import os
+from collections.abc import Iterable
 from pathlib import Path
 
 
-def run_cli(args, cwd=None):
+def run_cli(
+    args: Iterable[str], cwd: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     root_dir = Path(__file__).parents[1]
     env["PYTHONPATH"] = str(root_dir) + os.pathsep + env.get("PYTHONPATH", "")
@@ -14,7 +17,7 @@ def run_cli(args, cwd=None):
     executable = str(venv_python) if venv_python.exists() else sys.executable
 
     return subprocess.run(
-        [executable, "-m", "codeclone.cli"] + args,
+        [executable, "-m", "codeclone.cli", *args],
         capture_output=True,
         text=True,
         cwd=cwd,
@@ -22,7 +25,7 @@ def run_cli(args, cwd=None):
     )
 
 
-def test_cli_runs(tmp_path: Path):
+def test_cli_runs(tmp_path: Path) -> None:
     src = tmp_path / "a.py"
     src.write_text(
         """
@@ -39,7 +42,7 @@ def f():
     assert "Total Function Clones" in result.stdout
 
 
-def test_cli_baseline_missing_warning(tmp_path: Path):
+def test_cli_baseline_missing_warning(tmp_path: Path) -> None:
     # Should print a warning when baseline is missing and --update-baseline is not set
     src = tmp_path / "a.py"
     src.write_text("def f(): pass")
@@ -53,7 +56,7 @@ def test_cli_baseline_missing_warning(tmp_path: Path):
     assert baseline_file.name in result.stdout
 
 
-def test_cli_update_baseline(tmp_path: Path):
+def test_cli_update_baseline(tmp_path: Path) -> None:
     src = tmp_path / "a.py"
     # Create two identical functions to trigger a clone
     src.write_text("""

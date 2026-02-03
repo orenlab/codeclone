@@ -9,21 +9,24 @@ Licensed under the MIT License.
 from __future__ import annotations
 
 import ast
+import os
+import signal
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Sequence
 
-from .blocks import extract_blocks, BlockUnit
+from .blocks import BlockUnit, extract_blocks
 from .cfg import CFGBuilder
-from .fingerprint import sha1, bucket_loc
+from .errors import ParseError
+from .fingerprint import bucket_loc, sha1
 from .normalize import NormalizationConfig, normalized_ast_dump_from_list
-
 
 # =========================
 # Data structures
 # =========================
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Unit:
     qualname: str
     filepath: str
@@ -39,6 +42,67 @@ class Unit:
 # Helpers
 # =========================
 
+PARSE_TIMEOUT_SECONDS = 5
+
+
+class _ParseTimeoutError(Exception):
+    pass
+
+
+@contextmanager
+def _parse_limits(timeout_s: int) -> Iterator[None]:
+    if os.name != "posix" or timeout_s <= 0:
+        yield
+        return
+
+    old_handler = signal.getsignal(signal.SIGALRM)
+
+    def _timeout_handler(_signum: int, _frame: object) -> None:
+        raise _ParseTimeoutError("AST parsing timeout")
+
+    old_limits: tuple[int, int] | None = None
+    try:
+        signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.setitimer(signal.ITIMER_REAL, timeout_s)
+
+        try:
+            import resource
+
+            old_limits = resource.getrlimit(resource.RLIMIT_CPU)
+            soft, hard = old_limits
+            new_soft = (
+                min(timeout_s, soft) if soft != resource.RLIM_INFINITY else timeout_s
+            )
+            new_hard = (
+                min(timeout_s + 1, hard)
+                if hard != resource.RLIM_INFINITY
+                else timeout_s + 1
+            )
+            resource.setrlimit(resource.RLIMIT_CPU, (new_soft, new_hard))
+        except Exception:
+            # If resource is unavailable or cannot be set, rely on alarm only.
+            pass
+
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old_handler)
+        if old_limits is not None:
+            try:
+                import resource
+
+                resource.setrlimit(resource.RLIMIT_CPU, old_limits)
+            except Exception:
+                pass
+
+
+def _parse_with_limits(source: str, timeout_s: int) -> ast.AST:
+    try:
+        with _parse_limits(timeout_s):
+            return ast.parse(source)
+    except _ParseTimeoutError as e:
+        raise ParseError(str(e)) from e
+
 
 def _stmt_count(node: ast.AST) -> int:
     body = getattr(node, "body", None)
@@ -46,6 +110,8 @@ def _stmt_count(node: ast.AST) -> int:
 
 
 class _QualnameBuilder(ast.NodeVisitor):
+    __slots__ = ("stack", "units")
+
     def __init__(self) -> None:
         self.stack: list[str] = []
         self.units: list[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]] = []
@@ -56,11 +122,11 @@ class _QualnameBuilder(ast.NodeVisitor):
         self.stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        name = ".".join(self.stack + [node.name]) if self.stack else node.name
+        name = ".".join([*self.stack, node.name]) if self.stack else node.name
         self.units.append((name, node))
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        name = ".".join(self.stack + [node.name]) if self.stack else node.name
+        name = ".".join([*self.stack, node.name]) if self.stack else node.name
         self.units.append((name, node))
 
 
@@ -75,28 +141,39 @@ def get_cfg_fingerprint(
     qualname: str,
 ) -> str:
     """
-    Build CFG, normalize it into a canonical form, and hash it.
+    Generate a structural fingerprint for a function using CFG analysis.
+
+    The fingerprint is computed by:
+    1. Building a Control Flow Graph (CFG) from the function
+    2. Normalizing each CFG block's statements (variable names, constants, etc.)
+    3. Creating a canonical representation of the CFG structure
+    4. Hashing the representation with SHA-1
+
+    Functions with identical control flow and normalized statements will
+    produce the same fingerprint, even if they differ in variable names,
+    constants, or type annotations.
+
+    Args:
+        node: Function AST node to fingerprint
+        cfg: Normalization configuration (what to ignore)
+        qualname: Qualified name for logging/debugging
+
+    Returns:
+        40-character hex SHA-1 hash of the normalized CFG
     """
     builder = CFGBuilder()
     graph = builder.build(qualname, node)
 
+    # Use generator to avoid building large list of strings
     parts: list[str] = []
-
-    # Stable order for deterministic hash
     for block in sorted(graph.blocks, key=lambda b: b.id):
-        # NOTE: normalized_ast_dump_from_list must accept Sequence[ast.AST] (covariant),
-        # but even if it still accepts list[ast.AST], passing list[ast.stmt] will fail
-        # due to invariance. We pass as Sequence[ast.AST] via a typed view.
-        stmts_as_ast: Sequence[ast.AST] = block.statements
-        normalized_stmts = normalized_ast_dump_from_list(stmts_as_ast, cfg)
-
-        successor_ids = sorted(succ.id for succ in block.successors)
-
-        parts.append(
-            f"BLOCK[{block.id}]:{normalized_stmts}"
-            f"|SUCCESSORS:{','.join(map(str, successor_ids))}"
+        succ_ids = ",".join(
+            str(s.id) for s in sorted(block.successors, key=lambda s: s.id)
         )
-
+        parts.append(
+            f"BLOCK[{block.id}]:{normalized_ast_dump_from_list(block.statements, cfg)}"
+            f"|SUCCESSORS:{succ_ids}"
+        )
     return sha1("|".join(parts))
 
 
@@ -114,9 +191,9 @@ def extract_units_from_source(
     min_stmt: int,
 ) -> tuple[list[Unit], list[BlockUnit]]:
     try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return [], []
+        tree = _parse_with_limits(source, PARSE_TIMEOUT_SECONDS)
+    except SyntaxError as e:
+        raise ParseError(f"Failed to parse {filepath}: {e}") from e
 
     qb = _QualnameBuilder()
     qb.visit(tree)

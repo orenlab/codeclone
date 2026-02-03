@@ -2,70 +2,79 @@
 
 ## Supported Versions
 
-CodeClone is a static analysis tool and does not process untrusted input at runtime in production systems.
+CodeClone is a static analysis tool and does not execute analyzed code at runtime.
+Nevertheless, security and robustness are treated as first‑class concerns.
 
-That said, we take security seriously.
+The following versions currently receive security updates:
 
 | Version | Supported |
 |---------|-----------|
-| 1.1.x   | ✅ Yes     |
-| 1.0.x   | ❌ No      |
+| 1.2.x   | Yes       |
+| 1.1.x   | No        |
+| 1.0.x   | No        |
 
 ---
 
-## 🛡️ Security Considerations
+## Security Considerations
 
-CodeClone:
+CodeClone operates purely on static input and follows a conservative execution model:
 
-- Parses Python source code using `ast`
+- Parses Python source code using the standard `ast` module
 - Does **not** execute analyzed code
-- Generates static HTML reports
+- Performs analysis in-process with explicit resource limits
+- Generates static HTML reports without external dependencies
 
 Potential risk areas include:
 
-- malformed source files
-- extremely large inputs (resource exhaustion)
-- HTML report generation
+- malformed or adversarial source files
+- extremely large inputs leading to resource exhaustion
+- HTML report generation and embedding
+
+These areas are explicitly tested and hardened, but are still the primary focus of
+ongoing security review.
 
 ---
 
-## 🚨 Reporting a Vulnerability
+## Reporting a Vulnerability
 
-If you believe you have found a security vulnerability, **do not open a public issue**.
+If you believe you have discovered a security vulnerability, **do not open a public issue**.
 
-Instead, please report it privately:
+Please report it privately via email:
 
-📧 **Email:** `pytelemonbot@mail.ru`  
-Subject: `Security issue in CodeClone`
+**Email:** `pytelemonbot@mail.ru`  
+**Subject:** `Security issue in CodeClone`
 
-Please include:
+When reporting a vulnerability, please include:
 
-- CodeClone version
-- Description of the issue
-- Steps to reproduce
-- Potential impact
+- the affected CodeClone version
+- a clear description of the issue
+- minimal steps to reproduce
+- an assessment of potential impact, if known
 
 You will receive an acknowledgment within **72 hours**.
 
 ---
 
-## 🧪 What Is NOT Considered a Security Issue
+## What Is Not Considered a Security Issue
 
-The following are **not** security vulnerabilities:
+The following issues are **not** considered security vulnerabilities:
 
-- False positives or negatives in clone detection
-- Performance issues on very large codebases
-- UI / HTML layout problems
-- Missing CFG edge cases (tracked as feature issues)
+- false positives or false negatives in clone detection
+- performance limitations on very large codebases
+- UI or HTML layout issues
+- missing CFG edge cases or semantic limitations
 
----
-
-## 🕒 Disclosure Policy
-
-- Valid vulnerabilities will be fixed promptly
-- A patched release will be published
-- Credit will be given unless anonymity is requested
+Such issues should be reported through the regular issue tracker as bugs or feature
+requests.
 
 ---
 
-Thank you for helping keep CodeClone safe and reliable.
+## Disclosure Policy
+
+- Confirmed vulnerabilities will be addressed promptly
+- A patched release will be published as soon as feasible
+- Credit will be given to the reporter unless anonymity is requested
+
+---
+
+Thank you for helping keep CodeClone secure, reliable, and trustworthy.

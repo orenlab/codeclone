@@ -189,6 +189,16 @@ CFG v1 guarantees:
 
 This is critical for CI usage and baseline comparison.
 
+## Python Version Consistency for Baseline Checks
+
+Due to inherent differences in Python’s AST between interpreter versions, baseline
+generation and verification must be performed using the same Python version.
+
+This ensures deterministic and reproducible clone detection results.
+
+CI checks therefore pin baseline verification to a single Python version, while the
+test matrix continues to validate compatibility across Python 3.10–3.14.
+
 ---
 
 ## Why This Is Acceptable (and Intended)
