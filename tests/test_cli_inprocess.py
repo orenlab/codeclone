@@ -279,6 +279,60 @@ def f2():
     assert "New clones detected but --fail-on-new not set" in out
 
 
+def test_cli_baseline_python_version_mismatch_warns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(
+        '{"functions": [], "blocks": [], "python_version": "0.0"}', "utf-8"
+    )
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline),
+            "--no-progress",
+        ],
+    )
+    out = capsys.readouterr().out
+    assert "Baseline was generated with Python 0.0." in out
+    assert "Current interpreter: Python" in out
+
+
+def test_cli_baseline_python_version_mismatch_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(
+        '{"functions": [], "blocks": [], "python_version": "0.0"}', "utf-8"
+    )
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline),
+                "--fail-on-new",
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "Baseline checks require the same Python version" in out
+
+
 def test_cli_main_fail_threshold(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
