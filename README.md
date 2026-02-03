@@ -166,6 +166,18 @@ Note on Python versions:
 - AST dumps can differ across Python versions.
 - For deterministic baselines, run baseline generation and CI checks on the
   same Python version.
+- Baseline files include the Python version used to generate them, and
+  `--fail-on-new` enforces a matching interpreter.
+
+### Python Version Consistency for Baseline Checks
+
+Due to inherent differences in Python’s AST between interpreter versions, baseline
+generation and verification must be performed using the same Python version.
+
+This ensures deterministic and reproducible clone detection results.
+
+CI checks therefore pin baseline verification to a single Python version, while the
+test matrix continues to validate compatibility across Python 3.10–3.14.
 
 ---
 

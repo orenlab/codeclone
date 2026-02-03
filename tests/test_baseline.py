@@ -31,6 +31,7 @@ def test_baseline_io(tmp_path: Path) -> None:
     content = json.loads(f.read_text("utf-8"))
     assert content["functions"] == ["f1", "f2"]
     assert content["blocks"] == ["b1"]
+    assert "python_version" not in content
 
     bl2 = Baseline(f)
     bl2.load()
@@ -62,3 +63,19 @@ def test_baseline_from_groups() -> None:
     assert bl.functions == {"f1", "f2"}
     assert bl.blocks == {"b1"}
     assert bl.path == Path("custom.json")
+
+
+def test_baseline_python_version_roundtrip(tmp_path: Path) -> None:
+    f = tmp_path / "baseline.json"
+    bl = Baseline(f)
+    bl.functions = {"f1"}
+    bl.blocks = {"b1"}
+    bl.python_version = "3.13"
+    bl.save()
+
+    content = json.loads(f.read_text("utf-8"))
+    assert content["python_version"] == "3.13"
+
+    bl2 = Baseline(f)
+    bl2.load()
+    assert bl2.python_version == "3.13"

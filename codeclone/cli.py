@@ -480,6 +480,21 @@ def main() -> None:
 
     if baseline_exists:
         baseline.load()
+        if not args.update_baseline and baseline.python_version:
+            current_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+            if baseline.python_version != current_version:
+                console.print(
+                    "[warning]Baseline Python version mismatch.[/warning]\n"
+                    f"Baseline was generated with Python {baseline.python_version}.\n"
+                    f"Current interpreter: Python {current_version}."
+                )
+                if args.fail_on_new:
+                    console.print(
+                        "[error]Baseline checks require the same Python version to "
+                        "ensure deterministic results. Please regenerate the baseline "
+                        "using the current interpreter.[/error]"
+                    )
+                    sys.exit(2)
     else:
         if not args.update_baseline:
             console.print(
@@ -492,7 +507,10 @@ def main() -> None:
 
     if args.update_baseline:
         new_baseline = Baseline.from_groups(
-            func_groups, block_groups, path=baseline_path
+            func_groups,
+            block_groups,
+            path=baseline_path,
+            python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
         )
         new_baseline.save()
         console.print(f"[success]✔ Baseline updated:[/success] {baseline_path}")
