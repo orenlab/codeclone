@@ -8,6 +8,11 @@ Licensed under the MIT License.
 
 from string import Template
 
+FONT_CSS_URL = (
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700"
+    "&family=JetBrains+Mono:wght@400;500;600&display=swap"
+)
+
 REPORT_TEMPLATE = Template(r"""
 <!doctype html>
 <html lang="en" data-theme="dark">
@@ -19,7 +24,7 @@ REPORT_TEMPLATE = Template(r"""
 <!-- Fonts -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="${font_css_url}" rel="stylesheet">
 
 <style>
 /* ============================
@@ -33,39 +38,51 @@ REPORT_TEMPLATE = Template(r"""
   --brand-cyan: #06B6D4;
   --brand-pink: #EC4899;
   --brand-amber: #F59E0B;
-  
+
   /* Surface Hierarchy */
   --surface-0: #0A0A0F;
   --surface-1: #141419;
   --surface-2: #1E1E24;
   --surface-3: #28282F;
   --surface-4: #32323A;
-  
+
   /* Text */
   --text-primary: #F9FAFB;
   --text-secondary: #D1D5DB;
   --text-tertiary: #9CA3AF;
   --text-muted: #6B7280;
-  
+
   /* Borders */
   --border-subtle: #2D2D35;
   --border-default: #3F3F46;
   --border-strong: #52525B;
-  
+
   /* Semantic */
   --success: #10B981;
   --warning: #F59E0B;
   --error: #EF4444;
   --info: #3B82F6;
-  
+
   /* Gradients */
-  --gradient-primary: linear-gradient(135deg, var(--brand-purple) 0%, var(--brand-cyan) 100%);
-  --gradient-accent: linear-gradient(135deg, var(--brand-pink) 0%, var(--brand-amber) 100%);
-  --gradient-subtle: linear-gradient(180deg, transparent 0%, rgba(139, 92, 246, 0.05) 100%);
-  --gradient-mesh: 
+  --gradient-primary: linear-gradient(
+    135deg,
+    var(--brand-purple) 0%,
+    var(--brand-cyan) 100%
+  );
+  --gradient-accent: linear-gradient(
+    135deg,
+    var(--brand-pink) 0%,
+    var(--brand-amber) 100%
+  );
+  --gradient-subtle: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(139, 92, 246, 0.05) 100%
+  );
+  --gradient-mesh:
     radial-gradient(at 0% 0%, rgba(139, 92, 246, 0.15) 0px, transparent 50%),
     radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.15) 0px, transparent 50%);
-  
+
   /* Elevation */
   --elevation-0: none;
   --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -73,12 +90,12 @@ REPORT_TEMPLATE = Template(r"""
   --elevation-3: 0 10px 20px rgba(0, 0, 0, 0.4), 0 3px 6px rgba(0, 0, 0, 0.3);
   --elevation-4: 0 15px 25px rgba(0, 0, 0, 0.45), 0 5px 10px rgba(0, 0, 0, 0.25);
   --elevation-glow: 0 0 20px rgba(139, 92, 246, 0.3);
-  
+
   /* Glassmorphism */
   --glass-bg: rgba(20, 20, 25, 0.7);
   --glass-border: rgba(255, 255, 255, 0.1);
   --glass-blur: blur(20px);
-  
+
   /* Typography Scale (1.25 ratio) */
   --text-xs: 0.75rem;      /* 12px */
   --text-sm: 0.875rem;     /* 14px */
@@ -87,23 +104,24 @@ REPORT_TEMPLATE = Template(r"""
   --text-xl: 1.25rem;      /* 20px */
   --text-2xl: 1.563rem;    /* 25px */
   --text-3xl: 1.953rem;    /* 31px */
-  
+
   /* Font Families */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
-  
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono',
+    Menlo, Consolas, monospace;
+
   /* Line Heights */
   --leading-tight: 1.25;
   --leading-normal: 1.5;
   --leading-relaxed: 1.75;
-  
+
   /* Border Radius */
   --radius-sm: 4px;
   --radius: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-full: 9999px;
-  
+
   /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-base: 300ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -118,32 +136,32 @@ html[data-theme="light"] {
   --surface-2: #F3F4F6;
   --surface-3: #E5E7EB;
   --surface-4: #D1D5DB;
-  
+
   /* Text */
   --text-primary: #111827;
   --text-secondary: #374151;
   --text-tertiary: #6B7280;
   --text-muted: #9CA3AF;
-  
+
   /* Borders */
   --border-subtle: #E5E7EB;
   --border-default: #D1D5DB;
   --border-strong: #9CA3AF;
-  
+
   /* Elevation */
   --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
   --elevation-2: 0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
   --elevation-3: 0 10px 15px rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.05);
   --elevation-4: 0 20px 25px rgba(0, 0, 0, 0.1), 0 10px 10px rgba(0, 0, 0, 0.04);
   --elevation-glow: 0 0 20px rgba(139, 92, 246, 0.2);
-  
+
   /* Glassmorphism */
   --glass-bg: rgba(249, 250, 251, 0.8);
   --glass-border: rgba(0, 0, 0, 0.1);
 }
 
 /* ========== Global Styles ========== */
-* { 
+* {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -257,7 +275,12 @@ body {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.1),
+    transparent
+  );
   transform: translateX(-100%);
   transition: transform var(--transition-slow);
 }
@@ -318,7 +341,9 @@ body {
   cursor: pointer;
   transition: all var(--transition-base);
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239CA3AF' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' \
+width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239CA3AF' \
+d='M6 8L2 4h8z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
 }
@@ -397,13 +422,13 @@ body {
     flex-direction: column;
     align-items: stretch;
   }
-  
+
   .toolbar-left,
   .toolbar-right {
     width: 100%;
     justify-content: space-between;
   }
-  
+
   .search-wrap {
     min-width: 0;
     flex: 1;
@@ -925,7 +950,10 @@ html[data-theme="dark"] .codebox .s2 { color: #C3E88D; } /* Strings */
 html[data-theme="dark"] .codebox .nf { color: #82AAFF; } /* Functions */
 html[data-theme="dark"] .codebox .nb { color: #FFCB6B; } /* Builtins */
 html[data-theme="dark"] .codebox .c,
-html[data-theme="dark"] .codebox .c1 { color: #546E7A; font-style: italic; } /* Comments */
+html[data-theme="dark"] .codebox .c1 {
+  color: #546E7A;
+  font-style: italic;
+} /* Comments */
 
 </style>
 </head>
@@ -946,7 +974,14 @@ html[data-theme="dark"] .codebox .c1 { color: #546E7A; font-style: italic; } /* 
         ${icon_theme} Theme
       </button>
       <button class="btn primary" type="button" id="export-btn" title="Export report">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
           <polyline points="7 10 12 15 17 10"></polyline>
           <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -965,28 +1000,29 @@ ${func_section}
 ${block_section}
 
 <div class="footer">
-  Generated by CodeClone v${version} • Press <kbd class="kbd">/</kbd> to search • <kbd class="kbd">T</kbd> to toggle theme
+  Generated by CodeClone v${version} • Press <kbd class="kbd">/</kbd> to search •
+  <kbd class="kbd">T</kbd> to toggle theme
 </div>
 </div>
 
 <script>
 (() => {
   'use strict';
-  
+
   // ========== Theme Management ==========
   const htmlEl = document.documentElement;
   const btnTheme = document.getElementById('theme-toggle');
-  
+
   function initTheme() {
     const stored = localStorage.getItem('codeclone_theme');
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     const hour = new Date().getHours();
     const isNight = hour < 7 || hour > 19;
-    
+
     const theme = stored || (prefersDark || isNight ? 'dark' : 'light');
     htmlEl.setAttribute('data-theme', theme);
   }
-  
+
   function toggleTheme() {
     const cur = htmlEl.getAttribute('data-theme') || 'dark';
     const next = cur === 'dark' ? 'light' : 'dark';
@@ -994,49 +1030,49 @@ ${block_section}
     localStorage.setItem('codeclone_theme', next);
     showToast(`Switched to $${next} theme`, 'info');
   }
-  
+
   initTheme();
   btnTheme?.addEventListener('click', toggleTheme);
-  
+
   // ========== Toast Notifications ==========
   function showToast(message, type = 'info') {
     const icons = {
-      info: 'ℹ️',
-      success: '✅',
-      warning: '⚠️',
-      error: '❌'
+      info: 'i',
+      success: 'ok',
+      warning: '!',
+      error: 'x'
     };
-    
+
     const toast = document.createElement('div');
     toast.className = `toast toast-$${type}`;
     toast.innerHTML = `
       <span class="toast-icon">$${icons[type]}</span>
       <span class="toast-message">$${message}</span>
-      <button class="toast-close" aria-label="Close">×</button>
+      <button class="toast-close" aria-label="Close">x</button>
     `;
-    
+
     const container = document.querySelector('.toast-container');
     container.appendChild(toast);
-    
+
     // Trigger animation
     setTimeout(() => toast.classList.add('toast-show'), 10);
-    
+
     // Close button
     toast.querySelector('.toast-close').addEventListener('click', () => {
       toast.classList.remove('toast-show');
       setTimeout(() => toast.remove(), 300);
     });
-    
+
     // Auto-remove
     setTimeout(() => {
       toast.classList.remove('toast-show');
       setTimeout(() => toast.remove(), 300);
     }, 4000);
   }
-  
+
   // Make showToast global for use in other scripts
   window.showToast = showToast;
-  
+
   // ========== Keyboard Shortcuts ==========
   document.addEventListener('keydown', (e) => {
     // / - Focus search
@@ -1048,7 +1084,7 @@ ${block_section}
         search.select();
       }
     }
-    
+
     // T - Toggle theme
     if (e.key === 't' || e.key === 'T') {
       if (!e.target.matches('input, textarea')) {
@@ -1056,7 +1092,7 @@ ${block_section}
         toggleTheme();
       }
     }
-    
+
     // Escape - Clear search / close modals
     if (e.key === 'Escape') {
       const search = document.querySelector('.search');
@@ -1066,7 +1102,7 @@ ${block_section}
       }
     }
   });
-  
+
   // ========== Group Toggle ==========
   document.querySelectorAll('.group-head').forEach((head) => {
     head.addEventListener('click', (e) => {
@@ -1075,26 +1111,28 @@ ${block_section}
       if (btn) btn.click();
     });
   });
-  
+
   document.querySelectorAll('[data-toggle-group]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const id = btn.getAttribute('data-toggle-group');
       const body = document.getElementById('group-body-' + id);
       if (!body) return;
-      
+
       const isHidden = body.style.display === 'none';
       body.style.display = isHidden ? '' : 'none';
       btn.style.transform = isHidden ? 'rotate(0deg)' : 'rotate(-90deg)';
     });
   });
-  
+
   // ========== Section Management ==========
   function initSection(sectionId) {
     const section = document.querySelector(`section[data-section='$${sectionId}']`);
     if (!section) return;
-    
-    const groups = Array.from(section.querySelectorAll(`.group[data-group='$${sectionId}']`));
+
+    const groups = Array.from(
+      section.querySelectorAll(`.group[data-group='$${sectionId}']`)
+    );
     const searchInput = document.getElementById(`search-$${sectionId}`);
     const btnPrev = section.querySelector(`[data-prev='$${sectionId}']`);
     const btnNext = section.querySelector(`[data-next='$${sectionId}']`);
@@ -1104,37 +1142,37 @@ ${block_section}
     const btnCollapseAll = section.querySelector(`[data-collapse-all='$${sectionId}']`);
     const btnExpandAll = section.querySelector(`[data-expand-all='$${sectionId}']`);
     const pill = section.querySelector(`[data-count-pill='$${sectionId}']`);
-    
+
     const state = {
       q: '',
       page: 1,
       pageSize: parseInt(selPageSize?.value || '10', 10),
       filtered: groups
     };
-    
+
     function setGroupVisible(el, yes) {
       el.style.display = yes ? '' : 'none';
     }
-    
+
     function render() {
       const total = state.filtered.length;
       const pageSize = Math.max(1, state.pageSize);
       const pages = Math.max(1, Math.ceil(total / pageSize));
       state.page = Math.min(Math.max(1, state.page), pages);
-      
+
       const start = (state.page - 1) * pageSize;
       const end = Math.min(total, start + pageSize);
-      
+
       groups.forEach(g => setGroupVisible(g, false));
       state.filtered.slice(start, end).forEach(g => setGroupVisible(g, true));
-      
+
       if (meta) meta.textContent = `Page $${state.page} / $${pages} • $${total} groups`;
       if (pill) pill.textContent = `$${total} groups`;
-      
+
       if (btnPrev) btnPrev.disabled = state.page <= 1;
       if (btnNext) btnNext.disabled = state.page >= pages;
     }
-    
+
     function applyFilter() {
       const q = (state.q || '').trim().toLowerCase();
       if (!q) {
@@ -1148,34 +1186,34 @@ ${block_section}
       state.page = 1;
       render();
     }
-    
+
     searchInput?.addEventListener('input', (e) => {
       state.q = e.target.value || '';
       applyFilter();
     });
-    
+
     btnClear?.addEventListener('click', () => {
       if (searchInput) searchInput.value = '';
       state.q = '';
       applyFilter();
     });
-    
+
     selPageSize?.addEventListener('change', () => {
       state.pageSize = parseInt(selPageSize.value || '10', 10);
       state.page = 1;
       render();
     });
-    
+
     btnPrev?.addEventListener('click', () => {
       state.page -= 1;
       render();
     });
-    
+
     btnNext?.addEventListener('click', () => {
       state.page += 1;
       render();
     });
-    
+
     btnCollapseAll?.addEventListener('click', () => {
       section.querySelectorAll('.items').forEach(b => {
         b.style.display = 'none';
@@ -1184,7 +1222,7 @@ ${block_section}
         c.style.transform = 'rotate(-90deg)';
       });
     });
-    
+
     btnExpandAll?.addEventListener('click', () => {
       section.querySelectorAll('.items').forEach(b => {
         b.style.display = '';
@@ -1193,23 +1231,23 @@ ${block_section}
         c.style.transform = 'rotate(0deg)';
       });
     });
-    
+
     render();
   }
-  
+
   initSection('functions');
   initSection('blocks');
-  
+
   // ========== Export Functionality ==========
   document.getElementById('export-btn')?.addEventListener('click', () => {
     showToast('Export functionality coming soon!', 'info');
   });
-  
+
   // ========== Page Load Animation ==========
   document.querySelectorAll('.section').forEach((section, index) => {
     section.style.animationDelay = `$${index * 0.1}s`;
   });
-  
+
   // Show welcome toast
   setTimeout(() => {
     const groupCount = document.querySelectorAll('.group').length;

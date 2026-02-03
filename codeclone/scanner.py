@@ -42,6 +42,10 @@ SENSITIVE_DIRS = {
 }
 
 
+def _get_tempdir() -> Path:
+    return Path(tempfile.gettempdir()).resolve()
+
+
 def iter_py_files(
     root: str,
     excludes: tuple[str, ...] = DEFAULT_EXCLUDES,
@@ -57,7 +61,7 @@ def iter_py_files(
         raise ValidationError(f"Root must be a directory: {root}")
 
     root_str = str(rootp)
-    temp_root = Path(tempfile.gettempdir()).resolve()
+    temp_root = _get_tempdir()
     in_temp = False
     try:
         rootp.relative_to(temp_root)

@@ -19,7 +19,7 @@ from typing import Any, NamedTuple, cast
 from codeclone import __version__
 from codeclone.errors import FileProcessingError
 
-from .templates import REPORT_TEMPLATE
+from .templates import FONT_CSS_URL, REPORT_TEMPLATE
 
 # ============================
 # Pairwise
@@ -407,15 +407,15 @@ def build_html_report(
             )
 
             out.append(
-                "<div class=\"group-head\">"
-                "<div class=\"group-left\">"
+                '<div class="group-head">'
+                '<div class="group-left">'
                 f'<button class="chev" type="button" aria-label="Toggle group" '
                 f'data-toggle-group="{section_id}-{idx}">{ICON_CHEV_DOWN}</button>'
-                f"<div class=\"group-title\">Group #{idx}</div>"
-                f"<span class=\"pill small {pill_cls}\">{len(items)} items</span>"
+                f'<div class="group-title">Group #{idx}</div>'
+                f'<span class="pill small {pill_cls}">{len(items)} items</span>'
                 "</div>"
-                "<div class=\"group-right\">"
-                f"<code class=\"gkey\">{_escape(gkey)}</code>"
+                '<div class="group-right">'
+                f'<code class="gkey">{_escape(gkey)}</code>'
                 "</div>"
                 "</div>"
             )
@@ -488,4 +488,5 @@ def build_html_report(
         func_section=func_section,
         block_section=block_section,
         icon_theme=ICON_THEME,
+        font_css_url=FONT_CSS_URL,
     )

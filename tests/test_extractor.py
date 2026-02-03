@@ -198,9 +198,7 @@ def f():
 
 
 def test_parse_limits_triggers_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _fake_signal(
-        _sig: int, handler: Callable[[int, object], None] | None
-    ) -> None:
+    def _fake_signal(_sig: int, handler: Callable[[int, object], None] | None) -> None:
         if callable(handler):
             handler(_sig, None)
         return None

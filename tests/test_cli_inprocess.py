@@ -260,7 +260,7 @@ def f2():
         "utf-8",
     )
     baseline = tmp_path / "baseline.json"
-    baseline.write_text("{\"functions\": [], \"blocks\": []}", "utf-8")
+    baseline.write_text('{"functions": [], "blocks": []}', "utf-8")
     _patch_parallel(monkeypatch)
     _run_main(
         monkeypatch,

@@ -363,9 +363,7 @@ def main() -> None:
                             handle_result(result)
                         progress.advance(task)
             else:
-                console.print(
-                    f"[info]Processing {total_files} changed files...[/info]"
-                )
+                console.print(f"[info]Processing {total_files} changed files...[/info]")
                 for fp in files_to_process:
                     result = _safe_process_file(fp)
                     if result is not None:

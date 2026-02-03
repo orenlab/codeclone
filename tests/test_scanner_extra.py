@@ -112,7 +112,7 @@ def test_sensitive_directory_blocked_via_dotdot(
 ) -> None:
     fake_temp = tmp_path / "fake_tmp"
     fake_temp.mkdir()
-    monkeypatch.setattr(scanner.tempfile, "gettempdir", lambda: str(fake_temp))
+    monkeypatch.setattr(scanner, "_get_tempdir", lambda: fake_temp.resolve())
 
     base = tmp_path / "base"
     sensitive_root = tmp_path / "sensitive"
@@ -136,7 +136,7 @@ def test_symlink_to_sensitive_directory_skipped(
 ) -> None:
     fake_temp = tmp_path / "fake_tmp"
     fake_temp.mkdir()
-    monkeypatch.setattr(scanner.tempfile, "gettempdir", lambda: str(fake_temp))
+    monkeypatch.setattr(scanner, "_get_tempdir", lambda: fake_temp.resolve())
 
     root = tmp_path / "root"
     sensitive_root = tmp_path / "sensitive_link_target"
