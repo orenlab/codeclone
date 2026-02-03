@@ -112,7 +112,16 @@ class AstNormalizer(ast.NodeTransformer):
 
 def _stable_ast_dump(node: ast.AST) -> str:
     dumped = ast.dump(node, annotate_fields=True, include_attributes=False)
-    return dumped.replace(", keywords=[]", "")
+    # Normalize optional empty fields across Python versions.
+    for token in (
+        ", keywords=[]",
+        ", type_comment=None",
+        ", type_ignores=[]",
+        ", kind=None",
+        ", type_params=[]",
+    ):
+        dumped = dumped.replace(token, "")
+    return dumped
 
 
 def normalized_ast_dump(func_node: ast.AST, cfg: NormalizationConfig) -> str:
