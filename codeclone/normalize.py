@@ -110,29 +110,6 @@ class AstNormalizer(ast.NodeTransformer):
         return self.generic_visit(new_node)
 
 
-def _stable_ast_dump(node: ast.AST) -> str:
-    def _dump(obj: object) -> str:
-        if isinstance(obj, ast.AST):
-            parts: list[str] = []
-            for name, value in ast.iter_fields(obj):
-                if value is None:
-                    continue
-                if isinstance(value, list):
-                    if not value:
-                        continue
-                    items = ",".join(_dump(v) for v in value)
-                    parts.append(f"{name}=[{items}]")
-                else:
-                    parts.append(f"{name}={_dump(value)}")
-            inside = ", ".join(parts)
-            return f"{obj.__class__.__name__}({inside})"
-        if isinstance(obj, list):
-            return "[" + ",".join(_dump(v) for v in obj) + "]"
-        return repr(obj)
-
-    return _dump(node)
-
-
 def normalized_ast_dump(func_node: ast.AST, cfg: NormalizationConfig) -> str:
     """
     Dump the normalized AST.
@@ -140,7 +117,7 @@ def normalized_ast_dump(func_node: ast.AST, cfg: NormalizationConfig) -> str:
     """
     normalizer = AstNormalizer(cfg)
     new_node = ast.fix_missing_locations(normalizer.visit(func_node))
-    return _stable_ast_dump(new_node)
+    return ast.dump(new_node, annotate_fields=True, include_attributes=False)
 
 
 def normalized_ast_dump_from_list(
@@ -155,6 +132,6 @@ def normalized_ast_dump_from_list(
 
     for node in nodes:
         new_node = ast.fix_missing_locations(normalizer.visit(node))
-        dumps.append(_stable_ast_dump(new_node))
+        dumps.append(ast.dump(new_node, annotate_fields=True, include_attributes=False))
 
     return ";".join(dumps)

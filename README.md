@@ -161,6 +161,12 @@ Behavior:
 - ❌ build fails if *new* clones appear,
 - ✅ refactoring that removes duplication is always allowed.
 
+Note on Python versions:
+
+- AST dumps can differ across Python versions.
+- For deterministic baselines, run baseline generation and CI checks on the
+  same Python version.
+
 ---
 
 ## Using with pre-commit

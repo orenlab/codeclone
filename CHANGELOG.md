@@ -88,6 +88,9 @@ tool suitable for security-sensitive and large-scale environments.
 - Achieved and enforced 98%+ line coverage, with coverage configuration added to
   `pyproject.toml`.
 - Added GitHub Actions workflow with Python 3.10–3.14 test matrix plus ruff and mypy checks.
+- CI baseline enforcement now runs only on Python 3.13 to avoid AST dump
+  differences across versions (baseline should be generated and verified on the
+  same Python version).
 
 ---
 

@@ -41,9 +41,11 @@ jobs:
         run: uv run pytest --cov=codeclone --cov-report=term-missing --cov-fail-under=98
 
       - name: Verify baseline exists
+        if: ${{ matrix.python-version == '3.13' }}
         run: test -f codeclone.baseline.json
 
       - name: Check for new clones vs baseline
+        if: ${{ matrix.python-version == '3.13' }}
         run: uv run codeclone . --fail-on-new --no-progress
 
   lint:
