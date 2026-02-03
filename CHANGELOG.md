@@ -74,6 +74,8 @@ tool suitable for security-sensitive and large-scale environments.
   restricted or sandboxed environments).
 - Emit clear, user-visible warnings when cache validation fails instead of silently ignoring
   corrupted state.
+- HTML report template hardened to safely embed JS template literals and cleaned up to meet
+  lint requirements.
 
 ---
 
@@ -81,8 +83,11 @@ tool suitable for security-sensitive and large-scale environments.
 
 - Expanded unit and integration test coverage across the CLI, CFG construction, cache
   handling, scanner, and HTML reporting paths.
+- Added security regression tests for dot-dot traversal and symlinked sensitive directories,
+  and tightened cache mismatch assertions to verify state reset.
 - Achieved and enforced 98%+ line coverage, with coverage configuration added to
   `pyproject.toml`.
+- Added GitHub Actions workflow with Python 3.10–3.14 test matrix plus ruff and mypy checks.
 
 ---
 
@@ -97,11 +102,6 @@ tool suitable for security-sensitive and large-scale environments.
 - **Block Detection Scaling**  
   Made `MIN_LINE_DISTANCE` dynamic based on block size to improve clone detection accuracy
   across differently sized functions.
-
----
-
-It is recommended for all users, especially those running the tool in CI/CD or
-security-sensitive environments.
 
 ## [1.2.0] - 2026-02-02
 
