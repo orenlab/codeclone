@@ -374,7 +374,18 @@ def f1():
 
 def f2():
     return 1
-""",
+    """,
+        "utf-8",
+    )
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(
+        json.dumps(
+            {
+                "functions": [],
+                "blocks": [],
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+            }
+        ),
         "utf-8",
     )
     _patch_parallel(monkeypatch)
@@ -383,6 +394,8 @@ def f2():
             monkeypatch,
             [
                 str(tmp_path),
+                "--baseline",
+                str(baseline),
                 "--min-loc",
                 "1",
                 "--min-stmt",
@@ -674,9 +687,29 @@ def test_cli_fail_on_new_prints_groups(
         return {"f1"}, {"b1"}
 
     monkeypatch.setattr(baseline.Baseline, "diff", _diff)
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(
+        json.dumps(
+            {
+                "functions": [],
+                "blocks": [],
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+            }
+        ),
+        "utf-8",
+    )
     _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
-        _run_main(monkeypatch, [str(tmp_path), "--fail-on-new", "--no-progress"])
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline_path),
+                "--fail-on-new",
+                "--no-progress",
+            ],
+        )
     assert exc.value.code == 3
     out = capsys.readouterr().out
     assert "New Functions" in out
