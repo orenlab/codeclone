@@ -119,6 +119,12 @@ def _stable_ast_dump(node: ast.AST) -> str:
         ", type_ignores=[]",
         ", kind=None",
         ", type_params=[]",
+        ", posonlyargs=[]",
+        ", kwonlyargs=[]",
+        ", kw_defaults=[]",
+        ", defaults=[]",
+        ", decorator_list=[]",
+        ", returns=None",
     ):
         dumped = dumped.replace(token, "")
     return dumped
