@@ -8,6 +8,7 @@ version = "1.2.1"
 description = "AST and CFG-based code clone detector for Python focused on architectural duplication"
 readme = { file = "README.md", content-type = "text/markdown" }
 license = { text = "MIT" }
+
 authors = [
     { name = "Den Rozhnovskiy", email = "pytelemonbot@mail.ru" }
 ]
@@ -16,6 +17,7 @@ maintainers = [
 ]
 
 requires-python = ">=3.10"
+
 dependencies = [
     "pygments>=2.19.2",
     "rich>=14.3.2",
@@ -24,18 +26,20 @@ dependencies = [
 keywords = [
     "python",
     "ast",
+    "cfg",
     "code-clone",
     "duplication",
     "static-analysis",
-    "ci",
     "architecture",
+    "control-flow",
+    "ci",
 ]
 
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
+    "Topic :: Software Development :: Static Analysis",
     "Topic :: Software Development :: Quality Assurance",
-    "Topic :: Software Development :: Code Generators",
     "Topic :: Software Development :: Testing",
     "Typing :: Typed",
     "License :: OSI Approved :: MIT License",
@@ -62,7 +66,7 @@ dev = [
     "build>=1.2.0",
     "twine>=5.0.0",
     "mypy>=1.19.1",
-    "ruff>=0.12.0"
+    "ruff>=0.12.0",
 ]
 
 [project.scripts]
@@ -70,6 +74,7 @@ codeclone = "codeclone.cli:main"
 
 [tool.setuptools]
 packages = ["codeclone"]
+license-files = ["LICENSE"]
 
 [tool.setuptools.package-data]
 codeclone = ["py.typed"]
@@ -98,3 +103,8 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "PIE", "PERF", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

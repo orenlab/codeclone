@@ -6,7 +6,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/codeclone.svg)](https://pypi.org/project/codeclone/)
 [![License](https://img.shields.io/pypi/l/codeclone.svg)](LICENSE)
 
-**CodeClone** is a Python code clone detector based on **normalized AST and control-flow graphs (CFG)**.
+**CodeClone** is a Python code clone detector based on **normalized Python AST and Control Flow Graphs (CFG)**.
 It helps teams discover architectural duplication and prevent new copy-paste from entering the codebase via CI.
 
 CodeClone is designed to help teams:
@@ -16,8 +16,7 @@ CodeClone is designed to help teams:
 - prevent *new* duplication via CI and pre-commit hooks.
 
 Unlike token- or text-based tools, CodeClone operates on **normalized Python AST and CFG**, making it robust against
-renaming,
-formatting, and minor refactoring.
+renaming, formatting, and minor refactoring.
 
 ---
 
@@ -86,6 +85,7 @@ This design keeps clone detection **stable, deterministic, and low-noise**.
 - AST + CFG normalization instead of token matching.
 - Conservative defaults tuned for real-world Python projects.
 - Explicit thresholds for size and statement count.
+- No probabilistic scoring or heuristic similarity thresholds.
 - Focus on *architectural duplication*, not micro-similarities.
 
 ### CI-friendly baseline mode
@@ -152,22 +152,16 @@ Commit the generated baseline file to the repository.
 ### 2. Use in CI
 
 ```bash
-codeclone . --fail-on-new
+codeclone . --fail-on-new --no-progress
 ```
 
 Behavior:
 
-- ✅ existing clones are allowed,
-- ❌ build fails if *new* clones appear,
-- ✅ refactoring that removes duplication is always allowed.
+- existing clones are allowed,
+- the build fails if *new* clones appear,
+- refactoring that removes duplication is always allowed.
 
-Note on Python versions:
-
-- AST dumps can differ across Python versions.
-- For deterministic baselines, run baseline generation and CI checks on the
-  same Python version.
-- Baseline files include the Python version used to generate them, and
-  `--fail-on-new` enforces a matching interpreter.
+`--fail-on-new` exits with a non-zero code when new clones are detected.
 
 ### Python Version Consistency for Baseline Checks
 
