@@ -67,6 +67,8 @@ def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
     loaded.load()
     assert loaded.load_warning is not None
     assert "signature" in loaded.load_warning
+    assert loaded.data["version"] == Cache.CACHE_VERSION
+    assert loaded.data["files"] == {}
 
 
 def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
@@ -83,6 +85,8 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     loaded.load()
     assert loaded.load_warning is not None
     assert "version" in loaded.load_warning
+    assert loaded.data["version"] == Cache.CACHE_VERSION
+    assert loaded.data["files"] == {}
 
 
 def test_cache_entry_validation(tmp_path: Path) -> None:
