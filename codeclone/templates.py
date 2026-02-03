@@ -1010,7 +1010,7 @@ ${block_section}
     const toast = document.createElement('div');
     toast.className = `toast toast-$${type}`;
     toast.innerHTML = `
-      <span class="toast-icon">${icons[type]}</span>
+      <span class="toast-icon">$${icons[type]}</span>
       <span class="toast-message">$${message}</span>
       <button class="toast-close" aria-label="Close">×</button>
     `;
@@ -1128,7 +1128,7 @@ ${block_section}
       groups.forEach(g => setGroupVisible(g, false));
       state.filtered.slice(start, end).forEach(g => setGroupVisible(g, true));
       
-      if (meta) meta.textContent = `Page ${state.page} / $${pages} • $${total} groups`;
+      if (meta) meta.textContent = `Page $${state.page} / $${pages} • $${total} groups`;
       if (pill) pill.textContent = `$${total} groups`;
       
       if (btnPrev) btnPrev.disabled = state.page <= 1;
@@ -1207,7 +1207,7 @@ ${block_section}
   
   // ========== Page Load Animation ==========
   document.querySelectorAll('.section').forEach((section, index) => {
-    section.style.animationDelay = `${index * 0.1}s`;
+    section.style.animationDelay = `$${index * 0.1}s`;
   });
   
   // Show welcome toast
