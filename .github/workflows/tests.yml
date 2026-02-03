@@ -40,6 +40,15 @@ jobs:
       - name: Run tests
         run: uv run pytest --cov=codeclone --cov-report=term-missing --cov-fail-under=98
 
+      - name: Check for new clones vs baseline
+        uses: ./.github/actions/codeclone
+        with:
+          python-version: ${{ matrix.python-version }}
+          path: .
+          fail-on-new: "true"
+          no-progress: "true"
+          require-baseline: "true"
+
   lint:
     runs-on: ubuntu-latest
     steps:
