@@ -1123,8 +1123,8 @@ ${block_section}
   'use strict';
 
   // ========== Utilities ==========
-  const $ = (sel) => document.querySelector(sel);
-  const $$ = (sel) => document.querySelectorAll(sel);
+  const $$ = (sel) => document.querySelector(sel);
+  const $$$$ = (sel) => document.querySelectorAll(sel);
 
   // ========== State Management ==========
   const state = {
@@ -1172,7 +1172,7 @@ ${block_section}
       '<span class="toast-message">' + message + '</span>' +
       '<button class="toast-close" aria-label="Close">x</button>';
 
-    const container = $('.toast-container');
+    const container = $$('.toast-container');
     container.appendChild(toast);
 
     setTimeout(() => toast.classList.add('toast-show'), 10);
@@ -1192,9 +1192,9 @@ ${block_section}
 
   // ========== Command Palette ==========
   function initCommandPalette() {
-    const palette = $('#command-palette');
-    const input = $('#command-input');
-    const results = $('#command-results');
+    const palette = $$('#command-palette');
+    const input = $$('#command-input');
+    const results = $$('#command-results');
 
     const commands = [
       {
@@ -1239,7 +1239,7 @@ ${block_section}
             icon: '🔍',
             label: 'Focus Search',
             shortcut: '/',
-            action: () => $('.search')?.focus()
+            action: () => $$('.search')?.focus()
           },
           {
             icon: '📜',
@@ -1334,8 +1334,8 @@ ${block_section}
       input.value = '';
     }
 
-    $('#command-btn')?.addEventListener('click', openCommandPalette);
-    $('.command-backdrop')?.addEventListener('click', closeCommandPalette);
+    $$('#command-btn')?.addEventListener('click', openCommandPalette);
+    $$('.command-backdrop')?.addEventListener('click', closeCommandPalette);
 
     input?.addEventListener('input', (e) => {
       renderCommands(e.target.value);
@@ -1345,7 +1345,7 @@ ${block_section}
       if (e.key === 'Escape') {
         closeCommandPalette();
       } else if (e.key === 'Enter') {
-        const selected = $('.command-item.selected');
+        const selected = $$('.command-item.selected');
         if (selected) selected.click();
       }
     });
@@ -1355,8 +1355,8 @@ ${block_section}
 
   // ========== Statistics ==========
   function calculateStats() {
-    const groups = $$('.group');
-    const items = $$('.item');
+    const groups = $$$$('.group');
+    const items = $$$$('.item');
 
     state.stats.totalGroups = groups.length;
     state.stats.totalItems = items.length;
@@ -1373,7 +1373,7 @@ ${block_section}
   }
 
   function showStats() {
-    const dashboard = $('#stats-dashboard');
+    const dashboard = $$('#stats-dashboard');
     if (dashboard.children.length > 0) {
       dashboard.style.display = dashboard.style.display === 'none' ? 'grid' : 'none';
       return;
@@ -1428,7 +1428,7 @@ ${block_section}
 
   // ========== Charts ==========
   function showCharts() {
-    const container = $('#chart-container');
+    const container = $$('#chart-container');
     container.style.display = container.style.display === 'none' ? 'block' : 'none';
 
     if (container.style.display === 'block') {
@@ -1443,7 +1443,7 @@ ${block_section}
       const data = {
         generated: new Date().toISOString(),
         stats: state.stats,
-        groups: Array.from($$('.group')).map(g => ({
+        groups: Array.from($$$$('.group')).map(g => ({
           title: g.querySelector('.group-title')?.textContent,
           items: g.querySelectorAll('.item').length
         }))
@@ -1467,14 +1467,14 @@ ${block_section}
 
   // ========== Group Controls ==========
   function expandAll() {
-    $$('.items').forEach(b => b.style.display = '');
-    $$('[data-toggle-group]').forEach(c => c.style.transform = 'rotate(0deg)');
+    $$$$('.items').forEach(b => b.style.display = '');
+    $$$$('[data-toggle-group]').forEach(c => c.style.transform = 'rotate(0deg)');
     showToast('All groups expanded', 'info');
   }
 
   function collapseAll() {
-    $$('.items').forEach(b => b.style.display = 'none');
-    $$('[data-toggle-group]').forEach(c => c.style.transform = 'rotate(-90deg)');
+    $$$$('.items').forEach(b => b.style.display = 'none');
+    $$$$('[data-toggle-group]').forEach(c => c.style.transform = 'rotate(-90deg)');
     showToast('All groups collapsed', 'info');
   }
 
@@ -1493,7 +1493,7 @@ ${block_section}
     // / - Focus search
     if (e.key === '/') {
       e.preventDefault();
-      $('.search')?.focus();
+      $$('.search')?.focus();
     }
 
     // T - Toggle theme
@@ -1517,11 +1517,11 @@ ${block_section}
     // Escape - Close modals
     if (e.key === 'Escape') {
       if (state.commandPaletteOpen) {
-        const palette = $('#command-palette');
+        const palette = $$('#command-palette');
         palette?.classList.remove('show');
         state.commandPaletteOpen = false;
       }
-      const search = $('.search');
+      const search = $$('.search');
       if (search && search.value) {
         search.value = '';
         search.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1530,7 +1530,7 @@ ${block_section}
   });
 
   // ========== Group Toggle ==========
-  $$('.group-head').forEach((head) => {
+  $$$$('.group-head').forEach((head) => {
     head.addEventListener('click', (e) => {
       if (e.target.closest('button')) return;
       const btn = head.querySelector('[data-toggle-group]');
@@ -1538,11 +1538,11 @@ ${block_section}
     });
   });
 
-  $$('[data-toggle-group]').forEach((btn) => {
+  $$$$('[data-toggle-group]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const id = btn.getAttribute('data-toggle-group');
-      const body = $('#group-body-' + id);
+      const body = $$('#group-body-' + id);
       if (!body) return;
 
       const isHidden = body.style.display === 'none';
@@ -1553,19 +1553,19 @@ ${block_section}
 
   // ========== Section Management ==========
   function initSection(sectionId) {
-    const section = $('section[data-section="' + sectionId + '"]');
+    const section = $$('section[data-section="' + sectionId + '"]');
     if (!section) return;
 
-    const groups = Array.from($$('.group[data-group="' + sectionId + '"]'));
-    const searchInput = $('#search-' + sectionId);
-    const btnPrev = $('[data-prev="' + sectionId + '"]');
-    const btnNext = $('[data-next="' + sectionId + '"]');
-    const meta = $('[data-page-meta="' + sectionId + '"]');
-    const selPageSize = $('[data-pagesize="' + sectionId + '"]');
-    const btnClear = $('[data-clear="' + sectionId + '"]');
-    const btnCollapseAll = $('[data-collapse-all="' + sectionId + '"]');
-    const btnExpandAll = $('[data-expand-all="' + sectionId + '"]');
-    const pill = $('[data-count-pill="' + sectionId + '"]');
+    const groups = Array.from($$$$('.group[data-group="' + sectionId + '"]'));
+    const searchInput = $$('#search-' + sectionId);
+    const btnPrev = $$('[data-prev="' + sectionId + '"]');
+    const btnNext = $$('[data-next="' + sectionId + '"]');
+    const meta = $$('[data-page-meta="' + sectionId + '"]');
+    const selPageSize = $$('[data-pagesize="' + sectionId + '"]');
+    const btnClear = $$('[data-clear="' + sectionId + '"]');
+    const btnCollapseAll = $$('[data-collapse-all="' + sectionId + '"]');
+    const btnExpandAll = $$('[data-expand-all="' + sectionId + '"]');
+    const pill = $$('[data-count-pill="' + sectionId + '"]');
 
     const sectionState = {
       q: '',
@@ -1669,8 +1669,8 @@ ${block_section}
   }
 
   // ========== Event Listeners ==========
-  $('#theme-toggle')?.addEventListener('click', toggleTheme);
-  $('#export-btn')?.addEventListener('click', () => exportReport('json'));
+  $$('#theme-toggle')?.addEventListener('click', toggleTheme);
+  $$('#export-btn')?.addEventListener('click', () => exportReport('json'));
 
   // ========== Initialize ==========
   initTheme();
@@ -1681,7 +1681,7 @@ ${block_section}
 
   // Welcome message
   setTimeout(() => {
-    const groupCount = $$('.group').length;
+    const groupCount = $$$$('.group').length;
     if (groupCount > 0) {
       showToast(groupCount + ' clone groups loaded', 'success');
     }
