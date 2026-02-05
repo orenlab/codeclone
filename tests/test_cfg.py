@@ -261,6 +261,23 @@ def test_cfg_try_else() -> None:
     assert has_else_assign
 
 
+def test_cfg_try_else_return_terminates() -> None:
+    source = """
+    def f():
+        try:
+            x = 1
+        except ValueError:
+            pass
+        else:
+            return 1
+    """
+    cfg = build_cfg_from_source(source)
+    assert any(
+        any(isinstance(stmt, ast.Return) for stmt in block.statements)
+        for block in cfg.blocks
+    )
+
+
 def test_cfg_try_return_in_body() -> None:
     source = """
     def f():

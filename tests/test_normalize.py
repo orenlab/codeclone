@@ -1,39 +1,47 @@
 import ast
+from typing import Any, cast
 
-from codeclone.normalize import NormalizationConfig, normalized_ast_dump
+import pytest
+
+from codeclone.normalize import (
+    NormalizationConfig,
+    normalized_ast_dump,
+    normalized_ast_dump_from_list,
+)
 
 
-def test_normalization_ignores_variable_names() -> None:
-    src1 = """
+@pytest.mark.parametrize(
+    ("src1", "src2"),
+    [
+        (
+            """
 def f():
     x = 1
     return x
-"""
-    src2 = """
+""",
+            """
 def f():
     y = 2
     return y
-"""
-
-    cfg = NormalizationConfig()
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-
-    assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
-
-
-def test_normalization_docstring_removed() -> None:
-    src1 = '''
+""",
+        ),
+        (
+            '''
 def f():
     """doc"""
     x = 1
     return x
-'''
-    src2 = """
+''',
+            """
 def f():
     x = 1
     return x
-"""
+""",
+        ),
+    ],
+    ids=["ignore_var_names", "drop_docstring"],
+)
+def test_normalization_equivalent_sources(src1: str, src2: str) -> None:
     cfg = NormalizationConfig()
     a1 = ast.parse(src1).body[0]
     a2 = ast.parse(src2).body[0]
@@ -83,6 +91,41 @@ def f():
     a1 = ast.parse(src1).body[0]
     a2 = ast.parse(src2).body[0]
     assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
+
+
+def test_normalization_augassign_target_without_ctx() -> None:
+    node = ast.AugAssign(
+        target=cast(Any, ast.Constant(value=1)),
+        op=ast.Add(),
+        value=ast.Constant(value=2),
+    )
+    node.lineno = 1
+    node.col_offset = 0
+    cfg = NormalizationConfig()
+    dump = normalized_ast_dump_from_list([node], cfg)
+    assert "Assign" in dump
+
+
+def test_normalization_unary_non_not_preserved() -> None:
+    src = """
+def f(x):
+    return -x
+"""
+    cfg = NormalizationConfig(normalize_names=False)
+    node = ast.parse(src).body[0]
+    dump = normalized_ast_dump(node, cfg)
+    assert "UnaryOp" in dump
+
+
+def test_normalization_not_non_compare_preserved() -> None:
+    src = """
+def f(x):
+    return not x
+"""
+    cfg = NormalizationConfig(normalize_names=False)
+    node = ast.parse(src).body[0]
+    dump = normalized_ast_dump(node, cfg)
+    assert "Not" in dump
 
 
 def test_normalization_commutative_binop_reorders() -> None:

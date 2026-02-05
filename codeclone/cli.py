@@ -46,7 +46,13 @@ custom_theme = Theme(
         "dim": "dim",
     }
 )
-console = Console(theme=custom_theme, width=200)
+
+
+def _make_console(*, no_color: bool) -> Console:
+    return Console(theme=custom_theme, width=200, no_color=no_color)
+
+
+console = _make_console(no_color=False)
 
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 BATCH_SIZE = 100
@@ -145,12 +151,23 @@ def process_file(
 def print_banner() -> None:
     console.print(
         Panel.fit(
-            "[bold white]CodeClone[/bold white] [dim]v1.2.1[/dim]\n"
+            f"[bold white]CodeClone[/bold white] [dim]v{__version__}[/dim]\n"
             "[italic]Architectural duplication detector[/italic]",
             border_style="blue",
             padding=(0, 2),
         )
     )
+
+
+def _validate_output_path(path: str, *, expected_suffix: str, label: str) -> Path:
+    out = Path(path).expanduser()
+    if out.suffix.lower() != expected_suffix:
+        console.print(
+            f"[error]Invalid {label} output extension: {out} "
+            f"(expected {expected_suffix}).[/error]"
+        )
+        sys.exit(2)
+    return out.resolve()
 
 
 def main() -> None:
@@ -219,6 +236,11 @@ def main() -> None:
         metavar="MAX_CLONES",
         help="Exit with error if total clone groups exceed this number.",
     )
+    ci_group.add_argument(
+        "--ci",
+        action="store_true",
+        help="CI preset: --fail-on-new --no-color --quiet.",
+    )
 
     # Output
     out_group = ap.add_argument_group("Reporting")
@@ -245,10 +267,37 @@ def main() -> None:
         action="store_true",
         help="Disable the progress bar (recommended for CI logs).",
     )
+    out_group.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable ANSI colors in output.",
+    )
+    out_group.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Minimize output (still shows warnings and errors).",
+    )
+    out_group.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print detailed hash identifiers for new clones.",
+    )
 
     args = ap.parse_args()
 
-    print_banner()
+    if args.ci:
+        args.fail_on_new = True
+        args.no_color = True
+        args.quiet = True
+
+    if args.quiet:
+        args.no_progress = True
+
+    global console
+    console = _make_console(no_color=args.no_color)
+
+    if not args.quiet:
+        print_banner()
 
     try:
         root_path = Path(args.root).resolve()
@@ -259,7 +308,24 @@ def main() -> None:
         console.print(f"[error]Invalid root path: {e}[/error]")
         sys.exit(1)
 
-    console.print(f"[info]Scanning root:[/info] {root_path}")
+    if not args.quiet:
+        console.print(f"[info]Scanning root:[/info] {root_path}")
+
+    html_out_path: Path | None = None
+    json_out_path: Path | None = None
+    text_out_path: Path | None = None
+    if args.html_out:
+        html_out_path = _validate_output_path(
+            args.html_out, expected_suffix=".html", label="HTML"
+        )
+    if args.json_out:
+        json_out_path = _validate_output_path(
+            args.json_out, expected_suffix=".json", label="JSON"
+        )
+    if args.text_out:
+        text_out_path = _validate_output_path(
+            args.text_out, expected_suffix=".txt", label="text"
+        )
 
     # Initialize Cache
     cfg = NormalizationConfig()
@@ -305,8 +371,8 @@ def main() -> None:
             return None, str(e)
 
     # Discovery phase
-    with console.status("[bold green]Discovering Python files...", spinner="dots"):
-        try:
+    try:
+        if args.quiet:
             for fp in iter_py_files(str(root_path)):
                 stat, cached, warn = _get_cached_entry(fp)
                 if warn:
@@ -333,9 +399,39 @@ def main() -> None:
                     )
                 else:
                     files_to_process.append(fp)
-        except Exception as e:
-            console.print(f"[error]Scan failed: {e}[/error]")
-            sys.exit(1)
+        else:
+            with console.status(
+                "[bold green]Discovering Python files...", spinner="dots"
+            ):
+                for fp in iter_py_files(str(root_path)):
+                    stat, cached, warn = _get_cached_entry(fp)
+                    if warn:
+                        console.print(warn)
+                        continue
+                    if cached and cached.get("stat") == stat:
+                        all_units.extend(
+                            cast(
+                                list[dict[str, Any]],
+                                cast(object, cached.get("units", [])),
+                            )
+                        )
+                        all_blocks.extend(
+                            cast(
+                                list[dict[str, Any]],
+                                cast(object, cached.get("blocks", [])),
+                            )
+                        )
+                        all_segments.extend(
+                            cast(
+                                list[dict[str, Any]],
+                                cast(object, cached.get("segments", [])),
+                            )
+                        )
+                    else:
+                        files_to_process.append(fp)
+    except Exception as e:
+        console.print(f"[error]Scan failed: {e}[/error]")
+        sys.exit(1)
 
     total_files = len(files_to_process)
     failed_files = []
@@ -382,7 +478,10 @@ def main() -> None:
                             handle_result(result)
                         progress.advance(task)
             else:
-                console.print(f"[info]Processing {total_files} changed files...[/info]")
+                if not args.quiet:
+                    console.print(
+                        f"[info]Processing {total_files} changed files...[/info]"
+                    )
                 for fp in files_to_process:
                     result = _safe_process_file(fp)
                     if result is not None:
@@ -391,9 +490,10 @@ def main() -> None:
         try:
             with ProcessPoolExecutor(max_workers=args.processes) as executor:
                 if args.no_progress:
-                    console.print(
-                        f"[info]Processing {total_files} changed files...[/info]"
-                    )
+                    if not args.quiet:
+                        console.print(
+                            f"[info]Processing {total_files} changed files...[/info]"
+                        )
 
                     # Process in batches to manage memory
                     for i in range(0, total_files, BATCH_SIZE):
@@ -476,7 +576,7 @@ def main() -> None:
             console.print(f"  ... and {len(failed_files) - 10} more")
 
     # Analysis phase
-    with console.status("[bold green]Grouping clones...", spinner="dots"):
+    if args.quiet:
         func_groups = build_groups(all_units)
         block_groups = build_block_groups(all_blocks)
         segment_groups = build_segment_groups(all_segments)
@@ -484,6 +584,15 @@ def main() -> None:
             cache.save()
         except CacheError as e:
             console.print(f"[warning]Failed to save cache: {e}[/warning]")
+    else:
+        with console.status("[bold green]Grouping clones...", spinner="dots"):
+            func_groups = build_groups(all_units)
+            block_groups = build_block_groups(all_blocks)
+            segment_groups = build_segment_groups(all_segments)
+            try:
+                cache.save()
+            except CacheError as e:
+                console.print(f"[warning]Failed to save cache: {e}[/warning]")
 
     # Reporting
     func_clones_count = len(func_groups)
@@ -493,8 +602,7 @@ def main() -> None:
     # Baseline Logic
     baseline_path = Path(args.baseline).expanduser().resolve()
 
-    # If user didn't specify path and default logic applies, baseline_path
-    # is now ./codeclone_baseline.json
+    # If user didn't specify path, the default is ./codeclone.baseline.json.
 
     baseline = Baseline(baseline_path)
     baseline_exists = baseline_path.exists()
@@ -566,26 +674,28 @@ def main() -> None:
     new_clones_count = len(new_func) + len(new_block)
 
     # Summary Table
-    table = Table(title="Analysis Summary", border_style="blue")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="bold white")
+    if not args.quiet:
+        table = Table(title="Analysis Summary", border_style="blue")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="bold white")
 
-    table.add_row("Files Processed", str(changed_files_count))
-    table.add_row("Total Function Clones", str(func_clones_count))
-    table.add_row("Total Block Clones", str(block_clones_count))
-    table.add_row("Total Segment Clones", str(segment_clones_count))
+        table.add_row("Files Processed", str(changed_files_count))
+        table.add_row("Total Function Clones", str(func_clones_count))
+        table.add_row("Total Block Clones", str(block_clones_count))
+        table.add_row("Total Segment Clones", str(segment_clones_count))
 
-    if baseline_exists:
-        style = "error" if new_clones_count > 0 else "success"
-        table.add_row(
-            "New Clones (vs Baseline)", f"[{style}]{new_clones_count}[/{style}]"
-        )
+        if baseline_exists:
+            style = "error" if new_clones_count > 0 else "success"
+            table.add_row(
+                "New Clones (vs Baseline)", f"[{style}]{new_clones_count}[/{style}]"
+            )
 
-    console.print(table)
+        console.print(table)
 
     # Outputs
-    if args.html_out:
-        out = Path(args.html_out).expanduser().resolve()
+    html_report_path: str | None = None
+    if html_out_path:
+        out = html_out_path
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(
             build_html_report(
@@ -598,19 +708,22 @@ def main() -> None:
             ),
             "utf-8",
         )
-        console.print(f"[info]HTML report saved:[/info] {out}")
+        html_report_path = str(out)
+        if not args.quiet:
+            console.print(f"[info]HTML report saved:[/info] {out}")
 
-    if args.json_out:
-        out = Path(args.json_out).expanduser().resolve()
+    if json_out_path:
+        out = json_out_path
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(
             to_json_report(func_groups, block_groups, segment_groups),
             "utf-8",
         )
-        console.print(f"[info]JSON report saved:[/info] {out}")
+        if not args.quiet:
+            console.print(f"[info]JSON report saved:[/info] {out}")
 
-    if args.text_out:
-        out = Path(args.text_out).expanduser().resolve()
+    if text_out_path:
+        out = text_out_path
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(
             "FUNCTION CLONES\n"
@@ -621,15 +734,34 @@ def main() -> None:
             + to_text(segment_groups),
             "utf-8",
         )
-        console.print(f"[info]Text report saved:[/info] {out}")
+        if not args.quiet:
+            console.print(f"[info]Text report saved:[/info] {out}")
 
     # Exit Codes
     if args.fail_on_new and (new_func or new_block):
-        console.print("\n[error]❌ FAILED: New code clones detected![/error]")
-        if new_func:
-            console.print(f"  New Functions: {', '.join(sorted(new_func))}")
-        if new_block:
-            console.print(f"  New Blocks: {', '.join(sorted(new_block))}")
+        default_report = Path(".cache/codeclone/report.html")
+        if html_report_path is None and default_report.exists():
+            html_report_path = str(default_report)
+
+        console.print("\n[error]FAILED: New code clones detected.[/error]")
+        console.print("\nSummary:")
+        console.print(f"- New function clone groups: {len(new_func)}")
+        console.print(f"- New block clone groups: {len(new_block)}")
+        if html_report_path:
+            console.print("\nSee detailed report:")
+            console.print(f"  {html_report_path}")
+        console.print("\nTo accept these clones as technical debt, run:")
+        console.print("  codeclone . --update-baseline")
+
+        if args.verbose:
+            if new_func:
+                console.print("\nDetails (function clone hashes):")
+                for h in sorted(new_func):
+                    console.print(f"- {h}")
+            if new_block:
+                console.print("\nDetails (block clone hashes):")
+                for h in sorted(new_block):
+                    console.print(f"- {h}")
         sys.exit(3)
 
     if 0 <= args.fail_threshold < (func_clones_count + block_clones_count):

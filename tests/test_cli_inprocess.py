@@ -12,7 +12,7 @@ import pytest
 import codeclone.baseline as baseline
 from codeclone import __version__, cli
 from codeclone.baseline import BASELINE_SCHEMA_VERSION
-from codeclone.cache import Cache
+from codeclone.cache import Cache, file_stat_signature
 from codeclone.errors import CacheError
 
 
@@ -61,6 +61,60 @@ class _FailingExecutor:
         return False
 
 
+@dataclass(slots=True)
+class _FixedFuture:
+    value: object | None = None
+    error: Exception | None = None
+
+    def result(self) -> object | None:
+        if self.error:
+            raise self.error
+        return self.value
+
+
+class _FixedExecutor:
+    def __init__(self, future: _FixedFuture, *args: object, **kwargs: object) -> None:
+        self._future = future
+
+    def __enter__(self) -> _FixedExecutor:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: object | None,
+    ) -> Literal[False]:
+        return False
+
+    def submit(
+        self, fn: Callable[..., object], *args: object, **kwargs: object
+    ) -> _FixedFuture:
+        return self._future
+
+
+class _DummyProgress:
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        return None
+
+    def __enter__(self) -> _DummyProgress:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: object | None,
+    ) -> Literal[False]:
+        return False
+
+    def add_task(self, _desc: str, total: int) -> int:
+        return total
+
+    def advance(self, _task: int) -> None:
+        return None
+
+
 def _patch_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "ProcessPoolExecutor", _DummyExecutor)
     monkeypatch.setattr(cli, "as_completed", lambda futures: futures)
@@ -69,6 +123,59 @@ def _patch_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
 def _run_main(monkeypatch: pytest.MonkeyPatch, args: Iterable[str]) -> None:
     monkeypatch.setattr(sys, "argv", ["codeclone", *args])
     cli.main()
+
+
+def _patch_fixed_executor(
+    monkeypatch: pytest.MonkeyPatch, future: _FixedFuture
+) -> None:
+    monkeypatch.setattr(
+        cli, "ProcessPoolExecutor", lambda *args, **kwargs: _FixedExecutor(future)
+    )
+    monkeypatch.setattr(cli, "as_completed", lambda futures: futures)
+
+
+def _baseline_payload(
+    *,
+    python_version: str | None = None,
+    baseline_version: str | None = None,
+    schema_version: int | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {"functions": [], "blocks": []}
+    if python_version is not None:
+        payload["python_version"] = python_version
+    payload["baseline_version"] = baseline_version or __version__
+    payload["schema_version"] = (
+        BASELINE_SCHEMA_VERSION if schema_version is None else schema_version
+    )
+    return payload
+
+
+def _write_baseline(
+    path: Path,
+    *,
+    python_version: str | None = None,
+    baseline_version: str | None = None,
+    schema_version: int | None = None,
+) -> Path:
+    path.write_text(
+        json.dumps(
+            _baseline_payload(
+                python_version=python_version,
+                baseline_version=baseline_version,
+                schema_version=schema_version,
+            )
+        ),
+        "utf-8",
+    )
+    return path
+
+
+def _assert_fail_on_new_summary(out: str, *, include_blocks: bool = True) -> None:
+    assert "FAILED: New code clones detected." in out
+    assert "New function clone groups" in out
+    if include_blocks:
+        assert "New block clone groups" in out
+    assert "codeclone . --update-baseline" in out
 
 
 def test_cli_main_no_progress_parallel(
@@ -131,33 +238,36 @@ def test_cli_main_no_progress_fallback(
     assert "falling back to sequential" in out
 
 
+def test_cli_main_no_progress_fallback_quiet(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    monkeypatch.setattr(cli, "ProcessPoolExecutor", _FailingExecutor)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--ci",
+            "--baseline",
+            str(baseline),
+        ],
+    )
+    out = capsys.readouterr().out
+    assert "Processing" not in out
+
+
 def test_cli_main_progress_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
-
-    class _DummyProgress:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            return None
-
-        def __enter__(self) -> _DummyProgress:
-            return self
-
-        def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc: BaseException | None,
-            tb: object | None,
-        ) -> Literal[False]:
-            return False
-
-        def add_task(self, _desc: str, total: int) -> int:
-            return total
-
-        def advance(self, _task: int) -> None:
-            return None
-
     monkeypatch.setattr(cli, "Progress", _DummyProgress)
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(tmp_path)])
@@ -173,17 +283,26 @@ def test_cli_invalid_root_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     assert exc.value.code == 1
 
 
-def test_cli_main_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_main_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
     html_out = tmp_path / "out.html"
     json_out = tmp_path / "out.json"
     text_out = tmp_path / "out.txt"
+    baseline = tmp_path / "baseline.json"
+    _write_baseline(
+        baseline,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
     _patch_parallel(monkeypatch)
     _run_main(
         monkeypatch,
         [
             str(tmp_path),
+            "--baseline",
+            str(baseline),
             "--html",
             str(html_out),
             "--json",
@@ -196,6 +315,109 @@ def test_cli_main_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert html_out.exists()
     assert json_out.exists()
     assert text_out.exists()
+    out = capsys.readouterr().out
+    assert "HTML report saved" in out
+    assert "JSON report saved" in out
+    assert "Text report saved" in out
+
+
+@pytest.mark.parametrize(
+    ("flag", "bad_name", "label", "expected"),
+    [
+        ("--html", "report.exe", "HTML", ".html"),
+        ("--json", "report.txt", "JSON", ".json"),
+        ("--text", "report.json", "text", ".txt"),
+    ],
+)
+def test_cli_output_extension_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    flag: str,
+    bad_name: str,
+    label: str,
+    expected: str,
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    bad_path = tmp_path / bad_name
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                flag,
+                str(bad_path),
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert f"Invalid {label} output extension" in out
+    assert expected in out
+
+
+def test_cli_outputs_quiet_no_print(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    html_out = tmp_path / "out.html"
+    json_out = tmp_path / "out.json"
+    text_out = tmp_path / "out.txt"
+    baseline = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--ci",
+            "--baseline",
+            str(baseline),
+            "--html",
+            str(html_out),
+            "--json",
+            str(json_out),
+            "--text",
+            str(text_out),
+        ],
+    )
+    assert html_out.exists()
+    assert json_out.exists()
+    assert text_out.exists()
+    out = capsys.readouterr().out
+    assert "report saved" not in out
+
+
+def test_cli_update_baseline_skips_version_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        baseline_version="0.0.0",
+    )
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--update-baseline",
+            "--no-progress",
+        ],
+    )
+    out = capsys.readouterr().out
+    assert "Baseline updated" in out
 
 
 def test_cli_update_baseline(
@@ -270,21 +492,11 @@ def f1():
 
 def f2():
     return 1
-""",
+    """,
         "utf-8",
     )
     baseline = tmp_path / "baseline.json"
-    baseline.write_text(
-        json.dumps(
-            {
-                "functions": [],
-                "blocks": [],
-                "baseline_version": __version__,
-                "schema_version": BASELINE_SCHEMA_VERSION,
-            }
-        ),
-        "utf-8",
-    )
+    _write_baseline(baseline)
     _patch_parallel(monkeypatch)
     _run_main(
         monkeypatch,
@@ -311,18 +523,7 @@ def test_cli_baseline_python_version_mismatch_warns(
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
     baseline = tmp_path / "baseline.json"
-    baseline.write_text(
-        json.dumps(
-            {
-                "functions": [],
-                "blocks": [],
-                "python_version": "0.0",
-                "baseline_version": __version__,
-                "schema_version": BASELINE_SCHEMA_VERSION,
-            }
-        ),
-        "utf-8",
-    )
+    _write_baseline(baseline, python_version="0.0")
     _patch_parallel(monkeypatch)
     _run_main(
         monkeypatch,
@@ -346,17 +547,10 @@ def test_cli_baseline_version_mismatch_fails(
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
     baseline_path = tmp_path / "baseline.json"
-    baseline_path.write_text(
-        json.dumps(
-            {
-                "functions": [],
-                "blocks": [],
-                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
-                "baseline_version": "0.0.0",
-                "schema_version": BASELINE_SCHEMA_VERSION,
-            }
-        ),
-        "utf-8",
+    _write_baseline(
+        baseline_path,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        baseline_version="0.0.0",
     )
     _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
@@ -374,6 +568,35 @@ def test_cli_baseline_version_mismatch_fails(
     assert "Baseline version mismatch" in out
 
 
+def test_cli_baseline_schema_version_mismatch_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    _write_baseline(
+        baseline_path,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        schema_version=999,
+    )
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline_path),
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "Baseline schema version mismatch" in out
+
+
 def test_cli_baseline_python_version_mismatch_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -382,18 +605,7 @@ def test_cli_baseline_python_version_mismatch_fails(
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
     baseline = tmp_path / "baseline.json"
-    baseline.write_text(
-        json.dumps(
-            {
-                "functions": [],
-                "blocks": [],
-                "python_version": "0.0",
-                "baseline_version": __version__,
-                "schema_version": BASELINE_SCHEMA_VERSION,
-            }
-        ),
-        "utf-8",
-    )
+    _write_baseline(baseline, python_version="0.0")
     _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(
@@ -456,17 +668,9 @@ def f2():
         "utf-8",
     )
     baseline = tmp_path / "baseline.json"
-    baseline.write_text(
-        json.dumps(
-            {
-                "functions": [],
-                "blocks": [],
-                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
-                "baseline_version": __version__,
-                "schema_version": BASELINE_SCHEMA_VERSION,
-            }
-        ),
-        "utf-8",
+    _write_baseline(
+        baseline,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
     )
     _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
@@ -499,21 +703,13 @@ def f1():
 
 def f2():
 {body}
-""",
+    """,
         "utf-8",
     )
     baseline = tmp_path / "baseline.json"
-    baseline.write_text(
-        json.dumps(
-            {
-                "functions": [],
-                "blocks": [],
-                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
-                "baseline_version": __version__,
-                "schema_version": BASELINE_SCHEMA_VERSION,
-            }
-        ),
-        "utf-8",
+    _write_baseline(
+        baseline,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
     )
     _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
@@ -533,8 +729,47 @@ def f2():
         )
     assert exc.value.code == 3
     out = capsys.readouterr().out
-    assert "New Functions" in out
-    assert "New Blocks" in out
+    _assert_fail_on_new_summary(out)
+
+
+def test_cli_ci_preset_fails_on_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text(
+        """
+def f1():
+    return 1
+
+def f2():
+    return 1
+    """,
+        "utf-8",
+    )
+    baseline = tmp_path / "baseline.json"
+    _write_baseline(
+        baseline,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline),
+                "--min-loc",
+                "1",
+                "--min-stmt",
+                "1",
+                "--ci",
+            ],
+        )
+    assert exc.value.code == 3
+    out = capsys.readouterr().out
+    _assert_fail_on_new_summary(out, include_blocks=False)
+    assert "CodeClone v" not in out
 
 
 def test_cli_blocks_processing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -601,6 +836,37 @@ def test_cli_cache_save_warning(
     assert "Failed to save cache" in out
 
 
+def test_cli_cache_save_warning_quiet(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    _write_baseline(
+        baseline_path,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+
+    def _raise_save(self: Cache) -> None:
+        raise CacheError("nope")
+
+    monkeypatch.setattr(Cache, "save", _raise_save)
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--ci",
+            "--baseline",
+            str(baseline_path),
+        ],
+    )
+    out = capsys.readouterr().out
+    assert "Failed to save cache" in out
+
+
 def test_cli_invalid_root(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, ["/path/does/not/exist"])
@@ -649,10 +915,12 @@ def test_cli_discovery_cache_hit(
     assert "Files Processed" in out
 
 
+@pytest.mark.parametrize("extra_args", [["--no-progress"], ["--ci"]])
 def test_cli_discovery_skip_oserror(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    extra_args: list[str],
 ) -> None:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
@@ -662,9 +930,48 @@ def test_cli_discovery_skip_oserror(
 
     monkeypatch.setattr(cli, "file_stat_signature", _bad_stat)
     _patch_parallel(monkeypatch)
-    _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
+    _run_main(monkeypatch, [str(tmp_path), *extra_args])
     out = capsys.readouterr().out
     assert "Skipping file" in out
+
+
+def test_cli_ci_discovery_cache_hit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    stat = file_stat_signature(str(src))
+    cache.put_file_entry(
+        str(src),
+        stat,
+        [],
+        [],
+        [],
+    )
+    cache.save()
+    baseline = tmp_path / "baseline.json"
+    _write_baseline(
+        baseline,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--ci",
+            "--cache-dir",
+            str(cache_path),
+            "--baseline",
+            str(baseline),
+        ],
+    )
+    out = capsys.readouterr().out
+    assert "CodeClone v" not in out
 
 
 def test_cli_scan_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -696,6 +1003,27 @@ def test_cli_failed_files_report(
     out = capsys.readouterr().out
     assert "files failed to process" in out
     assert "and 2 more" in out
+
+
+def test_cli_failed_files_report_single(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+
+    def _bad_process(
+        _fp: str, *_args: object, **_kwargs: object
+    ) -> cli.ProcessingResult:
+        return cli.ProcessingResult(filepath=_fp, success=False, error="bad")
+
+    monkeypatch.setattr(cli, "process_file", _bad_process)
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
+    out = capsys.readouterr().out
+    assert "files failed to process" in out
+    assert "and 1 more" not in out
 
 
 def test_cli_worker_failed(
@@ -741,27 +1069,6 @@ def test_cli_worker_failed_progress_sequential(
             tb: object | None,
         ) -> Literal[False]:
             return False
-
-    class _DummyProgress:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            return None
-
-        def __enter__(self) -> _DummyProgress:
-            return self
-
-        def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc: BaseException | None,
-            tb: object | None,
-        ) -> Literal[False]:
-            return False
-
-        def add_task(self, _desc: str, total: int) -> int:
-            return total
-
-        def advance(self, _task: int) -> None:
-            return None
 
     monkeypatch.setattr(cli, "Progress", _DummyProgress)
     monkeypatch.setattr(cli, "ProcessPoolExecutor", _FailExec)
@@ -819,17 +1126,9 @@ def test_cli_fail_on_new_prints_groups(
 
     monkeypatch.setattr(baseline.Baseline, "diff", _diff)
     baseline_path = tmp_path / "baseline.json"
-    baseline_path.write_text(
-        json.dumps(
-            {
-                "functions": [],
-                "blocks": [],
-                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
-                "baseline_version": __version__,
-                "schema_version": BASELINE_SCHEMA_VERSION,
-            }
-        ),
-        "utf-8",
+    _write_baseline(
+        baseline_path,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
     )
     _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
@@ -845,8 +1144,207 @@ def test_cli_fail_on_new_prints_groups(
         )
     assert exc.value.code == 3
     out = capsys.readouterr().out
-    assert "New Functions" in out
-    assert "New Blocks" in out
+    _assert_fail_on_new_summary(out)
+
+
+def test_cli_fail_on_new_no_report_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+
+    def _diff(
+        _self: object, _f: dict[str, object], _b: dict[str, object]
+    ) -> tuple[set[str], set[str]]:
+        return {"f1"}, {"b1"}
+
+    monkeypatch.setattr(baseline.Baseline, "diff", _diff)
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    monkeypatch.chdir(tmp_path)
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline_path),
+                "--fail-on-new",
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 3
+    out = capsys.readouterr().out
+    assert "See detailed report:" not in out
+
+
+@pytest.mark.parametrize(
+    ("new_func", "new_block", "expect_func", "expect_block"),
+    [
+        ({"f1"}, set(), True, False),
+        (set(), {"b1"}, False, True),
+    ],
+)
+def test_cli_fail_on_new_verbose_single_kind(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    new_func: set[str],
+    new_block: set[str],
+    expect_func: bool,
+    expect_block: bool,
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f1():\n    return 1\n\ndef f2():\n    return 1\n", "utf-8")
+
+    def _diff(
+        _self: object, _f: dict[str, object], _b: dict[str, object]
+    ) -> tuple[set[str], set[str]]:
+        return new_func, new_block
+
+    monkeypatch.setattr(baseline.Baseline, "diff", _diff)
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline_path),
+                "--fail-on-new",
+                "--verbose",
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 3
+    out = capsys.readouterr().out
+    if expect_func:
+        assert "Details (function clone hashes):" in out
+    else:
+        assert "Details (function clone hashes):" not in out
+    if expect_block:
+        assert "Details (block clone hashes):" in out
+    else:
+        assert "Details (block clone hashes):" not in out
+
+
+def test_cli_fail_on_new_verbose_and_report_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f1():\n    return 1\n\ndef f2():\n    return 1\n", "utf-8")
+
+    def _diff(
+        _self: object, _f: dict[str, object], _b: dict[str, object]
+    ) -> tuple[set[str], set[str]]:
+        return {"fhash1"}, {"bhash1"}
+
+    monkeypatch.setattr(baseline.Baseline, "diff", _diff)
+    baseline_path = tmp_path / "baseline.json"
+    _write_baseline(
+        baseline_path,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    html_out = tmp_path / "report.html"
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline_path),
+                "--fail-on-new",
+                "--verbose",
+                "--html",
+                str(html_out),
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 3
+    out = capsys.readouterr().out
+    assert "See detailed report:" in out
+    assert str(html_out) in out
+    assert "Details (function clone hashes):" in out
+    assert "- fhash1" in out
+    assert "Details (block clone hashes):" in out
+    assert "- bhash1" in out
+
+
+def test_cli_fail_on_new_default_report_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f1():\n    return 1\n\ndef f2():\n    return 1\n", "utf-8")
+    report_path = tmp_path / ".cache" / "codeclone" / "report.html"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("<html>ok</html>", "utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    _write_baseline(
+        baseline_path,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    monkeypatch.chdir(tmp_path)
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline_path),
+                "--fail-on-new",
+                "--min-loc",
+                "1",
+                "--min-stmt",
+                "1",
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 3
+    out = capsys.readouterr().out
+    assert "See detailed report:" in out
+    assert ".cache/codeclone/report.html" in out
+
+
+def test_cli_batch_result_none_no_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    _patch_fixed_executor(monkeypatch, _FixedFuture(value=None))
+    _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
+    out = capsys.readouterr().out
+    assert "Failed to process batch item" not in out
+
+
+def test_cli_batch_result_none_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    monkeypatch.setattr(cli, "Progress", _DummyProgress)
+    _patch_fixed_executor(monkeypatch, _FixedFuture(value=None))
+    _run_main(monkeypatch, [str(tmp_path)])
+    out = capsys.readouterr().out
+    assert "Worker failed" not in out
 
 
 def test_cli_failed_batch_item_no_progress(
@@ -856,31 +1354,7 @@ def test_cli_failed_batch_item_no_progress(
 ) -> None:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
-
-    class _Future:
-        def result(self) -> cli.ProcessingResult:
-            raise RuntimeError("boom")
-
-    class _Exec:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            return None
-
-        def __enter__(self) -> _Exec:
-            return self
-
-        def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc: BaseException | None,
-            tb: object | None,
-        ) -> Literal[False]:
-            return False
-
-        def submit(self, *_args: object, **_kwargs: object) -> _Future:
-            return _Future()
-
-    monkeypatch.setattr(cli, "ProcessPoolExecutor", _Exec)
-    monkeypatch.setattr(cli, "as_completed", lambda futures: futures)
+    _patch_fixed_executor(monkeypatch, _FixedFuture(error=RuntimeError("boom")))
     _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     out = capsys.readouterr().out
     assert "Failed to process batch item" in out
@@ -893,53 +1367,8 @@ def test_cli_failed_batch_item_progress(
 ) -> None:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
-
-    class _Future:
-        def result(self) -> cli.ProcessingResult:
-            raise RuntimeError("boom")
-
-    class _Exec:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            return None
-
-        def __enter__(self) -> _Exec:
-            return self
-
-        def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc: BaseException | None,
-            tb: object | None,
-        ) -> Literal[False]:
-            return False
-
-        def submit(self, *_args: object, **_kwargs: object) -> _Future:
-            return _Future()
-
-    class _DummyProgress:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            return None
-
-        def __enter__(self) -> _DummyProgress:
-            return self
-
-        def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc: BaseException | None,
-            tb: object | None,
-        ) -> Literal[False]:
-            return False
-
-        def add_task(self, _desc: str, total: int) -> int:
-            return total
-
-        def advance(self, _task: int) -> None:
-            return None
-
     monkeypatch.setattr(cli, "Progress", _DummyProgress)
-    monkeypatch.setattr(cli, "ProcessPoolExecutor", _Exec)
-    monkeypatch.setattr(cli, "as_completed", lambda futures: futures)
+    _patch_fixed_executor(monkeypatch, _FixedFuture(error=RuntimeError("boom")))
     _run_main(monkeypatch, [str(tmp_path)])
     out = capsys.readouterr().out
-    assert "Worker failed" in out or "Failed to process batch item" in out
+    assert "Worker failed" in out

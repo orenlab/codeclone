@@ -88,7 +88,7 @@ class CFGBuilder:
             case ast.Try():
                 self._visit_try(cast(_TryLike, stmt))
             case _ if TryStar is not None and isinstance(stmt, TryStar):
-                self._visit_try(cast(_TryLike, stmt))
+                self._visit_try(cast(_TryLike, cast(object, stmt)))
 
             case ast.With() | ast.AsyncWith():
                 self._visit_with(stmt)

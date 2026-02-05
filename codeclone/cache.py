@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 
 from .errors import CacheError
 
+OS_NAME = os.name
+
 
 class FileStat(TypedDict):
     mtime_ns: int
@@ -96,7 +98,7 @@ class Cache:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 secret_path.write_bytes(secret)
                 # Set restrictive permissions on secret file (Unix only)
-                if os.name == "posix":
+                if OS_NAME == "posix":
                     secret_path.chmod(0o600)
             except OSError:
                 pass

@@ -211,3 +211,14 @@ def test_cache_secret_chmod_failure(
 
     cache = Cache(cache_path)
     assert isinstance(cache.secret, bytes)
+
+
+def test_cache_secret_non_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr("codeclone.cache.OS_NAME", "nt")
+    cache = Cache(cache_path)
+    secret_path = cache_path.parent / ".cache_secret"
+    assert secret_path.exists()
+    assert isinstance(cache.secret, bytes)

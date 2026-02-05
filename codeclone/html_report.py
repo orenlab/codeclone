@@ -64,8 +64,9 @@ class _FileCache:
 
         self._get_lines_impl = lru_cache(maxsize=maxsize)(self._read_file_range)
 
+    @staticmethod
     def _read_file_range(
-        self, filepath: str, start_line: int, end_line: int
+            filepath: str, start_line: int, end_line: int
     ) -> tuple[str, ...]:
         if start_line < 1:
             start_line = 1
@@ -93,7 +94,7 @@ class _FileCache:
             raise FileProcessingError(f"Cannot read {filepath}: {e}") from e
 
     def get_lines_range(
-        self, filepath: str, start_line: int, end_line: int
+            self, filepath: str, start_line: int, end_line: int
     ) -> tuple[str, ...]:
         return self._get_lines_impl(filepath, start_line, end_line)
 
@@ -112,7 +113,7 @@ def _try_pygments(code: str) -> str | None:
         pygments = importlib.import_module("pygments")
         formatters = importlib.import_module("pygments.formatters")
         lexers = importlib.import_module("pygments.lexers")
-    except Exception:
+    except ImportError:
         return None
 
     highlight = pygments.highlight
@@ -129,7 +130,7 @@ def _pygments_css(style_name: str) -> str:
     """
     try:
         formatters = importlib.import_module("pygments.formatters")
-    except Exception:
+    except ImportError:
         return ""
 
     try:
@@ -178,13 +179,13 @@ def _prefix_css(css: str, prefix: str) -> str:
 
 
 def _render_code_block(
-    *,
-    filepath: str,
-    start_line: int,
-    end_line: int,
-    file_cache: _FileCache,
-    context: int,
-    max_lines: int,
+        *,
+        filepath: str,
+        start_line: int,
+        end_line: int,
+        file_cache: _FileCache,
+        context: int,
+        max_lines: int,
 ) -> _Snippet:
     s = max(1, start_line - context)
     e = end_line + context
@@ -236,13 +237,13 @@ def _group_sort_key(items: list[dict[str, Any]]) -> tuple[int, int]:
 
 
 def build_html_report(
-    *,
-    func_groups: dict[str, list[dict[str, Any]]],
-    block_groups: dict[str, list[dict[str, Any]]],
-    segment_groups: dict[str, list[dict[str, Any]]],
-    title: str = "CodeClone Report",
-    context_lines: int = 3,
-    max_snippet_lines: int = 220,
+        *,
+        func_groups: dict[str, list[dict[str, Any]]],
+        block_groups: dict[str, list[dict[str, Any]]],
+        segment_groups: dict[str, list[dict[str, Any]]],
+        title: str = "CodeClone Report",
+        context_lines: int = 3,
+        max_snippet_lines: int = 220,
 ) -> str:
     file_cache = _FileCache()
 
@@ -269,74 +270,70 @@ def build_html_report(
     # ============================
     # Icons (Inline SVG)
     # ============================
-    ICON_SEARCH = (
-        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" '
-        'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" '
-        'stroke-linejoin="round">'
-        '<circle cx="11" cy="11" r="8"></circle>'
-        '<line x1="21" y1="21" x2="16.65" y2="16.65"></line>'
-        "</svg>"
-    )
-    ICON_X = (
-        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" '
-        'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" '
-        'stroke-linejoin="round">'
-        '<line x1="18" y1="6" x2="6" y2="18"></line>'
-        '<line x1="6" y1="6" x2="18" y2="18"></line>'
-        "</svg>"
-    )
-    ICON_CHEV_DOWN = (
-        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" '
-        'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" '
-        'stroke-linejoin="round">'
-        '<polyline points="6 9 12 15 18 9"></polyline>'
-        "</svg>"
-    )
-    # ICON_CHEV_RIGHT = (
-    #     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" '
-    #     'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" '
-    #     'stroke-linejoin="round">'
-    #     '<polyline points="9 18 15 12 9 6"></polyline>'
-    #     "</svg>"
-    # )
-    ICON_THEME = (
-        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" '
-        'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
-        'stroke-linejoin="round">'
-        '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>'
-        "</svg>"
-    )
-    ICON_CHECK = (
-        '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" '
-        'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
-        'stroke-linejoin="round">'
-        '<polyline points="20 6 9 17 4 12"></polyline>'
-        "</svg>"
-    )
-    ICON_PREV = (
-        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" '
-        'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
-        'stroke-linejoin="round">'
-        '<polyline points="15 18 9 12 15 6"></polyline>'
-        "</svg>"
-    )
-    ICON_NEXT = (
-        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" '
-        'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
-        'stroke-linejoin="round">'
-        '<polyline points="9 18 15 12 9 6"></polyline>'
-        "</svg>"
-    )
+    def _svg_icon(size: int, stroke_width: str, body: str) -> str:
+        return (
+            f'<svg width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" '
+            f'stroke="currentColor" stroke-width="{stroke_width}" '
+            'stroke-linecap="round" stroke-linejoin="round">'
+            f"{body}</svg>"
+        )
+
+    ICONS = {
+        "search": _svg_icon(
+            16,
+            "2.5",
+            '<circle cx="11" cy="11" r="8"></circle>'
+            '<line x1="21" y1="21" x2="16.65" y2="16.65"></line>',
+        ),
+        "clear": _svg_icon(
+            16,
+            "2.5",
+            '<line x1="18" y1="6" x2="6" y2="18"></line>'
+            '<line x1="6" y1="6" x2="18" y2="18"></line>',
+        ),
+        "chev_down": _svg_icon(
+            16,
+            "2.5",
+            '<polyline points="6 9 12 15 18 9"></polyline>',
+        ),
+        # ICON_CHEV_RIGHT = (
+        #     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" '
+        #     'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" '
+        #     'stroke-linejoin="round">'
+        #     '<polyline points="9 18 15 12 9 6"></polyline>'
+        #     "</svg>"
+        # )
+        "theme": _svg_icon(
+            16,
+            "2",
+            '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>',
+        ),
+        "check": _svg_icon(
+            48,
+            "2",
+            '<polyline points="20 6 9 17 4 12"></polyline>',
+        ),
+        "prev": _svg_icon(
+            16,
+            "2",
+            '<polyline points="15 18 9 12 15 6"></polyline>',
+        ),
+        "next": _svg_icon(
+            16,
+            "2",
+            '<polyline points="9 18 15 12 9 6"></polyline>',
+        ),
+    }
 
     # ----------------------------
     # Section renderer
     # ----------------------------
 
     def render_section(
-        section_id: str,
-        section_title: str,
-        groups: list[tuple[str, list[dict[str, Any]]]],
-        pill_cls: str,
+            section_id: str,
+            section_title: str,
+            groups: list[tuple[str, list[dict[str, Any]]]],
+            pill_cls: str,
     ) -> str:
         if not groups:
             return ""
@@ -354,7 +351,7 @@ def build_html_report(
      aria-label="{_escape(section_title)} controls">
   <div class="toolbar-left">
     <div class="search-wrap">
-      <span class="search-ico">{ICON_SEARCH}</span>
+      <span class="search-ico">{ICONS["search"]}</span>
       <input class="search"
              id="search-{section_id}"
              placeholder="Search..."
@@ -362,7 +359,7 @@ def build_html_report(
       <button class="btn ghost"
               type="button"
               data-clear="{section_id}"
-              title="Clear search">{ICON_X}</button>
+              title="Clear search">{ICONS["clear"]}</button>
     </div>
     <div class="segmented">
       <button class="btn seg"
@@ -378,11 +375,11 @@ def build_html_report(
     <div class="pager">
       <button class="btn"
               type="button"
-              data-prev="{section_id}">{ICON_PREV}</button>
+              data-prev="{section_id}">{ICONS["prev"]}</button>
       <span class="page-meta" data-page-meta="{section_id}">Page 1</span>
       <button class="btn"
               type="button"
-              data-next="{section_id}">{ICON_NEXT}</button>
+              data-next="{section_id}">{ICONS["next"]}</button>
     </div>
     <select class="select" data-pagesize="{section_id}" title="Groups per page">
       <option value="5">5 / page</option>
@@ -414,7 +411,7 @@ def build_html_report(
                 '<div class="group-head">'
                 '<div class="group-left">'
                 f'<button class="chev" type="button" aria-label="Toggle group" '
-                f'data-toggle-group="{section_id}-{idx}">{ICON_CHEV_DOWN}</button>'
+                f'data-toggle-group="{section_id}-{idx}">{ICONS["chev_down"]}</button>'
                 f'<div class="group-title">Group #{idx}</div>'
                 f'<span class="pill small {pill_cls}">{len(items)} items</span>'
                 "</div>"
@@ -468,7 +465,7 @@ def build_html_report(
         empty_state_html = f"""
 <div class="empty">
   <div class="empty-card">
-    <div class="empty-icon">{ICON_CHECK}</div>
+    <div class="empty-icon">{ICONS["check"]}</div>
     <h2>No code clones detected</h2>
     <p>
       No structural, block-level, or segment-level duplication was found above
@@ -496,6 +493,6 @@ def build_html_report(
         func_section=func_section,
         block_section=block_section,
         segment_section=segment_section,
-        icon_theme=ICON_THEME,
+        icon_theme=ICONS["theme"],
         font_css_url=FONT_CSS_URL,
     )

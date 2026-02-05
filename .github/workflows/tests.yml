@@ -46,7 +46,7 @@ jobs:
 
       - name: Check for new clones vs baseline
         if: ${{ matrix.python-version == '3.13' }}
-        run: uv run codeclone . --fail-on-new --no-progress
+        run: uv run codeclone . --ci
 
   lint:
     runs-on: ubuntu-latest

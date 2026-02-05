@@ -1,10 +1,12 @@
 # CodeClone
 
-[![PyPI](https://img.shields.io/pypi/v/codeclone.svg)](https://pypi.org/project/codeclone/)
-[![Downloads](https://img.shields.io/pypi/dm/codeclone.svg)](https://pypi.org/project/codeclone/)
-[![tests](https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/orenlab/codeclone/actions/workflows/tests.yml)
-[![Python](https://img.shields.io/pypi/pyversions/codeclone.svg)](https://pypi.org/project/codeclone/)
-[![License](https://img.shields.io/pypi/l/codeclone.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/codeclone.svg?style=flat-square)](https://pypi.org/project/codeclone/)
+[![Downloads](https://img.shields.io/pypi/dm/codeclone.svg?style=flat-square)](https://pypi.org/project/codeclone/)
+[![tests](https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main&style=flat-square)](https://github.com/orenlab/codeclone/actions/workflows/tests.yml)
+[![Python](https://img.shields.io/pypi/pyversions/codeclone.svg?style=flat-square)](https://pypi.org/project/codeclone/)
+![CI First](https://img.shields.io/badge/CI-first-green?style=flat-square)
+![Baseline](https://img.shields.io/badge/baseline-versioned-green?style=flat-square)
+[![License](https://img.shields.io/pypi/l/codeclone.svg?style=flat-square)](LICENSE)
 
 **CodeClone** is a Python code clone detector based on **normalized Python AST and Control Flow Graphs (CFG)**.
 It helps teams discover architectural duplication and prevent new copy-paste from entering the codebase via CI.
@@ -143,6 +145,14 @@ Generate an HTML report:
 ```bash
 codeclone . --html .cache/codeclone/report.html
 ```
+
+Run in CI mode:
+
+```bash
+codeclone . --ci --html .cache/codeclone/report.html
+```
+
+`--ci` is equivalent to `--fail-on-new --no-color --quiet`.
 
 ---
 

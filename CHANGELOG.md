@@ -50,6 +50,12 @@ Update the baseline:
 codeclone . --update-baseline
 ```
 
+### CLI UX (CI)
+
+- Added `--ci` preset (`--fail-on-new --no-color --quiet`).
+- Improved `--fail-on-new` output with aggregated counts and clear next steps.
+- Validate report output extensions (`.html`, `.json`, `.txt`) and fail fast on mismatches.
+
 ### HTML Report UI
 
 - **Visual refresh**  

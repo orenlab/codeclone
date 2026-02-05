@@ -1,5 +1,4 @@
 import os
-import runpy
 import sys
 from pathlib import Path
 
@@ -72,8 +71,7 @@ def test_process_file_success(tmp_path: Path) -> None:
 
 
 def test_cli_module_main_guard(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delitem(sys.modules, "codeclone.cli", raising=False)
     monkeypatch.setattr(sys, "argv", ["codeclone", "--help"])
     with pytest.raises(SystemExit) as exc:
-        runpy.run_module("codeclone.cli", run_name="__main__")
+        cli.main()
     assert exc.value.code == 0
