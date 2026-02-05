@@ -1125,6 +1125,159 @@ ${block_section}
   // ========== Utilities ==========
   const $$ = (sel) => document.querySelector(sel);
   const $$$$ = (sel) => document.querySelectorAll(sel);
+  const svg = (parts) => parts.join('');
+  const ICONS = {
+    info: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<circle cx="12" cy="12" r="10" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></circle>',
+      '<path d="M12 10v7" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '<circle cx="12" cy="7" r="1.25" fill="currentColor"></circle>',
+      '</svg>'
+    ]),
+    success: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<circle cx="12" cy="12" r="10" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></circle>',
+      '<path d="M7 12l3 3 7-7" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    warning: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M12 3l10 18H2L12 3z" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '<path d="M12 9v5" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '<circle cx="12" cy="17" r="1.25" fill="currentColor"></circle>',
+      '</svg>'
+    ]),
+    error: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<circle cx="12" cy="12" r="10" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></circle>',
+      '<path d="M8 8l8 8M16 8l-8 8" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    exportJson: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M12 3v12" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '<path d="M7 10l5 5 5-5" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '<path d="M5 21h14" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    exportPdf: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M6 2h9l5 5v15H6z" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '<path d="M15 2v5h5" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    stats: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M4 20V10M10 20V4M16 20v-8M22 20V7" fill="none"',
+      ' stroke="currentColor" stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    charts: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M4 20h16" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '<path d="M6 16l4-4 4 3 4-6" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    refresh: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M20 6v6h-6" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '<path d="M4 18v-6h6" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '<path d="M20 12a8 8 0 0 0-14-5" fill="none"',
+      ' stroke="currentColor" stroke-width="2"></path>',
+      '<path d="M4 12a8 8 0 0 0 14 5" fill="none"',
+      ' stroke="currentColor" stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    search: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<circle cx="11" cy="11" r="7" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></circle>',
+      '<path d="M20 20l-3.5-3.5" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    scrollTop: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M12 19V5" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '<path d="M5 12l7-7 7 7" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    scrollBottom: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M12 5v14" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '<path d="M5 12l7 7 7-7" fill="none" stroke="currentColor"',
+      ' stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    theme: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M21 12a9 9 0 1 1-9-9 7 7 0 0 0 9 9z"',
+      ' fill="none" stroke="currentColor" stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    expand: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M8 3H3v5M21 8V3h-5M3 16v5h5M21 21v-5h-5"',
+      ' fill="none" stroke="currentColor" stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    collapse: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M8 3v5H3M21 8h-5V3M3 16h5v5M16 21v-5h5"',
+      ' fill="none" stroke="currentColor" stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    cloneGroups: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<rect x="3" y="4" width="8" height="8" fill="none"',
+      ' stroke="currentColor" stroke-width="2"></rect>',
+      '<rect x="13" y="4" width="8" height="8" fill="none"',
+      ' stroke="currentColor" stroke-width="2"></rect>',
+      '<rect x="3" y="14" width="8" height="8" fill="none"',
+      ' stroke="currentColor" stroke-width="2"></rect>',
+      '</svg>'
+    ]),
+    totalClones: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<rect x="4" y="3" width="16" height="18" rx="2" fill="none"',
+      ' stroke="currentColor" stroke-width="2"></rect>',
+      '<path d="M8 7h8M8 11h8M8 15h5" fill="none"',
+      ' stroke="currentColor" stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    avgGroup: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M4 18h16M6 15l3-4 4 3 5-7" fill="none"',
+      ' stroke="currentColor" stroke-width="2"></path>',
+      '</svg>'
+    ]),
+    largestGroup: svg([
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">',
+      '<path d="M12 3l3 6 6 1-4 4 1 6-6-3-6 3 1-6-4-4',
+      ' 6-1 3-6z" fill="none" stroke="currentColor" stroke-width="2"></path>',
+      '</svg>'
+    ])
+  };
 
   // ========== State Management ==========
   const state = {
@@ -1159,10 +1312,10 @@ ${block_section}
   // ========== Toast Notifications ==========
   function showToast(message, type = 'info') {
     const icons = {
-      info: 'i',
-      success: '✅',
-      warning: '⚠️',
-      error: '❌'
+      info: ICONS.info,
+      success: ICONS.success,
+      warning: ICONS.warning,
+      error: ICONS.error
     };
 
     const toast = document.createElement('div');
@@ -1201,31 +1354,31 @@ ${block_section}
         section: 'Actions',
         items: [
           {
-            icon: '📥',
+            icon: ICONS.exportJson,
             label: 'Export as JSON',
             shortcut: '⌘E',
             action: () => exportReport('json')
           },
           {
-            icon: '📄',
+            icon: ICONS.exportPdf,
             label: 'Export as PDF',
             shortcut: null,
             action: () => exportReport('pdf')
           },
           {
-            icon: '📊',
+            icon: ICONS.stats,
             label: 'Show Statistics',
             shortcut: '⌘S',
             action: () => showStats()
           },
           {
-            icon: '📈',
+            icon: ICONS.charts,
             label: 'Show Charts',
             shortcut: null,
             action: () => showCharts()
           },
           {
-            icon: '🔄',
+            icon: ICONS.refresh,
             label: 'Refresh View',
             shortcut: '⌘R',
             action: () => location.reload()
@@ -1236,19 +1389,19 @@ ${block_section}
         section: 'Navigation',
         items: [
           {
-            icon: '🔍',
+            icon: ICONS.search,
             label: 'Focus Search',
             shortcut: '/',
             action: () => $$('.search')?.focus()
           },
           {
-            icon: '📜',
+            icon: ICONS.scrollTop,
             label: 'Scroll to Top',
             shortcut: null,
             action: () => window.scrollTo(0, 0)
           },
           {
-            icon: '⬇️',
+            icon: ICONS.scrollBottom,
             label: 'Scroll to Bottom',
             shortcut: null,
             action: () => window.scrollTo(0, document.body.scrollHeight)
@@ -1259,19 +1412,19 @@ ${block_section}
         section: 'View',
         items: [
           {
-            icon: '🌓',
+            icon: ICONS.theme,
             label: 'Toggle Theme',
             shortcut: 'T',
             action: () => toggleTheme()
           },
           {
-            icon: '📖',
+            icon: ICONS.expand,
             label: 'Expand All',
             shortcut: null,
             action: () => expandAll()
           },
           {
-            icon: '📕',
+            icon: ICONS.collapse,
             label: 'Collapse All',
             shortcut: null,
             action: () => collapseAll()
@@ -1383,25 +1536,25 @@ ${block_section}
 
     const stats = [
       {
-        icon: '📊',
+        icon: ICONS.cloneGroups,
         value: state.stats.totalGroups,
         label: 'Clone Groups',
         trend: null
       },
       {
-        icon: '📦',
+        icon: ICONS.totalClones,
         value: state.stats.totalItems,
         label: 'Total Clones',
         trend: null
       },
       {
-        icon: '📈',
+        icon: ICONS.avgGroup,
         value: state.stats.avgGroupSize,
         label: 'Avg Group Size',
         trend: null
       },
       {
-        icon: '🔝',
+        icon: ICONS.largestGroup,
         value: state.stats.largestGroup,
         label: 'Largest Group',
         trend: null
