@@ -239,6 +239,7 @@ def build_html_report(
     *,
     func_groups: dict[str, list[dict[str, Any]]],
     block_groups: dict[str, list[dict[str, Any]]],
+    segment_groups: dict[str, list[dict[str, Any]]],
     title: str = "CodeClone Report",
     context_lines: int = 3,
     max_snippet_lines: int = 220,
@@ -247,8 +248,11 @@ def build_html_report(
 
     func_sorted = sorted(func_groups.items(), key=lambda kv: _group_sort_key(kv[1]))
     block_sorted = sorted(block_groups.items(), key=lambda kv: _group_sort_key(kv[1]))
+    segment_sorted = sorted(
+        segment_groups.items(), key=lambda kv: _group_sort_key(kv[1])
+    )
 
-    has_any = bool(func_sorted) or bool(block_sorted)
+    has_any = bool(func_sorted) or bool(block_sorted) or bool(segment_sorted)
 
     # Pygments CSS (scoped). Use modern GitHub-like styles when available.
     # We scope per theme to support toggle without reloading.
@@ -467,7 +471,8 @@ def build_html_report(
     <div class="empty-icon">{ICON_CHECK}</div>
     <h2>No code clones detected</h2>
     <p>
-      No structural or block-level duplication was found above configured thresholds.
+      No structural, block-level, or segment-level duplication was found above
+      configured thresholds.
     </p>
     <p class="muted">This usually indicates healthy abstraction boundaries.</p>
   </div>
@@ -478,6 +483,9 @@ def build_html_report(
         "functions", "Function clones", func_sorted, "pill-func"
     )
     block_section = render_section("blocks", "Block clones", block_sorted, "pill-block")
+    segment_section = render_section(
+        "segments", "Segment clones", segment_sorted, "pill-segment"
+    )
 
     return REPORT_TEMPLATE.substitute(
         title=_escape(title),
@@ -487,6 +495,7 @@ def build_html_report(
         empty_state_html=empty_state_html,
         func_section=func_section,
         block_section=block_section,
+        segment_section=segment_section,
         icon_theme=ICON_THEME,
         font_css_url=FONT_CSS_URL,
     )

@@ -32,11 +32,15 @@ def test_baseline_io(tmp_path: Path) -> None:
     assert content["functions"] == ["f1", "f2"]
     assert content["blocks"] == ["b1"]
     assert "python_version" not in content
+    assert "baseline_version" in content
+    assert "schema_version" in content
 
     bl2 = Baseline(f)
     bl2.load()
     assert bl2.functions == {"f1", "f2"}
     assert bl2.blocks == {"b1"}
+    assert isinstance(bl2.baseline_version, str)
+    assert bl2.schema_version == 1
 
 
 def test_baseline_load_missing(tmp_path: Path) -> None:
@@ -58,11 +62,19 @@ def test_baseline_load_corrupted(tmp_path: Path) -> None:
 def test_baseline_from_groups() -> None:
     func_groups: dict[str, object] = {"f1": [], "f2": []}
     block_groups: dict[str, object] = {"b1": []}
-    bl = Baseline.from_groups(func_groups, block_groups, path="custom.json")
+    bl = Baseline.from_groups(
+        func_groups,
+        block_groups,
+        path="custom.json",
+        baseline_version="1.3.0",
+        schema_version=1,
+    )
 
     assert bl.functions == {"f1", "f2"}
     assert bl.blocks == {"b1"}
     assert bl.path == Path("custom.json")
+    assert bl.baseline_version == "1.3.0"
+    assert bl.schema_version == 1
 
 
 def test_baseline_python_version_roundtrip(tmp_path: Path) -> None:
@@ -75,7 +87,11 @@ def test_baseline_python_version_roundtrip(tmp_path: Path) -> None:
 
     content = json.loads(f.read_text("utf-8"))
     assert content["python_version"] == "3.13"
+    assert "baseline_version" in content
+    assert content["schema_version"] == 1
 
     bl2 = Baseline(f)
     bl2.load()
     assert bl2.python_version == "3.13"
+    assert isinstance(bl2.baseline_version, str)
+    assert bl2.schema_version == 1

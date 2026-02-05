@@ -4,5 +4,7 @@
     "7d573fa56fb11050f1642f18ca4bb3225e11e194|0-19"
   ],
   "blocks": [],
-  "python_version": "3.13"
+  "python_version": "3.13",
+  "baseline_version": "1.3.0",
+  "schema_version": 1
 }

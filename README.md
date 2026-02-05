@@ -63,6 +63,12 @@ Typical use cases:
     - no `__init__` noise,
     - size and statement-count thresholds.
 
+### Segment-level internal clone detection
+
+- Detects repeated **segment windows** inside the same function.
+- Uses a two‑step deterministic match (candidate signature → strict hash).
+- Included in reports for explainability, **not** in baseline/CI failure logic.
+
 ### Control-Flow Awareness (CFG v1)
 
 - Each function is converted into a **Control Flow Graph**.
@@ -74,6 +80,8 @@ Typical use cases:
     - `with` / `async with`
     - `match` / `case` (Python 3.10+)
 - Current CFG semantics (v1):
+    - `and` / `or` are modeled as short‑circuit micro‑CFG branches,
+    - `try/except` links only from statements that may raise,
     - `break` and `continue` are treated as statements (no jump targets),
     - after-blocks are explicit and always present,
     - focus is on **structural similarity**, not precise runtime semantics.
@@ -86,6 +94,7 @@ This design keeps clone detection **stable, deterministic, and low-noise**.
 - Conservative defaults tuned for real-world Python projects.
 - Explicit thresholds for size and statement count.
 - No probabilistic scoring or heuristic similarity thresholds.
+- Safe commutative normalization and local logical equivalences only.
 - Focus on *architectural duplication*, not micro-similarities.
 
 ### CI-friendly baseline mode
@@ -148,6 +157,9 @@ codeclone . --update-baseline
 ```
 
 Commit the generated baseline file to the repository.
+
+Baselines are **versioned**. If CodeClone is upgraded, regenerate the baseline to keep
+CI deterministic and explainable.
 
 ### 2. Use in CI
 
@@ -215,8 +227,9 @@ repos:
 2. Normalize AST (names, constants, attributes, annotations).
 3. Build a **Control Flow Graph (CFG)** per function.
 4. Compute stable CFG fingerprints.
-5. Detect function-level and block-level clones.
-6. Apply conservative filters to suppress noise.
+5. Extract segment windows for internal clone discovery.
+6. Detect function-level, block-level, and segment-level clones.
+7. Apply conservative filters to suppress noise.
 
 See the architectural overview:
 

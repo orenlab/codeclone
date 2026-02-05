@@ -56,6 +56,51 @@ def test_cfg_if_else() -> None:
     assert cfg_str.strip() == dedent(expected).strip()
 
 
+def test_cfg_if_with_boolop_and() -> None:
+    source = """
+    def f(a, b):
+        if a and b:
+            x = 1
+        else:
+            x = 2
+    """
+    cfg_str = cfg_to_str(build_cfg_from_source(source))
+    expected = """
+Block 0 -> [3, 5]
+  Expr(value=Name(id='a', ctx=Load()))
+Block 1 -> []
+Block 2 -> [4]
+  Assign(targets=[Name(id='x', ctx=Store())], value=Constant(value=1))
+Block 3 -> [4]
+  Assign(targets=[Name(id='x', ctx=Store())], value=Constant(value=2))
+Block 4 -> [1]
+Block 5 -> [2, 3]
+  Expr(value=Name(id='b', ctx=Load()))
+"""
+    assert cfg_str.strip() == dedent(expected).strip()
+
+
+def test_cfg_while_with_boolop_or() -> None:
+    source = """
+    def f(a, b):
+        while a or b:
+            x = 1
+    """
+    cfg_str = cfg_to_str(build_cfg_from_source(source))
+    expected = """
+Block 0 -> [2]
+Block 1 -> []
+Block 2 -> [3, 5]
+  Expr(value=Name(id='a', ctx=Load()))
+Block 3 -> [2]
+  Assign(targets=[Name(id='x', ctx=Store())], value=Constant(value=1))
+Block 4 -> [1]
+Block 5 -> [3, 4]
+  Expr(value=Name(id='b', ctx=Load()))
+"""
+    assert cfg_str.strip() == dedent(expected).strip()
+
+
 def test_cfg_while_loop() -> None:
     source = """
     def f():
@@ -328,12 +373,12 @@ def test_cfg_match() -> None:
 
 
 def test_cfg_try_handler_linking() -> None:
-    """Test that statements inside try block are linked to handlers."""
+    """Test that only potentially raising statements inside try link to handlers."""
     code = """
     def f():
         try:
             x = 1
-            y = 2
+            y = risky()
         except ValueError:
             pass
     """
@@ -358,13 +403,105 @@ def test_cfg_try_handler_linking() -> None:
 
     predecessors = [b for b in cfg.blocks if handler_block in b.successors]
 
-    has_assignment = False
+    has_call = False
     for pred in predecessors:
         for stmt in pred.statements:
-            if isinstance(stmt, ast.Assign):
-                has_assignment = True
+            if (
+                isinstance(stmt, ast.Assign)
+                and isinstance(stmt.value, ast.Call)
+                and isinstance(stmt.value.func, ast.Name)
+                and stmt.value.func.id == "risky"
+            ):
+                has_call = True
 
-    assert has_assignment, "Handler should be reachable from assignment block"
+    assert has_call, "Handler should be reachable from potentially raising block"
+
+
+def test_cfg_try_handler_linking_skips_safe_statements() -> None:
+    code = """
+    def f():
+        try:
+            x = 1
+            y = 2
+        except ValueError:
+            pass
+    """
+    func = ast.parse(dedent(code)).body[0]
+    assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
+    cfg = CFGBuilder().build("f", func)
+
+    handler_blocks = [
+        b
+        for b in cfg.blocks
+        if any(
+            isinstance(s, ast.Expr)
+            and isinstance(s.value, ast.Name)
+            and s.value.id == "ValueError"
+            for s in b.statements
+        )
+    ]
+
+    assert len(handler_blocks) == 1
+    handler_block = handler_blocks[0]
+
+    predecessors = [b for b in cfg.blocks if handler_block in b.successors]
+
+    has_assign_only = any(
+        any(isinstance(stmt, ast.Assign) for stmt in pred.statements)
+        for pred in predecessors
+    )
+
+    assert not has_assign_only, "Safe assignments should not link to handlers"
+
+
+def test_cfg_try_body_breaks_after_termination() -> None:
+    code = """
+    def f():
+        try:
+            return 1
+            x = 2
+        except ValueError:
+            pass
+    """
+    func = ast.parse(dedent(code)).body[0]
+    assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
+    cfg = CFGBuilder().build("f", func)
+    assert any(
+        any(isinstance(stmt, ast.Return) for stmt in block.statements)
+        for block in cfg.blocks
+    )
+
+
+def test_cfg_try_handler_linking_for_raise() -> None:
+    code = """
+    def f():
+        try:
+            raise ValueError("x")
+        except ValueError:
+            pass
+    """
+    func = ast.parse(dedent(code)).body[0]
+    assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
+    cfg = CFGBuilder().build("f", func)
+
+    handler_blocks = [
+        b
+        for b in cfg.blocks
+        if any(
+            isinstance(s, ast.Expr)
+            and isinstance(s.value, ast.Name)
+            and s.value.id == "ValueError"
+            for s in b.statements
+        )
+    ]
+    assert len(handler_blocks) == 1
+    handler_block = handler_blocks[0]
+
+    predecessors = [b for b in cfg.blocks if handler_block in b.successors]
+    assert any(
+        any(isinstance(stmt, ast.Raise) for stmt in pred.statements)
+        for pred in predecessors
+    )
 
 
 def test_cfg_try_star() -> None:

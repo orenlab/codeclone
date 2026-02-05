@@ -82,6 +82,9 @@ An `if` statement creates:
 
 Both branches always reconverge at an explicit after-block.
 
+If the condition is a short‑circuit boolean (`and`/`or`), it is expanded into a
+**micro‑CFG** with one block per operand and explicit branch edges between them.
+
 ---
 
 ### `while` loops
@@ -170,12 +173,15 @@ is more important than their exact runtime behavior.
 
 ---
 
-### No exception flow
+### Limited exception flow
 
-- `try / except / finally` blocks are represented only structurally.
-- No exceptional control-flow edges are created.
+- `try / except / finally` blocks are represented structurally.
+- `try/except` edges are created **only** from statements that may raise:
+  function calls, attribute access, indexing, `await`, `yield from`, and `raise`.
+- No interprocedural exception propagation is modeled.
 
-This avoids CFG explosion and keeps fingerprints stable.
+This keeps CFGs deterministic while reducing false differences between safe and
+potentially‑raising code.
 
 ---
 

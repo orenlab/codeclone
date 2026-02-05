@@ -9,7 +9,8 @@ The following versions currently receive security updates:
 
 | Version | Supported |
 |---------|-----------|
-| 1.2.x   | Yes       |
+| 1.3.x   | Yes       |
+| 1.2.x   | No        |
 | 1.1.x   | No        |
 | 1.0.x   | No        |
 
@@ -32,6 +33,11 @@ Potential risk areas include:
 
 These areas are explicitly tested and hardened, but are still the primary focus of
 ongoing security review.
+
+Additional safeguards:
+
+- HTML report content is escaped to prevent script injection.
+- Reports are static and do not execute analyzed code.
 
 ---
 

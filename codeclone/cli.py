@@ -20,13 +20,20 @@ from rich.progress import (
 from rich.table import Table
 from rich.theme import Theme
 
-from .baseline import Baseline
+from . import __version__
+from .baseline import BASELINE_SCHEMA_VERSION, Baseline
 from .cache import Cache, CacheEntry, FileStat, file_stat_signature
 from .errors import CacheError
 from .extractor import extract_units_from_source
 from .html_report import build_html_report
 from .normalize import NormalizationConfig
-from .report import build_block_groups, build_groups, to_json_report, to_text
+from .report import (
+    build_block_groups,
+    build_groups,
+    build_segment_groups,
+    to_json_report,
+    to_text,
+)
 from .scanner import iter_py_files, module_name_from_path
 
 # Custom theme for Rich
@@ -54,6 +61,7 @@ class ProcessingResult:
     error: str | None = None
     units: list[Any] | None = None
     blocks: list[Any] | None = None
+    segments: list[Any] | None = None
     stat: FileStat | None = None
 
 
@@ -108,7 +116,7 @@ def process_file(
         stat = file_stat_signature(filepath)
         module_name = module_name_from_path(root, filepath)
 
-        units, blocks = extract_units_from_source(
+        units, blocks, segments = extract_units_from_source(
             source=source,
             filepath=filepath,
             module_name=module_name,
@@ -122,6 +130,7 @@ def process_file(
             success=True,
             units=units,
             blocks=blocks,
+            segments=segments,
             stat=stat,
         )
 
@@ -262,6 +271,7 @@ def main() -> None:
 
     all_units: list[dict[str, Any]] = []
     all_blocks: list[dict[str, Any]] = []
+    all_segments: list[dict[str, Any]] = []
     changed_files_count = 0
     files_to_process: list[str] = []
 
@@ -315,6 +325,12 @@ def main() -> None:
                             cast(object, cached.get("blocks", [])),
                         )
                     )
+                    all_segments.extend(
+                        cast(
+                            list[dict[str, Any]],
+                            cast(object, cached.get("segments", [])),
+                        )
+                    )
                 else:
                     files_to_process.append(fp)
         except Exception as e:
@@ -335,12 +351,15 @@ def main() -> None:
                     result.stat,
                     result.units or [],
                     result.blocks or [],
+                    result.segments or [],
                 )
                 changed_files_count += 1
                 if result.units:
                     all_units.extend([asdict(u) for u in result.units])
                 if result.blocks:
                     all_blocks.extend([asdict(b) for b in result.blocks])
+                if result.segments:
+                    all_segments.extend([asdict(s) for s in result.segments])
             else:
                 failed_files.append(f"{result.filepath}: {result.error}")
 
@@ -460,6 +479,7 @@ def main() -> None:
     with console.status("[bold green]Grouping clones...", spinner="dots"):
         func_groups = build_groups(all_units)
         block_groups = build_block_groups(all_blocks)
+        segment_groups = build_segment_groups(all_segments)
         try:
             cache.save()
         except CacheError as e:
@@ -468,6 +488,7 @@ def main() -> None:
     # Reporting
     func_clones_count = len(func_groups)
     block_clones_count = len(block_groups)
+    segment_clones_count = len(segment_groups)
 
     # Baseline Logic
     baseline_path = Path(args.baseline).expanduser().resolve()
@@ -480,6 +501,27 @@ def main() -> None:
 
     if baseline_exists:
         baseline.load()
+        if not args.update_baseline:
+            if baseline.baseline_version != __version__:
+                console.print(
+                    "[error]Baseline version mismatch.[/error]\n"
+                    "Baseline was generated with CodeClone "
+                    f"{baseline.baseline_version or 'unknown'}.\n"
+                    f"Current version: {__version__}.\n"
+                    "Please regenerate the baseline with --update-baseline."
+                )
+                sys.exit(2)
+            if (
+                baseline.schema_version is not None
+                and baseline.schema_version != BASELINE_SCHEMA_VERSION
+            ):
+                console.print(
+                    "[error]Baseline schema version mismatch.[/error]\n"
+                    f"Baseline schema: {baseline.schema_version}. "
+                    f"Current schema: {BASELINE_SCHEMA_VERSION}.\n"
+                    "Please regenerate the baseline with --update-baseline."
+                )
+                sys.exit(2)
         if not args.update_baseline and baseline.python_version:
             current_version = f"{sys.version_info.major}.{sys.version_info.minor}"
             if baseline.python_version != current_version:
@@ -511,6 +553,8 @@ def main() -> None:
             block_groups,
             path=baseline_path,
             python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+            baseline_version=__version__,
+            schema_version=BASELINE_SCHEMA_VERSION,
         )
         new_baseline.save()
         console.print(f"[success]✔ Baseline updated:[/success] {baseline_path}")
@@ -529,6 +573,7 @@ def main() -> None:
     table.add_row("Files Processed", str(changed_files_count))
     table.add_row("Total Function Clones", str(func_clones_count))
     table.add_row("Total Block Clones", str(block_clones_count))
+    table.add_row("Total Segment Clones", str(segment_clones_count))
 
     if baseline_exists:
         style = "error" if new_clones_count > 0 else "success"
@@ -546,6 +591,7 @@ def main() -> None:
             build_html_report(
                 func_groups=func_groups,
                 block_groups=block_groups,
+                segment_groups=segment_groups,
                 title="CodeClone Report",
                 context_lines=3,
                 max_snippet_lines=220,
@@ -558,7 +604,7 @@ def main() -> None:
         out = Path(args.json_out).expanduser().resolve()
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(
-            to_json_report(func_groups, block_groups),
+            to_json_report(func_groups, block_groups, segment_groups),
             "utf-8",
         )
         console.print(f"[info]JSON report saved:[/info] {out}")
@@ -570,7 +616,9 @@ def main() -> None:
             "FUNCTION CLONES\n"
             + to_text(func_groups)
             + "\nBLOCK CLONES\n"
-            + to_text(block_groups),
+            + to_text(block_groups)
+            + "\nSEGMENT CLONES\n"
+            + to_text(segment_groups),
             "utf-8",
         )
         console.print(f"[info]Text report saved:[/info] {out}")

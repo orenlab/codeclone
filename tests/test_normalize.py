@@ -85,6 +85,100 @@ def f():
     assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
 
 
+def test_normalization_commutative_binop_reorders() -> None:
+    src1 = """
+def f():
+    return a + b
+"""
+    src2 = """
+def f():
+    return b + a
+"""
+    cfg = NormalizationConfig(
+        normalize_names=False,
+        normalize_attributes=False,
+        normalize_constants=False,
+    )
+    a1 = ast.parse(src1).body[0]
+    a2 = ast.parse(src2).body[0]
+    assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
+
+
+def test_normalization_commutative_binop_side_effects_not_reordered() -> None:
+    src1 = """
+def f():
+    return foo() + bar()
+"""
+    src2 = """
+def f():
+    return bar() + foo()
+"""
+    cfg = NormalizationConfig(
+        normalize_names=False,
+        normalize_attributes=False,
+        normalize_constants=False,
+    )
+    a1 = ast.parse(src1).body[0]
+    a2 = ast.parse(src2).body[0]
+    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
+
+
+def test_normalization_non_commutative_binop_not_reordered() -> None:
+    src1 = """
+def f():
+    return a - b
+"""
+    src2 = """
+def f():
+    return b - a
+"""
+    cfg = NormalizationConfig(normalize_names=False)
+    a1 = ast.parse(src1).body[0]
+    a2 = ast.parse(src2).body[0]
+    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
+
+
+def test_normalization_not_in_and_is_not_equivalence() -> None:
+    src1 = """
+def f(x, y):
+    return not (x in y)
+"""
+    src2 = """
+def f(x, y):
+    return x not in y
+"""
+    src3 = """
+def f(x, y):
+    return not (x is y)
+"""
+    src4 = """
+def f(x, y):
+    return x is not y
+"""
+    cfg = NormalizationConfig(normalize_names=False)
+    a1 = ast.parse(src1).body[0]
+    a2 = ast.parse(src2).body[0]
+    a3 = ast.parse(src3).body[0]
+    a4 = ast.parse(src4).body[0]
+    assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
+    assert normalized_ast_dump(a3, cfg) == normalized_ast_dump(a4, cfg)
+
+
+def test_normalization_no_demorgan() -> None:
+    src1 = """
+def f(x, y):
+    return not (x == y)
+"""
+    src2 = """
+def f(x, y):
+    return x != y
+"""
+    cfg = NormalizationConfig(normalize_names=False)
+    a1 = ast.parse(src1).body[0]
+    a2 = ast.parse(src2).body[0]
+    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
+
+
 def test_normalization_flags_false_preserve_details() -> None:
     src = """
 def f(x: int, /, y: int, *, z: int, **k: int) -> int:

@@ -10,7 +10,8 @@ from typing import Literal
 import pytest
 
 import codeclone.baseline as baseline
-from codeclone import cli
+from codeclone import __version__, cli
+from codeclone.baseline import BASELINE_SCHEMA_VERSION
 from codeclone.cache import Cache
 from codeclone.errors import CacheError
 
@@ -113,6 +114,19 @@ def test_cli_main_progress_fallback(
     src.write_text("def f():\n    return 1\n", "utf-8")
     monkeypatch.setattr(cli, "ProcessPoolExecutor", _FailingExecutor)
     _run_main(monkeypatch, [str(tmp_path)])
+    out = capsys.readouterr().out
+    assert "falling back to sequential" in out
+
+
+def test_cli_main_no_progress_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    monkeypatch.setattr(cli, "ProcessPoolExecutor", _FailingExecutor)
+    _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     out = capsys.readouterr().out
     assert "falling back to sequential" in out
 
@@ -260,7 +274,17 @@ def f2():
         "utf-8",
     )
     baseline = tmp_path / "baseline.json"
-    baseline.write_text('{"functions": [], "blocks": []}', "utf-8")
+    baseline.write_text(
+        json.dumps(
+            {
+                "functions": [],
+                "blocks": [],
+                "baseline_version": __version__,
+                "schema_version": BASELINE_SCHEMA_VERSION,
+            }
+        ),
+        "utf-8",
+    )
     _patch_parallel(monkeypatch)
     _run_main(
         monkeypatch,
@@ -288,7 +312,16 @@ def test_cli_baseline_python_version_mismatch_warns(
     src.write_text("def f():\n    return 1\n", "utf-8")
     baseline = tmp_path / "baseline.json"
     baseline.write_text(
-        '{"functions": [], "blocks": [], "python_version": "0.0"}', "utf-8"
+        json.dumps(
+            {
+                "functions": [],
+                "blocks": [],
+                "python_version": "0.0",
+                "baseline_version": __version__,
+                "schema_version": BASELINE_SCHEMA_VERSION,
+            }
+        ),
+        "utf-8",
     )
     _patch_parallel(monkeypatch)
     _run_main(
@@ -305,6 +338,42 @@ def test_cli_baseline_python_version_mismatch_warns(
     assert "Current interpreter: Python" in out
 
 
+def test_cli_baseline_version_mismatch_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(
+        json.dumps(
+            {
+                "functions": [],
+                "blocks": [],
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+                "baseline_version": "0.0.0",
+                "schema_version": BASELINE_SCHEMA_VERSION,
+            }
+        ),
+        "utf-8",
+    )
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline_path),
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "Baseline version mismatch" in out
+
+
 def test_cli_baseline_python_version_mismatch_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -314,7 +383,16 @@ def test_cli_baseline_python_version_mismatch_fails(
     src.write_text("def f():\n    return 1\n", "utf-8")
     baseline = tmp_path / "baseline.json"
     baseline.write_text(
-        '{"functions": [], "blocks": [], "python_version": "0.0"}', "utf-8"
+        json.dumps(
+            {
+                "functions": [],
+                "blocks": [],
+                "python_version": "0.0",
+                "baseline_version": __version__,
+                "schema_version": BASELINE_SCHEMA_VERSION,
+            }
+        ),
+        "utf-8",
     )
     _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
@@ -384,6 +462,8 @@ def f2():
                 "functions": [],
                 "blocks": [],
                 "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+                "baseline_version": __version__,
+                "schema_version": BASELINE_SCHEMA_VERSION,
             }
         ),
         "utf-8",
@@ -407,6 +487,56 @@ def f2():
     assert exc.value.code == 3
 
 
+def test_cli_main_fail_on_new_includes_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    body = "\n".join([f"    x{i} = {i}" for i in range(50)])
+    src = tmp_path / "a.py"
+    src.write_text(
+        f"""
+def f1():
+{body}
+
+def f2():
+{body}
+""",
+        "utf-8",
+    )
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(
+        json.dumps(
+            {
+                "functions": [],
+                "blocks": [],
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+                "baseline_version": __version__,
+                "schema_version": BASELINE_SCHEMA_VERSION,
+            }
+        ),
+        "utf-8",
+    )
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline),
+                "--min-loc",
+                "1",
+                "--min-stmt",
+                "1",
+                "--fail-on-new",
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 3
+    out = capsys.readouterr().out
+    assert "New Functions" in out
+    assert "New Blocks" in out
+
+
 def test_cli_blocks_processing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     body = "\n".join([f"    x{i} = {i}" for i in range(60)])
     src = tmp_path / "a.py"
@@ -427,7 +557,7 @@ def test_cli_cache_warning(
     src.write_text("def f():\n    return 1\n", "utf-8")
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 1}, [], [])
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 1}, [], [], [])
     cache.save()
     data = json.loads(cache_path.read_text("utf-8"))
     data["_signature"] = "bad"
@@ -501,6 +631,7 @@ def test_cli_discovery_cache_hit(
             }
         ],
         "blocks": [],
+        "segments": [],
     }
     cache.save()
 
@@ -694,6 +825,8 @@ def test_cli_fail_on_new_prints_groups(
                 "functions": [],
                 "blocks": [],
                 "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+                "baseline_version": __version__,
+                "schema_version": BASELINE_SCHEMA_VERSION,
             }
         ),
         "utf-8",

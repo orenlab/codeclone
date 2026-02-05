@@ -102,14 +102,11 @@ class CFGBuilder:
     # ---------- Control Flow ----------
 
     def _visit_if(self, stmt: ast.If) -> None:
-        self.current.statements.append(ast.Expr(value=stmt.test))
-
         then_block = self.cfg.create_block()
         else_block = self.cfg.create_block()
         after_block = self.cfg.create_block()
 
-        self.current.add_successor(then_block)
-        self.current.add_successor(else_block)
+        self._emit_condition(stmt.test, then_block, else_block)
 
         self.current = then_block
         self._visit_statements(stmt.body)
@@ -131,9 +128,7 @@ class CFGBuilder:
         self.current.add_successor(cond_block)
 
         self.current = cond_block
-        self.current.statements.append(ast.Expr(value=stmt.test))
-        self.current.add_successor(body_block)
-        self.current.add_successor(after_block)
+        self._emit_condition(stmt.test, body_block, after_block)
 
         self.current = body_block
         self._visit_statements(stmt.body)
@@ -198,14 +193,14 @@ class CFGBuilder:
         final_block = self.cfg.create_block()
 
         # Process each statement in try body
-        # Link each to exception handlers
+        # Link only statements that can raise to exception handlers
         for stmt_node in stmt.body:
             if self.current.is_terminated:
                 break
 
-            # Current statement could raise exception
-            for h_block in handlers_blocks:
-                self.current.add_successor(h_block)
+            if _stmt_can_raise(stmt_node):
+                for h_block in handlers_blocks:
+                    self.current.add_successor(h_block)
 
             self._visit(stmt_node)
 
@@ -261,3 +256,66 @@ class CFGBuilder:
                 self.current.add_successor(after_block)
 
         self.current = after_block
+
+    def _emit_condition(
+        self, test: ast.expr, true_block: Block, false_block: Block
+    ) -> None:
+        if isinstance(test, ast.BoolOp) and isinstance(test.op, (ast.And, ast.Or)):
+            self._emit_boolop(test, true_block, false_block)
+            return
+
+        self.current.statements.append(ast.Expr(value=test))
+        self.current.add_successor(true_block)
+        self.current.add_successor(false_block)
+
+    def _emit_boolop(
+        self, test: ast.BoolOp, true_block: Block, false_block: Block
+    ) -> None:
+        values = test.values
+        op = test.op
+        current = self.current
+
+        for idx, value in enumerate(values):
+            current.statements.append(ast.Expr(value=value))
+            is_last = idx == len(values) - 1
+
+            if isinstance(op, ast.And):
+                if is_last:
+                    current.add_successor(true_block)
+                    current.add_successor(false_block)
+                else:
+                    next_block = self.cfg.create_block()
+                    current.add_successor(next_block)
+                    current.add_successor(false_block)
+                    current = next_block
+            else:
+                if is_last:
+                    current.add_successor(true_block)
+                    current.add_successor(false_block)
+                else:
+                    next_block = self.cfg.create_block()
+                    current.add_successor(true_block)
+                    current.add_successor(next_block)
+                    current = next_block
+
+        self.current = current
+
+
+def _stmt_can_raise(stmt: ast.stmt) -> bool:
+    if isinstance(stmt, ast.Raise):
+        return True
+
+    for node in ast.walk(stmt):
+        if isinstance(
+            node,
+            (
+                ast.Call,
+                ast.Attribute,
+                ast.Subscript,
+                ast.Await,
+                ast.YieldFrom,
+            ),
+        ):
+            return True
+
+    return False

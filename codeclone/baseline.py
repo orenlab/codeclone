@@ -13,15 +13,28 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from . import __version__
+
+BASELINE_SCHEMA_VERSION = 1
+
 
 class Baseline:
-    __slots__ = ("blocks", "functions", "path", "python_version")
+    __slots__ = (
+        "baseline_version",
+        "blocks",
+        "functions",
+        "path",
+        "python_version",
+        "schema_version",
+    )
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.functions: set[str] = set()
         self.blocks: set[str] = set()
         self.python_version: str | None = None
+        self.baseline_version: str | None = None
+        self.schema_version: int | None = None
 
     def load(self) -> None:
         if not self.path.exists():
@@ -35,6 +48,14 @@ class Baseline:
             self.python_version = (
                 python_version if isinstance(python_version, str) else None
             )
+            baseline_version = data.get("baseline_version")
+            self.baseline_version = (
+                baseline_version if isinstance(baseline_version, str) else None
+            )
+            schema_version = data.get("schema_version")
+            self.schema_version = (
+                schema_version if isinstance(schema_version, int) else None
+            )
         except json.JSONDecodeError as e:
             raise ValueError(f"Corrupted baseline file at {self.path}: {e}") from e
 
@@ -42,7 +63,13 @@ class Baseline:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
             json.dumps(
-                _baseline_payload(self.functions, self.blocks, self.python_version),
+                _baseline_payload(
+                    self.functions,
+                    self.blocks,
+                    self.python_version,
+                    self.baseline_version,
+                    self.schema_version,
+                ),
                 indent=2,
                 ensure_ascii=False,
             ),
@@ -55,11 +82,15 @@ class Baseline:
         block_groups: Mapping[str, object],
         path: str | Path = "",
         python_version: str | None = None,
+        baseline_version: str | None = None,
+        schema_version: int | None = None,
     ) -> Baseline:
         bl = Baseline(path)
         bl.functions = set(func_groups.keys())
         bl.blocks = set(block_groups.keys())
         bl.python_version = python_version
+        bl.baseline_version = baseline_version
+        bl.schema_version = schema_version
         return bl
 
     def diff(
@@ -74,6 +105,8 @@ def _baseline_payload(
     functions: set[str],
     blocks: set[str],
     python_version: str | None,
+    baseline_version: str | None,
+    schema_version: int | None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "functions": sorted(functions),
@@ -81,4 +114,8 @@ def _baseline_payload(
     }
     if python_version:
         payload["python_version"] = python_version
+    payload["baseline_version"] = baseline_version or __version__
+    payload["schema_version"] = (
+        schema_version if schema_version is not None else BASELINE_SCHEMA_VERSION
+    )
     return payload

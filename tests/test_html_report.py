@@ -14,7 +14,9 @@ from codeclone.html_report import (
 
 
 def test_html_report_empty() -> None:
-    html = build_html_report(func_groups={}, block_groups={}, title="Empty Report")
+    html = build_html_report(
+        func_groups={}, block_groups={}, segment_groups={}, title="Empty Report"
+    )
     assert "<!doctype html>" in html
     assert "Empty Report" in html
     assert "No code clones detected" in html
@@ -36,6 +38,7 @@ def test_html_report_generation(tmp_path: Path) -> None:
     html = build_html_report(
         func_groups=func_groups,
         block_groups={},
+        segment_groups={},
         title="Test Report",
         context_lines=1,
         max_snippet_lines=10,
@@ -102,6 +105,7 @@ def test_render_code_block_truncate(tmp_path: Path) -> None:
             ]
         },
         block_groups={},
+        segment_groups={},
         title="Truncate",
         context_lines=10,
         max_snippet_lines=5,
@@ -115,6 +119,12 @@ def test_prefix_css() -> None:
     assert ".wrap .a" in prefixed
     assert ".wrap .b" in prefixed
     assert "/* c */" in prefixed
+
+
+def test_prefix_css_empty_selector_passthrough() -> None:
+    css = "   { color: red; }\n"
+    prefixed = _prefix_css(css, ".wrap")
+    assert "{ color: red; }" in prefixed
 
 
 def test_pygments_css() -> None:
@@ -172,7 +182,12 @@ def test_html_report_with_blocks(tmp_path: Path) -> None:
             },
         ]
     }
-    html = build_html_report(func_groups={}, block_groups=block_groups, title="Blocks")
+    html = build_html_report(
+        func_groups={},
+        block_groups=block_groups,
+        segment_groups={},
+        title="Blocks",
+    )
     assert "Block clones" in html
 
 
@@ -185,8 +200,61 @@ def test_html_report_pygments_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
         return "x"
 
     monkeypatch.setattr(hr, "_pygments_css", _fake_css)
-    html = build_html_report(func_groups={}, block_groups={}, title="Pygments")
+    html = build_html_report(
+        func_groups={}, block_groups={}, segment_groups={}, title="Pygments"
+    )
     assert "Pygments" in html
+
+
+def test_html_report_segments_section(tmp_path: Path) -> None:
+    f = tmp_path / "a.py"
+    f.write_text("def f():\n    x = 1\n    y = 2\n", "utf-8")
+    segment_groups = {
+        "s1|mod:f": [
+            {
+                "qualname": "mod:f",
+                "filepath": str(f),
+                "start_line": 1,
+                "end_line": 2,
+                "size": 2,
+            },
+            {
+                "qualname": "mod:f",
+                "filepath": str(f),
+                "start_line": 2,
+                "end_line": 3,
+                "size": 2,
+            },
+        ]
+    }
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups=segment_groups,
+        title="Segments",
+    )
+    assert "Segment clones" in html
+
+
+def test_render_code_block_truncates_and_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    f = tmp_path / "a.py"
+    f.write_text("\n".join([f"line{i}" for i in range(1, 30)]), "utf-8")
+
+    import codeclone.html_report as hr
+
+    monkeypatch.setattr(hr, "_try_pygments", lambda _text: None)
+    cache = _FileCache(maxsize=2)
+    snippet = hr._render_code_block(
+        filepath=str(f),
+        start_line=1,
+        end_line=20,
+        file_cache=cache,
+        context=5,
+        max_lines=5,
+    )
+    assert "codebox" in snippet.code_html
 
 
 def test_pygments_css_get_style_defs_error(monkeypatch: pytest.MonkeyPatch) -> None:

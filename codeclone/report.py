@@ -37,6 +37,37 @@ def build_block_groups(blocks: list[GroupItem], min_functions: int = 2) -> Group
     return filtered
 
 
+def build_segment_groups(
+    segments: list[GroupItem], min_occurrences: int = 2
+) -> GroupMap:
+    sig_groups: GroupMap = {}
+    for s in segments:
+        sig_groups.setdefault(s["segment_sig"], []).append(s)
+
+    confirmed: GroupMap = {}
+    for items in sig_groups.values():
+        if len(items) < min_occurrences:
+            continue
+
+        hash_groups: GroupMap = {}
+        for item in items:
+            hash_groups.setdefault(item["segment_hash"], []).append(item)
+
+        for segment_hash, hash_items in hash_groups.items():
+            if len(hash_items) < min_occurrences:
+                continue
+
+            by_func: GroupMap = {}
+            for it in hash_items:
+                by_func.setdefault(it["qualname"], []).append(it)
+
+            for qualname, q_items in by_func.items():
+                if len(q_items) >= min_occurrences:
+                    confirmed[f"{segment_hash}|{qualname}"] = q_items
+
+    return confirmed
+
+
 def to_json(groups: GroupMap) -> str:
     return json.dumps(
         {
@@ -53,9 +84,11 @@ def to_json(groups: GroupMap) -> str:
     )
 
 
-def to_json_report(func_groups: GroupMap, block_groups: GroupMap) -> str:
+def to_json_report(
+    func_groups: GroupMap, block_groups: GroupMap, segment_groups: GroupMap
+) -> str:
     return json.dumps(
-        {"functions": func_groups, "blocks": block_groups},
+        {"functions": func_groups, "blocks": block_groups, "segments": segment_groups},
         ensure_ascii=False,
         indent=2,
     )

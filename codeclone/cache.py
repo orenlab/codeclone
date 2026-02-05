@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 if TYPE_CHECKING:
-    from .blocks import BlockUnit
+    from .blocks import BlockUnit, SegmentUnit
     from .extractor import Unit
 
 from .errors import CacheError
@@ -50,10 +50,21 @@ class BlockDict(TypedDict):
     size: int
 
 
+class SegmentDict(TypedDict):
+    segment_hash: str
+    segment_sig: str
+    filepath: str
+    qualname: str
+    start_line: int
+    end_line: int
+    size: int
+
+
 class CacheEntry(TypedDict):
     stat: FileStat
     units: list[UnitDict]
     blocks: list[BlockDict]
+    segments: list[SegmentDict]
 
 
 class CacheData(TypedDict):
@@ -63,7 +74,7 @@ class CacheData(TypedDict):
 
 class Cache:
     __slots__ = ("data", "load_warning", "path", "secret")
-    CACHE_VERSION = "1.0"
+    CACHE_VERSION = "1.1"
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -129,7 +140,7 @@ class Cache:
                 self.data = {"version": self.CACHE_VERSION, "files": {}}
                 return
 
-            self.data = cast(CacheData, data)
+            self.data = cast(CacheData, cast(object, data))
             self.load_warning = None
 
         except (json.JSONDecodeError, ValueError):
@@ -159,7 +170,7 @@ class Cache:
         if not isinstance(entry, dict):
             return None
 
-        required = {"stat", "units", "blocks"}
+        required = {"stat", "units", "blocks", "segments"}
         if not required.issubset(entry.keys()):
             return None
 
@@ -171,11 +182,15 @@ class Cache:
         stat_sig: FileStat,
         units: list[Unit],
         blocks: list[BlockUnit],
+        segments: list[SegmentUnit],
     ) -> None:
         self.data["files"][filepath] = {
             "stat": stat_sig,
             "units": cast(list[UnitDict], cast(object, [asdict(u) for u in units])),
             "blocks": cast(list[BlockDict], cast(object, [asdict(b) for b in blocks])),
+            "segments": cast(
+                list[SegmentDict], cast(object, [asdict(s) for s in segments])
+            ),
         }
 
 

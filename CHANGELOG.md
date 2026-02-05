@@ -1,5 +1,96 @@
 # Changelog
 
+## [1.3.0] - 2026-02-05
+
+### Overview
+
+This release improves clone-detection precision and explainability with deterministic
+normalization and CFG upgrades, adds segment-level internal clone reporting, refreshes
+the HTML report UI, and introduces baseline versioning. This is a breaking change for CI
+workflows that rely on existing baselines.
+
+### Clone Detection Accuracy
+
+- **Commutative normalization**  
+  Canonicalized operand order for `+`, `*`, `|`, `&`, `^` when operands are free of side
+  effects, enabling safe detection of reordered expressions.
+
+- **Local logical equivalence**  
+  Normalized `not (x in y)` to `x not in y` and `not (x is y)` to `x is not y` without
+  De Morgan transformations or broader boolean rewrites.
+
+### CFG Precision
+
+- **Short‑circuit modeling**  
+  Represented `and`/`or` as micro‑CFGs with explicit branch splits after each operand.
+
+- **Exception linking**  
+  Linked `try/except` only to statements that may raise (calls, attribute access, indexing,
+  `await`, `yield from`, `raise`) instead of blanket connections.
+
+### Segment‑Level Detection
+
+- **Window fingerprints**  
+  Added deterministic segment windows inside functions for internal clone discovery.
+
+- **Candidate generation**  
+  Used an order‑insensitive signature for candidate grouping and a strict segment hash for
+  final confirmation; segment matches do not affect baseline or CI failure logic.
+
+### Baseline & CI
+
+- Baselines are now **versioned** and include a schema version.
+- Mismatched baseline versions **fail fast** and require regeneration.
+  
+**Breaking (CI):** baseline version mismatch now fails hard; CI requires baseline regeneration on upgrade.
+
+Update the baseline:
+
+```bash
+codeclone . --update-baseline
+```
+
+### HTML Report UI
+
+- **Visual refresh**  
+  Introduced a redesigned, modern HTML report layout with a sticky top bar and improved
+  typography and spacing.
+
+- **Interactive tooling**  
+  Added a command palette, keyboard shortcuts, toast notifications, and quick actions for
+  common tasks (export, stats, charts, navigation).
+
+- **Reporting widgets**  
+  Added a stats dashboard and chart container to surface high‑level clone metrics directly
+  in the report.
+
+- **Icon system**  
+  Replaced emoji glyphs with inline SVG icons for consistent rendering and a fully
+  self‑contained UI.
+
+- **Segment reporting**  
+  Added a dedicated “Segment clones” section and summary metric in HTML/TXT/JSON outputs.
+
+### Cache & Internals
+
+- Extended cache schema to store segment fingerprints (cache version bump).
+
+### Packaging
+
+- Removed an invalid PyPI classifier from the package metadata.
+
+### Documentation
+
+- Updated architecture and CFG documentation to reflect new normalization, CFG, and
+  segment‑level detection behavior.
+- Updated README, SECURITY, and CONTRIBUTING guidance for 1.3.0.
+
+### Testing & Security
+
+- Expanded security tests (HTML escaping and safety checks).
+
+---
+
 ## [1.2.1] - 2026-02-02
 
 ### Overview

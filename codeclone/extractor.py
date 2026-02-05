@@ -15,7 +15,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-from .blocks import BlockUnit, extract_blocks
+from .blocks import BlockUnit, SegmentUnit, extract_blocks, extract_segments
 from .cfg import CFGBuilder
 from .errors import ParseError
 from .fingerprint import bucket_loc, sha1
@@ -189,7 +189,7 @@ def extract_units_from_source(
     cfg: NormalizationConfig,
     min_loc: int,
     min_stmt: int,
-) -> tuple[list[Unit], list[BlockUnit]]:
+) -> tuple[list[Unit], list[BlockUnit], list[SegmentUnit]]:
     try:
         tree = _parse_with_limits(source, PARSE_TIMEOUT_SECONDS)
     except SyntaxError as e:
@@ -200,6 +200,7 @@ def extract_units_from_source(
 
     units: list[Unit] = []
     block_units: list[BlockUnit] = []
+    segment_units: list[SegmentUnit] = []
 
     for local_name, node in qb.units:
         start = getattr(node, "lineno", None)
@@ -243,4 +244,16 @@ def extract_units_from_source(
             )
             block_units.extend(blocks)
 
-    return units, block_units
+        # Segment-level units (windows within functions, for internal clones)
+        if loc >= 30 and stmt_count >= 12:
+            segments = extract_segments(
+                node,
+                filepath=filepath,
+                qualname=qualname,
+                cfg=cfg,
+                window_size=6,
+                max_segments=60,
+            )
+            segment_units.extend(segments)
+
+    return units, block_units, segment_units

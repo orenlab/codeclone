@@ -109,6 +109,78 @@ class AstNormalizer(ast.NodeTransformer):
         )
         return self.generic_visit(new_node)
 
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.AST:
+        new_node = self.generic_visit(node)
+        assert isinstance(new_node, ast.UnaryOp)
+
+        if isinstance(new_node.op, ast.Not):
+            operand = new_node.operand
+            if (
+                isinstance(operand, ast.Compare)
+                and len(operand.ops) == 1
+                and len(operand.comparators) == 1
+            ):
+                op = operand.ops[0]
+                if isinstance(op, ast.In):
+                    cmp = ast.Compare(
+                        left=operand.left,
+                        ops=[ast.NotIn()],
+                        comparators=operand.comparators,
+                    )
+                    return ast.copy_location(cmp, new_node)
+                if isinstance(op, ast.Is):
+                    cmp = ast.Compare(
+                        left=operand.left,
+                        ops=[ast.IsNot()],
+                        comparators=operand.comparators,
+                    )
+                    return ast.copy_location(cmp, new_node)
+        return new_node
+
+    def visit_BinOp(self, node: ast.BinOp) -> ast.AST:
+        new_node = self.generic_visit(node)
+        assert isinstance(new_node, ast.BinOp)
+
+        if not isinstance(
+            new_node.op, (ast.Add, ast.Mult, ast.BitOr, ast.BitAnd, ast.BitXor)
+        ):
+            return new_node
+
+        if not (
+            _is_safe_commutative_operand(new_node.left)
+            and _is_safe_commutative_operand(new_node.right)
+        ):
+            return new_node
+
+        left_key = _expr_sort_key(new_node.left)
+        right_key = _expr_sort_key(new_node.right)
+        if right_key < left_key:
+            new_node.left, new_node.right = new_node.right, new_node.left
+        return new_node
+
+
+def _expr_sort_key(node: ast.AST) -> str:
+    return ast.dump(node, annotate_fields=True, include_attributes=False)
+
+
+def _is_safe_commutative_operand(node: ast.AST) -> bool:
+    disallowed = (
+        ast.Call,
+        ast.Attribute,
+        ast.Subscript,
+        ast.Await,
+        ast.Yield,
+        ast.YieldFrom,
+        ast.Lambda,
+        ast.NamedExpr,
+        ast.ListComp,
+        ast.SetComp,
+        ast.DictComp,
+        ast.GeneratorExp,
+    )
+
+    return all(not isinstance(child, disallowed) for child in ast.walk(node))
+
 
 def normalized_ast_dump(func_node: ast.AST, cfg: NormalizationConfig) -> str:
     """

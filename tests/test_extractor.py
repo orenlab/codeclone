@@ -22,7 +22,7 @@ def foo():
     return a + b
 """
 
-    units, blocks = extract_units_from_source(
+    units, blocks, segments = extract_units_from_source(
         source=src,
         filepath="x.py",
         module_name="mod",
@@ -36,6 +36,7 @@ def foo():
     assert u.qualname == "mod:foo"
     assert u.loc >= 3
     assert blocks == []
+    assert segments == []
 
 
 def test_init_function_is_ignored_for_blocks() -> None:
@@ -48,7 +49,7 @@ class A:
         w = 4
 """
 
-    units, blocks = extract_units_from_source(
+    units, blocks, segments = extract_units_from_source(
         source=src,
         filepath="x.py",
         module_name="mod",
@@ -59,6 +60,7 @@ class A:
 
     assert len(units) == 1
     assert blocks == []
+    assert segments == []
 
 
 def test_parse_timeout_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -122,7 +124,7 @@ def test_extract_respects_min_loc_min_stmt() -> None:
 def f():
     x = 1
 """
-    units, blocks = extract_units_from_source(
+    units, blocks, segments = extract_units_from_source(
         source=src,
         filepath="x.py",
         module_name="mod",
@@ -132,6 +134,7 @@ def f():
     )
     assert units == []
     assert blocks == []
+    assert segments == []
 
 
 def test_extract_block_units_generated() -> None:
@@ -141,7 +144,7 @@ def test_extract_block_units_generated() -> None:
 def f():
 {body_lines}
 """
-    units, blocks = extract_units_from_source(
+    units, blocks, segments = extract_units_from_source(
         source=src,
         filepath="x.py",
         module_name="mod",
@@ -151,6 +154,7 @@ def f():
     )
     assert units
     assert blocks
+    assert segments
 
 
 def test_extract_async_function() -> None:
@@ -158,7 +162,7 @@ def test_extract_async_function() -> None:
 async def af():
     return 1
 """
-    units, blocks = extract_units_from_source(
+    units, blocks, segments = extract_units_from_source(
         source=src,
         filepath="x.py",
         module_name="mod",
@@ -168,6 +172,7 @@ async def af():
     )
     assert len(units) == 1
     assert blocks == []
+    assert segments == []
 
 
 def test_extract_skips_invalid_positions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,7 +190,7 @@ def f():
         return tree
 
     monkeypatch.setattr(extractor, "_parse_with_limits", _fake_parse)
-    units, blocks = extract_units_from_source(
+    units, blocks, segments = extract_units_from_source(
         source="def f():\n    return 1\n",
         filepath="x.py",
         module_name="mod",
@@ -195,6 +200,7 @@ def f():
     )
     assert units == []
     assert blocks == []
+    assert segments == []
 
 
 def test_parse_limits_triggers_timeout(monkeypatch: pytest.MonkeyPatch) -> None:

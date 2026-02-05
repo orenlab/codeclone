@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 
-from codeclone.blocks import BlockUnit
+from codeclone.blocks import BlockUnit, SegmentUnit
 from codeclone.cache import Cache
 from codeclone.errors import CacheError
 from codeclone.extractor import Unit
@@ -37,12 +37,27 @@ def _make_block(filepath: str) -> BlockUnit:
     )
 
 
+def _make_segment(filepath: str) -> SegmentUnit:
+    return SegmentUnit(
+        segment_hash="s1",
+        segment_sig="sig1",
+        filepath=filepath,
+        qualname="mod:func",
+        start_line=1,
+        end_line=6,
+        size=6,
+    )
+
+
 def test_cache_roundtrip(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     unit = _make_unit("x.py")
     block = _make_block("x.py")
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [unit], [block])
+    segment = _make_segment("x.py")
+    cache.put_file_entry(
+        "x.py", {"mtime_ns": 1, "size": 10}, [unit], [block], [segment]
+    )
     cache.save()
 
     loaded = Cache(cache_path)
@@ -56,7 +71,7 @@ def test_cache_roundtrip(tmp_path: Path) -> None:
 def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [])
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
     cache.save()
 
     data = json.loads(cache_path.read_text("utf-8"))

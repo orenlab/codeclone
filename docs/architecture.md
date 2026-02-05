@@ -13,8 +13,9 @@ CodeClone processes Python projects in the following stages:
 3. **AST normalization**
 4. **CFG construction**
 5. **Fingerprinting**
-6. **Clone grouping**
-7. **Reporting / CI decision**
+6. **Segment window extraction**
+7. **Clone grouping**
+8. **Reporting / CI decision**
 
 ---
 
@@ -40,6 +41,8 @@ Normalization removes non-structural noise:
 - constants → `_CONST_`
 - attributes → `_ATTR_`
 - syntactic sugar (e.g. `x += 1` → `x = x + 1`)
+- commutative operand canonicalization (`+`, `*`, `|`, `&`, `^`) when side‑effect free
+- local logical equivalence (`not (x in y)` → `x not in y`, `not (x is y)` → `x is not y`)
 - docstrings removed
 - type annotations removed
 
@@ -52,6 +55,8 @@ This ensures structural stability across refactors.
 - Built per-function using `CFGBuilder`.
 - Produces deterministic basic blocks.
 - Captures structural control flow (`if`, `for`, `while`, `try`, `with`, `match`).
+- Models short‑circuit `and`/`or` as micro‑CFG branches.
+- Links `try/except` only from statements that may raise.
 
 📄 See [docs/cfg.md](cfg.md) for full semantics.
 
@@ -65,7 +70,17 @@ This fingerprint is used to group structurally identical functions.
 
 ---
 
-## 6. Clone Detection
+## 6. Segment Windows
+
+Large functions are also scanned with **segment windows** (sliding windows over normalized
+statements). These are used to detect **internal clones** inside the same function.
+
+Segment windows are **never** used as a final equivalence signal; they are candidate
+generators with strict hash confirmation.
+
+---
+
+## 7. Clone Detection
 
 Two clone types are detected:
 
@@ -86,7 +101,15 @@ Noise filters applied:
 
 ---
 
-## 7. Reporting
+### Segment clones (internal)
+
+- Detected only **inside the same function**.
+- Used for internal copy‑paste discovery and report explainability.
+- Not included in baseline or CI failure logic.
+
+---
+
+## 8. Reporting
 
 Detected clone groups can be:
 
@@ -100,6 +123,9 @@ Detected clone groups can be:
 
 Baseline comparison allows CI to fail **only on new clones**,
 enabling gradual architectural improvement.
+
+Baseline files are **versioned**. The baseline stores the CodeClone version and schema
+version used to generate it. Mismatches result in a hard stop and require regeneration.
 
 ## Python Version Consistency for Baseline Checks
 

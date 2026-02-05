@@ -1,6 +1,7 @@
 from codeclone.report import (
     build_block_groups,
     build_groups,
+    build_segment_groups,
     to_json,
     to_json_report,
     to_text,
@@ -59,9 +60,85 @@ def test_report_output_formats() -> None:
         ],
     }
     json_out = to_json(groups)
-    report_out = to_json_report(groups, groups)
+    report_out = to_json_report(groups, groups, {})
     text_out = to_text(groups)
 
     assert "group_count" in json_out
     assert '"functions"' in report_out
     assert "Clone group #1" in text_out
+
+
+def test_segment_groups_internal_only() -> None:
+    segments = [
+        {
+            "segment_sig": "sig1",
+            "segment_hash": "h1",
+            "qualname": "mod:f",
+            "filepath": "a.py",
+            "start_line": 1,
+            "end_line": 4,
+            "size": 4,
+        },
+        {
+            "segment_sig": "sig1",
+            "segment_hash": "h1",
+            "qualname": "mod:f",
+            "filepath": "a.py",
+            "start_line": 10,
+            "end_line": 13,
+            "size": 4,
+        },
+        {
+            "segment_sig": "sig1",
+            "segment_hash": "h1",
+            "qualname": "mod:g",
+            "filepath": "b.py",
+            "start_line": 1,
+            "end_line": 4,
+            "size": 4,
+        },
+    ]
+
+    groups = build_segment_groups(segments)
+    assert len(groups) == 1
+    group_items = next(iter(groups.values()))
+    assert all(item["qualname"] == "mod:f" for item in group_items)
+
+
+def test_segment_groups_filters_small_candidates() -> None:
+    segments = [
+        {
+            "segment_sig": "sig1",
+            "segment_hash": "h1",
+            "qualname": "mod:f",
+            "filepath": "a.py",
+            "start_line": 1,
+            "end_line": 2,
+            "size": 2,
+        }
+    ]
+    groups = build_segment_groups(segments)
+    assert groups == {}
+
+    segments = [
+        {
+            "segment_sig": "sig2",
+            "segment_hash": "h1",
+            "qualname": "mod:f",
+            "filepath": "a.py",
+            "start_line": 1,
+            "end_line": 2,
+            "size": 2,
+        },
+        {
+            "segment_sig": "sig2",
+            "segment_hash": "h2",
+            "qualname": "mod:f",
+            "filepath": "a.py",
+            "start_line": 3,
+            "end_line": 4,
+            "size": 2,
+        },
+    ]
+    groups = build_segment_groups(segments)
+    assert groups == {}
