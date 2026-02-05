@@ -38,6 +38,8 @@ Additional safeguards:
 
 - HTML report content is escaped to prevent script injection.
 - Reports are static and do not execute analyzed code.
+- Cache files are HMAC-signed; signature mismatches are ignored.
+- Cache secrets are stored next to the cache (`.cache_secret`) and must not be committed.
 
 ---
 

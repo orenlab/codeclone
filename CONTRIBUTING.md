@@ -92,6 +92,14 @@ Such changes often require design-level discussion and may be staged across vers
 
 ---
 
+## Baseline & CI
+
+- Baselines are **versioned**. Regenerate with `codeclone . --update-baseline`
+  when detection logic or CodeClone version changes.
+- Baseline verification must use the same Python `major.minor` version.
+
+---
+
 ## Development Setup
 
 ```bash

@@ -23,6 +23,7 @@ CodeClone processes Python projects in the following stages:
 
 - Recursively scans `.py` files.
 - Applies cache-based skipping using file stat signatures.
+- Default cache location is project‑local: `<root>/.cache/codeclone/cache.json` (override via `--cache-dir`).
 
 ---
 

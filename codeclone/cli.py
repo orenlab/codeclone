@@ -47,6 +47,8 @@ custom_theme = Theme(
     }
 )
 
+LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
+
 
 def _make_console(*, no_color: bool) -> Console:
     return Console(theme=custom_theme, width=200, no_color=no_color)
@@ -208,8 +210,11 @@ def main() -> None:
     )
     tune_group.add_argument(
         "--cache-dir",
-        default="~/.cache/codeclone/cache.json",
-        help="Path to the cache file to speed up subsequent runs.",
+        default=".cache/codeclone/cache.json",
+        help=(
+            "Path to the cache file to speed up subsequent runs. "
+            "Defaults to <root>/.cache/codeclone/cache.json."
+        ),
     )
 
     # Baseline & CI
@@ -283,6 +288,9 @@ def main() -> None:
         help="Print detailed hash identifiers for new clones.",
     )
 
+    cache_dir_from_args = any(
+        arg == "--cache-dir" or arg.startswith("--cache-dir=") for arg in sys.argv
+    )
     args = ap.parse_args()
 
     if args.ci:
@@ -329,7 +337,24 @@ def main() -> None:
 
     # Initialize Cache
     cfg = NormalizationConfig()
-    cache_path = Path(args.cache_dir).expanduser()
+    if cache_dir_from_args:
+        cache_path = Path(args.cache_dir).expanduser()
+    else:
+        cache_path = root_path / ".cache" / "codeclone" / "cache.json"
+        if LEGACY_CACHE_PATH.exists():
+            try:
+                legacy_resolved = LEGACY_CACHE_PATH.resolve()
+            except OSError:
+                legacy_resolved = LEGACY_CACHE_PATH
+            if legacy_resolved != cache_path:
+                console.print(
+                    "[warning]Legacy cache file found at: "
+                    f"{legacy_resolved}.[/warning]\n"
+                    "[warning]Cache is now stored per-project at: "
+                    f"{cache_path}.[/warning]\n"
+                    "[warning]Please delete the legacy cache file and add "
+                    ".cache/ to .gitignore.[/warning]"
+                )
     cache = Cache(cache_path)
     cache.load()
     if cache.load_warning:
@@ -611,13 +636,21 @@ def main() -> None:
         baseline.load()
         if not args.update_baseline:
             if baseline.baseline_version != __version__:
-                console.print(
-                    "[error]Baseline version mismatch.[/error]\n"
-                    "Baseline was generated with CodeClone "
-                    f"{baseline.baseline_version or 'unknown'}.\n"
-                    f"Current version: {__version__}.\n"
-                    "Please regenerate the baseline with --update-baseline."
-                )
+                if baseline.baseline_version is None:
+                    console.print(
+                        "[error]Baseline version mismatch.[/error]\n"
+                        "Baseline version missing (legacy baseline format).\n"
+                        f"Current version: {__version__}.\n"
+                        "Please regenerate the baseline with --update-baseline."
+                    )
+                else:
+                    console.print(
+                        "[error]Baseline version mismatch.[/error]\n"
+                        "Baseline was generated with CodeClone "
+                        f"{baseline.baseline_version}.\n"
+                        f"Current version: {__version__}.\n"
+                        "Please regenerate the baseline with --update-baseline."
+                    )
                 sys.exit(2)
             if (
                 baseline.schema_version is not None

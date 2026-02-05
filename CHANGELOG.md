@@ -80,6 +80,9 @@ codeclone . --update-baseline
 ### Cache & Internals
 
 - Extended cache schema to store segment fingerprints (cache version bump).
+- Default cache location moved to `<root>/.cache/codeclone/cache.json` (project‑local).
+- Added a legacy cache warning for `~/.cache/codeclone/cache.json` with guidance to
+  delete it and add `.cache/` to `.gitignore`.
 
 ### Packaging
 

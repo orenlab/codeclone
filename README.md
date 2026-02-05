@@ -185,6 +185,17 @@ Behavior:
 
 `--fail-on-new` exits with a non-zero code when new clones are detected.
 
+### Cache
+
+By default, CodeClone stores the cache per project at:
+
+`<root>/.cache/codeclone/cache.json`
+
+You can override this path with `--cache-dir`.
+
+If you used an older version of CodeClone, delete the legacy cache file at
+`~/.cache/codeclone/cache.json` and add `.cache/` to `.gitignore`.
+
 ### Python Version Consistency for Baseline Checks
 
 Due to inherent differences in Python’s AST between interpreter versions, baseline

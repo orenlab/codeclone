@@ -212,6 +212,303 @@ def f2():
     assert "Total Function Clones" in out
 
 
+def test_cli_default_cache_dir_uses_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    captured: dict[str, Path] = {}
+
+    class _CacheStub:
+        def __init__(self, path: Path) -> None:
+            captured["path"] = Path(path)
+            self.load_warning = None
+
+        def load(self) -> None:
+            return None
+
+        def get_file_entry(self, _fp: str) -> None:
+            return None
+
+        def put_file_entry(
+            self,
+            _fp: str,
+            _stat: object,
+            _units: object,
+            _blocks: object,
+            _segments: object,
+        ) -> None:
+            return None
+
+        def save(self) -> None:
+            return None
+
+    monkeypatch.setattr(cli, "Cache", _CacheStub)
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
+    assert captured["path"] == tmp_path / ".cache" / "codeclone" / "cache.json"
+
+
+def test_cli_cache_dir_override_respected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    captured: dict[str, Path] = {}
+
+    class _CacheStub:
+        def __init__(self, path: Path) -> None:
+            captured["path"] = Path(path)
+            self.load_warning = None
+
+        def load(self) -> None:
+            return None
+
+        def get_file_entry(self, _fp: str) -> None:
+            return None
+
+        def put_file_entry(
+            self,
+            _fp: str,
+            _stat: object,
+            _units: object,
+            _blocks: object,
+            _segments: object,
+        ) -> None:
+            return None
+
+        def save(self) -> None:
+            return None
+
+    cache_path = tmp_path / "custom-cache.json"
+    monkeypatch.setattr(cli, "Cache", _CacheStub)
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--cache-dir",
+            str(cache_path),
+            "--no-progress",
+        ],
+    )
+    assert captured["path"] == cache_path
+
+
+def test_cli_default_cache_dir_per_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root1 = tmp_path / "p1"
+    root2 = tmp_path / "p2"
+    root1.mkdir()
+    root2.mkdir()
+    (root1 / "a.py").write_text("def f():\n    return 1\n", "utf-8")
+    (root2 / "b.py").write_text("def f():\n    return 1\n", "utf-8")
+    captured: list[Path] = []
+
+    class _CacheStub:
+        def __init__(self, path: Path) -> None:
+            captured.append(Path(path))
+            self.load_warning = None
+
+        def load(self) -> None:
+            return None
+
+        def get_file_entry(self, _fp: str) -> None:
+            return None
+
+        def put_file_entry(
+            self,
+            _fp: str,
+            _stat: object,
+            _units: object,
+            _blocks: object,
+            _segments: object,
+        ) -> None:
+            return None
+
+        def save(self) -> None:
+            return None
+
+    monkeypatch.setattr(cli, "Cache", _CacheStub)
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, [str(root1), "--no-progress"])
+    _run_main(monkeypatch, [str(root2), "--no-progress"])
+    assert captured[0] == root1 / ".cache" / "codeclone" / "cache.json"
+    assert captured[1] == root2 / ".cache" / "codeclone" / "cache.json"
+    assert captured[0] != captured[1]
+
+
+def test_cli_cache_not_shared_between_projects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root1 = tmp_path / "p1"
+    root2 = tmp_path / "p2"
+    root1.mkdir()
+    root2.mkdir()
+    legacy_cache = root1 / ".cache" / "codeclone" / "cache.json"
+    legacy_cache.parent.mkdir(parents=True, exist_ok=True)
+    legacy_cache.write_text("{}", "utf-8")
+
+    monkeypatch.setattr(cli, "iter_py_files", lambda _root: [])
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, [str(root2), "--no-progress"])
+    out = capsys.readouterr().out
+    assert "Cache signature mismatch" not in out
+
+
+def test_cli_warns_on_legacy_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "a.py").write_text("def f():\n    return 1\n", "utf-8")
+    legacy_path = tmp_path / "legacy" / "cache.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("{}", "utf-8")
+    monkeypatch.setattr(cli, "LEGACY_CACHE_PATH", legacy_path)
+    baseline = _write_baseline(
+        root / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [str(root), "--baseline", str(baseline), "--no-progress"],
+    )
+    out = capsys.readouterr().out
+    assert "Legacy cache file found at" in out
+    assert "Cache is now stored per-project" in out
+    assert ".cache/ to .gitignore" in out
+
+
+def test_cli_legacy_cache_resolve_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "a.py").write_text("def f():\n    return 1\n", "utf-8")
+
+    class _LegacyPath:
+        def __init__(self, value: str) -> None:
+            self.value = value
+
+        def exists(self) -> bool:
+            return True
+
+        def resolve(self) -> Path:
+            raise OSError("nope")
+
+        def __str__(self) -> str:
+            return self.value
+
+    monkeypatch.setattr(
+        cli, "LEGACY_CACHE_PATH", _LegacyPath(str(tmp_path / "legacy-cache.json"))
+    )
+    baseline = _write_baseline(
+        root / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [str(root), "--baseline", str(baseline), "--no-progress"],
+    )
+    out = capsys.readouterr().out
+    assert "Legacy cache file found at" in out
+
+
+def test_cli_no_legacy_warning_with_cache_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "a.py").write_text("def f():\n    return 1\n", "utf-8")
+    legacy_path = tmp_path / "legacy" / "cache.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("{}", "utf-8")
+    monkeypatch.setattr(cli, "LEGACY_CACHE_PATH", legacy_path)
+    cache_path = tmp_path / "custom-cache.json"
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(root),
+            "--cache-dir",
+            str(cache_path),
+            "--no-progress",
+        ],
+    )
+    out = capsys.readouterr().out
+    assert "Legacy cache file found at" not in out
+
+
+def test_cli_no_legacy_warning_when_legacy_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "a.py").write_text("def f():\n    return 1\n", "utf-8")
+    missing_legacy = tmp_path / "missing" / "cache.json"
+    monkeypatch.setattr(cli, "LEGACY_CACHE_PATH", missing_legacy)
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, [str(root), "--no-progress"])
+    out = capsys.readouterr().out
+    assert "Legacy cache file found at" not in out
+
+
+def test_cli_no_legacy_warning_when_paths_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "a.py").write_text("def f():\n    return 1\n", "utf-8")
+    cache_path = root / ".cache" / "codeclone" / "cache.json"
+
+    class _LegacyPathSame:
+        def __init__(self, resolved: Path) -> None:
+            self._resolved = resolved
+
+        def exists(self) -> bool:
+            return True
+
+        def resolve(self) -> Path:
+            return self._resolved
+
+        def __str__(self) -> str:
+            return str(self._resolved)
+
+    class _CacheStub:
+        def __init__(self, _path: Path) -> None:
+            self.load_warning = None
+
+        def load(self) -> None:
+            return None
+
+        def get_file_entry(self, _fp: str) -> None:
+            return None
+
+        def put_file_entry(
+            self,
+            _fp: str,
+            _stat: object,
+            _units: object,
+            _blocks: object,
+            _segments: object,
+        ) -> None:
+            return None
+
+        def save(self) -> None:
+            return None
+
+    monkeypatch.setattr(cli, "LEGACY_CACHE_PATH", _LegacyPathSame(cache_path))
+    monkeypatch.setattr(cli, "Cache", _CacheStub)
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, [str(root), "--no-progress"])
+    out = capsys.readouterr().out
+    assert "Legacy cache file found at" not in out
+
+
 def test_cli_main_progress_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -566,6 +863,41 @@ def test_cli_baseline_version_mismatch_fails(
     assert exc.value.code == 2
     out = capsys.readouterr().out
     assert "Baseline version mismatch" in out
+
+
+def test_cli_baseline_version_missing_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(
+        json.dumps(
+            {
+                "functions": [],
+                "blocks": [],
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+                "schema_version": BASELINE_SCHEMA_VERSION,
+            }
+        ),
+        "utf-8",
+    )
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline_path),
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "Baseline version missing" in out
 
 
 def test_cli_baseline_schema_version_mismatch_fails(
