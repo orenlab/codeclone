@@ -44,7 +44,7 @@ workflows that rely on existing baselines.
 
 - Baselines are now **versioned** and include a schema version.
 - Mismatched baseline versions **fail fast** and require regeneration.
-  
+
 **Breaking (CI):** baseline version mismatch now fails hard; CI requires baseline regeneration on upgrade.
 
 Update the baseline:

@@ -2,6 +2,8 @@ import ast
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 import codeclone.report as report_mod
 from codeclone.report import (
     build_block_groups,
@@ -510,51 +512,27 @@ def test_segment_prepare_missing_file(tmp_path: Path) -> None:
     assert "seg|mod:f" in filtered
 
 
-def test_segment_prepare_syntax_error_file(tmp_path: Path) -> None:
-    bad = tmp_path / "bad.py"
-    bad.write_text("def f(:\n    pass\n", "utf-8")
-    group = {
-        "seg|mod:f": [
-            {
-                "segment_sig": "sig",
-                "segment_hash": "hash",
-                "qualname": "mod:f",
-                "filepath": str(bad),
-                "start_line": 1,
-                "end_line": 2,
-                "size": 2,
-            }
-        ]
-    }
-    filtered, suppressed = prepare_segment_report_groups(group)
-    assert suppressed == 0
-    assert "seg|mod:f" in filtered
+@pytest.mark.parametrize(
+    ("case", "start_line", "end_line"),
+    [
+        ("syntax_error", 1, 2),
+        ("missing_function", 1, 2),
+        ("empty_range", 10, 12),
+    ],
+)
+def test_segment_prepare_unresolvable_cases(
+    tmp_path: Path, case: str, start_line: int, end_line: int
+) -> None:
+    if case == "syntax_error":
+        f = tmp_path / "bad.py"
+        f.write_text("def f(:\n    pass\n", "utf-8")
+    elif case == "missing_function":
+        f = tmp_path / "a.py"
+        f.write_text("def g():\n    return 1\n", "utf-8")
+    else:
+        f = tmp_path / "a.py"
+        f.write_text("def f():\n    x = 1\n", "utf-8")
 
-
-def test_segment_prepare_missing_function(tmp_path: Path) -> None:
-    f = tmp_path / "a.py"
-    f.write_text("def g():\n    return 1\n", "utf-8")
-    group = {
-        "seg|mod:f": [
-            {
-                "segment_sig": "sig",
-                "segment_hash": "hash",
-                "qualname": "mod:f",
-                "filepath": str(f),
-                "start_line": 1,
-                "end_line": 2,
-                "size": 2,
-            }
-        ]
-    }
-    filtered, suppressed = prepare_segment_report_groups(group)
-    assert suppressed == 0
-    assert "seg|mod:f" in filtered
-
-
-def test_segment_prepare_empty_range(tmp_path: Path) -> None:
-    f = tmp_path / "a.py"
-    f.write_text("def f():\n    x = 1\n", "utf-8")
     group = {
         "seg|mod:f": [
             {
@@ -562,8 +540,8 @@ def test_segment_prepare_empty_range(tmp_path: Path) -> None:
                 "segment_hash": "hash",
                 "qualname": "mod:f",
                 "filepath": str(f),
-                "start_line": 10,
-                "end_line": 12,
+                "start_line": start_line,
+                "end_line": end_line,
                 "size": 2,
             }
         ]
