@@ -66,7 +66,7 @@ class _FileCache:
 
     @staticmethod
     def _read_file_range(
-            filepath: str, start_line: int, end_line: int
+        filepath: str, start_line: int, end_line: int
     ) -> tuple[str, ...]:
         if start_line < 1:
             start_line = 1
@@ -94,7 +94,7 @@ class _FileCache:
             raise FileProcessingError(f"Cannot read {filepath}: {e}") from e
 
     def get_lines_range(
-            self, filepath: str, start_line: int, end_line: int
+        self, filepath: str, start_line: int, end_line: int
     ) -> tuple[str, ...]:
         return self._get_lines_impl(filepath, start_line, end_line)
 
@@ -179,13 +179,13 @@ def _prefix_css(css: str, prefix: str) -> str:
 
 
 def _render_code_block(
-        *,
-        filepath: str,
-        start_line: int,
-        end_line: int,
-        file_cache: _FileCache,
-        context: int,
-        max_lines: int,
+    *,
+    filepath: str,
+    start_line: int,
+    end_line: int,
+    file_cache: _FileCache,
+    context: int,
+    max_lines: int,
 ) -> _Snippet:
     s = max(1, start_line - context)
     e = end_line + context
@@ -237,13 +237,13 @@ def _group_sort_key(items: list[dict[str, Any]]) -> tuple[int, int]:
 
 
 def build_html_report(
-        *,
-        func_groups: dict[str, list[dict[str, Any]]],
-        block_groups: dict[str, list[dict[str, Any]]],
-        segment_groups: dict[str, list[dict[str, Any]]],
-        title: str = "CodeClone Report",
-        context_lines: int = 3,
-        max_snippet_lines: int = 220,
+    *,
+    func_groups: dict[str, list[dict[str, Any]]],
+    block_groups: dict[str, list[dict[str, Any]]],
+    segment_groups: dict[str, list[dict[str, Any]]],
+    title: str = "CodeClone Report",
+    context_lines: int = 3,
+    max_snippet_lines: int = 220,
 ) -> str:
     file_cache = _FileCache()
 
@@ -330,10 +330,10 @@ def build_html_report(
     # ----------------------------
 
     def render_section(
-            section_id: str,
-            section_title: str,
-            groups: list[tuple[str, list[dict[str, Any]]]],
-            pill_cls: str,
+        section_id: str,
+        section_title: str,
+        groups: list[tuple[str, list[dict[str, Any]]]],
+        pill_cls: str,
     ) -> str:
         if not groups:
             return ""
@@ -423,10 +423,11 @@ def build_html_report(
 
             out.append(f'<div class="items" id="group-body-{section_id}-{idx}">')
 
-            for a, b in pairwise(items):
+            for i in range(0, len(items), 2):
+                row_items = items[i : i + 2]
                 out.append('<div class="item-pair">')
 
-                for item in (a, b):
+                for item in row_items:
                     snippet = _render_code_block(
                         filepath=item["filepath"],
                         start_line=int(item["start_line"]),

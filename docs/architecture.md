@@ -107,6 +107,9 @@ Noise filters applied:
 - Detected only **inside the same function**.
 - Used for internal copy‑paste discovery and report explainability.
 - Not included in baseline or CI failure logic.
+- Report UX merges overlapping segment windows and suppresses boilerplate‑only groups.
+- A segment group is reported only if it has at least **2** unique statement types
+  or contains a control‑flow statement.
 
 ---
 

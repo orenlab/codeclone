@@ -146,6 +146,12 @@ Generate an HTML report:
 codeclone . --html .cache/codeclone/report.html
 ```
 
+Check version:
+
+```bash
+codeclone --version
+```
+
 Run in CI mode:
 
 ```bash
@@ -191,7 +197,7 @@ By default, CodeClone stores the cache per project at:
 
 `<root>/.cache/codeclone/cache.json`
 
-You can override this path with `--cache-dir`.
+You can override this path with `--cache-path` (`--cache-dir` is a legacy alias).
 
 If you used an older version of CodeClone, delete the legacy cache file at
 `~/.cache/codeclone/cache.json` and add `.cache/` to `.gitignore`.

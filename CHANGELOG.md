@@ -36,6 +36,9 @@ workflows that rely on existing baselines.
 - **Candidate generation**  
   Used an order‑insensitive signature for candidate grouping and a strict segment hash for
   final confirmation; segment matches do not affect baseline or CI failure logic.
+- **Noise reduction (report‑only)**  
+  Merged overlapping segment windows into a single span per function and suppressed
+  boilerplate‑only groups (attribute assignment wiring) using deterministic AST criteria.
 
 ### Baseline & CI
 
@@ -52,6 +55,8 @@ codeclone . --update-baseline
 
 ### CLI UX (CI)
 
+- Added `--version` for standard version output.
+- Added `--cache-path` (legacy alias: `--cache-dir`) and clarified cache help text.
 - Added `--ci` preset (`--fail-on-new --no-color --quiet`).
 - Improved `--fail-on-new` output with aggregated counts and clear next steps.
 - Validate report output extensions (`.html`, `.json`, `.txt`) and fail fast on mismatches.

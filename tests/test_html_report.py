@@ -10,6 +10,7 @@ from codeclone.html_report import (
     _pygments_css,
     _try_pygments,
     build_html_report,
+    pairwise,
 )
 
 
@@ -234,6 +235,33 @@ def test_html_report_segments_section(tmp_path: Path) -> None:
         title="Segments",
     )
     assert "Segment clones" in html
+
+
+def test_html_report_single_item_group(tmp_path: Path) -> None:
+    f = tmp_path / "a.py"
+    f.write_text("def f():\n    x = 1\n", "utf-8")
+    segment_groups = {
+        "s1|mod:f": [
+            {
+                "qualname": "mod:f",
+                "filepath": str(f),
+                "start_line": 1,
+                "end_line": 2,
+                "size": 2,
+            }
+        ]
+    }
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups=segment_groups,
+        title="Segments",
+    )
+    assert f"{f}:1-2" in html
+
+
+def test_pairwise_helper() -> None:
+    assert list(pairwise([1, 2, 3])) == [(1, 2), (2, 3)]
 
 
 def test_render_code_block_truncates_and_fallback(

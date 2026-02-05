@@ -31,6 +31,7 @@ from .report import (
     build_block_groups,
     build_groups,
     build_segment_groups,
+    prepare_segment_report_groups,
     to_json_report,
     to_text,
 )
@@ -46,6 +47,14 @@ custom_theme = Theme(
         "dim": "dim",
     }
 )
+
+
+class _HelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
+    def _get_help_string(self, action: argparse.Action) -> str:
+        if action.dest == "cache_path":
+            return action.help or ""
+        return cast(str, super()._get_help_string(action))
+
 
 LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
 
@@ -176,7 +185,13 @@ def main() -> None:
     ap = argparse.ArgumentParser(
         prog="codeclone",
         description="AST and CFG-based code clone detector for Python.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        formatter_class=_HelpFormatter,
+    )
+    ap.add_argument(
+        "--version",
+        action="version",
+        version=f"CodeClone {__version__}",
+        help="Print the CodeClone version and exit.",
     )
 
     # Core Arguments
@@ -209,12 +224,18 @@ def main() -> None:
         help="Number of parallel worker processes.",
     )
     tune_group.add_argument(
+        "--cache-path",
+        dest="cache_path",
+        metavar="FILE",
+        default=None,
+        help="Path to the cache file. Default: <root>/.cache/codeclone/cache.json.",
+    )
+    tune_group.add_argument(
         "--cache-dir",
-        default=".cache/codeclone/cache.json",
-        help=(
-            "Path to the cache file to speed up subsequent runs. "
-            "Defaults to <root>/.cache/codeclone/cache.json."
-        ),
+        dest="cache_path",
+        metavar="FILE",
+        default=None,
+        help="Legacy alias for --cache-path.",
     )
 
     # Baseline & CI
@@ -239,7 +260,10 @@ def main() -> None:
         type=int,
         default=-1,
         metavar="MAX_CLONES",
-        help="Exit with error if total clone groups exceed this number.",
+        help=(
+            "Exit with error if total clone groups (function + block) "
+            "exceed this number."
+        ),
     )
     ci_group.add_argument(
         "--ci",
@@ -288,8 +312,10 @@ def main() -> None:
         help="Print detailed hash identifiers for new clones.",
     )
 
-    cache_dir_from_args = any(
-        arg == "--cache-dir" or arg.startswith("--cache-dir=") for arg in sys.argv
+    cache_path_from_args = any(
+        arg in {"--cache-dir", "--cache-path"}
+        or arg.startswith(("--cache-dir=", "--cache-path="))
+        for arg in sys.argv
     )
     args = ap.parse_args()
 
@@ -337,8 +363,8 @@ def main() -> None:
 
     # Initialize Cache
     cfg = NormalizationConfig()
-    if cache_dir_from_args:
-        cache_path = Path(args.cache_dir).expanduser()
+    if cache_path_from_args and args.cache_path:
+        cache_path = Path(args.cache_path).expanduser()
     else:
         cache_path = root_path / ".cache" / "codeclone" / "cache.json"
         if LEGACY_CACHE_PATH.exists():
@@ -601,10 +627,14 @@ def main() -> None:
             console.print(f"  ... and {len(failed_files) - 10} more")
 
     # Analysis phase
+    suppressed_segment_groups = 0
     if args.quiet:
         func_groups = build_groups(all_units)
         block_groups = build_block_groups(all_blocks)
         segment_groups = build_segment_groups(all_segments)
+        segment_groups, suppressed_segment_groups = prepare_segment_report_groups(
+            segment_groups
+        )
         try:
             cache.save()
         except CacheError as e:
@@ -614,6 +644,9 @@ def main() -> None:
             func_groups = build_groups(all_units)
             block_groups = build_block_groups(all_blocks)
             segment_groups = build_segment_groups(all_segments)
+            segment_groups, suppressed_segment_groups = prepare_segment_report_groups(
+                segment_groups
+            )
             try:
                 cache.save()
             except CacheError as e:
@@ -716,6 +749,8 @@ def main() -> None:
         table.add_row("Total Function Clones", str(func_clones_count))
         table.add_row("Total Block Clones", str(block_clones_count))
         table.add_row("Total Segment Clones", str(segment_clones_count))
+        if suppressed_segment_groups > 0:
+            table.add_row("Suppressed Segment Groups", str(suppressed_segment_groups))
 
         if baseline_exists:
             style = "error" if new_clones_count > 0 else "success"

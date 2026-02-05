@@ -249,8 +249,9 @@ def test_cli_default_cache_dir_uses_root(
     assert captured["path"] == tmp_path / ".cache" / "codeclone" / "cache.json"
 
 
+@pytest.mark.parametrize("flag", ["--cache-dir", "--cache-path"])
 def test_cli_cache_dir_override_respected(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str
 ) -> None:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
@@ -287,7 +288,7 @@ def test_cli_cache_dir_override_respected(
         monkeypatch,
         [
             str(tmp_path),
-            "--cache-dir",
+            flag,
             str(cache_path),
             "--no-progress",
         ],
