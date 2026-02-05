@@ -152,16 +152,6 @@ Check version:
 codeclone --version
 ```
 
-Run in CI mode:
-
-```bash
-codeclone . --ci --html .cache/codeclone/report.html
-```
-
-`--ci` is equivalent to `--fail-on-new --no-color --quiet`.
-
----
-
 ## Baseline Workflow (Recommended)
 
 ### 1. Create a baseline
@@ -180,8 +170,18 @@ CI deterministic and explainable.
 ### 2. Use in CI
 
 ```bash
-codeclone . --fail-on-new --no-progress
+codeclone . --ci
 ```
+
+or:
+
+```bash
+codeclone . --ci --html .cache/codeclone/report.html
+```
+
+`--ci` is equivalent to `--fail-on-new --no-color --quiet`.
+
+---
 
 Behavior:
 
@@ -223,8 +223,9 @@ repos:
       - id: codeclone
         name: CodeClone
         entry: codeclone
-        language: python
-        args: [ ".", "--fail-on-new" ]
+        language: system
+        pass_filenames: false
+        args: [ ".", "--ci" ]
         types: [ python ]
 ```
 
