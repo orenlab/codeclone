@@ -930,7 +930,14 @@ def test_cli_discovery_skip_oserror(
 
     monkeypatch.setattr(cli, "file_stat_signature", _bad_stat)
     _patch_parallel(monkeypatch)
-    _run_main(monkeypatch, [str(tmp_path), *extra_args])
+    args = [str(tmp_path), *extra_args]
+    if "--ci" in extra_args:
+        baseline = _write_baseline(
+            tmp_path / "baseline.json",
+            python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        )
+        args.extend(["--baseline", str(baseline)])
+    _run_main(monkeypatch, args)
     out = capsys.readouterr().out
     assert "Skipping file" in out
 
