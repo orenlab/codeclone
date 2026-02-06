@@ -6,8 +6,8 @@
 
 This release improves clone-detection precision and explainability with deterministic
 normalization and CFG upgrades, adds segment-level internal clone reporting, refreshes
-the HTML report UI, and introduces baseline versioning. This is a breaking change for CI
-workflows that rely on existing baselines.
+the HTML report UI, and introduces baseline versioning. It is a breaking CI change for
+workflows that reuse old baselines.
 
 ### Clone Detection Accuracy
 
@@ -26,7 +26,7 @@ workflows that rely on existing baselines.
 
 - **Exception linking**  
   Linked `try/except` only to statements that may raise (calls, attribute access, indexing,
-  `await`, `yield from`, `raise`) instead of blanket connections.
+  `await`, `yield from`, `raise`) instead of blanket links.
 
 ### Segment‑Level Detection
 
@@ -35,10 +35,10 @@ workflows that rely on existing baselines.
 
 - **Candidate generation**  
   Used an order‑insensitive signature for candidate grouping and a strict segment hash for
-  final confirmation; segment matches do not affect baseline or CI failure logic.
+  final confirmation. Segment matches do not affect baseline or CI failure logic.
 - **Noise reduction (report‑only)**  
   Merged overlapping segment windows into a single span per function and suppressed
-  boilerplate‑only groups (attribute assignment wiring) using deterministic AST criteria.
+  boilerplate-only groups (attribute assignment wiring) with deterministic AST criteria.
 
 ### Baseline & CI
 
@@ -59,25 +59,23 @@ codeclone . --update-baseline
 - Added `--cache-path` (legacy alias: `--cache-dir`) and clarified cache help text.
 - Added `--ci` preset (`--fail-on-new --no-color --quiet`).
 - Improved `--fail-on-new` output with aggregated counts and clear next steps.
-- Validate report output extensions (`.html`, `.json`, `.txt`) and fail fast on mismatches.
+- Added strict report output extension validation (`.html`, `.json`, `.txt`).
 
 ### HTML Report UI
 
 - **Visual refresh**  
-  Introduced a redesigned, modern HTML report layout with a sticky top bar and improved
-  typography and spacing.
+  Introduced a modernized HTML report layout with a sticky top bar and improved spacing.
 
 - **Interactive tooling**  
-  Added a command palette, keyboard shortcuts, toast notifications, and quick actions for
-  common tasks (export, stats, charts, navigation).
+  Added a command palette, keyboard shortcuts, toast notifications, and quick actions
+  (export, stats, charts, navigation).
 
 - **Reporting widgets**  
-  Added a stats dashboard and chart container to surface high‑level clone metrics directly
-  in the report.
+  Added a stats dashboard and chart container for high-level clone metrics.
 
 - **Icon system**  
   Replaced emoji glyphs with inline SVG icons for consistent rendering and a fully
-  self‑contained UI.
+  self-contained UI.
 
 - **Segment reporting**  
   Added a dedicated “Segment clones” section and summary metric in HTML/TXT/JSON outputs.

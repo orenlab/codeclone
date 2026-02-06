@@ -278,6 +278,30 @@ See full design and semantics:
 
 ---
 
+## CLI Options
+
+| Option                        | Description                                                      | Default                              |
+|-------------------------------|------------------------------------------------------------------|--------------------------------------|
+| `root`                        | Project root directory to scan                                   | `.`                                  |
+| `--version`                   | Print CodeClone version and exit                                 | -                                    |
+| `--min-loc`                   | Minimum function LOC to analyze                                  | `15`                                 |
+| `--min-stmt`                  | Minimum AST statements to analyze                                | `6`                                  |
+| `--processes`                 | Number of worker processes                                       | `4`                                  |
+| `--cache-path FILE`           | Cache file path                                                  | `<root>/.cache/codeclone/cache.json` |
+| `--cache-dir FILE`            | Legacy alias for `--cache-path`                                  | -                                    |
+| `--baseline FILE`             | Baseline file path                                               | `codeclone.baseline.json`            |
+| `--update-baseline`           | Regenerate baseline from current results                         | `False`                              |
+| `--fail-on-new`               | Fail if new function/block clone groups appear vs baseline       | `False`                              |
+| `--fail-threshold MAX_CLONES` | Fail if total clone groups (`function + block`) exceed threshold | `-1` (disabled)                      |
+| `--ci`                        | CI preset: `--fail-on-new --no-color --quiet`                    | `False`                              |
+| `--html FILE`                 | Write HTML report (`.html`)                                      | -                                    |
+| `--json FILE`                 | Write JSON report (`.json`)                                      | -                                    |
+| `--text FILE`                 | Write text report (`.txt`)                                       | -                                    |
+| `--no-progress`               | Disable progress bar output                                      | `False`                              |
+| `--no-color`                  | Disable ANSI colors                                              | `False`                              |
+| `--quiet`                     | Minimize output (warnings/errors still shown)                    | `False`                              |
+| `--verbose`                   | Show hash details for new clone groups in fail output            | `False`                              |
+
 ## License
 
 MIT License
