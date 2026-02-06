@@ -308,6 +308,53 @@ html[data-theme="light"] .topbar {
   margin-top: 40px;
 }
 
+.meta-panel {
+  margin-top: 22px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.meta-title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.meta-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 8px 16px;
+}
+
+.meta-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+}
+
+.meta-row dt {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.meta-row dd {
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  word-break: break-all;
+}
+
 .section-head {
   display: flex;
   flex-direction: column;
@@ -485,11 +532,13 @@ html[data-theme="light"] .topbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 14px 16px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--border-subtle);
   cursor: pointer;
   transition: background var(--transition-fast);
+  min-width: 0;
 }
 
 .group:hover .group-head {
@@ -500,6 +549,7 @@ html[data-theme="light"] .topbar {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .group-title {
@@ -512,9 +562,13 @@ html[data-theme="light"] .topbar {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  flex: 1;
+  justify-content: flex-end;
 }
 
 .gkey {
+  display: block;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-tertiary);
@@ -522,6 +576,26 @@ html[data-theme="light"] .topbar {
   padding: 3px 6px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(52vw, 700px);
+}
+
+@media (max-width: 900px) {
+  .group-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .group-right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .gkey {
+    max-width: 100%;
+  }
 }
 
 .chev {
@@ -897,7 +971,8 @@ html[data-theme="light"] .topbar {
 }
 
 .command-item:hover,
-.command-item.selected {
+.command-item.selected,
+.command-item[aria-selected='true'] {
   background: var(--accent-muted);
 }
 
@@ -922,6 +997,12 @@ html[data-theme="light"] .topbar {
   padding: 2px 6px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
+}
+
+.command-empty {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  padding: 12px;
 }
 
 /* Stats Dashboard */
@@ -997,6 +1078,38 @@ html[data-theme="light"] .topbar {
   height: 300px;
 }
 
+@media print {
+  .topbar,
+  .section-toolbar,
+  .toast-container,
+  .command-palette,
+  .footer,
+  #command-btn,
+  #theme-toggle,
+  #export-btn {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+    color: #111;
+  }
+
+  .container {
+    max-width: none;
+    padding: 0;
+  }
+
+  .group,
+  .item {
+    break-inside: avoid;
+  }
+
+  .codebox {
+    max-height: none;
+  }
+}
+
 /* Accessibility */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -1043,19 +1156,30 @@ ${pyg_light}
 <div class="toast-container"></div>
 
 <!-- Command Palette -->
-<div class="command-palette" id="command-palette">
+<div class="command-palette" id="command-palette" aria-hidden="true">
   <div class="command-backdrop"></div>
-  <div class="command-dialog">
+  <div
+    class="command-dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Command palette"
+  >
     <div class="command-input-wrap">
       <input
         type="text"
         class="command-input"
         id="command-input"
         placeholder="Type a command or search..."
+        aria-label="Command search"
         autocomplete="off"
       />
     </div>
-    <div class="command-results" id="command-results">
+    <div
+      class="command-results"
+      id="command-results"
+      role="listbox"
+      aria-label="Command results"
+    >
       <!-- Populated dynamically -->
     </div>
   </div>
@@ -1107,14 +1231,16 @@ ${pyg_light}
 <!-- Main Content -->
 <div class="container">
 
+${report_meta_html}
+
 <!-- Stats Dashboard -->
-<div class="stats-grid" id="stats-dashboard">
+<div class="stats-grid" id="stats-dashboard" style="display: none;">
   <!-- Populated dynamically -->
 </div>
 
 <!-- Charts -->
 <div class="chart-container" id="chart-container" style="display: none;">
-  <div class="chart-title">Clone Complexity Distribution</div>
+  <div class="chart-title">Clone Group Distribution</div>
   <canvas id="complexity-chart" class="chart-canvas"></canvas>
 </div>
 
@@ -1297,6 +1423,7 @@ ${segment_section}
   const state = {
     theme: 'dark',
     commandPaletteOpen: false,
+    chartVisible: false,
     stats: {
       totalGroups: 0,
       totalItems: 0,
@@ -1304,6 +1431,14 @@ ${segment_section}
       largestGroup: 0
     }
   };
+
+  function getPrimarySearchInput() {
+    const inputs = Array.from($$$$('.search'));
+    for (const input of inputs) {
+      if (input.offsetParent !== null) return input;
+    }
+    return inputs[0] || null;
+  }
 
   // ========== Theme Management ==========
   function initTheme() {
@@ -1320,6 +1455,7 @@ ${segment_section}
     state.theme = state.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', state.theme);
     localStorage.setItem('codeclone_theme', state.theme);
+    if (state.chartVisible) renderComplexityChart();
     showToast('Theme switched to ' + state.theme, 'info');
   }
 
@@ -1362,6 +1498,8 @@ ${segment_section}
     const palette = $$('#command-palette');
     const input = $$('#command-input');
     const results = $$('#command-results');
+    if (!palette || !input || !results) return;
+    let selectedIndex = -1;
 
     const commands = [
       {
@@ -1381,13 +1519,13 @@ ${segment_section}
           },
           {
             icon: ICONS.stats,
-            label: 'Show Statistics',
+            label: 'Toggle Statistics',
             shortcut: '⌘S',
             action: () => showStats()
           },
           {
             icon: ICONS.charts,
-            label: 'Show Charts',
+            label: 'Toggle Charts',
             shortcut: null,
             action: () => showCharts()
           },
@@ -1406,7 +1544,15 @@ ${segment_section}
             icon: ICONS.search,
             label: 'Focus Search',
             shortcut: '/',
-            action: () => $$('.search')?.focus()
+            action: () => {
+              const search = getPrimarySearchInput();
+              if (!search) {
+                showToast('Search is not available in this report', 'warning');
+                return;
+              }
+              search.focus();
+              if (typeof search.select === 'function') search.select();
+            }
           },
           {
             icon: ICONS.scrollTop,
@@ -1447,9 +1593,29 @@ ${segment_section}
       }
     ];
 
+    function getVisibleCommandItems() {
+      return Array.from(results.querySelectorAll('.command-item'));
+    }
+
+    function setSelected(index) {
+      const items = getVisibleCommandItems();
+      if (!items.length) {
+        selectedIndex = -1;
+        return;
+      }
+      selectedIndex = (index + items.length) % items.length;
+      items.forEach((item, idx) => {
+        const isSelected = idx === selectedIndex;
+        item.classList.toggle('selected', isSelected);
+        item.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+      });
+      items[selectedIndex].scrollIntoView({ block: 'nearest' });
+    }
+
     function renderCommands(filter = '') {
       const f = filter.toLowerCase();
       results.innerHTML = '';
+      let rendered = 0;
 
       commands.forEach(section => {
         const filtered = section.items.filter(item =>
@@ -1465,9 +1631,12 @@ ${segment_section}
           section.section +
           '</div>';
 
-        filtered.forEach((item, idx) => {
+        filtered.forEach((item) => {
           const btn = document.createElement('button');
-          btn.className = 'command-item' + (idx === 0 && f === '' ? ' selected' : '');
+          btn.className = 'command-item';
+          btn.type = 'button';
+          btn.setAttribute('role', 'option');
+          btn.setAttribute('aria-selected', 'false');
           btn.innerHTML =
             '<div class="command-item-left">' +
             '<span class="command-icon">' + item.icon + '</span>' +
@@ -1480,24 +1649,40 @@ ${segment_section}
             item.action();
             closeCommandPalette();
           });
+          btn.addEventListener('mouseenter', () => {
+            const items = getVisibleCommandItems();
+            const hoverIndex = items.indexOf(btn);
+            if (hoverIndex >= 0) setSelected(hoverIndex);
+          });
           sectionEl.appendChild(btn);
+          rendered += 1;
         });
 
         results.appendChild(sectionEl);
       });
+
+      if (rendered === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'command-empty';
+        empty.textContent = 'No matching commands';
+        results.appendChild(empty);
+      }
+      setSelected(0);
     }
 
     function openCommandPalette() {
       state.commandPaletteOpen = true;
       palette.classList.add('show');
+      palette.setAttribute('aria-hidden', 'false');
       input.value = '';
-      input.focus();
       renderCommands();
+      input.focus();
     }
 
     function closeCommandPalette() {
       state.commandPaletteOpen = false;
       palette.classList.remove('show');
+      palette.setAttribute('aria-hidden', 'true');
       input.value = '';
     }
 
@@ -1510,14 +1695,23 @@ ${segment_section}
 
     input?.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
         closeCommandPalette();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelected(selectedIndex + 1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelected(selectedIndex - 1);
       } else if (e.key === 'Enter') {
+        e.preventDefault();
         const selected = $$('.command-item.selected');
         if (selected) selected.click();
       }
     });
 
     window.openCommandPalette = openCommandPalette;
+    window.closeCommandPalette = closeCommandPalette;
   }
 
   // ========== Statistics ==========
@@ -1541,8 +1735,12 @@ ${segment_section}
 
   function showStats() {
     const dashboard = $$('#stats-dashboard');
-    if (dashboard.children.length > 0) {
-      dashboard.style.display = dashboard.style.display === 'none' ? 'grid' : 'none';
+    if (!dashboard) return;
+
+    const isVisible = dashboard.style.display !== 'none';
+    if (isVisible) {
+      dashboard.style.display = 'none';
+      showToast('Statistics hidden', 'info');
       return;
     }
 
@@ -1593,27 +1791,176 @@ ${segment_section}
     showToast('Statistics displayed', 'success');
   }
 
+  function collectSectionMetrics() {
+    const sections = [
+      { id: 'functions', label: 'Function', colorVar: '--accent-primary' },
+      { id: 'blocks', label: 'Block', colorVar: '--success' },
+      { id: 'segments', label: 'Segment', colorVar: '--warning' }
+    ];
+    return sections.map((section) => {
+      const groups = Array.from($$$$('.group[data-group="' + section.id + '"]'));
+      return {
+        label: section.label,
+        colorVar: section.colorVar,
+        value: groups.length
+      };
+    });
+  }
+
+  function renderComplexityChart() {
+    const canvas = $$('#complexity-chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(320, Math.floor(rect.width || 320));
+    const height = Math.max(220, Math.floor(rect.height || 300));
+    const ratio = Math.max(1, window.devicePixelRatio || 1);
+
+    canvas.width = Math.floor(width * ratio);
+    canvas.height = Math.floor(height * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    const styles = getComputedStyle(document.documentElement);
+    const textPrimary = styles.getPropertyValue('--text-primary').trim() || '#d1d5db';
+    const textMuted = styles.getPropertyValue('--text-muted').trim() || '#9ca3af';
+    const gridColor = styles.getPropertyValue('--border-subtle').trim() || '#334155';
+    const sansFont =
+      'ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
+
+    const metrics = collectSectionMetrics();
+    const maxValue = Math.max(1, ...metrics.map((m) => m.value));
+    const left = 52;
+    const right = 18;
+    const top = 16;
+    const bottom = 40;
+    const chartWidth = width - left - right;
+    const chartHeight = height - top - bottom;
+
+    ctx.strokeStyle = gridColor;
+    ctx.lineWidth = 1;
+    for (let step = 0; step <= 4; step += 1) {
+      const y = top + (chartHeight * step) / 4;
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(left + chartWidth, y);
+      ctx.stroke();
+
+      const value = Math.round(maxValue - (maxValue * step) / 4);
+      ctx.fillStyle = textMuted;
+      ctx.font = '12px ' + sansFont;
+      ctx.textAlign = 'right';
+      ctx.fillText(String(value), left - 8, y + 4);
+    }
+
+    const slot = chartWidth / metrics.length;
+    const barWidth = Math.max(40, Math.min(90, slot * 0.56));
+    metrics.forEach((metric, idx) => {
+      const x = left + slot * idx + (slot - barWidth) / 2;
+      const barHeight = (metric.value / maxValue) * chartHeight;
+      const y = top + chartHeight - barHeight;
+      const color = styles.getPropertyValue(metric.colorVar).trim() || '#4f46e5';
+
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y, barWidth, barHeight);
+
+      ctx.fillStyle = textPrimary;
+      ctx.font = '600 12px ' + sansFont;
+      ctx.textAlign = 'center';
+      ctx.fillText(String(metric.value), x + barWidth / 2, y - 6);
+
+      ctx.fillStyle = textMuted;
+      ctx.font = '12px ' + sansFont;
+      ctx.fillText(metric.label, x + barWidth / 2, top + chartHeight + 18);
+    });
+
+    if (metrics.every((metric) => metric.value === 0)) {
+      ctx.fillStyle = textMuted;
+      ctx.font = '14px ' + sansFont;
+      ctx.textAlign = 'center';
+      ctx.fillText(
+        'No clone groups to visualize',
+        left + chartWidth / 2,
+        top + chartHeight / 2
+      );
+    }
+  }
+
   // ========== Charts ==========
   function showCharts() {
     const container = $$('#chart-container');
-    container.style.display = container.style.display === 'none' ? 'block' : 'none';
-
-    if (container.style.display === 'block') {
-      // Simple ASCII chart for demonstration
-      showToast('Chart feature coming soon', 'info');
+    if (!container) return;
+    const visible = container.style.display !== 'none';
+    if (visible) {
+      container.style.display = 'none';
+      state.chartVisible = false;
+      showToast('Charts hidden', 'info');
+      return;
     }
+    container.style.display = 'block';
+    state.chartVisible = true;
+    renderComplexityChart();
+    showToast('Charts displayed', 'success');
+  }
+
+  function readReportMetaFromDom() {
+    const metaEl = $$('#report-meta');
+    if (!metaEl) return {};
+
+    const boolAttr = (name) => {
+      const value = (metaEl.getAttribute(name) || '').toLowerCase();
+      if (value === 'true') return true;
+      if (value === 'false') return false;
+      return null;
+    };
+    const textAttr = (name) => {
+      const value = (metaEl.getAttribute(name) || '').trim();
+      return value || null;
+    };
+    const intAttr = (name) => {
+      const value = textAttr(name);
+      if (value === null) return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    return {
+      codeclone_version: textAttr('data-codeclone-version'),
+      python_version: textAttr('data-python-version'),
+      baseline_path: textAttr('data-baseline-path'),
+      baseline_version: textAttr('data-baseline-version'),
+      baseline_schema_version: intAttr('data-baseline-schema-version'),
+      baseline_python_version: textAttr('data-baseline-python-version'),
+      baseline_loaded: boolAttr('data-baseline-loaded'),
+      baseline_status: textAttr('data-baseline-status'),
+      cache_path: textAttr('data-cache-path'),
+      cache_used: boolAttr('data-cache-used')
+    };
   }
 
   // ========== Export ==========
   function exportReport(format) {
+    calculateStats();
     if (format === 'json') {
+      const groups = Array.from($$$$('.group')).map((groupEl) => ({
+        section: groupEl.getAttribute('data-group') || '',
+        group_index: Number(groupEl.getAttribute('data-group-index') || '0'),
+        group_key: groupEl.getAttribute('data-group-key') || '',
+        items: Array.from(groupEl.querySelectorAll('.item')).map((itemEl) => ({
+          qualname: itemEl.getAttribute('data-qualname') || '',
+          filepath: itemEl.getAttribute('data-filepath') || '',
+          start_line: Number(itemEl.getAttribute('data-start-line') || '0'),
+          end_line: Number(itemEl.getAttribute('data-end-line') || '0')
+        }))
+      }));
       const data = {
         generated: new Date().toISOString(),
+        source: 'CodeClone HTML report',
+        meta: readReportMetaFromDom(),
         stats: state.stats,
-        groups: Array.from($$$$('.group')).map(g => ({
-          title: g.querySelector('.group-title')?.textContent,
-          items: g.querySelectorAll('.item').length
-        }))
+        groups
       };
 
       const blob = new Blob([JSON.stringify(data, null, 2)], {
@@ -1627,9 +1974,16 @@ ${segment_section}
       URL.revokeObjectURL(url);
 
       showToast('Report exported as JSON', 'success');
-    } else {
-      showToast('Export to ' + format.toUpperCase() + ' coming soon', 'info');
+      return;
     }
+
+    if (format === 'pdf') {
+      showToast('Opening print dialog for PDF export', 'info');
+      window.print();
+      return;
+    }
+
+    showToast('Unsupported export format: ' + format, 'warning');
   }
 
   // ========== Group Controls ==========
@@ -1647,48 +2001,72 @@ ${segment_section}
 
   // ========== Keyboard Shortcuts ==========
   document.addEventListener('keydown', (e) => {
+    const key = String(e.key || '').toLowerCase();
+
     // Command Palette: ⌘K or Ctrl+K
-    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    if ((e.metaKey || e.ctrlKey) && key === 'k') {
       e.preventDefault();
-      window.openCommandPalette();
+      if (state.commandPaletteOpen) {
+        window.closeCommandPalette?.();
+      } else {
+        window.openCommandPalette?.();
+      }
+      return;
+    }
+
+    if (state.commandPaletteOpen) {
+      if (key === 'escape') {
+        e.preventDefault();
+        window.closeCommandPalette?.();
+      }
       return;
     }
 
     // Don't trigger if typing in input
-    if (e.target.matches('input, textarea')) return;
+    const target = e.target;
+    if (
+      target &&
+      typeof target.matches === 'function' &&
+      target.matches('input, textarea, [contenteditable="true"]')
+    ) {
+      return;
+    }
 
     // / - Focus search
-    if (e.key === '/') {
+    if (key === '/') {
       e.preventDefault();
-      $$('.search')?.focus();
+      const search = getPrimarySearchInput();
+      search?.focus();
+      if (search && typeof search.select === 'function') search.select();
     }
 
     // T - Toggle theme
-    if (e.key === 't' || e.key === 'T') {
+    if (key === 't') {
       e.preventDefault();
       toggleTheme();
     }
 
     // S - Show stats
-    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+    if ((e.metaKey || e.ctrlKey) && key === 's') {
       e.preventDefault();
       showStats();
     }
 
     // E - Export
-    if ((e.metaKey || e.ctrlKey) && e.key === 'e') {
+    if ((e.metaKey || e.ctrlKey) && key === 'e') {
       e.preventDefault();
       exportReport('json');
     }
 
+    // R - Refresh view
+    if ((e.metaKey || e.ctrlKey) && key === 'r') {
+      e.preventDefault();
+      location.reload();
+    }
+
     // Escape - Close modals
-    if (e.key === 'Escape') {
-      if (state.commandPaletteOpen) {
-        const palette = $$('#command-palette');
-        palette?.classList.remove('show');
-        state.commandPaletteOpen = false;
-      }
-      const search = $$('.search');
+    if (key === 'escape') {
+      const search = getPrimarySearchInput();
       if (search && search.value) {
         search.value = '';
         search.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1838,6 +2216,9 @@ ${segment_section}
   // ========== Event Listeners ==========
   $$('#theme-toggle')?.addEventListener('click', toggleTheme);
   $$('#export-btn')?.addEventListener('click', () => exportReport('json'));
+  window.addEventListener('resize', () => {
+    if (state.chartVisible) renderComplexityChart();
+  });
 
   // ========== Initialize ==========
   initTheme();

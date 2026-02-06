@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -320,10 +321,23 @@ def to_json(groups: GroupMap) -> str:
 
 
 def to_json_report(
-    func_groups: GroupMap, block_groups: GroupMap, segment_groups: GroupMap
+    func_groups: GroupMap,
+    block_groups: GroupMap,
+    segment_groups: GroupMap,
+    meta: Mapping[str, Any] | None = None,
 ) -> str:
+    meta_payload = dict(meta or {})
     return json.dumps(
-        {"functions": func_groups, "blocks": block_groups, "segments": segment_groups},
+        {
+            "meta": meta_payload,
+            "function_clones": func_groups,
+            "block_clones": block_groups,
+            "segment_clones": segment_groups,
+            # Backward-compatible keys.
+            "functions": func_groups,
+            "blocks": block_groups,
+            "segments": segment_groups,
+        },
         ensure_ascii=False,
         indent=2,
     )
@@ -344,3 +358,51 @@ def to_text(groups: GroupMap) -> str:
             ]
         )
     return "\n".join(lines).strip() + "\n"
+
+
+def _format_meta_text_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "n/a"
+    text = str(value).strip()
+    return text if text else "n/a"
+
+
+def to_text_report(
+    *,
+    meta: Mapping[str, Any],
+    func_groups: GroupMap,
+    block_groups: GroupMap,
+    segment_groups: GroupMap,
+) -> str:
+    lines = [
+        "REPORT METADATA",
+        f"CodeClone version: {_format_meta_text_value(meta.get('codeclone_version'))}",
+        f"Python version: {_format_meta_text_value(meta.get('python_version'))}",
+        f"Baseline path: {_format_meta_text_value(meta.get('baseline_path'))}",
+        f"Baseline version: {_format_meta_text_value(meta.get('baseline_version'))}",
+        "Baseline schema version: "
+        f"{_format_meta_text_value(meta.get('baseline_schema_version'))}",
+        "Baseline Python version: "
+        f"{_format_meta_text_value(meta.get('baseline_python_version'))}",
+        f"Baseline loaded: {_format_meta_text_value(meta.get('baseline_loaded'))}",
+        f"Baseline status: {_format_meta_text_value(meta.get('baseline_status'))}",
+    ]
+    if "cache_path" in meta:
+        lines.append(f"Cache path: {_format_meta_text_value(meta.get('cache_path'))}")
+    if "cache_used" in meta:
+        lines.append(f"Cache used: {_format_meta_text_value(meta.get('cache_used'))}")
+
+    sections = [
+        ("FUNCTION CLONES", func_groups),
+        ("BLOCK CLONES", block_groups),
+        ("SEGMENT CLONES", segment_groups),
+    ]
+    for title, groups in sections:
+        lines.append("")
+        lines.append(title)
+        block = to_text(groups).rstrip()
+        lines.append(block if block else "(none)")
+
+    return "\n".join(lines).rstrip() + "\n"

@@ -122,6 +122,17 @@ Detected clone groups can be:
 - exported as JSON,
 - rendered as an interactive HTML report.
 
+All report formats include provenance metadata:
+
+- `codeclone_version`
+- `python_version`
+- `baseline_path`
+- `baseline_version`
+- `baseline_schema_version`
+- `baseline_python_version`
+- `baseline_loaded`
+- `baseline_status` (`ok | missing | mismatch | invalid`)
+
 ---
 
 ## CI Integration

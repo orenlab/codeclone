@@ -229,6 +229,15 @@ def _escape(v: Any) -> str:
     return html.escape("" if v is None else str(v))
 
 
+def _meta_display(v: Any) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if v is None:
+        return "n/a"
+    text = str(v).strip()
+    return text if text else "n/a"
+
+
 def _group_sort_key(items: list[dict[str, Any]]) -> tuple[int, int]:
     return (
         -len(items),
@@ -241,6 +250,7 @@ def build_html_report(
     func_groups: dict[str, list[dict[str, Any]]],
     block_groups: dict[str, list[dict[str, Any]]],
     segment_groups: dict[str, list[dict[str, Any]]],
+    report_meta: dict[str, Any] | None = None,
     title: str = "CodeClone Report",
     context_lines: int = 3,
     max_snippet_lines: int = 220,
@@ -404,6 +414,8 @@ def build_html_report(
 
             out.append(
                 f'<div class="group" data-group="{section_id}" '
+                f'data-group-index="{idx}" '
+                f'data-group-key="{_escape(gkey)}" '
                 f'data-search="{search_blob_escaped}">'
             )
 
@@ -416,7 +428,7 @@ def build_html_report(
                 f'<span class="pill small {pill_cls}">{len(items)} items</span>'
                 "</div>"
                 '<div class="group-right">'
-                f'<code class="gkey">{_escape(gkey)}</code>'
+                f'<code class="gkey" title="{_escape(gkey)}">{_escape(gkey)}</code>'
                 "</div>"
                 "</div>"
             )
@@ -437,16 +449,18 @@ def build_html_report(
                         max_lines=max_snippet_lines,
                     )
 
+                    qualname = _escape(item["qualname"])
+                    filepath = _escape(item["filepath"])
+                    start_line = int(item["start_line"])
+                    end_line = int(item["end_line"])
                     out.append(
-                        '<div class="item">'
-                        f'<div class="item-head" title="{_escape(item["qualname"])}">'
-                        f"{_escape(item['qualname'])}"
-                        "</div>"
+                        f'<div class="item" data-qualname="{qualname}" '
+                        f'data-filepath="{filepath}" data-start-line="{start_line}" '
+                        f'data-end-line="{end_line}">'
+                        f'<div class="item-head" title="{qualname}">{qualname}</div>'
                         f'<div class="item-file" '
-                        f'title="{_escape(item["filepath"])}:'
-                        f'{item["start_line"]}-{item["end_line"]}">'
-                        f"{_escape(item['filepath'])}:"
-                        f"{item['start_line']}-{item['end_line']}"
+                        f'title="{filepath}:{start_line}-{end_line}">'
+                        f"{filepath}:{start_line}-{end_line}"
                         f"</div>"
                         f"{snippet.code_html}"
                         "</div>"
@@ -489,11 +503,61 @@ def build_html_report(
         "segments", "Segment clones", segment_sorted, "pill-segment"
     )
 
+    meta = dict(report_meta or {})
+    meta_rows: list[tuple[str, Any]] = [
+        ("CodeClone", meta.get("codeclone_version", __version__)),
+        ("Python", meta.get("python_version")),
+        ("Baseline", meta.get("baseline_path")),
+        ("Baseline version", meta.get("baseline_version")),
+        ("Baseline schema", meta.get("baseline_schema_version")),
+        ("Baseline Python", meta.get("baseline_python_version")),
+        ("Baseline loaded", meta.get("baseline_loaded")),
+        ("Baseline status", meta.get("baseline_status")),
+    ]
+    if "cache_path" in meta:
+        meta_rows.append(("Cache path", meta.get("cache_path")))
+    if "cache_used" in meta:
+        meta_rows.append(("Cache used", meta.get("cache_used")))
+
+    meta_attrs = " ".join(
+        [
+            (
+                'data-codeclone-version="'
+                f'{_escape(meta.get("codeclone_version", __version__))}"'
+            ),
+            f'data-python-version="{_escape(meta.get("python_version"))}"',
+            f'data-baseline-path="{_escape(meta.get("baseline_path"))}"',
+            f'data-baseline-version="{_escape(meta.get("baseline_version"))}"',
+            f'data-baseline-schema-version="{_escape(meta.get("baseline_schema_version"))}"',
+            f'data-baseline-python-version="{_escape(meta.get("baseline_python_version"))}"',
+            f'data-baseline-loaded="{_escape(_meta_display(meta.get("baseline_loaded")))}"',
+            f'data-baseline-status="{_escape(meta.get("baseline_status"))}"',
+            f'data-cache-path="{_escape(meta.get("cache_path"))}"',
+            f'data-cache-used="{_escape(_meta_display(meta.get("cache_used")))}"',
+        ]
+    )
+    meta_rows_html = "".join(
+        (
+            '<div class="meta-row">'
+            f"<dt>{_escape(label)}</dt>"
+            f"<dd>{_escape(_meta_display(value))}</dd>"
+            "</div>"
+        )
+        for label, value in meta_rows
+    )
+    report_meta_html = (
+        f'<section class="meta-panel" id="report-meta" {meta_attrs}>'
+        '<div class="meta-title">Report Provenance</div>'
+        f'<dl class="meta-grid">{meta_rows_html}</dl>'
+        "</section>"
+    )
+
     return REPORT_TEMPLATE.substitute(
         title=_escape(title),
         version=__version__,
         pyg_dark=pyg_dark,
         pyg_light=pyg_light,
+        report_meta_html=report_meta_html,
         empty_state_html=empty_state_html,
         func_section=func_section,
         block_section=block_section,

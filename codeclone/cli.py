@@ -33,7 +33,7 @@ from .report import (
     build_segment_groups,
     prepare_segment_report_groups,
     to_json_report,
-    to_text,
+    to_text_report,
 )
 from .scanner import iter_py_files, module_name_from_path
 
@@ -179,6 +179,33 @@ def _validate_output_path(path: str, *, expected_suffix: str, label: str) -> Pat
         )
         sys.exit(2)
     return out.resolve()
+
+
+def _current_python_version() -> str:
+    return f"{sys.version_info.major}.{sys.version_info.minor}"
+
+
+def _build_report_meta(
+    *,
+    baseline_path: Path,
+    baseline: Baseline,
+    baseline_loaded: bool,
+    baseline_status: str,
+    cache_path: Path,
+    cache_used: bool,
+) -> dict[str, Any]:
+    return {
+        "codeclone_version": __version__,
+        "python_version": _current_python_version(),
+        "baseline_path": str(baseline_path),
+        "baseline_version": baseline.baseline_version,
+        "baseline_schema_version": baseline.schema_version,
+        "baseline_python_version": baseline.python_version,
+        "baseline_loaded": baseline_loaded,
+        "baseline_status": baseline_status,
+        "cache_path": str(cache_path),
+        "cache_used": cache_used,
+    }
 
 
 def main() -> None:
@@ -664,53 +691,74 @@ def main() -> None:
 
     baseline = Baseline(baseline_path)
     baseline_exists = baseline_path.exists()
+    baseline_loaded = False
+    baseline_status = "missing"
+    baseline_failure_code: int | None = None
 
     if baseline_exists:
-        baseline.load()
-        if not args.update_baseline:
-            if baseline.baseline_version != __version__:
-                if baseline.baseline_version is None:
-                    console.print(
-                        "[error]Baseline version mismatch.[/error]\n"
-                        "Baseline version missing (legacy baseline format).\n"
-                        f"Current version: {__version__}.\n"
-                        "Please regenerate the baseline with --update-baseline."
-                    )
-                else:
-                    console.print(
-                        "[error]Baseline version mismatch.[/error]\n"
-                        "Baseline was generated with CodeClone "
-                        f"{baseline.baseline_version}.\n"
-                        f"Current version: {__version__}.\n"
-                        "Please regenerate the baseline with --update-baseline."
-                    )
-                sys.exit(2)
-            if (
-                baseline.schema_version is not None
-                and baseline.schema_version != BASELINE_SCHEMA_VERSION
-            ):
+        try:
+            baseline.load()
+        except ValueError as e:
+            baseline_status = "invalid"
+            if not args.update_baseline:
                 console.print(
-                    "[error]Baseline schema version mismatch.[/error]\n"
-                    f"Baseline schema: {baseline.schema_version}. "
-                    f"Current schema: {BASELINE_SCHEMA_VERSION}.\n"
+                    "[error]Invalid baseline file.[/error]\n"
+                    f"{e}\n"
                     "Please regenerate the baseline with --update-baseline."
                 )
-                sys.exit(2)
-        if not args.update_baseline and baseline.python_version:
-            current_version = f"{sys.version_info.major}.{sys.version_info.minor}"
-            if baseline.python_version != current_version:
-                console.print(
-                    "[warning]Baseline Python version mismatch.[/warning]\n"
-                    f"Baseline was generated with Python {baseline.python_version}.\n"
-                    f"Current interpreter: Python {current_version}."
-                )
-                if args.fail_on_new:
+                baseline_failure_code = 2
+        else:
+            baseline_loaded = True
+            baseline_status = "ok"
+            if not args.update_baseline:
+                if baseline.baseline_version != __version__:
+                    baseline_status = "mismatch"
+                    if baseline.baseline_version is None:
+                        console.print(
+                            "[error]Baseline version mismatch.[/error]\n"
+                            "Baseline version missing (legacy baseline format).\n"
+                            f"Current version: {__version__}.\n"
+                            "Please regenerate the baseline with --update-baseline."
+                        )
+                    else:
+                        console.print(
+                            "[error]Baseline version mismatch.[/error]\n"
+                            "Baseline was generated with CodeClone "
+                            f"{baseline.baseline_version}.\n"
+                            f"Current version: {__version__}.\n"
+                            "Please regenerate the baseline with --update-baseline."
+                        )
+                    baseline_failure_code = 2
+                if (
+                    baseline.schema_version is not None
+                    and baseline.schema_version != BASELINE_SCHEMA_VERSION
+                ):
+                    baseline_status = "mismatch"
                     console.print(
-                        "[error]Baseline checks require the same Python version to "
-                        "ensure deterministic results. Please regenerate the baseline "
-                        "using the current interpreter.[/error]"
+                        "[error]Baseline schema version mismatch.[/error]\n"
+                        f"Baseline schema: {baseline.schema_version}. "
+                        f"Current schema: {BASELINE_SCHEMA_VERSION}.\n"
+                        "Please regenerate the baseline with --update-baseline."
                     )
-                    sys.exit(2)
+                    baseline_failure_code = 2
+            if not args.update_baseline and baseline.python_version:
+                current_version = _current_python_version()
+                if baseline.python_version != current_version:
+                    baseline_status = "mismatch"
+                    console.print(
+                        "[warning]Baseline Python version mismatch.[/warning]\n"
+                        "Baseline was generated with Python "
+                        f"{baseline.python_version}.\n"
+                        f"Current interpreter: Python {current_version}."
+                    )
+                    if args.fail_on_new:
+                        console.print(
+                            "[error]Baseline checks require the same Python version to "
+                            "ensure deterministic results. Please regenerate the "
+                            "baseline "
+                            "using the current interpreter.[/error]"
+                        )
+                        baseline_failure_code = 2
     else:
         if not args.update_baseline:
             console.print(
@@ -734,6 +782,15 @@ def main() -> None:
         console.print(f"[success]✔ Baseline updated:[/success] {baseline_path}")
         # When updating, we don't fail on new, we just saved the new state.
         # But we might still want to print the summary.
+
+    report_meta = _build_report_meta(
+        baseline_path=baseline_path,
+        baseline=baseline,
+        baseline_loaded=baseline_loaded,
+        baseline_status=baseline_status,
+        cache_path=cache_path.resolve(),
+        cache_used=cache.load_warning is None,
+    )
 
     # Diff
     new_func, new_block = baseline.diff(func_groups, block_groups)
@@ -770,6 +827,7 @@ def main() -> None:
                 func_groups=func_groups,
                 block_groups=block_groups,
                 segment_groups=segment_groups,
+                report_meta=report_meta,
                 title="CodeClone Report",
                 context_lines=3,
                 max_snippet_lines=220,
@@ -784,7 +842,7 @@ def main() -> None:
         out = json_out_path
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(
-            to_json_report(func_groups, block_groups, segment_groups),
+            to_json_report(func_groups, block_groups, segment_groups, report_meta),
             "utf-8",
         )
         if not args.quiet:
@@ -794,16 +852,19 @@ def main() -> None:
         out = text_out_path
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(
-            "FUNCTION CLONES\n"
-            + to_text(func_groups)
-            + "\nBLOCK CLONES\n"
-            + to_text(block_groups)
-            + "\nSEGMENT CLONES\n"
-            + to_text(segment_groups),
+            to_text_report(
+                meta=report_meta,
+                func_groups=func_groups,
+                block_groups=block_groups,
+                segment_groups=segment_groups,
+            ),
             "utf-8",
         )
         if not args.quiet:
             console.print(f"[info]Text report saved:[/info] {out}")
+
+    if baseline_failure_code is not None:
+        sys.exit(baseline_failure_code)
 
     # Exit Codes
     if args.fail_on_new and (new_func or new_block):

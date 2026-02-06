@@ -619,6 +619,187 @@ def test_cli_main_outputs(
     assert "Text report saved" in out
 
 
+def test_cli_reports_include_audit_metadata_ok(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    html_out = tmp_path / "report.html"
+    json_out = tmp_path / "report.json"
+    text_out = tmp_path / "report.txt"
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--html",
+            str(html_out),
+            "--json",
+            str(json_out),
+            "--text",
+            str(text_out),
+            "--no-progress",
+        ],
+    )
+
+    payload = json.loads(json_out.read_text("utf-8"))
+    meta = payload["meta"]
+    assert meta["baseline_status"] == "ok"
+    assert meta["baseline_loaded"] is True
+    assert meta["baseline_version"] == __version__
+    assert meta["baseline_schema_version"] == BASELINE_SCHEMA_VERSION
+    assert meta["baseline_path"] == str(baseline_path.resolve())
+    assert "function_clones" in payload
+    assert "block_clones" in payload
+    assert "segment_clones" in payload
+
+    text = text_out.read_text("utf-8")
+    assert "REPORT METADATA" in text
+    assert "Baseline status: ok" in text
+    assert f"Baseline schema version: {BASELINE_SCHEMA_VERSION}" in text
+
+    html = html_out.read_text("utf-8")
+    assert "Report Provenance" in html
+    assert 'data-baseline-status="ok"' in html
+    assert "Baseline schema" in html
+
+
+def test_cli_reports_include_audit_metadata_missing_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    json_out = tmp_path / "report.json"
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(tmp_path / "missing-baseline.json"),
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
+    payload = json.loads(json_out.read_text("utf-8"))
+    meta = payload["meta"]
+    assert meta["baseline_status"] == "missing"
+    assert meta["baseline_loaded"] is False
+    assert meta["baseline_version"] is None
+    assert meta["baseline_schema_version"] is None
+
+
+def test_cli_reports_include_audit_metadata_version_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        baseline_version="0.0.0",
+    )
+    json_out = tmp_path / "report.json"
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline_path),
+                "--json",
+                str(json_out),
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "Baseline version mismatch" in out
+    payload = json.loads(json_out.read_text("utf-8"))
+    meta = payload["meta"]
+    assert meta["baseline_status"] == "mismatch"
+    assert meta["baseline_loaded"] is True
+    assert meta["baseline_version"] == "0.0.0"
+
+
+def test_cli_reports_include_audit_metadata_schema_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        schema_version=999,
+    )
+    json_out = tmp_path / "report.json"
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline_path),
+                "--json",
+                str(json_out),
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "Baseline schema version mismatch" in out
+    payload = json.loads(json_out.read_text("utf-8"))
+    meta = payload["meta"]
+    assert meta["baseline_status"] == "mismatch"
+    assert meta["baseline_loaded"] is True
+    assert meta["baseline_schema_version"] == 999
+
+
+def test_cli_reports_include_audit_metadata_invalid_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text("{broken json", "utf-8")
+    json_out = tmp_path / "report.json"
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline_path),
+                "--json",
+                str(json_out),
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "Invalid baseline file" in out
+    payload = json.loads(json_out.read_text("utf-8"))
+    meta = payload["meta"]
+    assert meta["baseline_status"] == "invalid"
+    assert meta["baseline_loaded"] is False
+
+
 @pytest.mark.parametrize(
     ("flag", "bad_name", "label", "expected"),
     [
@@ -753,6 +934,34 @@ def f2():
     out = capsys.readouterr().out
     assert "Baseline updated" in out
     assert baseline.exists()
+
+
+def test_cli_update_baseline_with_invalid_existing_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text("{broken json", "utf-8")
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--update-baseline",
+            "--no-progress",
+        ],
+    )
+    out = capsys.readouterr().out
+    assert "Baseline updated" in out
+    assert "Invalid baseline file" not in out
+    payload = json.loads(baseline_path.read_text("utf-8"))
+    assert payload.get("baseline_version") == __version__
+    assert payload.get("schema_version") == BASELINE_SCHEMA_VERSION
 
 
 def test_cli_baseline_missing_warning(

@@ -78,3 +78,5 @@ def test_html_report_escapes_user_content(tmp_path: Path) -> None:
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert 'onmouseover="alert(1)' not in html
+    assert 'data-qualname="&lt;script&gt;alert(1)&lt;/script&gt;"' in html
+    assert "&quot; onmouseover=&quot;alert(1).py" in html

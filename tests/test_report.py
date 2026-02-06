@@ -12,7 +12,7 @@ from codeclone.report import (
     prepare_segment_report_groups,
     to_json,
     to_json_report,
-    to_text,
+    to_text_report,
 )
 
 
@@ -67,13 +67,50 @@ def test_report_output_formats() -> None:
             },
         ],
     }
+    meta = {
+        "codeclone_version": "1.3.0",
+        "python_version": "3.13",
+        "baseline_path": "/tmp/codeclone.baseline.json",
+        "baseline_version": "1.3.0",
+        "baseline_schema_version": 1,
+        "baseline_python_version": "3.13",
+        "baseline_loaded": True,
+        "baseline_status": "ok",
+        "cache_path": "/tmp/cache.json",
+        "cache_used": True,
+    }
     json_out = to_json(groups)
-    report_out = to_json_report(groups, groups, {})
-    text_out = to_text(groups)
+    report_out = to_json_report(groups, groups, {}, meta)
+    text_out = to_text_report(
+        meta=meta,
+        func_groups=groups,
+        block_groups=groups,
+        segment_groups={},
+    )
 
     assert "group_count" in json_out
-    assert '"functions"' in report_out
+    assert '"meta"' in report_out
+    assert '"function_clones"' in report_out
+    assert '"baseline_schema_version": 1' in report_out
+    assert "REPORT METADATA" in text_out
+    assert "Baseline schema version: 1" in text_out
     assert "Clone group #1" in text_out
+
+
+def test_to_text_report_handles_missing_meta_fields() -> None:
+    text_out = to_text_report(
+        meta={},
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    assert "CodeClone version: n/a" in text_out
+    assert "Baseline status: n/a" in text_out
+    assert "Cache path:" not in text_out
+    assert "Cache used:" not in text_out
+    assert "FUNCTION CLONES\n(none)" in text_out
+    assert "BLOCK CLONES\n(none)" in text_out
+    assert "SEGMENT CLONES\n(none)" in text_out
 
 
 def test_segment_groups_internal_only() -> None:

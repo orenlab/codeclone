@@ -140,6 +140,11 @@ codeclone . \
   --text .cache/codeclone/report.txt
 ```
 
+All report formats include provenance metadata for auditability:
+`codeclone_version`, `python_version`, `baseline_path`, `baseline_version`,
+`baseline_schema_version`, `baseline_python_version`, `baseline_loaded`,
+`baseline_status` (and cache metadata when available).
+
 Generate an HTML report:
 
 ```bash

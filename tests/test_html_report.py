@@ -51,6 +51,81 @@ def test_html_report_generation(tmp_path: Path) -> None:
     assert "codebox" in html
 
 
+def test_html_report_group_and_item_metadata_attrs(tmp_path: Path) -> None:
+    f = tmp_path / "a.py"
+    f.write_text("def f():\n    return 1\n", "utf-8")
+    html = build_html_report(
+        func_groups={
+            "hash1": [
+                {
+                    "qualname": "pkg.mod:f",
+                    "filepath": str(f),
+                    "start_line": 1,
+                    "end_line": 2,
+                }
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        title="Attrs",
+    )
+    assert 'data-group-key="hash1"' in html
+    assert '<code class="gkey" title="hash1">hash1</code>' in html
+    assert 'data-qualname="pkg.mod:f"' in html
+    assert 'data-filepath="' in html
+    assert 'data-start-line="1"' in html
+    assert 'data-end-line="2"' in html
+
+
+def test_html_report_command_palette_full_actions_present() -> None:
+    html = build_html_report(func_groups={}, block_groups={}, segment_groups={})
+    assert "Export as PDF" in html
+    assert "window.print();" in html
+    assert "No matching commands" in html
+    assert "ArrowDown" in html
+    assert "ArrowUp" in html
+    assert "Chart feature coming soon" not in html
+    assert "Clone Group Distribution" in html
+    assert 'id="stats-dashboard" style="display: none;"' in html
+
+
+def test_html_report_includes_provenance_metadata(tmp_path: Path) -> None:
+    f = tmp_path / "a.py"
+    f.write_text("def f():\n    return 1\n", "utf-8")
+    html = build_html_report(
+        func_groups={
+            "h1": [
+                {
+                    "qualname": "f",
+                    "filepath": str(f),
+                    "start_line": 1,
+                    "end_line": 2,
+                }
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        report_meta={
+            "codeclone_version": "1.3.0",
+            "python_version": "3.13",
+            "baseline_path": "/repo/codeclone.baseline.json",
+            "baseline_version": "1.3.0",
+            "baseline_schema_version": 1,
+            "baseline_python_version": "3.13",
+            "baseline_loaded": True,
+            "baseline_status": "ok",
+            "cache_path": "/repo/.cache/codeclone/cache.json",
+            "cache_used": True,
+        },
+    )
+    assert "Report Provenance" in html
+    assert "CodeClone" in html
+    assert "Baseline schema" in html
+    assert 'data-baseline-status="ok"' in html
+    assert "/repo/codeclone.baseline.json" in html
+    assert 'data-cache-used="true"' in html
+
+
 def test_file_cache_reads_ranges(tmp_path: Path) -> None:
     f = tmp_path / "sample.py"
     f.write_text("\n".join([f"line{i}" for i in range(1, 21)]), "utf-8")
