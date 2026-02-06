@@ -536,9 +536,15 @@ def build_html_report(
             f'data-cache-used="{_escape(_meta_display(meta.get("cache_used")))}"',
         ]
     )
+
+    def _meta_row_class(label: str) -> str:
+        if label in {"Baseline", "Cache path"}:
+            return "meta-row meta-row-wide"
+        return "meta-row"
+
     meta_rows_html = "".join(
         (
-            '<div class="meta-row">'
+            f'<div class="{_meta_row_class(label)}">'
             f"<dt>{_escape(label)}</dt>"
             f"<dd>{_escape(_meta_display(value))}</dd>"
             "</div>"

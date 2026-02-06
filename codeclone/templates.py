@@ -133,6 +133,14 @@ html[data-theme="light"] {
   padding: 0;
 }
 
+.icon {
+  width: 1em;
+  height: 1em;
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -327,7 +335,7 @@ html[data-theme="light"] .topbar {
 .meta-grid {
   margin: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 8px 16px;
 }
 
@@ -352,7 +360,12 @@ html[data-theme="light"] .topbar {
   color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  word-break: break-all;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.meta-row-wide {
+  grid-column: 1 / -1;
 }
 
 .section-head {
@@ -1014,30 +1027,47 @@ html[data-theme="light"] .topbar {
 }
 
 .stat-card {
-  padding: 20px;
+  padding: 16px 18px;
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  text-align: center;
+  text-align: left;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  gap: 2px 12px;
+  align-items: center;
 }
 
 .stat-icon {
-  font-size: 32px;
-  margin-bottom: 8px;
-  opacity: 0.8;
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  width: 38px;
+  height: 38px;
+  color: var(--text-tertiary);
+  opacity: 0.92;
+}
+
+.stat-icon .icon {
+  width: 100%;
+  height: 100%;
 }
 
 .stat-value {
+  grid-column: 2;
+  grid-row: 1;
   font-size: var(--text-2xl);
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 4px;
+  line-height: 1.1;
 }
 
 .stat-label {
+  grid-column: 2;
+  grid-row: 2;
   font-size: var(--text-sm);
-  color: var(--text-tertiary);
-  margin-bottom: 8px;
+  color: var(--text-muted);
+  margin: 0;
 }
 
 .stat-trend {
@@ -1832,6 +1862,7 @@ ${segment_section}
 
     const metrics = collectSectionMetrics();
     const maxValue = Math.max(1, ...metrics.map((m) => m.value));
+    const yMax = Math.max(4, Math.ceil(maxValue / 4) * 4);
     const left = 52;
     const right = 18;
     const top = 16;
@@ -1848,7 +1879,7 @@ ${segment_section}
       ctx.lineTo(left + chartWidth, y);
       ctx.stroke();
 
-      const value = Math.round(maxValue - (maxValue * step) / 4);
+      const value = Math.round(yMax - (yMax * step) / 4);
       ctx.fillStyle = textMuted;
       ctx.font = '12px ' + sansFont;
       ctx.textAlign = 'right';
@@ -1859,7 +1890,7 @@ ${segment_section}
     const barWidth = Math.max(40, Math.min(90, slot * 0.56));
     metrics.forEach((metric, idx) => {
       const x = left + slot * idx + (slot - barWidth) / 2;
-      const barHeight = (metric.value / maxValue) * chartHeight;
+      const barHeight = (metric.value / yMax) * chartHeight;
       const y = top + chartHeight - barHeight;
       const color = styles.getPropertyValue(metric.colorVar).trim() || '#4f46e5';
 
