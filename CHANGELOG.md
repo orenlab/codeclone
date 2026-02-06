@@ -6,8 +6,9 @@
 
 This release improves clone-detection precision and explainability with deterministic
 normalization and CFG upgrades, adds segment-level internal clone reporting, refreshes
-the HTML report UI, and introduces baseline versioning. It is a breaking CI change for
-workflows that reuse old baselines.
+the HTML report UI, and introduces baseline versioning.
+
+**Breaking change:** CI workflows that reuse old baselines must regenerate them.
 
 ### Clone Detection Accuracy
 
