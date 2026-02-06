@@ -439,8 +439,12 @@ def build_html_report(
 
                     out.append(
                         '<div class="item">'
-                        f'<div class="item-head">{_escape(item["qualname"])}</div>'
-                        f'<div class="item-file">'
+                        f'<div class="item-head" title="{_escape(item["qualname"])}">'
+                        f"{_escape(item['qualname'])}"
+                        "</div>"
+                        f'<div class="item-file" '
+                        f'title="{_escape(item["filepath"])}:'
+                        f'{item["start_line"]}-{item["end_line"]}">'
                         f"{_escape(item['filepath'])}:"
                         f"{item['start_line']}-{item['end_line']}"
                         f"</div>"

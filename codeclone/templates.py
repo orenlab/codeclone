@@ -594,6 +594,9 @@ html[data-theme="light"] .topbar {
   font-weight: 600;
   color: var(--accent-primary);
   font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .item-file {
@@ -603,6 +606,9 @@ html[data-theme="light"] .topbar {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Code Display */
