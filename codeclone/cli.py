@@ -18,9 +18,11 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from rich.table import Table
+from rich.text import Text
 from rich.theme import Theme
 
 from . import __version__
+from . import ui_messages as ui
 from .baseline import BASELINE_SCHEMA_VERSION, Baseline
 from .cache import Cache, CacheEntry, FileStat, file_stat_signature
 from .errors import CacheError
@@ -162,8 +164,7 @@ def process_file(
 def print_banner() -> None:
     console.print(
         Panel.fit(
-            f"[bold white]CodeClone[/bold white] [dim]v{__version__}[/dim]\n"
-            "[italic]Architectural duplication detector[/italic]",
+            ui.banner_title(__version__),
             border_style="blue",
             padding=(0, 2),
         )
@@ -174,8 +175,9 @@ def _validate_output_path(path: str, *, expected_suffix: str, label: str) -> Pat
     out = Path(path).expanduser()
     if out.suffix.lower() != expected_suffix:
         console.print(
-            f"[error]Invalid {label} output extension: {out} "
-            f"(expected {expected_suffix}).[/error]"
+            ui.fmt_invalid_output_extension(
+                label=label, path=out, expected_suffix=expected_suffix
+            )
         )
         sys.exit(2)
     return out.resolve()
@@ -208,22 +210,58 @@ def _build_report_meta(
     }
 
 
-def _aligned_summary_lines(rows: list[tuple[str, int]]) -> list[str]:
-    if not rows:
-        return []
-    label_width = max(len(label) for label, _ in rows)
-    value_width = max(len(str(value)) for _, value in rows)
+def _summary_value_style(*, label: str, value: int) -> str:
+    if value == 0:
+        return "dim"
+    if label == ui.SUMMARY_LABEL_NEW_BASELINE:
+        return "bold red"
+    if label == ui.SUMMARY_LABEL_SUPPRESSED:
+        return "yellow"
+    return "bold green"
+
+
+def _build_summary_rows(
+    *,
+    files_found: int,
+    files_analyzed: int,
+    cache_hits: int,
+    files_skipped: int,
+    func_clones_count: int,
+    block_clones_count: int,
+    segment_clones_count: int,
+    suppressed_segment_groups: int,
+    new_clones_count: int,
+) -> list[tuple[str, int]]:
     return [
-        f"  {label + ':':<{label_width + 1}} {value:>{value_width}}"
-        for label, value in rows
+        (ui.SUMMARY_LABEL_FILES_FOUND, files_found),
+        (ui.SUMMARY_LABEL_FILES_ANALYZED, files_analyzed),
+        (ui.SUMMARY_LABEL_CACHE_HITS, cache_hits),
+        (ui.SUMMARY_LABEL_FILES_SKIPPED, files_skipped),
+        (ui.SUMMARY_LABEL_FUNCTION, func_clones_count),
+        (ui.SUMMARY_LABEL_BLOCK, block_clones_count),
+        (ui.SUMMARY_LABEL_SEGMENT, segment_clones_count),
+        (ui.SUMMARY_LABEL_SUPPRESSED, suppressed_segment_groups),
+        (ui.SUMMARY_LABEL_NEW_BASELINE, new_clones_count),
     ]
+
+
+def _build_summary_table(rows: list[tuple[str, int]]) -> Table:
+    summary_table = Table(title=ui.SUMMARY_TITLE, show_header=True)
+    summary_table.add_column("Metric")
+    summary_table.add_column("Value", justify="right")
+    for label, value in rows:
+        summary_table.add_row(
+            label,
+            Text(str(value), style=_summary_value_style(label=label, value=value)),
+        )
+    return summary_table
 
 
 def _print_summary(
     *,
     quiet: bool,
     files_found: int,
-    files_parsed: int,
+    files_analyzed: int,
     cache_hits: int,
     files_skipped: int,
     func_clones_count: int,
@@ -232,58 +270,43 @@ def _print_summary(
     suppressed_segment_groups: int,
     new_clones_count: int,
 ) -> None:
-    invariant_ok = files_found == (files_parsed + cache_hits + files_skipped)
-    input_rows = [
-        ("Files found", files_found),
-        ("Files parsed", files_parsed),
-        ("Cache hits", cache_hits),
-        ("Files skipped", files_skipped),
-    ]
-    clone_rows = [
-        ("Function", func_clones_count),
-        ("Block", block_clones_count),
-        ("Segment", segment_clones_count),
-        ("Suppressed", suppressed_segment_groups),
-        ("New (baseline)", new_clones_count),
-    ]
+    invariant_ok = files_found == (files_analyzed + cache_hits + files_skipped)
+    rows = _build_summary_rows(
+        files_found=files_found,
+        files_analyzed=files_analyzed,
+        cache_hits=cache_hits,
+        files_skipped=files_skipped,
+        func_clones_count=func_clones_count,
+        block_clones_count=block_clones_count,
+        segment_clones_count=segment_clones_count,
+        suppressed_segment_groups=suppressed_segment_groups,
+        new_clones_count=new_clones_count,
+    )
 
     if quiet:
-        console.print("Analysis Summary")
+        console.print(ui.SUMMARY_TITLE)
         console.print(
-            "Input: "
-            f"found={files_found} parsed={files_parsed} "
-            f"cache_hits={cache_hits} skipped={files_skipped}"
+            ui.fmt_summary_compact_input(
+                found=files_found,
+                analyzed=files_analyzed,
+                cache_hits=cache_hits,
+                skipped=files_skipped,
+            )
         )
         console.print(
-            "Clone groups: "
-            f"function={func_clones_count} block={block_clones_count} "
-            f"segment={segment_clones_count} suppressed={suppressed_segment_groups} "
-            f"new={new_clones_count}"
+            ui.fmt_summary_compact_clones(
+                function=func_clones_count,
+                block=block_clones_count,
+                segment=segment_clones_count,
+                suppressed=suppressed_segment_groups,
+                new=new_clones_count,
+            )
         )
     else:
-        input_table = Table(title="Input", show_header=False)
-        input_table.add_column("Metric", style="dim")
-        input_table.add_column("Value", justify="right")
-        for label, value in input_rows:
-            input_table.add_row(label, str(value))
-
-        clone_table = Table(title="Clone groups", show_header=False)
-        clone_table.add_column("Metric", style="dim")
-        clone_table.add_column("Value", justify="right")
-        for label, value in clone_rows:
-            clone_table.add_row(label, str(value))
-
-        console.print("[bold]Analysis Summary[/bold]")
-        console.print("")
-        console.print(input_table)
-        console.print("")
-        console.print(clone_table)
+        console.print(_build_summary_table(rows))
 
     if not invariant_ok:
-        console.print(
-            "[warning]Summary accounting mismatch: "
-            "files_found != files_parsed + cache_hits + files_skipped[/warning]"
-        )
+        console.print(f"[warning]{ui.WARN_SUMMARY_ACCOUNTING_MISMATCH}[/warning]")
 
 
 def main() -> None:
@@ -295,8 +318,8 @@ def main() -> None:
     ap.add_argument(
         "--version",
         action="version",
-        version=f"CodeClone {__version__}",
-        help="Print the CodeClone version and exit.",
+        version=ui.version_output(__version__),
+        help=ui.HELP_VERSION,
     )
 
     # Core Arguments
@@ -305,7 +328,7 @@ def main() -> None:
         "root",
         nargs="?",
         default=".",
-        help="Project root directory to scan.",
+        help=ui.HELP_ROOT,
     )
 
     # Tuning
@@ -314,33 +337,33 @@ def main() -> None:
         "--min-loc",
         type=int,
         default=15,
-        help="Minimum Lines of Code (LOC) to consider.",
+        help=ui.HELP_MIN_LOC,
     )
     tune_group.add_argument(
         "--min-stmt",
         type=int,
         default=6,
-        help="Minimum AST statements to consider.",
+        help=ui.HELP_MIN_STMT,
     )
     tune_group.add_argument(
         "--processes",
         type=int,
         default=4,
-        help="Number of parallel worker processes.",
+        help=ui.HELP_PROCESSES,
     )
     tune_group.add_argument(
         "--cache-path",
         dest="cache_path",
         metavar="FILE",
         default=None,
-        help="Path to the cache file. Default: <root>/.cache/codeclone/cache.json.",
+        help=ui.HELP_CACHE_PATH,
     )
     tune_group.add_argument(
         "--cache-dir",
         dest="cache_path",
         metavar="FILE",
         default=None,
-        help="Legacy alias for --cache-path.",
+        help=ui.HELP_CACHE_DIR_LEGACY,
     )
 
     # Baseline & CI
@@ -348,32 +371,29 @@ def main() -> None:
     ci_group.add_argument(
         "--baseline",
         default="codeclone.baseline.json",
-        help="Path to the baseline file (stored in repo).",
+        help=ui.HELP_BASELINE,
     )
     ci_group.add_argument(
         "--update-baseline",
         action="store_true",
-        help="Overwrite the baseline file with current results.",
+        help=ui.HELP_UPDATE_BASELINE,
     )
     ci_group.add_argument(
         "--fail-on-new",
         action="store_true",
-        help="Exit with error if NEW clones (not in baseline) are detected.",
+        help=ui.HELP_FAIL_ON_NEW,
     )
     ci_group.add_argument(
         "--fail-threshold",
         type=int,
         default=-1,
         metavar="MAX_CLONES",
-        help=(
-            "Exit with error if total clone groups (function + block) "
-            "exceed this number."
-        ),
+        help=ui.HELP_FAIL_THRESHOLD,
     )
     ci_group.add_argument(
         "--ci",
         action="store_true",
-        help="CI preset: --fail-on-new --no-color --quiet.",
+        help=ui.HELP_CI,
     )
 
     # Output
@@ -382,39 +402,39 @@ def main() -> None:
         "--html",
         dest="html_out",
         metavar="FILE",
-        help="Generate an HTML report to FILE.",
+        help=ui.HELP_HTML,
     )
     out_group.add_argument(
         "--json",
         dest="json_out",
         metavar="FILE",
-        help="Generate a JSON report to FILE.",
+        help=ui.HELP_JSON,
     )
     out_group.add_argument(
         "--text",
         dest="text_out",
         metavar="FILE",
-        help="Generate a text report to FILE.",
+        help=ui.HELP_TEXT,
     )
     out_group.add_argument(
         "--no-progress",
         action="store_true",
-        help="Disable the progress bar (recommended for CI logs).",
+        help=ui.HELP_NO_PROGRESS,
     )
     out_group.add_argument(
         "--no-color",
         action="store_true",
-        help="Disable ANSI colors in output.",
+        help=ui.HELP_NO_COLOR,
     )
     out_group.add_argument(
         "--quiet",
         action="store_true",
-        help="Minimize output (still shows warnings and errors).",
+        help=ui.HELP_QUIET,
     )
     out_group.add_argument(
         "--verbose",
         action="store_true",
-        help="Print detailed hash identifiers for new clones.",
+        help=ui.HELP_VERBOSE,
     )
 
     cache_path_from_args = any(
@@ -441,14 +461,14 @@ def main() -> None:
     try:
         root_path = Path(args.root).resolve()
         if not root_path.exists():
-            console.print(f"[error]Root path does not exist: {root_path}[/error]")
+            console.print(ui.ERR_ROOT_NOT_FOUND.format(path=root_path))
             sys.exit(1)
     except Exception as e:
-        console.print(f"[error]Invalid root path: {e}[/error]")
+        console.print(ui.ERR_INVALID_ROOT_PATH.format(error=e))
         sys.exit(1)
 
     if not args.quiet:
-        console.print(f"[info]Scanning root:[/info] {root_path}")
+        console.print(ui.fmt_scanning_root(root_path))
 
     html_out_path: Path | None = None
     json_out_path: Path | None = None
@@ -479,12 +499,9 @@ def main() -> None:
                 legacy_resolved = LEGACY_CACHE_PATH
             if legacy_resolved != cache_path:
                 console.print(
-                    "[warning]Legacy cache file found at: "
-                    f"{legacy_resolved}.[/warning]\n"
-                    "[warning]Cache is now stored per-project at: "
-                    f"{cache_path}.[/warning]\n"
-                    "[warning]Please delete the legacy cache file and add "
-                    ".cache/ to .gitignore.[/warning]"
+                    ui.fmt_legacy_cache_warning(
+                        legacy_path=legacy_resolved, new_path=cache_path
+                    )
                 )
     cache = Cache(cache_path)
     cache.load()
@@ -495,7 +512,7 @@ def main() -> None:
     all_blocks: list[dict[str, Any]] = []
     all_segments: list[dict[str, Any]] = []
     files_found = 0
-    files_parsed = 0
+    files_analyzed = 0
     cache_hits = 0
     files_skipped = 0
     files_to_process: list[str] = []
@@ -506,7 +523,7 @@ def main() -> None:
         try:
             stat = file_stat_signature(fp)
         except OSError as e:
-            return None, None, f"[warning]Skipping file {fp}: {e}[/warning]"
+            return None, None, ui.fmt_skipping_file(fp, e)
         cached = cache.get_file_entry(fp)
         return stat, cached, None
 
@@ -520,7 +537,7 @@ def main() -> None:
                 args.min_stmt,
             )
         except Exception as e:
-            console.print(f"[warning]Worker failed: {e}[/warning]")
+            console.print(ui.fmt_worker_failed(e))
             return None
 
     def _safe_future_result(future: Any) -> tuple[ProcessingResult | None, str | None]:
@@ -562,9 +579,7 @@ def main() -> None:
                 else:
                     files_to_process.append(fp)
         else:
-            with console.status(
-                "[bold green]Discovering Python files...", spinner="dots"
-            ):
+            with console.status(ui.STATUS_DISCOVERING, spinner="dots"):
                 for fp in iter_py_files(str(root_path)):
                     files_found += 1
                     stat, cached, warn = _get_cached_entry(fp)
@@ -595,7 +610,7 @@ def main() -> None:
                     else:
                         files_to_process.append(fp)
     except Exception as e:
-        console.print(f"[error]Scan failed: {e}[/error]")
+        console.print(ui.ERR_SCAN_FAILED.format(error=e))
         sys.exit(1)
 
     total_files = len(files_to_process)
@@ -605,7 +620,7 @@ def main() -> None:
     if total_files > 0:
 
         def handle_result(result: ProcessingResult) -> None:
-            nonlocal files_parsed, files_skipped
+            nonlocal files_analyzed, files_skipped
             if result.success and result.stat:
                 cache.put_file_entry(
                     result.filepath,
@@ -614,7 +629,7 @@ def main() -> None:
                     result.blocks or [],
                     result.segments or [],
                 )
-                files_parsed += 1
+                files_analyzed += 1
                 if result.units:
                     all_units.extend([asdict(u) for u in result.units])
                 if result.blocks:
@@ -649,9 +664,7 @@ def main() -> None:
                         progress.advance(task)
             else:
                 if not args.quiet:
-                    console.print(
-                        f"[info]Processing {total_files} changed files...[/info]"
-                    )
+                    console.print(ui.fmt_processing_changed(total_files))
                 for fp in files_to_process:
                     result = _safe_process_file(fp)
                     if result is not None:
@@ -664,9 +677,7 @@ def main() -> None:
             with ProcessPoolExecutor(max_workers=args.processes) as executor:
                 if args.no_progress:
                     if not args.quiet:
-                        console.print(
-                            f"[info]Processing {total_files} changed files...[/info]"
-                        )
+                        console.print(ui.fmt_processing_changed(total_files))
 
                     # Process in batches to manage memory
                     for i in range(0, total_files, BATCH_SIZE):
@@ -695,10 +706,7 @@ def main() -> None:
                                 files_skipped += 1
                                 reason = err
                                 failed_files.append(f"{fp}: {reason}")
-                                console.print(
-                                    "[warning]Failed to process batch item: "
-                                    f"{reason}[/warning]"
-                                )
+                                console.print(ui.fmt_batch_item_failed(reason))
                             else:
                                 files_skipped += 1
 
@@ -745,23 +753,16 @@ def main() -> None:
                                     failed_files.append(f"{fp}: {reason}")
                                     # Should rarely happen due to try/except
                                     # in process_file.
-                                    console.print(
-                                        f"[warning]Worker failed: {reason}[/warning]"
-                                    )
+                                    console.print(ui.fmt_worker_failed(reason))
                                 else:
                                     files_skipped += 1
                                 progress.advance(task)
         except (OSError, RuntimeError, PermissionError) as e:
-            console.print(
-                "[warning]Parallel processing unavailable, "
-                f"falling back to sequential: {e}[/warning]"
-            )
+            console.print(ui.fmt_parallel_fallback(e))
             process_sequential(with_progress=not args.no_progress)
 
     if failed_files:
-        console.print(
-            f"\n[warning]⚠ {len(failed_files)} files failed to process:[/warning]"
-        )
+        console.print(ui.fmt_failed_files_header(len(failed_files)))
         for failure in failed_files[:10]:
             console.print(f"  • {failure}")
         if len(failed_files) > 10:
@@ -779,9 +780,9 @@ def main() -> None:
         try:
             cache.save()
         except CacheError as e:
-            console.print(f"[warning]Failed to save cache: {e}[/warning]")
+            console.print(ui.fmt_cache_save_failed(e))
     else:
-        with console.status("[bold green]Grouping clones...", spinner="dots"):
+        with console.status(ui.STATUS_GROUPING, spinner="dots"):
             func_groups = build_groups(all_units)
             block_groups = build_block_groups(all_blocks)
             segment_groups = build_segment_groups(all_segments)
@@ -791,7 +792,7 @@ def main() -> None:
             try:
                 cache.save()
             except CacheError as e:
-                console.print(f"[warning]Failed to save cache: {e}[/warning]")
+                console.print(ui.fmt_cache_save_failed(e))
 
     # Reporting
     func_clones_count = len(func_groups)
@@ -815,11 +816,7 @@ def main() -> None:
         except ValueError as e:
             baseline_status = "invalid"
             if not args.update_baseline:
-                console.print(
-                    "[error]Invalid baseline file.[/error]\n"
-                    f"{e}\n"
-                    "Please regenerate the baseline with --update-baseline."
-                )
+                console.print(ui.fmt_invalid_baseline(e))
                 baseline_failure_code = 2
         else:
             baseline_loaded = True
@@ -828,19 +825,13 @@ def main() -> None:
                 if baseline.baseline_version != __version__:
                     baseline_status = "mismatch"
                     if baseline.baseline_version is None:
-                        console.print(
-                            "[error]Baseline version mismatch.[/error]\n"
-                            "Baseline version missing (legacy baseline format).\n"
-                            f"Current version: {__version__}.\n"
-                            "Please regenerate the baseline with --update-baseline."
-                        )
+                        console.print(ui.fmt_baseline_version_missing(__version__))
                     else:
                         console.print(
-                            "[error]Baseline version mismatch.[/error]\n"
-                            "Baseline was generated with CodeClone "
-                            f"{baseline.baseline_version}.\n"
-                            f"Current version: {__version__}.\n"
-                            "Please regenerate the baseline with --update-baseline."
+                            ui.fmt_baseline_version_mismatch(
+                                baseline_version=baseline.baseline_version,
+                                current_version=__version__,
+                            )
                         )
                     baseline_failure_code = 2
                 if (
@@ -849,10 +840,10 @@ def main() -> None:
                 ):
                     baseline_status = "mismatch"
                     console.print(
-                        "[error]Baseline schema version mismatch.[/error]\n"
-                        f"Baseline schema: {baseline.schema_version}. "
-                        f"Current schema: {BASELINE_SCHEMA_VERSION}.\n"
-                        "Please regenerate the baseline with --update-baseline."
+                        ui.fmt_baseline_schema_mismatch(
+                            baseline_schema=baseline.schema_version,
+                            current_schema=BASELINE_SCHEMA_VERSION,
+                        )
                     )
                     baseline_failure_code = 2
             if not args.update_baseline and baseline.python_version:
@@ -860,28 +851,17 @@ def main() -> None:
                 if baseline.python_version != current_version:
                     baseline_status = "mismatch"
                     console.print(
-                        "[warning]Baseline Python version mismatch.[/warning]\n"
-                        "Baseline was generated with Python "
-                        f"{baseline.python_version}.\n"
-                        f"Current interpreter: Python {current_version}."
+                        ui.fmt_baseline_python_mismatch(
+                            baseline_python=baseline.python_version,
+                            current_python=current_version,
+                        )
                     )
                     if args.fail_on_new:
-                        console.print(
-                            "[error]Baseline checks require the same Python version to "
-                            "ensure deterministic results. Please regenerate the "
-                            "baseline "
-                            "using the current interpreter.[/error]"
-                        )
+                        console.print(ui.ERR_BASELINE_SAME_PYTHON_REQUIRED)
                         baseline_failure_code = 2
     else:
         if not args.update_baseline:
-            console.print(
-                "[warning]Baseline file not found at: [bold]"
-                f"{baseline_path}"
-                "[/bold][/warning]\n"
-                "[dim]Comparing against an empty baseline. "
-                "Use --update-baseline to create it.[/dim]"
-            )
+            console.print(ui.fmt_path(ui.WARN_BASELINE_MISSING, baseline_path))
 
     if args.update_baseline:
         new_baseline = Baseline.from_groups(
@@ -893,7 +873,7 @@ def main() -> None:
             schema_version=BASELINE_SCHEMA_VERSION,
         )
         new_baseline.save()
-        console.print(f"[success]✔ Baseline updated:[/success] {baseline_path}")
+        console.print(ui.fmt_path(ui.SUCCESS_BASELINE_UPDATED, baseline_path))
         # When updating, we don't fail on new, we just saved the new state.
         # But we might still want to print the summary.
 
@@ -913,7 +893,7 @@ def main() -> None:
     _print_summary(
         quiet=args.quiet,
         files_found=files_found,
-        files_parsed=files_parsed,
+        files_analyzed=files_analyzed,
         cache_hits=cache_hits,
         files_skipped=files_skipped,
         func_clones_count=func_clones_count,
@@ -925,6 +905,17 @@ def main() -> None:
 
     # Outputs
     html_report_path: str | None = None
+    output_notice_printed = False
+
+    def _print_output_notice(message: str) -> None:
+        nonlocal output_notice_printed
+        if args.quiet:
+            return
+        if not output_notice_printed:
+            console.print("")
+            output_notice_printed = True
+        console.print(message)
+
     if html_out_path:
         out = html_out_path
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -941,8 +932,7 @@ def main() -> None:
             "utf-8",
         )
         html_report_path = str(out)
-        if not args.quiet:
-            console.print(f"[info]HTML report saved:[/info] {out}")
+        _print_output_notice(ui.fmt_path(ui.INFO_HTML_REPORT_SAVED, out))
 
     if json_out_path:
         out = json_out_path
@@ -951,8 +941,7 @@ def main() -> None:
             to_json_report(func_groups, block_groups, segment_groups, report_meta),
             "utf-8",
         )
-        if not args.quiet:
-            console.print(f"[info]JSON report saved:[/info] {out}")
+        _print_output_notice(ui.fmt_path(ui.INFO_JSON_REPORT_SAVED, out))
 
     if text_out_path:
         out = text_out_path
@@ -966,8 +955,7 @@ def main() -> None:
             ),
             "utf-8",
         )
-        if not args.quiet:
-            console.print(f"[info]Text report saved:[/info] {out}")
+        _print_output_notice(ui.fmt_path(ui.INFO_TEXT_REPORT_SAVED, out))
 
     if baseline_failure_code is not None:
         sys.exit(baseline_failure_code)
@@ -978,40 +966,34 @@ def main() -> None:
         if html_report_path is None and default_report.exists():
             html_report_path = str(default_report)
 
-        console.print("\n[error]FAILED: New code clones detected.[/error]")
-        console.print("\nSummary:")
-        console.print(f"- New function clone groups: {len(new_func)}")
-        console.print(f"- New block clone groups: {len(new_block)}")
+        console.print(f"\n{ui.FAIL_NEW_TITLE}")
+        console.print(f"\n{ui.FAIL_NEW_SUMMARY_TITLE}")
+        console.print(ui.FAIL_NEW_FUNCTION.format(count=len(new_func)))
+        console.print(ui.FAIL_NEW_BLOCK.format(count=len(new_block)))
         if html_report_path:
-            console.print("\nSee detailed report:")
+            console.print(f"\n{ui.FAIL_NEW_REPORT_TITLE}")
             console.print(f"  {html_report_path}")
-        console.print("\nTo accept these clones as technical debt, run:")
-        console.print("  codeclone . --update-baseline")
+        console.print(f"\n{ui.FAIL_NEW_ACCEPT_TITLE}")
+        console.print(ui.FAIL_NEW_ACCEPT_COMMAND)
 
         if args.verbose:
             if new_func:
-                console.print("\nDetails (function clone hashes):")
+                console.print(f"\n{ui.FAIL_NEW_DETAIL_FUNCTION}")
                 for h in sorted(new_func):
                     console.print(f"- {h}")
             if new_block:
-                console.print("\nDetails (block clone hashes):")
+                console.print(f"\n{ui.FAIL_NEW_DETAIL_BLOCK}")
                 for h in sorted(new_block):
                     console.print(f"- {h}")
         sys.exit(3)
 
     if 0 <= args.fail_threshold < (func_clones_count + block_clones_count):
         total = func_clones_count + block_clones_count
-        console.print(
-            f"\n[error]❌ FAILED: Total clones ({total}) "
-            f"exceed threshold ({args.fail_threshold})![/error]"
-        )
+        console.print(ui.fmt_fail_threshold(total=total, threshold=args.fail_threshold))
         sys.exit(2)
 
     if not args.update_baseline and not args.fail_on_new and new_clones_count > 0:
-        console.print(
-            "\n[warning]New clones detected but --fail-on-new not set.[/warning]\n"
-            "Run with --update-baseline to accept them as technical debt."
-        )
+        console.print(ui.WARN_NEW_CLONES_WITHOUT_FAIL)
 
 
 if __name__ == "__main__":

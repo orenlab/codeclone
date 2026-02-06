@@ -78,6 +78,11 @@ codeclone . --update-baseline
 - Added `--ci` preset (`--fail-on-new --no-color --quiet`).
 - Improved `--fail-on-new` output with aggregated counts and clear next steps.
 - Added strict report output extension validation (`.html`, `.json`, `.txt`).
+- Centralized user-facing CLI strings in `codeclone/ui_messages.py` to keep text contracts
+  consistent and maintainable.
+- Refined Summary output: a single compact table with deterministic metric order and
+  explicit `Files analyzed` semantics (cache-aware), plus stable compact output for
+  `--quiet/--ci`.
 
 ### HTML Report UI
 

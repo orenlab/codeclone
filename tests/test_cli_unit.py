@@ -1,11 +1,14 @@
 import os
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
+from rich.text import Text
 
 import codeclone.cli as cli
 from codeclone import __version__
+from codeclone import ui_messages as ui
 from codeclone.cli import expand_path, process_file
 from codeclone.normalize import NormalizationConfig
 
@@ -113,17 +116,42 @@ def test_cli_help_text_consistency(
     assert "block) exceed this number" in out
 
 
-def test_aligned_summary_lines_empty() -> None:
-    assert cli._aligned_summary_lines([]) == []
+def test_summary_value_style_mapping() -> None:
+    assert cli._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=0) == "dim"
+    assert (
+        cli._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=2)
+        == "bold green"
+    )
+    assert (
+        cli._summary_value_style(label=ui.SUMMARY_LABEL_SUPPRESSED, value=1) == "yellow"
+    )
+    assert (
+        cli._summary_value_style(label=ui.SUMMARY_LABEL_NEW_BASELINE, value=3)
+        == "bold red"
+    )
 
 
-def test_aligned_summary_lines_non_empty() -> None:
-    lines = cli._aligned_summary_lines([("Files found", 12), ("Cache hits", 3)])
-    assert len(lines) == 2
-    assert "Files found:" in lines[0]
-    assert "12" in lines[0]
-    assert "Cache hits:" in lines[1]
-    assert "3" in lines[1]
+def test_build_summary_table_rows_and_styles() -> None:
+    rows = cli._build_summary_rows(
+        files_found=2,
+        files_analyzed=0,
+        cache_hits=2,
+        files_skipped=0,
+        func_clones_count=1,
+        block_clones_count=0,
+        segment_clones_count=0,
+        suppressed_segment_groups=1,
+        new_clones_count=1,
+    )
+    table = cli._build_summary_table(rows)
+    assert table.title == ui.SUMMARY_TITLE
+    assert table.columns[0]._cells == [label for label, _ in rows]
+    value_cells = table.columns[1]._cells
+    assert isinstance(value_cells[0], Text)
+    assert str(value_cells[0]) == "2"
+    assert cast(Text, value_cells[1]).style == "dim"
+    assert cast(Text, value_cells[7]).style == "yellow"
+    assert cast(Text, value_cells[8]).style == "bold red"
 
 
 def test_print_summary_invariant_warning(
@@ -133,7 +161,7 @@ def test_print_summary_invariant_warning(
     cli._print_summary(
         quiet=False,
         files_found=1,
-        files_parsed=0,
+        files_analyzed=0,
         cache_hits=0,
         files_skipped=0,
         func_clones_count=0,
