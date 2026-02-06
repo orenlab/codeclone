@@ -111,3 +111,36 @@ def test_cli_help_text_consistency(
     assert "CI preset: --fail-on-new --no-color --quiet." in out
     assert "total clone groups (function +" in out
     assert "block) exceed this number" in out
+
+
+def test_aligned_summary_lines_empty() -> None:
+    assert cli._aligned_summary_lines([]) == []
+
+
+def test_aligned_summary_lines_non_empty() -> None:
+    lines = cli._aligned_summary_lines([("Files found", 12), ("Cache hits", 3)])
+    assert len(lines) == 2
+    assert "Files found:" in lines[0]
+    assert "12" in lines[0]
+    assert "Cache hits:" in lines[1]
+    assert "3" in lines[1]
+
+
+def test_print_summary_invariant_warning(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    cli._print_summary(
+        quiet=False,
+        files_found=1,
+        files_parsed=0,
+        cache_hits=0,
+        files_skipped=0,
+        func_clones_count=0,
+        block_clones_count=0,
+        segment_clones_count=0,
+        suppressed_segment_groups=0,
+        new_clones_count=0,
+    )
+    out = capsys.readouterr().out
+    assert "Summary accounting mismatch" in out

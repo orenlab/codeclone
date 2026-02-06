@@ -3,6 +3,8 @@ from typing import Any, cast
 
 import pytest
 
+import codeclone.normalize as normalize_mod
+from codeclone.meta_markers import CFG_META_PREFIX
 from codeclone.normalize import (
     NormalizationConfig,
     normalized_ast_dump,
@@ -131,6 +133,21 @@ def f(x):
 def test_normalization_commutative_binop_reorders() -> None:
     src1 = """
 def f():
+    return 1 + 2
+"""
+    src2 = """
+def f():
+    return 2 + 1
+"""
+    cfg = NormalizationConfig(normalize_constants=False)
+    a1 = ast.parse(src1).body[0]
+    a2 = ast.parse(src2).body[0]
+    assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
+
+
+def test_normalization_commutative_name_operands_not_reordered() -> None:
+    src1 = """
+def f():
     return a + b
 """
     src2 = """
@@ -144,7 +161,7 @@ def f():
     )
     a1 = ast.parse(src1).body[0]
     a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
+    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
 
 
 def test_normalization_commutative_binop_side_effects_not_reordered() -> None:
@@ -164,6 +181,123 @@ def f():
     a1 = ast.parse(src1).body[0]
     a2 = ast.parse(src2).body[0]
     assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
+
+
+def test_normalization_preserves_call_target_names() -> None:
+    src1 = """
+def f(x):
+    return load_user(x)
+"""
+    src2 = """
+def f(x):
+    return delete_user(x)
+"""
+    cfg = NormalizationConfig()
+    a1 = ast.parse(src1).body[0]
+    a2 = ast.parse(src2).body[0]
+    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
+
+
+def test_normalization_preserves_call_target_attributes() -> None:
+    src1 = """
+def f():
+    return svc.load_user()
+"""
+    src2 = """
+def f():
+    return svc.delete_user()
+"""
+    cfg = NormalizationConfig()
+    a1 = ast.parse(src1).body[0]
+    a2 = ast.parse(src2).body[0]
+    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
+
+
+def test_normalization_call_keyword_values_are_visited() -> None:
+    src1 = """
+def f():
+    x = 1
+    return process(payload=x)
+"""
+    src2 = """
+def f():
+    y = 2
+    return process(payload=y)
+"""
+    cfg = NormalizationConfig()
+    a1 = ast.parse(src1).body[0]
+    a2 = ast.parse(src2).body[0]
+    assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
+
+
+def test_normalization_preserves_attribute_call_target_with_call_value() -> None:
+    src1 = """
+def f():
+    return factory_a().run()
+"""
+    src2 = """
+def f():
+    return factory_b().run()
+"""
+    cfg = NormalizationConfig()
+    a1 = ast.parse(src1).body[0]
+    a2 = ast.parse(src2).body[0]
+    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
+
+
+def test_normalization_non_name_non_attribute_call_target() -> None:
+    src1 = """
+def f():
+    handlers = [run]
+    return handlers[0]()
+"""
+    src2 = """
+def f():
+    callbacks = [run]
+    return callbacks[0]()
+"""
+    cfg = NormalizationConfig()
+    a1 = ast.parse(src1).body[0]
+    a2 = ast.parse(src2).body[0]
+    assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
+
+
+def test_commutative_operand_recursive_and_constant_guards() -> None:
+    nested = ast.parse("(1 + 2) + 3", mode="eval").body
+    assert isinstance(nested, ast.BinOp)
+    assert normalize_mod._is_proven_commutative_operand(nested, ast.Add())
+    assert not normalize_mod._is_proven_commutative_constant(True, ast.BitOr())
+    assert not normalize_mod._is_proven_commutative_constant("x", ast.Add())
+    assert not normalize_mod._is_proven_commutative_constant(1, ast.Sub())
+
+
+def test_normalization_preserves_semantic_marker_names() -> None:
+    fn = ast.FunctionDef(
+        name="f",
+        args=ast.arguments(
+            posonlyargs=[],
+            args=[],
+            kwonlyargs=[],
+            kw_defaults=[],
+            defaults=[],
+        ),
+        body=[
+            ast.Expr(
+                value=ast.Name(
+                    id=f"{CFG_META_PREFIX}MATCH_PATTERN:MatchValue(Constant(value=1))",
+                    ctx=ast.Load(),
+                )
+            )
+        ],
+        decorator_list=[],
+    )
+    module = ast.Module(body=[fn], type_ignores=[])
+    module = ast.fix_missing_locations(module)
+    node = module.body[0]
+    assert isinstance(node, ast.FunctionDef)
+    cfg = NormalizationConfig()
+    dump = normalized_ast_dump(node, cfg)
+    assert f"{CFG_META_PREFIX}MATCH_PATTERN:MatchValue(Constant(value=1))" in dump
 
 
 def test_normalization_non_commutative_binop_not_reordered() -> None:

@@ -12,12 +12,16 @@ workflows that reuse old baselines.
 ### Clone Detection Accuracy
 
 - **Commutative normalization**  
-  Canonicalized operand order for `+`, `*`, `|`, `&`, `^` when operands are free of side
-  effects, enabling safe detection of reordered expressions.
+  Canonicalized operand order for `+`, `*`, `|`, `&`, `^` only for provably safe constant
+  domains. Symbolic operands are no longer reordered.
 
 - **Local logical equivalence**  
   Normalized `not (x in y)` to `x not in y` and `not (x is y)` to `x is not y` without
   De Morgan transformations or broader boolean rewrites.
+
+- **Call-target preservation**  
+  Kept symbolic call targets during normalization to avoid conflating different APIs
+  (for example, `load_user(...)` vs `delete_user(...)`).
 
 ### CFG Precision
 
@@ -28,6 +32,19 @@ workflows that reuse old baselines.
   Linked `try/except` only to statements that may raise (calls, attribute access, indexing,
   `await`, `yield from`, `raise`) instead of blanket links.
 
+### Detection Integrity
+
+- **Internal CFG marker hardening**  
+  Switched CFG metadata markers to an internal namespace (`__CC_META__::...`) emitted as
+  synthetic AST names, preventing collisions with user string literals.
+
+- **Ordered control-flow semantics**  
+  Modeled `break`/`continue` as terminating loop transitions, added correct `for/while ... else`
+  semantics, preserved `match case` evaluation order, and preserved `except` handler order.
+
+- **Deterministic traversal order**  
+  Sorted Python file discovery to stabilize processing and report ordering across runs/platforms.
+
 ### Segment‑Level Detection
 
 - **Window fingerprints**  
@@ -36,6 +53,7 @@ workflows that reuse old baselines.
 - **Candidate generation**  
   Used an order‑insensitive signature for candidate grouping and a strict segment hash for
   final confirmation. Segment matches do not affect baseline or CI failure logic.
+
 - **Noise reduction (report‑only)**  
   Merged overlapping segment windows into a single span per function and suppressed
   boilerplate-only groups (attribute assignment wiring) with deterministic AST criteria.

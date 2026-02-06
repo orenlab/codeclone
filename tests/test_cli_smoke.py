@@ -39,7 +39,8 @@ def f():
     result = run_cli([str(tmp_path)], cwd=tmp_path)
 
     assert result.returncode == 0
-    assert "Total Function Clones" in result.stdout
+    assert "Analysis Summary" in result.stdout
+    assert "Function" in result.stdout
 
 
 def test_cli_baseline_missing_warning(tmp_path: Path) -> None:
@@ -107,4 +108,4 @@ def f2():
         ]
     )
     assert result2.returncode == 0
-    assert "New Clones (vs Baseline)" in result2.stdout
+    assert "New (baseline)" in result2.stdout

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -178,6 +179,21 @@ def _assert_fail_on_new_summary(out: str, *, include_blocks: bool = True) -> Non
     assert "codeclone . --update-baseline" in out
 
 
+def _summary_metric(out: str, label: str) -> int:
+    match = re.search(rf"{re.escape(label)}:\s+(\d+)", out)
+    if match:
+        return int(match.group(1))
+    match = re.search(rf"{re.escape(label)}\s+[│|]\s+(\d+)", out)
+    assert match, f"summary label not found: {label}\n{out}"
+    return int(match.group(1))
+
+
+def _compact_summary_metric(out: str, key: str) -> int:
+    match = re.search(rf"{re.escape(key)}=(\d+)", out)
+    assert match, f"compact summary key not found: {key}\n{out}"
+    return int(match.group(1))
+
+
 def test_cli_main_no_progress_parallel(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -209,7 +225,8 @@ def f2():
         ],
     )
     out = capsys.readouterr().out
-    assert "Total Function Clones" in out
+    assert "Clone groups" in out
+    assert "Function" in out
 
 
 def test_cli_default_cache_dir_uses_root(
@@ -1454,7 +1471,14 @@ def test_cli_discovery_cache_hit(
         ],
     )
     out = capsys.readouterr().out
-    assert "Files Processed" in out
+    files_found = _summary_metric(out, "Files found")
+    files_parsed = _summary_metric(out, "Files parsed")
+    cache_hits = _summary_metric(out, "Cache hits")
+    files_skipped = _summary_metric(out, "Files skipped")
+    assert files_found > 0
+    assert cache_hits == files_found
+    assert files_parsed == 0
+    assert files_found == files_parsed + cache_hits + files_skipped
 
 
 @pytest.mark.parametrize("extra_args", [["--no-progress"], ["--ci"]])
@@ -1482,6 +1506,17 @@ def test_cli_discovery_skip_oserror(
     _run_main(monkeypatch, args)
     out = capsys.readouterr().out
     assert "Skipping file" in out
+    if "--ci" in extra_args:
+        files_found = _compact_summary_metric(out, "found")
+        files_parsed = _compact_summary_metric(out, "parsed")
+        cache_hits = _compact_summary_metric(out, "cache_hits")
+        files_skipped = _compact_summary_metric(out, "skipped")
+    else:
+        files_found = _summary_metric(out, "Files found")
+        files_parsed = _summary_metric(out, "Files parsed")
+        cache_hits = _summary_metric(out, "Cache hits")
+        files_skipped = _summary_metric(out, "Files skipped")
+    assert files_found == files_parsed + cache_hits + files_skipped
 
 
 def test_cli_ci_discovery_cache_hit(
@@ -1521,6 +1556,56 @@ def test_cli_ci_discovery_cache_hit(
     )
     out = capsys.readouterr().out
     assert "CodeClone v" not in out
+    assert "Analysis Summary" in out
+    assert _compact_summary_metric(out, "found") == 1
+    assert _compact_summary_metric(out, "parsed") == 0
+    assert _compact_summary_metric(out, "cache_hits") == 1
+    assert _compact_summary_metric(out, "skipped") == 0
+
+
+def test_cli_summary_cache_miss_metrics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
+    out = capsys.readouterr().out
+    files_found = _summary_metric(out, "Files found")
+    files_parsed = _summary_metric(out, "Files parsed")
+    cache_hits = _summary_metric(out, "Cache hits")
+    files_skipped = _summary_metric(out, "Files skipped")
+    assert files_found > 0
+    assert files_parsed == files_found
+    assert cache_hits == 0
+    assert files_skipped == 0
+    assert files_found == files_parsed + cache_hits + files_skipped
+
+
+def test_cli_summary_format_stable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
+    out = capsys.readouterr().out
+    assert "Analysis Summary" in out
+    assert "Input" in out
+    assert "Clone groups" in out
+    assert _summary_metric(out, "Files found") >= 0
+    assert _summary_metric(out, "Files parsed") >= 0
+    assert _summary_metric(out, "Cache hits") >= 0
+    assert _summary_metric(out, "Files skipped") >= 0
+    assert _summary_metric(out, "Function") >= 0
+    assert _summary_metric(out, "Block") >= 0
+    assert _summary_metric(out, "Segment") >= 0
+    assert _summary_metric(out, "Suppressed") >= 0
+    assert _summary_metric(out, "New (baseline)") >= 0
 
 
 def test_cli_scan_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -203,6 +203,26 @@ def f():
     assert segments == []
 
 
+def test_extract_distinguishes_call_targets() -> None:
+    src = """
+def load(x):
+    return load_user(x)
+
+def delete(x):
+    return delete_user(x)
+"""
+    units, _, _ = extract_units_from_source(
+        source=src,
+        filepath="x.py",
+        module_name="mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    fps = {u.qualname: u.fingerprint for u in units}
+    assert fps["mod:load"] != fps["mod:delete"]
+
+
 def test_parse_limits_triggers_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     def _fake_signal(_sig: int, handler: Callable[[int, object], None] | None) -> None:
         if callable(handler):

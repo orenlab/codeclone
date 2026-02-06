@@ -32,6 +32,18 @@ def test_iter_py_files_excludes(tmp_path: Path) -> None:
     assert str(skip) not in files
 
 
+def test_iter_py_files_deterministic_sorted_order(tmp_path: Path) -> None:
+    z_file = tmp_path / "z.py"
+    z_file.write_text("z = 1\n", "utf-8")
+    a_dir = tmp_path / "pkg"
+    a_dir.mkdir()
+    a_file = a_dir / "a.py"
+    a_file.write_text("a = 1\n", "utf-8")
+
+    files = list(iter_py_files(str(tmp_path)))
+    assert files == sorted(files)
+
+
 def test_module_name_from_path(tmp_path: Path) -> None:
     pkg = tmp_path / "pkg"
     pkg.mkdir()

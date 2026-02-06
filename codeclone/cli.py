@@ -208,6 +208,84 @@ def _build_report_meta(
     }
 
 
+def _aligned_summary_lines(rows: list[tuple[str, int]]) -> list[str]:
+    if not rows:
+        return []
+    label_width = max(len(label) for label, _ in rows)
+    value_width = max(len(str(value)) for _, value in rows)
+    return [
+        f"  {label + ':':<{label_width + 1}} {value:>{value_width}}"
+        for label, value in rows
+    ]
+
+
+def _print_summary(
+    *,
+    quiet: bool,
+    files_found: int,
+    files_parsed: int,
+    cache_hits: int,
+    files_skipped: int,
+    func_clones_count: int,
+    block_clones_count: int,
+    segment_clones_count: int,
+    suppressed_segment_groups: int,
+    new_clones_count: int,
+) -> None:
+    invariant_ok = files_found == (files_parsed + cache_hits + files_skipped)
+    input_rows = [
+        ("Files found", files_found),
+        ("Files parsed", files_parsed),
+        ("Cache hits", cache_hits),
+        ("Files skipped", files_skipped),
+    ]
+    clone_rows = [
+        ("Function", func_clones_count),
+        ("Block", block_clones_count),
+        ("Segment", segment_clones_count),
+        ("Suppressed", suppressed_segment_groups),
+        ("New (baseline)", new_clones_count),
+    ]
+
+    if quiet:
+        console.print("Analysis Summary")
+        console.print(
+            "Input: "
+            f"found={files_found} parsed={files_parsed} "
+            f"cache_hits={cache_hits} skipped={files_skipped}"
+        )
+        console.print(
+            "Clone groups: "
+            f"function={func_clones_count} block={block_clones_count} "
+            f"segment={segment_clones_count} suppressed={suppressed_segment_groups} "
+            f"new={new_clones_count}"
+        )
+    else:
+        input_table = Table(title="Input", show_header=False)
+        input_table.add_column("Metric", style="dim")
+        input_table.add_column("Value", justify="right")
+        for label, value in input_rows:
+            input_table.add_row(label, str(value))
+
+        clone_table = Table(title="Clone groups", show_header=False)
+        clone_table.add_column("Metric", style="dim")
+        clone_table.add_column("Value", justify="right")
+        for label, value in clone_rows:
+            clone_table.add_row(label, str(value))
+
+        console.print("[bold]Analysis Summary[/bold]")
+        console.print("")
+        console.print(input_table)
+        console.print("")
+        console.print(clone_table)
+
+    if not invariant_ok:
+        console.print(
+            "[warning]Summary accounting mismatch: "
+            "files_found != files_parsed + cache_hits + files_skipped[/warning]"
+        )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         prog="codeclone",
@@ -416,7 +494,10 @@ def main() -> None:
     all_units: list[dict[str, Any]] = []
     all_blocks: list[dict[str, Any]] = []
     all_segments: list[dict[str, Any]] = []
-    changed_files_count = 0
+    files_found = 0
+    files_parsed = 0
+    cache_hits = 0
+    files_skipped = 0
     files_to_process: list[str] = []
 
     def _get_cached_entry(
@@ -452,11 +533,14 @@ def main() -> None:
     try:
         if args.quiet:
             for fp in iter_py_files(str(root_path)):
+                files_found += 1
                 stat, cached, warn = _get_cached_entry(fp)
                 if warn:
                     console.print(warn)
+                    files_skipped += 1
                     continue
                 if cached and cached.get("stat") == stat:
+                    cache_hits += 1
                     all_units.extend(
                         cast(
                             list[dict[str, Any]],
@@ -482,11 +566,14 @@ def main() -> None:
                 "[bold green]Discovering Python files...", spinner="dots"
             ):
                 for fp in iter_py_files(str(root_path)):
+                    files_found += 1
                     stat, cached, warn = _get_cached_entry(fp)
                     if warn:
                         console.print(warn)
+                        files_skipped += 1
                         continue
                     if cached and cached.get("stat") == stat:
+                        cache_hits += 1
                         all_units.extend(
                             cast(
                                 list[dict[str, Any]],
@@ -518,7 +605,7 @@ def main() -> None:
     if total_files > 0:
 
         def handle_result(result: ProcessingResult) -> None:
-            nonlocal changed_files_count
+            nonlocal files_parsed, files_skipped
             if result.success and result.stat:
                 cache.put_file_entry(
                     result.filepath,
@@ -527,7 +614,7 @@ def main() -> None:
                     result.blocks or [],
                     result.segments or [],
                 )
-                changed_files_count += 1
+                files_parsed += 1
                 if result.units:
                     all_units.extend([asdict(u) for u in result.units])
                 if result.blocks:
@@ -535,9 +622,11 @@ def main() -> None:
                 if result.segments:
                     all_segments.extend([asdict(s) for s in result.segments])
             else:
+                files_skipped += 1
                 failed_files.append(f"{result.filepath}: {result.error}")
 
         def process_sequential(with_progress: bool) -> None:
+            nonlocal files_skipped
             if with_progress:
                 with Progress(
                     SpinnerColumn(),
@@ -554,6 +643,9 @@ def main() -> None:
                         result = _safe_process_file(fp)
                         if result is not None:
                             handle_result(result)
+                        else:
+                            files_skipped += 1
+                            failed_files.append(f"{fp}: worker failed")
                         progress.advance(task)
             else:
                 if not args.quiet:
@@ -564,6 +656,9 @@ def main() -> None:
                     result = _safe_process_file(fp)
                     if result is not None:
                         handle_result(result)
+                    else:
+                        files_skipped += 1
+                        failed_files.append(f"{fp}: worker failed")
 
         try:
             with ProcessPoolExecutor(max_workers=args.processes) as executor:
@@ -587,16 +682,25 @@ def main() -> None:
                             )
                             for fp in batch
                         ]
+                        future_to_fp = {
+                            id(fut): fp for fut, fp in zip(futures, batch, strict=True)
+                        }
 
                         for future in as_completed(futures):
+                            fp = future_to_fp[id(future)]
                             result, err = _safe_future_result(future)
                             if result is not None:
                                 handle_result(result)
                             elif err is not None:
+                                files_skipped += 1
+                                reason = err
+                                failed_files.append(f"{fp}: {reason}")
                                 console.print(
                                     "[warning]Failed to process batch item: "
-                                    f"{err}[/warning]"
+                                    f"{reason}[/warning]"
                                 )
+                            else:
+                                files_skipped += 1
 
                 else:
                     with Progress(
@@ -625,17 +729,27 @@ def main() -> None:
                                 )
                                 for fp in batch
                             ]
+                            future_to_fp = {
+                                id(fut): fp
+                                for fut, fp in zip(futures, batch, strict=True)
+                            }
 
                             for future in as_completed(futures):
+                                fp = future_to_fp[id(future)]
                                 result, err = _safe_future_result(future)
                                 if result is not None:
                                     handle_result(result)
                                 elif err is not None:
+                                    files_skipped += 1
+                                    reason = err
+                                    failed_files.append(f"{fp}: {reason}")
                                     # Should rarely happen due to try/except
                                     # in process_file.
                                     console.print(
-                                        f"[warning]Worker failed: {err}[/warning]"
+                                        f"[warning]Worker failed: {reason}[/warning]"
                                     )
+                                else:
+                                    files_skipped += 1
                                 progress.advance(task)
         except (OSError, RuntimeError, PermissionError) as e:
             console.print(
@@ -796,26 +910,18 @@ def main() -> None:
     new_func, new_block = baseline.diff(func_groups, block_groups)
     new_clones_count = len(new_func) + len(new_block)
 
-    # Summary Table
-    if not args.quiet:
-        table = Table(title="Analysis Summary", border_style="blue")
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="bold white")
-
-        table.add_row("Files Processed", str(changed_files_count))
-        table.add_row("Total Function Clones", str(func_clones_count))
-        table.add_row("Total Block Clones", str(block_clones_count))
-        table.add_row("Total Segment Clones", str(segment_clones_count))
-        if suppressed_segment_groups > 0:
-            table.add_row("Suppressed Segment Groups", str(suppressed_segment_groups))
-
-        if baseline_exists:
-            style = "error" if new_clones_count > 0 else "success"
-            table.add_row(
-                "New Clones (vs Baseline)", f"[{style}]{new_clones_count}[/{style}]"
-            )
-
-        console.print(table)
+    _print_summary(
+        quiet=args.quiet,
+        files_found=files_found,
+        files_parsed=files_parsed,
+        cache_hits=cache_hits,
+        files_skipped=files_skipped,
+        func_clones_count=func_clones_count,
+        block_clones_count=block_clones_count,
+        segment_clones_count=segment_clones_count,
+        suppressed_segment_groups=suppressed_segment_groups,
+        new_clones_count=new_clones_count,
+    )
 
     # Outputs
     html_report_path: str | None = None
