@@ -542,19 +542,75 @@ def build_html_report(
             return "meta-row meta-row-wide"
         return "meta-row"
 
+    def _is_path_field(label: str) -> bool:
+        """Check if field contains a file path."""
+        return label in {"Baseline", "Cache path"}
+
+    def _is_bool_field(label: str) -> bool:
+        """Check if field contains a boolean value."""
+        return label in {"Baseline loaded", "Cache used"}
+
+    def _format_meta_value(label: str, value: Any) -> str:
+        """Format meta value with appropriate styling."""
+        display_val = _meta_display(value)
+
+        # Boolean fields with badge styling
+        if _is_bool_field(label):
+            if isinstance(value, bool):
+                badge_class = "meta-bool-true" if value else "meta-bool-false"
+                badge_text = "true" if value else "false"
+                return f'<span class="meta-bool {badge_class}">{badge_text}</span>'
+            else:
+                return '<span class="meta-bool meta-bool-na">n/a</span>'
+
+        # Path fields with tooltip on hover
+        if _is_path_field(label) and display_val != "n/a":
+            escaped_path = _escape(display_val)
+            return (
+                f'<span class="meta-path">'
+                f"{escaped_path}"
+                f'<span class="meta-path-tooltip">{escaped_path}</span>'
+                f"</span>"
+            )
+
+        # Regular fields
+        return _escape(display_val)
+
     meta_rows_html = "".join(
         (
             f'<div class="{_meta_row_class(label)}">'
             f"<dt>{_escape(label)}</dt>"
-            f"<dd>{_escape(_meta_display(value))}</dd>"
+            f"<dd>{_format_meta_value(label, value)}</dd>"
             "</div>"
         )
         for label, value in meta_rows
     )
+
+    # Chevron icon for toggle
+    chevron_icon = (
+        '<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" '
+        'd="M19 9l-7 7-7-7"/>'
+        "</svg>"
+    )
+
+    # Count non-n/a fields for badge
+    non_na_count = sum(1 for _, val in meta_rows if _meta_display(val) != "n/a")
+
     report_meta_html = (
         f'<section class="meta-panel" id="report-meta" {meta_attrs}>'
-        '<div class="meta-title">Report Provenance</div>'
+        '<div class="meta-header">'
+        '<div class="meta-header-left">'
+        f'<div class="meta-toggle">{chevron_icon}</div>'
+        '<h3 class="meta-title">Report Provenance</h3>'
+        f'<span class="meta-badge">{non_na_count} fields</span>'
+        "</div>"
+        "</div>"
+        '<div class="meta-content">'
+        '<div class="meta-body">'
         f'<dl class="meta-grid">{meta_rows_html}</dl>'
+        "</div>"
+        "</div>"
         "</section>"
     )
 
