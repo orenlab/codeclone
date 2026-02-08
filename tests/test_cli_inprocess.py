@@ -211,6 +211,7 @@ def _assert_baseline_failure_meta(
     mutate_payload: Callable[[dict[str, object]], None],
     expected_message: str,
     expected_status: str,
+    strict_fail: bool = False,
 ) -> None:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
@@ -223,24 +224,29 @@ def _assert_baseline_failure_meta(
     json_out = tmp_path / "report.json"
 
     _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--json",
-                str(json_out),
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    args = [
+        str(tmp_path),
+        "--baseline",
+        str(baseline_path),
+        "--json",
+        str(json_out),
+        "--no-progress",
+    ]
+    if strict_fail:
+        args.append("--ci")
+        with pytest.raises(SystemExit) as exc:
+            _run_main(monkeypatch, args)
+        assert exc.value.code == 2
+    else:
+        _run_main(monkeypatch, args)
     out = capsys.readouterr().out
     assert expected_message in out
+    if not strict_fail:
+        assert "Baseline is not trusted for this run and will be ignored" in out
     payload_out = json.loads(json_out.read_text("utf-8"))
     meta = payload_out["meta"]
     assert meta["baseline_status"] == expected_status
+    assert meta["baseline_loaded"] is False
 
 
 def _assert_fail_on_new_summary(out: str, *, include_blocks: bool = True) -> None:
@@ -906,21 +912,20 @@ def test_cli_reports_include_audit_metadata_invalid_baseline(
     baseline_path.write_text("{broken json", "utf-8")
     json_out = tmp_path / "report.json"
     _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--json",
-                str(json_out),
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
     out = capsys.readouterr().out
     assert "Invalid baseline file" in out
+    assert "Baseline is not trusted for this run and will be ignored" in out
     payload = json.loads(json_out.read_text("utf-8"))
     meta = payload["meta"]
     assert meta["baseline_status"] == "invalid"
@@ -981,25 +986,24 @@ def test_cli_reports_include_audit_metadata_integrity_failed(
 
     json_out = tmp_path / "report.json"
     _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--json",
-                str(json_out),
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
     out = capsys.readouterr().out
     assert "integrity check failed" in out
+    assert "Baseline is not trusted for this run and will be ignored" in out
     payload = json.loads(json_out.read_text("utf-8"))
     meta = payload["meta"]
     assert meta["baseline_status"] == "integrity_failed"
-    assert meta["baseline_loaded"] is True
+    assert meta["baseline_loaded"] is False
 
 
 def test_cli_reports_include_audit_metadata_generator_mismatch(
@@ -1016,24 +1020,24 @@ def test_cli_reports_include_audit_metadata_generator_mismatch(
     )
     json_out = tmp_path / "report.json"
     _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--json",
-                str(json_out),
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
     out = capsys.readouterr().out
     assert "generator mismatch" in out
+    assert "Baseline is not trusted for this run and will be ignored" in out
     payload = json.loads(json_out.read_text("utf-8"))
     meta = payload["meta"]
     assert meta["baseline_status"] == "generator_mismatch"
+    assert meta["baseline_loaded"] is False
 
 
 @pytest.mark.parametrize(
@@ -1082,6 +1086,174 @@ def test_cli_reports_include_audit_metadata_integrity_missing(
     baseline_path.write_text(json.dumps(payload), "utf-8")
     json_out = tmp_path / "report.json"
     _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
+    out = capsys.readouterr().out
+    assert "integrity payload hash is missing" in out
+    assert "Baseline is not trusted for this run and will be ignored" in out
+    payload_out = json.loads(json_out.read_text("utf-8"))
+    meta = payload_out["meta"]
+    assert meta["baseline_status"] == "integrity_missing"
+    assert meta["baseline_loaded"] is False
+
+
+def test_cli_reports_include_audit_metadata_baseline_too_large(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = _write_baseline(tmp_path / "baseline.json")
+    json_out = tmp_path / "report.json"
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--max-baseline-size-mb",
+            "0",
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
+    out = capsys.readouterr().out
+    assert "too large" in out
+    assert "Baseline is not trusted for this run and will be ignored" in out
+    payload = json.loads(json_out.read_text("utf-8"))
+    meta = payload["meta"]
+    assert meta["baseline_status"] == "too_large"
+    assert meta["baseline_loaded"] is False
+
+
+def test_cli_untrusted_baseline_ignored_for_diff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text(
+        """
+def f1():
+    return 1
+
+def f2():
+    return 1
+""",
+        "utf-8",
+    )
+    baseline_path = tmp_path / "baseline.json"
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--update-baseline",
+            "--min-loc",
+            "1",
+            "--min-stmt",
+            "1",
+            "--no-progress",
+        ],
+    )
+    capsys.readouterr()
+
+    payload = json.loads(baseline_path.read_text("utf-8"))
+    payload["generator"] = "not-codeclone"
+    baseline_path.write_text(json.dumps(payload), "utf-8")
+    json_out = tmp_path / "report.json"
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--json",
+            str(json_out),
+            "--min-loc",
+            "1",
+            "--min-stmt",
+            "1",
+            "--no-progress",
+        ],
+    )
+    out = capsys.readouterr().out
+    assert "Baseline is not trusted for this run and will be ignored" in out
+    assert _summary_metric(out, "New vs baseline") > 0
+    report = json.loads(json_out.read_text("utf-8"))
+    assert report["meta"]["baseline_status"] == "generator_mismatch"
+    assert report["meta"]["baseline_loaded"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value", "expected_message", "expected_status"),
+    [
+        ("generator", "not-codeclone", "generator mismatch", "generator_mismatch"),
+        (
+            "payload_sha256",
+            "00",
+            "integrity check failed",
+            "integrity_failed",
+        ),
+        (
+            "payload_sha256",
+            None,
+            "integrity payload hash is missing",
+            "integrity_missing",
+        ),
+    ],
+)
+def test_cli_untrusted_baseline_fails_in_ci(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    field: str,
+    bad_value: object,
+    expected_message: str,
+    expected_status: str,
+) -> None:
+    def _mutate(payload: dict[str, object]) -> None:
+        if bad_value is None:
+            payload.pop(field, None)
+        else:
+            payload[field] = bad_value
+
+    _assert_baseline_failure_meta(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        capsys=capsys,
+        mutate_payload=_mutate,
+        expected_message=expected_message,
+        expected_status=expected_status,
+        strict_fail=True,
+    )
+
+
+def test_cli_invalid_baseline_fails_in_ci(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text("{broken json", "utf-8")
+    json_out = tmp_path / "report.json"
+    _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(
             monkeypatch,
@@ -1091,18 +1263,19 @@ def test_cli_reports_include_audit_metadata_integrity_missing(
                 str(baseline_path),
                 "--json",
                 str(json_out),
+                "--ci",
                 "--no-progress",
             ],
         )
     assert exc.value.code == 2
     out = capsys.readouterr().out
-    assert "integrity payload hash is missing" in out
-    payload_out = json.loads(json_out.read_text("utf-8"))
-    meta = payload_out["meta"]
-    assert meta["baseline_status"] == "integrity_missing"
+    assert "Invalid baseline file" in out
+    payload = json.loads(json_out.read_text("utf-8"))
+    assert payload["meta"]["baseline_status"] == "invalid"
+    assert payload["meta"]["baseline_loaded"] is False
 
 
-def test_cli_reports_include_audit_metadata_baseline_too_large(
+def test_cli_too_large_baseline_fails_in_ci(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -1123,6 +1296,7 @@ def test_cli_reports_include_audit_metadata_baseline_too_large(
                 "0",
                 "--json",
                 str(json_out),
+                "--ci",
                 "--no-progress",
             ],
         )
@@ -1130,8 +1304,8 @@ def test_cli_reports_include_audit_metadata_baseline_too_large(
     out = capsys.readouterr().out
     assert "too large" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["baseline_status"] == "too_large"
+    assert payload["meta"]["baseline_status"] == "too_large"
+    assert payload["meta"]["baseline_loaded"] is False
 
 
 def test_cli_reports_cache_used_false_on_warning(

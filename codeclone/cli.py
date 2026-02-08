@@ -81,6 +81,13 @@ _VALID_BASELINE_STATUSES = {
     "integrity_failed",
     "too_large",
 }
+_UNTRUSTED_BASELINE_STATUSES = {
+    "invalid",
+    "too_large",
+    "generator_mismatch",
+    "integrity_missing",
+    "integrity_failed",
+}
 
 
 @dataclass(slots=True)
@@ -657,6 +664,7 @@ def main() -> None:
     baseline_loaded = False
     baseline_status = "missing"
     baseline_failure_code: int | None = None
+    baseline_trusted_for_diff = False
 
     if baseline_exists:
         try:
@@ -665,17 +673,22 @@ def main() -> None:
             baseline_status = (
                 e.status if e.status in _VALID_BASELINE_STATUSES else "invalid"
             )
-            if baseline_status == "too_large" or not args.update_baseline:
+            if not args.update_baseline:
                 console.print(ui.fmt_invalid_baseline(e))
-                baseline_failure_code = 2
+                if args.fail_on_new:
+                    baseline_failure_code = 2
+                else:
+                    console.print(ui.WARN_BASELINE_IGNORED)
         else:
             baseline_loaded = True
             baseline_status = "ok"
+            baseline_trusted_for_diff = True
             if not args.update_baseline:
                 if baseline.is_legacy_format():
                     baseline_status = "legacy"
                     console.print(ui.fmt_baseline_version_missing(__version__))
                     baseline_failure_code = 2
+                    baseline_trusted_for_diff = False
                 else:
                     if baseline.baseline_version != __version__:
                         assert baseline.baseline_version is not None
@@ -687,6 +700,7 @@ def main() -> None:
                             )
                         )
                         baseline_failure_code = 2
+                        baseline_trusted_for_diff = False
                     if baseline.schema_version != BASELINE_SCHEMA_VERSION:
                         assert baseline.schema_version is not None
                         if baseline_status == "ok":
@@ -698,6 +712,7 @@ def main() -> None:
                             )
                         )
                         baseline_failure_code = 2
+                        baseline_trusted_for_diff = False
                     if baseline.python_version:
                         current_version = _current_python_version()
                         if baseline.python_version != current_version:
@@ -712,6 +727,7 @@ def main() -> None:
                             if args.fail_on_new:
                                 console.print(ui.ERR_BASELINE_SAME_PYTHON_REQUIRED)
                                 baseline_failure_code = 2
+                                baseline_trusted_for_diff = False
                     if baseline_status == "ok":
                         try:
                             baseline.verify_integrity()
@@ -723,7 +739,14 @@ def main() -> None:
                             )
                             baseline_status = status
                             console.print(ui.fmt_invalid_baseline(e))
-                            baseline_failure_code = 2
+                            baseline_trusted_for_diff = False
+                            if args.fail_on_new:
+                                baseline_failure_code = 2
+                            else:
+                                console.print(ui.WARN_BASELINE_IGNORED)
+            if baseline_status in _UNTRUSTED_BASELINE_STATUSES:
+                baseline_loaded = False
+                baseline_trusted_for_diff = False
     else:
         if not args.update_baseline:
             console.print(ui.fmt_path(ui.WARN_BASELINE_MISSING, baseline_path))
@@ -742,6 +765,7 @@ def main() -> None:
         baseline = new_baseline
         baseline_loaded = True
         baseline_status = "ok"
+        baseline_trusted_for_diff = True
         # When updating, we don't fail on new, we just saved the new state.
         # But we might still want to print the summary.
 
@@ -755,7 +779,10 @@ def main() -> None:
     )
 
     # Diff
-    new_func, new_block = baseline.diff(func_groups, block_groups)
+    baseline_for_diff = (
+        baseline if baseline_trusted_for_diff else Baseline(baseline_path)
+    )
+    new_func, new_block = baseline_for_diff.diff(func_groups, block_groups)
     new_clones_count = len(new_func) + len(new_block)
 
     _print_summary(

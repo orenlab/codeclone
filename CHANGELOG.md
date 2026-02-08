@@ -63,14 +63,14 @@ the HTML report UI, and introduces baseline versioning.
 
 - Baselines are now **versioned** and include a schema version.
 - Mismatched baseline versions **fail fast** and require regeneration.
-- Baseline loading is now strict: invalid schema/types or oversized baseline files
-  fail fast to preserve CI integrity.
 - Added baseline tamper-evident integrity for v1.3+ files (`generator`, `payload_sha256`)
   while keeping legacy baseline behavior as explicit regeneration-required fail-fast.
 - Added configurable size guards (`--max-baseline-size-mb`, `--max-cache-size-mb`):
-  oversized baseline fails fast, oversized cache is ignored with warning.
+  oversized cache is ignored with warning; oversized/invalid/untrusted baseline is ignored
+  outside gating mode and treated as empty baseline.
 - Behavioral hardening (CLI): baseline validation is now an explicit contract
-  (legacy/version/schema/python/integrity/size states) with deterministic fail-fast behavior.
+  (legacy/version/schema/python/integrity/size states). In `--fail-on-new`/`--ci`,
+  untrusted baseline states fail fast with deterministic exit codes.
 
 **Breaking (CI):** baseline version mismatch now fails hard; CI requires baseline regeneration on upgrade.
 

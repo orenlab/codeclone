@@ -102,6 +102,10 @@ WARN_BASELINE_MISSING = (
     "[dim]Comparing against an empty baseline. "
     "Use --update-baseline to create it.[/dim]"
 )
+WARN_BASELINE_IGNORED = (
+    "[warning]Baseline is not trusted for this run and will be ignored.[/warning]\n"
+    "[dim]Comparison will proceed against an empty baseline.[/dim]"
+)
 SUCCESS_BASELINE_UPDATED = "✔ Baseline updated: {path}"
 
 FAIL_NEW_TITLE = "[error]FAILED: New code clones detected.[/error]"
