@@ -96,7 +96,10 @@ Such changes often require design-level discussion and may be staged across vers
 
 - Baselines are **versioned**. Regenerate with `codeclone . --update-baseline`
   when detection logic or CodeClone version changes.
+- Baselines in 1.3+ are tamper-evident (`generator`, `payload_sha256`).
 - Baseline verification must use the same Python `major.minor` version.
+- In `--fail-on-new` / `--ci`, untrusted baseline states fail fast. Outside gating
+  mode, baseline is ignored with warning and comparison proceeds against an empty baseline.
 
 ---
 
@@ -113,15 +116,15 @@ pip install -e .[dev]
 Run tests:
 
 ```bash
-pytest
+uv run pytest
 ```
 
 Static checks:
 
 ```bash
-mypy
-ruff check .
-ruff format .
+uv run mypy .
+uv run ruff check .
+uv run ruff format .
 ```
 
 ---

@@ -47,8 +47,9 @@ Normalization removes non-structural noise:
 - variable names → `_VAR_`
 - constants → `_CONST_`
 - attributes → `_ATTR_`
+- symbolic call targets are preserved (to avoid API conflation)
 - syntactic sugar (e.g. `x += 1` → `x = x + 1`)
-- commutative operand canonicalization (`+`, `*`, `|`, `&`, `^`) when side‑effect free
+- commutative operand canonicalization (`+`, `*`, `|`, `&`, `^`) on proven constant domains
 - local logical equivalence (`not (x in y)` → `x not in y`, `not (x is y)` → `x is not y`)
 - docstrings removed
 - type annotations removed
@@ -64,6 +65,9 @@ This ensures structural stability across refactors.
 - Captures structural control flow (`if`, `for`, `while`, `try`, `with`, `match`).
 - Models short‑circuit `and`/`or` as micro‑CFG branches.
 - Links `try/except` only from statements that may raise.
+- Preserves `match case` and `except` handler order structurally.
+- Models `break` / `continue` as terminating loop transitions.
+- Preserves `for/while ... else` semantics.
 
 📄 See [docs/cfg.md](cfg.md) for full semantics.
 
@@ -150,8 +154,20 @@ Baseline files are **versioned**. The baseline stores the CodeClone version and 
 version used to generate it. Mismatches result in a hard stop and require regeneration.
 Baseline format in 1.3+ is tamper-evident (`generator`, `payload_sha256`) and validated
 before baseline diffing.
-Baseline loading is strict: schema/type violations or oversized baseline files are treated
-as invalid input and fail fast in CI mode.
+
+Baseline validation order is deterministic:
+
+1. size guard (before JSON parse),
+2. JSON parse and root object/type checks,
+3. legacy/version/schema policy checks,
+4. Python version policy check,
+5. integrity checks (`generator`, `payload_sha256`) for v1.3+ baseline format only.
+
+Baseline loading is strict: schema/type violations, integrity failures, generator mismatch,
+or oversized files are treated as untrusted input.
+In `--fail-on-new` / `--ci`, untrusted baseline states fail fast.
+Outside gating mode, untrusted baseline is ignored with warning and comparison proceeds
+against an empty baseline.
 Baseline size guard is configurable via `--max-baseline-size-mb`.
 
 ## Python Version Consistency for Baseline Checks
