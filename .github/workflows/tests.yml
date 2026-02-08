@@ -38,6 +38,8 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Run tests
+        # Smoke CLI tests intentionally disable subprocess coverage collection
+        # to avoid runner-specific flakiness while keeping parent-process coverage strict.
         run: uv run pytest --cov=codeclone --cov-report=term-missing --cov-fail-under=98
 
       - name: Verify baseline exists

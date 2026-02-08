@@ -11,13 +11,29 @@ def run_cli(
     env = os.environ.copy()
     root_dir = Path(__file__).parents[1]
     env["PYTHONPATH"] = str(root_dir) + os.pathsep + env.get("PYTHONPATH", "")
+    # Keep smoke tests stable under pytest-cov:
+    # subprocess coverage collection is not required here and can create
+    # nondeterministic overhead when child process pools are used.
+    env.pop("COV_CORE_SOURCE", None)
+    env.pop("COV_CORE_CONFIG", None)
+    env.pop("COV_CORE_DATAFILE", None)
+    env.pop("COVERAGE_PROCESS_START", None)
 
     # Try to find venv python
     venv_python = root_dir / ".venv" / "bin" / "python"
     executable = str(venv_python) if venv_python.exists() else sys.executable
 
     return subprocess.run(
-        [executable, "-m", "codeclone.cli", *args],
+        [
+            executable,
+            "-m",
+            "codeclone.cli",
+            *args,
+            "--processes",
+            "1",
+            "--no-progress",
+            "--no-color",
+        ],
         capture_output=True,
         text=True,
         cwd=cwd,
