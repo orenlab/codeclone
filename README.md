@@ -68,7 +68,7 @@ Typical use cases:
 ### Segment-level internal clone detection
 
 - Detects repeated **segment windows** inside the same function.
-- Uses a two‑step deterministic match (candidate signature → strict hash).
+- Uses a two-step deterministic match (candidate signature → strict hash).
 - Included in reports for explainability, **not** in baseline/CI failure logic.
 
 ### Control-Flow Awareness (CFG v1)
@@ -82,7 +82,7 @@ Typical use cases:
     - `with` / `async with`
     - `match` / `case` (Python 3.10+)
 - Current CFG semantics (v1):
-    - `and` / `or` are modeled as short‑circuit micro‑CFG branches,
+    - `and` / `or` are modeled as short-circuit micro-CFG branches,
     - `try/except` links only from statements that may raise,
     - `break` / `continue` are modeled as terminating loop transitions with explicit targets,
     - `for/while ... else` semantics are preserved structurally,
@@ -115,9 +115,7 @@ This design keeps clone detection **stable, deterministic, and low-noise**.
 pip install codeclone
 ```
 
-Python **3.10+** is required.
-
----
+Python 3.10+ is required.
 
 ## Quick Start
 
@@ -142,14 +140,6 @@ codeclone . \
   --text .cache/codeclone/report.txt
 ```
 
-All report formats include provenance metadata for auditability:
-`codeclone_version`, `python_version`, `baseline_path`, `baseline_version`,
-`baseline_schema_version`, `baseline_python_version`, `baseline_loaded`,
-`baseline_status` (and cache metadata when available).
-`baseline_status` values: `ok`, `missing`, `legacy`, `invalid`,
-`mismatch_version`, `mismatch_schema`, `mismatch_python`,
-`generator_mismatch`, `integrity_missing`, `integrity_failed`, `too_large`.
-
 Generate an HTML report:
 
 ```bash
@@ -162,9 +152,35 @@ Check version:
 codeclone --version
 ```
 
+---
+
+## Reports and Metadata
+
+All report formats include provenance metadata for auditability:
+
+`codeclone_version`, `python_version`, `baseline_path`, `baseline_version`,
+`baseline_schema_version`, `baseline_python_version`, `baseline_loaded`,
+`baseline_status` (and cache metadata when available).
+
+baseline_status values:
+
+- `ok`
+- `missing`
+- `legacy`
+- `invalid`
+- `mismatch_version`
+- `mismatch_schema`
+- `mismatch_python`
+- `generator_mismatch`
+- `integrity_missing`
+- `integrity_failed`
+- `too_large`
+
+---
+
 ## Baseline Workflow (Recommended)
 
-### 1. Create a baseline
+1. Create a baseline
 
 Run once on your current codebase:
 
@@ -174,18 +190,28 @@ codeclone . --update-baseline
 
 Commit the generated baseline file to the repository.
 
-Baselines are **versioned**. If CodeClone is upgraded, regenerate the baseline to keep
+Baselines are versioned. If CodeClone is upgraded, regenerate the baseline to keep
 CI deterministic and explainable.
-Baseline format in 1.3+ is tamper-evident (`generator`, `payload_sha256`) and validated
+
+Baseline format in 1.3+ is tamper-evident (generator, payload_sha256) and validated
 before baseline comparison.
 
-Trusted vs untrusted baseline behavior (`invalid`, `too_large`, `generator_mismatch`,
-`integrity_missing`, `integrity_failed`):
+2. Trusted vs untrusted baseline behavior
 
-- ignored with warning in non-gating mode (comparison falls back to empty baseline),
-- fail-fast in `--fail-on-new` / `--ci` (exit code `2`).
+Baseline states considered untrusted:
 
-### 2. Use in CI
+- `invalid`
+- `too_large`
+- `generator_mismatch`
+- `integrity_missing`
+- `integrity_failed`
+
+Behavior:
+
+- in normal mode, untrusted baseline is ignored with a warning (comparison falls back to empty baseline);
+- in `--fail-on-new` / `--ci`, untrusted baseline fails fast (exit code 2).
+
+3. Use in CI
 
 ```bash
 codeclone . --ci
@@ -199,21 +225,23 @@ codeclone . --ci --html .cache/codeclone/report.html
 
 `--ci` is equivalent to `--fail-on-new --no-color --quiet`.
 
----
-
 Behavior:
 
 - existing clones are allowed,
-- the build fails if *new* clones appear,
+- the build fails if new clones appear,
 - refactoring that removes duplication is always allowed.
 
-`--fail-on-new` exits with a non-zero code when new clones are detected.
+`--fail-on-new` / `--ci` exits with a non-zero code when new clones are detected.
+
+---
 
 ### Cache
 
 By default, CodeClone stores the cache per project at:
 
-`<root>/.cache/codeclone/cache.json`
+```bash
+<root>/.cache/codeclone/cache.json
+```
 
 You can override this path with `--cache-path` (`--cache-dir` is a legacy alias).
 
@@ -222,10 +250,13 @@ If you used an older version of CodeClone, delete the legacy cache file at
 
 Cache integrity checks are strict: signature mismatch or oversized cache files are ignored
 with an explicit warning, then rebuilt from source.
+
 Cache entries are validated against expected structure/types; invalid entries are ignored
 deterministically.
 
-### Python Version Consistency for Baseline Checks
+---
+
+## Python Version Consistency for Baseline Checks
 
 Due to inherent differences in Python’s AST between interpreter versions, baseline
 generation and verification must be performed using the same Python version.
@@ -256,27 +287,25 @@ repos:
 
 ## What CodeClone Is (and Is Not)
 
-### CodeClone **is**
+### CodeClone Is
 
 - an architectural analysis tool,
 - a duplication radar,
 - a CI guard against copy-paste,
 - a control-flow-aware clone detector.
 
-### CodeClone **is not**
+### CodeClone Is Not
 
 - a linter,
 - a formatter,
 - a semantic equivalence prover,
 - a runtime analyzer.
 
----
-
 ## How It Works (High Level)
 
 1. Parse Python source into AST.
 2. Normalize AST (names, constants, attributes, annotations).
-3. Build a **Control Flow Graph (CFG)** per function.
+3. Build a Control Flow Graph (CFG) per function.
 4. Compute stable CFG fingerprints.
 5. Extract segment windows for internal clone discovery.
 6. Detect function-level, block-level, and segment-level clones.
@@ -290,10 +319,10 @@ See the architectural overview:
 
 ## Control Flow Graph (CFG)
 
-Starting from **version 1.1.0**, CodeClone uses a **Control Flow Graph (CFG)**
+Starting from version 1.1.0, CodeClone uses a Control Flow Graph (CFG)
 to improve structural clone detection robustness.
 
-The CFG is a **structural abstraction**, not a runtime execution model.
+The CFG is a structural abstraction, not a runtime execution model.
 
 See full design and semantics:
 
