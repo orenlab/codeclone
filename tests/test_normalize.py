@@ -12,6 +12,23 @@ from codeclone.normalize import (
 )
 
 
+def _normalized_dump(source: str, cfg: NormalizationConfig) -> str:
+    node = ast.parse(source).body[0]
+    return normalized_ast_dump(node, cfg)
+
+
+def _assert_normalized_equal(
+    source_a: str, source_b: str, cfg: NormalizationConfig
+) -> None:
+    assert _normalized_dump(source_a, cfg) == _normalized_dump(source_b, cfg)
+
+
+def _assert_normalized_not_equal(
+    source_a: str, source_b: str, cfg: NormalizationConfig
+) -> None:
+    assert _normalized_dump(source_a, cfg) != _normalized_dump(source_b, cfg)
+
+
 @pytest.mark.parametrize(
     ("src1", "src2"),
     [
@@ -145,42 +162,39 @@ def f():
     assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
 
 
-def test_normalization_commutative_name_operands_not_reordered() -> None:
-    src1 = """
+@pytest.mark.parametrize(
+    ("src1", "src2"),
+    [
+        (
+            """
 def f():
     return a + b
-"""
-    src2 = """
+""",
+            """
 def f():
     return b + a
-"""
-    cfg = NormalizationConfig(
-        normalize_names=False,
-        normalize_attributes=False,
-        normalize_constants=False,
-    )
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
-
-
-def test_normalization_commutative_binop_side_effects_not_reordered() -> None:
-    src1 = """
+""",
+        ),
+        (
+            """
 def f():
     return foo() + bar()
-"""
-    src2 = """
+""",
+            """
 def f():
     return bar() + foo()
-"""
+""",
+        ),
+    ],
+    ids=["name_operands", "call_operands"],
+)
+def test_normalization_commutative_binop_not_reordered(src1: str, src2: str) -> None:
     cfg = NormalizationConfig(
         normalize_names=False,
         normalize_attributes=False,
         normalize_constants=False,
     )
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
+    _assert_normalized_not_equal(src1, src2, cfg)
 
 
 def test_normalization_preserves_call_target_names() -> None:
@@ -213,21 +227,39 @@ def f():
     assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
 
 
-def test_normalization_call_keyword_values_are_visited() -> None:
-    src1 = """
+@pytest.mark.parametrize(
+    ("src1", "src2"),
+    [
+        (
+            """
 def f():
     x = 1
     return process(payload=x)
-"""
-    src2 = """
+""",
+            """
 def f():
     y = 2
     return process(payload=y)
-"""
+""",
+        ),
+        (
+            """
+def f():
+    handlers = [run]
+    return handlers[0]()
+""",
+            """
+def f():
+    callbacks = [run]
+    return callbacks[0]()
+""",
+        ),
+    ],
+    ids=["call_keyword_values", "non_name_call_target"],
+)
+def test_normalization_call_values_normalize(src1: str, src2: str) -> None:
     cfg = NormalizationConfig()
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
+    _assert_normalized_equal(src1, src2, cfg)
 
 
 def test_normalization_preserves_attribute_call_target_with_call_value() -> None:
@@ -243,23 +275,6 @@ def f():
     a1 = ast.parse(src1).body[0]
     a2 = ast.parse(src2).body[0]
     assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
-
-
-def test_normalization_non_name_non_attribute_call_target() -> None:
-    src1 = """
-def f():
-    handlers = [run]
-    return handlers[0]()
-"""
-    src2 = """
-def f():
-    callbacks = [run]
-    return callbacks[0]()
-"""
-    cfg = NormalizationConfig()
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
 
 
 def test_commutative_operand_recursive_and_constant_guards() -> None:

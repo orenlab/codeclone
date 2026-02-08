@@ -5,6 +5,7 @@ import pytest
 
 from codeclone.cfg import CFG, CFGBuilder
 from codeclone.cfg_model import CFG as CFGModel
+from codeclone.cfg_model import Block
 from codeclone.extractor import get_cfg_fingerprint
 from codeclone.meta_markers import CFG_META_PREFIX
 from codeclone.normalize import NormalizationConfig
@@ -42,6 +43,47 @@ def _const_meta_value(stmt: ast.stmt) -> str | None:
     if not isinstance(stmt.value.id, str):
         return None
     return stmt.value.id
+
+
+def _parse_function(
+    source: str, *, skip_reason: str | None = None
+) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    try:
+        module = ast.parse(dedent(source))
+    except SyntaxError:
+        if skip_reason:
+            pytest.skip(skip_reason)
+        raise
+    for node in ast.walk(module):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return node
+    raise AssertionError("Expected at least one function in source")
+
+
+def _cfg_fingerprint(
+    source: str, qualname: str, *, skip_reason: str | None = None
+) -> str:
+    func = _parse_function(source, skip_reason=skip_reason)
+    cfg = NormalizationConfig()
+    return get_cfg_fingerprint(func, cfg, qualname)
+
+
+def _assert_fingerprint_diff(
+    source_a: str, source_b: str, *, skip_reason: str | None = None
+) -> None:
+    fp_a = _cfg_fingerprint(source_a, "m:f", skip_reason=skip_reason)
+    fp_b = _cfg_fingerprint(source_b, "m:g", skip_reason=skip_reason)
+    assert fp_a != fp_b
+
+
+def _single_return_block(cfg: CFG) -> Block:
+    return_blocks = [
+        block
+        for block in cfg.blocks
+        if any(isinstance(stmt, ast.Return) for stmt in block.statements)
+    ]
+    assert len(return_blocks) == 1
+    return return_blocks[0]
 
 
 def test_cfg_if_else() -> None:
@@ -581,69 +623,49 @@ def test_cfg_match_pattern() -> None:
     assert "MatchMapping" in patterns_found[1]
 
 
-def test_cfg_match_guard_affects_fingerprint() -> None:
-    code_with_guard = """
+@pytest.mark.parametrize(
+    ("source_a", "source_b", "skip_reason"),
+    [
+        (
+            """
     def f(x):
         match x:
             case 1 if cond():
                 return 1
             case _:
                 return 2
-    """
-    code_without_guard = """
+    """,
+            """
     def f(x):
         match x:
             case 1:
                 return 1
             case _:
                 return 2
-    """
-    try:
-        func_with_guard = ast.parse(dedent(code_with_guard)).body[0]
-        func_without_guard = ast.parse(dedent(code_without_guard)).body[0]
-    except SyntaxError:
-        pytest.skip("Match syntax is unavailable")
-
-    assert isinstance(func_with_guard, (ast.FunctionDef, ast.AsyncFunctionDef))
-    assert isinstance(func_without_guard, (ast.FunctionDef, ast.AsyncFunctionDef))
-    cfg = NormalizationConfig()
-    fp_with_guard = get_cfg_fingerprint(func_with_guard, cfg, "m:f")
-    fp_without_guard = get_cfg_fingerprint(func_without_guard, cfg, "m:g")
-    assert fp_with_guard != fp_without_guard
-
-
-def test_cfg_match_case_order_affects_fingerprint() -> None:
-    source_a = """
+    """,
+            "Match syntax is unavailable",
+        ),
+        (
+            """
     def f(x):
         match x:
             case 1:
                 return 1
             case _:
                 return 2
-    """
-    source_b = """
+    """,
+            """
     def g(x):
         match x:
             case _:
                 return 2
             case 1:
                 return 1
-    """
-    try:
-        func_a = ast.parse(dedent(source_a)).body[0]
-        func_b = ast.parse(dedent(source_b)).body[0]
-    except SyntaxError:
-        pytest.skip("Match syntax is unavailable")
-    assert isinstance(func_a, (ast.FunctionDef, ast.AsyncFunctionDef))
-    assert isinstance(func_b, (ast.FunctionDef, ast.AsyncFunctionDef))
-    cfg = NormalizationConfig()
-    fp_a = get_cfg_fingerprint(func_a, cfg, "m:f")
-    fp_b = get_cfg_fingerprint(func_b, cfg, "m:g")
-    assert fp_a != fp_b
-
-
-def test_cfg_try_handler_order_affects_fingerprint() -> None:
-    source_a = """
+    """,
+            "Match syntax is unavailable",
+        ),
+        (
+            """
     def f(x):
         try:
             return risky(x)
@@ -651,8 +673,8 @@ def test_cfg_try_handler_order_affects_fingerprint() -> None:
             return 1
         except Exception:
             return 2
-    """
-    source_b = """
+    """,
+            """
     def g(x):
         try:
             return risky(x)
@@ -660,99 +682,78 @@ def test_cfg_try_handler_order_affects_fingerprint() -> None:
             return 2
         except ValueError:
             return 1
-    """
-    func_a = ast.parse(dedent(source_a)).body[0]
-    func_b = ast.parse(dedent(source_b)).body[0]
-    assert isinstance(func_a, (ast.FunctionDef, ast.AsyncFunctionDef))
-    assert isinstance(func_b, (ast.FunctionDef, ast.AsyncFunctionDef))
-    cfg = NormalizationConfig()
-    fp_a = get_cfg_fingerprint(func_a, cfg, "m:f")
-    fp_b = get_cfg_fingerprint(func_b, cfg, "m:g")
-    assert fp_a != fp_b
-
-
-def test_cfg_for_else_affects_fingerprint() -> None:
-    with_else = """
+    """,
+            None,
+        ),
+        (
+            """
     def f(xs):
         for x in xs:
             pass
         else:
             y = 1
-    """
-    without_else = """
+    """,
+            """
     def f(xs):
         for x in xs:
             pass
-    """
-    func_with_else = ast.parse(dedent(with_else)).body[0]
-    func_without_else = ast.parse(dedent(without_else)).body[0]
-    assert isinstance(func_with_else, (ast.FunctionDef, ast.AsyncFunctionDef))
-    assert isinstance(func_without_else, (ast.FunctionDef, ast.AsyncFunctionDef))
-    cfg = NormalizationConfig()
-    fp_with_else = get_cfg_fingerprint(func_with_else, cfg, "m:f")
-    fp_without_else = get_cfg_fingerprint(func_without_else, cfg, "m:g")
-    assert fp_with_else != fp_without_else
-
-
-def test_cfg_while_else_affects_fingerprint() -> None:
-    with_else = """
+    """,
+            None,
+        ),
+        (
+            """
     def f(flag):
         while flag:
             flag = False
         else:
             x = 1
-    """
-    without_else = """
+    """,
+            """
     def f(flag):
         while flag:
             flag = False
-    """
-    func_with_else = ast.parse(dedent(with_else)).body[0]
-    func_without_else = ast.parse(dedent(without_else)).body[0]
-    assert isinstance(func_with_else, (ast.FunctionDef, ast.AsyncFunctionDef))
-    assert isinstance(func_without_else, (ast.FunctionDef, ast.AsyncFunctionDef))
-    cfg = NormalizationConfig()
-    fp_with_else = get_cfg_fingerprint(func_with_else, cfg, "m:f")
-    fp_without_else = get_cfg_fingerprint(func_without_else, cfg, "m:g")
-    assert fp_with_else != fp_without_else
+    """,
+            None,
+        ),
+    ],
+    ids=[
+        "match_guard",
+        "match_case_order",
+        "try_handler_order",
+        "for_else",
+        "while_else",
+    ],
+)
+def test_cfg_fingerprint_variants(
+    source_a: str, source_b: str, skip_reason: str | None
+) -> None:
+    _assert_fingerprint_diff(source_a, source_b, skip_reason=skip_reason)
 
 
-def test_cfg_break_terminates_block() -> None:
-    source = """
+@pytest.mark.parametrize(
+    ("keyword", "stmt_type"),
+    [("break", ast.Break), ("continue", ast.Continue)],
+    ids=["break", "continue"],
+)
+def test_cfg_loop_control_terminates_block(
+    keyword: str, stmt_type: type[ast.stmt]
+) -> None:
+    source = f"""
     def f(xs):
         for x in xs:
-            break
+            {keyword}
             y = 1
     """
     cfg = build_cfg_from_source(source)
-    break_blocks = [
+    control_blocks = [
         block
         for block in cfg.blocks
-        if any(isinstance(stmt, ast.Break) for stmt in block.statements)
+        if any(isinstance(stmt, stmt_type) for stmt in block.statements)
     ]
-    assert len(break_blocks) == 1
-    break_block = break_blocks[0]
-    assert break_block.is_terminated is True
-    assert all(not isinstance(stmt, ast.Assign) for stmt in break_block.statements)
-
-
-def test_cfg_continue_terminates_block() -> None:
-    source = """
-    def f(xs):
-        for x in xs:
-            continue
-            y = 1
-    """
-    cfg = build_cfg_from_source(source)
-    continue_blocks = [
-        block
-        for block in cfg.blocks
-        if any(isinstance(stmt, ast.Continue) for stmt in block.statements)
-    ]
-    assert len(continue_blocks) == 1
-    continue_block = continue_blocks[0]
-    assert continue_block.is_terminated is True
-    assert all(not isinstance(stmt, ast.Assign) for stmt in continue_block.statements)
+    assert len(control_blocks) == 1
+    control_block = control_blocks[0]
+    assert control_block.is_terminated is True
+    assert all(not isinstance(stmt, ast.Assign) for stmt in control_block.statements)
 
 
 def test_cfg_break_skips_for_else_block() -> None:
@@ -783,42 +784,31 @@ def test_cfg_break_skips_for_else_block() -> None:
     assert else_blocks[0] not in break_blocks[0].successors
 
 
-def test_cfg_while_else_terminated_branch() -> None:
-    source = """
+@pytest.mark.parametrize(
+    "source",
+    [
+        """
     def f(flag):
         while flag:
             flag = False
         else:
             return 1
-    """
-    cfg = build_cfg_from_source(source)
-    return_blocks = [
-        block
-        for block in cfg.blocks
-        if any(isinstance(stmt, ast.Return) for stmt in block.statements)
-    ]
-    assert len(return_blocks) == 1
-    assert return_blocks[0].is_terminated is True
-    assert cfg.exit in return_blocks[0].successors
-
-
-def test_cfg_for_else_terminated_branch() -> None:
-    source = """
+    """,
+        """
     def f(xs):
         for x in xs:
             pass
         else:
             return 1
-    """
+    """,
+    ],
+    ids=["while_else", "for_else"],
+)
+def test_cfg_loop_else_terminated_branch(source: str) -> None:
     cfg = build_cfg_from_source(source)
-    return_blocks = [
-        block
-        for block in cfg.blocks
-        if any(isinstance(stmt, ast.Return) for stmt in block.statements)
-    ]
-    assert len(return_blocks) == 1
-    assert return_blocks[0].is_terminated is True
-    assert cfg.exit in return_blocks[0].successors
+    return_block = _single_return_block(cfg)
+    assert return_block.is_terminated is True
+    assert cfg.exit in return_block.successors
 
 
 def test_cfg_break_outside_loop_falls_back_to_exit() -> None:

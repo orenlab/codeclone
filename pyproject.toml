@@ -65,7 +65,8 @@ dev = [
     "build>=1.2.0",
     "twine>=5.0.0",
     "mypy>=1.19.1",
-    "ruff>=0.12.0",
+    "ruff>=0.15.0",
+    "pre-commit>=4.5.1",
 ]
 
 [project.scripts]
@@ -107,8 +108,3 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "PIE", "PERF", "RUF"]
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
-
-[dependency-groups]
-dev = [
-    "pre-commit>=4.5.1",
-]
