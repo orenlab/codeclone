@@ -36,9 +36,11 @@ ongoing security review.
 
 Additional safeguards:
 
-- HTML report content is escaped to prevent script injection.
+- HTML report content is escaped in both text and attribute contexts to prevent script injection.
 - Reports are static and do not execute analyzed code.
-- Cache files are HMAC-signed; signature mismatches are ignored.
+- Scanner traversal is root-confined and prevents symlink-based path escape.
+- Baseline files are schema/type validated with size limits; invalid baselines fail fast.
+- Cache files are HMAC-signed (constant-time comparison), size-limited, and ignored on mismatch.
 - Cache secrets are stored next to the cache (`.cache_secret`) and must not be committed.
 
 ---

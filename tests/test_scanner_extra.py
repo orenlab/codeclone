@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,17 @@ import pytest
 import codeclone.scanner as scanner
 from codeclone.errors import ValidationError
 from codeclone.scanner import iter_py_files, module_name_from_path
+
+
+def _symlink_or_skip(
+    link: Path, target: Path, *, target_is_directory: bool = False
+) -> None:
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink is not supported on this platform")
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is not available in this environment")
 
 
 def test_iter_py_files_in_temp(tmp_path: Path) -> None:
@@ -85,10 +97,36 @@ def test_iter_py_files_symlink_skip(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     link = root / "link.py"
-    link.symlink_to(out_file)
+    _symlink_or_skip(link, out_file)
 
     files = list(iter_py_files(str(root)))
     assert str(link) not in files
+
+
+def test_iter_py_files_symlink_to_etc_skipped(tmp_path: Path) -> None:
+    passwd = Path("/etc/passwd")
+    if not passwd.exists():
+        pytest.skip("/etc/passwd not available")
+
+    root = tmp_path / "root"
+    root.mkdir()
+    link = root / "passwd.py"
+    _symlink_or_skip(link, passwd)
+
+    files = list(iter_py_files(str(root)))
+    assert str(link) not in files
+
+
+def test_iter_py_files_symlink_loop_does_not_traverse(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    src = root / "a.py"
+    src.write_text("x = 1\n", "utf-8")
+    loop = root / "loop"
+    _symlink_or_skip(loop, root, target_is_directory=True)
+
+    files = list(iter_py_files(str(root), max_files=10))
+    assert files.count(str(src)) == 1
 
 
 def test_sensitive_prefix_blocked(
@@ -161,7 +199,7 @@ def test_symlink_to_sensitive_directory_skipped(
         monkeypatch.setattr(scanner, "SENSITIVE_DIRS", {str(sensitive_root)})
 
         link = root / "sensitive_link"
-        link.symlink_to(sensitive_root, target_is_directory=True)
+        _symlink_or_skip(link, sensitive_root, target_is_directory=True)
 
         files = list(scanner.iter_py_files(str(root)))
         assert str(sensitive_file) not in files

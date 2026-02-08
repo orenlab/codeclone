@@ -8,241 +8,37 @@ Licensed under the MIT License.
 
 from __future__ import annotations
 
-import html
-import importlib
-import itertools
-from collections.abc import Iterable
-from dataclasses import dataclass
-from functools import lru_cache
-from typing import Any, NamedTuple, cast
+from typing import Any
 
-from codeclone import __version__
-from codeclone.errors import FileProcessingError
-
+from . import __version__
+from ._html_escape import _escape_attr, _escape_html, _meta_display
+from ._html_snippets import (
+    _FileCache,
+    _prefix_css,
+    _pygments_css,
+    _render_code_block,
+    _try_pygments,
+    pairwise,
+)
 from .templates import FONT_CSS_URL, REPORT_TEMPLATE
 
-# ============================
-# Pairwise
-# ============================
-
-
-def pairwise(iterable: Iterable[Any]) -> Iterable[tuple[Any, Any]]:
-    a, b = itertools.tee(iterable)
-    next(b, None)
-    return zip(a, b, strict=False)
-
-
-# ============================
-# Code snippet infrastructure
-# ============================
-
-
-@dataclass(slots=True)
-class _Snippet:
-    filepath: str
-    start_line: int
-    end_line: int
-    code_html: str
-
-
-class _FileCache:
-    __slots__ = ("_get_lines_impl", "maxsize")
-
-    def __init__(self, maxsize: int = 128) -> None:
-        self.maxsize = maxsize
-        # Create a bound method with lru_cache
-        # We need to cache on the method to have instance-level caching if we wanted
-        # different caches per instance. But lru_cache on method actually caches
-        # on the function object (class level) if not careful,
-        # or we use a wrapper.
-        # However, for this script, we usually have one reporter.
-        # To be safe and cleaner, we can use a method that delegates to a cached
-        # function, OR just use lru_cache on a method (which requires 'self' to be
-        # hashable, which it is by default id).
-        # But 'self' changes if we create new instances.
-        # Let's use the audit's pattern: cache the implementation.
-
-        self._get_lines_impl = lru_cache(maxsize=maxsize)(self._read_file_range)
-
-    @staticmethod
-    def _read_file_range(
-        filepath: str, start_line: int, end_line: int
-    ) -> tuple[str, ...]:
-        if start_line < 1:
-            start_line = 1
-        if end_line < start_line:
-            return ()
-
-        try:
-
-            def _read_with_errors(errors: str) -> tuple[str, ...]:
-                lines: list[str] = []
-                with open(filepath, encoding="utf-8", errors=errors) as f:
-                    for lineno, line in enumerate(f, start=1):
-                        if lineno < start_line:
-                            continue
-                        if lineno > end_line:
-                            break
-                        lines.append(line.rstrip("\n"))
-                return tuple(lines)
-
-            try:
-                return _read_with_errors("strict")
-            except UnicodeDecodeError:
-                return _read_with_errors("replace")
-        except OSError as e:
-            raise FileProcessingError(f"Cannot read {filepath}: {e}") from e
-
-    def get_lines_range(
-        self, filepath: str, start_line: int, end_line: int
-    ) -> tuple[str, ...]:
-        return self._get_lines_impl(filepath, start_line, end_line)
-
-    class _CacheInfo(NamedTuple):
-        hits: int
-        misses: int
-        maxsize: int | None
-        currsize: int
-
-    def cache_info(self) -> _CacheInfo:
-        return cast(_FileCache._CacheInfo, self._get_lines_impl.cache_info())
-
-
-def _try_pygments(code: str) -> str | None:
-    try:
-        pygments = importlib.import_module("pygments")
-        formatters = importlib.import_module("pygments.formatters")
-        lexers = importlib.import_module("pygments.lexers")
-    except ImportError:
-        return None
-
-    highlight = pygments.highlight
-    formatter_cls = formatters.HtmlFormatter
-    lexer_cls = lexers.PythonLexer
-    result = highlight(code, lexer_cls(), formatter_cls(nowrap=True))
-    return result if isinstance(result, str) else None
-
-
-def _pygments_css(style_name: str) -> str:
-    """
-    Returns CSS for pygments tokens. Scoped to `.codebox` to avoid leaking styles.
-    If Pygments is not available or style missing, returns "".
-    """
-    try:
-        formatters = importlib.import_module("pygments.formatters")
-    except ImportError:
-        return ""
-
-    try:
-        formatter_cls = formatters.HtmlFormatter
-        fmt = formatter_cls(style=style_name)
-    except Exception:
-        try:
-            fmt = formatter_cls()
-        except Exception:
-            return ""
-
-    try:
-        # `.codebox` scope: pygments will emit selectors like `.codebox .k { ... }`
-        css = fmt.get_style_defs(".codebox")
-        return css if isinstance(css, str) else ""
-    except Exception:
-        return ""
-
-
-def _prefix_css(css: str, prefix: str) -> str:
-    """
-    Prefix every selector block with `prefix `.
-    Safe enough for pygments CSS which is mostly selector blocks and comments.
-    """
-    out_lines: list[str] = []
-    for line in css.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            out_lines.append(line)
-            continue
-        if stripped.startswith(("/*", "*", "*/")):
-            out_lines.append(line)
-            continue
-        # Selector lines usually end with `{
-        if "{" in line:
-            # naive prefix: split at "{", prefix selector part
-            before, after = line.split("{", 1)
-            sel = before.strip()
-            if sel:
-                out_lines.append(f"{prefix} {sel} {{ {after}".rstrip())
-            else:
-                out_lines.append(line)
-        else:
-            out_lines.append(line)
-    return "\n".join(out_lines)
-
-
-def _render_code_block(
-    *,
-    filepath: str,
-    start_line: int,
-    end_line: int,
-    file_cache: _FileCache,
-    context: int,
-    max_lines: int,
-) -> _Snippet:
-    s = max(1, start_line - context)
-    e = end_line + context
-
-    if e - s + 1 > max_lines:
-        e = s + max_lines - 1
-
-    lines = file_cache.get_lines_range(filepath, s, e)
-
-    numbered: list[tuple[bool, str]] = []
-    for lineno, line in enumerate(lines, start=s):
-        hit = start_line <= lineno <= end_line
-        numbered.append((hit, f"{lineno:>5} | {line.rstrip()}"))
-
-    raw = "\n".join(text for _, text in numbered)
-    highlighted = _try_pygments(raw)
-
-    if highlighted is None:
-        rendered: list[str] = []
-        for hit, text in numbered:
-            cls = "hitline" if hit else "line"
-            rendered.append(f'<div class="{cls}">{html.escape(text)}</div>')
-        body = "\n".join(rendered)
-    else:
-        body = highlighted
-
-    return _Snippet(
-        filepath=filepath,
-        start_line=start_line,
-        end_line=end_line,
-        code_html=f'<div class="codebox"><pre><code>{body}</code></pre></div>',
-    )
-
+__all__ = [
+    "_FileCache",
+    "_prefix_css",
+    "_pygments_css",
+    "_render_code_block",
+    "_try_pygments",
+    "build_html_report",
+    "pairwise",
+]
 
 # ============================
 # HTML report builder
 # ============================
 
 
-def _escape(v: Any) -> str:
-    return html.escape("" if v is None else str(v))
-
-
-def _meta_display(v: Any) -> str:
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    if v is None:
-        return "n/a"
-    text = str(v).strip()
-    return text if text else "n/a"
-
-
-def _group_sort_key(items: list[dict[str, Any]]) -> tuple[int, int]:
-    return (
-        -len(items),
-        -max(int(i.get("loc") or i.get("size") or 0) for i in items),
-    )
+def _group_sort_key(items: list[dict[str, Any]]) -> tuple[int]:
+    return (-len(items),)
 
 
 def build_html_report(
@@ -257,10 +53,14 @@ def build_html_report(
 ) -> str:
     file_cache = _FileCache()
 
-    func_sorted = sorted(func_groups.items(), key=lambda kv: _group_sort_key(kv[1]))
-    block_sorted = sorted(block_groups.items(), key=lambda kv: _group_sort_key(kv[1]))
+    func_sorted = sorted(
+        func_groups.items(), key=lambda kv: (*_group_sort_key(kv[1]), kv[0])
+    )
+    block_sorted = sorted(
+        block_groups.items(), key=lambda kv: (*_group_sort_key(kv[1]), kv[0])
+    )
     segment_sorted = sorted(
-        segment_groups.items(), key=lambda kv: _group_sort_key(kv[1])
+        segment_groups.items(), key=lambda kv: (*_group_sort_key(kv[1]), kv[0])
     )
 
     has_any = bool(func_sorted) or bool(block_sorted) or bool(segment_sorted)
@@ -352,13 +152,13 @@ def build_html_report(
         out: list[str] = [
             f'<section id="{section_id}" class="section" data-section="{section_id}">',
             '<div class="section-head">',
-            f"<h2>{_escape(section_title)} "
+            f"<h2>{_escape_html(section_title)} "
             f'<span class="pill {pill_cls}" data-count-pill="{section_id}">'
             f"{len(groups)} groups</span></h2>",
             f"""
 <div class="section-toolbar"
      role="toolbar"
-     aria-label="{_escape(section_title)} controls">
+     aria-label="{_escape_attr(section_title)} controls">
   <div class="toolbar-left">
     <div class="search-wrap">
       <span class="search-ico">{ICONS["search"]}</span>
@@ -410,12 +210,12 @@ def build_html_report(
                 search_parts.append(str(it.get("qualname", "")))
                 search_parts.append(str(it.get("filepath", "")))
             search_blob = " ".join(search_parts).lower()
-            search_blob_escaped = html.escape(search_blob, quote=True)
+            search_blob_escaped = _escape_attr(search_blob)
 
             out.append(
                 f'<div class="group" data-group="{section_id}" '
                 f'data-group-index="{idx}" '
-                f'data-group-key="{_escape(gkey)}" '
+                f'data-group-key="{_escape_attr(gkey)}" '
                 f'data-search="{search_blob_escaped}">'
             )
 
@@ -428,7 +228,8 @@ def build_html_report(
                 f'<span class="pill small {pill_cls}">{len(items)} items</span>'
                 "</div>"
                 '<div class="group-right">'
-                f'<code class="gkey" title="{_escape(gkey)}">{_escape(gkey)}</code>'
+                f'<code class="gkey" title="{_escape_attr(gkey)}">'
+                f"{_escape_html(gkey)}</code>"
                 "</div>"
                 "</div>"
             )
@@ -449,17 +250,21 @@ def build_html_report(
                         max_lines=max_snippet_lines,
                     )
 
-                    qualname = _escape(item["qualname"])
-                    filepath = _escape(item["filepath"])
+                    qualname = _escape_html(item["qualname"])
+                    qualname_attr = _escape_attr(item["qualname"])
+                    filepath = _escape_html(item["filepath"])
+                    filepath_attr = _escape_attr(item["filepath"])
                     start_line = int(item["start_line"])
                     end_line = int(item["end_line"])
                     out.append(
-                        f'<div class="item" data-qualname="{qualname}" '
-                        f'data-filepath="{filepath}" data-start-line="{start_line}" '
+                        f'<div class="item" data-qualname="{qualname_attr}" '
+                        f'data-filepath="{filepath_attr}" '
+                        f'data-start-line="{start_line}" '
                         f'data-end-line="{end_line}">'
-                        f'<div class="item-head" title="{qualname}">{qualname}</div>'
+                        f'<div class="item-head" title="{qualname_attr}">'
+                        f"{qualname}</div>"
                         f'<div class="item-file" '
-                        f'title="{filepath}:{start_line}-{end_line}">'
+                        f'title="{filepath_attr}:{start_line}-{end_line}">'
                         f"{filepath}:{start_line}-{end_line}"
                         f"</div>"
                         f"{snippet.code_html}"
@@ -523,17 +328,17 @@ def build_html_report(
         [
             (
                 'data-codeclone-version="'
-                f'{_escape(meta.get("codeclone_version", __version__))}"'
+                f'{_escape_attr(meta.get("codeclone_version", __version__))}"'
             ),
-            f'data-python-version="{_escape(meta.get("python_version"))}"',
-            f'data-baseline-path="{_escape(meta.get("baseline_path"))}"',
-            f'data-baseline-version="{_escape(meta.get("baseline_version"))}"',
-            f'data-baseline-schema-version="{_escape(meta.get("baseline_schema_version"))}"',
-            f'data-baseline-python-version="{_escape(meta.get("baseline_python_version"))}"',
-            f'data-baseline-loaded="{_escape(_meta_display(meta.get("baseline_loaded")))}"',
-            f'data-baseline-status="{_escape(meta.get("baseline_status"))}"',
-            f'data-cache-path="{_escape(meta.get("cache_path"))}"',
-            f'data-cache-used="{_escape(_meta_display(meta.get("cache_used")))}"',
+            f'data-python-version="{_escape_attr(meta.get("python_version"))}"',
+            f'data-baseline-path="{_escape_attr(meta.get("baseline_path"))}"',
+            f'data-baseline-version="{_escape_attr(meta.get("baseline_version"))}"',
+            f'data-baseline-schema-version="{_escape_attr(meta.get("baseline_schema_version"))}"',
+            f'data-baseline-python-version="{_escape_attr(meta.get("baseline_python_version"))}"',
+            f'data-baseline-loaded="{_escape_attr(_meta_display(meta.get("baseline_loaded")))}"',
+            f'data-baseline-status="{_escape_attr(meta.get("baseline_status"))}"',
+            f'data-cache-path="{_escape_attr(meta.get("cache_path"))}"',
+            f'data-cache-used="{_escape_attr(_meta_display(meta.get("cache_used")))}"',
         ]
     )
 
@@ -565,7 +370,7 @@ def build_html_report(
 
         # Path fields with tooltip on hover
         if _is_path_field(label) and display_val != "n/a":
-            escaped_path = _escape(display_val)
+            escaped_path = _escape_html(display_val)
             return (
                 f'<span class="meta-path">'
                 f"{escaped_path}"
@@ -574,12 +379,12 @@ def build_html_report(
             )
 
         # Regular fields
-        return _escape(display_val)
+        return _escape_html(display_val)
 
     meta_rows_html = "".join(
         (
             f'<div class="{_meta_row_class(label)}">'
-            f"<dt>{_escape(label)}</dt>"
+            f"<dt>{_escape_html(label)}</dt>"
             f"<dd>{_format_meta_value(label, value)}</dd>"
             "</div>"
         )
@@ -615,7 +420,7 @@ def build_html_report(
     )
 
     return REPORT_TEMPLATE.substitute(
-        title=_escape(title),
+        title=_escape_html(title),
         version=__version__,
         pyg_dark=pyg_dark,
         pyg_light=pyg_light,

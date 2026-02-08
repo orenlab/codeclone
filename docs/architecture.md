@@ -22,9 +22,14 @@ CodeClone processes Python projects in the following stages:
 ## 1. Source Scanning
 
 - Recursively scans `.py` files.
+- Uses deterministic sorted traversal.
+- Skips paths that resolve outside the root (symlink traversal guard).
 - Applies cache-based skipping using file stat signatures.
 - Default cache location is project-local: `<root>/.cache/codeclone/cache.json`
   (override via `--cache-path`, legacy alias: `--cache-dir`).
+- Cache file size guard is configurable via `--max-cache-size-mb` (oversized cache is ignored with warning).
+- Cache is best-effort: signature/version/shape mismatches are ignored with warnings, and
+  invalid entries are skipped deterministically.
 
 ---
 
@@ -131,7 +136,8 @@ All report formats include provenance metadata:
 - `baseline_schema_version`
 - `baseline_python_version`
 - `baseline_loaded`
-- `baseline_status` (`ok | missing | mismatch | invalid`)
+- `baseline_status`
+  (`ok | missing | legacy | invalid | mismatch_version | mismatch_schema | mismatch_python | generator_mismatch | integrity_missing | integrity_failed | too_large`)
 
 ---
 
@@ -142,6 +148,11 @@ enabling gradual architectural improvement.
 
 Baseline files are **versioned**. The baseline stores the CodeClone version and schema
 version used to generate it. Mismatches result in a hard stop and require regeneration.
+Baseline format in 1.3+ is tamper-evident (`generator`, `payload_sha256`) and validated
+before baseline diffing.
+Baseline loading is strict: schema/type violations or oversized baseline files are treated
+as invalid input and fail fast in CI mode.
+Baseline size guard is configurable via `--max-baseline-size-mb`.
 
 ## Python Version Consistency for Baseline Checks
 

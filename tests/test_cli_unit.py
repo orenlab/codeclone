@@ -111,6 +111,8 @@ def test_cli_help_text_consistency(
     assert "Default:" in out
     assert "<root>/.cache/codeclone/cache.json" in out
     assert "Legacy alias for --cache-path" in out
+    assert "--max-baseline-size-mb MB" in out
+    assert "--max-cache-size-mb MB" in out
     assert "CI preset: --fail-on-new --no-color --quiet." in out
     assert "total clone groups (function +" in out
     assert "block) exceed this number" in out
@@ -152,6 +154,32 @@ def test_build_summary_table_rows_and_styles() -> None:
     assert cast(Text, value_cells[1]).style == "dim"
     assert cast(Text, value_cells[7]).style == "yellow"
     assert cast(Text, value_cells[8]).style == "bold red"
+
+
+def test_build_summary_rows_order() -> None:
+    rows = cli._build_summary_rows(
+        files_found=1,
+        files_analyzed=1,
+        cache_hits=0,
+        files_skipped=0,
+        func_clones_count=0,
+        block_clones_count=0,
+        segment_clones_count=0,
+        suppressed_segment_groups=0,
+        new_clones_count=0,
+    )
+    labels = [label for label, _ in rows]
+    assert labels == [
+        ui.SUMMARY_LABEL_FILES_FOUND,
+        ui.SUMMARY_LABEL_FILES_ANALYZED,
+        ui.SUMMARY_LABEL_CACHE_HITS,
+        ui.SUMMARY_LABEL_FILES_SKIPPED,
+        ui.SUMMARY_LABEL_FUNCTION,
+        ui.SUMMARY_LABEL_BLOCK,
+        ui.SUMMARY_LABEL_SEGMENT,
+        ui.SUMMARY_LABEL_SUPPRESSED,
+        ui.SUMMARY_LABEL_NEW_BASELINE,
+    ]
 
 
 def test_print_summary_invariant_warning(

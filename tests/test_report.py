@@ -1,4 +1,5 @@
 import ast
+import json
 from pathlib import Path
 from typing import cast
 
@@ -95,6 +96,137 @@ def test_report_output_formats() -> None:
     assert "REPORT METADATA" in text_out
     assert "Baseline schema version: 1" in text_out
     assert "Clone group #1" in text_out
+
+
+def test_report_json_deterministic_group_order() -> None:
+    groups_a = {
+        "b": [
+            {
+                "qualname": "b",
+                "filepath": "b.py",
+                "start_line": 2,
+                "end_line": 3,
+                "loc": 2,
+            }
+        ],
+        "a": [
+            {
+                "qualname": "a",
+                "filepath": "a.py",
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+            }
+        ],
+    }
+    groups_b = {"a": groups_a["a"], "b": groups_a["b"]}
+    meta = {"codeclone_version": "1.3.0"}
+    out_a = to_json_report(groups_a, groups_a, groups_a, meta)
+    out_b = to_json_report(groups_b, groups_b, groups_b, meta)
+    assert out_a == out_b
+
+
+def test_report_json_group_order_prefers_size_then_key() -> None:
+    groups = {
+        "b": [
+            {
+                "qualname": "b",
+                "filepath": "b.py",
+                "start_line": 2,
+                "end_line": 3,
+                "loc": 2,
+            }
+        ],
+        "a": [
+            {
+                "qualname": "a",
+                "filepath": "a.py",
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+            }
+        ],
+        "c": [
+            {
+                "qualname": "c1",
+                "filepath": "c.py",
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+            },
+            {
+                "qualname": "c2",
+                "filepath": "c.py",
+                "start_line": 3,
+                "end_line": 4,
+                "loc": 2,
+            },
+        ],
+    }
+    payload = to_json_report(groups, {}, {}, {"codeclone_version": "1.3.0"})
+    report_obj = json.loads(payload)
+    assert list(report_obj["function_clones"].keys()) == ["c", "a", "b"]
+
+
+def test_report_json_deterministic_with_shuffled_units() -> None:
+    units_a = [
+        {
+            "fingerprint": "abc",
+            "loc_bucket": "0-19",
+            "qualname": "b",
+            "filepath": "b.py",
+            "start_line": 2,
+            "end_line": 3,
+            "loc": 2,
+        },
+        {
+            "fingerprint": "abc",
+            "loc_bucket": "0-19",
+            "qualname": "a",
+            "filepath": "a.py",
+            "start_line": 1,
+            "end_line": 2,
+            "loc": 2,
+        },
+    ]
+    units_b = list(reversed(units_a))
+    groups_a = build_groups(units_a)
+    groups_b = build_groups(units_b)
+    meta = {"codeclone_version": "1.3.0"}
+    out_a = to_json_report(groups_a, {}, {}, meta)
+    out_b = to_json_report(groups_b, {}, {}, meta)
+    assert out_a == out_b
+
+
+def test_text_report_deterministic_group_order() -> None:
+    groups = {
+        "b": [
+            {
+                "qualname": "b",
+                "filepath": "b.py",
+                "start_line": 2,
+                "end_line": 3,
+                "loc": 2,
+            }
+        ],
+        "a": [
+            {
+                "qualname": "a",
+                "filepath": "a.py",
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+            }
+        ],
+    }
+    text = report_mod.to_text(groups)
+    first_idx = text.find("Clone group #1")
+    a_idx = text.find("a.py")
+    b_idx = text.find("b.py")
+    assert first_idx != -1
+    assert a_idx != -1
+    assert b_idx != -1
+    assert a_idx < b_idx
 
 
 def test_to_text_report_handles_missing_meta_fields() -> None:

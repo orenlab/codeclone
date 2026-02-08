@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.3.0] - 2026-02-05
+## [1.3.0] - 2026-02-08
 
 ### Overview
 
@@ -63,6 +63,14 @@ the HTML report UI, and introduces baseline versioning.
 
 - Baselines are now **versioned** and include a schema version.
 - Mismatched baseline versions **fail fast** and require regeneration.
+- Baseline loading is now strict: invalid schema/types or oversized baseline files
+  fail fast to preserve CI integrity.
+- Added baseline tamper-evident integrity for v1.3+ files (`generator`, `payload_sha256`)
+  while keeping legacy baseline behavior as explicit regeneration-required fail-fast.
+- Added configurable size guards (`--max-baseline-size-mb`, `--max-cache-size-mb`):
+  oversized baseline fails fast, oversized cache is ignored with warning.
+- Behavioral hardening (CLI): baseline validation is now an explicit contract
+  (legacy/version/schema/python/integrity/size states) with deterministic fail-fast behavior.
 
 **Breaking (CI):** baseline version mismatch now fails hard; CI requires baseline regeneration on upgrade.
 
@@ -104,12 +112,20 @@ codeclone . --update-baseline
 - **Segment reporting**  
   Added a dedicated “Segment clones” section and summary metric in HTML/TXT/JSON outputs.
 
+- **Escaping and snippet resilience**  
+  Hardened HTML escaping for text and attribute contexts, and added a safe fallback when
+  source snippets are unavailable during report rendering.
+
 ### Cache & Internals
 
 - Extended cache schema to store segment fingerprints (cache version bump).
 - Default cache location moved to `<root>/.cache/codeclone/cache.json` (project‑local).
 - Added a legacy cache warning for `~/.cache/codeclone/cache.json` with guidance to
   delete it and add `.cache/` to `.gitignore`.
+- Strengthened cache integrity handling with constant-time signature checks and explicit
+  warnings for oversized cache files.
+- Added deterministic deep-schema cache entry validation (`stat/units/blocks/segments`);
+  invalid cache entries are ignored instead of affecting analysis results.
 
 ### Packaging
 
@@ -124,6 +140,8 @@ codeclone . --update-baseline
 ### Testing & Security
 
 - Expanded security tests (HTML escaping and safety checks).
+- Added regression tests for deterministic report ordering across HTML/TXT/JSON,
+  baseline/cache integrity edge cases, and symlink traversal/loop safety.
 
 ---
 

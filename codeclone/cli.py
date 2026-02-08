@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -17,15 +16,22 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
-from rich.table import Table
-from rich.text import Text
 from rich.theme import Theme
 
 from . import __version__
 from . import ui_messages as ui
+from ._cli_args import build_parser
+from ._cli_meta import _build_report_meta as _build_report_meta_impl
+from ._cli_meta import _current_python_version as _current_python_version_impl
+from ._cli_paths import _validate_output_path as _validate_output_path_impl
+from ._cli_paths import expand_path as _expand_path_impl
+from ._cli_summary import _build_summary_rows as _build_summary_rows_impl
+from ._cli_summary import _build_summary_table as _build_summary_table_impl
+from ._cli_summary import _print_summary as _print_summary_impl
+from ._cli_summary import _summary_value_style as _summary_value_style_impl
 from .baseline import BASELINE_SCHEMA_VERSION, Baseline
 from .cache import Cache, CacheEntry, FileStat, file_stat_signature
-from .errors import CacheError
+from .errors import BaselineValidationError, CacheError
 from .extractor import extract_units_from_source
 from .html_report import build_html_report
 from .normalize import NormalizationConfig
@@ -51,13 +57,6 @@ custom_theme = Theme(
 )
 
 
-class _HelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
-    def _get_help_string(self, action: argparse.Action) -> str:
-        if action.dest == "cache_path":
-            return action.help or ""
-        return cast(str, super()._get_help_string(action))
-
-
 LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
 
 
@@ -69,6 +68,19 @@ console = _make_console(no_color=False)
 
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 BATCH_SIZE = 100
+_VALID_BASELINE_STATUSES = {
+    "ok",
+    "missing",
+    "legacy",
+    "invalid",
+    "mismatch_version",
+    "mismatch_schema",
+    "mismatch_python",
+    "generator_mismatch",
+    "integrity_missing",
+    "integrity_failed",
+    "too_large",
+}
 
 
 @dataclass(slots=True)
@@ -85,7 +97,7 @@ class ProcessingResult:
 
 
 def expand_path(p: str) -> Path:
-    return Path(p).expanduser().resolve()
+    return _expand_path_impl(p)
 
 
 def process_file(
@@ -172,19 +184,17 @@ def print_banner() -> None:
 
 
 def _validate_output_path(path: str, *, expected_suffix: str, label: str) -> Path:
-    out = Path(path).expanduser()
-    if out.suffix.lower() != expected_suffix:
-        console.print(
-            ui.fmt_invalid_output_extension(
-                label=label, path=out, expected_suffix=expected_suffix
-            )
-        )
-        sys.exit(2)
-    return out.resolve()
+    return _validate_output_path_impl(
+        path,
+        expected_suffix=expected_suffix,
+        label=label,
+        console=console,
+        invalid_message=ui.fmt_invalid_output_extension,
+    )
 
 
 def _current_python_version() -> str:
-    return f"{sys.version_info.major}.{sys.version_info.minor}"
+    return _current_python_version_impl()
 
 
 def _build_report_meta(
@@ -196,28 +206,19 @@ def _build_report_meta(
     cache_path: Path,
     cache_used: bool,
 ) -> dict[str, Any]:
-    return {
-        "codeclone_version": __version__,
-        "python_version": _current_python_version(),
-        "baseline_path": str(baseline_path),
-        "baseline_version": baseline.baseline_version,
-        "baseline_schema_version": baseline.schema_version,
-        "baseline_python_version": baseline.python_version,
-        "baseline_loaded": baseline_loaded,
-        "baseline_status": baseline_status,
-        "cache_path": str(cache_path),
-        "cache_used": cache_used,
-    }
+    return _build_report_meta_impl(
+        codeclone_version=__version__,
+        baseline_path=baseline_path,
+        baseline=baseline,
+        baseline_loaded=baseline_loaded,
+        baseline_status=baseline_status,
+        cache_path=cache_path,
+        cache_used=cache_used,
+    )
 
 
 def _summary_value_style(*, label: str, value: int) -> str:
-    if value == 0:
-        return "dim"
-    if label == ui.SUMMARY_LABEL_NEW_BASELINE:
-        return "bold red"
-    if label == ui.SUMMARY_LABEL_SUPPRESSED:
-        return "yellow"
-    return "bold green"
+    return _summary_value_style_impl(label=label, value=value)
 
 
 def _build_summary_rows(
@@ -232,29 +233,21 @@ def _build_summary_rows(
     suppressed_segment_groups: int,
     new_clones_count: int,
 ) -> list[tuple[str, int]]:
-    return [
-        (ui.SUMMARY_LABEL_FILES_FOUND, files_found),
-        (ui.SUMMARY_LABEL_FILES_ANALYZED, files_analyzed),
-        (ui.SUMMARY_LABEL_CACHE_HITS, cache_hits),
-        (ui.SUMMARY_LABEL_FILES_SKIPPED, files_skipped),
-        (ui.SUMMARY_LABEL_FUNCTION, func_clones_count),
-        (ui.SUMMARY_LABEL_BLOCK, block_clones_count),
-        (ui.SUMMARY_LABEL_SEGMENT, segment_clones_count),
-        (ui.SUMMARY_LABEL_SUPPRESSED, suppressed_segment_groups),
-        (ui.SUMMARY_LABEL_NEW_BASELINE, new_clones_count),
-    ]
+    return _build_summary_rows_impl(
+        files_found=files_found,
+        files_analyzed=files_analyzed,
+        cache_hits=cache_hits,
+        files_skipped=files_skipped,
+        func_clones_count=func_clones_count,
+        block_clones_count=block_clones_count,
+        segment_clones_count=segment_clones_count,
+        suppressed_segment_groups=suppressed_segment_groups,
+        new_clones_count=new_clones_count,
+    )
 
 
-def _build_summary_table(rows: list[tuple[str, int]]) -> Table:
-    summary_table = Table(title=ui.SUMMARY_TITLE, show_header=True)
-    summary_table.add_column("Metric")
-    summary_table.add_column("Value", justify="right")
-    for label, value in rows:
-        summary_table.add_row(
-            label,
-            Text(str(value), style=_summary_value_style(label=label, value=value)),
-        )
-    return summary_table
+def _build_summary_table(rows: list[tuple[str, int]]) -> Any:
+    return _build_summary_table_impl(rows)
 
 
 def _print_summary(
@@ -270,8 +263,9 @@ def _print_summary(
     suppressed_segment_groups: int,
     new_clones_count: int,
 ) -> None:
-    invariant_ok = files_found == (files_analyzed + cache_hits + files_skipped)
-    rows = _build_summary_rows(
+    _print_summary_impl(
+        console=console,
+        quiet=quiet,
         files_found=files_found,
         files_analyzed=files_analyzed,
         cache_hits=cache_hits,
@@ -283,159 +277,9 @@ def _print_summary(
         new_clones_count=new_clones_count,
     )
 
-    if quiet:
-        console.print(ui.SUMMARY_TITLE)
-        console.print(
-            ui.fmt_summary_compact_input(
-                found=files_found,
-                analyzed=files_analyzed,
-                cache_hits=cache_hits,
-                skipped=files_skipped,
-            )
-        )
-        console.print(
-            ui.fmt_summary_compact_clones(
-                function=func_clones_count,
-                block=block_clones_count,
-                segment=segment_clones_count,
-                suppressed=suppressed_segment_groups,
-                new=new_clones_count,
-            )
-        )
-    else:
-        console.print(_build_summary_table(rows))
-
-    if not invariant_ok:
-        console.print(f"[warning]{ui.WARN_SUMMARY_ACCOUNTING_MISMATCH}[/warning]")
-
 
 def main() -> None:
-    ap = argparse.ArgumentParser(
-        prog="codeclone",
-        description="AST and CFG-based code clone detector for Python.",
-        formatter_class=_HelpFormatter,
-    )
-    ap.add_argument(
-        "--version",
-        action="version",
-        version=ui.version_output(__version__),
-        help=ui.HELP_VERSION,
-    )
-
-    # Core Arguments
-    core_group = ap.add_argument_group("Target")
-    core_group.add_argument(
-        "root",
-        nargs="?",
-        default=".",
-        help=ui.HELP_ROOT,
-    )
-
-    # Tuning
-    tune_group = ap.add_argument_group("Analysis Tuning")
-    tune_group.add_argument(
-        "--min-loc",
-        type=int,
-        default=15,
-        help=ui.HELP_MIN_LOC,
-    )
-    tune_group.add_argument(
-        "--min-stmt",
-        type=int,
-        default=6,
-        help=ui.HELP_MIN_STMT,
-    )
-    tune_group.add_argument(
-        "--processes",
-        type=int,
-        default=4,
-        help=ui.HELP_PROCESSES,
-    )
-    tune_group.add_argument(
-        "--cache-path",
-        dest="cache_path",
-        metavar="FILE",
-        default=None,
-        help=ui.HELP_CACHE_PATH,
-    )
-    tune_group.add_argument(
-        "--cache-dir",
-        dest="cache_path",
-        metavar="FILE",
-        default=None,
-        help=ui.HELP_CACHE_DIR_LEGACY,
-    )
-
-    # Baseline & CI
-    ci_group = ap.add_argument_group("Baseline & CI/CD")
-    ci_group.add_argument(
-        "--baseline",
-        default="codeclone.baseline.json",
-        help=ui.HELP_BASELINE,
-    )
-    ci_group.add_argument(
-        "--update-baseline",
-        action="store_true",
-        help=ui.HELP_UPDATE_BASELINE,
-    )
-    ci_group.add_argument(
-        "--fail-on-new",
-        action="store_true",
-        help=ui.HELP_FAIL_ON_NEW,
-    )
-    ci_group.add_argument(
-        "--fail-threshold",
-        type=int,
-        default=-1,
-        metavar="MAX_CLONES",
-        help=ui.HELP_FAIL_THRESHOLD,
-    )
-    ci_group.add_argument(
-        "--ci",
-        action="store_true",
-        help=ui.HELP_CI,
-    )
-
-    # Output
-    out_group = ap.add_argument_group("Reporting")
-    out_group.add_argument(
-        "--html",
-        dest="html_out",
-        metavar="FILE",
-        help=ui.HELP_HTML,
-    )
-    out_group.add_argument(
-        "--json",
-        dest="json_out",
-        metavar="FILE",
-        help=ui.HELP_JSON,
-    )
-    out_group.add_argument(
-        "--text",
-        dest="text_out",
-        metavar="FILE",
-        help=ui.HELP_TEXT,
-    )
-    out_group.add_argument(
-        "--no-progress",
-        action="store_true",
-        help=ui.HELP_NO_PROGRESS,
-    )
-    out_group.add_argument(
-        "--no-color",
-        action="store_true",
-        help=ui.HELP_NO_COLOR,
-    )
-    out_group.add_argument(
-        "--quiet",
-        action="store_true",
-        help=ui.HELP_QUIET,
-    )
-    out_group.add_argument(
-        "--verbose",
-        action="store_true",
-        help=ui.HELP_VERBOSE,
-    )
+    ap = build_parser(__version__)
 
     cache_path_from_args = any(
         arg in {"--cache-dir", "--cache-path"}
@@ -454,6 +298,10 @@ def main() -> None:
 
     global console
     console = _make_console(no_color=args.no_color)
+
+    if args.max_baseline_size_mb < 0 or args.max_cache_size_mb < 0:
+        console.print("[error]Size limits must be non-negative integers (MB).[/error]")
+        sys.exit(1)
 
     if not args.quiet:
         print_banner()
@@ -503,7 +351,7 @@ def main() -> None:
                         legacy_path=legacy_resolved, new_path=cache_path
                     )
                 )
-    cache = Cache(cache_path)
+    cache = Cache(cache_path, max_size_bytes=args.max_cache_size_mb * 1024 * 1024)
     cache.load()
     if cache.load_warning:
         console.print(f"[warning]{cache.load_warning}[/warning]")
@@ -812,53 +660,70 @@ def main() -> None:
 
     if baseline_exists:
         try:
-            baseline.load()
-        except ValueError as e:
-            baseline_status = "invalid"
-            if not args.update_baseline:
+            baseline.load(max_size_bytes=args.max_baseline_size_mb * 1024 * 1024)
+        except BaselineValidationError as e:
+            baseline_status = (
+                e.status if e.status in _VALID_BASELINE_STATUSES else "invalid"
+            )
+            if baseline_status == "too_large" or not args.update_baseline:
                 console.print(ui.fmt_invalid_baseline(e))
                 baseline_failure_code = 2
         else:
             baseline_loaded = True
             baseline_status = "ok"
             if not args.update_baseline:
-                if baseline.baseline_version != __version__:
-                    baseline_status = "mismatch"
-                    if baseline.baseline_version is None:
-                        console.print(ui.fmt_baseline_version_missing(__version__))
-                    else:
+                if baseline.is_legacy_format():
+                    baseline_status = "legacy"
+                    console.print(ui.fmt_baseline_version_missing(__version__))
+                    baseline_failure_code = 2
+                else:
+                    if baseline.baseline_version != __version__:
+                        assert baseline.baseline_version is not None
+                        baseline_status = "mismatch_version"
                         console.print(
                             ui.fmt_baseline_version_mismatch(
                                 baseline_version=baseline.baseline_version,
                                 current_version=__version__,
                             )
                         )
-                    baseline_failure_code = 2
-                if (
-                    baseline.schema_version is not None
-                    and baseline.schema_version != BASELINE_SCHEMA_VERSION
-                ):
-                    baseline_status = "mismatch"
-                    console.print(
-                        ui.fmt_baseline_schema_mismatch(
-                            baseline_schema=baseline.schema_version,
-                            current_schema=BASELINE_SCHEMA_VERSION,
-                        )
-                    )
-                    baseline_failure_code = 2
-            if not args.update_baseline and baseline.python_version:
-                current_version = _current_python_version()
-                if baseline.python_version != current_version:
-                    baseline_status = "mismatch"
-                    console.print(
-                        ui.fmt_baseline_python_mismatch(
-                            baseline_python=baseline.python_version,
-                            current_python=current_version,
-                        )
-                    )
-                    if args.fail_on_new:
-                        console.print(ui.ERR_BASELINE_SAME_PYTHON_REQUIRED)
                         baseline_failure_code = 2
+                    if baseline.schema_version != BASELINE_SCHEMA_VERSION:
+                        assert baseline.schema_version is not None
+                        if baseline_status == "ok":
+                            baseline_status = "mismatch_schema"
+                        console.print(
+                            ui.fmt_baseline_schema_mismatch(
+                                baseline_schema=baseline.schema_version,
+                                current_schema=BASELINE_SCHEMA_VERSION,
+                            )
+                        )
+                        baseline_failure_code = 2
+                    if baseline.python_version:
+                        current_version = _current_python_version()
+                        if baseline.python_version != current_version:
+                            if baseline_status == "ok":
+                                baseline_status = "mismatch_python"
+                            console.print(
+                                ui.fmt_baseline_python_mismatch(
+                                    baseline_python=baseline.python_version,
+                                    current_python=current_version,
+                                )
+                            )
+                            if args.fail_on_new:
+                                console.print(ui.ERR_BASELINE_SAME_PYTHON_REQUIRED)
+                                baseline_failure_code = 2
+                    if baseline_status == "ok":
+                        try:
+                            baseline.verify_integrity()
+                        except BaselineValidationError as e:
+                            status = (
+                                e.status
+                                if e.status in _VALID_BASELINE_STATUSES
+                                else "invalid"
+                            )
+                            baseline_status = status
+                            console.print(ui.fmt_invalid_baseline(e))
+                            baseline_failure_code = 2
     else:
         if not args.update_baseline:
             console.print(ui.fmt_path(ui.WARN_BASELINE_MISSING, baseline_path))
@@ -874,6 +739,9 @@ def main() -> None:
         )
         new_baseline.save()
         console.print(ui.fmt_path(ui.SUCCESS_BASELINE_UPDATED, baseline_path))
+        baseline = new_baseline
+        baseline_loaded = True
+        baseline_status = "ok"
         # When updating, we don't fail on new, we just saved the new state.
         # But we might still want to print the summary.
 

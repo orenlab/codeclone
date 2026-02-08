@@ -144,6 +144,9 @@ All report formats include provenance metadata for auditability:
 `codeclone_version`, `python_version`, `baseline_path`, `baseline_version`,
 `baseline_schema_version`, `baseline_python_version`, `baseline_loaded`,
 `baseline_status` (and cache metadata when available).
+`baseline_status` values: `ok`, `missing`, `legacy`, `invalid`,
+`mismatch_version`, `mismatch_schema`, `mismatch_python`,
+`generator_mismatch`, `integrity_missing`, `integrity_failed`, `too_large`.
 
 Generate an HTML report:
 
@@ -171,6 +174,9 @@ Commit the generated baseline file to the repository.
 
 Baselines are **versioned**. If CodeClone is upgraded, regenerate the baseline to keep
 CI deterministic and explainable.
+Baseline format in 1.3+ is tamper-evident (`generator`, `payload_sha256`) and validated
+before baseline comparison.
+Invalid or oversized baseline files fail fast in CI mode and must be regenerated.
 
 ### 2. Use in CI
 
@@ -206,6 +212,11 @@ You can override this path with `--cache-path` (`--cache-dir` is a legacy alias)
 
 If you used an older version of CodeClone, delete the legacy cache file at
 `~/.cache/codeclone/cache.json` and add `.cache/` to `.gitignore`.
+
+Cache integrity checks are strict: signature mismatch or oversized cache files are ignored
+with an explicit warning, then rebuilt from source.
+Cache entries are validated against expected structure/types; invalid entries are ignored
+deterministically.
 
 ### Python Version Consistency for Baseline Checks
 
@@ -294,7 +305,9 @@ See full design and semantics:
 | `--processes`                 | Number of worker processes                                       | `4`                                  |
 | `--cache-path FILE`           | Cache file path                                                  | `<root>/.cache/codeclone/cache.json` |
 | `--cache-dir FILE`            | Legacy alias for `--cache-path`                                  | -                                    |
+| `--max-cache-size-mb MB`      | Max cache size before ignore + warning                           | `50`                                 |
 | `--baseline FILE`             | Baseline file path                                               | `codeclone.baseline.json`            |
+| `--max-baseline-size-mb MB`   | Max baseline size before fail-fast                               | `5`                                  |
 | `--update-baseline`           | Regenerate baseline from current results                         | `False`                              |
 | `--fail-on-new`               | Fail if new function/block clone groups appear vs baseline       | `False`                              |
 | `--fail-threshold MAX_CLONES` | Fail if total clone groups (`function + block`) exceed threshold | `-1` (disabled)                      |

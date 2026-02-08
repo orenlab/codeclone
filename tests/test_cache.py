@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pytest
 
+import codeclone.cache as cache_mod
 from codeclone.blocks import BlockUnit, SegmentUnit
 from codeclone.cache import Cache
 from codeclone.errors import CacheError
@@ -104,11 +105,223 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     assert loaded.data["files"] == {}
 
 
+def test_cache_too_large_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text(json.dumps({"version": Cache.CACHE_VERSION, "files": {}}))
+    monkeypatch.setattr(cache_mod, "MAX_CACHE_SIZE_BYTES", 1)
+    cache = Cache(cache_path)
+    cache.load()
+    assert cache.load_warning is not None
+    assert "too large" in cache.load_warning
+    assert cache.data["version"] == Cache.CACHE_VERSION
+    assert cache.data["files"] == {}
+
+
 def test_cache_entry_validation(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     cache.data["files"]["x.py"] = cast(Any, {"stat": {"mtime_ns": 1, "size": 1}})
     assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_invalid_stat_types(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": "1", "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_stat_not_dict(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": [],
+            "units": [],
+            "blocks": [],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_invalid_units_container_type(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": {},
+            "blocks": [],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_unit_item_not_dict(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": ["bad"],
+            "blocks": [],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_invalid_unit_field_type(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [
+                {
+                    "qualname": "q",
+                    "filepath": "x.py",
+                    "start_line": "1",
+                    "end_line": 2,
+                    "loc": 2,
+                    "stmt_count": 1,
+                    "fingerprint": "fp",
+                    "loc_bucket": "0-19",
+                }
+            ],
+            "blocks": [],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_block_item_not_dict(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": ["bad"],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_invalid_block_field_type(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [
+                {
+                    "block_hash": "h",
+                    "filepath": "x.py",
+                    "qualname": "q",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "size": "4",
+                }
+            ],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_segment_item_not_dict(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": ["bad"],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_invalid_segment_field_type(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": [
+                {
+                    "segment_hash": "h",
+                    "segment_sig": "sig",
+                    "filepath": "x.py",
+                    "qualname": "q",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "size": "6",
+                }
+            ],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_valid_deep_schema(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [
+                {
+                    "qualname": "q",
+                    "filepath": "x.py",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "loc": 2,
+                    "stmt_count": 1,
+                    "fingerprint": "fp",
+                    "loc_bucket": "0-19",
+                }
+            ],
+            "blocks": [
+                {
+                    "block_hash": "h",
+                    "filepath": "x.py",
+                    "qualname": "q",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "size": 4,
+                }
+            ],
+            "segments": [
+                {
+                    "segment_hash": "h",
+                    "segment_sig": "sig",
+                    "filepath": "x.py",
+                    "qualname": "q",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "size": 6,
+                }
+            ],
+        },
+    )
+    assert cache.get_file_entry("x.py") is not None
 
 
 def test_cache_load_missing_file(tmp_path: Path) -> None:

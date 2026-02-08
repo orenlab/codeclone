@@ -175,6 +175,25 @@ async def af():
     assert segments == []
 
 
+def test_extract_handles_long_line() -> None:
+    long_line = 'x = "1" * 10000'
+    src = f"""
+def f():
+    {long_line}
+"""
+    units, blocks, segments = extract_units_from_source(
+        source=src,
+        filepath="x.py",
+        module_name="mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    assert units
+    assert blocks == []
+    assert segments == []
+
+
 def test_extract_skips_invalid_positions(monkeypatch: pytest.MonkeyPatch) -> None:
     tree = ast.parse(
         """

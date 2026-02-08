@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 from .errors import CacheError
 
 OS_NAME = os.name
+MAX_CACHE_SIZE_BYTES = 50 * 1024 * 1024
 
 
 class FileStat(TypedDict):
@@ -75,14 +76,17 @@ class CacheData(TypedDict):
 
 
 class Cache:
-    __slots__ = ("data", "load_warning", "path", "secret")
+    __slots__ = ("data", "load_warning", "max_size_bytes", "path", "secret")
     CACHE_VERSION = "1.1"
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, max_size_bytes: int | None = None):
         self.path = Path(path)
         self.data: CacheData = {"version": self.CACHE_VERSION, "files": {}}
         self.secret = self._load_secret()
         self.load_warning: str | None = None
+        self.max_size_bytes = (
+            MAX_CACHE_SIZE_BYTES if max_size_bytes is None else max_size_bytes
+        )
 
     def _load_secret(self) -> bytes:
         """Load or create cache signing secret."""
@@ -115,6 +119,15 @@ class Cache:
             return
 
         try:
+            size = self.path.stat().st_size
+            if size > self.max_size_bytes:
+                self.load_warning = (
+                    "Cache file too large "
+                    f"({size} bytes, max {self.max_size_bytes}); ignoring cache."
+                )
+                self.data = {"version": self.CACHE_VERSION, "files": {}}
+                return
+
             raw = json.loads(self.path.read_text("utf-8"))
             stored_sig = raw.get("_signature")
 
@@ -123,7 +136,10 @@ class Cache:
 
             # Verify signature
             expected_sig = self._sign_data(data)
-            if stored_sig != expected_sig:
+            if not (
+                isinstance(stored_sig, str)
+                and hmac.compare_digest(stored_sig, expected_sig)
+            ):
                 self.load_warning = "Cache signature mismatch; ignoring cache."
                 self.data = {"version": self.CACHE_VERSION, "files": {}}
                 return
@@ -176,6 +192,18 @@ class Cache:
         if not required.issubset(entry.keys()):
             return None
 
+        stat = entry.get("stat")
+        units = entry.get("units")
+        blocks = entry.get("blocks")
+        segments = entry.get("segments")
+        if not (
+            _is_file_stat_dict(stat)
+            and _is_unit_list(units)
+            and _is_block_list(blocks)
+            and _is_segment_list(segments)
+        ):
+            return None
+
         return entry
 
     def put_file_entry(
@@ -202,3 +230,56 @@ def file_stat_signature(path: str) -> FileStat:
         "mtime_ns": st.st_mtime_ns,
         "size": st.st_size,
     }
+
+
+def _is_file_stat_dict(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return isinstance(value.get("mtime_ns"), int) and isinstance(value.get("size"), int)
+
+
+def _is_unit_dict(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    string_keys = ("qualname", "filepath", "fingerprint", "loc_bucket")
+    int_keys = ("start_line", "end_line", "loc", "stmt_count")
+    return _has_typed_fields(value, string_keys=string_keys, int_keys=int_keys)
+
+
+def _is_block_dict(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    string_keys = ("block_hash", "filepath", "qualname")
+    int_keys = ("start_line", "end_line", "size")
+    return _has_typed_fields(value, string_keys=string_keys, int_keys=int_keys)
+
+
+def _is_segment_dict(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    string_keys = ("segment_hash", "segment_sig", "filepath", "qualname")
+    int_keys = ("start_line", "end_line", "size")
+    return _has_typed_fields(value, string_keys=string_keys, int_keys=int_keys)
+
+
+def _is_unit_list(value: object) -> bool:
+    return isinstance(value, list) and all(_is_unit_dict(item) for item in value)
+
+
+def _is_block_list(value: object) -> bool:
+    return isinstance(value, list) and all(_is_block_dict(item) for item in value)
+
+
+def _is_segment_list(value: object) -> bool:
+    return isinstance(value, list) and all(_is_segment_dict(item) for item in value)
+
+
+def _has_typed_fields(
+    value: dict[str, object],
+    *,
+    string_keys: tuple[str, ...],
+    int_keys: tuple[str, ...],
+) -> bool:
+    return all(isinstance(value.get(key), str) for key in string_keys) and all(
+        isinstance(value.get(key), int) for key in int_keys
+    )
