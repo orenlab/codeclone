@@ -6,10 +6,12 @@ from typing import cast
 import pytest
 from rich.text import Text
 
+import codeclone._cli_summary as cli_summary
 import codeclone.cli as cli
 from codeclone import __version__
 from codeclone import ui_messages as ui
-from codeclone.cli import expand_path, process_file
+from codeclone._cli_paths import expand_path
+from codeclone.cli import process_file
 from codeclone.normalize import NormalizationConfig
 
 
@@ -119,22 +121,26 @@ def test_cli_help_text_consistency(
 
 
 def test_summary_value_style_mapping() -> None:
-    assert cli._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=0) == "dim"
     assert (
-        cli._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=2)
+        cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=0)
+        == "dim"
+    )
+    assert (
+        cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=2)
         == "bold green"
     )
     assert (
-        cli._summary_value_style(label=ui.SUMMARY_LABEL_SUPPRESSED, value=1) == "yellow"
+        cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_SUPPRESSED, value=1)
+        == "yellow"
     )
     assert (
-        cli._summary_value_style(label=ui.SUMMARY_LABEL_NEW_BASELINE, value=3)
+        cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_NEW_BASELINE, value=3)
         == "bold red"
     )
 
 
 def test_build_summary_table_rows_and_styles() -> None:
-    rows = cli._build_summary_rows(
+    rows = cli_summary._build_summary_rows(
         files_found=2,
         files_analyzed=0,
         cache_hits=2,
@@ -145,7 +151,7 @@ def test_build_summary_table_rows_and_styles() -> None:
         suppressed_segment_groups=1,
         new_clones_count=1,
     )
-    table = cli._build_summary_table(rows)
+    table = cli_summary._build_summary_table(rows)
     assert table.title == ui.SUMMARY_TITLE
     assert table.columns[0]._cells == [label for label, _ in rows]
     value_cells = table.columns[1]._cells
@@ -157,7 +163,7 @@ def test_build_summary_table_rows_and_styles() -> None:
 
 
 def test_build_summary_rows_order() -> None:
-    rows = cli._build_summary_rows(
+    rows = cli_summary._build_summary_rows(
         files_found=1,
         files_analyzed=1,
         cache_hits=0,
@@ -186,7 +192,8 @@ def test_print_summary_invariant_warning(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
-    cli._print_summary(
+    cli_summary._print_summary(
+        console=cli.console,
         quiet=False,
         files_found=1,
         files_analyzed=0,

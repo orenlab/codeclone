@@ -89,22 +89,20 @@ ERR_INVALID_BASELINE = (
     "{error}\n"
     "Please regenerate the baseline with --update-baseline."
 )
-ERR_BASELINE_VERSION_MISMATCH = "[error]Baseline version mismatch.[/error]"
-ERR_BASELINE_SCHEMA_MISMATCH = "[error]Baseline schema version mismatch.[/error]"
-WARN_BASELINE_PYTHON_MISMATCH = "[warning]Baseline Python version mismatch.[/warning]"
-ERR_BASELINE_SAME_PYTHON_REQUIRED = (
-    "[error]Baseline checks require the same Python version to "
-    "ensure deterministic results. Please regenerate the "
-    "baseline using the current interpreter.[/error]"
-)
+ACTION_UPDATE_BASELINE = "Run: codeclone . --update-baseline"
 WARN_BASELINE_MISSING = (
     "[warning]Baseline file not found at: [bold]{path}[/bold][/warning]\n"
     "[dim]Comparing against an empty baseline. "
-    "Use --update-baseline to create it.[/dim]"
+    "Use --update-baseline to create it.[/dim]\n"
+    f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
 )
 WARN_BASELINE_IGNORED = (
     "[warning]Baseline is not trusted for this run and will be ignored.[/warning]\n"
-    "[dim]Comparison will proceed against an empty baseline.[/dim]"
+    "[dim]Comparison will proceed against an empty baseline.[/dim]\n"
+    f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
+)
+ERR_BASELINE_GATING_REQUIRES_TRUSTED = (
+    f"[error]CI requires a trusted baseline.[/error]\n{ACTION_UPDATE_BASELINE}"
 )
 SUCCESS_BASELINE_UPDATED = "✔ Baseline updated: {path}"
 
@@ -183,45 +181,6 @@ def fmt_legacy_cache_warning(*, legacy_path: Path, new_path: Path) -> str:
 
 def fmt_invalid_baseline(error: object) -> str:
     return ERR_INVALID_BASELINE.format(error=error)
-
-
-def fmt_baseline_version_missing(current_version: str) -> str:
-    return (
-        f"{ERR_BASELINE_VERSION_MISMATCH}\n"
-        "Baseline version missing (legacy baseline format).\n"
-        f"Current version: {current_version}.\n"
-        "Please regenerate the baseline with --update-baseline."
-    )
-
-
-def fmt_baseline_version_mismatch(
-    *, baseline_version: str, current_version: str
-) -> str:
-    return (
-        f"{ERR_BASELINE_VERSION_MISMATCH}\n"
-        "Baseline was generated with CodeClone "
-        f"{baseline_version}.\n"
-        f"Current version: {current_version}.\n"
-        "Please regenerate the baseline with --update-baseline."
-    )
-
-
-def fmt_baseline_schema_mismatch(*, baseline_schema: int, current_schema: int) -> str:
-    return (
-        f"{ERR_BASELINE_SCHEMA_MISMATCH}\n"
-        f"Baseline schema: {baseline_schema}. "
-        f"Current schema: {current_schema}.\n"
-        "Please regenerate the baseline with --update-baseline."
-    )
-
-
-def fmt_baseline_python_mismatch(*, baseline_python: str, current_python: str) -> str:
-    return (
-        f"{WARN_BASELINE_PYTHON_MISMATCH}\n"
-        "Baseline was generated with Python "
-        f"{baseline_python}.\n"
-        f"Current interpreter: Python {current_python}."
-    )
 
 
 def fmt_path(template: str, path: Path) -> str:

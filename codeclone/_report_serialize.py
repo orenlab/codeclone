@@ -133,11 +133,14 @@ def to_text_report(
         f"CodeClone version: {_format_meta_text_value(meta.get('codeclone_version'))}",
         f"Python version: {_format_meta_text_value(meta.get('python_version'))}",
         f"Baseline path: {_format_meta_text_value(meta.get('baseline_path'))}",
-        f"Baseline version: {_format_meta_text_value(meta.get('baseline_version'))}",
+        "Baseline fingerprint version: "
+        f"{_format_meta_text_value(meta.get('baseline_fingerprint_version'))}",
         "Baseline schema version: "
         f"{_format_meta_text_value(meta.get('baseline_schema_version'))}",
-        "Baseline Python version: "
-        f"{_format_meta_text_value(meta.get('baseline_python_version'))}",
+        "Baseline Python tag: "
+        f"{_format_meta_text_value(meta.get('baseline_python_tag'))}",
+        "Baseline generator version: "
+        f"{_format_meta_text_value(meta.get('baseline_generator_version'))}",
         f"Baseline loaded: {_format_meta_text_value(meta.get('baseline_loaded'))}",
         f"Baseline status: {_format_meta_text_value(meta.get('baseline_status'))}",
     ]

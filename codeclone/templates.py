@@ -734,6 +734,53 @@ html[data-theme="light"] .topbar {
   justify-content: flex-end;
 }
 
+.group-basis {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(44vw, 560px);
+}
+
+.group-explain {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.group-explain-item {
+  display: inline-block;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.group-explain-note {
+  margin: 4px 0 0;
+  width: 100%;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.group-explain-warn {
+  color: var(--warning);
+  border-color: var(--warning);
+  background: var(--warning-subtle);
+}
+
+.group-explain-muted {
+  color: var(--text-tertiary);
+}
+
 .gkey {
   display: block;
   font-family: var(--font-mono);
@@ -762,6 +809,18 @@ html[data-theme="light"] .topbar {
 
   .gkey {
     max-width: 100%;
+  }
+
+  .group-basis {
+    max-width: 100%;
+  }
+
+  .group-explain {
+    justify-content: flex-start;
+  }
+
+  .group-explain-item {
+    white-space: normal;
   }
 }
 
@@ -2114,10 +2173,12 @@ ${segment_section}
     return {
       codeclone_version: textAttr('data-codeclone-version'),
       python_version: textAttr('data-python-version'),
+      baseline_file: textAttr('data-baseline-file'),
       baseline_path: textAttr('data-baseline-path'),
-      baseline_version: textAttr('data-baseline-version'),
-      baseline_schema_version: intAttr('data-baseline-schema-version'),
-      baseline_python_version: textAttr('data-baseline-python-version'),
+      baseline_fingerprint_version: textAttr('data-baseline-fingerprint-version'),
+      baseline_schema_version: textAttr('data-baseline-schema-version'),
+      baseline_python_tag: textAttr('data-baseline-python-tag'),
+      baseline_generator_version: textAttr('data-baseline-generator-version'),
       baseline_loaded: boolAttr('data-baseline-loaded'),
       baseline_status: textAttr('data-baseline-status'),
       cache_path: textAttr('data-cache-path'),

@@ -9,6 +9,7 @@ from codeclone.cli import MAX_FILE_SIZE, process_file
 from codeclone.errors import ValidationError
 from codeclone.html_report import build_html_report
 from codeclone.normalize import NormalizationConfig
+from codeclone.report import build_block_group_facts
 from codeclone.scanner import iter_py_files
 
 
@@ -73,6 +74,7 @@ def test_html_report_escapes_user_content(tmp_path: Path) -> None:
         func_groups=func_groups,
         block_groups={},
         segment_groups={},
+        block_group_facts=build_block_group_facts({}),
         title="Security",
     )
     assert "<script>alert(1)</script>" not in html

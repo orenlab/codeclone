@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from .blocks import BlockUnit, SegmentUnit
     from .extractor import Unit
 
+from .contracts import CACHE_VERSION
 from .errors import CacheError
 
 OS_NAME = os.name
@@ -77,11 +78,11 @@ class CacheData(TypedDict):
 
 class Cache:
     __slots__ = ("data", "load_warning", "max_size_bytes", "path", "secret")
-    CACHE_VERSION = "1.1"
+    _CACHE_VERSION = CACHE_VERSION
 
     def __init__(self, path: str | Path, *, max_size_bytes: int | None = None):
         self.path = Path(path)
-        self.data: CacheData = {"version": self.CACHE_VERSION, "files": {}}
+        self.data: CacheData = {"version": self._CACHE_VERSION, "files": {}}
         self.secret = self._load_secret()
         self.load_warning: str | None = None
         self.max_size_bytes = (
@@ -125,7 +126,7 @@ class Cache:
                     "Cache file too large "
                     f"({size} bytes, max {self.max_size_bytes}); ignoring cache."
                 )
-                self.data = {"version": self.CACHE_VERSION, "files": {}}
+                self.data = {"version": self._CACHE_VERSION, "files": {}}
                 return
 
             raw = json.loads(self.path.read_text("utf-8"))
@@ -141,21 +142,21 @@ class Cache:
                 and hmac.compare_digest(stored_sig, expected_sig)
             ):
                 self.load_warning = "Cache signature mismatch; ignoring cache."
-                self.data = {"version": self.CACHE_VERSION, "files": {}}
+                self.data = {"version": self._CACHE_VERSION, "files": {}}
                 return
 
-            if data.get("version") != self.CACHE_VERSION:
+            if data.get("version") != self._CACHE_VERSION:
                 self.load_warning = (
                     "Cache version mismatch "
                     f"(found {data.get('version')}); ignoring cache."
                 )
-                self.data = {"version": self.CACHE_VERSION, "files": {}}
+                self.data = {"version": self._CACHE_VERSION, "files": {}}
                 return
 
             # Basic structure check
             if not isinstance(data.get("files"), dict):
                 self.load_warning = "Cache format invalid; ignoring cache."
-                self.data = {"version": self.CACHE_VERSION, "files": {}}
+                self.data = {"version": self._CACHE_VERSION, "files": {}}
                 return
 
             self.data = cast(CacheData, cast(object, data))
@@ -163,7 +164,7 @@ class Cache:
 
         except (json.JSONDecodeError, ValueError):
             self.load_warning = "Cache corrupted; ignoring cache."
-            self.data = {"version": self.CACHE_VERSION, "files": {}}
+            self.data = {"version": self._CACHE_VERSION, "files": {}}
 
     def save(self) -> None:
         try:

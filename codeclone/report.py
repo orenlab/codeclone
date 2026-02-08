@@ -8,6 +8,8 @@ Licensed under the MIT License.
 
 from __future__ import annotations
 
+from ._report_blocks import _merge_block_items, prepare_block_report_groups
+from ._report_explain import build_block_group_facts
 from ._report_grouping import build_block_groups, build_groups, build_segment_groups
 from ._report_segments import (
     _CONTROL_FLOW_STMTS,
@@ -43,11 +45,14 @@ __all__ = [
     "_assign_targets_attribute_only",
     "_collect_file_functions",
     "_format_meta_text_value",
+    "_merge_block_items",
     "_merge_segment_items",
     "_segment_statements",
+    "build_block_group_facts",
     "build_block_groups",
     "build_groups",
     "build_segment_groups",
+    "prepare_block_report_groups",
     "prepare_segment_report_groups",
     "to_json",
     "to_json_report",

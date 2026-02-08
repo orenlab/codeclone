@@ -7,9 +7,12 @@ import pytest
 
 import codeclone.report as report_mod
 from codeclone.report import (
+    GroupMap,
+    build_block_group_facts,
     build_block_groups,
     build_groups,
     build_segment_groups,
+    prepare_block_report_groups,
     prepare_segment_report_groups,
     to_json,
     to_json_report,
@@ -38,6 +41,191 @@ def test_block_groups_require_multiple_functions() -> None:
 
     groups = build_block_groups(blocks)
     assert len(groups) == 1
+
+
+def test_prepare_block_report_groups_merges_to_maximal_regions() -> None:
+    groups = {
+        "h": [
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:f",
+                "start_line": 20,
+                "end_line": 23,
+                "size": 4,
+            },
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:f",
+                "start_line": 10,
+                "end_line": 13,
+                "size": 4,
+            },
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:f",
+                "start_line": 13,
+                "end_line": 16,
+                "size": 4,
+            },
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:g",
+                "start_line": 10,
+                "end_line": 13,
+                "size": 4,
+            },
+        ]
+    }
+
+    prepared = prepare_block_report_groups(groups)
+    items = prepared["h"]
+    assert len(items) == 3
+
+    assert items[0]["qualname"] == "mod:f"
+    assert items[0]["start_line"] == 10
+    assert items[0]["end_line"] == 16
+    assert items[0]["size"] == 7
+
+    assert items[1]["qualname"] == "mod:f"
+    assert items[1]["start_line"] == 20
+    assert items[1]["end_line"] == 23
+    assert items[1]["size"] == 4
+
+    assert items[2]["qualname"] == "mod:g"
+    assert items[2]["start_line"] == 10
+    assert items[2]["end_line"] == 13
+    assert items[2]["size"] == 4
+
+
+def test_prepare_block_report_groups_skips_invalid_ranges() -> None:
+    groups = {
+        "h": [
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:f",
+                "start_line": "bad",
+                "end_line": 13,
+                "size": 4,
+            },
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:f",
+                "start_line": 30,
+                "end_line": 33,
+                "size": 4,
+            },
+        ]
+    }
+    prepared = prepare_block_report_groups(groups)
+    assert len(prepared["h"]) == 1
+    assert prepared["h"][0]["start_line"] == 30
+    assert prepared["h"][0]["end_line"] == 33
+
+
+def test_prepare_block_report_groups_all_invalid_ranges_fallback_sorted() -> None:
+    groups: GroupMap = {
+        "h": [
+            {
+                "block_hash": "h",
+                "filepath": "b.py",
+                "qualname": "mod:f",
+                "start_line": "bad",
+                "end_line": 13,
+                "size": 4,
+            },
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:f",
+                "start_line": None,
+                "end_line": 1,
+                "size": 4,
+            },
+        ]
+    }
+    prepared = prepare_block_report_groups(groups)
+    items = prepared["h"]
+    assert len(items) == 2
+    assert items[0]["filepath"] == "a.py"
+    assert items[1]["filepath"] == "b.py"
+
+
+def test_prepare_block_report_groups_handles_empty_item_list() -> None:
+    groups: GroupMap = {"h": []}
+    prepared = prepare_block_report_groups(groups)
+    assert prepared["h"] == []
+
+
+def test_build_block_group_facts_assert_only(tmp_path: Path) -> None:
+    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
+    group_key = "|".join([repeated] * 4)
+    test_file = tmp_path / "test_repeated_asserts.py"
+    test_file.write_text(
+        "def f(html):\n"
+        "    assert 'a' in html\n"
+        "    assert 'b' in html\n"
+        "    assert 'c' in html\n"
+        "    assert 'd' in html\n",
+        "utf-8",
+    )
+    facts = build_block_group_facts(
+        {
+            group_key: [
+                {
+                    "qualname": "pkg.mod:f",
+                    "filepath": str(test_file),
+                    "start_line": 2,
+                    "end_line": 5,
+                }
+            ]
+        }
+    )
+    group = facts[group_key]
+    assert group["match_rule"] == "normalized_sliding_window"
+    assert group["block_size"] == "4"
+    assert group["signature_kind"] == "stmt_hash_sequence"
+    assert group["merged_regions"] == "true"
+    assert group["pattern"] == "repeated_stmt_hash"
+    assert group["pattern_display"] == f"{repeated[:12]} x4"
+    assert group["hint"] == "assert_only"
+    assert group["hint_confidence"] == "deterministic"
+    assert group["assert_ratio"] == "100%"
+    assert group["consecutive_asserts"] == "4"
+
+
+def test_build_block_group_facts_deterministic_item_order(tmp_path: Path) -> None:
+    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
+    group_key = "|".join([repeated] * 4)
+    test_file = tmp_path / "test_repeated_asserts.py"
+    test_file.write_text(
+        "def f(html):\n"
+        "    assert 'a' in html\n"
+        "    assert 'b' in html\n"
+        "    assert 'c' in html\n"
+        "    assert 'd' in html\n",
+        "utf-8",
+    )
+    item_a = {
+        "qualname": "pkg.mod:f",
+        "filepath": str(test_file),
+        "start_line": 2,
+        "end_line": 5,
+    }
+    item_b = {
+        "qualname": "pkg.mod:f",
+        "filepath": str(test_file),
+        "start_line": 2,
+        "end_line": 5,
+    }
+    facts_a = build_block_group_facts({group_key: [item_a, item_b]})
+    facts_b = build_block_group_facts({group_key: [item_b, item_a]})
+    assert facts_a == facts_b
 
 
 def test_report_output_formats() -> None:
@@ -72,9 +260,10 @@ def test_report_output_formats() -> None:
         "codeclone_version": "1.3.0",
         "python_version": "3.13",
         "baseline_path": "/tmp/codeclone.baseline.json",
-        "baseline_version": "1.3.0",
+        "baseline_fingerprint_version": "1",
         "baseline_schema_version": 1,
         "baseline_python_version": "3.13",
+        "baseline_generator_version": "1.4.0",
         "baseline_loaded": True,
         "baseline_status": "ok",
         "cache_path": "/tmp/cache.json",
@@ -89,13 +278,16 @@ def test_report_output_formats() -> None:
         segment_groups={},
     )
 
-    assert "group_count" in json_out
-    assert '"meta"' in report_out
-    assert '"function_clones"' in report_out
-    assert '"baseline_schema_version": 1' in report_out
-    assert "REPORT METADATA" in text_out
-    assert "Baseline schema version: 1" in text_out
-    assert "Clone group #1" in text_out
+    expected_json = ["group_count"]
+    expected_report = ['"meta"', '"function_clones"', '"baseline_schema_version": 1']
+    expected_text = ["REPORT METADATA", "Baseline schema version: 1", "Clone group #1"]
+
+    for token in expected_json:
+        assert token in json_out
+    for token in expected_report:
+        assert token in report_out
+    for token in expected_text:
+        assert token in text_out
 
 
 def test_report_json_deterministic_group_order() -> None:
@@ -614,7 +806,7 @@ def test_segment_helpers_cover_edge_cases(tmp_path: Path) -> None:
     class Dummy:
         body = None
 
-    dummy = cast(ast.FunctionDef, Dummy())
+    dummy = cast(ast.FunctionDef, cast(object, Dummy()))
     assert report_mod._segment_statements(dummy, 1, 2) == []
 
     func = ast.parse("def f():\n    x = 1\n").body[0]

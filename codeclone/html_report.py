@@ -46,12 +46,25 @@ def build_html_report(
     func_groups: dict[str, list[dict[str, Any]]],
     block_groups: dict[str, list[dict[str, Any]]],
     segment_groups: dict[str, list[dict[str, Any]]],
+    block_group_facts: dict[str, dict[str, str]],
     report_meta: dict[str, Any] | None = None,
     title: str = "CodeClone Report",
     context_lines: int = 3,
     max_snippet_lines: int = 220,
 ) -> str:
     file_cache = _FileCache()
+    resolved_block_group_facts = block_group_facts
+
+    def _path_basename(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        normalized = text.replace("\\", "/").rstrip("/")
+        if not normalized:
+            return None
+        return normalized.rsplit("/", maxsplit=1)[-1]
 
     func_sorted = sorted(
         func_groups.items(), key=lambda kv: (*_group_sort_key(kv[1]), kv[0])
@@ -139,6 +152,127 @@ def build_html_report(
     # Section renderer
     # ----------------------------
 
+    def _group_basis_label(section_id: str) -> str:
+        basis_labels = {
+            "functions": "strict match: CFG fingerprint + LOC bucket",
+            "blocks": (
+                "strict match: normalized 4-statement block signature (merged ranges)"
+            ),
+            "segments": "strict match: segment hash inside one function",
+        }
+        return basis_labels[section_id]
+
+    def _display_group_key(
+        section_id: str, group_key: str, block_meta: dict[str, str] | None = None
+    ) -> str:
+        if section_id != "blocks":
+            return group_key
+
+        if block_meta and block_meta.get("pattern_display"):
+            return str(block_meta["pattern_display"])
+
+        return group_key
+
+    def _block_group_explanation_meta(
+        section_id: str, group_key: str
+    ) -> dict[str, str]:
+        if section_id != "blocks":
+            return {}
+
+        raw = resolved_block_group_facts.get(group_key, {})
+        return {str(k): str(v) for k, v in raw.items() if v is not None}
+
+    def _render_group_explanation(meta: dict[str, Any]) -> str:
+        if not meta:
+            return ""
+
+        explain_items: list[tuple[str, str]] = []
+        if meta.get("match_rule"):
+            explain_items.append(
+                (f"match_rule: {meta['match_rule']}", "group-explain-item")
+            )
+        if meta.get("block_size"):
+            explain_items.append(
+                (f"block_size: {meta['block_size']}", "group-explain-item")
+            )
+        if meta.get("signature_kind"):
+            explain_items.append(
+                (f"signature_kind: {meta['signature_kind']}", "group-explain-item")
+            )
+        if meta.get("merged_regions"):
+            explain_items.append(
+                (f"merged_regions: {meta['merged_regions']}", "group-explain-item")
+            )
+        if meta.get("pattern") == "repeated_stmt_hash":
+            pattern_display = str(meta.get("pattern_display", "")).strip()
+            if pattern_display:
+                explain_items.append(
+                    (
+                        f"pattern: repeated_stmt_hash ({pattern_display})",
+                        "group-explain-item",
+                    )
+                )
+            else:
+                explain_items.append(
+                    ("pattern: repeated_stmt_hash", "group-explain-item")
+                )
+
+        if meta.get("hint") == "assert_only":
+            explain_items.append(
+                ("hint: assert-only block", "group-explain-item group-explain-warn")
+            )
+            explain_items.append(
+                (
+                    "hint_confidence: deterministic",
+                    "group-explain-item group-explain-muted",
+                )
+            )
+            if meta.get("assert_ratio"):
+                explain_items.append(
+                    (
+                        f"assert_ratio: {meta['assert_ratio']}",
+                        "group-explain-item group-explain-muted",
+                    )
+                )
+            if meta.get("consecutive_asserts"):
+                explain_items.append(
+                    (
+                        f"consecutive_asserts: {meta['consecutive_asserts']}",
+                        "group-explain-item group-explain-muted",
+                    )
+                )
+            if meta.get("hint_context") == "likely_test_boilerplate":
+                explain_items.append(
+                    (
+                        "likely test boilerplate / repeated asserts",
+                        "group-explain-item group-explain-muted",
+                    )
+                )
+
+        attrs = {
+            "data-match-rule": str(meta.get("match_rule", "")),
+            "data-block-size": str(meta.get("block_size", "")),
+            "data-signature-kind": str(meta.get("signature_kind", "")),
+            "data-merged-regions": str(meta.get("merged_regions", "")),
+            "data-pattern": str(meta.get("pattern", "")),
+            "data-hint": str(meta.get("hint", "")),
+            "data-hint-confidence": str(meta.get("hint_confidence", "")),
+            "data-assert-ratio": str(meta.get("assert_ratio", "")),
+            "data-consecutive-asserts": str(meta.get("consecutive_asserts", "")),
+        }
+        attr_html = " ".join(
+            f'{key}="{_escape_attr(value)}"' for key, value in attrs.items() if value
+        )
+        parts = [
+            f'<span class="{css_class}">{_escape_html(text)}</span>'
+            for text, css_class in explain_items
+        ]
+        note = ""
+        if isinstance(meta.get("hint_note"), str):
+            note_text = _escape_html(str(meta["hint_note"]))
+            note = f'<p class="group-explain-note">{note_text}</p>'
+        return f'<div class="group-explain" {attr_html}>{"".join(parts)}{note}</div>'
+
     def render_section(
         section_id: str,
         section_title: str,
@@ -211,12 +345,35 @@ def build_html_report(
                 search_parts.append(str(it.get("filepath", "")))
             search_blob = " ".join(search_parts).lower()
             search_blob_escaped = _escape_attr(search_blob)
+            basis_label = _group_basis_label(section_id)
+            block_meta = _block_group_explanation_meta(section_id, gkey)
+            display_key = _display_group_key(section_id, gkey, block_meta)
+            group_explain_html = _render_group_explanation(block_meta)
+            block_group_attrs = ""
+            if block_meta:
+                attrs = {
+                    "data-match-rule": block_meta.get("match_rule"),
+                    "data-block-size": block_meta.get("block_size"),
+                    "data-signature-kind": block_meta.get("signature_kind"),
+                    "data-merged-regions": block_meta.get("merged_regions"),
+                    "data-pattern": block_meta.get("pattern"),
+                    "data-hint": block_meta.get("hint"),
+                    "data-hint-confidence": block_meta.get("hint_confidence"),
+                    "data-assert-ratio": block_meta.get("assert_ratio"),
+                    "data-consecutive-asserts": block_meta.get("consecutive_asserts"),
+                }
+                block_group_attrs = " ".join(
+                    f'{name}="{_escape_attr(value)}"'
+                    for name, value in attrs.items()
+                    if value
+                )
+                block_group_attrs = f" {block_group_attrs}"
 
             out.append(
                 f'<div class="group" data-group="{section_id}" '
                 f'data-group-index="{idx}" '
                 f'data-group-key="{_escape_attr(gkey)}" '
-                f'data-search="{search_blob_escaped}">'
+                f'data-search="{search_blob_escaped}"{block_group_attrs}>'
             )
 
             out.append(
@@ -228,8 +385,11 @@ def build_html_report(
                 f'<span class="pill small {pill_cls}">{len(items)} items</span>'
                 "</div>"
                 '<div class="group-right">'
+                f'<span class="group-basis" title="{_escape_attr(basis_label)}">'
+                f"{_escape_html(basis_label)}</span>"
                 f'<code class="gkey" title="{_escape_attr(gkey)}">'
-                f"{_escape_html(gkey)}</code>"
+                f"{_escape_html(display_key)}</code>"
+                f"{group_explain_html}"
                 "</div>"
                 "</div>"
             )
@@ -309,13 +469,16 @@ def build_html_report(
     )
 
     meta = dict(report_meta or {})
+    baseline_path_value = meta.get("baseline_path")
     meta_rows: list[tuple[str, Any]] = [
         ("CodeClone", meta.get("codeclone_version", __version__)),
         ("Python", meta.get("python_version")),
-        ("Baseline", meta.get("baseline_path")),
-        ("Baseline version", meta.get("baseline_version")),
+        ("Baseline file", _path_basename(baseline_path_value)),
+        ("Baseline path", baseline_path_value),
+        ("Baseline fingerprint", meta.get("baseline_fingerprint_version")),
         ("Baseline schema", meta.get("baseline_schema_version")),
-        ("Baseline Python", meta.get("baseline_python_version")),
+        ("Baseline Python tag", meta.get("baseline_python_tag")),
+        ("Baseline generator version", meta.get("baseline_generator_version")),
         ("Baseline loaded", meta.get("baseline_loaded")),
         ("Baseline status", meta.get("baseline_status")),
     ]
@@ -331,10 +494,21 @@ def build_html_report(
                 f'{_escape_attr(meta.get("codeclone_version", __version__))}"'
             ),
             f'data-python-version="{_escape_attr(meta.get("python_version"))}"',
-            f'data-baseline-path="{_escape_attr(meta.get("baseline_path"))}"',
-            f'data-baseline-version="{_escape_attr(meta.get("baseline_version"))}"',
+            f'data-baseline-file="{_escape_attr(_path_basename(baseline_path_value))}"',
+            f'data-baseline-path="{_escape_attr(baseline_path_value)}"',
+            (
+                'data-baseline-fingerprint-version="'
+                f'{_escape_attr(meta.get("baseline_fingerprint_version"))}"'
+            ),
             f'data-baseline-schema-version="{_escape_attr(meta.get("baseline_schema_version"))}"',
-            f'data-baseline-python-version="{_escape_attr(meta.get("baseline_python_version"))}"',
+            (
+                'data-baseline-python-tag="'
+                f'{_escape_attr(meta.get("baseline_python_tag"))}"'
+            ),
+            (
+                'data-baseline-generator-version="'
+                f'{_escape_attr(meta.get("baseline_generator_version"))}"'
+            ),
             f'data-baseline-loaded="{_escape_attr(_meta_display(meta.get("baseline_loaded")))}"',
             f'data-baseline-status="{_escape_attr(meta.get("baseline_status"))}"',
             f'data-cache-path="{_escape_attr(meta.get("cache_path"))}"',
@@ -343,13 +517,13 @@ def build_html_report(
     )
 
     def _meta_row_class(label: str) -> str:
-        if label in {"Baseline", "Cache path"}:
+        if label in {"Baseline path", "Cache path"}:
             return "meta-row meta-row-wide"
         return "meta-row"
 
     def _is_path_field(label: str) -> bool:
         """Check if field contains a file path."""
-        return label in {"Baseline", "Cache path"}
+        return label in {"Baseline path", "Cache path"}
 
     def _is_bool_field(label: str) -> bool:
         """Check if field contains a boolean value."""

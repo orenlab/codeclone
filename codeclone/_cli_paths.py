@@ -14,6 +14,8 @@ from pathlib import Path
 
 from rich.console import Console
 
+from .contracts import ExitCode
+
 
 def expand_path(p: str) -> Path:
     return Path(p).expanduser().resolve()
@@ -32,5 +34,5 @@ def _validate_output_path(
         console.print(
             invalid_message(label=label, path=out, expected_suffix=expected_suffix)
         )
-        sys.exit(2)
+        sys.exit(ExitCode.CONTRACT_ERROR)
     return out.resolve()

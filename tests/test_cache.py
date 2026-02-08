@@ -83,7 +83,7 @@ def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
     loaded.load()
     assert loaded.load_warning is not None
     assert "signature" in loaded.load_warning
-    assert loaded.data["version"] == Cache.CACHE_VERSION
+    assert loaded.data["version"] == Cache._CACHE_VERSION
     assert loaded.data["files"] == {}
 
 
@@ -101,19 +101,19 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     loaded.load()
     assert loaded.load_warning is not None
     assert "version" in loaded.load_warning
-    assert loaded.data["version"] == Cache.CACHE_VERSION
+    assert loaded.data["version"] == Cache._CACHE_VERSION
     assert loaded.data["files"] == {}
 
 
 def test_cache_too_large_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cache_path = tmp_path / "cache.json"
-    cache_path.write_text(json.dumps({"version": Cache.CACHE_VERSION, "files": {}}))
+    cache_path.write_text(json.dumps({"version": Cache._CACHE_VERSION, "files": {}}))
     monkeypatch.setattr(cache_mod, "MAX_CACHE_SIZE_BYTES", 1)
     cache = Cache(cache_path)
     cache.load()
     assert cache.load_warning is not None
     assert "too large" in cache.load_warning
-    assert cache.data["version"] == Cache.CACHE_VERSION
+    assert cache.data["version"] == Cache._CACHE_VERSION
     assert cache.data["files"] == {}
 
 
@@ -350,7 +350,7 @@ def test_cache_load_corrupted_json(tmp_path: Path) -> None:
 def test_cache_load_invalid_files_type(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
-    data = {"version": cache.CACHE_VERSION, "files": []}
+    data = {"version": cache._CACHE_VERSION, "files": []}
     signature = cache._sign_data(data)
     cache_path.write_text(json.dumps({**data, "_signature": signature}), "utf-8")
     cache.load()

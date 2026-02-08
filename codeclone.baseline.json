@@ -1,10 +1,20 @@
 {
-  "functions": [],
-  "blocks": [],
-  "python_version": "3.13",
-  "baseline_version": "1.3.0",
-  "schema_version": 1,
-  "generator": "codeclone",
-  "payload_sha256": "92e80b05c857b796bb452de9e62985a1568874da468bc671998133975c94397a",
-  "created_at": "2026-02-08T09:54:31+00:00"
+  "meta": {
+    "generator": {
+      "name": "codeclone",
+      "version": "1.4.0"
+    },
+    "schema_version": "1.0",
+    "fingerprint_version": "1",
+    "python_tag": "cp313",
+    "created_at": "2026-02-08T17:14:12Z",
+    "payload_sha256": "77767150a39a80be72a7d71ad15deeb7f6635d016c0304abd6bcbd879f5ffa47"
+  },
+  "clones": {
+    "functions": [],
+    "blocks": [
+      "0e8579f84e518d186950d012c9944a40cb872332|0e8579f84e518d186950d012c9944a40cb872332|0e8579f84e518d186950d012c9944a40cb872332|0e8579f84e518d186950d012c9944a40cb872332",
+      "d60c0005a4c850c140378d1c82b81dde93a7ccab|20dee3217a8e68da799c7abe861a17ab18466b3d|a3d9246201e0126294acc3eadd75bf6a0bd5f35e|38625db4ce1fdc33b450d82f7ae8cedf790fbeae"
+    ]
+  }
 }
