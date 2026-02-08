@@ -70,15 +70,14 @@ def _parse_limits(timeout_s: int) -> Iterator[None]:
 
             old_limits = resource.getrlimit(resource.RLIMIT_CPU)
             soft, hard = old_limits
-            new_soft = (
-                min(timeout_s, soft) if soft != resource.RLIM_INFINITY else timeout_s
-            )
-            new_hard = (
-                min(timeout_s + 1, hard)
-                if hard != resource.RLIM_INFINITY
-                else timeout_s + 1
-            )
-            resource.setrlimit(resource.RLIMIT_CPU, (new_soft, new_hard))
+            hard_ceiling = timeout_s if hard == resource.RLIM_INFINITY else max(1, hard)
+            if soft == resource.RLIM_INFINITY:
+                new_soft = min(timeout_s, hard_ceiling)
+            else:
+                new_soft = min(timeout_s, soft, hard_ceiling)
+            # Never lower hard limit: raising it back may be disallowed for
+            # unprivileged processes and can lead to process termination later.
+            resource.setrlimit(resource.RLIMIT_CPU, (new_soft, hard))
         except Exception:
             # If resource is unavailable or cannot be set, rely on alarm only.
             pass

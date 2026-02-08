@@ -106,6 +106,102 @@ def test_parse_limits_resource_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     assert tree is not None
 
 
+def test_parse_limits_never_lowers_hard_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[int, int]] = []
+
+    class _DummyResource:
+        RLIMIT_CPU = 0
+        RLIM_INFINITY = 10**9
+
+        @staticmethod
+        def getrlimit(_key: int) -> tuple[int, int]:
+            return (_DummyResource.RLIM_INFINITY, _DummyResource.RLIM_INFINITY)
+
+        @staticmethod
+        def setrlimit(_key: int, val: tuple[int, int]) -> None:
+            calls.append(val)
+            # Simulate a system where changing hard limit would fail.
+            assert val[1] == _DummyResource.RLIM_INFINITY
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
+    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+
+    with extractor._parse_limits(5):
+        pass
+
+    assert calls
+    # First set lowers only soft limit, hard stays unchanged.
+    assert calls[0] == (5, _DummyResource.RLIM_INFINITY)
+    # Final restore returns to original limits.
+    assert calls[-1] == (
+        _DummyResource.RLIM_INFINITY,
+        _DummyResource.RLIM_INFINITY,
+    )
+
+
+def test_parse_limits_uses_finite_soft_limit_branch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, int]] = []
+
+    class _DummyResource:
+        RLIMIT_CPU = 0
+        RLIM_INFINITY = 10**9
+
+        @staticmethod
+        def getrlimit(_key: int) -> tuple[int, int]:
+            return (20, 20)
+
+        @staticmethod
+        def setrlimit(_key: int, val: tuple[int, int]) -> None:
+            calls.append(val)
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
+    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+
+    with extractor._parse_limits(5):
+        pass
+
+    # New soft is min(timeout, old_soft, hard_ceiling), hard is preserved.
+    assert calls[0] == (5, 20)
+    assert calls[-1] == (20, 20)
+
+
+def test_parse_limits_restore_failure_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DummyResource:
+        RLIMIT_CPU = 0
+        RLIM_INFINITY = 10**9
+        _calls = 0
+
+        @staticmethod
+        def getrlimit(_key: int) -> tuple[int, int]:
+            return (_DummyResource.RLIM_INFINITY, _DummyResource.RLIM_INFINITY)
+
+        @staticmethod
+        def setrlimit(_key: int, _val: tuple[int, int]) -> None:
+            _DummyResource._calls += 1
+            if _DummyResource._calls >= 2:
+                raise RuntimeError("restore denied")
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
+    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+
+    # Should not raise even if restoring old limits fails.
+    with extractor._parse_limits(5):
+        pass
+
+
 def test_extract_syntax_error() -> None:
     with pytest.raises(ParseError):
         extract_units_from_source(

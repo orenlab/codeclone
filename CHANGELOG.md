@@ -142,6 +142,8 @@ codeclone . --update-baseline
 - Expanded security tests (HTML escaping and safety checks).
 - Added regression tests for deterministic report ordering across HTML/TXT/JSON,
   baseline/cache integrity edge cases, and symlink traversal/loop safety.
+- Fixed POSIX parser CPU guard to avoid lowering `RLIMIT_CPU` hard limit, preventing
+  potential process termination in long CI test sessions.
 
 ---
 
