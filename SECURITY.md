@@ -9,7 +9,8 @@ The following versions currently receive security updates:
 
 | Version | Supported |
 |---------|-----------|
-| 1.2.x   | Yes       |
+| 1.3.x   | Yes       |
+| 1.2.x   | No        |
 | 1.1.x   | No        |
 | 1.0.x   | No        |
 
@@ -32,6 +33,20 @@ Potential risk areas include:
 
 These areas are explicitly tested and hardened, but are still the primary focus of
 ongoing security review.
+
+Additional safeguards:
+
+- HTML report content is escaped in both text and attribute contexts to prevent script injection.
+- Reports are static and do not execute analyzed code.
+- Scanner traversal is root-confined and prevents symlink-based path escape.
+- Baseline files are schema/type validated with size limits and tamper-evident integrity fields
+  (`generator`, `payload_sha256` for v1.3+).
+- Baseline integrity is tamper-evident (audit signal), not tamper-proof cryptographic signing.
+  An actor who can rewrite baseline content and recompute `payload_sha256` can still alter it.
+- In `--fail-on-new` / `--ci`, untrusted baseline states fail fast; otherwise baseline is ignored
+  with explicit warning and comparison proceeds against an empty baseline.
+- Cache files are HMAC-signed (constant-time comparison), size-limited, and ignored on mismatch.
+- Cache secrets are stored next to the cache (`.cache_secret`) and must not be committed.
 
 ---
 

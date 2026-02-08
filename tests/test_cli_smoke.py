@@ -11,13 +11,29 @@ def run_cli(
     env = os.environ.copy()
     root_dir = Path(__file__).parents[1]
     env["PYTHONPATH"] = str(root_dir) + os.pathsep + env.get("PYTHONPATH", "")
+    # Keep smoke tests stable under pytest-cov:
+    # subprocess coverage collection is not required here and can create
+    # nondeterministic overhead when child process pools are used.
+    env.pop("COV_CORE_SOURCE", None)
+    env.pop("COV_CORE_CONFIG", None)
+    env.pop("COV_CORE_DATAFILE", None)
+    env.pop("COVERAGE_PROCESS_START", None)
 
     # Try to find venv python
     venv_python = root_dir / ".venv" / "bin" / "python"
     executable = str(venv_python) if venv_python.exists() else sys.executable
 
     return subprocess.run(
-        [executable, "-m", "codeclone.cli", *args],
+        [
+            executable,
+            "-m",
+            "codeclone.cli",
+            *args,
+            "--processes",
+            "1",
+            "--no-progress",
+            "--no-color",
+        ],
         capture_output=True,
         text=True,
         cwd=cwd,
@@ -39,7 +55,8 @@ def f():
     result = run_cli([str(tmp_path)], cwd=tmp_path)
 
     assert result.returncode == 0
-    assert "Total Function Clones" in result.stdout
+    assert "Analysis Summary" in result.stdout
+    assert "Function clone groups" in result.stdout
 
 
 def test_cli_baseline_missing_warning(tmp_path: Path) -> None:
@@ -107,4 +124,4 @@ def f2():
         ]
     )
     assert result2.returncode == 0
-    assert "New Clones (vs Baseline)" in result2.stdout
+    assert "New vs baseline" in result2.stdout

@@ -78,7 +78,7 @@ def iter_py_files(
                 raise ValidationError(f"Cannot scan under sensitive directory: {root}")
 
     file_count = 0
-    for p in rootp.rglob("*.py"):
+    for p in sorted(rootp.rglob("*.py"), key=lambda path: str(path)):
         # Verify path is actually under root (prevent symlink attacks)
         try:
             p.resolve().relative_to(rootp)

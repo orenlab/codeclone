@@ -22,7 +22,7 @@ def foo():
     return a + b
 """
 
-    units, blocks = extract_units_from_source(
+    units, blocks, segments = extract_units_from_source(
         source=src,
         filepath="x.py",
         module_name="mod",
@@ -36,6 +36,7 @@ def foo():
     assert u.qualname == "mod:foo"
     assert u.loc >= 3
     assert blocks == []
+    assert segments == []
 
 
 def test_init_function_is_ignored_for_blocks() -> None:
@@ -48,7 +49,7 @@ class A:
         w = 4
 """
 
-    units, blocks = extract_units_from_source(
+    units, blocks, segments = extract_units_from_source(
         source=src,
         filepath="x.py",
         module_name="mod",
@@ -59,6 +60,7 @@ class A:
 
     assert len(units) == 1
     assert blocks == []
+    assert segments == []
 
 
 def test_parse_timeout_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,6 +106,102 @@ def test_parse_limits_resource_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     assert tree is not None
 
 
+def test_parse_limits_never_lowers_hard_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[int, int]] = []
+
+    class _DummyResource:
+        RLIMIT_CPU = 0
+        RLIM_INFINITY = 10**9
+
+        @staticmethod
+        def getrlimit(_key: int) -> tuple[int, int]:
+            return (_DummyResource.RLIM_INFINITY, _DummyResource.RLIM_INFINITY)
+
+        @staticmethod
+        def setrlimit(_key: int, val: tuple[int, int]) -> None:
+            calls.append(val)
+            # Simulate a system where changing hard limit would fail.
+            assert val[1] == _DummyResource.RLIM_INFINITY
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
+    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+
+    with extractor._parse_limits(5):
+        pass
+
+    assert calls
+    # First set lowers only soft limit, hard stays unchanged.
+    assert calls[0] == (5, _DummyResource.RLIM_INFINITY)
+    # Final restore returns to original limits.
+    assert calls[-1] == (
+        _DummyResource.RLIM_INFINITY,
+        _DummyResource.RLIM_INFINITY,
+    )
+
+
+def test_parse_limits_uses_finite_soft_limit_branch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, int]] = []
+
+    class _DummyResource:
+        RLIMIT_CPU = 0
+        RLIM_INFINITY = 10**9
+
+        @staticmethod
+        def getrlimit(_key: int) -> tuple[int, int]:
+            return (20, 20)
+
+        @staticmethod
+        def setrlimit(_key: int, val: tuple[int, int]) -> None:
+            calls.append(val)
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
+    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+
+    with extractor._parse_limits(5):
+        pass
+
+    # New soft is min(timeout, old_soft, hard_ceiling), hard is preserved.
+    assert calls[0] == (5, 20)
+    assert calls[-1] == (20, 20)
+
+
+def test_parse_limits_restore_failure_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DummyResource:
+        RLIMIT_CPU = 0
+        RLIM_INFINITY = 10**9
+        _calls = 0
+
+        @staticmethod
+        def getrlimit(_key: int) -> tuple[int, int]:
+            return (_DummyResource.RLIM_INFINITY, _DummyResource.RLIM_INFINITY)
+
+        @staticmethod
+        def setrlimit(_key: int, _val: tuple[int, int]) -> None:
+            _DummyResource._calls += 1
+            if _DummyResource._calls >= 2:
+                raise RuntimeError("restore denied")
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
+    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+
+    # Should not raise even if restoring old limits fails.
+    with extractor._parse_limits(5):
+        pass
+
+
 def test_extract_syntax_error() -> None:
     with pytest.raises(ParseError):
         extract_units_from_source(
@@ -122,7 +220,7 @@ def test_extract_respects_min_loc_min_stmt() -> None:
 def f():
     x = 1
 """
-    units, blocks = extract_units_from_source(
+    units, blocks, segments = extract_units_from_source(
         source=src,
         filepath="x.py",
         module_name="mod",
@@ -132,6 +230,7 @@ def f():
     )
     assert units == []
     assert blocks == []
+    assert segments == []
 
 
 def test_extract_block_units_generated() -> None:
@@ -141,7 +240,7 @@ def test_extract_block_units_generated() -> None:
 def f():
 {body_lines}
 """
-    units, blocks = extract_units_from_source(
+    units, blocks, segments = extract_units_from_source(
         source=src,
         filepath="x.py",
         module_name="mod",
@@ -151,6 +250,7 @@ def f():
     )
     assert units
     assert blocks
+    assert segments
 
 
 def test_extract_async_function() -> None:
@@ -158,7 +258,7 @@ def test_extract_async_function() -> None:
 async def af():
     return 1
 """
-    units, blocks = extract_units_from_source(
+    units, blocks, segments = extract_units_from_source(
         source=src,
         filepath="x.py",
         module_name="mod",
@@ -168,6 +268,26 @@ async def af():
     )
     assert len(units) == 1
     assert blocks == []
+    assert segments == []
+
+
+def test_extract_handles_long_line() -> None:
+    long_line = 'x = "1" * 10000'
+    src = f"""
+def f():
+    {long_line}
+"""
+    units, blocks, segments = extract_units_from_source(
+        source=src,
+        filepath="x.py",
+        module_name="mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    assert units
+    assert blocks == []
+    assert segments == []
 
 
 def test_extract_skips_invalid_positions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,7 +305,7 @@ def f():
         return tree
 
     monkeypatch.setattr(extractor, "_parse_with_limits", _fake_parse)
-    units, blocks = extract_units_from_source(
+    units, blocks, segments = extract_units_from_source(
         source="def f():\n    return 1\n",
         filepath="x.py",
         module_name="mod",
@@ -195,6 +315,27 @@ def f():
     )
     assert units == []
     assert blocks == []
+    assert segments == []
+
+
+def test_extract_distinguishes_call_targets() -> None:
+    src = """
+def load(x):
+    return load_user(x)
+
+def delete(x):
+    return delete_user(x)
+"""
+    units, _, _ = extract_units_from_source(
+        source=src,
+        filepath="x.py",
+        module_name="mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    fps = {u.qualname: u.fingerprint for u in units}
+    assert fps["mod:load"] != fps["mod:delete"]
 
 
 def test_parse_limits_triggers_timeout(monkeypatch: pytest.MonkeyPatch) -> None:

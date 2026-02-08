@@ -12,12 +12,24 @@ import ast
 from dataclasses import dataclass
 
 from .blockhash import stmt_hash
+from .fingerprint import sha1
 from .normalize import NormalizationConfig
 
 
 @dataclass(frozen=True, slots=True)
 class BlockUnit:
     block_hash: str
+    filepath: str
+    qualname: str
+    start_line: int
+    end_line: int
+    size: int
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentUnit:
+    segment_hash: str
+    segment_sig: str
     filepath: str
     qualname: str
     start_line: int
@@ -72,3 +84,48 @@ def extract_blocks(
             break
 
     return blocks
+
+
+def extract_segments(
+    func_node: ast.AST,
+    *,
+    filepath: str,
+    qualname: str,
+    cfg: NormalizationConfig,
+    window_size: int,
+    max_segments: int,
+) -> list[SegmentUnit]:
+    body = getattr(func_node, "body", None)
+    if not isinstance(body, list) or len(body) < window_size:
+        return []
+
+    stmt_hashes = [stmt_hash(stmt, cfg) for stmt in body]
+
+    segments: list[SegmentUnit] = []
+
+    for i in range(len(stmt_hashes) - window_size + 1):
+        start = getattr(body[i], "lineno", None)
+        end = getattr(body[i + window_size - 1], "end_lineno", None)
+        if not start or not end:
+            continue
+
+        window = stmt_hashes[i : i + window_size]
+        segment_hash = sha1("|".join(window))
+        segment_sig = sha1("|".join(sorted(window)))
+
+        segments.append(
+            SegmentUnit(
+                segment_hash=segment_hash,
+                segment_sig=segment_sig,
+                filepath=filepath,
+                qualname=qualname,
+                start_line=start,
+                end_line=end,
+                size=window_size,
+            )
+        )
+
+        if len(segments) >= max_segments:
+            break
+
+    return segments

@@ -1,5 +1,79 @@
 # Changelog
 
+## [1.3.0] - 2026-02-08
+
+### Overview
+
+This release improves detection precision, determinism, and auditability, adds
+segment-level reporting, refreshes the HTML report UI, and hardens baseline/cache
+contracts for CI usage.
+
+**Breaking (CI):** baseline contract checks are stricter. Legacy or mismatched baselines
+must be regenerated.
+
+### Detection Engine
+
+- Safe normalization upgrades: local logical equivalence, proven-domain commutative
+  canonicalization, and preserved symbolic call targets.
+- Internal CFG metadata markers were moved to the `__CC_META__::...` namespace and emitted
+  as synthetic AST names to prevent collisions with user string literals.
+- CFG precision upgrades: short-circuit micro-CFG, selective `try/except` raise-linking,
+  loop `break`/`continue` jump semantics, `for/while ... else`, and ordered `match`/`except`.
+- Deterministic traversal and ordering improvements for stable clone grouping/report output.
+- Segment-level internal detection added with strict candidate->hash confirmation; remains
+  report-only (not part of baseline/CI fail criteria).
+- Segment report noise reduction: overlapping windows are merged and boilerplate-only groups
+  are suppressed using deterministic AST criteria.
+
+### Baseline & CI
+
+- Baseline format is versioned (`baseline_version`, `schema_version`) and legacy baselines
+  fail fast with regeneration guidance.
+- Added tamper-evident baseline integrity for v1.3+ (`generator`, `payload_sha256`).
+- Added configurable size guards: `--max-baseline-size-mb`, `--max-cache-size-mb`.
+- Behavioral hardening: in normal mode, untrusted baseline states are ignored with warning
+  and compared as empty; in `--fail-on-new` / `--ci`, they fail fast with deterministic exit codes.
+
+Update baseline after upgrade:
+
+```bash
+codeclone . --update-baseline
+```
+
+### CLI & Reports
+
+- Added `--version`, `--cache-path` (legacy alias: `--cache-dir`), and `--ci` preset.
+- Added strict output extension validation for `--html/.html`, `--json/.json`, `--text/.txt`.
+- Summary output was redesigned for deterministic, cache-aware metrics across standard and CI modes.
+- User-facing CLI messages were centralized in `codeclone/ui_messages.py`.
+- HTML/TXT/JSON reports now include consistent provenance metadata (baseline/cache status fields).
+- Clone group/report ordering is deterministic and aligned across HTML/TXT/JSON outputs.
+
+### HTML UI
+
+- Refreshed layout with improved navigation and dashboard widgets.
+- Added command palette and keyboard shortcuts.
+- Replaced emoji icons with inline SVG icons.
+- Hardened escaping (text + attribute context) and snippet fallback behavior.
+
+### Cache & Security
+
+- Cache default moved to `<root>/.cache/codeclone/cache.json` with legacy path warning.
+- Cache schema was extended to include segment data (`CACHE_VERSION=1.1`).
+- Cache integrity uses constant-time signature checks and deep schema validation.
+- Invalid/oversized cache is ignored deterministically and rebuilt from source.
+- Added security regressions for traversal safety, report escaping, baseline/cache integrity,
+  and deterministic report ordering across formats.
+- Fixed POSIX parser CPU guard to avoid lowering `RLIMIT_CPU` hard limit.
+
+### Documentation & Packaging
+
+- Updated README and docs (`architecture`, `cfg`, `SECURITY`, `CONTRIBUTING`) to reflect
+  current contracts and behaviors.
+- Removed an invalid PyPI classifier from package metadata.
+
+---
+
 ## [1.2.1] - 2026-02-02
 
 ### Overview

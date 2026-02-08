@@ -1,11 +1,13 @@
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from codeclone.cli import MAX_FILE_SIZE, process_file
 from codeclone.errors import ValidationError
+from codeclone.html_report import build_html_report
 from codeclone.normalize import NormalizationConfig
 from codeclone.scanner import iter_py_files
 
@@ -42,3 +44,39 @@ def test_process_file_size_limit() -> None:
 
     finally:
         os.remove(tmp_path)
+
+
+def test_html_report_escapes_user_content(tmp_path: Path) -> None:
+    bad_path = tmp_path / 'x" onmouseover="alert(1).py'
+    good_path = tmp_path / "y.py"
+    bad_path.write_text("def f():\n    return 1\n", "utf-8")
+    good_path.write_text("def g():\n    return 2\n", "utf-8")
+    func_groups = {
+        "k": [
+            {
+                "qualname": "<script>alert(1)</script>",
+                "filepath": str(bad_path),
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+            },
+            {
+                "qualname": "ok",
+                "filepath": str(good_path),
+                "start_line": 3,
+                "end_line": 4,
+                "loc": 2,
+            },
+        ]
+    }
+    html = build_html_report(
+        func_groups=func_groups,
+        block_groups={},
+        segment_groups={},
+        title="Security",
+    )
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert 'onmouseover="alert(1)' not in html
+    assert 'data-qualname="&lt;script&gt;alert(1)&lt;/script&gt;"' in html
+    assert "&quot; onmouseover=&quot;alert(1).py" in html

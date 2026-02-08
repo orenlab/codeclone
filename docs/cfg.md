@@ -82,6 +82,9 @@ An `if` statement creates:
 
 Both branches always reconverge at an explicit after-block.
 
+If the condition is a short‑circuit boolean (`and`/`or`), it is expanded into a
+**micro‑CFG** with one block per operand and explicit branch edges between them.
+
 ---
 
 ### `while` loops
@@ -90,12 +93,13 @@ A `while` loop produces:
 
 - a loop condition block,
 - a body block,
+- an optional `else` block,
 - an after-loop block.
 
 The condition block always has two successors:
 
 - loop body,
-- after-loop.
+- else/after-loop path.
 
 ---
 
@@ -105,6 +109,7 @@ A `for` loop is modeled similarly to `while`:
 
 - an iteration-expression block,
 - a body block,
+- an optional `else` block,
 - an after-loop block.
 
 The iterable expression (`range(...)`, etc.) is represented as a statement
@@ -114,42 +119,25 @@ inside the condition block.
 
 ## `break` and `continue` Semantics (CFG v1)
 
-### Current behavior
-
 In CFG v1:
 
-- `break` and `continue` are represented as **explicit blocks**,
-- they are treated as **structural statements**, not precise jumps,
-- they do **not** resolve exact runtime jump targets.
+- `break` and `continue` are explicit terminating statements,
+- each maps to a deterministic jump target through loop context:
+  - `break` -> loop after-block,
+  - `continue` -> loop condition/iteration block,
+- `for/while ... else` remains reachable only on normal loop completion
+  (not through `break` paths).
 
-Example:
-
-```python
-for x in xs:
-    if cond:
-        continue
-    process(x)
-```
-
-The CFG records:
-
-- presence of `continue`,
-- its position in the control structure,
-
-but does not encode a direct jump back to the loop header.
+This preserves structural loop semantics while keeping deterministic graph shape.
 
 ---
 
-### Rationale
+## Ordered Branch Semantics
 
-Precise modeling of `break` / `continue`:
+To avoid false equivalence from branch reordering, CFG v1 preserves:
 
-- significantly increases CFG complexity,
-- creates many structurally distinct but semantically similar graphs,
-- destabilizes structural fingerprints.
-
-For clone detection, the **presence and position** of these statements
-is more important than their exact runtime behavior.
+- `match case` evaluation order via indexed case-test blocks,
+- `except` handler order via indexed handler-test blocks.
 
 ---
 
@@ -170,12 +158,15 @@ is more important than their exact runtime behavior.
 
 ---
 
-### No exception flow
+### Limited exception flow
 
-- `try / except / finally` blocks are represented only structurally.
-- No exceptional control-flow edges are created.
+- `try / except / finally` blocks are represented structurally.
+- `try/except` edges are created **only** from statements that may raise:
+  function calls, attribute access, indexing, `await`, `yield from`, and `raise`.
+- No interprocedural exception propagation is modeled.
 
-This avoids CFG explosion and keeps fingerprints stable.
+This keeps CFGs deterministic while reducing false differences between safe and
+potentially‑raising code.
 
 ---
 
@@ -219,8 +210,7 @@ CFG v1 is intentionally **structural, conservative, and explainable**.
 
 Potential future enhancements:
 
-- precise jump targets for `break` / `continue`,
-- basic exception-flow modeling,
+- richer exception-flow modeling,
 - optional data-flow fingerprints,
 - configurable strictness modes.
 

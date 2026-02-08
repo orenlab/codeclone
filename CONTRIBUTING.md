@@ -30,6 +30,7 @@ We especially welcome contributions in the following areas:
 
 - Control Flow Graph (CFG) construction and semantics
 - AST normalization improvements
+- Segment-level clone detection and reporting
 - False-positive reduction
 - HTML report UX improvements
 - Performance optimizations
@@ -83,6 +84,25 @@ Such changes often require design-level discussion and may be staged across vers
 
 ---
 
+## Security & Safety Expectations
+
+- Assume **untrusted input** (paths and source code).
+- Add **negative tests** for any normalization or CFG change.
+- Changes must preserve determinism and avoid new false positives.
+
+---
+
+## Baseline & CI
+
+- Baselines are **versioned**. Regenerate with `codeclone . --update-baseline`
+  when detection logic or CodeClone version changes.
+- Baselines in 1.3+ are tamper-evident (`generator`, `payload_sha256`).
+- Baseline verification must use the same Python `major.minor` version.
+- In `--fail-on-new` / `--ci`, untrusted baseline states fail fast. Outside gating
+  mode, baseline is ignored with warning and comparison proceeds against an empty baseline.
+
+---
+
 ## Development Setup
 
 ```bash
@@ -96,15 +116,15 @@ pip install -e .[dev]
 Run tests:
 
 ```bash
-pytest
+uv run pytest
 ```
 
 Static checks:
 
 ```bash
-mypy
-ruff check .
-ruff format .
+uv run mypy .
+uv run ruff check .
+uv run ruff format .
 ```
 
 ---
@@ -127,6 +147,9 @@ CodeClone follows **semantic versioning**:
 - **MAJOR**: fundamental detection model changes
 - **MINOR**: new detection capabilities (for example, CFG improvements)
 - **PATCH**: bug fixes, performance improvements, and UI/UX polish
+
+Baselines are versioned. Any change to detection behavior must include documentation
+and tests, and may require baseline regeneration.
 
 ---
 

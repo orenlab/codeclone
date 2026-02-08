@@ -13,6 +13,9 @@ import copy
 from ast import AST
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import cast
+
+from .meta_markers import CFG_META_PREFIX
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +74,8 @@ class AstNormalizer(ast.NodeTransformer):
         return node
 
     def visit_Name(self, node: ast.Name) -> ast.Name:
-        if self.cfg.normalize_names:
+        # Call targets are handled in visit_Call to avoid erasing callee symbols.
+        if self.cfg.normalize_names and not _is_semantic_marker_name(node.id):
             node.id = "_VAR_"
         return node
 
@@ -86,6 +90,26 @@ class AstNormalizer(ast.NodeTransformer):
         if self.cfg.normalize_constants:
             node.value = "_CONST_"
         return node
+
+    def visit_Call(self, node: ast.Call) -> ast.Call:
+        node.func = self._visit_call_target(node.func)
+        node.args = [cast(ast.expr, self.visit(arg)) for arg in node.args]
+        for kw in node.keywords:
+            kw.value = cast(ast.expr, self.visit(kw.value))
+        return node
+
+    def _visit_call_target(self, node: ast.expr) -> ast.expr:
+        # Keep symbolic call targets intact to avoid conflating different APIs.
+        if isinstance(node, ast.Name):
+            return node
+        if isinstance(node, ast.Attribute):
+            value = node.value
+            if isinstance(value, (ast.Name, ast.Attribute)):
+                node.value = self._visit_call_target(value)
+            else:
+                node.value = cast(ast.expr, self.visit(value))
+            return node
+        return cast(ast.expr, self.visit(node))
 
     def visit_AugAssign(self, node: ast.AugAssign) -> AST:
         # Normalize x += 1 to x = x + 1
@@ -108,6 +132,81 @@ class AstNormalizer(ast.NodeTransformer):
             end_col_offset=getattr(node, "end_col_offset", None),
         )
         return self.generic_visit(new_node)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.AST:
+        new_node = self.generic_visit(node)
+        assert isinstance(new_node, ast.UnaryOp)
+
+        if isinstance(new_node.op, ast.Not):
+            operand = new_node.operand
+            if (
+                isinstance(operand, ast.Compare)
+                and len(operand.ops) == 1
+                and len(operand.comparators) == 1
+            ):
+                op = operand.ops[0]
+                if isinstance(op, ast.In):
+                    cmp = ast.Compare(
+                        left=operand.left,
+                        ops=[ast.NotIn()],
+                        comparators=operand.comparators,
+                    )
+                    return ast.copy_location(cmp, new_node)
+                if isinstance(op, ast.Is):
+                    cmp = ast.Compare(
+                        left=operand.left,
+                        ops=[ast.IsNot()],
+                        comparators=operand.comparators,
+                    )
+                    return ast.copy_location(cmp, new_node)
+        return new_node
+
+    def visit_BinOp(self, node: ast.BinOp) -> ast.AST:
+        new_node = self.generic_visit(node)
+        assert isinstance(new_node, ast.BinOp)
+
+        if not isinstance(
+            new_node.op, (ast.Add, ast.Mult, ast.BitOr, ast.BitAnd, ast.BitXor)
+        ):
+            return new_node
+
+        if not (
+            _is_proven_commutative_operand(new_node.left, new_node.op)
+            and _is_proven_commutative_operand(new_node.right, new_node.op)
+        ):
+            return new_node
+
+        left_key = _expr_sort_key(new_node.left)
+        right_key = _expr_sort_key(new_node.right)
+        if right_key < left_key:
+            new_node.left, new_node.right = new_node.right, new_node.left
+        return new_node
+
+
+def _expr_sort_key(node: ast.AST) -> str:
+    return ast.dump(node, annotate_fields=True, include_attributes=False)
+
+
+def _is_semantic_marker_name(name: str) -> bool:
+    return name.startswith(CFG_META_PREFIX)
+
+
+def _is_proven_commutative_operand(node: ast.AST, op: ast.operator) -> bool:
+    if isinstance(node, ast.Constant):
+        return _is_proven_commutative_constant(node.value, op)
+    if isinstance(node, ast.BinOp) and type(node.op) is type(op):
+        return _is_proven_commutative_operand(
+            node.left, op
+        ) and _is_proven_commutative_operand(node.right, op)
+    return False
+
+
+def _is_proven_commutative_constant(value: object, op: ast.operator) -> bool:
+    if isinstance(op, (ast.BitOr, ast.BitAnd, ast.BitXor)):
+        return isinstance(value, int) and not isinstance(value, bool)
+    if isinstance(op, (ast.Add, ast.Mult)):
+        return isinstance(value, (int, float, complex)) and not isinstance(value, bool)
+    return False
 
 
 def normalized_ast_dump(func_node: ast.AST, cfg: NormalizationConfig) -> str:

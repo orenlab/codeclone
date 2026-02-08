@@ -7,7 +7,8 @@ from typing import Any, cast
 
 import pytest
 
-from codeclone.blocks import BlockUnit
+import codeclone.cache as cache_mod
+from codeclone.blocks import BlockUnit, SegmentUnit
 from codeclone.cache import Cache
 from codeclone.errors import CacheError
 from codeclone.extractor import Unit
@@ -37,12 +38,27 @@ def _make_block(filepath: str) -> BlockUnit:
     )
 
 
+def _make_segment(filepath: str) -> SegmentUnit:
+    return SegmentUnit(
+        segment_hash="s1",
+        segment_sig="sig1",
+        filepath=filepath,
+        qualname="mod:func",
+        start_line=1,
+        end_line=6,
+        size=6,
+    )
+
+
 def test_cache_roundtrip(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     unit = _make_unit("x.py")
     block = _make_block("x.py")
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [unit], [block])
+    segment = _make_segment("x.py")
+    cache.put_file_entry(
+        "x.py", {"mtime_ns": 1, "size": 10}, [unit], [block], [segment]
+    )
     cache.save()
 
     loaded = Cache(cache_path)
@@ -56,7 +72,7 @@ def test_cache_roundtrip(tmp_path: Path) -> None:
 def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [])
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
     cache.save()
 
     data = json.loads(cache_path.read_text("utf-8"))
@@ -89,11 +105,223 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     assert loaded.data["files"] == {}
 
 
+def test_cache_too_large_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text(json.dumps({"version": Cache.CACHE_VERSION, "files": {}}))
+    monkeypatch.setattr(cache_mod, "MAX_CACHE_SIZE_BYTES", 1)
+    cache = Cache(cache_path)
+    cache.load()
+    assert cache.load_warning is not None
+    assert "too large" in cache.load_warning
+    assert cache.data["version"] == Cache.CACHE_VERSION
+    assert cache.data["files"] == {}
+
+
 def test_cache_entry_validation(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     cache.data["files"]["x.py"] = cast(Any, {"stat": {"mtime_ns": 1, "size": 1}})
     assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_invalid_stat_types(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": "1", "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_stat_not_dict(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": [],
+            "units": [],
+            "blocks": [],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_invalid_units_container_type(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": {},
+            "blocks": [],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_unit_item_not_dict(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": ["bad"],
+            "blocks": [],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_invalid_unit_field_type(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [
+                {
+                    "qualname": "q",
+                    "filepath": "x.py",
+                    "start_line": "1",
+                    "end_line": 2,
+                    "loc": 2,
+                    "stmt_count": 1,
+                    "fingerprint": "fp",
+                    "loc_bucket": "0-19",
+                }
+            ],
+            "blocks": [],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_block_item_not_dict(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": ["bad"],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_invalid_block_field_type(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [
+                {
+                    "block_hash": "h",
+                    "filepath": "x.py",
+                    "qualname": "q",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "size": "4",
+                }
+            ],
+            "segments": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_segment_item_not_dict(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": ["bad"],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_invalid_segment_field_type(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": [
+                {
+                    "segment_hash": "h",
+                    "segment_sig": "sig",
+                    "filepath": "x.py",
+                    "qualname": "q",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "size": "6",
+                }
+            ],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_cache_entry_valid_deep_schema(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [
+                {
+                    "qualname": "q",
+                    "filepath": "x.py",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "loc": 2,
+                    "stmt_count": 1,
+                    "fingerprint": "fp",
+                    "loc_bucket": "0-19",
+                }
+            ],
+            "blocks": [
+                {
+                    "block_hash": "h",
+                    "filepath": "x.py",
+                    "qualname": "q",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "size": 4,
+                }
+            ],
+            "segments": [
+                {
+                    "segment_hash": "h",
+                    "segment_sig": "sig",
+                    "filepath": "x.py",
+                    "qualname": "q",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "size": 6,
+                }
+            ],
+        },
+    )
+    assert cache.get_file_entry("x.py") is not None
 
 
 def test_cache_load_missing_file(tmp_path: Path) -> None:
@@ -195,4 +423,15 @@ def test_cache_secret_chmod_failure(
     monkeypatch.setattr(os, "name", "posix")
 
     cache = Cache(cache_path)
+    assert isinstance(cache.secret, bytes)
+
+
+def test_cache_secret_non_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr("codeclone.cache.OS_NAME", "nt")
+    cache = Cache(cache_path)
+    secret_path = cache_path.parent / ".cache_secret"
+    assert secret_path.exists()
     assert isinstance(cache.secret, bytes)

@@ -25,3 +25,17 @@ class ValidationError(CodeCloneError):
 
 class CacheError(CodeCloneError):
     """Cache operation failed."""
+
+
+class BaselineSchemaError(CodeCloneError):
+    """Baseline file structure is invalid."""
+
+
+class BaselineValidationError(BaselineSchemaError):
+    """Baseline validation error with machine-readable status."""
+
+    __slots__ = ("status",)
+
+    def __init__(self, message: str, *, status: str = "invalid") -> None:
+        super().__init__(message)
+        self.status = status
