@@ -221,12 +221,13 @@ def build_html_report(
             explain_items.append(
                 ("hint: assert-only block", "group-explain-item group-explain-warn")
             )
-            explain_items.append(
-                (
-                    "hint_confidence: deterministic",
-                    "group-explain-item group-explain-muted",
+            if meta.get("hint_confidence"):
+                explain_items.append(
+                    (
+                        f"hint_confidence: {meta['hint_confidence']}",
+                        "group-explain-item group-explain-muted",
+                    )
                 )
-            )
             if meta.get("assert_ratio"):
                 explain_items.append(
                     (
@@ -282,50 +283,73 @@ def build_html_report(
         if not groups:
             return ""
 
-        # build group DOM with data-search (for fast client-side search)
+        def _block_group_name(display_key: str, meta: dict[str, str]) -> str:
+            if meta.get("group_display_name"):
+                return str(meta["group_display_name"])
+            if len(display_key) > 56:
+                return f"{display_key[:24]}...{display_key[-16:]}"
+            return display_key
+
+        def _group_name(display_key: str, meta: dict[str, str]) -> str:
+            if section_id == "blocks":
+                return _block_group_name(display_key, meta)
+            return display_key
+
+        def _item_span_size(item: dict[str, Any]) -> int:
+            start_line = int(item.get("start_line", 0))
+            end_line = int(item.get("end_line", 0))
+            return max(0, end_line - start_line + 1)
+
+        def _group_span_size(items: list[dict[str, Any]]) -> int:
+            return max((_item_span_size(item) for item in items), default=0)
+
         out: list[str] = [
             f'<section id="{section_id}" class="section" data-section="{section_id}">',
-            '<div class="section-head">',
+            '<div class="section-title">',
             f"<h2>{_escape_html(section_title)} "
-            f'<span class="pill {pill_cls}" data-count-pill="{section_id}">'
+            f'<span class="count-pill" data-count-pill="{section_id}">'
             f"{len(groups)} groups</span></h2>",
+            "</div>",
             f"""
-<div class="section-toolbar"
-     role="toolbar"
-     aria-label="{_escape_attr(section_title)} controls">
+<div class="toolbar" role="toolbar" aria-label="{_escape_attr(section_title)} controls">
   <div class="toolbar-left">
-    <div class="search-wrap">
+    <div class="search-box">
       <span class="search-ico">{ICONS["search"]}</span>
-      <input class="search"
-             id="search-{section_id}"
-             placeholder="Search..."
-             autocomplete="off" />
-      <button class="btn ghost"
-              type="button"
-              data-clear="{section_id}"
-              title="Clear search">{ICONS["clear"]}</button>
+      <input
+        type="text"
+        id="search-{section_id}"
+        placeholder="Search..."
+        autocomplete="off"
+      />
+      <button
+        class="clear-btn"
+        type="button"
+        data-clear="{section_id}"
+        title="Clear search"
+      >{ICONS["clear"]}</button>
     </div>
-    <div class="segmented">
-      <button class="btn seg"
-              type="button"
-              data-collapse-all="{section_id}">Collapse</button>
-      <button class="btn seg"
-              type="button"
-              data-expand-all="{section_id}">Expand</button>
-    </div>
+    <button class="btn" type="button" data-collapse-all="{section_id}">Collapse</button>
+    <button class="btn" type="button" data-expand-all="{section_id}">Expand</button>
   </div>
 
   <div class="toolbar-right">
-    <div class="pager">
-      <button class="btn"
-              type="button"
-              data-prev="{section_id}">{ICONS["prev"]}</button>
-      <span class="page-meta" data-page-meta="{section_id}">Page 1</span>
-      <button class="btn"
-              type="button"
-              data-next="{section_id}">{ICONS["next"]}</button>
+    <div class="pagination">
+      <button class="btn" type="button" data-prev="{section_id}">
+        {ICONS["prev"]}
+      </button>
+      <span class="page-meta" data-page-meta="{section_id}">
+        Page 1 / 1 • {len(groups)} groups
+      </span>
+      <button class="btn" type="button" data-next="{section_id}">
+        {ICONS["next"]}
+      </button>
     </div>
-    <select class="select" data-pagesize="{section_id}" title="Groups per page">
+    <select
+      class="select"
+      data-pagesize="{section_id}"
+      aria-label="Items per page"
+      title="Groups per page"
+    >
       <option value="5">5 / page</option>
       <option value="10" selected>10 / page</option>
       <option value="20">20 / page</option>
@@ -334,24 +358,40 @@ def build_html_report(
   </div>
 </div>
 """,
-            "</div>",  # section-head
             '<div class="section-body">',
         ]
 
         for idx, (gkey, items) in enumerate(groups, start=1):
+            group_id = f"{section_id}-{idx}"
             search_parts: list[str] = [str(gkey)]
             for it in items:
                 search_parts.append(str(it.get("qualname", "")))
                 search_parts.append(str(it.get("filepath", "")))
             search_blob = " ".join(search_parts).lower()
             search_blob_escaped = _escape_attr(search_blob)
-            basis_label = _group_basis_label(section_id)
             block_meta = _block_group_explanation_meta(section_id, gkey)
             display_key = _display_group_key(section_id, gkey, block_meta)
-            group_explain_html = _render_group_explanation(block_meta)
+            group_name = _group_name(display_key, block_meta)
+            group_span_size = _group_span_size(items)
+            group_arity = len(items)
+            if section_id == "blocks":
+                block_size_raw = block_meta.get("block_size", "").strip()
+                if block_size_raw.isdigit():
+                    group_span_size = int(block_size_raw)
+                arity_raw = block_meta.get("group_arity", "").strip()
+                if arity_raw.isdigit() and int(arity_raw) > 0:
+                    group_arity = int(arity_raw)
+            group_summary = (
+                f"{group_arity} instances • block size {group_span_size}"
+                if group_span_size > 0
+                else f"{group_arity} instances"
+            )
             block_group_attrs = ""
             if block_meta:
                 attrs = {
+                    "data-group-id": group_id,
+                    "data-clone-size": str(group_span_size),
+                    "data-items-count": str(group_arity),
                     "data-match-rule": block_meta.get("match_rule"),
                     "data-block-size": block_meta.get("block_size"),
                     "data-signature-kind": block_meta.get("signature_kind"),
@@ -361,14 +401,36 @@ def build_html_report(
                     "data-hint-confidence": block_meta.get("hint_confidence"),
                     "data-assert-ratio": block_meta.get("assert_ratio"),
                     "data-consecutive-asserts": block_meta.get("consecutive_asserts"),
+                    "data-boilerplate-asserts": block_meta.get("boilerplate_asserts"),
                 }
                 block_group_attrs = " ".join(
                     f'{name}="{_escape_attr(value)}"'
                     for name, value in attrs.items()
                     if value
                 )
+            if block_group_attrs:
                 block_group_attrs = f" {block_group_attrs}"
+            if 'data-group-id="' not in block_group_attrs:
+                group_id_attr = _escape_attr(group_id)
+                block_group_attrs = (
+                    f' data-group-id="{group_id_attr}"{block_group_attrs}'
+                )
+            if 'data-clone-size="' not in block_group_attrs:
+                clone_size_attr = _escape_attr(str(group_span_size))
+                block_group_attrs += f' data-clone-size="{clone_size_attr}"'
+            if 'data-items-count="' not in block_group_attrs:
+                items_count_attr = _escape_attr(str(group_arity))
+                block_group_attrs += f' data-items-count="{items_count_attr}"'
+            if 'data-group-arity="' not in block_group_attrs:
+                arity_attr = _escape_attr(str(group_arity))
+                block_group_attrs += f' data-group-arity="{arity_attr}"'
 
+            metrics_button = ""
+            if section_id == "blocks":
+                metrics_button = (
+                    f'<button class="btn ghost" type="button" '
+                    f'data-metrics-btn="{_escape_attr(group_id)}">Info</button>'
+                )
             out.append(
                 f'<div class="group" data-group="{section_id}" '
                 f'data-group-index="{idx}" '
@@ -378,62 +440,80 @@ def build_html_report(
 
             out.append(
                 '<div class="group-head">'
-                '<div class="group-left">'
-                f'<button class="chev" type="button" aria-label="Toggle group" '
-                f'data-toggle-group="{section_id}-{idx}">{ICONS["chev_down"]}</button>'
-                f'<div class="group-title">Group #{idx}</div>'
-                f'<span class="pill small {pill_cls}">{len(items)} items</span>'
+                '<div class="group-head-left">'
+                f'<button class="group-toggle" type="button" aria-label="Toggle group" '
+                f'data-toggle-group="{group_id}">{ICONS["chev_down"]}</button>'
+                '<div class="group-info">'
+                f'<div class="group-name">{_escape_html(group_name)}</div>'
+                f'<div class="group-summary">{_escape_html(group_summary)}</div>'
                 "</div>"
-                '<div class="group-right">'
-                f'<span class="group-basis" title="{_escape_attr(basis_label)}">'
-                f"{_escape_html(basis_label)}</span>"
-                f'<code class="gkey" title="{_escape_attr(gkey)}">'
-                f"{_escape_html(display_key)}</code>"
-                f"{group_explain_html}"
+                "</div>"
+                '<div class="group-head-right">'
+                f'<span class="clone-count-badge">{group_arity}</span>'
+                f"{metrics_button}"
                 "</div>"
                 "</div>"
             )
-
-            out.append(f'<div class="items" id="group-body-{section_id}-{idx}">')
-
-            for i in range(0, len(items), 2):
-                row_items = items[i : i + 2]
-                out.append('<div class="item-pair">')
-
-                for item in row_items:
-                    snippet = _render_code_block(
-                        filepath=item["filepath"],
-                        start_line=int(item["start_line"]),
-                        end_line=int(item["end_line"]),
-                        file_cache=file_cache,
-                        context=context_lines,
-                        max_lines=max_snippet_lines,
-                    )
-
-                    qualname = _escape_html(item["qualname"])
-                    qualname_attr = _escape_attr(item["qualname"])
-                    filepath = _escape_html(item["filepath"])
-                    filepath_attr = _escape_attr(item["filepath"])
-                    start_line = int(item["start_line"])
-                    end_line = int(item["end_line"])
+            if section_id == "blocks" and group_arity > 2:
+                compare_note = block_meta.get("group_compare_note", "").strip()
+                if compare_note:
                     out.append(
-                        f'<div class="item" data-qualname="{qualname_attr}" '
-                        f'data-filepath="{filepath_attr}" '
-                        f'data-start-line="{start_line}" '
-                        f'data-end-line="{end_line}">'
-                        f'<div class="item-head" title="{qualname_attr}">'
-                        f"{qualname}</div>"
-                        f'<div class="item-file" '
-                        f'title="{filepath_attr}:{start_line}-{end_line}">'
-                        f"{filepath}:{start_line}-{end_line}"
-                        f"</div>"
-                        f"{snippet.code_html}"
+                        '<div class="group-compare-note">'
+                        f"{_escape_html(compare_note)}"
                         "</div>"
                     )
 
-                out.append("</div>")  # item-pair
+            if section_id == "blocks" and block_meta:
+                out.append(_render_group_explanation(block_meta))
 
-            out.append("</div>")  # items
+            out.append(f'<div class="group-body items" id="group-body-{group_id}">')
+            for item_index, item in enumerate(items, start=1):
+                snippet = _render_code_block(
+                    filepath=item["filepath"],
+                    start_line=int(item["start_line"]),
+                    end_line=int(item["end_line"]),
+                    file_cache=file_cache,
+                    context=context_lines,
+                    max_lines=max_snippet_lines,
+                )
+                qualname = _escape_html(item["qualname"])
+                qualname_attr = _escape_attr(item["qualname"])
+                filepath = _escape_html(item["filepath"])
+                filepath_attr = _escape_attr(item["filepath"])
+                start_line = int(item["start_line"])
+                end_line = int(item["end_line"])
+                peer_count = 0
+                peer_count_raw = block_meta.get("instance_peer_count", "").strip()
+                if peer_count_raw.isdigit() and int(peer_count_raw) >= 0:
+                    peer_count = int(peer_count_raw)
+                compare_meta_html = ""
+                if section_id == "blocks" and "group_arity" in block_meta:
+                    compare_text = (
+                        f"instance {item_index}/{group_arity} "
+                        f"• matches {peer_count} peers"
+                    )
+                    compare_meta_html = (
+                        f'<div class="item-compare-meta">{compare_text}</div>'
+                    )
+                out.append(
+                    f'<div class="item" data-qualname="{qualname_attr}" '
+                    f'data-filepath="{filepath_attr}" '
+                    f'data-start-line="{start_line}" '
+                    f'data-end-line="{end_line}" '
+                    f'data-peer-count="{peer_count}" '
+                    f'data-instance-index="{item_index}">'
+                    '<div class="item-header">'
+                    f'<div class="item-title" title="{qualname_attr}">{qualname}</div>'
+                    f'<div class="item-loc" '
+                    f'title="{filepath_attr}:{start_line}-{end_line}">'
+                    f"{filepath}:{start_line}-{end_line}"
+                    "</div>"
+                    "</div>"
+                    f"{compare_meta_html}"
+                    f"{snippet.code_html}"
+                    "</div>"
+                )
+            out.append("</div>")  # group-body
             out.append("</div>")  # group
 
         out.append("</div>")  # section-body
@@ -516,50 +596,26 @@ def build_html_report(
         ]
     )
 
-    def _meta_row_class(label: str) -> str:
+    def _meta_item_class(label: str) -> str:
+        cls = ["meta-item"]
         if label in {"Baseline path", "Cache path"}:
-            return "meta-row meta-row-wide"
-        return "meta-row"
+            cls.append("meta-item-wide")
+        if label in {"Baseline loaded", "Cache used"}:
+            cls.append("meta-item-boolean")
+        return " ".join(cls)
 
-    def _is_path_field(label: str) -> bool:
-        """Check if field contains a file path."""
-        return label in {"Baseline path", "Cache path"}
-
-    def _is_bool_field(label: str) -> bool:
-        """Check if field contains a boolean value."""
-        return label in {"Baseline loaded", "Cache used"}
-
-    def _format_meta_value(label: str, value: Any) -> str:
-        """Format meta value with appropriate styling."""
-        display_val = _meta_display(value)
-
-        # Boolean fields with badge styling
-        if _is_bool_field(label):
-            if isinstance(value, bool):
-                badge_class = "meta-bool-true" if value else "meta-bool-false"
-                badge_text = "true" if value else "false"
-                return f'<span class="meta-bool {badge_class}">{badge_text}</span>'
-            else:
-                return '<span class="meta-bool meta-bool-na">n/a</span>'
-
-        # Path fields with tooltip on hover
-        if _is_path_field(label) and display_val != "n/a":
-            escaped_path = _escape_html(display_val)
-            return (
-                f'<span class="meta-path">'
-                f"{escaped_path}"
-                f'<span class="meta-path-tooltip">{escaped_path}</span>'
-                f"</span>"
-            )
-
-        # Regular fields
-        return _escape_html(display_val)
+    def _meta_value_html(label: str, value: Any) -> str:
+        if label in {"Baseline loaded", "Cache used"} and isinstance(value, bool):
+            badge_cls = "meta-bool-true" if value else "meta-bool-false"
+            text = "true" if value else "false"
+            return f'<span class="meta-bool {badge_cls}">{text}</span>'
+        return _escape_html(_meta_display(value))
 
     meta_rows_html = "".join(
         (
-            f'<div class="{_meta_row_class(label)}">'
-            f"<dt>{_escape_html(label)}</dt>"
-            f"<dd>{_format_meta_value(label, value)}</dd>"
+            f'<div class="{_meta_item_class(label)}">'
+            f'<div class="meta-label">{_escape_html(label)}</div>'
+            f'<div class="meta-value">{_meta_value_html(label, value)}</div>'
             "</div>"
         )
         for label, value in meta_rows
@@ -573,24 +629,19 @@ def build_html_report(
         "</svg>"
     )
 
-    # Count non-n/a fields for badge
-    non_na_count = sum(1 for _, val in meta_rows if _meta_display(val) != "n/a")
-
     report_meta_html = (
-        f'<section class="meta-panel" id="report-meta" {meta_attrs}>'
+        f'<div class="meta-panel" id="report-meta" {meta_attrs}>'
         '<div class="meta-header">'
-        '<div class="meta-header-left">'
-        f'<div class="meta-toggle">{chevron_icon}</div>'
-        '<h3 class="meta-title">Report Provenance</h3>'
-        f'<span class="meta-badge">{non_na_count} fields</span>'
+        '<div class="meta-title">'
+        f"{chevron_icon}"
+        "Report Provenance"
+        "</div>"
+        '<div class="meta-toggle collapsed">▸</div>'
+        "</div>"
+        '<div class="meta-content collapsed">'
+        f'<div class="meta-grid">{meta_rows_html}</div>'
         "</div>"
         "</div>"
-        '<div class="meta-content">'
-        '<div class="meta-body">'
-        f'<dl class="meta-grid">{meta_rows_html}</dl>'
-        "</div>"
-        "</div>"
-        "</section>"
     )
 
     return REPORT_TEMPLATE.substitute(

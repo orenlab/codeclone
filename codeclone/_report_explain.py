@@ -239,6 +239,16 @@ def build_block_group_facts(block_groups: GroupMap) -> dict[str, dict[str, str]]
             ast_cache=ast_cache,
             range_cache=range_cache,
         )
+        group_arity = len(items)
+        peer_count = max(0, group_arity - 1)
+        facts["group_arity"] = str(group_arity)
+        facts["instance_peer_count"] = str(peer_count)
+        if group_arity > 2:
+            facts["group_compare_note"] = (
+                f"N-way group: each block matches {peer_count} peers in this group."
+            )
+        if facts.get("hint") == "assert_only":
+            facts["group_display_name"] = "assert pattern block"
         facts_by_group[group_key] = facts
 
     return facts_by_group

@@ -213,3 +213,30 @@ def test_build_block_group_facts_assert_only_without_test_context(
     group = facts[group_key]
     assert group["hint"] == "assert_only"
     assert "hint_context" not in group
+
+
+def test_build_block_group_facts_n_way_group_compare_facts(tmp_path: Path) -> None:
+    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
+    group_key = "|".join([repeated] * 4)
+    test_file = tmp_path / "test_repeated_asserts.py"
+    test_file.write_text(
+        "def f(html):\n"
+        "    assert 'a' in html\n"
+        "    assert 'b' in html\n"
+        "    assert 'c' in html\n"
+        "    assert 'd' in html\n",
+        "utf-8",
+    )
+    item = {
+        "qualname": "pkg.mod:f",
+        "filepath": str(test_file),
+        "start_line": 2,
+        "end_line": 5,
+    }
+    facts = build_block_group_facts({group_key: [item, item, item]})
+    group = facts[group_key]
+    assert group["group_arity"] == "3"
+    assert group["instance_peer_count"] == "2"
+    assert group["group_compare_note"] == (
+        "N-way group: each block matches 2 peers in this group."
+    )
