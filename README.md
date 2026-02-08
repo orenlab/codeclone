@@ -158,23 +158,30 @@ codeclone --version
 
 All report formats include provenance metadata for auditability:
 
-`codeclone_version`, `python_version`, `baseline_path`, `baseline_version`,
-`baseline_schema_version`, `baseline_python_version`, `baseline_loaded`,
-`baseline_status` (and cache metadata when available).
+`codeclone_version`, `python_version`, `baseline_path`,
+`baseline_fingerprint_version`,
+`baseline_schema_version`, `baseline_python_tag`,
+`baseline_generator_version`, `baseline_loaded`, `baseline_status`
+(and cache metadata when available).
+
+Explainability contract:
+- Facts are computed in Python core/report layer.
+- HTML UI only renders those facts (no semantic recomputation in UI).
 
 baseline_status values:
 
 - `ok`
 - `missing`
-- `legacy`
-- `invalid`
-- `mismatch_version`
-- `mismatch_schema`
-- `mismatch_python`
+- `too_large`
+- `invalid_json`
+- `invalid_type`
+- `missing_fields`
+- `mismatch_schema_version`
+- `mismatch_fingerprint_version`
+- `mismatch_python_version`
 - `generator_mismatch`
 - `integrity_missing`
 - `integrity_failed`
-- `too_large`
 
 ---
 
@@ -190,18 +197,29 @@ codeclone . --update-baseline
 
 Commit the generated baseline file to the repository.
 
-Baselines are versioned. If CodeClone is upgraded, regenerate the baseline to keep
-CI deterministic and explainable.
+Baseline compatibility is tied to `fingerprint_version` (not `codeclone_version`):
 
-Baseline format in 1.3+ is tamper-evident (generator, payload_sha256) and validated
-before baseline comparison.
+- patch/minor releases can reuse the same baseline,
+- regenerate baseline only when `fingerprint_version` changes,
+- baseline file remains tamper-evident via `payload_sha256`.
+
+Baseline v1 contract schema:
+`meta.generator.name`, `meta.generator.version`, `meta.schema_version`,
+`meta.fingerprint_version`, `meta.python_tag`, `meta.created_at`,
+`meta.payload_sha256`,
+`clones.functions`, `clones.blocks`.
 
 2. Trusted vs untrusted baseline behavior
 
 Baseline states considered untrusted:
 
-- `invalid`
 - `too_large`
+- `invalid_json`
+- `invalid_type`
+- `missing_fields`
+- `mismatch_schema_version`
+- `mismatch_fingerprint_version`
+- `mismatch_python_version`
 - `generator_mismatch`
 - `integrity_missing`
 - `integrity_failed`
@@ -233,6 +251,12 @@ Behavior:
 
 `--fail-on-new` / `--ci` exits with a non-zero code when new clones are detected.
 
+Exit codes:
+
+- `0` success
+- `2` invalid arguments or untrusted baseline in gating mode
+- `3` gating failure (`--fail-on-new` new clones or `--fail-threshold` exceeded)
+
 ---
 
 ### Cache
@@ -256,15 +280,13 @@ deterministically.
 
 ---
 
-## Python Version Consistency for Baseline Checks
+## Python Tag Consistency for Baseline Checks
 
-Due to inherent differences in Python’s AST between interpreter versions, baseline
-generation and verification must be performed using the same Python version.
+Baseline compatibility is pinned to `python_tag` (for example `cp313`) to keep
+AST/fingerprint behavior reproducible across runs.
 
-This ensures deterministic and reproducible clone detection results.
-
-CI checks therefore pin baseline verification to a single Python version, while the
-test matrix continues to validate compatibility across Python 3.10–3.14.
+Patch-level interpreter updates do not invalidate the baseline as long as
+the `python_tag` stays the same.
 
 ---
 

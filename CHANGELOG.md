@@ -1,5 +1,58 @@
 # Changelog
 
+## [1.4.0] - 2026-02-08
+
+### Overview
+
+This release stabilizes the baseline contract for long-term CI use without changing
+clone-detection algorithms.
+
+### Baseline Contract Stabilization
+
+- Baseline schema moved to a stable v1 contract with strict top-level
+  `meta` + `clones` objects.
+- `meta` fields are now explicit and versioned:
+  `generator`, `schema_version`, `fingerprint_version`,
+  `python_tag`, `created_at`, `payload_sha256` (`generator.name` / `generator.version`).
+- `clones` currently stores only deterministic baseline keys:
+  `functions`, `blocks`.
+- Compatibility no longer depends on CodeClone patch/minor version.
+  Baseline regeneration is required when `fingerprint_version` changes.
+- Added deterministic compatibility checks and statuses:
+  `mismatch_schema_version`, `mismatch_fingerprint_version`,
+  `mismatch_python_version`, `missing_fields`, `invalid_json`, `invalid_type`.
+- Legacy 1.3 baseline files are treated as untrusted (`missing_fields`) with explicit
+  regeneration guidance.
+
+### Integrity & IO Hardening
+
+- Baseline integrity hash now uses canonical payload:
+  `functions`, `blocks`, `python_tag`,
+  `fingerprint_version`, `schema_version`.
+- Baseline writes are now atomic (`*.tmp` + `os.replace`) for CI/interruption safety.
+- Baseline and cache size guards remain configurable:
+  `--max-baseline-size-mb`, `--max-cache-size-mb`.
+
+### CLI & Reporting Behavior
+
+- Trusted/untrusted baseline behavior is deterministic:
+  normal mode ignores untrusted baseline with warning and compares against empty baseline;
+  gating mode (`--fail-on-new`/`--ci`) fails fast with exit code `2`.
+- Report metadata (HTML/TXT/JSON) now exposes baseline audit fields:
+  `baseline_fingerprint_version`,
+  `baseline_schema_version`, `baseline_python_tag`,
+  `baseline_generator_version`, `baseline_loaded`, `baseline_status`.
+- Block-clone explainability is now core-owned:
+  Python report layer generates facts/hints (`match_rule`, `signature_kind`,
+  `assert_ratio`, `consecutive_asserts`), HTML only renders them.
+- HTML report API now expects precomputed `block_group_facts` from core (no UI-side semantics).
+
+### Testing
+
+- Expanded baseline validation matrix tests (types, missing fields, legacy, size limits,
+  compatibility mismatches, integrity mismatch, canonical hash determinism).
+- Full quality gates pass with `ruff`, `mypy`, and `pytest` at 100% coverage.
+
 ## [1.3.0] - 2026-02-08
 
 ### Overview
