@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 from .contracts import CACHE_VERSION
 from .errors import CacheError
 
+# Any: cache JSON payload boundary before per-entry structural validation.
+
 OS_NAME = os.name
 MAX_CACHE_SIZE_BYTES = 50 * 1024 * 1024
 

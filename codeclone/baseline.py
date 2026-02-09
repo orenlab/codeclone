@@ -27,6 +27,9 @@ from .contracts import (
 )
 from .errors import BaselineValidationError
 
+# Any: baseline JSON parsing/serialization boundary. Values are validated
+# and narrowed before entering compatibility/integrity checks.
+
 BASELINE_GENERATOR = "codeclone"
 BASELINE_SCHEMA_MAJOR = 1
 BASELINE_SCHEMA_MAX_MINOR = 0
@@ -50,6 +53,7 @@ class BaselineStatus(str, Enum):
 
 BASELINE_UNTRUSTED_STATUSES: Final[frozenset[BaselineStatus]] = frozenset(
     {
+        BaselineStatus.MISSING,
         BaselineStatus.TOO_LARGE,
         BaselineStatus.INVALID_JSON,
         BaselineStatus.INVALID_TYPE,

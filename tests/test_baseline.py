@@ -1,5 +1,6 @@
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -21,8 +22,16 @@ def _func_id() -> str:
     return f"{'a' * 40}|0-19"
 
 
+def _func_id_alt() -> str:
+    return f"{'b' * 40}|20-39"
+
+
 def _block_id() -> str:
     return "|".join(["a" * 40, "b" * 40, "c" * 40, "d" * 40])
+
+
+def _block_id_alt() -> str:
+    return "|".join(["b" * 40, "c" * 40, "d" * 40, "e" * 40])
 
 
 def _trusted_payload(
@@ -405,6 +414,102 @@ def test_baseline_verify_integrity_mismatch(tmp_path: Path) -> None:
     assert exc.value.status == "integrity_failed"
 
 
+def test_baseline_integrity_fails_on_clone_removal(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    payload = _trusted_payload(blocks=[_block_id(), _block_id_alt()])
+    _write_payload(baseline_path, payload)
+    baseline = Baseline(baseline_path)
+    baseline.load()
+    baseline.blocks.remove(_block_id_alt())
+    with pytest.raises(BaselineValidationError, match="payload_sha256 mismatch") as exc:
+        baseline.verify_integrity()
+    assert exc.value.status == "integrity_failed"
+
+
+def test_baseline_integrity_fails_on_block_addition_without_rehash(
+    tmp_path: Path,
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    payload = _trusted_payload(blocks=[_block_id()])
+    _write_payload(baseline_path, payload)
+    baseline = Baseline(baseline_path)
+    baseline.load()
+    baseline.blocks.add(_block_id_alt())
+    with pytest.raises(BaselineValidationError, match="payload_sha256 mismatch") as exc:
+        baseline.verify_integrity()
+    assert exc.value.status == "integrity_failed"
+
+
+@pytest.mark.parametrize(
+    "blocks",
+    [
+        [_block_id(), _block_id()],
+        [_block_id_alt(), _block_id()],
+    ],
+)
+def test_baseline_load_rejects_non_canonical_block_lists(
+    tmp_path: Path, blocks: list[str]
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    payload = _trusted_payload()
+    clones = payload["clones"]
+    assert isinstance(clones, dict)
+    clones["blocks"] = blocks
+    _write_payload(baseline_path, payload)
+    baseline = Baseline(baseline_path)
+    with pytest.raises(BaselineValidationError, match="sorted and unique") as exc:
+        baseline.load()
+    assert exc.value.status == "invalid_type"
+
+
+def test_baseline_verify_compatibility_ignores_generator_version(
+    tmp_path: Path,
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    _write_payload(baseline_path, _trusted_payload())
+    baseline = Baseline(baseline_path)
+    baseline.load()
+    baseline.generator_version = "9.9.9"
+    baseline.verify_compatibility(current_python_tag=_python_tag())
+
+
+def test_baseline_payload_fields_contract_invariant(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    _write_payload(
+        baseline_path,
+        _trusted_payload(functions=[_func_id()], blocks=[_block_id()]),
+    )
+    baseline = Baseline(baseline_path)
+    baseline.load()
+
+    payload_mutators: list[Callable[[Baseline], None]] = [
+        lambda b: b.functions.add(_func_id_alt()),
+        lambda b: b.blocks.add(_block_id_alt()),
+        lambda b: setattr(b, "schema_version", "1.1"),
+        lambda b: setattr(b, "fingerprint_version", "2"),
+        lambda b: setattr(b, "python_tag", "cp399"),
+    ]
+    for mutate in payload_mutators:
+        probe = Baseline(baseline_path)
+        probe.load()
+        mutate(probe)
+        with pytest.raises(
+            BaselineValidationError, match="payload_sha256 mismatch"
+        ) as exc:
+            probe.verify_integrity()
+        assert exc.value.status == "integrity_failed"
+
+    non_payload_mutators: list[Callable[[Baseline], None]] = [
+        lambda b: setattr(b, "created_at", "2030-01-01T00:00:00Z"),
+        lambda b: setattr(b, "generator_version", "9.9.9"),
+    ]
+    for mutate in non_payload_mutators:
+        probe = Baseline(baseline_path)
+        probe.load()
+        mutate(probe)
+        probe.verify_integrity()
+
+
 def test_baseline_hash_canonical_determinism() -> None:
     hash_a = baseline_mod._compute_payload_sha256(
         functions={"a" * 40 + "|0-19", "b" * 40 + "|0-19"},
@@ -421,6 +526,90 @@ def test_baseline_hash_canonical_determinism() -> None:
         python_tag="cp313",
     )
     assert hash_a == hash_b
+
+
+def test_baseline_payload_sha256_independent_of_created_at_and_generator_version() -> (
+    None
+):
+    payload_a = _trusted_payload(
+        created_at="2026-02-08T11:43:16Z",
+        generator_version="1.4.0",
+    )
+    payload_b = _trusted_payload(
+        created_at="2030-01-01T00:00:00Z",
+        generator_version="9.9.9",
+    )
+    meta_a = payload_a["meta"]
+    meta_b = payload_b["meta"]
+    assert isinstance(meta_a, dict)
+    assert isinstance(meta_b, dict)
+    assert meta_a["payload_sha256"] == meta_b["payload_sha256"]
+
+
+def test_baseline_verify_integrity_ignores_created_at_and_generator_version(
+    tmp_path: Path,
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    _write_payload(baseline_path, _trusted_payload())
+    baseline = Baseline(baseline_path)
+    baseline.load()
+    baseline.created_at = "2030-12-31T23:59:59Z"
+    baseline.generator_version = "9.9.9"
+    baseline.verify_integrity()
+
+
+def test_baseline_load_whitespace_and_key_order_do_not_break_integrity(
+    tmp_path: Path,
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    payload = _trusted_payload()
+    meta = payload["meta"]
+    clones = payload["clones"]
+    assert isinstance(meta, dict)
+    assert isinstance(clones, dict)
+
+    custom_order_payload = {
+        "clones": {
+            "blocks": clones["blocks"],
+            "functions": clones["functions"],
+        },
+        "meta": {
+            "payload_sha256": meta["payload_sha256"],
+            "created_at": meta["created_at"],
+            "python_tag": meta["python_tag"],
+            "fingerprint_version": meta["fingerprint_version"],
+            "schema_version": meta["schema_version"],
+            "generator": meta["generator"],
+        },
+    }
+    baseline_path.write_text(
+        json.dumps(custom_order_payload, ensure_ascii=False, indent=4) + "\n\n",
+        "utf-8",
+    )
+
+    baseline = Baseline(baseline_path)
+    baseline.load()
+    baseline.verify_compatibility(current_python_tag=_python_tag())
+    assert baseline.functions == {_func_id()}
+    assert baseline.blocks == {_block_id()}
+
+
+def test_baseline_save_sorts_clone_lists_deterministically(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    func_a = f"{'a' * 40}|0-19"
+    func_b = f"{'b' * 40}|0-19"
+    block_a = "|".join(["a" * 40, "b" * 40, "c" * 40, "d" * 40])
+    block_b = "|".join(["b" * 40, "c" * 40, "d" * 40, "e" * 40])
+    baseline = Baseline(baseline_path)
+    baseline.functions = {func_b, func_a}
+    baseline.blocks = {block_b, block_a}
+    baseline.save()
+
+    payload = json.loads(baseline_path.read_text("utf-8"))
+    clones = payload["clones"]
+    assert isinstance(clones, dict)
+    assert clones["functions"] == [func_a, func_b]
+    assert clones["blocks"] == [block_a, block_b]
 
 
 def test_baseline_from_groups_defaults() -> None:
