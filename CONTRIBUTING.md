@@ -95,10 +95,12 @@ Such changes often require design-level discussion and may be staged across vers
 ## Baseline & CI
 
 - Baselines are **versioned**. Regenerate with `codeclone . --update-baseline`
-  when detection logic or CodeClone version changes.
-- Baselines in 1.3+ are tamper-evident (`generator`, `payload_sha256`).
-- Baseline verification must use the same Python `major.minor` version.
-- In `--fail-on-new` / `--ci`, untrusted baseline states fail fast. Outside gating
+  when `fingerprint_version` changes.
+- Baseline regeneration is not required for UI/report/CLI/cache/performance-only changes
+  if `fingerprint_version` is unchanged.
+- Baseline v1 is tamper-evident (`meta.generator`, `meta.payload_sha256`).
+- Baseline verification is pinned to `python_tag` (for example `cp313`).
+- In `--ci` (or explicit `--fail-on-new`), untrusted baseline states fail fast. Outside gating
   mode, baseline is ignored with warning and comparison proceeds against an empty baseline.
 
 ---

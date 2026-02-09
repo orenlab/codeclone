@@ -172,10 +172,20 @@ Baseline validation order is deterministic:
 
 Baseline loading is strict: schema/type violations, integrity failures, generator mismatch,
 or oversized files are treated as untrusted input.
-In `--fail-on-new` / `--ci`, untrusted baseline states fail fast.
+In `--ci` (or explicit `--fail-on-new`), untrusted baseline states fail fast.
 Outside gating mode, untrusted baseline is ignored with warning and comparison proceeds
 against an empty baseline.
 Baseline size guard is configurable via `--max-baseline-size-mb`.
+
+CLI exit code contract:
+
+- `0` success
+- `2` contract error (invalid arguments/output options or untrusted baseline in gating mode)
+- `3` gating failure (`--ci` new clones, or `--fail-threshold` exceeded)
+- `5` unexpected internal error (reserved)
+
+`5` is reserved only for unexpected internal exception paths (tool bug), not for
+baseline/options contract violations.
 
 ## Python Tag Consistency for Baseline Checks
 

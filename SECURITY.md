@@ -48,7 +48,7 @@ Additional safeguards:
 - Baseline hash excludes non-semantic metadata (`created_at`, `generator.version`) and
   covers canonical payload (`functions`, `blocks`, `python_tag`,
   `fingerprint_version`, `schema_version`).
-- In `--fail-on-new` / `--ci`, untrusted baseline states fail fast; otherwise baseline is ignored
+- In `--ci` (or explicit `--fail-on-new`), untrusted baseline states fail fast; otherwise baseline is ignored
   with explicit warning and comparison proceeds against an empty baseline.
 - Cache files are HMAC-signed (constant-time comparison), size-limited, and ignored on mismatch.
 - Cache secrets are stored next to the cache (`.cache_secret`) and must not be committed.

@@ -38,6 +38,11 @@ clone-detection algorithms.
 - Trusted/untrusted baseline behavior is deterministic:
   normal mode ignores untrusted baseline with warning and compares against empty baseline;
   gating mode (`--fail-on-new`/`--ci`) fails fast with exit code `2`.
+- Exit-code contract is now explicit and stable:
+  `0` success, `2` contract error, `3` gating failure (`--fail-on-new`/`--fail-threshold`).
+- CLI help now includes a canonical `Exit codes` section plus `Repository`/`Issues`/`Docs` links.
+- Error-path output now uses stable category markers:
+  `CONTRACT ERROR`, `GATING FAILURE`, `INTERNAL ERROR`.
 - Report metadata (HTML/TXT/JSON) now exposes baseline audit fields:
   `baseline_fingerprint_version`,
   `baseline_schema_version`, `baseline_python_tag`,

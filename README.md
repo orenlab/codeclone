@@ -201,6 +201,7 @@ Baseline compatibility is tied to `fingerprint_version` (not `codeclone_version`
 
 - patch/minor releases can reuse the same baseline,
 - regenerate baseline only when `fingerprint_version` changes,
+- do not regenerate baseline for UI/report/CLI/cache/performance-only changes when `fingerprint_version` is unchanged,
 - baseline file remains tamper-evident via `payload_sha256`.
 
 Baseline v1 contract schema:
@@ -213,6 +214,7 @@ Baseline v1 contract schema:
 
 Baseline states considered untrusted:
 
+- `missing`
 - `too_large`
 - `invalid_json`
 - `invalid_type`
@@ -227,7 +229,8 @@ Baseline states considered untrusted:
 Behavior:
 
 - in normal mode, untrusted baseline is ignored with a warning (comparison falls back to empty baseline);
-- in `--fail-on-new` / `--ci`, untrusted baseline fails fast (exit code 2).
+- in `--ci` (or explicit `--fail-on-new`), untrusted baseline fails fast (exit code 2).
+- in `--ci` with trusted baseline, clone gating (`new clones` / `--fail-threshold`) uses exit code 3.
 
 3. Use in CI
 
@@ -249,13 +252,18 @@ Behavior:
 - the build fails if new clones appear,
 - refactoring that removes duplication is always allowed.
 
-`--fail-on-new` / `--ci` exits with a non-zero code when new clones are detected.
+`--ci` exits with a non-zero code when new clones are detected
+(same behavior is available via explicit `--fail-on-new`).
 
 Exit codes:
 
 - `0` success
-- `2` invalid arguments or untrusted baseline in gating mode
-- `3` gating failure (`--fail-on-new` new clones or `--fail-threshold` exceeded)
+- `2` contract error (baseline missing/untrusted, invalid output extensions, incompatible versions)
+- `3` gating failure (new clones detected, threshold exceeded)
+- `5` internal error (unexpected exception; please report)
+
+`5` is only for unexpected internal failures (bug/exception path), not for invalid
+baseline/options/contracts.
 
 ---
 
@@ -367,9 +375,9 @@ See full design and semantics:
 | `--baseline FILE`             | Baseline file path                                                   | `codeclone.baseline.json`            |
 | `--max-baseline-size-mb MB`   | Max baseline size; untrusted baseline fails in CI, ignored otherwise | `5`                                  |
 | `--update-baseline`           | Regenerate baseline from current results                             | `False`                              |
-| `--fail-on-new`               | Fail if new function/block clone groups appear vs baseline           | `False`                              |
+| `--fail-on-new`               | Low-level gating flag (prefer `--ci` preset in CI docs/workflows)    | `False`                              |
 | `--fail-threshold MAX_CLONES` | Fail if total clone groups (`function + block`) exceed threshold     | `-1` (disabled)                      |
-| `--ci`                        | CI preset: `--fail-on-new --no-color --quiet`                        | `False`                              |
+| `--ci`                        | Recommended CI preset: `--fail-on-new --no-color --quiet`            | `False`                              |
 | `--html FILE`                 | Write HTML report (`.html`)                                          | -                                    |
 | `--json FILE`                 | Write JSON report (`.json`)                                          | -                                    |
 | `--text FILE`                 | Write text report (`.txt`)                                           | -                                    |
