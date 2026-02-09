@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
 
 from .baseline import Baseline
 
@@ -35,7 +34,7 @@ def _build_report_meta(
     baseline_status: str,
     cache_path: Path,
     cache_used: bool,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     return {
         "codeclone_version": codeclone_version,
         "python_version": _current_python_version(),

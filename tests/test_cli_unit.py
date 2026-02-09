@@ -10,8 +10,10 @@ import codeclone._cli_summary as cli_summary
 import codeclone.cli as cli
 from codeclone import __version__
 from codeclone import ui_messages as ui
+from codeclone._cli_args import build_parser
 from codeclone._cli_paths import expand_path
 from codeclone.cli import process_file
+from codeclone.contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
 from codeclone.normalize import NormalizationConfig
 
 
@@ -118,6 +120,46 @@ def test_cli_help_text_consistency(
     assert "CI preset: --fail-on-new --no-color --quiet." in out
     assert "total clone groups (function +" in out
     assert "block) exceed this number" in out
+    assert "Exit codes" in out
+    assert "0 - success" in out
+    assert "2 - contract error" in out
+    assert "baseline missing/untrusted" in out
+    assert "invalid output extensions" in out
+    assert "3 - gating failure" in out
+    assert "new clones detected" in out
+    assert "threshold exceeded" in out
+    assert "5 - internal error" in out
+    assert "please report" in out
+    assert f"Repository: {REPOSITORY_URL}" in out
+    assert f"Issues: {ISSUES_URL}" in out
+    assert f"Docs: {DOCS_URL}" in out
+    assert "\x1b[" not in out
+
+
+def test_cli_internal_error_marker(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def _boom() -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "_main_impl", _boom)
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 5
+    out = capsys.readouterr().out
+    assert "INTERNAL ERROR:" in out
+    assert "Please report:" in out
+
+
+def test_argument_parser_contract_error_marker_for_invalid_args(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = build_parser(__version__)
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["--unknown-flag"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "CONTRACT ERROR:" in err
 
 
 def test_summary_value_style_mapping() -> None:

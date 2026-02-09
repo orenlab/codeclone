@@ -9,12 +9,25 @@ Licensed under the MIT License.
 from __future__ import annotations
 
 import argparse
-from typing import cast
+import sys
+from typing import NoReturn, cast
 
 from . import ui_messages as ui
+from .contracts import ExitCode, cli_help_epilog
 
 
-class _HelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
+class _ArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        self.exit(
+            int(ExitCode.CONTRACT_ERROR),
+            f"CONTRACT ERROR: {message}\n",
+        )
+
+
+class _HelpFormatter(
+    argparse.RawTextHelpFormatter, argparse.ArgumentDefaultsHelpFormatter
+):
     def _get_help_string(self, action: argparse.Action) -> str:
         if action.dest == "cache_path":
             return action.help or ""
@@ -22,10 +35,11 @@ class _HelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
 
 
 def build_parser(version: str) -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(
+    ap = _ArgumentParser(
         prog="codeclone",
         description="AST and CFG-based code clone detector for Python.",
         formatter_class=_HelpFormatter,
+        epilog=cli_help_epilog(),
     )
     ap.add_argument(
         "--version",

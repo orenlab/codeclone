@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .contracts import ISSUES_URL
+
 BANNER_SUBTITLE = "[italic]Architectural duplication detector[/italic]"
+
+MARKER_CONTRACT_ERROR = "[error]CONTRACT ERROR:[/error]"
+MARKER_GATING_FAILURE = "[error]GATING FAILURE:[/error]"
+MARKER_INTERNAL_ERROR = "[error]INTERNAL ERROR:[/error]"
 
 HELP_VERSION = "Print the CodeClone version and exit."
 HELP_ROOT = "Project root directory to scan."
@@ -116,9 +122,7 @@ FAIL_NEW_ACCEPT_COMMAND = "  codeclone . --update-baseline"
 FAIL_NEW_DETAIL_FUNCTION = "Details (function clone hashes):"
 FAIL_NEW_DETAIL_BLOCK = "Details (block clone hashes):"
 
-ERR_FAIL_THRESHOLD = (
-    "\n[error]❌ FAILED: Total clones ({total}) exceed threshold ({threshold})![/error]"
-)
+ERR_FAIL_THRESHOLD = "Total clones ({total}) exceed threshold ({threshold})."
 WARN_NEW_CLONES_WITHOUT_FAIL = (
     "\n[warning]New clones detected but --fail-on-new not set.[/warning]\n"
     "Run with --update-baseline to accept them as technical debt."
@@ -214,3 +218,19 @@ def fmt_summary_compact_clones(
 
 def fmt_fail_threshold(*, total: int, threshold: int) -> str:
     return ERR_FAIL_THRESHOLD.format(total=total, threshold=threshold)
+
+
+def fmt_contract_error(message: str) -> str:
+    return f"{MARKER_CONTRACT_ERROR}\n{message}"
+
+
+def fmt_gating_failure(message: str) -> str:
+    return f"{MARKER_GATING_FAILURE}\n{message}"
+
+
+def fmt_internal_error(error: object, *, issues_url: str = ISSUES_URL) -> str:
+    return (
+        f"{MARKER_INTERNAL_ERROR}\n"
+        f"Unexpected exception: {error}\n"
+        f"Please report: {issues_url}"
+    )

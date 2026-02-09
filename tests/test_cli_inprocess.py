@@ -720,7 +720,7 @@ def test_cli_invalid_root_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "resolve", _boom)
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, ["bad"])
-    assert exc.value.code == 1
+    assert exc.value.code == 2
 
 
 def test_cli_main_outputs(
@@ -1723,6 +1723,32 @@ def test_cli_baseline_missing_warning(
     assert "Run: codeclone . --update-baseline" in out
 
 
+def test_cli_baseline_missing_fails_in_ci(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline = tmp_path / "missing.json"
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline),
+                "--ci",
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "Baseline file not found" in out
+    assert "CI requires a trusted baseline" in out
+
+
 def test_cli_new_clones_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1973,6 +1999,7 @@ def test_cli_baseline_python_version_mismatch_fails(
         )
     assert exc.value.code == 2
     out = capsys.readouterr().out
+    assert "CONTRACT ERROR:" in out
     assert "python tag mismatch" in out
 
 
@@ -1981,7 +2008,7 @@ def test_cli_negative_size_limits_fail_fast(
 ) -> None:
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, ["--max-baseline-size-mb", "-1"])
-    assert exc.value.code == 1
+    assert exc.value.code == 2
     out = capsys.readouterr().out
     assert "non-negative integers" in out
 
@@ -2131,6 +2158,7 @@ def f2():
         )
     assert exc.value.code == 3
     out = capsys.readouterr().out
+    assert "GATING FAILURE:" in out
     _assert_fail_on_new_summary(out, include_blocks=False)
     assert "CodeClone v" not in out
 
@@ -2233,7 +2261,7 @@ def test_cli_cache_save_warning_quiet(
 def test_cli_invalid_root(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, ["/path/does/not/exist"])
-    assert exc.value.code == 1
+    assert exc.value.code == 2
 
 
 def test_cli_discovery_cache_hit(
@@ -2438,7 +2466,7 @@ def test_cli_scan_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(cli, "iter_py_files", _boom)
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, [str(tmp_path)])
-    assert exc.value.code == 1
+    assert exc.value.code == 2
 
 
 def test_cli_failed_files_report(

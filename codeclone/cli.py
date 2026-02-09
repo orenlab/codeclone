@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, cast
 
 from rich.console import Console
 from rich.panel import Panel
@@ -24,6 +24,7 @@ from ._cli_args import build_parser
 from ._cli_meta import _build_report_meta, _current_python_tag
 from ._cli_paths import _validate_output_path
 from ._cli_summary import _print_summary
+from ._report_types import GroupItem
 from .baseline import (
     BASELINE_UNTRUSTED_STATUSES,
     Baseline,
@@ -34,6 +35,7 @@ from .cache import Cache, CacheEntry, FileStat, file_stat_signature
 from .contracts import (
     BASELINE_FINGERPRINT_VERSION,
     BASELINE_SCHEMA_VERSION,
+    ISSUES_URL,
     ExitCode,
 )
 from .errors import BaselineValidationError, CacheError
@@ -51,6 +53,10 @@ from .report import (
     to_text_report,
 )
 from .scanner import iter_py_files, module_name_from_path
+
+if TYPE_CHECKING:
+    from .blocks import BlockUnit, SegmentUnit
+    from .extractor import Unit
 
 # Custom theme for Rich
 custom_theme = Theme(
@@ -84,9 +90,9 @@ class ProcessingResult:
     filepath: str
     success: bool
     error: str | None = None
-    units: list[Any] | None = None
-    blocks: list[Any] | None = None
-    segments: list[Any] | None = None
+    units: list[Unit] | None = None
+    blocks: list[BlockUnit] | None = None
+    segments: list[SegmentUnit] | None = None
     stat: FileStat | None = None
 
 
@@ -173,7 +179,7 @@ def print_banner() -> None:
     )
 
 
-def main() -> None:
+def _main_impl() -> None:
     ap = build_parser(__version__)
 
     cache_path_from_args = any(
@@ -195,8 +201,10 @@ def main() -> None:
     console = _make_console(no_color=args.no_color)
 
     if args.max_baseline_size_mb < 0 or args.max_cache_size_mb < 0:
-        console.print("[error]Size limits must be non-negative integers (MB).[/error]")
-        sys.exit(ExitCode.CLI_ERROR)
+        console.print(
+            ui.fmt_contract_error("Size limits must be non-negative integers (MB).")
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
 
     if not args.quiet:
         print_banner()
@@ -204,11 +212,13 @@ def main() -> None:
     try:
         root_path = Path(args.root).resolve()
         if not root_path.exists():
-            console.print(ui.ERR_ROOT_NOT_FOUND.format(path=root_path))
-            sys.exit(ExitCode.CLI_ERROR)
+            console.print(
+                ui.fmt_contract_error(ui.ERR_ROOT_NOT_FOUND.format(path=root_path))
+            )
+            sys.exit(ExitCode.CONTRACT_ERROR)
     except Exception as e:
-        console.print(ui.ERR_INVALID_ROOT_PATH.format(error=e))
-        sys.exit(ExitCode.CLI_ERROR)
+        console.print(ui.fmt_contract_error(ui.ERR_INVALID_ROOT_PATH.format(error=e)))
+        sys.exit(ExitCode.CONTRACT_ERROR)
 
     if not args.quiet:
         console.print(ui.fmt_scanning_root(root_path))
@@ -263,9 +273,9 @@ def main() -> None:
     if cache.load_warning:
         console.print(f"[warning]{cache.load_warning}[/warning]")
 
-    all_units: list[dict[str, Any]] = []
-    all_blocks: list[dict[str, Any]] = []
-    all_segments: list[dict[str, Any]] = []
+    all_units: list[GroupItem] = []
+    all_blocks: list[GroupItem] = []
+    all_segments: list[GroupItem] = []
     files_found = 0
     files_analyzed = 0
     cache_hits = 0
@@ -295,7 +305,9 @@ def main() -> None:
             console.print(ui.fmt_worker_failed(e))
             return None
 
-    def _safe_future_result(future: Any) -> tuple[ProcessingResult | None, str | None]:
+    def _safe_future_result(
+        future: Future[ProcessingResult],
+    ) -> tuple[ProcessingResult | None, str | None]:
         try:
             return future.result(), None
         except Exception as e:
@@ -315,19 +327,19 @@ def main() -> None:
                     cache_hits += 1
                     all_units.extend(
                         cast(
-                            list[dict[str, Any]],
+                            list[GroupItem],
                             cast(object, cached.get("units", [])),
                         )
                     )
                     all_blocks.extend(
                         cast(
-                            list[dict[str, Any]],
+                            list[GroupItem],
                             cast(object, cached.get("blocks", [])),
                         )
                     )
                     all_segments.extend(
                         cast(
-                            list[dict[str, Any]],
+                            list[GroupItem],
                             cast(object, cached.get("segments", [])),
                         )
                     )
@@ -346,27 +358,27 @@ def main() -> None:
                         cache_hits += 1
                         all_units.extend(
                             cast(
-                                list[dict[str, Any]],
+                                list[GroupItem],
                                 cast(object, cached.get("units", [])),
                             )
                         )
                         all_blocks.extend(
                             cast(
-                                list[dict[str, Any]],
+                                list[GroupItem],
                                 cast(object, cached.get("blocks", [])),
                             )
                         )
                         all_segments.extend(
                             cast(
-                                list[dict[str, Any]],
+                                list[GroupItem],
                                 cast(object, cached.get("segments", [])),
                             )
                         )
                     else:
                         files_to_process.append(fp)
     except Exception as e:
-        console.print(ui.ERR_SCAN_FAILED.format(error=e))
-        sys.exit(ExitCode.CLI_ERROR)
+        console.print(ui.fmt_contract_error(ui.ERR_SCAN_FAILED.format(error=e)))
+        sys.exit(ExitCode.CONTRACT_ERROR)
 
     total_files = len(files_to_process)
     failed_files = []
@@ -603,6 +615,8 @@ def main() -> None:
     if baseline_status in BASELINE_UNTRUSTED_STATUSES:
         baseline_loaded = False
         baseline_trusted_for_diff = False
+        if args.fail_on_new and not args.update_baseline:
+            baseline_failure_code = ExitCode.CONTRACT_ERROR
 
     if args.update_baseline:
         new_baseline = Baseline.from_groups(
@@ -715,7 +729,7 @@ def main() -> None:
         _print_output_notice(ui.fmt_path(ui.INFO_TEXT_REPORT_SAVED, out))
 
     if baseline_failure_code is not None:
-        console.print(ui.ERR_BASELINE_GATING_REQUIRES_TRUSTED)
+        console.print(ui.fmt_contract_error(ui.ERR_BASELINE_GATING_REQUIRES_TRUSTED))
         sys.exit(baseline_failure_code)
 
     # Exit Codes
@@ -724,6 +738,7 @@ def main() -> None:
         if html_report_path is None and default_report.exists():
             html_report_path = str(default_report)
 
+        console.print(ui.fmt_gating_failure("New code clones detected."))
         console.print(f"\n{ui.FAIL_NEW_TITLE}")
         console.print(f"\n{ui.FAIL_NEW_SUMMARY_TITLE}")
         console.print(ui.FAIL_NEW_FUNCTION.format(count=len(new_func)))
@@ -747,11 +762,25 @@ def main() -> None:
 
     if 0 <= args.fail_threshold < (func_clones_count + block_clones_count):
         total = func_clones_count + block_clones_count
-        console.print(ui.fmt_fail_threshold(total=total, threshold=args.fail_threshold))
+        console.print(
+            ui.fmt_gating_failure(
+                ui.fmt_fail_threshold(total=total, threshold=args.fail_threshold)
+            )
+        )
         sys.exit(ExitCode.GATING_FAILURE)
 
     if not args.update_baseline and not args.fail_on_new and new_clones_count > 0:
         console.print(ui.WARN_NEW_CLONES_WITHOUT_FAIL)
+
+
+def main() -> None:
+    try:
+        _main_impl()
+    except SystemExit:
+        raise
+    except Exception as e:
+        console.print(ui.fmt_internal_error(e, issues_url=ISSUES_URL))
+        sys.exit(ExitCode.INTERNAL_ERROR)
 
 
 if __name__ == "__main__":
