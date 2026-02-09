@@ -8,7 +8,7 @@ Licensed under the MIT License.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
 
 from . import __version__
 from ._html_escape import _escape_attr, _escape_html, _meta_display
@@ -20,6 +20,8 @@ from ._html_snippets import (
     _try_pygments,
     pairwise,
 )
+from ._report_explain_contract import format_group_instance_compare_meta
+from ._report_types import GroupItem, GroupMap
 from .templates import FONT_CSS_URL, REPORT_TEMPLATE
 
 __all__ = [
@@ -37,17 +39,17 @@ __all__ = [
 # ============================
 
 
-def _group_sort_key(items: list[dict[str, Any]]) -> tuple[int]:
+def _group_sort_key(items: list[GroupItem]) -> tuple[int]:
     return (-len(items),)
 
 
 def build_html_report(
     *,
-    func_groups: dict[str, list[dict[str, Any]]],
-    block_groups: dict[str, list[dict[str, Any]]],
-    segment_groups: dict[str, list[dict[str, Any]]],
+    func_groups: GroupMap,
+    block_groups: GroupMap,
+    segment_groups: GroupMap,
     block_group_facts: dict[str, dict[str, str]],
-    report_meta: dict[str, Any] | None = None,
+    report_meta: Mapping[str, object] | None = None,
     title: str = "CodeClone Report",
     context_lines: int = 3,
     max_snippet_lines: int = 220,
@@ -55,7 +57,7 @@ def build_html_report(
     file_cache = _FileCache()
     resolved_block_group_facts = block_group_facts
 
-    def _path_basename(value: Any) -> str | None:
+    def _path_basename(value: object) -> str | None:
         if not isinstance(value, str):
             return None
         text = value.strip()
@@ -152,16 +154,6 @@ def build_html_report(
     # Section renderer
     # ----------------------------
 
-    def _group_basis_label(section_id: str) -> str:
-        basis_labels = {
-            "functions": "strict match: CFG fingerprint + LOC bucket",
-            "blocks": (
-                "strict match: normalized 4-statement block signature (merged ranges)"
-            ),
-            "segments": "strict match: segment hash inside one function",
-        }
-        return basis_labels[section_id]
-
     def _display_group_key(
         section_id: str, group_key: str, block_meta: dict[str, str] | None = None
     ) -> str:
@@ -182,7 +174,7 @@ def build_html_report(
         raw = resolved_block_group_facts.get(group_key, {})
         return {str(k): str(v) for k, v in raw.items() if v is not None}
 
-    def _render_group_explanation(meta: dict[str, Any]) -> str:
+    def _render_group_explanation(meta: Mapping[str, object]) -> str:
         if not meta:
             return ""
 
@@ -203,23 +195,27 @@ def build_html_report(
             explain_items.append(
                 (f"merged_regions: {meta['merged_regions']}", "group-explain-item")
             )
-        if meta.get("pattern") == "repeated_stmt_hash":
+        pattern_value = str(meta.get("pattern", "")).strip()
+        if pattern_value:
+            pattern_label = str(meta.get("pattern_label", pattern_value)).strip()
             pattern_display = str(meta.get("pattern_display", "")).strip()
             if pattern_display:
                 explain_items.append(
                     (
-                        f"pattern: repeated_stmt_hash ({pattern_display})",
+                        f"pattern: {pattern_label} ({pattern_display})",
                         "group-explain-item",
                     )
                 )
             else:
                 explain_items.append(
-                    ("pattern: repeated_stmt_hash", "group-explain-item")
+                    (f"pattern: {pattern_label}", "group-explain-item")
                 )
 
-        if meta.get("hint") == "assert_only":
+        hint_id = str(meta.get("hint", "")).strip()
+        if hint_id:
+            hint_label = str(meta.get("hint_label", hint_id)).strip()
             explain_items.append(
-                ("hint: assert-only block", "group-explain-item group-explain-warn")
+                (f"hint: {hint_label}", "group-explain-item group-explain-warn")
             )
             if meta.get("hint_confidence"):
                 explain_items.append(
@@ -242,10 +238,11 @@ def build_html_report(
                         "group-explain-item group-explain-muted",
                     )
                 )
-            if meta.get("hint_context") == "likely_test_boilerplate":
+            hint_context_label = str(meta.get("hint_context_label", "")).strip()
+            if hint_context_label:
                 explain_items.append(
                     (
-                        "likely test boilerplate / repeated asserts",
+                        hint_context_label,
                         "group-explain-item group-explain-muted",
                     )
                 )
@@ -256,7 +253,10 @@ def build_html_report(
             "data-signature-kind": str(meta.get("signature_kind", "")),
             "data-merged-regions": str(meta.get("merged_regions", "")),
             "data-pattern": str(meta.get("pattern", "")),
+            "data-pattern-label": str(meta.get("pattern_label", "")),
             "data-hint": str(meta.get("hint", "")),
+            "data-hint-label": str(meta.get("hint_label", "")),
+            "data-hint-context-label": str(meta.get("hint_context_label", "")),
             "data-hint-confidence": str(meta.get("hint_confidence", "")),
             "data-assert-ratio": str(meta.get("assert_ratio", "")),
             "data-consecutive-asserts": str(meta.get("consecutive_asserts", "")),
@@ -277,7 +277,7 @@ def build_html_report(
     def render_section(
         section_id: str,
         section_title: str,
-        groups: list[tuple[str, list[dict[str, Any]]]],
+        groups: list[tuple[str, list[GroupItem]]],
         pill_cls: str,
     ) -> str:
         if not groups:
@@ -295,12 +295,12 @@ def build_html_report(
                 return _block_group_name(display_key, meta)
             return display_key
 
-        def _item_span_size(item: dict[str, Any]) -> int:
+        def _item_span_size(item: GroupItem) -> int:
             start_line = int(item.get("start_line", 0))
             end_line = int(item.get("end_line", 0))
             return max(0, end_line - start_line + 1)
 
-        def _group_span_size(items: list[dict[str, Any]]) -> int:
+        def _group_span_size(items: list[GroupItem]) -> int:
             return max((_item_span_size(item) for item in items), default=0)
 
         out: list[str] = [
@@ -397,7 +397,10 @@ def build_html_report(
                     "data-signature-kind": block_meta.get("signature_kind"),
                     "data-merged-regions": block_meta.get("merged_regions"),
                     "data-pattern": block_meta.get("pattern"),
+                    "data-pattern-label": block_meta.get("pattern_label"),
                     "data-hint": block_meta.get("hint"),
+                    "data-hint-label": block_meta.get("hint_label"),
+                    "data-hint-context-label": block_meta.get("hint_context_label"),
                     "data-hint-confidence": block_meta.get("hint_confidence"),
                     "data-assert-ratio": block_meta.get("assert_ratio"),
                     "data-consecutive-asserts": block_meta.get("consecutive_asserts"),
@@ -421,9 +424,8 @@ def build_html_report(
             if 'data-items-count="' not in block_group_attrs:
                 items_count_attr = _escape_attr(str(group_arity))
                 block_group_attrs += f' data-items-count="{items_count_attr}"'
-            if 'data-group-arity="' not in block_group_attrs:
-                arity_attr = _escape_attr(str(group_arity))
-                block_group_attrs += f' data-group-arity="{arity_attr}"'
+            arity_attr = _escape_attr(str(group_arity))
+            block_group_attrs += f' data-group-arity="{arity_attr}"'
 
             metrics_button = ""
             if section_id == "blocks":
@@ -463,8 +465,10 @@ def build_html_report(
                         "</div>"
                     )
 
-            if section_id == "blocks" and block_meta:
-                out.append(_render_group_explanation(block_meta))
+            if section_id == "blocks":
+                explanation_html = _render_group_explanation(block_meta)
+                if explanation_html:
+                    out.append(explanation_html)
 
             out.append(f'<div class="group-body items" id="group-body-{group_id}">')
             for item_index, item in enumerate(items, start=1):
@@ -488,9 +492,10 @@ def build_html_report(
                     peer_count = int(peer_count_raw)
                 compare_meta_html = ""
                 if section_id == "blocks" and "group_arity" in block_meta:
-                    compare_text = (
-                        f"instance {item_index}/{group_arity} "
-                        f"• matches {peer_count} peers"
+                    compare_text = format_group_instance_compare_meta(
+                        instance_index=item_index,
+                        group_arity=group_arity,
+                        peer_count=peer_count,
                     )
                     compare_meta_html = (
                         f'<div class="item-compare-meta">{compare_text}</div>'
@@ -550,7 +555,7 @@ def build_html_report(
 
     meta = dict(report_meta or {})
     baseline_path_value = meta.get("baseline_path")
-    meta_rows: list[tuple[str, Any]] = [
+    meta_rows: list[tuple[str, object]] = [
         ("CodeClone", meta.get("codeclone_version", __version__)),
         ("Python", meta.get("python_version")),
         ("Baseline file", _path_basename(baseline_path_value)),
@@ -604,7 +609,7 @@ def build_html_report(
             cls.append("meta-item-boolean")
         return " ".join(cls)
 
-    def _meta_value_html(label: str, value: Any) -> str:
+    def _meta_value_html(label: str, value: object) -> str:
         if label in {"Baseline loaded", "Cache used"} and isinstance(value, bool):
             badge_cls = "meta-bool-true" if value else "meta-bool-false"
             text = "true" if value else "false"

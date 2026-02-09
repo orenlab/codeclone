@@ -194,6 +194,7 @@ def test_build_block_group_facts_assert_only(tmp_path: Path) -> None:
     assert group["pattern"] == "repeated_stmt_hash"
     assert group["pattern_display"] == f"{repeated[:12]} x4"
     assert group["hint"] == "assert_only"
+    assert group["hint_label"] == "assert-only block"
     assert group["hint_confidence"] == "deterministic"
     assert group["assert_ratio"] == "100%"
     assert group["consecutive_asserts"] == "4"

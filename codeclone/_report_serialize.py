@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import Any
 
 from ._report_types import GroupItem, GroupMap
 
@@ -47,7 +46,7 @@ def to_json_report(
     func_groups: GroupMap,
     block_groups: GroupMap,
     segment_groups: GroupMap,
-    meta: Mapping[str, Any] | None = None,
+    meta: Mapping[str, object] | None = None,
 ) -> str:
     def _sorted_items(items: list[GroupItem]) -> list[GroupItem]:
         return sorted(
@@ -112,7 +111,7 @@ def to_text(groups: GroupMap) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def _format_meta_text_value(value: Any) -> str:
+def _format_meta_text_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if value is None:
@@ -123,7 +122,7 @@ def _format_meta_text_value(value: Any) -> str:
 
 def to_text_report(
     *,
-    meta: Mapping[str, Any],
+    meta: Mapping[str, object],
     func_groups: GroupMap,
     block_groups: GroupMap,
     segment_groups: GroupMap,

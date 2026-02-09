@@ -267,6 +267,115 @@ def test_html_report_uses_core_block_group_facts(tmp_path: Path) -> None:
     assert 'data-consecutive-asserts="1"' in html
 
 
+def test_html_report_uses_core_hint_and_pattern_labels(tmp_path: Path) -> None:
+    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
+    group_key = "|".join([repeated] * 4)
+    test_file = tmp_path / "test_repeated_asserts.py"
+    test_file.write_text(
+        "def f(html):\n"
+        "    assert 'a' in html\n"
+        "    assert 'b' in html\n"
+        "    assert 'c' in html\n"
+        "    assert 'd' in html\n",
+        "utf-8",
+    )
+    html = build_html_report(
+        func_groups={},
+        block_groups={
+            group_key: [
+                {
+                    "qualname": "pkg.mod:f",
+                    "filepath": str(test_file),
+                    "start_line": 2,
+                    "end_line": 5,
+                }
+            ]
+        },
+        segment_groups={},
+        block_group_facts={
+            group_key: {
+                "pattern": "internal_pattern_id",
+                "pattern_label": "readable pattern",
+                "hint": "internal_hint_id",
+                "hint_label": "readable hint",
+            }
+        },
+    )
+    assert "pattern: readable pattern" in html
+    assert "hint: readable hint" in html
+    assert 'data-pattern-label="readable pattern"' in html
+    assert 'data-hint-label="readable hint"' in html
+
+
+def test_html_report_uses_core_hint_context_label(tmp_path: Path) -> None:
+    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
+    group_key = "|".join([repeated] * 4)
+    test_file = tmp_path / "test_repeated_asserts.py"
+    test_file.write_text(
+        "def f(html):\n"
+        "    assert 'a' in html\n"
+        "    assert 'b' in html\n"
+        "    assert 'c' in html\n"
+        "    assert 'd' in html\n",
+        "utf-8",
+    )
+    html = build_html_report(
+        func_groups={},
+        block_groups={
+            group_key: [
+                {
+                    "qualname": "pkg.mod:f",
+                    "filepath": str(test_file),
+                    "start_line": 2,
+                    "end_line": 5,
+                }
+            ]
+        },
+        segment_groups={},
+        block_group_facts={
+            group_key: {
+                "hint": "assert_only",
+                "hint_context_label": "Likely test boilerplate / repeated asserts",
+            }
+        },
+    )
+    assert "Likely test boilerplate / repeated asserts" in html
+    assert (
+        'data-hint-context-label="Likely test boilerplate / repeated asserts"' in html
+    )
+
+
+def test_html_report_blocks_without_explanation_meta(tmp_path: Path) -> None:
+    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
+    group_key = "|".join([repeated] * 4)
+    test_file = tmp_path / "test_repeated_asserts.py"
+    test_file.write_text(
+        "def f(html):\n"
+        "    assert 'a' in html\n"
+        "    assert 'b' in html\n"
+        "    assert 'c' in html\n"
+        "    assert 'd' in html\n",
+        "utf-8",
+    )
+    html = build_html_report(
+        func_groups={},
+        block_groups={
+            group_key: [
+                {
+                    "qualname": "pkg.mod:f",
+                    "filepath": str(test_file),
+                    "start_line": 2,
+                    "end_line": 5,
+                }
+            ]
+        },
+        segment_groups={},
+        block_group_facts={},
+    )
+    assert '<div class="group-explain"' not in html
+    assert 'data-group-arity="1"' in html
+
+
 def test_html_report_respects_sparse_core_block_facts(tmp_path: Path) -> None:
     repeated = "0e8579f84e518d186950d012c9944a40cb872332"
     group_key = "|".join([repeated] * 4)
@@ -358,6 +467,54 @@ def test_html_report_explanation_without_match_rule(tmp_path: Path) -> None:
     )
     assert 'data-hint="assert_only"' in html
     assert "match_rule:" not in html
+
+
+def test_html_report_n_way_group_without_compare_note(tmp_path: Path) -> None:
+    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
+    group_key = "|".join([repeated] * 4)
+    test_file = tmp_path / "test_repeated_asserts.py"
+    test_file.write_text(
+        "def f(html):\n"
+        "    assert 'a' in html\n"
+        "    assert 'b' in html\n"
+        "    assert 'c' in html\n"
+        "    assert 'd' in html\n",
+        "utf-8",
+    )
+    html = build_html_report(
+        func_groups={},
+        block_groups={
+            group_key: [
+                {
+                    "qualname": "pkg.mod:f1",
+                    "filepath": str(test_file),
+                    "start_line": 2,
+                    "end_line": 5,
+                },
+                {
+                    "qualname": "pkg.mod:f2",
+                    "filepath": str(test_file),
+                    "start_line": 2,
+                    "end_line": 5,
+                },
+                {
+                    "qualname": "pkg.mod:f3",
+                    "filepath": str(test_file),
+                    "start_line": 2,
+                    "end_line": 5,
+                },
+            ]
+        },
+        segment_groups={},
+        block_group_facts={
+            group_key: {
+                "group_arity": "3",
+                "instance_peer_count": "2",
+            }
+        },
+    )
+    assert 'data-group-arity="3"' in html
+    assert '<div class="group-compare-note">' not in html
 
 
 def test_html_report_command_palette_full_actions_present() -> None:

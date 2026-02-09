@@ -1759,20 +1759,21 @@ ${pyg_light}
       html += '</div>';
     }
 
-    if (groupData.pattern) {
+    const patternDisplayValue = groupData.pattern_label || groupData.pattern;
+    if (patternDisplayValue) {
       html += '<div class="metric-item">';
       html += '<div class="metric-label">';
       html += '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>';
       html += 'Pattern';
       html += '</div>';
-      html += '<div class="metric-value metric-value-compact">' + escapeHtml(groupData.pattern) + '</div>';
+      html += '<div class="metric-value metric-value-compact">' + escapeHtml(patternDisplayValue) + '</div>';
       html += '</div>';
     }
 
     html += '</div></div>';
 
     // Секция: Качественные метрики
-    if (groupData.assert_ratio || groupData.hint_confidence || groupData.merged_regions) {
+    if (groupData.assert_ratio || groupData.hint_label || groupData.hint_confidence || groupData.merged_regions) {
       html += '<div class="metrics-section">';
       html += '<div class="metrics-section-title">Quality Metrics</div>';
       html += '<div class="metrics-grid">';
@@ -1787,6 +1788,16 @@ ${pyg_light}
         html += 'Assert Ratio';
         html += '</div>';
         html += '<div class="metric-badge ' + badgeClass + '">' + escapeHtml(ratioText) + '</div>';
+        html += '</div>';
+      }
+
+      if (groupData.hint_label) {
+        html += '<div class="metric-item">';
+        html += '<div class="metric-label">';
+        html += '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.09 9a3 3 0 115.82 1c0 2-3 3-3 3"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="10"/></svg>';
+        html += 'Hint';
+        html += '</div>';
+        html += '<div class="metric-badge warning">' + escapeHtml(groupData.hint_label) + '</div>';
         html += '</div>';
       }
 
@@ -2426,6 +2437,8 @@ ${pyg_light}
         matchRule: groupEl.getAttribute('data-match-rule'),
         signature_kind: groupEl.getAttribute('data-signature-kind'),
         pattern: groupEl.getAttribute('data-pattern'),
+        pattern_label: groupEl.getAttribute('data-pattern-label'),
+        hint_label: groupEl.getAttribute('data-hint-label'),
         assert_ratio: groupEl.getAttribute('data-assert-ratio'),
         hint_confidence: groupEl.getAttribute('data-hint-confidence'),
         merged_regions: groupEl.getAttribute('data-merged-regions'),

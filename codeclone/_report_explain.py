@@ -11,17 +11,20 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from ._report_explain_contract import (
+    BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN,
+    BLOCK_HINT_ASSERT_ONLY,
+    BLOCK_HINT_ASSERT_ONLY_LABEL,
+    BLOCK_HINT_ASSERT_ONLY_NOTE,
+    BLOCK_HINT_CONFIDENCE_DETERMINISTIC,
+    BLOCK_PATTERN_REPEATED_STMT_HASH,
+    format_n_way_group_compare_note,
+)
 from ._report_types import GroupItem, GroupMap
 
 
 def _signature_parts(group_key: str) -> list[str]:
     return [part for part in group_key.split("|") if part]
-
-
-def _looks_like_test_path(filepath: str) -> bool:
-    normalized = filepath.replace("\\", "/").lower()
-    filename = normalized.rsplit("/", maxsplit=1)[-1]
-    return "/tests/" in f"/{normalized}/" or filename.startswith("test_")
 
 
 def _parsed_file_tree(
@@ -143,7 +146,8 @@ def _base_block_facts(group_key: str) -> dict[str, str]:
         "merged_regions": "true",
     }
     if repeated_signature:
-        facts["pattern"] = "repeated_stmt_hash"
+        facts["pattern"] = BLOCK_PATTERN_REPEATED_STMT_HASH
+        facts["pattern_label"] = BLOCK_PATTERN_REPEATED_STMT_HASH
         facts["pattern_display"] = f"{signature_parts[0][:12]} x{window_size}"
     return facts
 
@@ -156,14 +160,12 @@ def _enrich_with_assert_facts(
     range_cache: dict[tuple[str, int, int], tuple[int, int, int]],
 ) -> None:
     assert_only = True
-    test_like_paths = True
     total_statements = 0
     assert_statements = 0
     max_consecutive_asserts = 0
 
     if not items:
         assert_only = False
-        test_like_paths = False
 
     for item in items:
         filepath = str(item.get("filepath", ""))
@@ -201,23 +203,16 @@ def _enrich_with_assert_facts(
         ):
             assert_only = False
 
-        if not filepath or not _looks_like_test_path(filepath):
-            test_like_paths = False
-
     if total_statements > 0:
         ratio = round((assert_statements / total_statements) * 100)
         facts["assert_ratio"] = f"{ratio}%"
         facts["consecutive_asserts"] = str(max_consecutive_asserts)
 
     if assert_only:
-        facts["hint"] = "assert_only"
-        facts["hint_confidence"] = "deterministic"
-        if facts.get("pattern") == "repeated_stmt_hash" and test_like_paths:
-            facts["hint_context"] = "likely_test_boilerplate"
-        facts["hint_note"] = (
-            "This block clone consists entirely of assert-only statements. "
-            "This often occurs in test suites."
-        )
+        facts["hint"] = BLOCK_HINT_ASSERT_ONLY
+        facts["hint_label"] = BLOCK_HINT_ASSERT_ONLY_LABEL
+        facts["hint_confidence"] = BLOCK_HINT_CONFIDENCE_DETERMINISTIC
+        facts["hint_note"] = BLOCK_HINT_ASSERT_ONLY_NOTE
 
 
 def build_block_group_facts(block_groups: GroupMap) -> dict[str, dict[str, str]]:
@@ -244,11 +239,11 @@ def build_block_group_facts(block_groups: GroupMap) -> dict[str, dict[str, str]]
         facts["group_arity"] = str(group_arity)
         facts["instance_peer_count"] = str(peer_count)
         if group_arity > 2:
-            facts["group_compare_note"] = (
-                f"N-way group: each block matches {peer_count} peers in this group."
+            facts["group_compare_note"] = format_n_way_group_compare_note(
+                peer_count=peer_count
             )
-        if facts.get("hint") == "assert_only":
-            facts["group_display_name"] = "assert pattern block"
+        if facts.get("hint") == BLOCK_HINT_ASSERT_ONLY:
+            facts["group_display_name"] = BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN
         facts_by_group[group_key] = facts
 
     return facts_by_group

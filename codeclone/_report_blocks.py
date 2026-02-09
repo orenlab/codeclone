@@ -13,6 +13,7 @@ from typing import Any
 from ._report_types import GroupItem, GroupMap
 
 
+# Any: values come from report item dictionaries populated from JSON-like data.
 def _coerce_positive_int(value: Any) -> int | None:
     try:
         integer = int(value)

@@ -14,12 +14,12 @@ import itertools
 from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, NamedTuple, cast
+from typing import NamedTuple, cast
 
 from .errors import FileProcessingError
 
 
-def pairwise(iterable: Iterable[Any]) -> Iterable[tuple[Any, Any]]:
+def pairwise(iterable: Iterable[object]) -> Iterable[tuple[object, object]]:
     a, b = itertools.tee(iterable)
     next(b, None)
     return zip(a, b, strict=False)
