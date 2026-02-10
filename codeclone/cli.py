@@ -29,8 +29,8 @@ from .baseline import (
     BASELINE_UNTRUSTED_STATUSES,
     Baseline,
     BaselineStatus,
-    _current_python_tag,
     coerce_baseline_status,
+    current_python_tag,
 )
 from .cache import Cache, CacheEntry, FileStat, file_stat_signature
 from .contracts import (
@@ -596,7 +596,7 @@ def _main_impl() -> None:
             if not args.update_baseline:
                 try:
                     baseline.verify_compatibility(
-                        current_python_tag=_current_python_tag()
+                        current_python_tag=current_python_tag()
                     )
                 except BaselineValidationError as e:
                     baseline_status = coerce_baseline_status(e.status)
@@ -624,7 +624,7 @@ def _main_impl() -> None:
             func_groups,
             block_groups,
             path=baseline_path,
-            python_tag=_current_python_tag(),
+            python_tag=current_python_tag(),
             fingerprint_version=BASELINE_FINGERPRINT_VERSION,
             schema_version=BASELINE_SCHEMA_VERSION,
             generator_version=__version__,

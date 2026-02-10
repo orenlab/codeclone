@@ -11,7 +11,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from .baseline import Baseline, _current_python_tag
+from .baseline import Baseline, current_python_tag
 
 
 def _current_python_version() -> str:
@@ -31,7 +31,7 @@ def _build_report_meta(
     return {
         "codeclone_version": codeclone_version,
         "python_version": _current_python_version(),
-        "python_tag": _current_python_tag(),
+        "python_tag": current_python_tag(),
         "baseline_path": str(baseline_path),
         "baseline_fingerprint_version": baseline.fingerprint_version,
         "baseline_schema_version": baseline.schema_version,

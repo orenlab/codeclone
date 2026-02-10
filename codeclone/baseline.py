@@ -335,7 +335,7 @@ class Baseline:
         baseline.fingerprint_version = (
             fingerprint_version or BASELINE_FINGERPRINT_VERSION
         )
-        baseline.python_tag = python_tag or _current_python_tag()
+        baseline.python_tag = python_tag or current_python_tag()
         baseline.generator_version = generator_version or __version__
         return baseline
 
@@ -488,7 +488,7 @@ def _baseline_payload(
     resolved_generator = generator or BASELINE_GENERATOR
     resolved_schema = schema_version or BASELINE_SCHEMA_VERSION
     resolved_fingerprint = fingerprint_version or BASELINE_FINGERPRINT_VERSION
-    resolved_python_tag = python_tag or _current_python_tag()
+    resolved_python_tag = python_tag or current_python_tag()
     resolved_generator_version = generator_version or __version__
     resolved_created_at = created_at or _utc_now_z()
 
@@ -545,7 +545,8 @@ def _compute_payload_sha256(
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _current_python_tag() -> str:
+def current_python_tag() -> str:
+    """Return the interpreter compatibility tag as an immutable string."""
     impl = sys.implementation.name
     major, minor = sys.version_info[:2]
     prefix = "cp" if impl == "cpython" else impl[:2]

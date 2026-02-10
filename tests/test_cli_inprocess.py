@@ -158,7 +158,7 @@ def _baseline_payload(
         meta_schema = (
             BASELINE_SCHEMA_VERSION if schema_version is None else schema_version
         )
-        default_tag = baseline._current_python_tag()
+        default_tag = baseline.current_python_tag()
         version_suffix = f"{sys.version_info.major}{sys.version_info.minor}"
         prefix = default_tag.removesuffix(version_suffix)
         version_tag: str | None = None

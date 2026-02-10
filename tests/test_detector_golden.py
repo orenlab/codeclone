@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from codeclone.baseline import _current_python_tag
+from codeclone.baseline import current_python_tag
 from codeclone.extractor import extract_units_from_source
 from codeclone.normalize import NormalizationConfig
 from codeclone.report import build_block_groups, build_groups
@@ -48,7 +48,7 @@ def test_detector_output_matches_golden_fixture() -> None:
 
     # Golden fixture is a detector snapshot for one canonical Python tag.
     # Cross-version behavior is covered by contract/invariant tests.
-    runtime_tag = _current_python_tag()
+    runtime_tag = current_python_tag()
     if runtime_tag != expected_python_tag:
         pytest.skip(
             "Golden detector fixture is canonicalized for "

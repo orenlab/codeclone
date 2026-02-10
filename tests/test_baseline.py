@@ -11,7 +11,7 @@ from codeclone.errors import BaselineValidationError
 
 
 def _python_tag() -> str:
-    return baseline_mod._current_python_tag()
+    return baseline_mod.current_python_tag()
 
 
 def _func_id() -> str:
