@@ -179,7 +179,6 @@ def _baseline_payload(
             hash_value = baseline._compute_payload_sha256(
                 functions=set(function_list),
                 blocks=set(block_list),
-                schema_version=meta_schema,
                 fingerprint_version=meta_fingerprint,
                 python_tag=meta_python_tag,
             )
@@ -1888,6 +1887,7 @@ def test_cli_baseline_schema_version_mismatch_fails(
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
         schema_version="1.1",
     )
+    json_out = tmp_path / "report.json"
     _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(
@@ -1896,6 +1896,8 @@ def test_cli_baseline_schema_version_mismatch_fails(
                 str(tmp_path),
                 "--baseline",
                 str(baseline_path),
+                "--json",
+                str(json_out),
                 "--ci",
                 "--no-progress",
             ],
@@ -1903,6 +1905,8 @@ def test_cli_baseline_schema_version_mismatch_fails(
     assert exc.value.code == 2
     out = capsys.readouterr().out
     assert "schema version is newer than supported" in out
+    payload = json.loads(json_out.read_text("utf-8"))
+    assert payload["meta"]["baseline_status"] == "mismatch_schema_version"
 
 
 def test_cli_baseline_schema_and_fingerprint_mismatch_status_prefers_schema(

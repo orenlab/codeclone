@@ -86,8 +86,12 @@ codeclone . --ci
 
 ### Baseline Contract (v1)
 
-Baseline compatibility is tied to `fingerprint_version` (not package patch/minor version).
-Regenerate baseline only when `fingerprint_version` changes.
+Baseline compatibility is validated via `schema_version`, `fingerprint_version`,
+`python_tag`, and `generator.name` (not package patch/minor version).
+Baseline regeneration is typically required when `fingerprint_version` or `python_tag` changes.
+`schema_version` and `generator.name` are compatibility gates, not integrity-hash inputs.
+`created_at` and `generator.version` are informational metadata and do not affect
+`payload_sha256`.
 
 Canonical structure:
 
@@ -181,15 +185,9 @@ and add `.cache/` to `.gitignore`.
 ## Exit Codes
 
 - `0` success
-- `2` contract error (baseline untrusted in gating, invalid output extension, incompatible versions)
+- `2` contract error (baseline missing/untrusted, invalid output extensions, incompatible versions)
 - `3` gating failure (new clones detected, threshold exceeded)
-- `5` internal error (unexpected exception)
-
-## Project Links
-
-- Repository: https://github.com/orenlab/codeclone
-- Issues: https://github.com/orenlab/codeclone/issues
-- Docs: https://github.com/orenlab/codeclone/tree/main/docs
+- `5` internal error (unexpected exception; please report)
 
 ## Pre-commit Example
 
@@ -237,29 +235,30 @@ See details:
 
 ## CLI Options
 
-| Option                        | Description                                                          | Default                              |
-|-------------------------------|----------------------------------------------------------------------|--------------------------------------|
-| `root`                        | Project root directory to scan                                       | `.`                                  |
-| `--version`                   | Print CodeClone version and exit                                     | -                                    |
-| `--min-loc`                   | Minimum function LOC to analyze                                      | `15`                                 |
-| `--min-stmt`                  | Minimum AST statements to analyze                                    | `6`                                  |
-| `--processes`                 | Number of worker processes                                           | `4`                                  |
-| `--cache-path FILE`           | Cache file path                                                      | `<root>/.cache/codeclone/cache.json` |
-| `--cache-dir FILE`            | Legacy alias for `--cache-path`                                      | -                                    |
-| `--max-cache-size-mb MB`      | Max cache size before ignore + warning                               | `50`                                 |
-| `--baseline FILE`             | Baseline file path                                                   | `codeclone.baseline.json`            |
-| `--max-baseline-size-mb MB`   | Max baseline size; untrusted baseline fails in CI, ignored otherwise | `5`                                  |
-| `--update-baseline`           | Regenerate baseline from current results                             | `False`                              |
-| `--fail-on-new`               | Low-level gating flag (prefer `--ci`)                                | `False`                              |
-| `--fail-threshold MAX_CLONES` | Fail if total clone groups (`function + block`) exceed threshold     | `-1` (disabled)                      |
-| `--ci`                        | Recommended CI preset: `--fail-on-new --no-color --quiet`            | `False`                              |
-| `--html FILE`                 | Write HTML report (`.html`)                                          | -                                    |
-| `--json FILE`                 | Write JSON report (`.json`)                                          | -                                    |
-| `--text FILE`                 | Write text report (`.txt`)                                           | -                                    |
-| `--no-progress`               | Disable progress bar output                                          | `False`                              |
-| `--no-color`                  | Disable ANSI colors                                                  | `False`                              |
-| `--quiet`                     | Minimize output (warnings/errors still shown)                        | `False`                              |
-| `--verbose`                   | Show hash details for new clone groups in fail output                | `False`                              |
+| Option                        | Description                                                                  | Default                              |
+|-------------------------------|------------------------------------------------------------------------------|--------------------------------------|
+| `root`                        | Project root directory to scan                                               | `.`                                  |
+| `-h, --help`                  | Show this help message and exit                                              | -                                    |
+| `--version`                   | Print the CodeClone version and exit.                                        | -                                    |
+| `--min-loc`                   | Minimum function LOC to analyze                                              | `15`                                 |
+| `--min-stmt`                  | Minimum AST statements to analyze                                            | `6`                                  |
+| `--processes`                 | Number of worker processes                                                   | `4`                                  |
+| `--cache-path FILE`           | Path to the cache file.                                                      | `<root>/.cache/codeclone/cache.json` |
+| `--cache-dir FILE`            | Legacy alias for `--cache-path`.                                             | -                                    |
+| `--max-cache-size-mb MB`      | Maximum cache file size in MB.                                               | `50`                                 |
+| `--baseline FILE`             | Path to the baseline file (stored in repo).                                  | `codeclone.baseline.json`            |
+| `--max-baseline-size-mb MB`   | Maximum baseline file size in MB.                                            | `5`                                  |
+| `--update-baseline`           | Overwrite the baseline file with current results.                            | `False`                              |
+| `--fail-on-new`               | Exit with error if NEW clones (not in baseline) are detected.                | `False`                              |
+| `--fail-threshold MAX_CLONES` | Exit with error if total clone groups (function + block) exceed this number. | `-1`                                 |
+| `--ci`                        | Recommended CI preset: `--fail-on-new --no-color --quiet`                    | `False`                              |
+| `--html FILE`                 | Generate an HTML report to FILE.                                             | -                                    |
+| `--json FILE`                 | Generate a JSON report to FILE.                                              | -                                    |
+| `--text FILE`                 | Generate a text report to FILE.                                              | -                                    |
+| `--no-progress`               | Disable the progress bar (recommended for CI logs).                          | `False`                              |
+| `--no-color`                  | Disable ANSI colors                                                          | `False`                              |
+| `--quiet`                     | Minimize output (still shows warnings and errors).                           | `False`                              |
+| `--verbose`                   | Print detailed hash identifiers for new clones.                              | `False`                              |
 
 ## License
 

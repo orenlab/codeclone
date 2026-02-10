@@ -180,15 +180,15 @@ CFG v1 guarantees:
 
 This is critical for CI usage and baseline comparison.
 
-## Python Version Consistency for Baseline Checks
+## Python Tag Consistency for Baseline Checks
 
-Due to inherent differences in Python’s AST between interpreter versions, baseline
-generation and verification must be performed using the same Python version.
+Due to AST differences between interpreter versions, baseline compatibility is pinned to
+the same `python_tag` (for example `cp313`), not full patch version equality.
 
-This ensures deterministic and reproducible clone detection results.
+This keeps clone detection deterministic while allowing patch updates within the same tag.
 
-CI checks therefore pin baseline verification to a single Python version, while the
-test matrix continues to validate compatibility across Python 3.10–3.14.
+CI gating uses the baseline tag policy, while the test matrix validates runtime
+compatibility across Python 3.10-3.14.
 
 ---
 

@@ -481,7 +481,6 @@ def test_baseline_payload_fields_contract_invariant(tmp_path: Path) -> None:
     payload_mutators: list[Callable[[Baseline], None]] = [
         lambda b: b.functions.add(_func_id_alt()),
         lambda b: b.blocks.add(_block_id_alt()),
-        lambda b: setattr(b, "schema_version", "1.1"),
         lambda b: setattr(b, "fingerprint_version", "2"),
         lambda b: setattr(b, "python_tag", "cp399"),
     ]
@@ -498,26 +497,27 @@ def test_baseline_payload_fields_contract_invariant(tmp_path: Path) -> None:
     non_payload_mutators: list[Callable[[Baseline], None]] = [
         lambda b: setattr(b, "created_at", "2030-01-01T00:00:00Z"),
         lambda b: setattr(b, "generator_version", "9.9.9"),
+        lambda b: setattr(b, "schema_version", "1.1"),
     ]
     for mutate in non_payload_mutators:
         probe = Baseline(baseline_path)
         probe.load()
+        baseline_hash = probe.payload_sha256
         mutate(probe)
         probe.verify_integrity()
+        assert probe.payload_sha256 == baseline_hash
 
 
 def test_baseline_hash_canonical_determinism() -> None:
     hash_a = baseline_mod._compute_payload_sha256(
         functions={"a" * 40 + "|0-19", "b" * 40 + "|0-19"},
         blocks={_block_id()},
-        schema_version="1.0",
         fingerprint_version="1",
         python_tag="cp313",
     )
     hash_b = baseline_mod._compute_payload_sha256(
         functions={"b" * 40 + "|0-19", "a" * 40 + "|0-19"},
         blocks={_block_id()},
-        schema_version="1.0",
         fingerprint_version="1",
         python_tag="cp313",
     )
@@ -540,6 +540,43 @@ def test_baseline_payload_sha256_independent_of_created_at_and_generator_version
     assert isinstance(meta_a, dict)
     assert isinstance(meta_b, dict)
     assert meta_a["payload_sha256"] == meta_b["payload_sha256"]
+
+
+def test_baseline_payload_sha256_independent_of_schema_version() -> None:
+    payload_a = _trusted_payload(schema_version="1.0")
+    payload_b = _trusted_payload(schema_version="1.1")
+    meta_a = payload_a["meta"]
+    meta_b = payload_b["meta"]
+    assert isinstance(meta_a, dict)
+    assert isinstance(meta_b, dict)
+    assert meta_a["payload_sha256"] == meta_b["payload_sha256"]
+
+
+def test_baseline_schema_version_mutation_preserves_integrity_and_hash_on_save(
+    tmp_path: Path,
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    _write_payload(baseline_path, _trusted_payload(schema_version="1.0"))
+
+    baseline = Baseline(baseline_path)
+    baseline.load()
+    original_hash = baseline.payload_sha256
+    assert isinstance(original_hash, str)
+
+    baseline.schema_version = "1.1"
+    baseline.verify_integrity()
+    baseline.save()
+
+    payload = json.loads(baseline_path.read_text("utf-8"))
+    meta = payload["meta"]
+    assert isinstance(meta, dict)
+    assert meta["schema_version"] == "1.1"
+    assert meta["payload_sha256"] == original_hash
+
+    reloaded = Baseline(baseline_path)
+    reloaded.load()
+    reloaded.verify_integrity()
+    assert reloaded.payload_sha256 == original_hash
 
 
 def test_baseline_verify_integrity_ignores_created_at_and_generator_version(

@@ -157,10 +157,16 @@ Explainability contract (v1):
 Baseline comparison allows CI to fail **only on new clones**,
 enabling gradual architectural improvement.
 
-Baseline files use a stable v1 contract. Compatibility is tied to
-`fingerprint_version` (normalize/CFG/hash pipeline), not package patch/minor version.
-Regeneration is required when `fingerprint_version` changes.
-Baseline integrity is tamper-evident via canonical `payload_sha256`.
+Baseline files use a stable v1 contract. Compatibility is checked by
+`schema_version`, `fingerprint_version`, `python_tag`, and `generator.name`,
+not package patch/minor version.
+Regeneration is typically required when `fingerprint_version` or `python_tag` changes.
+Baseline integrity is tamper-evident via canonical `payload_sha256`, which covers
+`functions`, `blocks`, `fingerprint_version`, and `python_tag`.
+`schema_version` and `generator.name` are compatibility gates and intentionally
+excluded from the integrity hash.
+`created_at` and `generator.version` are informational metadata and do not affect
+integrity validation.
 
 Baseline validation order is deterministic:
 

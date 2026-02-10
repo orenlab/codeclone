@@ -307,7 +307,6 @@ class Baseline:
         expected = _compute_payload_sha256(
             functions=self.functions,
             blocks=self.blocks,
-            schema_version=self.schema_version,
             fingerprint_version=self.fingerprint_version,
             python_tag=self.python_tag,
         )
@@ -497,7 +496,6 @@ def _baseline_payload(
     payload_sha256 = _compute_payload_sha256(
         functions=set(sorted_functions),
         blocks=set(sorted_blocks),
-        schema_version=resolved_schema,
         fingerprint_version=resolved_fingerprint,
         python_tag=resolved_python_tag,
     )
@@ -525,7 +523,6 @@ def _compute_payload_sha256(
     *,
     functions: set[str],
     blocks: set[str],
-    schema_version: str,
     fingerprint_version: str,
     python_tag: str,
 ) -> str:
@@ -534,7 +531,6 @@ def _compute_payload_sha256(
         "fingerprint_version": fingerprint_version,
         "functions": sorted(functions),
         "python_tag": python_tag,
-        "schema_version": schema_version,
     }
     serialized = json.dumps(
         canonical,

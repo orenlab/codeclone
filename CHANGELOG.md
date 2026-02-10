@@ -4,59 +4,57 @@
 
 ### Overview
 
-This release stabilizes the baseline contract for long-term CI use without changing
-clone-detection algorithms.
+This release stabilizes the baseline contract for long-term CI reuse without changing
+clone-detection algorithms (report-only UX/explainability improvements only).
 
-### Baseline Contract Stabilization
+### Baseline Contract
 
-- Baseline schema moved to a stable v1 contract with strict top-level
-  `meta` + `clones` objects.
-- `meta` fields are now explicit and versioned:
-  `generator`, `schema_version`, `fingerprint_version`,
-  `python_tag`, `created_at`, `payload_sha256` (`generator.name` / `generator.version`).
-- `clones` currently stores only deterministic baseline keys:
-  `functions`, `blocks`.
-- Compatibility no longer depends on CodeClone patch/minor version.
-  Baseline regeneration is required when `fingerprint_version` changes.
-- Added deterministic compatibility checks and statuses:
-  `mismatch_schema_version`, `mismatch_fingerprint_version`,
-  `mismatch_python_version`, `missing_fields`, `invalid_json`, `invalid_type`.
-- Legacy 1.3 baseline files are treated as untrusted (`missing_fields`) with explicit
-  regeneration guidance.
+- Baseline moved to stable v1 schema with strict top-level `meta` + `clones` objects.
+- Compatibility is gated by `schema_version`, `generator.name`,
+  `fingerprint_version`, and `python_tag` (not package patch/minor version).
+- Legacy 1.3 baseline layouts are treated as untrusted with explicit regeneration guidance.
 
-### Integrity & IO Hardening
+### Integrity and IO
 
-- Baseline integrity hash now uses canonical payload:
-  `functions`, `blocks`, `python_tag`,
-  `fingerprint_version`, `schema_version`.
-- Baseline writes are now atomic (`*.tmp` + `os.replace`) for CI/interruption safety.
-- Baseline and cache size guards remain configurable:
+- Baseline integrity uses canonical `payload_sha256` over semantic payload
+  (`functions`, `blocks`, `fingerprint_version`, `python_tag`).
+- `schema_version` and `meta.generator.name` are compatibility/trust gates and are
+  intentionally excluded from `payload_sha256`.
+- `meta.generator.version` is informational only and excluded from `payload_sha256`.
+- Atomic baseline writes are implemented via `*.tmp` + `os.replace` (same filesystem).
+- Baseline/cache size guards are configurable:
   `--max-baseline-size-mb`, `--max-cache-size-mb`.
+- Early 1.4.0 development snapshots produced before this integrity
+  canonicalization fix may require a one-time `codeclone . --update-baseline`.
+- Baselines generated after this fix remain stable across future 1.x patch/minor
+  releases unless `fingerprint_version` changes.
 
-### CLI & Reporting Behavior
+### CLI and Reporting
 
 - Trusted/untrusted baseline behavior is deterministic:
-  normal mode ignores untrusted baseline with warning and compares against empty baseline;
-  gating mode (`--fail-on-new`/`--ci`) fails fast with exit code `2`.
-- Exit-code contract is now explicit and stable:
-  `0` success, `2` contract error, `3` gating failure (`--fail-on-new`/`--fail-threshold`).
-- CLI help now includes a canonical `Exit codes` section plus `Repository`/`Issues`/`Docs` links.
-- Error-path output now uses stable category markers:
-  `CONTRACT ERROR`, `GATING FAILURE`, `INTERNAL ERROR`.
-- Report metadata (HTML/TXT/JSON) now exposes baseline audit fields:
-  `baseline_fingerprint_version`,
-  `baseline_schema_version`, `baseline_python_tag`,
-  `baseline_generator_version`, `baseline_loaded`, `baseline_status`.
-- Block-clone explainability is now core-owned:
-  Python report layer generates facts/hints (`match_rule`, `signature_kind`,
-  `assert_ratio`, `consecutive_asserts`), HTML only renders them.
-- HTML report API now expects precomputed `block_group_facts` from core (no UI-side semantics).
+  normal mode warns and compares against empty baseline;
+  CI preset (`--ci`) fails fast on untrusted baseline (exit `2`).
+- Clone gating failures (`new clones`, `--fail-threshold`) use exit `3`.
+- Exit-code contract is explicit: `0` success, `2` contract error, `3` gating failure, `5` internal error.
+- CLI help includes canonical exit-code descriptions plus `Repository` / `Issues` / `Docs` links.
+- Report metadata (HTML/TXT/JSON) includes baseline audit fields and trust status.
+- Block explainability is core-owned (`block_group_facts`);
+  HTML renders those facts only (JSON/TXT explainability remains unchanged for now).
 
 ### Testing
 
-- Expanded baseline validation matrix tests (types, missing fields, legacy, size limits,
-  compatibility mismatches, integrity mismatch, canonical hash determinism).
-- Full quality gates pass with `ruff`, `mypy`, and `pytest` at 100% coverage.
+- Expanded baseline contract matrix (legacy, type/shape validation, compatibility mismatches,
+  integrity failures, canonical hash determinism).
+- Added detector golden snapshot fixture with canonical runtime policy:
+  golden assertions run on `cp313`, while the full invariant suite stays matrix-wide.
+- Golden tests now use the same core `python_tag` source as CLI/baseline checks to prevent
+  cross-layer drift.
+
+### Note (Roadmap)
+
+1.4.0 made the baseline/CI contract stable, but also exposed that the internal structure needs cleanup.
+In 1.5 we plan an architecture refactor focused on maintainability and orchestration, with a strict rule:
+no changes to detection semantics, fingerprints, baseline hash, or determinism guarantees.
 
 ## [1.3.0] - 2026-02-08
 
