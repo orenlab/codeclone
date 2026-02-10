@@ -13,101 +13,29 @@ It helps teams discover architectural duplication and prevent new copy-paste fro
 
 CodeClone is designed to help teams:
 
-- discover **structural and control-flow duplication**,
-- identify architectural hotspots,
-- prevent *new* duplication via CI and pre-commit hooks.
+- discover structural and control-flow duplication
+- identify architectural hotspots early
+- prevent new duplication via CI and pre-commit hooks
 
-Unlike token- or text-based tools, CodeClone operates on **normalized Python AST and CFG**, making it robust against
-renaming, formatting, and minor refactoring.
+## Why CodeClone
 
----
+CodeClone focuses on **architectural duplication**, not text similarity.
+It is robust to renaming, formatting, and minor refactors while preserving strict, explainable matching.
+Unlike token-based tools, it compares normalized structure and control flow.
 
-## Why CodeClone?
+Typical signals:
 
-Most existing tools detect *textual* duplication.
-CodeClone detects **structural and block-level duplication**, which usually signals missing abstractions or
-architectural drift.
+- repeated service/orchestration flow
+- duplicated guard/validation blocks
+- copy-pasted handler logic across modules
+- recurring internal segments in large functions
 
-Typical use cases:
+## Core Capabilities
 
-- duplicated service or orchestration logic across layers (API ↔ application),
-- repeated validation or guard blocks,
-- copy-pasted request / handler flows,
-- duplicated control-flow logic in routers, handlers, or services.
-
----
-
-## Features
-
-### Function-level clone detection (Type-2, CFG-based)
-
-- Detects functions and methods with identical **control-flow structure**.
-- Based on **Control Flow Graph (CFG)** fingerprinting.
-- Robust to:
-    - variable renaming,
-    - constant changes,
-    - attribute renaming,
-    - formatting differences,
-    - docstrings and type annotations.
-- Ideal for spotting architectural duplication across layers.
-
-### Block-level clone detection (Type-3-lite)
-
-- Detects repeated **statement blocks** inside larger functions.
-- Uses sliding windows over CFG-normalized statement sequences.
-- Targets:
-    - validation blocks,
-    - guard clauses,
-    - repeated orchestration logic.
-- Carefully filtered to reduce noise:
-    - no overlapping windows,
-    - no clones inside the same function,
-    - no `__init__` noise,
-    - size and statement-count thresholds.
-
-### Segment-level internal clone detection
-
-- Detects repeated **segment windows** inside the same function.
-- Uses a two-step deterministic match (candidate signature → strict hash).
-- Included in reports for explainability, **not** in baseline/CI failure logic.
-
-### Control-Flow Awareness (CFG v1)
-
-- Each function is converted into a **Control Flow Graph**.
-- CFG nodes contain normalized AST statements.
-- CFG edges represent structural control flow:
-    - `if` / `else`
-    - `for` / `async for` / `while`
-    - `try` / `except` / `finally`
-    - `with` / `async with`
-    - `match` / `case` (Python 3.10+)
-- Current CFG semantics (v1):
-    - `and` / `or` are modeled as short-circuit micro-CFG branches,
-    - `try/except` links only from statements that may raise,
-    - `break` / `continue` are modeled as terminating loop transitions with explicit targets,
-    - `for/while ... else` semantics are preserved structurally,
-    - `match case` and `except` handler order is preserved structurally,
-    - after-blocks are explicit and always present,
-    - focus is on **structural similarity**, not precise runtime semantics.
-
-This design keeps clone detection **stable, deterministic, and low-noise**.
-
-### Low-noise by design
-
-- AST + CFG normalization instead of token matching.
-- Conservative defaults tuned for real-world Python projects.
-- Explicit thresholds for size and statement count.
-- No probabilistic scoring or heuristic similarity thresholds.
-- Safe commutative normalization and local logical equivalences only.
-- Focus on *architectural duplication*, not micro-similarities.
-
-### CI-friendly baseline mode
-
-- Establish a baseline of existing clones.
-- Fail CI **only when new clones are introduced**.
-- Safe for legacy codebases and incremental refactoring.
-
----
+- **Function clones (CFG fingerprint):** strong structural signal for cross-layer duplication.
+- **Block clones (statement windows):** detects repeated local logic patterns.
+- **Segment clones (report-only):** internal function repetition for explainability; not used for baseline gating.
+- **Deterministic output:** stable ordering and reproducible artifacts for CI/audit.
 
 ## Installation
 
@@ -119,100 +47,73 @@ Python 3.10+ is required.
 
 ## Quick Start
 
-Run on a project:
+Run analysis:
 
 ```bash
 codeclone .
 ```
 
-This will:
-
-- scan Python files,
-- build CFGs for functions,
-- detect function-level and block-level clones,
-- print a summary to stdout.
-
 Generate reports:
 
 ```bash
 codeclone . \
+  --html .cache/codeclone/report.html \
   --json .cache/codeclone/report.json \
   --text .cache/codeclone/report.txt
 ```
 
-Generate an HTML report:
-
-```bash
-codeclone . --html .cache/codeclone/report.html
-```
-
-Check version:
+Print version:
 
 ```bash
 codeclone --version
 ```
 
----
+## Baseline and CI Workflow
 
-## Reports and Metadata
-
-All report formats include provenance metadata for auditability:
-
-`codeclone_version`, `python_version`, `baseline_path`,
-`baseline_fingerprint_version`,
-`baseline_schema_version`, `baseline_python_tag`,
-`baseline_generator_version`, `baseline_loaded`, `baseline_status`
-(and cache metadata when available).
-
-Explainability contract:
-- Facts are computed in Python core/report layer.
-- HTML UI only renders those facts (no semantic recomputation in UI).
-
-baseline_status values:
-
-- `ok`
-- `missing`
-- `too_large`
-- `invalid_json`
-- `invalid_type`
-- `missing_fields`
-- `mismatch_schema_version`
-- `mismatch_fingerprint_version`
-- `mismatch_python_version`
-- `generator_mismatch`
-- `integrity_missing`
-- `integrity_failed`
-
----
-
-## Baseline Workflow (Recommended)
-
-1. Create a baseline
-
-Run once on your current codebase:
+1. Generate baseline once and commit it:
 
 ```bash
 codeclone . --update-baseline
 ```
 
-Commit the generated baseline file to the repository.
+2. Gate CI with the preset mode:
 
-Baseline compatibility is tied to `fingerprint_version` (not `codeclone_version`):
+```bash
+codeclone . --ci
+```
 
-- patch/minor releases can reuse the same baseline,
-- regenerate baseline only when `fingerprint_version` changes,
-- do not regenerate baseline for UI/report/CLI/cache/performance-only changes when `fingerprint_version` is unchanged,
-- baseline file remains tamper-evident via `payload_sha256`.
+`--ci` is equivalent to `--fail-on-new --no-color --quiet`.
 
-Baseline v1 contract schema:
-`meta.generator.name`, `meta.generator.version`, `meta.schema_version`,
-`meta.fingerprint_version`, `meta.python_tag`, `meta.created_at`,
-`meta.payload_sha256`,
-`clones.functions`, `clones.blocks`.
+### Baseline Contract (v1)
 
-2. Trusted vs untrusted baseline behavior
+Baseline compatibility is tied to `fingerprint_version` (not package patch/minor version).
+Regenerate baseline only when `fingerprint_version` changes.
 
-Baseline states considered untrusted:
+Canonical structure:
+
+```json
+{
+  "meta": {
+    "generator": {
+      "name": "codeclone",
+      "version": "1.4.0"
+    },
+    "schema_version": "1.0",
+    "fingerprint_version": "1",
+    "python_tag": "cp313",
+    "created_at": "2026-02-09T11:44:08Z",
+    "payload_sha256": "..."
+  },
+  "clones": {
+    "functions": [],
+    "blocks": []
+  }
+}
+```
+
+### Trusted vs Untrusted Baseline
+
+Untrusted statuses:
 
 - `missing`
 - `too_large`
@@ -228,77 +129,69 @@ Baseline states considered untrusted:
 
 Behavior:
 
-- in normal mode, untrusted baseline is ignored with a warning (comparison falls back to empty baseline);
-- in `--ci` (or explicit `--fail-on-new`), untrusted baseline fails fast (exit code 2).
-- in `--ci` with trusted baseline, clone gating (`new clones` / `--fail-threshold`) uses exit code 3.
+- **Normal mode:** warn, ignore baseline, compare against empty baseline.
+- **Gating mode (`--ci`):** fail fast with exit code `2` if baseline is untrusted.
+- **Gating mode with trusted baseline:** new clones / threshold violations return exit code `3`.
 
-3. Use in CI
+Legacy baseline layouts (`<= 1.3.x`) are treated as untrusted.
 
-```bash
-codeclone . --ci
-```
+## Reports
 
-or:
+Supported formats:
 
-```bash
-codeclone . --ci --html .cache/codeclone/report.html
-```
+- HTML (`--html`)
+- JSON (`--json`)
+- Text (`--text`)
 
-`--ci` is equivalent to `--fail-on-new --no-color --quiet`.
+All report formats include provenance metadata, including baseline trust fields and cache usage fields when available.
 
-Behavior:
+Primary metadata keys:
 
-- existing clones are allowed,
-- the build fails if new clones appear,
-- refactoring that removes duplication is always allowed.
+- `codeclone_version`
+- `python_version`
+- `baseline_path`
+- `baseline_fingerprint_version`
+- `baseline_schema_version`
+- `baseline_python_tag`
+- `baseline_generator_version`
+- `baseline_loaded`
+- `baseline_status`
+- `cache_path` / `cache_used` (when present)
 
-`--ci` exits with a non-zero code when new clones are detected
-(same behavior is available via explicit `--fail-on-new`).
+## Cache
 
-Exit codes:
+Default cache location:
 
-- `0` success
-- `2` contract error (baseline missing/untrusted, invalid output extensions, incompatible versions)
-- `3` gating failure (new clones detected, threshold exceeded)
-- `5` internal error (unexpected exception; please report)
-
-`5` is only for unexpected internal failures (bug/exception path), not for invalid
-baseline/options/contracts.
-
----
-
-### Cache
-
-By default, CodeClone stores the cache per project at:
-
-```bash
+```text
 <root>/.cache/codeclone/cache.json
 ```
 
-You can override this path with `--cache-path` (`--cache-dir` is a legacy alias).
+- Override with `--cache-path` (`--cache-dir` is a legacy alias).
+- Invalid/oversized cache is ignored with warning and rebuilt from source.
+- Cache is an optimization only; never a source of truth.
 
-If you used an older version of CodeClone, delete the legacy cache file at
-`~/.cache/codeclone/cache.json` and add `.cache/` to `.gitignore`.
+If you upgraded from older versions, remove legacy cache at:
 
-Cache integrity checks are strict: signature mismatch or oversized cache files are ignored
-with an explicit warning, then rebuilt from source.
+```text
+~/.cache/codeclone/cache.json
+```
 
-Cache entries are validated against expected structure/types; invalid entries are ignored
-deterministically.
+and add `.cache/` to `.gitignore`.
 
----
+## Exit Codes
 
-## Python Tag Consistency for Baseline Checks
+- `0` success
+- `2` contract error (baseline untrusted in gating, invalid output extension, incompatible versions)
+- `3` gating failure (new clones detected, threshold exceeded)
+- `5` internal error (unexpected exception)
 
-Baseline compatibility is pinned to `python_tag` (for example `cp313`) to keep
-AST/fingerprint behavior reproducible across runs.
+## Project Links
 
-Patch-level interpreter updates do not invalidate the baseline as long as
-the `python_tag` stays the same.
+- Repository: https://github.com/orenlab/codeclone
+- Issues: https://github.com/orenlab/codeclone/issues
+- Docs: https://github.com/orenlab/codeclone/tree/main/docs
 
----
-
-## Using with pre-commit
+## Pre-commit Example
 
 ```yaml
 repos:
@@ -313,52 +206,34 @@ repos:
         types: [ python ]
 ```
 
----
-
 ## What CodeClone Is (and Is Not)
 
 ### CodeClone Is
 
-- an architectural analysis tool,
-- a duplication radar,
-- a CI guard against copy-paste,
-- a control-flow-aware clone detector.
+- a structural clone detector for Python
+- a CI guard against new duplication
+- a deterministic analysis tool with auditable outputs
 
 ### CodeClone Is Not
 
-- a linter,
-- a formatter,
-- a semantic equivalence prover,
-- a runtime analyzer.
+- a linter or formatter
+- a semantic equivalence prover
+- a runtime execution analyzer
 
-## How It Works (High Level)
+## High-level Pipeline
 
-1. Parse Python source into AST.
-2. Normalize AST (names, constants, attributes, annotations).
-3. Build a Control Flow Graph (CFG) per function.
-4. Compute stable CFG fingerprints.
-5. Extract segment windows for internal clone discovery.
-6. Detect function-level, block-level, and segment-level clones.
-7. Apply conservative filters to suppress noise.
+1. Parse Python source to AST.
+2. Normalize AST for structural comparison.
+3. Build CFG per function.
+4. Compute stable fingerprints.
+5. Build function/block/segment groups.
+6. Apply deterministic report preparation.
+7. Compare against trusted baseline when requested.
 
-See the architectural overview:
+See details:
 
 - [docs/architecture.md](docs/architecture.md)
-
----
-
-## Control Flow Graph (CFG)
-
-Starting from version 1.1.0, CodeClone uses a Control Flow Graph (CFG)
-to improve structural clone detection robustness.
-
-The CFG is a structural abstraction, not a runtime execution model.
-
-See full design and semantics:
-
 - [docs/cfg.md](docs/cfg.md)
-
----
 
 ## CLI Options
 
@@ -375,7 +250,7 @@ See full design and semantics:
 | `--baseline FILE`             | Baseline file path                                                   | `codeclone.baseline.json`            |
 | `--max-baseline-size-mb MB`   | Max baseline size; untrusted baseline fails in CI, ignored otherwise | `5`                                  |
 | `--update-baseline`           | Regenerate baseline from current results                             | `False`                              |
-| `--fail-on-new`               | Low-level gating flag (prefer `--ci` preset in CI docs/workflows)    | `False`                              |
+| `--fail-on-new`               | Low-level gating flag (prefer `--ci`)                                | `False`                              |
 | `--fail-threshold MAX_CLONES` | Fail if total clone groups (`function + block`) exceed threshold     | `-1` (disabled)                      |
 | `--ci`                        | Recommended CI preset: `--fail-on-new --no-color --quiet`            | `False`                              |
 | `--html FILE`                 | Write HTML report (`.html`)                                          | -                                    |
