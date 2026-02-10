@@ -12,23 +12,12 @@ from codeclone.normalize import NormalizationConfig
 from codeclone.report import build_block_groups, build_groups
 from codeclone.scanner import module_name_from_path
 
-CANONICAL_GOLDEN_PYTHON_TAG = "cp313"
-
 
 def _runtime_python_tag() -> str:
     impl = sys.implementation.name
     major, minor = sys.version_info[:2]
     prefix = "cp" if impl == "cpython" else impl[:2]
     return f"{prefix}{major}{minor}"
-
-
-pytestmark = pytest.mark.skipif(
-    _runtime_python_tag() != CANONICAL_GOLDEN_PYTHON_TAG,
-    reason=(
-        "Golden detector fixture is canonicalized for "
-        f"{CANONICAL_GOLDEN_PYTHON_TAG}; run contract/invariant tests on other tags."
-    ),
-)
 
 
 def _detect_group_keys(project_root: Path) -> tuple[list[str], list[str]]:
@@ -59,6 +48,17 @@ def test_detector_output_matches_golden_fixture() -> None:
     fixture_root = Path("tests/fixtures/golden_project").resolve()
     expected_path = fixture_root / "golden_expected_ids.json"
     expected = json.loads(expected_path.read_text("utf-8"))
+    expected_meta = expected.get("meta", {})
+    assert isinstance(expected_meta, dict)
+    expected_python_tag = expected_meta.get("python_tag")
+    assert isinstance(expected_python_tag, str)
+
+    runtime_tag = _runtime_python_tag()
+    if runtime_tag != expected_python_tag:
+        pytest.skip(
+            "Golden detector fixture is canonicalized for "
+            f"{expected_python_tag}; runtime is {runtime_tag}."
+        )
 
     function_group_keys, block_group_keys = _detect_group_keys(fixture_root)
 

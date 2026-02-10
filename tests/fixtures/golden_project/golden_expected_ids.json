@@ -1,4 +1,7 @@
 {
+  "meta": {
+    "python_tag": "cp313"
+  },
   "function_group_keys": [
     "efc8465229b381a3a50502d59d9539c0be3efe86|20-49"
   ],
