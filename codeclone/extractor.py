@@ -9,6 +9,7 @@ Licensed under the MIT License.
 from __future__ import annotations
 
 import ast
+import math
 import os
 import signal
 from collections.abc import Iterator
@@ -49,6 +50,17 @@ class _ParseTimeoutError(Exception):
     pass
 
 
+def _consumed_cpu_seconds(resource_module: object) -> float:
+    """Return consumed CPU seconds for the current process."""
+    try:
+        usage = resource_module.getrusage(  # type: ignore[attr-defined]
+            resource_module.RUSAGE_SELF  # type: ignore[attr-defined]
+        )
+        return float(usage.ru_utime) + float(usage.ru_stime)
+    except Exception:
+        return 0.0
+
+
 @contextmanager
 def _parse_limits(timeout_s: int) -> Iterator[None]:
     if os.name != "posix" or timeout_s <= 0:
@@ -70,11 +82,18 @@ def _parse_limits(timeout_s: int) -> Iterator[None]:
 
             old_limits = resource.getrlimit(resource.RLIMIT_CPU)
             soft, hard = old_limits
-            hard_ceiling = timeout_s if hard == resource.RLIM_INFINITY else max(1, hard)
+            consumed_cpu_s = _consumed_cpu_seconds(resource)
+            desired_soft = max(1, timeout_s + math.ceil(consumed_cpu_s))
             if soft == resource.RLIM_INFINITY:
-                new_soft = min(timeout_s, hard_ceiling)
+                candidate_soft = desired_soft
             else:
-                new_soft = min(timeout_s, soft, hard_ceiling)
+                # Never reduce finite soft limits and avoid immediate SIGXCPU
+                # when the process already consumed more CPU than timeout_s.
+                candidate_soft = max(soft, desired_soft)
+            if hard == resource.RLIM_INFINITY:
+                new_soft = candidate_soft
+            else:
+                new_soft = min(max(1, hard), candidate_soft)
             # Never lower hard limit: raising it back may be disallowed for
             # unprivileged processes and can lead to process termination later.
             resource.setrlimit(resource.RLIMIT_CPU, (new_soft, hard))

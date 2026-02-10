@@ -142,6 +142,90 @@ def test_parse_limits_never_lowers_hard_limit(monkeypatch: pytest.MonkeyPatch) -
     )
 
 
+def test_parse_limits_accounts_for_consumed_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, int]] = []
+
+    class _DummyUsage:
+        ru_utime = 7.2
+        ru_stime = 0.3
+
+    class _DummyResource:
+        RLIMIT_CPU = 0
+        RLIM_INFINITY = 10**9
+        RUSAGE_SELF = 0
+
+        @staticmethod
+        def getrlimit(_key: int) -> tuple[int, int]:
+            return (_DummyResource.RLIM_INFINITY, _DummyResource.RLIM_INFINITY)
+
+        @staticmethod
+        def setrlimit(_key: int, val: tuple[int, int]) -> None:
+            calls.append(val)
+
+        @staticmethod
+        def getrusage(_who: int) -> _DummyUsage:
+            return _DummyUsage()
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
+    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+
+    with extractor._parse_limits(5):
+        pass
+
+    assert calls
+    # ceil(7.5) + timeout(5) == 13
+    assert calls[0] == (13, _DummyResource.RLIM_INFINITY)
+    assert calls[-1] == (
+        _DummyResource.RLIM_INFINITY,
+        _DummyResource.RLIM_INFINITY,
+    )
+
+
+def test_parse_limits_raises_too_low_soft_limit_for_consumed_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, int]] = []
+
+    class _DummyUsage:
+        ru_utime = 10.0
+        ru_stime = 0.0
+
+    class _DummyResource:
+        RLIMIT_CPU = 0
+        RLIM_INFINITY = 10**9
+        RUSAGE_SELF = 0
+
+        @staticmethod
+        def getrlimit(_key: int) -> tuple[int, int]:
+            return (2, 20)
+
+        @staticmethod
+        def setrlimit(_key: int, val: tuple[int, int]) -> None:
+            calls.append(val)
+
+        @staticmethod
+        def getrusage(_who: int) -> _DummyUsage:
+            return _DummyUsage()
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
+    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+
+    with extractor._parse_limits(5):
+        pass
+
+    # Raised from 2 to ceil(10)+5 to avoid immediate SIGXCPU.
+    assert calls[0] == (15, 20)
+    assert calls[-1] == (2, 20)
+
+
 def test_parse_limits_uses_finite_soft_limit_branch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -168,8 +252,8 @@ def test_parse_limits_uses_finite_soft_limit_branch(
     with extractor._parse_limits(5):
         pass
 
-    # New soft is min(timeout, old_soft, hard_ceiling), hard is preserved.
-    assert calls[0] == (5, 20)
+    # Finite soft limits are never lowered.
+    assert calls[0] == (20, 20)
     assert calls[-1] == (20, 20)
 
 

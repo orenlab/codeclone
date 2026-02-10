@@ -54,6 +54,22 @@ def test_process_file_encoding_error(
     assert "Encoding error" in result.error
 
 
+def test_process_file_read_oserror(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+
+    def _boom(*_args: object, **_kwargs: object) -> str:
+        raise OSError("read denied")
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+    result = process_file(str(src), str(tmp_path), NormalizationConfig(), 1, 1)
+    assert result.success is False
+    assert result.error is not None
+    assert "Cannot read file" in result.error
+
+
 def test_process_file_unexpected_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

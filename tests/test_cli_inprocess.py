@@ -2668,6 +2668,83 @@ def test_cli_contract_error_priority_over_gating_failure_for_unreadable_source(
     assert "GATING FAILURE:" not in out
 
 
+def test_cli_unreadable_source_ci_shows_overflow_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    for i in range(11):
+        (tmp_path / f"f{i}.py").write_text("def f():\n    return 1\n", "utf-8")
+    _baseline = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+
+    def _source_read_error(
+        fp: str, *_args: object, **_kwargs: object
+    ) -> cli.ProcessingResult:
+        return _source_read_error_result(fp)
+
+    monkeypatch.setattr(cli, "process_file", _source_read_error)
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--ci",
+                "--baseline",
+                str(_baseline),
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    _assert_unreadable_source_contract_error(out)
+    assert "... and 1 more" in out
+
+
+def test_cli_report_meta_cache_path_resolve_oserror_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    cache_path = tmp_path / "cache_for_meta.json"
+    json_out = tmp_path / "report.json"
+
+    original_resolve = Path.resolve
+    resolve_called = {"cache": False}
+
+    def _resolve(self: Path, strict: bool = False) -> Path:
+        if self == cache_path:
+            resolve_called["cache"] = True
+            raise OSError("resolve failed")
+        return original_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _resolve)
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--cache-path",
+            str(cache_path),
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
+    payload = json.loads(json_out.read_text("utf-8"))
+    assert resolve_called["cache"] is True
+    assert payload["meta"]["cache_path"] == str(cache_path)
+
+
 def test_cli_ci_discovery_cache_hit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2790,6 +2867,23 @@ def test_cli_scan_failed_is_internal_error(
     assert exc.value.code == 5
     out = capsys.readouterr().out
     assert "INTERNAL ERROR:" in out
+
+
+def test_cli_scan_oserror_is_contract_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _boom(_root: str) -> Iterable[str]:
+        raise OSError("scan denied")
+
+    monkeypatch.setattr(cli, "iter_py_files", _boom)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, [str(tmp_path)])
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "CONTRACT ERROR:" in out
+    assert "Scan failed" in out
 
 
 def test_cli_failed_files_report(
