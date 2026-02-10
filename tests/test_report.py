@@ -272,6 +272,7 @@ def test_report_output_formats() -> None:
         "baseline_status": "ok",
         "cache_path": "/tmp/cache.json",
         "cache_used": True,
+        "files_skipped_source_io": 0,
     }
     json_out = to_json(groups)
     report_out = to_json_report(groups, groups, {}, meta)
@@ -283,8 +284,18 @@ def test_report_output_formats() -> None:
     )
 
     expected_json = ["group_count"]
-    expected_report = ['"meta"', '"function_clones"', '"baseline_schema_version": 1']
-    expected_text = ["REPORT METADATA", "Baseline schema version: 1", "Clone group #1"]
+    expected_report = [
+        '"meta"',
+        '"function_clones"',
+        '"baseline_schema_version": 1',
+        '"files_skipped_source_io": 0',
+    ]
+    expected_text = [
+        "REPORT METADATA",
+        "Baseline schema version: 1",
+        "Source IO skipped: 0",
+        "Clone group #1",
+    ]
 
     for token in expected_json:
         assert token in json_out

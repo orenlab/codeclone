@@ -570,6 +570,7 @@ def test_html_report_includes_provenance_metadata(tmp_path: Path) -> None:
             "baseline_status": "ok",
             "cache_path": "/repo/.cache/codeclone/cache.json",
             "cache_used": True,
+            "files_skipped_source_io": 0,
         },
     )
     expected = [
@@ -584,6 +585,8 @@ def test_html_report_includes_provenance_metadata(tmp_path: Path) -> None:
         'data-baseline-file="codeclone.baseline.json"',
         "/repo/codeclone.baseline.json",
         'data-cache-used="true"',
+        'data-files-skipped-source-io="0"',
+        "Source IO skipped",
     ]
     for token in expected:
         assert token in html

@@ -318,6 +318,34 @@ def _compact_summary_metric(out: str, key: str) -> int:
     return int(match.group(1))
 
 
+def _current_py_minor() -> str:
+    return f"{sys.version_info.major}.{sys.version_info.minor}"
+
+
+def _prepare_source_and_baseline(tmp_path: Path) -> tuple[Path, Path]:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=_current_py_minor(),
+    )
+    return src, baseline_path
+
+
+def _source_read_error_result(filepath: str) -> cli.ProcessingResult:
+    return cli.ProcessingResult(
+        filepath=filepath,
+        success=False,
+        error="Cannot read file: [Errno 13] Permission denied",
+        error_kind="source_read_error",
+    )
+
+
+def _assert_unreadable_source_contract_error(out: str) -> None:
+    assert "CONTRACT ERROR:" in out
+    assert "could not be read in CI/gating mode" in out
+
+
 def test_cli_main_no_progress_parallel(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -818,12 +846,7 @@ def test_cli_main_outputs(
 def test_cli_reports_include_audit_metadata_ok(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    baseline_path = _write_baseline(
-        tmp_path / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
-    )
+    _src, baseline_path = _prepare_source_and_baseline(tmp_path)
     html_out = tmp_path / "report.html"
     json_out = tmp_path / "report.json"
     text_out = tmp_path / "report.txt"
@@ -2541,12 +2564,7 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
     ) -> cli.ProcessingResult:
-        return cli.ProcessingResult(
-            filepath=fp,
-            success=False,
-            error="Cannot read file: [Errno 13] Permission denied",
-            error_kind="source_read_error",
-        )
+        return _source_read_error_result(fp)
 
     monkeypatch.setattr(cli, "process_file", _source_read_error)
     _patch_parallel(monkeypatch)
@@ -2562,22 +2580,13 @@ def test_cli_unreadable_source_fails_in_ci_with_contract_error(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    baseline_path = _write_baseline(
-        tmp_path / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
-    )
+    _src, baseline_path = _prepare_source_and_baseline(tmp_path)
+    json_out = tmp_path / "report.json"
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
     ) -> cli.ProcessingResult:
-        return cli.ProcessingResult(
-            filepath=fp,
-            success=False,
-            error="Cannot read file: [Errno 13] Permission denied",
-            error_kind="source_read_error",
-        )
+        return _source_read_error_result(fp)
 
     monkeypatch.setattr(cli, "process_file", _source_read_error)
     _patch_parallel(monkeypatch)
@@ -2589,12 +2598,37 @@ def test_cli_unreadable_source_fails_in_ci_with_contract_error(
                 "--ci",
                 "--baseline",
                 str(baseline_path),
+                "--json",
+                str(json_out),
             ],
         )
     assert exc.value.code == 2
     out = capsys.readouterr().out
-    assert "CONTRACT ERROR:" in out
-    assert "could not be read in CI/gating mode" in out
+    _assert_unreadable_source_contract_error(out)
+    payload = json.loads(json_out.read_text("utf-8"))
+    assert payload["meta"]["files_skipped_source_io"] == 1
+
+
+def test_cli_reports_include_source_io_skipped_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    json_out = tmp_path / "report.json"
+
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
+    payload = json.loads(json_out.read_text("utf-8"))
+    assert payload["meta"]["files_skipped_source_io"] == 0
 
 
 def test_cli_contract_error_priority_over_gating_failure_for_unreadable_source(
@@ -2602,22 +2636,12 @@ def test_cli_contract_error_priority_over_gating_failure_for_unreadable_source(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    baseline_path = _write_baseline(
-        tmp_path / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
-    )
+    _src, baseline_path = _prepare_source_and_baseline(tmp_path)
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
     ) -> cli.ProcessingResult:
-        return cli.ProcessingResult(
-            filepath=fp,
-            success=False,
-            error="Cannot read file: [Errno 13] Permission denied",
-            error_kind="source_read_error",
-        )
+        return _source_read_error_result(fp)
 
     def _diff(
         _self: object, _f: dict[str, object], _b: dict[str, object]
@@ -2640,8 +2664,7 @@ def test_cli_contract_error_priority_over_gating_failure_for_unreadable_source(
         )
     assert exc.value.code == 2
     out = capsys.readouterr().out
-    assert "CONTRACT ERROR:" in out
-    assert "could not be read in CI/gating mode" in out
+    _assert_unreadable_source_contract_error(out)
     assert "GATING FAILURE:" not in out
 
 
