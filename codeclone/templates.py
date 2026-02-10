@@ -425,7 +425,7 @@ html[data-theme="light"] .topbar {
 .meta-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
   padding: 10px 16px 16px;
 }
 
@@ -433,7 +433,7 @@ html[data-theme="light"] .topbar {
   display: flex;
   flex-direction: column;
   gap: 7px;
-  grid-column: span 3;
+  grid-column: span 4;
   min-width: 0;
   padding: 12px 13px;
   border: 1px solid var(--border-subtle);
@@ -830,7 +830,12 @@ html[data-theme="light"] .topbar {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin-top: 10px;
   padding: 0 12px 10px;
+}
+
+.group-head + .group-explain {
+  margin-top: 12px;
 }
 
 .group-explain-item {
@@ -861,7 +866,7 @@ html[data-theme="light"] .topbar {
 
 .group-explain-note {
   flex-basis: 100%;
-  margin-top: 2px;
+  margin-top: 4px;
   color: var(--text-tertiary);
   font-size: 0.74rem;
   line-height: 1.35;
@@ -884,12 +889,18 @@ html[data-theme="light"] .topbar {
 }
 
 .group-compare-note {
-  padding: 8px 12px 10px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: color-mix(in oklab, var(--surface-1) 75%, var(--surface-0) 25%);
+  margin: 12px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--surface-1) 72%, var(--surface-0) 28%);
   color: var(--text-tertiary);
   font-size: var(--text-xs);
   line-height: 1.45;
+}
+
+.group-compare-note + .group-explain {
+  margin-top: 10px;
 }
 
 .item-path {
@@ -981,6 +992,10 @@ html[data-theme="light"] .topbar {
   overflow-y: auto;
   box-shadow: var(--elevation-4);
   animation: slideUp var(--transition-slow);
+}
+
+.help-card {
+  max-width: min(1140px, 96vw);
 }
 
 @keyframes slideUp {
@@ -1117,6 +1132,67 @@ html[data-theme="light"] .topbar {
   color: var(--info);
 }
 
+.metric-link-item {
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.help-card .metrics-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.help-card .metrics-section:first-child .metrics-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.help-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: all var(--transition-base);
+}
+
+.help-link:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+  transform: translateY(-1px);
+}
+
+.help-link-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.help-link-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.help-link-meta {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.help-link-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
 /* Code Preview */
 .code-preview {
   margin-top: 8px;
@@ -1211,11 +1287,14 @@ html[data-theme="light"] .topbar {
 
 .cmd-palette-content {
   width: min(720px, 92vw);
+  max-height: min(76vh, 680px);
   background: var(--surface-1);
   border: 1px solid var(--border-default);
   border-radius: 16px;
   box-shadow: var(--elevation-4);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
   animation: slideDown var(--transition-slow);
 }
 
@@ -1249,11 +1328,15 @@ html[data-theme="light"] .topbar {
 .cmd-list {
   max-height: min(56vh, 460px);
   overflow-y: auto;
+  overflow-x: hidden;
   background: var(--surface-1);
 }
 
 .cmd-item {
   width: 100%;
+  max-width: 100%;
+  min-height: 64px;
+  box-sizing: border-box;
   appearance: none;
   -webkit-appearance: none;
   border: 0;
@@ -1306,12 +1389,14 @@ html[data-theme="light"] .topbar {
   font-size: var(--text-sm);
   font-weight: 500;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .cmd-item-desc {
   font-size: var(--text-xs);
   color: var(--text-tertiary);
   margin-top: 2px;
+  overflow-wrap: anywhere;
 }
 
 .cmd-item-shortcut {
@@ -1428,6 +1513,13 @@ ${pyg_light}
   }
 }
 
+@media (max-width: 1100px) {
+  .help-card .metrics-grid,
+  .help-card .metrics-section:first-child .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .container {
@@ -1475,6 +1567,11 @@ ${pyg_light}
   }
 
   .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .help-card .metrics-grid,
+  .help-card .metrics-section:first-child .metrics-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1550,16 +1647,19 @@ ${pyg_light}
       <span class="sub">v${version}</span>
     </div>
     <div class="top-actions">
-      <button class="btn ghost" id="theme-toggle" aria-label="Toggle theme">
+      <button class="btn ghost" id="theme-toggle" aria-label="Toggle theme" title="Toggle theme (T)">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="5"/>
           <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
         </svg>
       </button>
-      <button class="btn hotkey" id="cmd-btn">
+      <button class="btn hotkey" id="help-btn" aria-label="Open help" title="Open help (⌘I)">
+        <span>⌘I</span>
+      </button>
+      <button class="btn hotkey" id="cmd-btn" aria-label="Open command palette" title="Open command palette (⌘K)">
         <span>⌘K</span>
       </button>
-      <button class="btn primary" id="export-btn">
+      <button class="btn primary" id="export-btn" aria-label="Export report as JSON" title="Export report (⌘E)">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5-5m0 0L7 8m5-5v12"/>
         </svg>
@@ -1588,6 +1688,9 @@ ${pyg_light}
     <span class="footer-sep">•</span>
     <span>commands</span>
     <span class="footer-kbd">⌘K</span>
+    <span class="footer-sep">•</span>
+    <span>help</span>
+    <span class="footer-kbd">⌘I</span>
     <span class="footer-sep">•</span>
     <span>theme</span>
     <span class="footer-kbd">T</span>
@@ -1625,6 +1728,102 @@ ${pyg_light}
   </div>
 </div>
 
+<!-- Help Modal -->
+<div class="metrics-modal" id="help-modal">
+  <div class="metrics-card help-card">
+    <div class="metrics-header">
+      <h3>Help & Support</h3>
+      <button class="metrics-close" id="help-close" aria-label="Close help">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="metrics-body">
+      <div class="metrics-section">
+        <div class="metrics-section-title">Quick Shortcuts</div>
+        <div class="metrics-grid">
+          <div class="metric-item">
+            <div class="metric-label">Command Palette</div>
+            <div class="metric-badge info">⌘K / Ctrl+K</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">Search</div>
+            <div class="metric-badge info">/</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">Toggle Theme</div>
+            <div class="metric-badge info">T</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">Close Overlays</div>
+            <div class="metric-badge info">Esc</div>
+          </div>
+        </div>
+      </div>
+      <div class="metrics-section">
+        <div class="metrics-section-title">Project Links</div>
+        <div class="metrics-grid">
+          <div class="metric-item metric-link-item">
+            <a
+              class="help-link"
+              href="${repository_url}"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="${repository_url}"
+            >
+              <span class="help-link-main">
+                <span class="help-link-title">Open Repository</span>
+                <span class="help-link-meta">github.com/orenlab/codeclone</span>
+              </span>
+              <svg class="icon help-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M7 17L17 7"/>
+                <path d="M8 7h9v9"/>
+              </svg>
+            </a>
+          </div>
+          <div class="metric-item metric-link-item">
+            <a
+              class="help-link"
+              href="${issues_url}"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="${issues_url}"
+            >
+              <span class="help-link-main">
+                <span class="help-link-title">Open Issues</span>
+                <span class="help-link-meta">github.com/orenlab/codeclone/issues</span>
+              </span>
+              <svg class="icon help-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M7 17L17 7"/>
+                <path d="M8 7h9v9"/>
+              </svg>
+            </a>
+          </div>
+          <div class="metric-item metric-link-item">
+            <a
+              class="help-link"
+              href="${docs_url}"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="${docs_url}"
+            >
+              <span class="help-link-main">
+                <span class="help-link-title">Open Docs</span>
+                <span class="help-link-meta">github.com/orenlab/codeclone/docs</span>
+              </span>
+              <svg class="icon help-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M7 17L17 7"/>
+                <path d="M8 7h9v9"/>
+              </svg>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast Container -->
 <div class="toast-container" id="toast-container"></div>
 
@@ -1640,7 +1839,8 @@ ${pyg_light}
     commandPaletteOpen: false,
     chartVisible: false,
     stats: {},
-    currentMetrics: null
+    currentMetrics: null,
+    helpModalOpen: false
   };
 
   // ========== Theme ==========
@@ -1704,7 +1904,9 @@ ${pyg_light}
     function formatPercent(value) {
       const raw = String(value || '').trim();
       if (!raw) return '';
-      return raw.endsWith('%') ? raw : raw + '%';
+      const normalized = raw.replace(/%+$$/u, '');
+      if (!normalized) return '';
+      return normalized + '%';
     }
 
     // Секция: Общая информация
@@ -1863,8 +2065,28 @@ ${pyg_light}
     if (!modal) return;
 
     modal.classList.remove('active');
-    document.body.style.overflow = '';
+    if (!state.helpModalOpen) {
+      document.body.style.overflow = '';
+    }
     state.currentMetrics = null;
+  }
+
+  function openHelpModal() {
+    const modal = $$('#help-modal');
+    if (!modal) return;
+    modal.classList.add('active');
+    state.helpModalOpen = true;
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeHelpModal() {
+    const modal = $$('#help-modal');
+    if (!modal) return;
+    modal.classList.remove('active');
+    state.helpModalOpen = false;
+    if (!state.currentMetrics) {
+      document.body.style.overflow = '';
+    }
   }
 
   function scrollToSection(sectionId) {
@@ -1895,6 +2117,13 @@ ${pyg_light}
       desc: 'Switch between dark and light mode',
       shortcut: 'T',
       action: toggleTheme
+    },
+    {
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 115.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
+      title: 'Open Help',
+      desc: 'Open shortcuts and support links',
+      shortcut: '⌘I',
+      action: openHelpModal
     },
     {
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5-5m0 0L7 8m5-5v12"/></svg>',
@@ -2038,8 +2267,11 @@ ${pyg_light}
       }
 
       list.innerHTML = filtered
-        .map(
-          (c, i) =>
+        .map((c, i) => {
+          const safeTitle = escapeHtml(c.title || '');
+          const safeDesc = c.desc ? escapeHtml(c.desc) : '';
+          const safeShortcut = c.shortcut ? escapeHtml(c.shortcut) : '';
+          return (
             '<button type="button" class="cmd-item" role="option" aria-selected="false" data-cmd-index="' +
             i +
             '">' +
@@ -2048,15 +2280,16 @@ ${pyg_light}
             '</div>' +
             '<div class="cmd-item-text">' +
             '<div class="cmd-item-title">' +
-            c.title +
+            safeTitle +
             '</div>' +
-            (c.desc ? '<div class="cmd-item-desc">' + c.desc + '</div>' : '') +
+            (safeDesc ? '<div class="cmd-item-desc">' + safeDesc + '</div>' : '') +
             '</div>' +
-            (c.shortcut
-              ? '<div class="cmd-item-shortcut">' + c.shortcut + '</div>'
+            (safeShortcut
+              ? '<div class="cmd-item-shortcut">' + safeShortcut + '</div>'
               : '') +
             '</button>'
-        )
+          );
+        })
         .join('');
 
       getItems().forEach((el) => {
@@ -2088,6 +2321,10 @@ ${pyg_light}
 
     window.openCommandPalette = openCommandPalette;
     window.closeCommandPalette = closeCommandPalette;
+
+    $$('#help-btn')?.addEventListener('click', () => {
+      openHelpModal();
+    });
 
     btn?.addEventListener('click', () => {
       if (state.commandPaletteOpen) {
@@ -2335,6 +2572,17 @@ ${pyg_light}
       return;
     }
 
+    // Help: ⌘I or Ctrl+I
+    if ((e.metaKey || e.ctrlKey) && key === 'i') {
+      e.preventDefault();
+      if (state.helpModalOpen) {
+        closeHelpModal();
+      } else {
+        openHelpModal();
+      }
+      return;
+    }
+
     if (state.commandPaletteOpen) {
       if (key === 'escape') {
         e.preventDefault();
@@ -2387,7 +2635,9 @@ ${pyg_light}
 
     // Escape - Close modals
     if (key === 'escape') {
-      if (state.currentMetrics) {
+      if (state.helpModalOpen) {
+        closeHelpModal();
+      } else if (state.currentMetrics) {
         closeMetricsModal();
       } else {
         const search = getPrimarySearchInput();
@@ -2455,6 +2705,12 @@ ${pyg_light}
   $$('#metrics-modal')?.addEventListener('click', (e) => {
     if (e.target.id === 'metrics-modal') {
       closeMetricsModal();
+    }
+  });
+  $$('#help-close')?.addEventListener('click', closeHelpModal);
+  $$('#help-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'help-modal') {
+      closeHelpModal();
     }
   });
 
