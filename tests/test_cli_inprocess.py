@@ -158,9 +158,9 @@ def _baseline_payload(
         meta_schema = (
             BASELINE_SCHEMA_VERSION if schema_version is None else schema_version
         )
-        impl = sys.implementation.name
-        prefix = "cp" if impl == "cpython" else impl[:2]
-        default_tag = f"{prefix}{sys.version_info.major}{sys.version_info.minor}"
+        default_tag = baseline._current_python_tag()
+        version_suffix = f"{sys.version_info.major}{sys.version_info.minor}"
+        prefix = default_tag.removesuffix(version_suffix)
         version_tag: str | None = None
         if python_version:
             ver_match = re.fullmatch(r"(\d+)\.(\d+)(?:\.\d+)?", python_version.strip())

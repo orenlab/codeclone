@@ -11,18 +11,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from .baseline import Baseline
+from .baseline import Baseline, _current_python_tag
 
 
 def _current_python_version() -> str:
     return f"{sys.version_info.major}.{sys.version_info.minor}"
-
-
-def _current_python_tag() -> str:
-    impl = sys.implementation.name
-    major, minor = sys.version_info[:2]
-    prefix = "cp" if impl == "cpython" else impl[:2]
-    return f"{prefix}{major}{minor}"
 
 
 def _build_report_meta(

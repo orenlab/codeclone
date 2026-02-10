@@ -21,7 +21,7 @@ from rich.theme import Theme
 from . import __version__
 from . import ui_messages as ui
 from ._cli_args import build_parser
-from ._cli_meta import _build_report_meta, _current_python_tag
+from ._cli_meta import _build_report_meta
 from ._cli_paths import _validate_output_path
 from ._cli_summary import _print_summary
 from ._report_types import GroupItem
@@ -29,6 +29,7 @@ from .baseline import (
     BASELINE_UNTRUSTED_STATUSES,
     Baseline,
     BaselineStatus,
+    _current_python_tag,
     coerce_baseline_status,
 )
 from .cache import Cache, CacheEntry, FileStat, file_stat_signature
