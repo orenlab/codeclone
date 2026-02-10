@@ -5,7 +5,7 @@ focused on architectural duplication.
 Copyright (c) 2026 Den Rozhnovskiy
 Licensed under the MIT License.
 """
-# ruff: noqa: E501,RUF001,W293
+# ruff: noqa: E501
 
 from __future__ import annotations
 
@@ -951,7 +951,7 @@ html[data-theme="light"] .topbar {
   background: var(--accent-muted);
 }
 
-/* Modal для метрик - НОВОЕ */
+/* Metrics modal */
 .metrics-modal {
   position: fixed;
   top: 0;
@@ -1711,7 +1711,7 @@ ${pyg_light}
   </div>
 </div>
 
-<!-- Metrics Modal Template - НОВОЕ -->
+<!-- Metrics modal template -->
 <div class="metrics-modal" id="metrics-modal">
   <div class="metrics-card">
     <div class="metrics-header">
@@ -1723,7 +1723,7 @@ ${pyg_light}
       </button>
     </div>
     <div class="metrics-body" id="metrics-body">
-      <!-- Динамически заполняется JavaScript -->
+      <!-- Filled dynamically by JavaScript -->
     </div>
   </div>
 </div>
@@ -1890,7 +1890,7 @@ ${pyg_light}
       .replaceAll("'", '&#39;');
   }
 
-  // ========== Metrics Modal - НОВОЕ ==========
+  // ========== Metrics Modal ==========
   function openMetricsModal(groupData) {
     const modal = $$('#metrics-modal');
     const body = $$('#metrics-body');
@@ -1898,7 +1898,7 @@ ${pyg_light}
 
     state.currentMetrics = groupData;
 
-    // Формируем HTML с метриками
+    // Build HTML with metrics
     let html = '';
 
     function formatPercent(value) {
@@ -1909,11 +1909,11 @@ ${pyg_light}
       return normalized + '%';
     }
 
-    // Секция: Общая информация
+    // Section: General information
     html += '<div class="metrics-section">';
     html += '<div class="metrics-section-title">General Information</div>';
     html += '<div class="metrics-grid">';
-    
+
     if (groupData.clone_size) {
       html += '<div class="metric-item">';
       html += '<div class="metric-label">';
@@ -1936,7 +1936,7 @@ ${pyg_light}
 
     html += '</div></div>';
 
-    // Секция: Технические метрики
+    // Section: Technical metrics
     html += '<div class="metrics-section">';
     html += '<div class="metrics-section-title">Technical Metrics</div>';
     html += '<div class="metrics-grid">';
@@ -1974,7 +1974,7 @@ ${pyg_light}
 
     html += '</div></div>';
 
-    // Секция: Качественные метрики
+    // Section: Quality metrics
     if (groupData.assert_ratio || groupData.hint_label || groupData.hint_confidence || groupData.merged_regions) {
       html += '<div class="metrics-section">';
       html += '<div class="metrics-section-title">Quality Metrics</div>';
@@ -2026,7 +2026,7 @@ ${pyg_light}
       html += '</div></div>';
     }
 
-    // Секция: Статистика assert'ов
+    // Section: Assert statistics
     if (groupData.consecutive_asserts || groupData.boilerplate_asserts) {
       html += '<div class="metrics-section">';
       html += '<div class="metrics-section-title">Assert Statistics</div>';
@@ -2671,7 +2671,7 @@ ${pyg_light}
     });
   });
 
-  // ========== Metrics Button Handler - НОВОЕ ==========
+  // ========== Metrics Button Handler ==========
   $$$$('[data-metrics-btn]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2679,7 +2679,7 @@ ${pyg_light}
       const groupEl = $$('.group[data-group-id="' + groupId + '"]');
       if (!groupEl) return;
 
-      // Собираем все data-атрибуты группы
+      // Collect all group data-* attributes
       const groupData = {
         id: groupId,
         clone_size: groupEl.getAttribute('data-clone-size'),
@@ -2700,7 +2700,7 @@ ${pyg_light}
     });
   });
 
-  // ========== Metrics Modal Close Handler - НОВОЕ ==========
+  // ========== Metrics Modal Close Handler ==========
   $$('#metrics-close')?.addEventListener('click', closeMetricsModal);
   $$('#metrics-modal')?.addEventListener('click', (e) => {
     if (e.target.id === 'metrics-modal') {

@@ -435,3 +435,20 @@ def test_cache_secret_non_posix(
     secret_path = cache_path.parent / ".cache_secret"
     assert secret_path.exists()
     assert isinstance(cache.secret, bytes)
+
+
+def test_cache_secret_read_failure_graceful_ignore(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    secret_path = cache_path.parent / ".cache_secret"
+    secret_path.unlink()
+    secret_path.mkdir()
+
+    loaded = Cache(cache_path)
+    loaded.load()
+    assert loaded.load_warning is not None
+    assert "signature mismatch" in loaded.load_warning
+    assert loaded.data["files"] == {}

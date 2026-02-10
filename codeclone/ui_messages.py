@@ -10,6 +10,11 @@ MARKER_CONTRACT_ERROR = "[error]CONTRACT ERROR:[/error]"
 MARKER_GATING_FAILURE = "[error]GATING FAILURE:[/error]"
 MARKER_INTERNAL_ERROR = "[error]INTERNAL ERROR:[/error]"
 
+REPORT_BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN = "Assert pattern block"
+REPORT_BLOCK_GROUP_COMPARE_NOTE_N_WAY = (
+    "N-way group: each block matches {peer_count} peers in this group."
+)
+
 HELP_VERSION = "Print the CodeClone version and exit."
 HELP_ROOT = "Project root directory to scan."
 HELP_MIN_LOC = "Minimum Lines of Code (LOC) to consider."
@@ -234,3 +239,7 @@ def fmt_internal_error(error: object, *, issues_url: str = ISSUES_URL) -> str:
         f"Unexpected exception: {error}\n"
         f"Please report: {issues_url}"
     )
+
+
+def fmt_report_block_group_compare_note_n_way(*, peer_count: int) -> str:
+    return REPORT_BLOCK_GROUP_COMPARE_NOTE_N_WAY.format(peer_count=peer_count)

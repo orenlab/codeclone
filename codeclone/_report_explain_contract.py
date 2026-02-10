@@ -10,6 +10,11 @@ from __future__ import annotations
 
 from typing import Final
 
+from .ui_messages import (
+    REPORT_BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN,
+    fmt_report_block_group_compare_note_n_way,
+)
+
 BLOCK_PATTERN_REPEATED_STMT_HASH: Final = "repeated_stmt_hash"
 
 BLOCK_HINT_ASSERT_ONLY: Final = "assert_only"
@@ -20,11 +25,9 @@ BLOCK_HINT_ASSERT_ONLY_NOTE: Final = (
     "This often occurs in test suites."
 )
 
-BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN: Final = "Assert pattern block"
-
 
 def format_n_way_group_compare_note(*, peer_count: int) -> str:
-    return f"N-way group: each block matches {peer_count} peers in this group."
+    return fmt_report_block_group_compare_note_n_way(peer_count=peer_count)
 
 
 def resolve_group_compare_note(*, group_arity: int, peer_count: int) -> str | None:
@@ -35,7 +38,7 @@ def resolve_group_compare_note(*, group_arity: int, peer_count: int) -> str | No
 
 def resolve_group_display_name(*, hint_id: str | None) -> str | None:
     if hint_id == BLOCK_HINT_ASSERT_ONLY:
-        return BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN
+        return REPORT_BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN
     return None
 
 

@@ -85,8 +85,8 @@ class Cache:
     def __init__(self, path: str | Path, *, max_size_bytes: int | None = None):
         self.path = Path(path)
         self.data: CacheData = {"version": self._CACHE_VERSION, "files": {}}
-        self.secret = self._load_secret()
         self.load_warning: str | None = None
+        self.secret = self._load_secret()
         self.max_size_bytes = (
             MAX_CACHE_SIZE_BYTES if max_size_bytes is None else max_size_bytes
         )
@@ -98,7 +98,15 @@ class Cache:
         # ~/.cache/codeclone/.cache_secret
         secret_path = self.path.parent / ".cache_secret"
         if secret_path.exists():
-            return secret_path.read_bytes()
+            try:
+                return secret_path.read_bytes()
+            except OSError:
+                # Use a runtime-only secret so cache signature verification fails
+                # gracefully instead of crashing on unreadable secret files.
+                self.load_warning = (
+                    "Cache secret unreadable; signed cache may be ignored."
+                )
+                return secrets.token_bytes(32)
         else:
             secret = secrets.token_bytes(32)
             try:
