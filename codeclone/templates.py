@@ -411,10 +411,10 @@ html[data-theme="light"] .topbar {
 }
 
 .meta-content {
-  max-height: 500px;
+  max-height: none;
   opacity: 1;
-  overflow: hidden;
-  transition: max-height var(--transition-slow), opacity var(--transition-base);
+  overflow: visible;
+  transition: opacity var(--transition-base);
 }
 
 .meta-content.collapsed {
