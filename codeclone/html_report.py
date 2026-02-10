@@ -22,6 +22,7 @@ from ._html_snippets import (
 )
 from ._report_explain_contract import format_group_instance_compare_meta
 from ._report_types import GroupItem, GroupMap
+from .contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
 from .templates import FONT_CSS_URL, REPORT_TEMPLATE
 
 __all__ = [
@@ -661,4 +662,7 @@ def build_html_report(
         segment_section=segment_section,
         icon_theme=ICONS["theme"],
         font_css_url=FONT_CSS_URL,
+        repository_url=_escape_attr(REPOSITORY_URL),
+        issues_url=_escape_attr(ISSUES_URL),
+        docs_url=_escape_attr(DOCS_URL),
     )
