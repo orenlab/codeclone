@@ -1,23 +1,16 @@
 from __future__ import annotations
 
 import json
-import sys
 from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 
+from codeclone.baseline import _current_python_tag
 from codeclone.extractor import extract_units_from_source
 from codeclone.normalize import NormalizationConfig
 from codeclone.report import build_block_groups, build_groups
 from codeclone.scanner import module_name_from_path
-
-
-def _runtime_python_tag() -> str:
-    impl = sys.implementation.name
-    major, minor = sys.version_info[:2]
-    prefix = "cp" if impl == "cpython" else impl[:2]
-    return f"{prefix}{major}{minor}"
 
 
 def _detect_group_keys(project_root: Path) -> tuple[list[str], list[str]]:
@@ -53,7 +46,9 @@ def test_detector_output_matches_golden_fixture() -> None:
     expected_python_tag = expected_meta.get("python_tag")
     assert isinstance(expected_python_tag, str)
 
-    runtime_tag = _runtime_python_tag()
+    # Golden fixture is a detector snapshot for one canonical Python tag.
+    # Cross-version behavior is covered by contract/invariant tests.
+    runtime_tag = _current_python_tag()
     if runtime_tag != expected_python_tag:
         pytest.skip(
             "Golden detector fixture is canonicalized for "
