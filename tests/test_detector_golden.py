@@ -1,13 +1,34 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
+
+import pytest
 
 from codeclone.extractor import extract_units_from_source
 from codeclone.normalize import NormalizationConfig
 from codeclone.report import build_block_groups, build_groups
 from codeclone.scanner import module_name_from_path
+
+CANONICAL_GOLDEN_PYTHON_TAG = "cp313"
+
+
+def _runtime_python_tag() -> str:
+    impl = sys.implementation.name
+    major, minor = sys.version_info[:2]
+    prefix = "cp" if impl == "cpython" else impl[:2]
+    return f"{prefix}{major}{minor}"
+
+
+pytestmark = pytest.mark.skipif(
+    _runtime_python_tag() != CANONICAL_GOLDEN_PYTHON_TAG,
+    reason=(
+        "Golden detector fixture is canonicalized for "
+        f"{CANONICAL_GOLDEN_PYTHON_TAG}; run contract/invariant tests on other tags."
+    ),
+)
 
 
 def _detect_group_keys(project_root: Path) -> tuple[list[str], list[str]]:
