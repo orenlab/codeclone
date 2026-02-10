@@ -12,13 +12,13 @@ import ast
 from pathlib import Path
 
 from ._report_explain_contract import (
-    BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN,
     BLOCK_HINT_ASSERT_ONLY,
     BLOCK_HINT_ASSERT_ONLY_LABEL,
     BLOCK_HINT_ASSERT_ONLY_NOTE,
     BLOCK_HINT_CONFIDENCE_DETERMINISTIC,
     BLOCK_PATTERN_REPEATED_STMT_HASH,
-    format_n_way_group_compare_note,
+    resolve_group_compare_note,
+    resolve_group_display_name,
 )
 from ._report_types import GroupItem, GroupMap
 
@@ -238,12 +238,14 @@ def build_block_group_facts(block_groups: GroupMap) -> dict[str, dict[str, str]]
         peer_count = max(0, group_arity - 1)
         facts["group_arity"] = str(group_arity)
         facts["instance_peer_count"] = str(peer_count)
-        if group_arity > 2:
-            facts["group_compare_note"] = format_n_way_group_compare_note(
-                peer_count=peer_count
-            )
-        if facts.get("hint") == BLOCK_HINT_ASSERT_ONLY:
-            facts["group_display_name"] = BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN
+        compare_note = resolve_group_compare_note(
+            group_arity=group_arity, peer_count=peer_count
+        )
+        if compare_note is not None:
+            facts["group_compare_note"] = compare_note
+        group_display_name = resolve_group_display_name(hint_id=facts.get("hint"))
+        if group_display_name is not None:
+            facts["group_display_name"] = group_display_name
         facts_by_group[group_key] = facts
 
     return facts_by_group

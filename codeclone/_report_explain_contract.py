@@ -13,18 +13,30 @@ from typing import Final
 BLOCK_PATTERN_REPEATED_STMT_HASH: Final = "repeated_stmt_hash"
 
 BLOCK_HINT_ASSERT_ONLY: Final = "assert_only"
-BLOCK_HINT_ASSERT_ONLY_LABEL: Final = "assert-only block"
+BLOCK_HINT_ASSERT_ONLY_LABEL: Final = "Assert-only block"
 BLOCK_HINT_CONFIDENCE_DETERMINISTIC: Final = "deterministic"
 BLOCK_HINT_ASSERT_ONLY_NOTE: Final = (
     "This block clone consists entirely of assert-only statements. "
     "This often occurs in test suites."
 )
 
-BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN: Final = "assert pattern block"
+BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN: Final = "Assert pattern block"
 
 
 def format_n_way_group_compare_note(*, peer_count: int) -> str:
     return f"N-way group: each block matches {peer_count} peers in this group."
+
+
+def resolve_group_compare_note(*, group_arity: int, peer_count: int) -> str | None:
+    if group_arity > 2:
+        return format_n_way_group_compare_note(peer_count=peer_count)
+    return None
+
+
+def resolve_group_display_name(*, hint_id: str | None) -> str | None:
+    if hint_id == BLOCK_HINT_ASSERT_ONLY:
+        return BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN
+    return None
 
 
 def format_group_instance_compare_meta(
