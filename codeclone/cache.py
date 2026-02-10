@@ -126,7 +126,14 @@ class Cache:
         return hmac.new(self.secret, data_str.encode(), hashlib.sha256).hexdigest()
 
     def load(self) -> None:
-        if not self.path.exists():
+        try:
+            exists = self.path.exists()
+        except OSError as e:
+            self.load_warning = f"Cache unreadable; ignoring cache: {e}"
+            self.data = {"version": self._CACHE_VERSION, "files": {}}
+            return
+
+        if not exists:
             return
 
         try:
@@ -172,6 +179,9 @@ class Cache:
             self.data = cast(CacheData, cast(object, data))
             self.load_warning = None
 
+        except OSError as e:
+            self.load_warning = f"Cache unreadable; ignoring cache: {e}"
+            self.data = {"version": self._CACHE_VERSION, "files": {}}
         except (json.JSONDecodeError, ValueError):
             self.load_warning = "Cache corrupted; ignoring cache."
             self.data = {"version": self._CACHE_VERSION, "files": {}}

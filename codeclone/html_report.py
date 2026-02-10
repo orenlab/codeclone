@@ -572,6 +572,8 @@ def build_html_report(
         meta_rows.append(("Cache path", meta.get("cache_path")))
     if "cache_used" in meta:
         meta_rows.append(("Cache used", meta.get("cache_used")))
+    if "files_skipped_source_io" in meta:
+        meta_rows.append(("Source IO skipped", meta.get("files_skipped_source_io")))
 
     meta_attrs = " ".join(
         [
@@ -599,6 +601,10 @@ def build_html_report(
             f'data-baseline-status="{_escape_attr(meta.get("baseline_status"))}"',
             f'data-cache-path="{_escape_attr(meta.get("cache_path"))}"',
             f'data-cache-used="{_escape_attr(_meta_display(meta.get("cache_used")))}"',
+            (
+                'data-files-skipped-source-io="'
+                f'{_escape_attr(meta.get("files_skipped_source_io"))}"'
+            ),
         ]
     )
 

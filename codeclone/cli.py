@@ -95,6 +95,7 @@ class ProcessingResult:
     blocks: list[BlockUnit] | None = None
     segments: list[SegmentUnit] | None = None
     stat: FileStat | None = None
+    error_kind: str | None = None
 
 
 def process_file(
@@ -128,17 +129,31 @@ def process_file(
                     filepath=filepath,
                     success=False,
                     error=f"File too large: {st_size} bytes (max {MAX_FILE_SIZE})",
+                    error_kind="file_too_large",
                 )
         except OSError as e:
             return ProcessingResult(
-                filepath=filepath, success=False, error=f"Cannot stat file: {e}"
+                filepath=filepath,
+                success=False,
+                error=f"Cannot stat file: {e}",
+                error_kind="stat_error",
             )
 
         try:
             source = Path(filepath).read_text("utf-8")
         except UnicodeDecodeError as e:
             return ProcessingResult(
-                filepath=filepath, success=False, error=f"Encoding error: {e}"
+                filepath=filepath,
+                success=False,
+                error=f"Encoding error: {e}",
+                error_kind="source_read_error",
+            )
+        except OSError as e:
+            return ProcessingResult(
+                filepath=filepath,
+                success=False,
+                error=f"Cannot read file: {e}",
+                error_kind="source_read_error",
             )
 
         stat = file_stat_signature(filepath)
@@ -167,6 +182,7 @@ def process_file(
             filepath=filepath,
             success=False,
             error=f"Unexpected error: {type(e).__name__}: {e}",
+            error_kind="unexpected_error",
         )
 
 
@@ -217,7 +233,7 @@ def _main_impl() -> None:
                 ui.fmt_contract_error(ui.ERR_ROOT_NOT_FOUND.format(path=root_path))
             )
             sys.exit(ExitCode.CONTRACT_ERROR)
-    except Exception as e:
+    except OSError as e:
         console.print(ui.fmt_contract_error(ui.ERR_INVALID_ROOT_PATH.format(error=e)))
         sys.exit(ExitCode.CONTRACT_ERROR)
 
@@ -234,6 +250,7 @@ def _main_impl() -> None:
             label="HTML",
             console=console,
             invalid_message=ui.fmt_invalid_output_extension,
+            invalid_path_message=ui.fmt_invalid_output_path,
         )
     if args.json_out:
         json_out_path = _validate_output_path(
@@ -242,6 +259,7 @@ def _main_impl() -> None:
             label="JSON",
             console=console,
             invalid_message=ui.fmt_invalid_output_extension,
+            invalid_path_message=ui.fmt_invalid_output_path,
         )
     if args.text_out:
         text_out_path = _validate_output_path(
@@ -250,6 +268,7 @@ def _main_impl() -> None:
             label="text",
             console=console,
             invalid_message=ui.fmt_invalid_output_extension,
+            invalid_path_message=ui.fmt_invalid_output_path,
         )
 
     # Initialize Cache
@@ -377,12 +396,13 @@ def _main_impl() -> None:
                         )
                     else:
                         files_to_process.append(fp)
-    except Exception as e:
+    except OSError as e:
         console.print(ui.fmt_contract_error(ui.ERR_SCAN_FAILED.format(error=e)))
         sys.exit(ExitCode.CONTRACT_ERROR)
 
     total_files = len(files_to_process)
     failed_files = []
+    source_read_failures: list[str] = []
 
     # Processing phase
     if total_files > 0:
@@ -406,7 +426,10 @@ def _main_impl() -> None:
                     all_segments.extend([asdict(s) for s in result.segments])
             else:
                 files_skipped += 1
-                failed_files.append(f"{result.filepath}: {result.error}")
+                failure = f"{result.filepath}: {result.error}"
+                failed_files.append(failure)
+                if result.error_kind == "source_read_error":
+                    source_read_failures.append(failure)
 
         def process_sequential(with_progress: bool) -> None:
             nonlocal files_skipped
@@ -536,6 +559,11 @@ def _main_impl() -> None:
         if len(failed_files) > 10:
             console.print(f"  ... and {len(failed_files) - 10} more")
 
+    gating_mode = args.fail_on_new or args.fail_threshold >= 0
+    source_read_contract_failure = (
+        bool(source_read_failures) and gating_mode and not args.update_baseline
+    )
+
     # Analysis phase
     suppressed_segment_groups = 0
     if args.quiet:
@@ -570,12 +598,21 @@ def _main_impl() -> None:
     segment_clones_count = len(segment_groups)
 
     # Baseline Logic
-    baseline_path = Path(args.baseline).expanduser().resolve()
+    baseline_arg_path = Path(args.baseline).expanduser()
+    try:
+        baseline_path = baseline_arg_path.resolve()
+        baseline_exists = baseline_path.exists()
+    except OSError as e:
+        console.print(
+            ui.fmt_contract_error(
+                ui.fmt_invalid_baseline_path(path=baseline_arg_path, error=e)
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
 
     # If user didn't specify path, the default is ./codeclone.baseline.json.
 
     baseline = Baseline(baseline_path)
-    baseline_exists = baseline_path.exists()
     baseline_loaded = False
     baseline_status = BaselineStatus.MISSING
     baseline_failure_code: ExitCode | None = None
@@ -629,7 +666,15 @@ def _main_impl() -> None:
             schema_version=BASELINE_SCHEMA_VERSION,
             generator_version=__version__,
         )
-        new_baseline.save()
+        try:
+            new_baseline.save()
+        except OSError as e:
+            console.print(
+                ui.fmt_contract_error(
+                    ui.fmt_baseline_write_failed(path=baseline_path, error=e)
+                )
+            )
+            sys.exit(ExitCode.CONTRACT_ERROR)
         console.print(ui.fmt_path(ui.SUCCESS_BASELINE_UPDATED, baseline_path))
         baseline = new_baseline
         baseline_loaded = True
@@ -638,14 +683,20 @@ def _main_impl() -> None:
         # When updating, we don't fail on new, we just saved the new state.
         # But we might still want to print the summary.
 
+    try:
+        report_cache_path = cache_path.resolve()
+    except OSError:
+        report_cache_path = cache_path
+
     report_meta = _build_report_meta(
         codeclone_version=__version__,
         baseline_path=baseline_path,
         baseline=baseline,
         baseline_loaded=baseline_loaded,
         baseline_status=baseline_status.value,
-        cache_path=cache_path.resolve(),
+        cache_path=report_cache_path,
         cache_used=cache.load_warning is None,
+        files_skipped_source_io=len(source_read_failures),
     )
 
     # Diff
@@ -682,11 +733,23 @@ def _main_impl() -> None:
             output_notice_printed = True
         console.print(message)
 
+    def _write_report_output(*, out: Path, content: str, label: str) -> None:
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(content, "utf-8")
+        except OSError as e:
+            console.print(
+                ui.fmt_contract_error(
+                    ui.fmt_report_write_failed(label=label, path=out, error=e)
+                )
+            )
+            sys.exit(ExitCode.CONTRACT_ERROR)
+
     if html_out_path:
         out = html_out_path
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(
-            build_html_report(
+        _write_report_output(
+            out=out,
+            content=build_html_report(
                 func_groups=func_groups,
                 block_groups=block_groups_report,
                 segment_groups=segment_groups,
@@ -696,38 +759,50 @@ def _main_impl() -> None:
                 context_lines=3,
                 max_snippet_lines=220,
             ),
-            "utf-8",
+            label="HTML",
         )
         html_report_path = str(out)
         _print_output_notice(ui.fmt_path(ui.INFO_HTML_REPORT_SAVED, out))
 
     if json_out_path:
         out = json_out_path
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(
-            to_json_report(
+        _write_report_output(
+            out=out,
+            content=to_json_report(
                 func_groups,
                 block_groups_report,
                 segment_groups,
                 report_meta,
             ),
-            "utf-8",
+            label="JSON",
         )
         _print_output_notice(ui.fmt_path(ui.INFO_JSON_REPORT_SAVED, out))
 
     if text_out_path:
         out = text_out_path
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(
-            to_text_report(
+        _write_report_output(
+            out=out,
+            content=to_text_report(
                 meta=report_meta,
                 func_groups=func_groups,
                 block_groups=block_groups_report,
                 segment_groups=segment_groups,
             ),
-            "utf-8",
+            label="text",
         )
         _print_output_notice(ui.fmt_path(ui.INFO_TEXT_REPORT_SAVED, out))
+
+    if source_read_contract_failure:
+        console.print(
+            ui.fmt_contract_error(
+                ui.fmt_unreadable_source_in_gating(count=len(source_read_failures))
+            )
+        )
+        for failure in source_read_failures[:10]:
+            console.print(f"  • {failure}")
+        if len(source_read_failures) > 10:
+            console.print(f"  ... and {len(source_read_failures) - 10} more")
+        sys.exit(ExitCode.CONTRACT_ERROR)
 
     if baseline_failure_code is not None:
         console.print(ui.fmt_contract_error(ui.ERR_BASELINE_GATING_REQUIRES_TRUSTED))

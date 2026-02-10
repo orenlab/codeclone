@@ -147,6 +147,11 @@ def to_text_report(
         lines.append(f"Cache path: {_format_meta_text_value(meta.get('cache_path'))}")
     if "cache_used" in meta:
         lines.append(f"Cache used: {_format_meta_text_value(meta.get('cache_used'))}")
+    if "files_skipped_source_io" in meta:
+        lines.append(
+            "Source IO skipped: "
+            f"{_format_meta_text_value(meta.get('files_skipped_source_io'))}"
+        )
 
     sections = [
         ("FUNCTION CLONES", func_groups),

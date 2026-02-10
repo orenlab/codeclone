@@ -347,6 +347,50 @@ def test_cache_load_corrupted_json(tmp_path: Path) -> None:
     assert "corrupted" in cache.load_warning
 
 
+def test_cache_load_unreadable_stat_graceful_ignore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text('{"version":"1.0","files":{}}', "utf-8")
+    original_stat = Path.stat
+
+    def _raise_stat(self: Path, *args: object, **kwargs: object) -> os.stat_result:
+        if self == cache_path:
+            raise OSError("no stat")
+        return original_stat(self)
+
+    monkeypatch.setattr(Path, "stat", _raise_stat)
+    cache = Cache(cache_path)
+    cache.load()
+    assert cache.load_warning is not None
+    assert "unreadable" in cache.load_warning
+    assert cache.data["files"] == {}
+
+
+def test_cache_load_unreadable_read_graceful_ignore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text('{"version":"1.0","files":{}}', "utf-8")
+    original_read_text = Path.read_text
+
+    def _raise_read_text(
+        self: Path,
+        encoding: str | None = None,
+        errors: str | None = None,
+    ) -> str:
+        if self == cache_path:
+            raise OSError("no read")
+        return original_read_text(self, encoding=encoding, errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", _raise_read_text)
+    cache = Cache(cache_path)
+    cache.load()
+    assert cache.load_warning is not None
+    assert "unreadable" in cache.load_warning
+    assert cache.data["files"] == {}
+
+
 def test_cache_load_invalid_files_type(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)

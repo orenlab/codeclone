@@ -34,6 +34,11 @@ clone-detection algorithms (report-only UX/explainability improvements only).
 - Trusted/untrusted baseline behavior is deterministic:
   normal mode warns and compares against empty baseline;
   CI preset (`--ci`) fails fast on untrusted baseline (exit `2`).
+- In CI/gating modes (`--ci`, `--fail-on-new`, `--fail-threshold`), unreadable
+  source files are contract errors (exit `2`) to prevent incomplete analysis
+  from passing CI.
+- Exit-code priority is explicit: contract errors (`2`) override gating failures
+  (`3`) when both conditions are present.
 - Clone gating failures (`new clones`, `--fail-threshold`) use exit `3`.
 - Exit-code contract is explicit: `0` success, `2` contract error, `3` gating failure, `5` internal error.
 - CLI help includes canonical exit-code descriptions plus `Repository` / `Issues` / `Docs` links.

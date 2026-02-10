@@ -722,6 +722,60 @@ def test_cli_invalid_root_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     assert exc.value.code == 2
 
 
+def test_cli_unexpected_root_resolution_failure_is_internal(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def _boom(self: Path) -> Path:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(Path, "resolve", _boom)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, ["bad"])
+    assert exc.value.code == 5
+    out = capsys.readouterr().out
+    assert "INTERNAL ERROR:" in out
+
+
+def test_cli_unexpected_grouping_failure_is_internal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+
+    def _boom(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("boom")
+
+    _patch_parallel(monkeypatch)
+    monkeypatch.setattr(cli, "build_groups", _boom)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
+    assert exc.value.code == 5
+    out = capsys.readouterr().out
+    assert "INTERNAL ERROR:" in out
+
+
+def test_cli_unexpected_html_render_failure_is_internal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    html_out = tmp_path / "report.html"
+
+    def _boom(*_args: object, **_kwargs: object) -> str:
+        raise RuntimeError("render failed")
+
+    _patch_parallel(monkeypatch)
+    monkeypatch.setattr(cli, "build_html_report", _boom)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [str(tmp_path), "--html", str(html_out), "--no-progress"],
+        )
+    assert exc.value.code == 5
+    out = capsys.readouterr().out
+    assert "INTERNAL ERROR:" in out
+
+
 def test_cli_main_outputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1565,6 +1619,67 @@ def test_cli_output_extension_validation(
     assert expected in out
 
 
+def test_cli_output_path_resolve_error_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    html_out = tmp_path / "report.html"
+    original_resolve = Path.resolve
+
+    def _raise_resolve(
+        self: Path, strict: bool = False
+    ) -> Path:  # pragma: no cover - signature mirror
+        if self == html_out:
+            raise OSError("no resolve")
+        return original_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _raise_resolve)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, [str(tmp_path), "--html", str(html_out)])
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "CONTRACT ERROR:" in out
+    assert "Invalid HTML output path" in out
+
+
+def test_cli_report_write_error_is_contract_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    html_out = tmp_path / "report.html"
+    original_write_text = Path.write_text
+
+    def _raise_write_text(
+        self: Path,
+        data: str,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> int:
+        if self == html_out:
+            raise OSError("disk full")
+        return original_write_text(
+            self, data, encoding=encoding, errors=errors, newline=newline
+        )
+
+    monkeypatch.setattr(Path, "write_text", _raise_write_text)
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch, [str(tmp_path), "--html", str(html_out), "--no-progress"]
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "CONTRACT ERROR:" in out
+    assert "Failed to write HTML report" in out
+
+
 def test_cli_outputs_quiet_no_print(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1664,6 +1779,37 @@ def f2():
     out = capsys.readouterr().out
     assert "Baseline updated" in out
     assert baseline.exists()
+
+
+def test_cli_update_baseline_write_error_is_contract_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = tmp_path / "baseline.json"
+
+    def _raise_save(self: baseline.Baseline) -> None:
+        raise OSError("readonly fs")
+
+    monkeypatch.setattr(baseline.Baseline, "save", _raise_save)
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--baseline",
+                str(baseline_path),
+                "--update-baseline",
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "CONTRACT ERROR:" in out
+    assert "Failed to write baseline file" in out
 
 
 def test_cli_update_baseline_with_invalid_existing_file(
@@ -2268,6 +2414,35 @@ def test_cli_invalid_root(monkeypatch: pytest.MonkeyPatch) -> None:
     assert exc.value.code == 2
 
 
+def test_cli_invalid_baseline_path_error_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    original_resolve = Path.resolve
+
+    def _raise_resolve(
+        self: Path, strict: bool = False
+    ) -> Path:  # pragma: no cover - signature mirror
+        if self == baseline_path:
+            raise OSError("no resolve")
+        return original_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _raise_resolve)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [str(tmp_path), "--baseline", str(baseline_path), "--no-progress"],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "CONTRACT ERROR:" in out
+    assert "Invalid baseline path" in out
+
+
 def test_cli_discovery_cache_hit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2353,6 +2528,121 @@ def test_cli_discovery_skip_oserror(
         cache_hits = _summary_metric(out, "Cache hits")
         files_skipped = _summary_metric(out, "Files skipped")
     assert files_found == files_analyzed + cache_hits + files_skipped
+
+
+def test_cli_unreadable_source_normal_mode_warns_and_continues(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+
+    def _source_read_error(
+        fp: str, *_args: object, **_kwargs: object
+    ) -> cli.ProcessingResult:
+        return cli.ProcessingResult(
+            filepath=fp,
+            success=False,
+            error="Cannot read file: [Errno 13] Permission denied",
+            error_kind="source_read_error",
+        )
+
+    monkeypatch.setattr(cli, "process_file", _source_read_error)
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
+    out = capsys.readouterr().out
+    assert "Cannot read file" in out
+    assert "CONTRACT ERROR:" not in out
+    assert _summary_metric(out, "Files skipped") == 1
+
+
+def test_cli_unreadable_source_fails_in_ci_with_contract_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+
+    def _source_read_error(
+        fp: str, *_args: object, **_kwargs: object
+    ) -> cli.ProcessingResult:
+        return cli.ProcessingResult(
+            filepath=fp,
+            success=False,
+            error="Cannot read file: [Errno 13] Permission denied",
+            error_kind="source_read_error",
+        )
+
+    monkeypatch.setattr(cli, "process_file", _source_read_error)
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--ci",
+                "--baseline",
+                str(baseline_path),
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "CONTRACT ERROR:" in out
+    assert "could not be read in CI/gating mode" in out
+
+
+def test_cli_contract_error_priority_over_gating_failure_for_unreadable_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+
+    def _source_read_error(
+        fp: str, *_args: object, **_kwargs: object
+    ) -> cli.ProcessingResult:
+        return cli.ProcessingResult(
+            filepath=fp,
+            success=False,
+            error="Cannot read file: [Errno 13] Permission denied",
+            error_kind="source_read_error",
+        )
+
+    def _diff(
+        _self: object, _f: dict[str, object], _b: dict[str, object]
+    ) -> tuple[set[str], set[str]]:
+        return {"f1"}, set()
+
+    monkeypatch.setattr(cli, "process_file", _source_read_error)
+    monkeypatch.setattr(baseline.Baseline, "diff", _diff)
+    _patch_parallel(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--fail-on-new",
+                "--baseline",
+                str(baseline_path),
+                "--no-progress",
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "CONTRACT ERROR:" in out
+    assert "could not be read in CI/gating mode" in out
+    assert "GATING FAILURE:" not in out
 
 
 def test_cli_ci_discovery_cache_hit(
@@ -2463,14 +2753,20 @@ def test_cli_summary_no_color_has_no_ansi(
     assert "\x1b[" not in out
 
 
-def test_cli_scan_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_scan_failed_is_internal_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     def _boom(_root: str) -> Iterable[str]:
         raise RuntimeError("scan failed")
 
     monkeypatch.setattr(cli, "iter_py_files", _boom)
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, [str(tmp_path)])
-    assert exc.value.code == 2
+    assert exc.value.code == 5
+    out = capsys.readouterr().out
+    assert "INTERNAL ERROR:" in out
 
 
 def test_cli_failed_files_report(

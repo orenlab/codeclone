@@ -35,7 +35,7 @@ EXIT_CODE_DESCRIPTIONS: Final[tuple[tuple[ExitCode, str], ...]] = (
         ExitCode.CONTRACT_ERROR,
         (
             "contract error (baseline missing/untrusted, invalid output "
-            "extensions, incompatible versions)"
+            "extensions, incompatible versions, unreadable source files in CI/gating)"
         ),
     ),
     (

@@ -84,9 +84,23 @@ ERR_INVALID_OUTPUT_EXT = (
     "[error]Invalid {label} output extension: {path} "
     "(expected {expected_suffix}).[/error]"
 )
+ERR_INVALID_OUTPUT_PATH = (
+    "[error]Invalid {label} output path: {path} ({error}).[/error]"
+)
 ERR_ROOT_NOT_FOUND = "[error]Root path does not exist: {path}[/error]"
 ERR_INVALID_ROOT_PATH = "[error]Invalid root path: {error}[/error]"
 ERR_SCAN_FAILED = "[error]Scan failed: {error}[/error]"
+ERR_INVALID_BASELINE_PATH = "[error]Invalid baseline path: {path} ({error}).[/error]"
+ERR_BASELINE_WRITE_FAILED = (
+    "[error]Failed to write baseline file: {path} ({error}).[/error]"
+)
+ERR_REPORT_WRITE_FAILED = (
+    "[error]Failed to write {label} report: {path} ({error}).[/error]"
+)
+ERR_UNREADABLE_SOURCE_IN_GATING = (
+    "One or more source files could not be read in CI/gating mode.\n"
+    "Unreadable source files: {count}."
+)
 
 WARN_LEGACY_CACHE = (
     "[warning]Legacy cache file found at: {legacy_path}.[/warning]\n"
@@ -150,6 +164,26 @@ def fmt_invalid_output_extension(
     return ERR_INVALID_OUTPUT_EXT.format(
         label=label, path=path, expected_suffix=expected_suffix
     )
+
+
+def fmt_invalid_output_path(*, label: str, path: Path, error: object) -> str:
+    return ERR_INVALID_OUTPUT_PATH.format(label=label, path=path, error=error)
+
+
+def fmt_invalid_baseline_path(*, path: Path, error: object) -> str:
+    return ERR_INVALID_BASELINE_PATH.format(path=path, error=error)
+
+
+def fmt_baseline_write_failed(*, path: Path, error: object) -> str:
+    return ERR_BASELINE_WRITE_FAILED.format(path=path, error=error)
+
+
+def fmt_report_write_failed(*, label: str, path: Path, error: object) -> str:
+    return ERR_REPORT_WRITE_FAILED.format(label=label, path=path, error=error)
+
+
+def fmt_unreadable_source_in_gating(*, count: int) -> str:
+    return ERR_UNREADABLE_SOURCE_IN_GATING.format(count=count)
 
 
 def fmt_scanning_root(root: Path) -> str:

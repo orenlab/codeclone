@@ -185,7 +185,7 @@ and add `.cache/` to `.gitignore`.
 ## Exit Codes
 
 - `0` success
-- `2` contract error (baseline missing/untrusted, invalid output extensions, incompatible versions)
+- `2` contract error (baseline missing/untrusted, invalid output extensions, incompatible versions, unreadable source files in CI/gating modes)
 - `3` gating failure (new clones detected, threshold exceeded)
 - `5` internal error (unexpected exception; please report)
 

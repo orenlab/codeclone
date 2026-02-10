@@ -27,6 +27,7 @@ def _build_report_meta(
     baseline_status: str,
     cache_path: Path,
     cache_used: bool,
+    files_skipped_source_io: int,
 ) -> dict[str, object]:
     return {
         "codeclone_version": codeclone_version,
@@ -41,4 +42,5 @@ def _build_report_meta(
         "baseline_status": baseline_status,
         "cache_path": str(cache_path),
         "cache_used": cache_used,
+        "files_skipped_source_io": files_skipped_source_io,
     }

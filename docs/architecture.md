@@ -186,7 +186,7 @@ Baseline size guard is configurable via `--max-baseline-size-mb`.
 CLI exit code contract:
 
 - `0` success
-- `2` contract error (invalid arguments/output options or untrusted baseline in gating mode)
+- `2` contract error (invalid arguments/output options, untrusted baseline, or unreadable source files in gating mode)
 - `3` gating failure (`--ci` new clones, or `--fail-threshold` exceeded)
 - `5` unexpected internal error (reserved)
 

@@ -29,6 +29,7 @@ def _validate_output_path(
     label: str,
     console: Console,
     invalid_message: Callable[..., str],
+    invalid_path_message: Callable[..., str],
 ) -> Path:
     out = Path(path).expanduser()
     if out.suffix.lower() != expected_suffix:
@@ -38,4 +39,10 @@ def _validate_output_path(
             )
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
-    return out.resolve()
+    try:
+        return out.resolve()
+    except OSError as e:
+        console.print(
+            fmt_contract_error(invalid_path_message(label=label, path=out, error=e))
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
