@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import platform
+import shlex
+import sys
+import traceback
 from pathlib import Path
 
+from . import __version__
 from .contracts import ISSUES_URL
 
 BANNER_SUBTITLE = "[italic]Architectural duplication detector[/italic]"
@@ -38,8 +43,10 @@ HELP_NO_PROGRESS = "Disable the progress bar (recommended for CI logs)."
 HELP_NO_COLOR = "Disable ANSI colors in output."
 HELP_QUIET = "Minimize output (still shows warnings and errors)."
 HELP_VERBOSE = "Print detailed hash identifiers for new clones."
+HELP_DEBUG = "Print debug details (traceback and environment) on internal errors."
 
 SUMMARY_TITLE = "Analysis Summary"
+CLI_LAYOUT_WIDTH = 40
 SUMMARY_LABEL_FILES_FOUND = "Files found"
 SUMMARY_LABEL_FILES_ANALYZED = "Files analyzed"
 SUMMARY_LABEL_CACHE_HITS = "Cache hits"
@@ -267,12 +274,49 @@ def fmt_gating_failure(message: str) -> str:
     return f"{MARKER_GATING_FAILURE}\n{message}"
 
 
-def fmt_internal_error(error: object, *, issues_url: str = ISSUES_URL) -> str:
-    return (
-        f"{MARKER_INTERNAL_ERROR}\n"
-        f"Unexpected exception: {error}\n"
-        f"Please report: {issues_url}"
+def fmt_internal_error(
+    error: BaseException,
+    *,
+    issues_url: str = ISSUES_URL,
+    debug: bool = False,
+) -> str:
+    bug_report_url = issues_url.rstrip("/") + "/new?template=bug_report.yml"
+    error_name = type(error).__name__
+    error_text = str(error).strip() or "<no message>"
+    lines = [
+        MARKER_INTERNAL_ERROR,
+        "Unexpected exception.",
+        f"Reason: {error_name}: {error_text}",
+        "",
+        "Next steps:",
+        "- Re-run with --debug to include a traceback.",
+        f"- If this is reproducible, open an issue: {bug_report_url}.",
+        (
+            "- Attach: command line, CodeClone version, Python version, "
+            "and the report file if generated."
+        ),
+    ]
+    if not debug:
+        return "\n".join(lines)
+
+    traceback_lines = traceback.format_exception(
+        type(error), error, error.__traceback__
     )
+    command_line = shlex.join(sys.argv)
+    lines.extend(
+        [
+            "",
+            "DEBUG DETAILS",
+            f"Platform: {platform.platform()}",
+            f"Python: {sys.version.split()[0]}",
+            f"CodeClone: {__version__}",
+            f"Command: {command_line}",
+            f"CWD: {Path.cwd()}",
+            "Traceback:",
+            "".join(traceback_lines).rstrip(),
+        ]
+    )
+    return "\n".join(lines)
 
 
 def fmt_report_block_group_compare_note_n_way(*, peer_count: int) -> str:

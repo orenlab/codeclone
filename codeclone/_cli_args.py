@@ -172,4 +172,9 @@ def build_parser(version: str) -> argparse.ArgumentParser:
         action="store_true",
         help=ui.HELP_VERBOSE,
     )
+    out_group.add_argument(
+        "--debug",
+        action="store_true",
+        help=ui.HELP_DEBUG,
+    )
     return ap

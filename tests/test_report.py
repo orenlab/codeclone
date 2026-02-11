@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 
 import codeclone.report as report_mod
+from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.report import (
     GroupMap,
     build_block_group_facts,
@@ -261,16 +262,23 @@ def test_report_output_formats() -> None:
         ],
     }
     meta = {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "codeclone_version": "1.3.0",
         "python_version": "3.13",
+        "python_tag": "cp313",
         "baseline_path": "/tmp/codeclone.baseline.json",
         "baseline_fingerprint_version": "1",
         "baseline_schema_version": 1,
-        "baseline_python_version": "3.13",
+        "baseline_python_tag": "cp313",
+        "baseline_generator_name": "codeclone",
         "baseline_generator_version": "1.4.0",
+        "baseline_payload_sha256": "a" * 64,
+        "baseline_payload_sha256_verified": True,
         "baseline_loaded": True,
         "baseline_status": "ok",
         "cache_path": "/tmp/cache.json",
+        "cache_schema_version": "1.2",
+        "cache_status": "ok",
         "cache_used": True,
         "files_skipped_source_io": 0,
     }
@@ -286,14 +294,30 @@ def test_report_output_formats() -> None:
     expected_json = ["group_count"]
     expected_report = [
         '"meta"',
-        '"function_clones"',
+        '"groups"',
+        '"groups_split"',
+        '"group_item_layout"',
+        f'"report_schema_version": "{REPORT_SCHEMA_VERSION}"',
         '"baseline_schema_version": 1',
+        f'"baseline_payload_sha256": "{"a" * 64}"',
+        '"baseline_payload_sha256_verified": true',
+        '"cache_schema_version": "1.2"',
+        '"cache_status": "ok"',
         '"files_skipped_source_io": 0',
     ]
     expected_text = [
         "REPORT METADATA",
+        "Report schema version: 1.1",
+        "Python tag: cp313",
         "Baseline schema version: 1",
+        "Baseline generator name: codeclone",
+        f"Baseline payload sha256: {'a' * 64}",
+        "Baseline payload verified: true",
+        "Cache schema version: 1.2",
+        "Cache status: ok",
         "Source IO skipped: 0",
+        "FUNCTION CLONES (NEW) (groups=2)",
+        "FUNCTION CLONES (KNOWN) (groups=0)",
         "Clone group #1",
     ]
 
@@ -333,7 +357,7 @@ def test_report_json_deterministic_group_order() -> None:
     assert out_a == out_b
 
 
-def test_report_json_group_order_prefers_size_then_key() -> None:
+def test_report_json_group_order_is_lexicographic() -> None:
     groups = {
         "b": [
             {
@@ -372,7 +396,7 @@ def test_report_json_group_order_prefers_size_then_key() -> None:
     }
     payload = to_json_report(groups, {}, {}, {"codeclone_version": "1.3.0"})
     report_obj = json.loads(payload)
-    assert list(report_obj["function_clones"].keys()) == ["c", "a", "b"]
+    assert list(report_obj["groups"]["functions"].keys()) == ["a", "b", "c"]
 
 
 def test_report_json_deterministic_with_shuffled_units() -> None:
@@ -403,6 +427,220 @@ def test_report_json_deterministic_with_shuffled_units() -> None:
     out_a = to_json_report(groups_a, {}, {}, meta)
     out_b = to_json_report(groups_b, {}, {}, meta)
     assert out_a == out_b
+
+
+def test_report_json_compact_v11_contract() -> None:
+    groups = {
+        "g1": [
+            {
+                "qualname": "m:a",
+                "filepath": "z.py",
+                "start_line": 3,
+                "end_line": 4,
+                "loc": 2,
+                "stmt_count": 1,
+                "fingerprint": "fp-z",
+                "loc_bucket": "0-19",
+            },
+            {
+                "qualname": "m:b",
+                "filepath": "a.py",
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+                "stmt_count": 1,
+                "fingerprint": "fp-a",
+                "loc_bucket": "0-19",
+            },
+        ]
+    }
+    payload = json.loads(to_json_report(groups, {}, {}, {"codeclone_version": "1.4.0"}))
+
+    assert payload["meta"]["report_schema_version"] == REPORT_SCHEMA_VERSION
+    assert payload["files"] == ["a.py", "z.py"]
+    assert set(payload["groups"]) == {"functions", "blocks", "segments"}
+    assert payload["groups_split"] == {
+        "functions": {"new": ["g1"], "known": []},
+        "blocks": {"new": [], "known": []},
+        "segments": {"new": [], "known": []},
+    }
+    assert payload["meta"]["groups_counts"] == {
+        "functions": {"total": 1, "new": 1, "known": 0},
+        "blocks": {"total": 0, "new": 0, "known": 0},
+        "segments": {"total": 0, "new": 0, "known": 0},
+    }
+    assert payload["group_item_layout"] == {
+        "functions": [
+            "file_i",
+            "qualname",
+            "start",
+            "end",
+            "loc",
+            "stmt_count",
+            "fingerprint",
+            "loc_bucket",
+        ],
+        "blocks": ["file_i", "qualname", "start", "end", "size"],
+        "segments": [
+            "file_i",
+            "qualname",
+            "start",
+            "end",
+            "size",
+            "segment_hash",
+            "segment_sig",
+        ],
+    }
+    assert "function_clones" not in payload
+    assert "block_clones" not in payload
+    assert "segment_clones" not in payload
+
+    function_rows = payload["groups"]["functions"]["g1"]
+    assert function_rows == [
+        [0, "m:b", 1, 2, 2, 1, "fp-a", "0-19"],
+        [1, "m:a", 3, 4, 2, 1, "fp-z", "0-19"],
+    ]
+
+
+def test_report_json_block_records_do_not_repeat_group_hash() -> None:
+    block_group_key = "hash-a|hash-b|hash-c|hash-d"
+    payload = json.loads(
+        to_json_report(
+            {},
+            {
+                block_group_key: [
+                    {
+                        "qualname": "m:f",
+                        "filepath": "a.py",
+                        "start_line": 10,
+                        "end_line": 13,
+                        "size": 4,
+                    }
+                ]
+            },
+            {},
+            {"codeclone_version": "1.4.0"},
+        )
+    )
+    rows = payload["groups"]["blocks"][block_group_key]
+    assert rows == [[0, "m:f", 10, 13, 4]]
+
+
+def test_report_json_groups_split_trusted_baseline() -> None:
+    func_groups = {
+        "func-known": [
+            {
+                "qualname": "m:fk",
+                "filepath": "a.py",
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+                "stmt_count": 1,
+                "fingerprint": "fp-k",
+                "loc_bucket": "0-19",
+            }
+        ],
+        "func-new": [
+            {
+                "qualname": "m:fn",
+                "filepath": "b.py",
+                "start_line": 3,
+                "end_line": 4,
+                "loc": 2,
+                "stmt_count": 1,
+                "fingerprint": "fp-n",
+                "loc_bucket": "0-19",
+            }
+        ],
+    }
+    block_groups = {
+        "block-known": [
+            {
+                "qualname": "m:bk",
+                "filepath": "a.py",
+                "start_line": 10,
+                "end_line": 13,
+                "size": 4,
+            }
+        ],
+        "block-new": [
+            {
+                "qualname": "m:bn",
+                "filepath": "b.py",
+                "start_line": 20,
+                "end_line": 23,
+                "size": 4,
+            }
+        ],
+    }
+    segment_groups = {
+        "segment-new": [
+            {
+                "qualname": "m:sn",
+                "filepath": "b.py",
+                "start_line": 30,
+                "end_line": 35,
+                "size": 6,
+                "segment_hash": "seg-h",
+                "segment_sig": "seg-s",
+            }
+        ]
+    }
+    payload = json.loads(
+        to_json_report(
+            func_groups,
+            block_groups,
+            segment_groups,
+            {"baseline_loaded": True, "baseline_status": "ok"},
+            new_function_group_keys={"func-new"},
+            new_block_group_keys={"block-new"},
+            new_segment_group_keys={"segment-new"},
+        )
+    )
+    split = payload["groups_split"]
+    assert split["functions"] == {"new": ["func-new"], "known": ["func-known"]}
+    assert split["blocks"] == {"new": ["block-new"], "known": ["block-known"]}
+    assert split["segments"] == {"new": ["segment-new"], "known": []}
+    for section_name in ("functions", "blocks", "segments"):
+        new_keys = set(split[section_name]["new"])
+        known_keys = set(split[section_name]["known"])
+        group_keys = set(payload["groups"][section_name].keys())
+        assert new_keys.isdisjoint(known_keys)
+        assert new_keys | known_keys == group_keys
+        counts = payload["meta"]["groups_counts"][section_name]
+        assert counts["total"] == len(group_keys)
+        assert counts["new"] == len(new_keys)
+        assert counts["known"] == len(known_keys)
+
+
+def test_report_json_groups_split_untrusted_baseline() -> None:
+    func_groups = {
+        "func-a": [
+            {
+                "qualname": "m:f",
+                "filepath": "a.py",
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+                "stmt_count": 1,
+                "fingerprint": "fp-a",
+                "loc_bucket": "0-19",
+            }
+        ]
+    }
+    payload = json.loads(
+        to_json_report(
+            func_groups,
+            {},
+            {},
+            {"baseline_loaded": False, "baseline_status": "integrity_failed"},
+            new_function_group_keys=set(),
+        )
+    )
+    split = payload["groups_split"]
+    assert split["functions"] == {"new": ["func-a"], "known": []}
+    assert split["blocks"] == {"new": [], "known": []}
+    assert split["segments"] == {"new": [], "known": []}
 
 
 def test_text_report_deterministic_group_order() -> None:
@@ -443,13 +681,116 @@ def test_to_text_report_handles_missing_meta_fields() -> None:
         block_groups={},
         segment_groups={},
     )
-    assert "CodeClone version: n/a" in text_out
-    assert "Baseline status: n/a" in text_out
-    assert "Cache path:" not in text_out
-    assert "Cache used:" not in text_out
-    assert "FUNCTION CLONES\n(none)" in text_out
-    assert "BLOCK CLONES\n(none)" in text_out
-    assert "SEGMENT CLONES\n(none)" in text_out
+    assert "Report schema version: (none)" in text_out
+    assert "CodeClone version: (none)" in text_out
+    assert "Baseline status: (none)" in text_out
+    assert "Cache path: (none)" in text_out
+    assert "Cache used: (none)" in text_out
+    assert "Note: baseline is untrusted; all groups are treated as NEW." in text_out
+    assert "FUNCTION CLONES (NEW) (groups=0)\n(none)" in text_out
+    assert "FUNCTION CLONES (KNOWN) (groups=0)\n(none)" in text_out
+    assert "BLOCK CLONES (NEW) (groups=0)\n(none)" in text_out
+    assert "BLOCK CLONES (KNOWN) (groups=0)\n(none)" in text_out
+    assert "SEGMENT CLONES (NEW) (groups=0)\n(none)" in text_out
+    assert "SEGMENT CLONES (KNOWN) (groups=0)\n(none)" in text_out
+
+
+def test_to_text_report_uses_section_specific_metric_labels() -> None:
+    text_out = to_text_report(
+        meta={"codeclone_version": "1.4.0"},
+        func_groups={
+            "f": [
+                {
+                    "qualname": "pkg:f",
+                    "filepath": "a.py",
+                    "start_line": 1,
+                    "end_line": 10,
+                    "loc": 11,
+                }
+            ]
+        },
+        block_groups={
+            "b": [
+                {
+                    "qualname": "pkg:b",
+                    "filepath": "b.py",
+                    "start_line": 20,
+                    "end_line": 23,
+                    "size": 4,
+                }
+            ]
+        },
+        segment_groups={
+            "s": [
+                {
+                    "qualname": "pkg:s",
+                    "filepath": "c.py",
+                    "start_line": 30,
+                    "end_line": 35,
+                    "size": 6,
+                }
+            ]
+        },
+    )
+    assert "loc=11" in text_out
+    assert "size=4" in text_out
+    assert "size=6" in text_out
+
+
+def test_to_text_report_trusted_baseline_split_sections() -> None:
+    text_out = to_text_report(
+        meta={"baseline_loaded": True, "baseline_status": "ok"},
+        func_groups={
+            "func-known": [
+                {
+                    "qualname": "pkg:known",
+                    "filepath": "a.py",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "loc": 2,
+                }
+            ],
+            "func-new": [
+                {
+                    "qualname": "pkg:new",
+                    "filepath": "b.py",
+                    "start_line": 3,
+                    "end_line": 4,
+                    "loc": 2,
+                }
+            ],
+        },
+        block_groups={},
+        segment_groups={},
+        new_function_group_keys={"func-new"},
+    )
+    assert "Note: baseline is untrusted" not in text_out
+    assert "FUNCTION CLONES (NEW) (groups=1)" in text_out
+    assert "FUNCTION CLONES (KNOWN) (groups=1)" in text_out
+    assert "pkg:new b.py:3-4 loc=2" in text_out
+    assert "pkg:known a.py:1-2 loc=2" in text_out
+
+
+def test_to_text_report_untrusted_baseline_known_sections_empty() -> None:
+    text_out = to_text_report(
+        meta={"baseline_loaded": False, "baseline_status": "mismatch_schema_version"},
+        func_groups={
+            "func-a": [
+                {
+                    "qualname": "pkg:a",
+                    "filepath": "a.py",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "loc": 2,
+                }
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+    )
+    assert "Note: baseline is untrusted; all groups are treated as NEW." in text_out
+    assert "FUNCTION CLONES (NEW) (groups=1)" in text_out
+    assert "FUNCTION CLONES (KNOWN) (groups=0)\n(none)" in text_out
 
 
 def test_segment_groups_internal_only() -> None:

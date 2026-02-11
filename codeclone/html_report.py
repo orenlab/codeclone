@@ -8,7 +8,7 @@ Licensed under the MIT License.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 
 from . import __version__
 from ._html_escape import _escape_attr, _escape_html, _meta_display
@@ -50,6 +50,8 @@ def build_html_report(
     block_groups: GroupMap,
     segment_groups: GroupMap,
     block_group_facts: dict[str, dict[str, str]],
+    new_function_group_keys: Collection[str] | None = None,
+    new_block_group_keys: Collection[str] | None = None,
     report_meta: Mapping[str, object] | None = None,
     title: str = "CodeClone Report",
     context_lines: int = 3,
@@ -68,6 +70,21 @@ def build_html_report(
         if not normalized:
             return None
         return normalized.rsplit("/", maxsplit=1)[-1]
+
+    meta = dict(report_meta or {})
+    baseline_loaded = bool(meta.get("baseline_loaded"))
+    baseline_status = str(meta.get("baseline_status", "")).strip().lower()
+
+    if baseline_loaded and baseline_status == "ok":
+        baseline_split_note = (
+            "Split is based on baseline: known duplicates are already "
+            "recorded in baseline, new duplicates are absent from baseline."
+        )
+    else:
+        baseline_split_note = (
+            "Baseline is not loaded or not trusted: "
+            "all duplicates are treated as new versus an empty baseline."
+        )
 
     func_sorted = sorted(
         func_groups.items(), key=lambda kv: (*_group_sort_key(kv[1]), kv[0])
@@ -280,6 +297,8 @@ def build_html_report(
         section_title: str,
         groups: list[tuple[str, list[GroupItem]]],
         pill_cls: str,
+        *,
+        novelty_by_group: Mapping[str, str] | None = None,
     ) -> str:
         if not groups:
             return ""
@@ -304,8 +323,12 @@ def build_html_report(
         def _group_span_size(items: list[GroupItem]) -> int:
             return max((_item_span_size(item) for item in items), default=0)
 
+        section_novelty = novelty_by_group or {}
+        has_novelty_filter = bool(section_novelty)
+
         out: list[str] = [
-            f'<section id="{section_id}" class="section" data-section="{section_id}">',
+            f'<section id="{section_id}" class="section" data-section="{section_id}" '
+            f'data-has-novelty-filter="{"true" if has_novelty_filter else "false"}">',
             '<div class="section-title">',
             f"<h2>{_escape_html(section_title)} "
             f'<span class="count-pill" data-count-pill="{section_id}">'
@@ -434,10 +457,12 @@ def build_html_report(
                     f'<button class="btn ghost" type="button" '
                     f'data-metrics-btn="{_escape_attr(group_id)}">Info</button>'
                 )
+            group_novelty = section_novelty.get(gkey, "all")
             out.append(
                 f'<div class="group" data-group="{section_id}" '
                 f'data-group-index="{idx}" '
                 f'data-group-key="{_escape_attr(gkey)}" '
+                f'data-novelty="{_escape_attr(group_novelty)}" '
                 f'data-search="{search_blob_escaped}"{block_group_attrs}>'
             )
 
@@ -546,37 +571,102 @@ def build_html_report(
 </div>
 """
 
-    func_section = render_section(
-        "functions", "Function clones", func_sorted, "pill-func"
+    new_function_key_set = set(new_function_group_keys or ())
+    new_block_key_set = set(new_block_group_keys or ())
+    function_novelty = {
+        group_key: ("new" if group_key in new_function_key_set else "known")
+        for group_key, _ in func_sorted
+    }
+    block_novelty = {
+        group_key: ("new" if group_key in new_block_key_set else "known")
+        for group_key, _ in block_sorted
+    }
+    novelty_enabled = bool(function_novelty) or bool(block_novelty)
+    total_new_groups = sum(1 for value in function_novelty.values() if value == "new")
+    total_new_groups += sum(1 for value in block_novelty.values() if value == "new")
+    total_known_groups = sum(
+        1 for value in function_novelty.values() if value == "known"
     )
-    block_section = render_section("blocks", "Block clones", block_sorted, "pill-block")
+    total_known_groups += sum(1 for value in block_novelty.values() if value == "known")
+    default_novelty = "new" if total_new_groups > 0 else "known"
+    global_novelty_html = ""
+    if novelty_enabled:
+        global_novelty_html = (
+            '<section class="global-novelty" id="global-novelty-controls" '
+            f'data-default-novelty="{default_novelty}">'
+            '<div class="global-novelty-head">'
+            "<h2>Duplicate Scope</h2>"
+            '<div class="novelty-tabs" role="tablist" '
+            'aria-label="Baseline split filter">'
+            '<button class="btn novelty-tab" type="button" '
+            'data-global-novelty="new">'
+            "New duplicates "
+            f'<span class="novelty-count">{total_new_groups}</span>'
+            "</button>"
+            '<button class="btn novelty-tab" type="button" '
+            'data-global-novelty="known">'
+            "Known duplicates "
+            f'<span class="novelty-count">{total_known_groups}</span>'
+            "</button>"
+            "</div>"
+            "</div>"
+            f'<p class="novelty-note">{_escape_html(baseline_split_note)}</p>'
+            "</section>"
+        )
+
+    func_section = render_section(
+        "functions",
+        "Function clones",
+        func_sorted,
+        "pill-func",
+        novelty_by_group=function_novelty,
+    )
+    block_section = render_section(
+        "blocks",
+        "Block clones",
+        block_sorted,
+        "pill-block",
+        novelty_by_group=block_novelty,
+    )
     segment_section = render_section(
         "segments", "Segment clones", segment_sorted, "pill-segment"
     )
-
-    meta = dict(report_meta or {})
     baseline_path_value = meta.get("baseline_path")
     meta_rows: list[tuple[str, object]] = [
+        ("Report schema", meta.get("report_schema_version")),
         ("CodeClone", meta.get("codeclone_version", __version__)),
         ("Python", meta.get("python_version")),
         ("Baseline file", _path_basename(baseline_path_value)),
-        ("Baseline path", baseline_path_value),
         ("Baseline fingerprint", meta.get("baseline_fingerprint_version")),
         ("Baseline schema", meta.get("baseline_schema_version")),
         ("Baseline Python tag", meta.get("baseline_python_tag")),
+        ("Baseline generator name", meta.get("baseline_generator_name")),
         ("Baseline generator version", meta.get("baseline_generator_version")),
+        ("Baseline payload sha256", meta.get("baseline_payload_sha256")),
+        (
+            "Baseline payload verified",
+            meta.get("baseline_payload_sha256_verified"),
+        ),
         ("Baseline loaded", meta.get("baseline_loaded")),
         ("Baseline status", meta.get("baseline_status")),
+        ("Source IO skipped", meta.get("files_skipped_source_io")),
+        ("Baseline path", baseline_path_value),
     ]
     if "cache_path" in meta:
         meta_rows.append(("Cache path", meta.get("cache_path")))
+    if "cache_schema_version" in meta:
+        meta_rows.append(("Cache schema", meta.get("cache_schema_version")))
+    if "cache_status" in meta:
+        meta_rows.append(("Cache status", meta.get("cache_status")))
     if "cache_used" in meta:
         meta_rows.append(("Cache used", meta.get("cache_used")))
-    if "files_skipped_source_io" in meta:
-        meta_rows.append(("Source IO skipped", meta.get("files_skipped_source_io")))
 
     meta_attrs = " ".join(
         [
+            (
+                'data-report-schema-version="'
+                f'{_escape_attr(meta.get("report_schema_version"))}"'
+            ),
             (
                 'data-codeclone-version="'
                 f'{_escape_attr(meta.get("codeclone_version", __version__))}"'
@@ -594,12 +684,29 @@ def build_html_report(
                 f'{_escape_attr(meta.get("baseline_python_tag"))}"'
             ),
             (
+                'data-baseline-generator-name="'
+                f'{_escape_attr(meta.get("baseline_generator_name"))}"'
+            ),
+            (
                 'data-baseline-generator-version="'
                 f'{_escape_attr(meta.get("baseline_generator_version"))}"'
+            ),
+            (
+                'data-baseline-payload-sha256="'
+                f'{_escape_attr(meta.get("baseline_payload_sha256"))}"'
+            ),
+            (
+                'data-baseline-payload-verified="'
+                f'{_escape_attr(_meta_display(meta.get("baseline_payload_sha256_verified")))}"'
             ),
             f'data-baseline-loaded="{_escape_attr(_meta_display(meta.get("baseline_loaded")))}"',
             f'data-baseline-status="{_escape_attr(meta.get("baseline_status"))}"',
             f'data-cache-path="{_escape_attr(meta.get("cache_path"))}"',
+            (
+                'data-cache-schema-version="'
+                f'{_escape_attr(meta.get("cache_schema_version"))}"'
+            ),
+            f'data-cache-status="{_escape_attr(meta.get("cache_status"))}"',
             f'data-cache-used="{_escape_attr(_meta_display(meta.get("cache_used")))}"',
             (
                 'data-files-skipped-source-io="'
@@ -610,14 +717,22 @@ def build_html_report(
 
     def _meta_item_class(label: str) -> str:
         cls = ["meta-item"]
-        if label in {"Baseline path", "Cache path"}:
+        if label in {"Baseline path", "Cache path", "Baseline payload sha256"}:
             cls.append("meta-item-wide")
-        if label in {"Baseline loaded", "Cache used"}:
+        if label in {
+            "Baseline payload verified",
+            "Baseline loaded",
+            "Cache used",
+        }:
             cls.append("meta-item-boolean")
         return " ".join(cls)
 
     def _meta_value_html(label: str, value: object) -> str:
-        if label in {"Baseline loaded", "Cache used"} and isinstance(value, bool):
+        if label in {
+            "Baseline payload verified",
+            "Baseline loaded",
+            "Cache used",
+        } and isinstance(value, bool):
             badge_cls = "meta-bool-true" if value else "meta-bool-false"
             text = "true" if value else "false"
             return f'<span class="meta-bool {badge_cls}">{text}</span>'
@@ -661,6 +776,7 @@ def build_html_report(
         version=__version__,
         pyg_dark=pyg_dark,
         pyg_light=pyg_light,
+        global_novelty_html=global_novelty_html,
         report_meta_html=report_meta_html,
         empty_state_html=empty_state_html,
         func_section=func_section,

@@ -133,6 +133,7 @@ def test_cli_help_text_consistency(
     assert "Legacy alias for --cache-path" in out
     assert "--max-baseline-size-mb MB" in out
     assert "--max-cache-size-mb MB" in out
+    assert "--debug" in out
     assert "CI preset: --fail-on-new --no-color --quiet." in out
     assert "total clone groups (function +" in out
     assert "block) exceed this number" in out
@@ -164,7 +165,48 @@ def test_cli_internal_error_marker(
     assert exc.value.code == 5
     out = capsys.readouterr().out
     assert "INTERNAL ERROR:" in out
-    assert "Please report:" in out
+    assert "Unexpected exception." in out
+    assert "Reason: RuntimeError: boom" in out
+    assert "Next steps:" in out
+    assert "Re-run with --debug to include a traceback." in out
+    assert f"{ISSUES_URL}/new?template=bug_report.yml" in out
+    assert "Traceback:" not in out
+
+
+def test_cli_internal_error_debug_flag_includes_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def _boom() -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "_main_impl", _boom)
+    monkeypatch.setattr(sys, "argv", ["codeclone", "--debug"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 5
+    out = capsys.readouterr().out
+    assert "INTERNAL ERROR:" in out
+    assert "DEBUG DETAILS" in out
+    assert "Traceback:" in out
+    assert "Command: codeclone --debug" in out
+
+
+def test_cli_internal_error_debug_env_includes_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def _boom() -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "_main_impl", _boom)
+    monkeypatch.setenv("CODECLONE_DEBUG", "1")
+    monkeypatch.setattr(sys, "argv", ["codeclone"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 5
+    out = capsys.readouterr().out
+    assert "INTERNAL ERROR:" in out
+    assert "DEBUG DETAILS" in out
+    assert "Traceback:" in out
 
 
 def test_argument_parser_contract_error_marker_for_invalid_args(

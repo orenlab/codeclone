@@ -13,7 +13,12 @@ import pytest
 import codeclone.baseline as baseline
 from codeclone import __version__, cli
 from codeclone.cache import Cache, file_stat_signature
-from codeclone.contracts import BASELINE_FINGERPRINT_VERSION, BASELINE_SCHEMA_VERSION
+from codeclone.contracts import (
+    BASELINE_FINGERPRINT_VERSION,
+    BASELINE_SCHEMA_VERSION,
+    CACHE_VERSION,
+    REPORT_SCHEMA_VERSION,
+)
 from codeclone.errors import CacheError
 
 
@@ -330,6 +335,13 @@ def _prepare_source_and_baseline(tmp_path: Path) -> tuple[Path, Path]:
         python_version=_current_py_minor(),
     )
     return src, baseline_path
+
+
+def _prepare_single_source_cache(tmp_path: Path) -> tuple[Path, Path, Cache]:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    cache_path = tmp_path / "cache.json"
+    return src, cache_path, Cache(cache_path)
 
 
 def _source_read_error_result(filepath: str) -> cli.ProcessingResult:
@@ -679,6 +691,61 @@ def test_cli_no_legacy_warning_when_paths_match(
     assert "Legacy cache file found at" not in out
 
 
+@pytest.mark.parametrize(
+    ("load_warning", "expected_status"),
+    [(None, "ok"), ("bad cache", "invalid_type")],
+)
+def test_cli_cache_status_string_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    load_warning: str | None,
+    expected_status: str,
+) -> None:
+    _src, baseline_path = _prepare_source_and_baseline(tmp_path)
+    json_out = tmp_path / "report.json"
+
+    class _CacheStub:
+        def __init__(self, _path: Path, **_kwargs: object) -> None:
+            self.load_warning = load_warning
+            self.load_status = "not-a-cache-status"
+            self.cache_schema_version = "1.2"
+
+        def load(self) -> None:
+            return None
+
+        def get_file_entry(self, _fp: str) -> None:
+            return None
+
+        def put_file_entry(
+            self,
+            _fp: str,
+            _stat: object,
+            _units: object,
+            _blocks: object,
+            _segments: object,
+        ) -> None:
+            return None
+
+        def save(self) -> None:
+            return None
+
+    monkeypatch.setattr(cli, "Cache", _CacheStub)
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
+    payload = json.loads(json_out.read_text("utf-8"))
+    assert payload["meta"]["cache_status"] == expected_status
+
+
 def test_cli_main_progress_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -874,10 +941,15 @@ def test_cli_reports_include_audit_metadata_ok(
     assert meta["baseline_fingerprint_version"] == BASELINE_FINGERPRINT_VERSION
     assert meta["baseline_schema_version"] == BASELINE_SCHEMA_VERSION
     assert meta["baseline_generator_version"] == __version__
+    assert isinstance(meta["baseline_payload_sha256"], str)
+    assert meta["baseline_payload_sha256_verified"] is True
     assert meta["baseline_path"] == str(baseline_path.resolve())
-    assert "function_clones" in payload
-    assert "block_clones" in payload
-    assert "segment_clones" in payload
+    assert payload["meta"]["report_schema_version"] == REPORT_SCHEMA_VERSION
+    assert "files" in payload
+    assert "groups" in payload
+    assert "group_item_layout" in payload
+    assert set(payload["groups"]) == {"functions", "blocks", "segments"}
+    assert set(payload["group_item_layout"]) == {"functions", "blocks", "segments"}
 
     text = text_out.read_text("utf-8")
     assert "REPORT METADATA" in text
@@ -887,6 +959,7 @@ def test_cli_reports_include_audit_metadata_ok(
     html = html_out.read_text("utf-8")
     assert "Report Provenance" in html
     assert 'data-baseline-status="ok"' in html
+    assert 'data-baseline-payload-verified="true"' in html
     assert "Baseline schema" in html
 
 
@@ -914,6 +987,8 @@ def test_cli_reports_include_audit_metadata_missing_baseline(
     assert meta["baseline_loaded"] is False
     assert meta["baseline_fingerprint_version"] is None
     assert meta["baseline_schema_version"] is None
+    assert meta["baseline_payload_sha256"] is None
+    assert meta["baseline_payload_sha256_verified"] is False
 
 
 def test_cli_reports_include_audit_metadata_fingerprint_mismatch(
@@ -1533,14 +1608,11 @@ def test_cli_reports_cache_used_false_on_warning(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
+    src, cache_path, cache = _prepare_single_source_cache(tmp_path)
     cache.put_file_entry(str(src), {"mtime_ns": 1, "size": 10}, [], [], [])
     cache.save()
     data = json.loads(cache_path.read_text("utf-8"))
-    data["_signature"] = "bad"
+    data["sig"] = "bad"
     cache_path.write_text(json.dumps(data), "utf-8")
 
     baseline_path = _write_baseline(
@@ -1567,6 +1639,8 @@ def test_cli_reports_cache_used_false_on_warning(
     payload = json.loads(json_out.read_text("utf-8"))
     meta = payload["meta"]
     assert meta["cache_used"] is False
+    assert meta["cache_status"] == "integrity_failed"
+    assert meta["cache_schema_version"] == CACHE_VERSION
 
 
 def test_cli_reports_cache_too_large_respects_max_size_flag(
@@ -1605,6 +1679,41 @@ def test_cli_reports_cache_too_large_respects_max_size_flag(
     payload = json.loads(json_out.read_text("utf-8"))
     meta = payload["meta"]
     assert meta["cache_used"] is False
+    assert meta["cache_status"] == "too_large"
+    assert meta["cache_schema_version"] is None
+
+
+def test_cli_reports_cache_meta_when_cache_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    json_out = tmp_path / "report.json"
+    cache_path = tmp_path / "missing-cache.json"
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--cache-path",
+            str(cache_path),
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
+    payload = json.loads(json_out.read_text("utf-8"))
+    meta = payload["meta"]
+    assert meta["cache_used"] is False
+    assert meta["cache_status"] == "missing"
+    assert meta["cache_schema_version"] is None
 
 
 @pytest.mark.parametrize(
@@ -2359,7 +2468,7 @@ def test_cli_cache_warning(
     cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 1}, [], [], [])
     cache.save()
     data = json.loads(cache_path.read_text("utf-8"))
-    data["_signature"] = "bad"
+    data["sig"] = "bad"
     cache_path.write_text(json.dumps(data), "utf-8")
 
     _patch_parallel(monkeypatch)
@@ -2707,12 +2816,7 @@ def test_cli_report_meta_cache_path_resolve_oserror_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    baseline_path = _write_baseline(
-        tmp_path / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
-    )
+    _src, baseline_path = _prepare_source_and_baseline(tmp_path)
     cache_path = tmp_path / "cache_for_meta.json"
     json_out = tmp_path / "report.json"
 
@@ -2750,10 +2854,7 @@ def test_cli_ci_discovery_cache_hit(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
+    src, cache_path, cache = _prepare_single_source_cache(tmp_path)
     stat = file_stat_signature(str(src))
     cache.put_file_entry(
         str(src),

@@ -14,8 +14,8 @@ from typing import Final
 BASELINE_SCHEMA_VERSION: Final = "1.0"
 BASELINE_FINGERPRINT_VERSION: Final = "1"
 
-CACHE_VERSION: Final = "1.1"
-REPORT_SCHEMA_VERSION: Final = "1.0"
+CACHE_VERSION: Final = "1.2"
+REPORT_SCHEMA_VERSION: Final = "1.1"
 
 
 class ExitCode(IntEnum):

@@ -425,6 +425,7 @@ html[data-theme="light"] .topbar {
 .meta-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-flow: row dense;
   gap: 14px;
   padding: 10px 16px 16px;
 }
@@ -544,6 +545,81 @@ html[data-theme="light"] .topbar {
 
 .toolbar-right {
   justify-content: flex-end;
+}
+
+.novelty-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.global-novelty {
+  margin-top: 14px;
+  margin-bottom: 18px;
+  padding: 14px 16px 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow: var(--elevation-1);
+}
+
+.global-novelty-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.global-novelty-head h2 {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.novelty-tab {
+  height: var(--control-height-sm);
+  padding: 0 10px;
+  font-size: var(--text-xs);
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: var(--surface-0);
+  color: var(--text-secondary);
+}
+
+.novelty-tab:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.novelty-tab.is-active {
+  background: var(--accent-subtle);
+  border-color: color-mix(in oklab, var(--accent-primary) 45%, var(--border-default) 55%);
+  color: var(--accent-primary);
+}
+
+.novelty-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--surface-2) 90%, var(--surface-0) 10%);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1;
+}
+
+.novelty-note {
+  margin: 10px 2px 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.4;
 }
 
 /* Search */
@@ -717,7 +793,7 @@ html[data-theme="light"] .topbar {
   flex-shrink: 0;
 }
 
-/* Единственный основной бейдж - количество клонов */
+/* Primary badge: clone instances count */
 .clone-count-badge {
   display: inline-flex;
   align-items: center;
@@ -1549,6 +1625,10 @@ ${pyg_light}
     justify-content: flex-start;
   }
 
+  .global-novelty-head {
+    align-items: flex-start;
+  }
+
   .search-box {
     width: 100%;
   }
@@ -1573,6 +1653,10 @@ ${pyg_light}
   .help-card .metrics-grid,
   .help-card .metrics-section:first-child .metrics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .global-novelty {
+    padding: 12px;
   }
 
   .items {
@@ -1671,6 +1755,7 @@ ${pyg_light}
 
 <div class="container">
   ${report_meta_html}
+  ${global_novelty_html}
   <div class="stats-grid" id="stats-dashboard" style="display: none;"></div>
   <div class="chart-container" id="complexity-chart" style="display: none;">
     <h3 class="chart-title">Clone Group Distribution</h3>
@@ -1840,8 +1925,10 @@ ${pyg_light}
     chartVisible: false,
     stats: {},
     currentMetrics: null,
-    helpModalOpen: false
+    helpModalOpen: false,
+    globalNovelty: 'all'
   };
+  const sectionRefreshers = [];
 
   // ========== Theme ==========
   function initTheme() {
@@ -2714,6 +2801,41 @@ ${pyg_light}
     }
   });
 
+  function initGlobalNovelty() {
+    const panel = $$('#global-novelty-controls');
+    if (!panel) {
+      state.globalNovelty = 'all';
+      return;
+    }
+
+    const buttons = Array.from(panel.querySelectorAll('[data-global-novelty]'));
+    if (!buttons.length) {
+      state.globalNovelty = 'all';
+      return;
+    }
+
+    const defaultNovelty = panel.getAttribute('data-default-novelty') || 'new';
+    state.globalNovelty = defaultNovelty;
+
+    function applyGlobalNoveltyButtons() {
+      buttons.forEach((btn) => {
+        const value = btn.getAttribute('data-global-novelty') || '';
+        btn.classList.toggle('is-active', value === state.globalNovelty);
+      });
+    }
+
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const value = btn.getAttribute('data-global-novelty') || 'new';
+        state.globalNovelty = value;
+        applyGlobalNoveltyButtons();
+        sectionRefreshers.forEach((refresh) => refresh());
+      });
+    });
+
+    applyGlobalNoveltyButtons();
+  }
+
   // ========== Section Management ==========
   function initSection(sectionId) {
     const section = $$('section[data-section="' + sectionId + '"]');
@@ -2729,11 +2851,14 @@ ${pyg_light}
     const btnCollapseAll = $$('[data-collapse-all="' + sectionId + '"]');
     const btnExpandAll = $$('[data-expand-all="' + sectionId + '"]');
     const pill = $$('[data-count-pill="' + sectionId + '"]');
+    const hasNoveltyFilter = section.getAttribute('data-has-novelty-filter') === 'true';
 
+    const defaultNovelty = section.getAttribute('data-default-novelty') || 'all';
     const sectionState = {
       q: '',
       page: 1,
       pageSize: parseInt(selPageSize?.value || '10', 10),
+      novelty: hasNoveltyFilter ? defaultNovelty : 'all',
       filtered: groups
     };
 
@@ -2771,14 +2896,21 @@ ${pyg_light}
 
     function applyFilter() {
       const q = (sectionState.q || '').trim().toLowerCase();
-      if (!q) {
-        sectionState.filtered = groups;
-      } else {
-        sectionState.filtered = groups.filter(g => {
+      sectionState.novelty = hasNoveltyFilter ? state.globalNovelty : 'all';
+      let filteredGroups = groups;
+      if (sectionState.novelty !== 'all') {
+        filteredGroups = filteredGroups.filter(g => {
+          const novelty = g.getAttribute('data-novelty') || '';
+          return novelty === sectionState.novelty;
+        });
+      }
+      if (q) {
+        filteredGroups = filteredGroups.filter(g => {
           const blob = g.getAttribute('data-search') || '';
           return blob.indexOf(q) !== -1;
         });
       }
+      sectionState.filtered = filteredGroups;
       sectionState.page = 1;
       render();
     }
@@ -2828,7 +2960,8 @@ ${pyg_light}
       });
     });
 
-    render();
+    sectionRefreshers.push(() => applyFilter());
+    applyFilter();
   }
 
   // ========== Event Listeners ==========
@@ -2853,6 +2986,7 @@ ${pyg_light}
   // ========== Initialize ==========
   initTheme();
   initCommandPalette();
+  initGlobalNovelty();
   initMetaPanel();
   initSection('functions');
   initSection('blocks');

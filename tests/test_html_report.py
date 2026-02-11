@@ -20,6 +20,16 @@ from codeclone.html_report import (
 )
 from codeclone.report import build_block_group_facts, to_json_report
 
+_REPEATED_STMT_HASH = "0e8579f84e518d186950d012c9944a40cb872332"
+_REPEATED_BLOCK_GROUP_KEY = "|".join([_REPEATED_STMT_HASH] * 4)
+_REPEATED_ASSERT_SOURCE = (
+    "def f(html):\n"
+    "    assert 'a' in html\n"
+    "    assert 'b' in html\n"
+    "    assert 'c' in html\n"
+    "    assert 'd' in html\n"
+)
+
 
 def build_html_report(
     *,
@@ -41,6 +51,50 @@ def build_html_report(
         block_group_facts=resolved_block_group_facts,
         **kwargs,
     )
+
+
+def _repeated_assert_block_groups(
+    tmp_path: Path,
+    *,
+    qualnames: tuple[str, ...] = ("pkg.mod:f",),
+) -> tuple[str, dict[str, list[dict[str, Any]]]]:
+    test_file = tmp_path / "test_repeated_asserts.py"
+    test_file.write_text(_REPEATED_ASSERT_SOURCE, "utf-8")
+    return _REPEATED_BLOCK_GROUP_KEY, {
+        _REPEATED_BLOCK_GROUP_KEY: [
+            {
+                "qualname": qualname,
+                "filepath": str(test_file),
+                "start_line": 2,
+                "end_line": 5,
+            }
+            for qualname in qualnames
+        ]
+    }
+
+
+def _build_repeated_assert_block_report(
+    tmp_path: Path,
+    *,
+    qualnames: tuple[str, ...] = ("pkg.mod:f",),
+    block_group_facts: dict[str, dict[str, str]] | None = None,
+    report_meta: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    group_key, block_groups = _repeated_assert_block_groups(
+        tmp_path, qualnames=qualnames
+    )
+    kwargs: dict[str, Any] = {}
+    if block_group_facts is not None:
+        kwargs["block_group_facts"] = block_group_facts
+    if report_meta is not None:
+        kwargs["report_meta"] = report_meta
+    html = build_html_report(
+        func_groups={},
+        block_groups=block_groups,
+        segment_groups={},
+        **kwargs,
+    )
+    return group_key, html
 
 
 def test_html_report_empty() -> None:
@@ -115,9 +169,102 @@ def test_html_report_group_and_item_metadata_attrs(tmp_path: Path) -> None:
     assert 'data-end-line="2"' in html
 
 
+def test_html_report_renders_novelty_tabs_and_group_flags(tmp_path: Path) -> None:
+    f = tmp_path / "a.py"
+    f.write_text("def f():\n    return 1\n", "utf-8")
+    html = build_html_report(
+        func_groups={
+            "known-func": [
+                {
+                    "qualname": "pkg.mod:known",
+                    "filepath": str(f),
+                    "start_line": 1,
+                    "end_line": 2,
+                }
+            ],
+            "new-func": [
+                {
+                    "qualname": "pkg.mod:new",
+                    "filepath": str(f),
+                    "start_line": 1,
+                    "end_line": 2,
+                }
+            ],
+        },
+        block_groups={},
+        segment_groups={},
+        new_function_group_keys={"new-func"},
+        report_meta={"baseline_loaded": True, "baseline_status": "ok"},
+    )
+    assert "New duplicates" in html
+    assert "Known duplicates" in html
+    assert 'id="global-novelty-controls"' in html
+    assert 'data-global-novelty="new"' in html
+    assert 'data-global-novelty="known"' in html
+    assert 'data-novelty-filter="functions"' not in html
+    assert 'data-group-key="new-func" data-novelty="new"' in html
+    assert 'data-group-key="known-func" data-novelty="known"' in html
+    assert "Split is based on baseline" in html
+
+
+def test_html_report_renders_untrusted_baseline_novelty_note(tmp_path: Path) -> None:
+    f = tmp_path / "a.py"
+    f.write_text("def f():\n    return 1\n", "utf-8")
+    html = build_html_report(
+        func_groups={
+            "new-func": [
+                {
+                    "qualname": "pkg.mod:new",
+                    "filepath": str(f),
+                    "start_line": 1,
+                    "end_line": 2,
+                }
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        new_function_group_keys={"new-func"},
+        report_meta={"baseline_loaded": False, "baseline_status": "missing"},
+    )
+    assert "Baseline is not loaded or not trusted" in html
+    assert 'data-group-key="new-func" data-novelty="new"' in html
+
+
+def test_html_report_renders_block_novelty_tabs_and_group_flags(tmp_path: Path) -> None:
+    f = tmp_path / "a.py"
+    f.write_text("def f():\n    return 1\n", "utf-8")
+    html = build_html_report(
+        func_groups={},
+        block_groups={
+            "known-block": [
+                {
+                    "qualname": "pkg.mod:known",
+                    "filepath": str(f),
+                    "start_line": 1,
+                    "end_line": 4,
+                }
+            ],
+            "new-block": [
+                {
+                    "qualname": "pkg.mod:new",
+                    "filepath": str(f),
+                    "start_line": 5,
+                    "end_line": 8,
+                }
+            ],
+        },
+        segment_groups={},
+        new_block_group_keys={"new-block"},
+        report_meta={"baseline_loaded": True, "baseline_status": "ok"},
+    )
+    assert 'section id="blocks"' in html
+    assert 'data-section="blocks" data-has-novelty-filter="true"' in html
+    assert 'data-group-key="new-block" data-novelty="new"' in html
+    assert 'data-group-key="known-block" data-novelty="known"' in html
+
+
 def test_html_report_block_group_includes_match_basis_and_compact_key() -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
+    group_key = _REPEATED_BLOCK_GROUP_KEY
     html = build_html_report(
         func_groups={},
         block_groups={
@@ -137,37 +284,13 @@ def test_html_report_block_group_includes_match_basis_and_compact_key() -> None:
     assert 'data-signature-kind="stmt_hash_sequence"' in html
     assert 'data-merged-regions="true"' in html
     assert 'data-pattern="repeated_stmt_hash"' in html
-    assert f"{repeated[:12]} x4" in html
+    assert f"{_REPEATED_STMT_HASH[:12]} x4" in html
 
 
 def test_html_report_block_group_includes_assert_only_explanation(
     tmp_path: Path,
 ) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
-    test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    assert 'b' in html\n"
-        "    assert 'c' in html\n"
-        "    assert 'd' in html\n",
-        "utf-8",
-    )
-    html = build_html_report(
-        func_groups={},
-        block_groups={
-            group_key: [
-                {
-                    "qualname": "pkg.mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                }
-            ]
-        },
-        segment_groups={},
-    )
+    _group_key, html = _build_repeated_assert_block_report(tmp_path)
     assert 'data-hint="assert_only"' in html
     assert 'data-hint-confidence="deterministic"' in html
     assert 'data-assert-ratio="100%"' in html
@@ -177,42 +300,9 @@ def test_html_report_block_group_includes_assert_only_explanation(
 
 
 def test_html_report_block_group_n_way_compare_hint(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
-    test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    assert 'b' in html\n"
-        "    assert 'c' in html\n"
-        "    assert 'd' in html\n",
-        "utf-8",
-    )
-    html = build_html_report(
-        func_groups={},
-        block_groups={
-            group_key: [
-                {
-                    "qualname": "pkg.mod:f1",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                },
-                {
-                    "qualname": "pkg.mod:f2",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                },
-                {
-                    "qualname": "pkg.mod:f3",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                },
-            ]
-        },
-        segment_groups={},
+    _group_key, html = _build_repeated_assert_block_report(
+        tmp_path,
+        qualnames=("pkg.mod:f1", "pkg.mod:f2", "pkg.mod:f3"),
     )
     assert "N-way group: each block matches 2 peers in this group." in html
     assert "instance 1/3 • matches 2 peers" in html
@@ -222,32 +312,10 @@ def test_html_report_block_group_n_way_compare_hint(tmp_path: Path) -> None:
 
 
 def test_html_report_uses_core_block_group_facts(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
-    test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    assert 'b' in html\n"
-        "    assert 'c' in html\n"
-        "    assert 'd' in html\n",
-        "utf-8",
-    )
-    html = build_html_report(
-        func_groups={},
-        block_groups={
-            group_key: [
-                {
-                    "qualname": "pkg.mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                }
-            ]
-        },
-        segment_groups={},
+    _group_key, html = _build_repeated_assert_block_report(
+        tmp_path,
         block_group_facts={
-            group_key: {
+            _REPEATED_BLOCK_GROUP_KEY: {
                 "match_rule": "core_contract",
                 "block_size": "99",
                 "signature_kind": "core_signature",
@@ -269,32 +337,10 @@ def test_html_report_uses_core_block_group_facts(tmp_path: Path) -> None:
 
 
 def test_html_report_uses_core_hint_and_pattern_labels(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
-    test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    assert 'b' in html\n"
-        "    assert 'c' in html\n"
-        "    assert 'd' in html\n",
-        "utf-8",
-    )
-    html = build_html_report(
-        func_groups={},
-        block_groups={
-            group_key: [
-                {
-                    "qualname": "pkg.mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                }
-            ]
-        },
-        segment_groups={},
+    _group_key, html = _build_repeated_assert_block_report(
+        tmp_path,
         block_group_facts={
-            group_key: {
+            _REPEATED_BLOCK_GROUP_KEY: {
                 "pattern": "internal_pattern_id",
                 "pattern_label": "readable pattern",
                 "hint": "internal_hint_id",
@@ -309,32 +355,10 @@ def test_html_report_uses_core_hint_and_pattern_labels(tmp_path: Path) -> None:
 
 
 def test_html_report_uses_core_hint_context_label(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
-    test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    assert 'b' in html\n"
-        "    assert 'c' in html\n"
-        "    assert 'd' in html\n",
-        "utf-8",
-    )
-    html = build_html_report(
-        func_groups={},
-        block_groups={
-            group_key: [
-                {
-                    "qualname": "pkg.mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                }
-            ]
-        },
-        segment_groups={},
+    _group_key, html = _build_repeated_assert_block_report(
+        tmp_path,
         block_group_facts={
-            group_key: {
+            _REPEATED_BLOCK_GROUP_KEY: {
                 "hint": "assert_only",
                 "hint_context_label": "Likely test boilerplate / repeated asserts",
             }
@@ -347,68 +371,23 @@ def test_html_report_uses_core_hint_context_label(tmp_path: Path) -> None:
 
 
 def test_html_report_blocks_without_explanation_meta(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
-    test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    assert 'b' in html\n"
-        "    assert 'c' in html\n"
-        "    assert 'd' in html\n",
-        "utf-8",
-    )
-    html = build_html_report(
-        func_groups={},
-        block_groups={
-            group_key: [
-                {
-                    "qualname": "pkg.mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                }
-            ]
-        },
-        segment_groups={},
-        block_group_facts={},
+    _group_key, html = _build_repeated_assert_block_report(
+        tmp_path, block_group_facts={}
     )
     assert '<div class="group-explain"' not in html
     assert 'data-group-arity="1"' in html
 
 
 def test_html_report_respects_sparse_core_block_facts(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
-    test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    assert 'b' in html\n"
-        "    assert 'c' in html\n"
-        "    assert 'd' in html\n",
-        "utf-8",
-    )
-    html = build_html_report(
-        func_groups={},
-        block_groups={
-            group_key: [
-                {
-                    "qualname": "pkg.mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                }
-            ]
-        },
-        segment_groups={},
+    _group_key, html = _build_repeated_assert_block_report(
+        tmp_path,
         report_meta={
             "baseline_path": "   ",
             "cache_path": "/",
             "baseline_status": "ok",
         },
         block_group_facts={
-            group_key: {
+            _REPEATED_BLOCK_GROUP_KEY: {
                 "match_rule": "core_sparse",
                 "pattern": "repeated_stmt_hash",
                 "hint": "assert_only",
@@ -435,32 +414,10 @@ def test_html_report_handles_root_only_baseline_path() -> None:
 
 
 def test_html_report_explanation_without_match_rule(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
-    test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    assert 'b' in html\n"
-        "    assert 'c' in html\n"
-        "    assert 'd' in html\n",
-        "utf-8",
-    )
-    html = build_html_report(
-        func_groups={},
-        block_groups={
-            group_key: [
-                {
-                    "qualname": "pkg.mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                }
-            ]
-        },
-        segment_groups={},
+    _group_key, html = _build_repeated_assert_block_report(
+        tmp_path,
         block_group_facts={
-            group_key: {
+            _REPEATED_BLOCK_GROUP_KEY: {
                 "hint": "assert_only",
                 "hint_confidence": "deterministic",
             }
@@ -471,44 +428,11 @@ def test_html_report_explanation_without_match_rule(tmp_path: Path) -> None:
 
 
 def test_html_report_n_way_group_without_compare_note(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
-    test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    assert 'b' in html\n"
-        "    assert 'c' in html\n"
-        "    assert 'd' in html\n",
-        "utf-8",
-    )
-    html = build_html_report(
-        func_groups={},
-        block_groups={
-            group_key: [
-                {
-                    "qualname": "pkg.mod:f1",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                },
-                {
-                    "qualname": "pkg.mod:f2",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                },
-                {
-                    "qualname": "pkg.mod:f3",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 5,
-                },
-            ]
-        },
-        segment_groups={},
+    _group_key, html = _build_repeated_assert_block_report(
+        tmp_path,
+        qualnames=("pkg.mod:f1", "pkg.mod:f2", "pkg.mod:f3"),
         block_group_facts={
-            group_key: {
+            _REPEATED_BLOCK_GROUP_KEY: {
                 "group_arity": "3",
                 "instance_peer_count": "2",
             }
@@ -566,9 +490,13 @@ def test_html_report_includes_provenance_metadata(tmp_path: Path) -> None:
             "baseline_schema_version": 1,
             "baseline_python_version": "3.13",
             "baseline_generator_version": "1.4.0",
+            "baseline_payload_sha256": "a" * 64,
+            "baseline_payload_sha256_verified": True,
             "baseline_loaded": True,
             "baseline_status": "ok",
             "cache_path": "/repo/.cache/codeclone/cache.json",
+            "cache_schema_version": "1.2",
+            "cache_status": "ok",
             "cache_used": True,
             "files_skipped_source_io": 0,
         },
@@ -580,11 +508,18 @@ def test_html_report_includes_provenance_metadata(tmp_path: Path) -> None:
         "Baseline path",
         "Baseline schema",
         "Baseline generator version",
+        "Baseline payload sha256",
+        "Baseline payload verified",
         "codeclone.baseline.json",
         'data-baseline-status="ok"',
+        'data-baseline-payload-verified="true"',
         'data-baseline-file="codeclone.baseline.json"',
         "/repo/codeclone.baseline.json",
         'data-cache-used="true"',
+        "Cache schema",
+        "Cache status",
+        'data-cache-schema-version="1.2"',
+        'data-cache-status="ok"',
         'data-files-skipped-source-io="0"',
         "Source IO skipped",
     ]
@@ -726,8 +661,8 @@ def test_html_and_json_group_order_consistent(tmp_path: Path) -> None:
     }
     html = build_html_report(func_groups=groups, block_groups={}, segment_groups={})
     json_report = json.loads(to_json_report(groups, {}, {}))
-    json_keys = list(json_report["function_clones"].keys())
-    assert json_keys == ["c", "a", "b"]
+    json_keys = list(json_report["groups"]["functions"].keys())
+    assert json_keys == ["a", "b", "c"]
     assert html.find('data-group-key="c"') < html.find('data-group-key="a"')
     assert html.find('data-group-key="a"') < html.find('data-group-key="b"')
 

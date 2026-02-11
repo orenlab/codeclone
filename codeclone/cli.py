@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Mapping, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -32,7 +33,7 @@ from .baseline import (
     coerce_baseline_status,
     current_python_tag,
 )
-from .cache import Cache, CacheEntry, FileStat, file_stat_signature
+from .cache import Cache, CacheEntry, CacheStatus, FileStat, file_stat_signature
 from .contracts import (
     BASELINE_FINGERPRINT_VERSION,
     BASELINE_SCHEMA_VERSION,
@@ -188,12 +189,26 @@ def process_file(
 
 def print_banner() -> None:
     console.print(
-        Panel.fit(
+        Panel(
             ui.banner_title(__version__),
             border_style="blue",
             padding=(0, 2),
+            width=ui.CLI_LAYOUT_WIDTH,
+            expand=False,
         )
     )
+
+
+def _is_debug_enabled(
+    *,
+    argv: Sequence[str] | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> bool:
+    args = list(sys.argv[1:] if argv is None else argv)
+    debug_from_flag = any(arg == "--debug" for arg in args)
+    env = os.environ if environ is None else environ
+    debug_from_env = env.get("CODECLONE_DEBUG") == "1"
+    return debug_from_flag or debug_from_env
 
 
 def _main_impl() -> None:
@@ -288,7 +303,11 @@ def _main_impl() -> None:
                         legacy_path=legacy_resolved, new_path=cache_path
                     )
                 )
-    cache = Cache(cache_path, max_size_bytes=args.max_cache_size_mb * 1024 * 1024)
+    cache = Cache(
+        cache_path,
+        root=root_path,
+        max_size_bytes=args.max_cache_size_mb * 1024 * 1024,
+    )
     cache.load()
     if cache.load_warning:
         console.print(f"[warning]{cache.load_warning}[/warning]")
@@ -688,6 +707,28 @@ def _main_impl() -> None:
     except OSError:
         report_cache_path = cache_path
 
+    raw_cache_status = getattr(cache, "load_status", None)
+    if isinstance(raw_cache_status, CacheStatus):
+        cache_status = raw_cache_status
+    elif isinstance(raw_cache_status, str):
+        try:
+            cache_status = CacheStatus(raw_cache_status)
+        except ValueError:
+            cache_status = (
+                CacheStatus.OK
+                if cache.load_warning is None
+                else CacheStatus.INVALID_TYPE
+            )
+    else:
+        cache_status = (
+            CacheStatus.OK if cache.load_warning is None else CacheStatus.INVALID_TYPE
+        )
+
+    raw_cache_schema_version = getattr(cache, "cache_schema_version", None)
+    cache_schema_version = (
+        raw_cache_schema_version if isinstance(raw_cache_schema_version, str) else None
+    )
+
     report_meta = _build_report_meta(
         codeclone_version=__version__,
         baseline_path=baseline_path,
@@ -695,7 +736,9 @@ def _main_impl() -> None:
         baseline_loaded=baseline_loaded,
         baseline_status=baseline_status.value,
         cache_path=report_cache_path,
-        cache_used=cache.load_warning is None,
+        cache_used=cache_status == CacheStatus.OK,
+        cache_status=cache_status.value,
+        cache_schema_version=cache_schema_version,
         files_skipped_source_io=len(source_read_failures),
     )
 
@@ -754,6 +797,8 @@ def _main_impl() -> None:
                 block_groups=block_groups_report,
                 segment_groups=segment_groups,
                 block_group_facts=block_group_facts,
+                new_function_group_keys=new_func,
+                new_block_group_keys=new_block,
                 report_meta=report_meta,
                 title="CodeClone Report",
                 context_lines=3,
@@ -773,6 +818,10 @@ def _main_impl() -> None:
                 block_groups_report,
                 segment_groups,
                 report_meta,
+                block_group_facts,
+                new_function_group_keys=new_func,
+                new_block_group_keys=new_block,
+                new_segment_group_keys=set(segment_groups.keys()),
             ),
             label="JSON",
         )
@@ -787,6 +836,9 @@ def _main_impl() -> None:
                 func_groups=func_groups,
                 block_groups=block_groups_report,
                 segment_groups=segment_groups,
+                new_function_group_keys=new_func,
+                new_block_group_keys=new_block,
+                new_segment_group_keys=set(segment_groups.keys()),
             ),
             label="text",
         )
@@ -855,7 +907,13 @@ def main() -> None:
     except SystemExit:
         raise
     except Exception as e:
-        console.print(ui.fmt_internal_error(e, issues_url=ISSUES_URL))
+        console.print(
+            ui.fmt_internal_error(
+                e,
+                issues_url=ISSUES_URL,
+                debug=_is_debug_enabled(),
+            )
+        )
         sys.exit(ExitCode.INTERNAL_ERROR)
 
 
