@@ -42,18 +42,19 @@ Additional safeguards:
 - Report explainability fields are generated in Python core; UI is rendering-only and does not infer semantics.
 - Scanner traversal is root-confined and prevents symlink-based path escape.
 - Baseline files are schema/type validated with size limits and tamper-evident integrity fields
-  (`meta.generator`, `meta.payload_sha256` for v1 baseline contract).
+  (`meta.generator` as trust gate, `meta.payload_sha256` as integrity hash in baseline v1).
 - Baseline integrity is tamper-evident (audit signal), not tamper-proof cryptographic signing.
   An actor who can rewrite baseline content and recompute `payload_sha256` can still alter it.
-- Baseline hash excludes non-semantic metadata (`created_at`, `meta.generator.version`) and
-  covers canonical payload (`clones.functions`, `clones.blocks`, `meta.python_tag`,
-  `meta.fingerprint_version`).
+- Baseline hash covers canonical payload only (`clones.functions`, `clones.blocks`,
+  `meta.fingerprint_version`, `meta.python_tag`).
+- Baseline hash excludes non-semantic metadata (`created_at`, `meta.generator.version`).
 - `meta.schema_version` and `meta.generator.name` are validated as compatibility/trust gates and are
   intentionally excluded from `payload_sha256`.
 - In `--ci` (or explicit `--fail-on-new`), untrusted baseline states fail fast; otherwise baseline is ignored
   with explicit warning and comparison proceeds against an empty baseline.
-- Cache files are HMAC-signed (constant-time comparison), size-limited, and ignored on mismatch.
-- Cache secrets are stored next to the cache (`.cache_secret`) and must not be committed.
+- Cache files are integrity-signed with canonical payload hashing (constant-time comparison),
+  size-limited, and ignored on mismatch.
+- Legacy cache secret files (`.cache/codeclone/.cache_secret`) are obsolete and should be removed.
 
 ---
 

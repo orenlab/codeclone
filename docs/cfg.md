@@ -1,5 +1,8 @@
 # Control Flow Graph (CFG) — Design and Semantics
 
+> Scope note: this file is a CFG deep-dive.  
+> Contract-level guarantees are documented in `docs/book/` (especially `05-core-pipeline.md` and `12-determinism.md`).
+
 This document describes the **Control Flow Graph (CFG)** model used by **CodeClone**,
 its design goals, semantics, and known limitations.
 

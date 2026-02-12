@@ -1,5 +1,8 @@
 # CodeClone Architecture
 
+> Scope note: this file is an architecture narrative/deep-dive.  
+> Contract-level guarantees (schemas, statuses, exit codes, trust model, determinism) are defined in `docs/book/`.
+
 This document describes the high-level architecture of **CodeClone**.
 
 ---
@@ -133,16 +136,28 @@ Detected clone groups can be:
 
 All report formats include provenance metadata:
 
+- `report_schema_version`
 - `codeclone_version`
-- `python_version`
+- `python_version` (runtime major.minor, human-readable)
+- `python_tag` (runtime compatibility tag used by baseline/cache contracts)
 - `baseline_path`
 - `baseline_fingerprint_version`
 - `baseline_schema_version`
 - `baseline_python_tag`
+- `baseline_generator_name`
 - `baseline_generator_version`
+- `baseline_payload_sha256`
+- `baseline_payload_sha256_verified`
 - `baseline_loaded`
 - `baseline_status`
-  (`ok | missing | too_large | invalid_json | invalid_type | missing_fields | mismatch_schema_version | mismatch_fingerprint_version | mismatch_python_version | generator_mismatch | integrity_missing | integrity_failed`)
+  (
+  `ok | missing | too_large | invalid_json | invalid_type | missing_fields | mismatch_schema_version | mismatch_fingerprint_version | mismatch_python_version | generator_mismatch | integrity_missing | integrity_failed`;
+  `mismatch_python_version` is the status name used for `python_tag` mismatch)
+- `cache_path`
+- `cache_schema_version`
+- `cache_status`
+- `cache_used`
+- `files_skipped_source_io`
 
 Explainability contract (v1):
 
@@ -162,7 +177,7 @@ Baseline files use a stable v1 contract. Compatibility is checked by
 not package patch/minor version.
 Regeneration is typically required when `fingerprint_version` or `python_tag` changes.
 Baseline integrity is tamper-evident via canonical `payload_sha256`, which covers
-`functions`, `blocks`, `fingerprint_version`, and `python_tag`.
+`clones.functions`, `clones.blocks`, `meta.fingerprint_version`, and `meta.python_tag`.
 `schema_version` and `generator.name` are compatibility gates and intentionally
 excluded from the integrity hash.
 `created_at` and `generator.version` are informational metadata and do not affect

@@ -105,13 +105,15 @@ Such changes often require design-level discussion and may be staged across vers
   and `meta.generator.name`.
 - Integrity is tamper-evident via `meta.payload_sha256` over canonical payload:
   `clones.functions`, `clones.blocks`, `meta.fingerprint_version`, `meta.python_tag`.
-  (`created_at` and `meta.generator.version` are informational only.)
+  `meta.schema_version`, `meta.generator.name`, `meta.generator.version`, and `created_at`
+  are excluded from payload hashing.
 
 ### When baseline regeneration is required
 
-- Regenerate baseline with `codeclone . --update-baseline` **only when `fingerprint_version` changes**.
+- Regenerate baseline with `codeclone . --update-baseline` when
+  `fingerprint_version` **or** `python_tag` changes.
 - Regeneration is **not** required for UI/report/CLI/cache/performance-only changes
-  if `fingerprint_version` is unchanged.
+  if both `fingerprint_version` and `python_tag` are unchanged.
 
 ### Gating behavior
 

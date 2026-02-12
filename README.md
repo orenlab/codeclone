@@ -8,34 +8,49 @@
 ![Baseline](https://img.shields.io/badge/baseline-versioned-green?style=flat-square)
 [![License](https://img.shields.io/pypi/l/codeclone.svg?style=flat-square)](LICENSE)
 
-**CodeClone** is a Python code clone detector based on **normalized Python AST and Control Flow Graphs (CFG)**.
-It helps teams discover architectural duplication and prevent new copy-paste from entering the codebase via CI.
+**CodeClone** is a Python code clone detector based on **normalized AST and Control Flow Graphs (CFG)**.  
+It discovers architectural duplication and prevents new copy-paste from entering your codebase via CI.
 
-CodeClone is designed to help teams:
-
-- discover structural and control-flow duplication
-- identify architectural hotspots early
-- prevent new duplication via CI and pre-commit hooks
+---
 
 ## Why CodeClone
 
-CodeClone focuses on **architectural duplication**, not text similarity.
-It is robust to renaming, formatting, and minor refactors while preserving strict, explainable matching.
-Unlike token-based tools, it compares normalized structure and control flow.
+CodeClone focuses on **architectural duplication**, not text similarity. It detects structural patterns through:
 
-Typical signals:
+- **Normalized AST analysis** — robust to renaming, formatting, and minor refactors
+- **Control Flow Graphs** — captures execution logic, not just syntax
+- **Strict, explainable matching** — clear signals, not fuzzy heuristics
 
-- repeated service/orchestration flow
-- duplicated guard/validation blocks
-- copy-pasted handler logic across modules
-- recurring internal segments in large functions
+Unlike token-based tools, CodeClone compares **structure and control flow**, making it ideal for finding:
+
+- Repeated service/orchestration patterns
+- Duplicated guard/validation blocks
+- Copy-pasted handler logic across modules
+- Recurring internal segments in large functions
+
+---
 
 ## Core Capabilities
 
-- **Function clones (CFG fingerprint):** strong structural signal for cross-layer duplication.
-- **Block clones (statement windows):** detects repeated local logic patterns.
-- **Segment clones (report-only):** internal function repetition for explainability; not used for baseline gating.
-- **Deterministic output:** stable ordering and reproducible artifacts for CI/audit.
+**Three Detection Levels:**
+
+1. **Function clones (CFG fingerprint)**  
+   Strong structural signal for cross-layer duplication
+
+2. **Block clones (statement windows)**  
+   Detects repeated local logic patterns
+
+3. **Segment clones (report-only)**  
+   Internal function repetition for explainability; not used for baseline gating
+
+**CI-Ready Features:**
+
+- Deterministic output with stable ordering
+- Reproducible artifacts for audit trails
+- Baseline-driven gating to prevent new duplication
+- Fast incremental analysis with intelligent caching
+
+---
 
 ## Installation
 
@@ -43,17 +58,23 @@ Typical signals:
 pip install codeclone
 ```
 
-Python 3.10+ is required.
+**Requirements:** Python 3.10+
+
+---
 
 ## Quick Start
 
-Run analysis:
+### Basic Analysis
 
 ```bash
+# Analyze current directory
 codeclone .
+
+# Check version
+codeclone --version
 ```
 
-Generate reports:
+### Generate Reports
 
 ```bash
 codeclone . \
@@ -62,134 +83,194 @@ codeclone . \
   --text .cache/codeclone/report.txt
 ```
 
-Print version:
+### CI Integration
 
 ```bash
-codeclone --version
-```
-
-## Baseline and CI Workflow
-
-1. Generate baseline once and commit it:
-
-```bash
+# 1. Generate baseline once (commit to repo)
 codeclone . --update-baseline
-```
 
-2. Gate CI with the preset mode:
-
-```bash
+# 2. Add to CI pipeline
 codeclone . --ci
 ```
 
-`--ci` is equivalent to `--fail-on-new --no-color --quiet`.
+The `--ci` preset is equivalent to `--fail-on-new --no-color --quiet`.
 
-### Baseline Contract (v1)
+---
 
-Baseline compatibility is validated via `schema_version`, `fingerprint_version`,
-`python_tag`, and `generator.name` (not package patch/minor version).
-Baseline regeneration is typically required when `fingerprint_version` or `python_tag` changes.
-`schema_version` and `generator.name` are compatibility gates, not integrity-hash inputs.
-`created_at` and `generator.version` are informational metadata and do not affect
-`payload_sha256`.
+## Baseline Workflow
 
-Canonical structure:
+Baselines capture the **current state of duplication** in your codebase. Once committed, they serve as the reference
+point for CI checks.
+
+**Key points (contract-level):**
+
+- Baseline file is versioned (`codeclone.baseline.json`) and used to classify clones as **NEW** vs **KNOWN**.
+- Compatibility is gated by `schema_version`, `fingerprint_version`, and `python_tag`.
+- Baseline trust is gated by `meta.generator.name` (`codeclone`) and integrity (`payload_sha256`).
+- In CI preset (`--ci`), an untrusted baseline is a contract error (exit `2`).
+
+Full contract details: [`docs/book/06-baseline.md`](docs/book/06-baseline.md)
+
+---
+
+## Exit Codes
+
+CodeClone uses a deterministic exit code contract:
+
+| Code | Meaning                                                                     |
+|------|-----------------------------------------------------------------------------|
+| `0`  | Success — run completed without gating failures                             |
+| `2`  | Contract error — baseline missing/untrusted, invalid output extensions, incompatible versions, unreadable source files in CI/gating |
+| `3`  | Gating failure — new clones detected or threshold exceeded                  |
+| `5`  | Internal error — unexpected exception                                       |
+
+**Priority:** Contract errors (`2`) override gating failures (`3`) when both occur.
+
+Full contract details: [`docs/book/03-contracts-exit-codes.md`](docs/book/03-contracts-exit-codes.md)
+
+**Debug Support:**
+
+```bash
+# Show detailed error information
+codeclone . --debug
+
+# Or via environment variable
+CODECLONE_DEBUG=1 codeclone .
+```
+
+---
+
+## Reports
+
+### Supported Formats
+
+- **HTML** (`--html`) — Interactive web report with filtering
+- **JSON** (`--json`) — Machine-readable structured data
+- **Text** (`--text`) — Plain text summary
+
+### Report Schema (JSON v1.1)
+
+The JSON report uses a compact deterministic layout:
+
+- Top-level: `meta`, `files`, `groups`, `groups_split`, `group_item_layout`
+- Optional top-level: `facts`
+- `groups_split` provides explicit **NEW / KNOWN** separation per section
+- `meta.groups_counts` provides deterministic per-section aggregates
+- `meta` follows a shared canonical contract across HTML/JSON/TXT
+
+Canonical report contract: [`docs/book/08-report.md`](docs/book/08-report.md)
+
+**Minimal shape (v1.1):**
 
 ```json
 {
   "meta": {
-    "generator": {
-      "name": "codeclone",
-      "version": "1.4.0"
-    },
-    "schema_version": "1.0",
-    "fingerprint_version": "1",
+    "report_schema_version": "1.1",
+    "codeclone_version": "1.4.0",
+    "python_version": "3.13",
     "python_tag": "cp313",
-    "created_at": "2026-02-09T11:44:08Z",
-    "payload_sha256": "..."
+    "baseline_path": "/path/to/codeclone.baseline.json",
+    "baseline_fingerprint_version": "1",
+    "baseline_schema_version": "1.0",
+    "baseline_python_tag": "cp313",
+    "baseline_generator_name": "codeclone",
+    "baseline_generator_version": "1.4.0",
+    "baseline_payload_sha256": "<sha256>",
+    "baseline_payload_sha256_verified": true,
+    "baseline_loaded": true,
+    "baseline_status": "ok",
+    "cache_path": "/path/to/.cache/codeclone/cache.json",
+    "cache_used": true,
+    "cache_status": "ok",
+    "cache_schema_version": "1.2",
+    "files_skipped_source_io": 0,
+    "groups_counts": {
+      "functions": {
+        "total": 0,
+        "new": 0,
+        "known": 0
+      },
+      "blocks": {
+        "total": 0,
+        "new": 0,
+        "known": 0
+      },
+      "segments": {
+        "total": 0,
+        "new": 0,
+        "known": 0
+      }
+    }
   },
-  "clones": {
-    "functions": [],
-    "blocks": []
+  "files": [],
+  "groups": {
+    "functions": {},
+    "blocks": {},
+    "segments": {}
+  },
+  "groups_split": {
+    "functions": {
+      "new": [],
+      "known": []
+    },
+    "blocks": {
+      "new": [],
+      "known": []
+    },
+    "segments": {
+      "new": [],
+      "known": []
+    }
+  },
+  "group_item_layout": {
+    "functions": [
+      "file_i",
+      "qualname",
+      "start",
+      "end",
+      "loc",
+      "stmt_count",
+      "fingerprint",
+      "loc_bucket"
+    ],
+    "blocks": [
+      "file_i",
+      "qualname",
+      "start",
+      "end",
+      "size"
+    ],
+    "segments": [
+      "file_i",
+      "qualname",
+      "start",
+      "end",
+      "size",
+      "segment_hash",
+      "segment_sig"
+    ]
+  },
+  "facts": {
+    "blocks": {}
   }
 }
 ```
 
-### Trusted vs Untrusted Baseline
-
-Untrusted statuses:
-
-- `missing`
-- `too_large`
-- `invalid_json`
-- `invalid_type`
-- `missing_fields`
-- `mismatch_schema_version`
-- `mismatch_fingerprint_version`
-- `mismatch_python_version`
-- `generator_mismatch`
-- `integrity_missing`
-- `integrity_failed`
-
-Behavior:
-
-- **Normal mode:** warn, ignore baseline, compare against empty baseline.
-- **Gating mode (`--ci`):** fail fast with exit code `2` if baseline is untrusted.
-- **Gating mode with trusted baseline:** new clones / threshold violations return exit code `3`.
-
-Legacy baseline layouts (`<= 1.3.x`) are treated as untrusted.
-
-## Reports
-
-Supported formats:
-
-- HTML (`--html`)
-- JSON (`--json`)
-- Text (`--text`)
-
-All report formats include provenance metadata, including baseline trust fields and cache usage fields when available.
-
-Primary metadata keys:
-
-- `codeclone_version`
-- `python_version`
-- `baseline_path`
-- `baseline_fingerprint_version`
-- `baseline_schema_version`
-- `baseline_python_tag`
-- `baseline_generator_version`
-- `baseline_loaded`
-- `baseline_status`
-- `cache_path` / `cache_used` (when present)
+---
 
 ## Cache
 
-Default cache location:
+Cache is an optimization layer only and is never a source of truth.
 
-```text
-<root>/.cache/codeclone/cache.json
-```
+- Default path: `<root>/.cache/codeclone/cache.json`
+- Schema version: **v1.2**
+- Invalid or oversized cache is ignored with warning and rebuilt (fail-open)
 
-- Override with `--cache-path` (`--cache-dir` is a legacy alias).
-- Invalid/oversized cache is ignored with warning and rebuilt from source.
-- Cache is an optimization only; never a source of truth.
+Full contract details: [`docs/book/07-cache.md`](docs/book/07-cache.md)
 
-If you upgraded from older versions, remove legacy cache at:
+---
 
-```text
-~/.cache/codeclone/cache.json
-```
-
-and add `.cache/` to `.gitignore`.
-
-## Exit Codes
-
-- `0` success
-- `2` contract error (baseline missing/untrusted, invalid output extensions, incompatible versions, unreadable source files in CI/gating modes)
-- `3` gating failure (new clones detected, threshold exceeded)
-- `5` internal error (unexpected exception; please report)
-
-## Pre-commit Example
+## Pre-commit Integration
 
 ```yaml
 repos:
@@ -204,62 +285,63 @@ repos:
         types: [ python ]
 ```
 
+---
+
 ## What CodeClone Is (and Is Not)
 
 ### CodeClone Is
 
-- a structural clone detector for Python
-- a CI guard against new duplication
-- a deterministic analysis tool with auditable outputs
+- A structural clone detector for Python
+- A CI guard against new duplication
+- A deterministic analysis tool with auditable outputs
 
 ### CodeClone Is Not
 
-- a linter or formatter
-- a semantic equivalence prover
-- a runtime execution analyzer
+- A linter or code formatter
+- A semantic equivalence prover
+- A runtime execution analyzer
 
-## High-level Pipeline
+---
 
-1. Parse Python source to AST.
-2. Normalize AST for structural comparison.
-3. Build CFG per function.
-4. Compute stable fingerprints.
-5. Build function/block/segment groups.
-6. Apply deterministic report preparation.
-7. Compare against trusted baseline when requested.
+## How It Works
 
-See details:
+**High-level Pipeline:**
 
-- [docs/architecture.md](docs/architecture.md)
-- [docs/cfg.md](docs/cfg.md)
+1. **Parse** — Python source → AST
+2. **Normalize** — AST → canonical structure
+3. **CFG Construction** — per-function control flow graph
+4. **Fingerprinting** — stable hash computation
+5. **Grouping** — function/block/segment clone groups
+6. **Determinism** — stable ordering for reproducibility
+7. **Baseline Comparison** — new vs known clones (when requested)
 
-## CLI Options
+Learn more:
 
-| Option                        | Description                                                                  | Default                              |
-|-------------------------------|------------------------------------------------------------------------------|--------------------------------------|
-| `root`                        | Project root directory to scan                                               | `.`                                  |
-| `-h, --help`                  | Show this help message and exit                                              | -                                    |
-| `--version`                   | Print the CodeClone version and exit.                                        | -                                    |
-| `--min-loc`                   | Minimum function LOC to analyze                                              | `15`                                 |
-| `--min-stmt`                  | Minimum AST statements to analyze                                            | `6`                                  |
-| `--processes`                 | Number of worker processes                                                   | `4`                                  |
-| `--cache-path FILE`           | Path to the cache file.                                                      | `<root>/.cache/codeclone/cache.json` |
-| `--cache-dir FILE`            | Legacy alias for `--cache-path`.                                             | -                                    |
-| `--max-cache-size-mb MB`      | Maximum cache file size in MB.                                               | `50`                                 |
-| `--baseline FILE`             | Path to the baseline file (stored in repo).                                  | `codeclone.baseline.json`            |
-| `--max-baseline-size-mb MB`   | Maximum baseline file size in MB.                                            | `5`                                  |
-| `--update-baseline`           | Overwrite the baseline file with current results.                            | `False`                              |
-| `--fail-on-new`               | Exit with error if NEW clones (not in baseline) are detected.                | `False`                              |
-| `--fail-threshold MAX_CLONES` | Exit with error if total clone groups (function + block) exceed this number. | `-1`                                 |
-| `--ci`                        | Recommended CI preset: `--fail-on-new --no-color --quiet`                    | `False`                              |
-| `--html FILE`                 | Generate an HTML report to FILE.                                             | -                                    |
-| `--json FILE`                 | Generate a JSON report to FILE.                                              | -                                    |
-| `--text FILE`                 | Generate a text report to FILE.                                              | -                                    |
-| `--no-progress`               | Disable the progress bar (recommended for CI logs).                          | `False`                              |
-| `--no-color`                  | Disable ANSI colors                                                          | `False`                              |
-| `--quiet`                     | Minimize output (still shows warnings and errors).                           | `False`                              |
-| `--verbose`                   | Print detailed hash identifiers for new clones.                              | `False`                              |
+- Architecture: [`docs/architecture.md`](docs/architecture.md)
+- CFG semantics: [`docs/cfg.md`](docs/cfg.md)
 
-## License
+---
 
-MIT License
+## Documentation Map
+
+Use this map to pick the right level of detail:
+
+- **Contract book (canonical contracts/specs):** [`docs/book/`](docs/book/)
+    - Start here: [`docs/book/00-intro.md`](docs/book/00-intro.md)
+    - Exit codes and precedence: [`docs/book/03-contracts-exit-codes.md`](docs/book/03-contracts-exit-codes.md)
+    - Baseline contract (schema/trust/integrity): [`docs/book/06-baseline.md`](docs/book/06-baseline.md)
+    - Cache contract (schema/integrity/fail-open): [`docs/book/07-cache.md`](docs/book/07-cache.md)
+    - Report contract (schema v1.1 + NEW/KNOWN split): [`docs/book/08-report.md`](docs/book/08-report.md)
+    - CLI behavior: [`docs/book/09-cli.md`](docs/book/09-cli.md)
+    - HTML rendering: [`docs/book/10-html-render.md`](docs/book/10-html-render.md)
+    - Determinism policy: [`docs/book/12-determinism.md`](docs/book/12-determinism.md)
+    - Compatibility/versioning rules: [
+      `docs/book/14-compatibility-and-versioning.md`](docs/book/14-compatibility-and-versioning.md)
+- **Deep dives:**
+    - Architecture narrative: [`docs/architecture.md`](docs/architecture.md)
+    - CFG semantics: [`docs/cfg.md`](docs/cfg.md)
+
+## Links
+
+- **Issues:** <https://github.com/orenlab/codeclone/issues>
+- **PyPI:** <https://pypi.org/project/codeclone/>
