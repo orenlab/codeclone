@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from collections.abc import Mapping, Sequence
+from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, cast
 
 from rich.console import Console
 from rich.panel import Panel
@@ -21,29 +22,43 @@ from rich.theme import Theme
 from . import __version__
 from . import ui_messages as ui
 from ._cli_args import build_parser
-from ._cli_meta import _build_report_meta as _build_report_meta_impl
-from ._cli_meta import _current_python_version as _current_python_version_impl
-from ._cli_paths import _validate_output_path as _validate_output_path_impl
-from ._cli_paths import expand_path as _expand_path_impl
-from ._cli_summary import _build_summary_rows as _build_summary_rows_impl
-from ._cli_summary import _build_summary_table as _build_summary_table_impl
-from ._cli_summary import _print_summary as _print_summary_impl
-from ._cli_summary import _summary_value_style as _summary_value_style_impl
-from .baseline import BASELINE_SCHEMA_VERSION, Baseline
-from .cache import Cache, CacheEntry, FileStat, file_stat_signature
+from ._cli_meta import _build_report_meta
+from ._cli_paths import _validate_output_path
+from ._cli_summary import _print_summary
+from ._report_types import GroupItem
+from .baseline import (
+    BASELINE_UNTRUSTED_STATUSES,
+    Baseline,
+    BaselineStatus,
+    coerce_baseline_status,
+    current_python_tag,
+)
+from .cache import Cache, CacheEntry, CacheStatus, FileStat, file_stat_signature
+from .contracts import (
+    BASELINE_FINGERPRINT_VERSION,
+    BASELINE_SCHEMA_VERSION,
+    ISSUES_URL,
+    ExitCode,
+)
 from .errors import BaselineValidationError, CacheError
 from .extractor import extract_units_from_source
 from .html_report import build_html_report
 from .normalize import NormalizationConfig
 from .report import (
+    build_block_group_facts,
     build_block_groups,
     build_groups,
     build_segment_groups,
+    prepare_block_report_groups,
     prepare_segment_report_groups,
     to_json_report,
     to_text_report,
 )
 from .scanner import iter_py_files, module_name_from_path
+
+if TYPE_CHECKING:
+    from .blocks import BlockUnit, SegmentUnit
+    from .extractor import Unit
 
 # Custom theme for Rich
 custom_theme = Theme(
@@ -68,26 +83,6 @@ console = _make_console(no_color=False)
 
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 BATCH_SIZE = 100
-_VALID_BASELINE_STATUSES = {
-    "ok",
-    "missing",
-    "legacy",
-    "invalid",
-    "mismatch_version",
-    "mismatch_schema",
-    "mismatch_python",
-    "generator_mismatch",
-    "integrity_missing",
-    "integrity_failed",
-    "too_large",
-}
-_UNTRUSTED_BASELINE_STATUSES = {
-    "invalid",
-    "too_large",
-    "generator_mismatch",
-    "integrity_missing",
-    "integrity_failed",
-}
 
 
 @dataclass(slots=True)
@@ -97,14 +92,11 @@ class ProcessingResult:
     filepath: str
     success: bool
     error: str | None = None
-    units: list[Any] | None = None
-    blocks: list[Any] | None = None
-    segments: list[Any] | None = None
+    units: list[Unit] | None = None
+    blocks: list[BlockUnit] | None = None
+    segments: list[SegmentUnit] | None = None
     stat: FileStat | None = None
-
-
-def expand_path(p: str) -> Path:
-    return _expand_path_impl(p)
+    error_kind: str | None = None
 
 
 def process_file(
@@ -138,17 +130,31 @@ def process_file(
                     filepath=filepath,
                     success=False,
                     error=f"File too large: {st_size} bytes (max {MAX_FILE_SIZE})",
+                    error_kind="file_too_large",
                 )
         except OSError as e:
             return ProcessingResult(
-                filepath=filepath, success=False, error=f"Cannot stat file: {e}"
+                filepath=filepath,
+                success=False,
+                error=f"Cannot stat file: {e}",
+                error_kind="stat_error",
             )
 
         try:
             source = Path(filepath).read_text("utf-8")
         except UnicodeDecodeError as e:
             return ProcessingResult(
-                filepath=filepath, success=False, error=f"Encoding error: {e}"
+                filepath=filepath,
+                success=False,
+                error=f"Encoding error: {e}",
+                error_kind="source_read_error",
+            )
+        except OSError as e:
+            return ProcessingResult(
+                filepath=filepath,
+                success=False,
+                error=f"Cannot read file: {e}",
+                error_kind="source_read_error",
             )
 
         stat = file_stat_signature(filepath)
@@ -177,115 +183,35 @@ def process_file(
             filepath=filepath,
             success=False,
             error=f"Unexpected error: {type(e).__name__}: {e}",
+            error_kind="unexpected_error",
         )
 
 
 def print_banner() -> None:
     console.print(
-        Panel.fit(
+        Panel(
             ui.banner_title(__version__),
             border_style="blue",
             padding=(0, 2),
+            width=ui.CLI_LAYOUT_WIDTH,
+            expand=False,
         )
     )
 
 
-def _validate_output_path(path: str, *, expected_suffix: str, label: str) -> Path:
-    return _validate_output_path_impl(
-        path,
-        expected_suffix=expected_suffix,
-        label=label,
-        console=console,
-        invalid_message=ui.fmt_invalid_output_extension,
-    )
-
-
-def _current_python_version() -> str:
-    return _current_python_version_impl()
-
-
-def _build_report_meta(
+def _is_debug_enabled(
     *,
-    baseline_path: Path,
-    baseline: Baseline,
-    baseline_loaded: bool,
-    baseline_status: str,
-    cache_path: Path,
-    cache_used: bool,
-) -> dict[str, Any]:
-    return _build_report_meta_impl(
-        codeclone_version=__version__,
-        baseline_path=baseline_path,
-        baseline=baseline,
-        baseline_loaded=baseline_loaded,
-        baseline_status=baseline_status,
-        cache_path=cache_path,
-        cache_used=cache_used,
-    )
+    argv: Sequence[str] | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> bool:
+    args = list(sys.argv[1:] if argv is None else argv)
+    debug_from_flag = any(arg == "--debug" for arg in args)
+    env = os.environ if environ is None else environ
+    debug_from_env = env.get("CODECLONE_DEBUG") == "1"
+    return debug_from_flag or debug_from_env
 
 
-def _summary_value_style(*, label: str, value: int) -> str:
-    return _summary_value_style_impl(label=label, value=value)
-
-
-def _build_summary_rows(
-    *,
-    files_found: int,
-    files_analyzed: int,
-    cache_hits: int,
-    files_skipped: int,
-    func_clones_count: int,
-    block_clones_count: int,
-    segment_clones_count: int,
-    suppressed_segment_groups: int,
-    new_clones_count: int,
-) -> list[tuple[str, int]]:
-    return _build_summary_rows_impl(
-        files_found=files_found,
-        files_analyzed=files_analyzed,
-        cache_hits=cache_hits,
-        files_skipped=files_skipped,
-        func_clones_count=func_clones_count,
-        block_clones_count=block_clones_count,
-        segment_clones_count=segment_clones_count,
-        suppressed_segment_groups=suppressed_segment_groups,
-        new_clones_count=new_clones_count,
-    )
-
-
-def _build_summary_table(rows: list[tuple[str, int]]) -> Any:
-    return _build_summary_table_impl(rows)
-
-
-def _print_summary(
-    *,
-    quiet: bool,
-    files_found: int,
-    files_analyzed: int,
-    cache_hits: int,
-    files_skipped: int,
-    func_clones_count: int,
-    block_clones_count: int,
-    segment_clones_count: int,
-    suppressed_segment_groups: int,
-    new_clones_count: int,
-) -> None:
-    _print_summary_impl(
-        console=console,
-        quiet=quiet,
-        files_found=files_found,
-        files_analyzed=files_analyzed,
-        cache_hits=cache_hits,
-        files_skipped=files_skipped,
-        func_clones_count=func_clones_count,
-        block_clones_count=block_clones_count,
-        segment_clones_count=segment_clones_count,
-        suppressed_segment_groups=suppressed_segment_groups,
-        new_clones_count=new_clones_count,
-    )
-
-
-def main() -> None:
+def _main_impl() -> None:
     ap = build_parser(__version__)
 
     cache_path_from_args = any(
@@ -307,8 +233,10 @@ def main() -> None:
     console = _make_console(no_color=args.no_color)
 
     if args.max_baseline_size_mb < 0 or args.max_cache_size_mb < 0:
-        console.print("[error]Size limits must be non-negative integers (MB).[/error]")
-        sys.exit(1)
+        console.print(
+            ui.fmt_contract_error("Size limits must be non-negative integers (MB).")
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
 
     if not args.quiet:
         print_banner()
@@ -316,11 +244,13 @@ def main() -> None:
     try:
         root_path = Path(args.root).resolve()
         if not root_path.exists():
-            console.print(ui.ERR_ROOT_NOT_FOUND.format(path=root_path))
-            sys.exit(1)
-    except Exception as e:
-        console.print(ui.ERR_INVALID_ROOT_PATH.format(error=e))
-        sys.exit(1)
+            console.print(
+                ui.fmt_contract_error(ui.ERR_ROOT_NOT_FOUND.format(path=root_path))
+            )
+            sys.exit(ExitCode.CONTRACT_ERROR)
+    except OSError as e:
+        console.print(ui.fmt_contract_error(ui.ERR_INVALID_ROOT_PATH.format(error=e)))
+        sys.exit(ExitCode.CONTRACT_ERROR)
 
     if not args.quiet:
         console.print(ui.fmt_scanning_root(root_path))
@@ -330,15 +260,30 @@ def main() -> None:
     text_out_path: Path | None = None
     if args.html_out:
         html_out_path = _validate_output_path(
-            args.html_out, expected_suffix=".html", label="HTML"
+            args.html_out,
+            expected_suffix=".html",
+            label="HTML",
+            console=console,
+            invalid_message=ui.fmt_invalid_output_extension,
+            invalid_path_message=ui.fmt_invalid_output_path,
         )
     if args.json_out:
         json_out_path = _validate_output_path(
-            args.json_out, expected_suffix=".json", label="JSON"
+            args.json_out,
+            expected_suffix=".json",
+            label="JSON",
+            console=console,
+            invalid_message=ui.fmt_invalid_output_extension,
+            invalid_path_message=ui.fmt_invalid_output_path,
         )
     if args.text_out:
         text_out_path = _validate_output_path(
-            args.text_out, expected_suffix=".txt", label="text"
+            args.text_out,
+            expected_suffix=".txt",
+            label="text",
+            console=console,
+            invalid_message=ui.fmt_invalid_output_extension,
+            invalid_path_message=ui.fmt_invalid_output_path,
         )
 
     # Initialize Cache
@@ -358,14 +303,18 @@ def main() -> None:
                         legacy_path=legacy_resolved, new_path=cache_path
                     )
                 )
-    cache = Cache(cache_path, max_size_bytes=args.max_cache_size_mb * 1024 * 1024)
+    cache = Cache(
+        cache_path,
+        root=root_path,
+        max_size_bytes=args.max_cache_size_mb * 1024 * 1024,
+    )
     cache.load()
     if cache.load_warning:
         console.print(f"[warning]{cache.load_warning}[/warning]")
 
-    all_units: list[dict[str, Any]] = []
-    all_blocks: list[dict[str, Any]] = []
-    all_segments: list[dict[str, Any]] = []
+    all_units: list[GroupItem] = []
+    all_blocks: list[GroupItem] = []
+    all_segments: list[GroupItem] = []
     files_found = 0
     files_analyzed = 0
     cache_hits = 0
@@ -395,7 +344,9 @@ def main() -> None:
             console.print(ui.fmt_worker_failed(e))
             return None
 
-    def _safe_future_result(future: Any) -> tuple[ProcessingResult | None, str | None]:
+    def _safe_future_result(
+        future: Future[ProcessingResult],
+    ) -> tuple[ProcessingResult | None, str | None]:
         try:
             return future.result(), None
         except Exception as e:
@@ -415,19 +366,19 @@ def main() -> None:
                     cache_hits += 1
                     all_units.extend(
                         cast(
-                            list[dict[str, Any]],
+                            list[GroupItem],
                             cast(object, cached.get("units", [])),
                         )
                     )
                     all_blocks.extend(
                         cast(
-                            list[dict[str, Any]],
+                            list[GroupItem],
                             cast(object, cached.get("blocks", [])),
                         )
                     )
                     all_segments.extend(
                         cast(
-                            list[dict[str, Any]],
+                            list[GroupItem],
                             cast(object, cached.get("segments", [])),
                         )
                     )
@@ -446,30 +397,31 @@ def main() -> None:
                         cache_hits += 1
                         all_units.extend(
                             cast(
-                                list[dict[str, Any]],
+                                list[GroupItem],
                                 cast(object, cached.get("units", [])),
                             )
                         )
                         all_blocks.extend(
                             cast(
-                                list[dict[str, Any]],
+                                list[GroupItem],
                                 cast(object, cached.get("blocks", [])),
                             )
                         )
                         all_segments.extend(
                             cast(
-                                list[dict[str, Any]],
+                                list[GroupItem],
                                 cast(object, cached.get("segments", [])),
                             )
                         )
                     else:
                         files_to_process.append(fp)
-    except Exception as e:
-        console.print(ui.ERR_SCAN_FAILED.format(error=e))
-        sys.exit(1)
+    except OSError as e:
+        console.print(ui.fmt_contract_error(ui.ERR_SCAN_FAILED.format(error=e)))
+        sys.exit(ExitCode.CONTRACT_ERROR)
 
     total_files = len(files_to_process)
     failed_files = []
+    source_read_failures: list[str] = []
 
     # Processing phase
     if total_files > 0:
@@ -493,7 +445,10 @@ def main() -> None:
                     all_segments.extend([asdict(s) for s in result.segments])
             else:
                 files_skipped += 1
-                failed_files.append(f"{result.filepath}: {result.error}")
+                failure = f"{result.filepath}: {result.error}"
+                failed_files.append(failure)
+                if result.error_kind == "source_read_error":
+                    source_read_failures.append(failure)
 
         def process_sequential(with_progress: bool) -> None:
             nonlocal files_skipped
@@ -623,6 +578,11 @@ def main() -> None:
         if len(failed_files) > 10:
             console.print(f"  ... and {len(failed_files) - 10} more")
 
+    gating_mode = args.fail_on_new or args.fail_threshold >= 0
+    source_read_contract_failure = (
+        bool(source_read_failures) and gating_mode and not args.update_baseline
+    )
+
     # Analysis phase
     suppressed_segment_groups = 0
     if args.quiet:
@@ -650,132 +610,136 @@ def main() -> None:
                 console.print(ui.fmt_cache_save_failed(e))
 
     # Reporting
+    block_groups_report = prepare_block_report_groups(block_groups)
+    block_group_facts = build_block_group_facts(block_groups_report)
     func_clones_count = len(func_groups)
     block_clones_count = len(block_groups)
     segment_clones_count = len(segment_groups)
 
     # Baseline Logic
-    baseline_path = Path(args.baseline).expanduser().resolve()
+    baseline_arg_path = Path(args.baseline).expanduser()
+    try:
+        baseline_path = baseline_arg_path.resolve()
+        baseline_exists = baseline_path.exists()
+    except OSError as e:
+        console.print(
+            ui.fmt_contract_error(
+                ui.fmt_invalid_baseline_path(path=baseline_arg_path, error=e)
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
 
     # If user didn't specify path, the default is ./codeclone.baseline.json.
 
     baseline = Baseline(baseline_path)
-    baseline_exists = baseline_path.exists()
     baseline_loaded = False
-    baseline_status = "missing"
-    baseline_failure_code: int | None = None
+    baseline_status = BaselineStatus.MISSING
+    baseline_failure_code: ExitCode | None = None
     baseline_trusted_for_diff = False
 
     if baseline_exists:
         try:
             baseline.load(max_size_bytes=args.max_baseline_size_mb * 1024 * 1024)
         except BaselineValidationError as e:
-            baseline_status = (
-                e.status if e.status in _VALID_BASELINE_STATUSES else "invalid"
-            )
+            baseline_status = coerce_baseline_status(e.status)
             if not args.update_baseline:
                 console.print(ui.fmt_invalid_baseline(e))
                 if args.fail_on_new:
-                    baseline_failure_code = 2
+                    baseline_failure_code = ExitCode.CONTRACT_ERROR
                 else:
                     console.print(ui.WARN_BASELINE_IGNORED)
         else:
-            baseline_loaded = True
-            baseline_status = "ok"
-            baseline_trusted_for_diff = True
             if not args.update_baseline:
-                if baseline.is_legacy_format():
-                    baseline_status = "legacy"
-                    console.print(ui.fmt_baseline_version_missing(__version__))
-                    baseline_failure_code = 2
-                    baseline_trusted_for_diff = False
+                try:
+                    baseline.verify_compatibility(
+                        current_python_tag=current_python_tag()
+                    )
+                except BaselineValidationError as e:
+                    baseline_status = coerce_baseline_status(e.status)
+                    console.print(ui.fmt_invalid_baseline(e))
+                    if args.fail_on_new:
+                        baseline_failure_code = ExitCode.CONTRACT_ERROR
+                    else:
+                        console.print(ui.WARN_BASELINE_IGNORED)
                 else:
-                    if baseline.baseline_version != __version__:
-                        assert baseline.baseline_version is not None
-                        baseline_status = "mismatch_version"
-                        console.print(
-                            ui.fmt_baseline_version_mismatch(
-                                baseline_version=baseline.baseline_version,
-                                current_version=__version__,
-                            )
-                        )
-                        baseline_failure_code = 2
-                        baseline_trusted_for_diff = False
-                    if baseline.schema_version != BASELINE_SCHEMA_VERSION:
-                        assert baseline.schema_version is not None
-                        if baseline_status == "ok":
-                            baseline_status = "mismatch_schema"
-                        console.print(
-                            ui.fmt_baseline_schema_mismatch(
-                                baseline_schema=baseline.schema_version,
-                                current_schema=BASELINE_SCHEMA_VERSION,
-                            )
-                        )
-                        baseline_failure_code = 2
-                        baseline_trusted_for_diff = False
-                    if baseline.python_version:
-                        current_version = _current_python_version()
-                        if baseline.python_version != current_version:
-                            if baseline_status == "ok":
-                                baseline_status = "mismatch_python"
-                            console.print(
-                                ui.fmt_baseline_python_mismatch(
-                                    baseline_python=baseline.python_version,
-                                    current_python=current_version,
-                                )
-                            )
-                            if args.fail_on_new:
-                                console.print(ui.ERR_BASELINE_SAME_PYTHON_REQUIRED)
-                                baseline_failure_code = 2
-                                baseline_trusted_for_diff = False
-                    if baseline_status == "ok":
-                        try:
-                            baseline.verify_integrity()
-                        except BaselineValidationError as e:
-                            status = (
-                                e.status
-                                if e.status in _VALID_BASELINE_STATUSES
-                                else "invalid"
-                            )
-                            baseline_status = status
-                            console.print(ui.fmt_invalid_baseline(e))
-                            baseline_trusted_for_diff = False
-                            if args.fail_on_new:
-                                baseline_failure_code = 2
-                            else:
-                                console.print(ui.WARN_BASELINE_IGNORED)
-            if baseline_status in _UNTRUSTED_BASELINE_STATUSES:
-                baseline_loaded = False
-                baseline_trusted_for_diff = False
+                    baseline_loaded = True
+                    baseline_status = BaselineStatus.OK
+                    baseline_trusted_for_diff = True
     else:
         if not args.update_baseline:
             console.print(ui.fmt_path(ui.WARN_BASELINE_MISSING, baseline_path))
+
+    if baseline_status in BASELINE_UNTRUSTED_STATUSES:
+        baseline_loaded = False
+        baseline_trusted_for_diff = False
+        if args.fail_on_new and not args.update_baseline:
+            baseline_failure_code = ExitCode.CONTRACT_ERROR
 
     if args.update_baseline:
         new_baseline = Baseline.from_groups(
             func_groups,
             block_groups,
             path=baseline_path,
-            python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
-            baseline_version=__version__,
+            python_tag=current_python_tag(),
+            fingerprint_version=BASELINE_FINGERPRINT_VERSION,
             schema_version=BASELINE_SCHEMA_VERSION,
+            generator_version=__version__,
         )
-        new_baseline.save()
+        try:
+            new_baseline.save()
+        except OSError as e:
+            console.print(
+                ui.fmt_contract_error(
+                    ui.fmt_baseline_write_failed(path=baseline_path, error=e)
+                )
+            )
+            sys.exit(ExitCode.CONTRACT_ERROR)
         console.print(ui.fmt_path(ui.SUCCESS_BASELINE_UPDATED, baseline_path))
         baseline = new_baseline
         baseline_loaded = True
-        baseline_status = "ok"
+        baseline_status = BaselineStatus.OK
         baseline_trusted_for_diff = True
         # When updating, we don't fail on new, we just saved the new state.
         # But we might still want to print the summary.
 
+    try:
+        report_cache_path = cache_path.resolve()
+    except OSError:
+        report_cache_path = cache_path
+
+    raw_cache_status = getattr(cache, "load_status", None)
+    if isinstance(raw_cache_status, CacheStatus):
+        cache_status = raw_cache_status
+    elif isinstance(raw_cache_status, str):
+        try:
+            cache_status = CacheStatus(raw_cache_status)
+        except ValueError:
+            cache_status = (
+                CacheStatus.OK
+                if cache.load_warning is None
+                else CacheStatus.INVALID_TYPE
+            )
+    else:
+        cache_status = (
+            CacheStatus.OK if cache.load_warning is None else CacheStatus.INVALID_TYPE
+        )
+
+    raw_cache_schema_version = getattr(cache, "cache_schema_version", None)
+    cache_schema_version = (
+        raw_cache_schema_version if isinstance(raw_cache_schema_version, str) else None
+    )
+
     report_meta = _build_report_meta(
+        codeclone_version=__version__,
         baseline_path=baseline_path,
         baseline=baseline,
         baseline_loaded=baseline_loaded,
-        baseline_status=baseline_status,
-        cache_path=cache_path.resolve(),
-        cache_used=cache.load_warning is None,
+        baseline_status=baseline_status.value,
+        cache_path=report_cache_path,
+        cache_used=cache_status == CacheStatus.OK,
+        cache_status=cache_status.value,
+        cache_schema_version=cache_schema_version,
+        files_skipped_source_io=len(source_read_failures),
     )
 
     # Diff
@@ -786,6 +750,7 @@ def main() -> None:
     new_clones_count = len(new_func) + len(new_block)
 
     _print_summary(
+        console=console,
         quiet=args.quiet,
         files_found=files_found,
         files_analyzed=files_analyzed,
@@ -811,48 +776,88 @@ def main() -> None:
             output_notice_printed = True
         console.print(message)
 
+    def _write_report_output(*, out: Path, content: str, label: str) -> None:
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(content, "utf-8")
+        except OSError as e:
+            console.print(
+                ui.fmt_contract_error(
+                    ui.fmt_report_write_failed(label=label, path=out, error=e)
+                )
+            )
+            sys.exit(ExitCode.CONTRACT_ERROR)
+
     if html_out_path:
         out = html_out_path
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(
-            build_html_report(
+        _write_report_output(
+            out=out,
+            content=build_html_report(
                 func_groups=func_groups,
-                block_groups=block_groups,
+                block_groups=block_groups_report,
                 segment_groups=segment_groups,
+                block_group_facts=block_group_facts,
+                new_function_group_keys=new_func,
+                new_block_group_keys=new_block,
                 report_meta=report_meta,
                 title="CodeClone Report",
                 context_lines=3,
                 max_snippet_lines=220,
             ),
-            "utf-8",
+            label="HTML",
         )
         html_report_path = str(out)
         _print_output_notice(ui.fmt_path(ui.INFO_HTML_REPORT_SAVED, out))
 
     if json_out_path:
         out = json_out_path
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(
-            to_json_report(func_groups, block_groups, segment_groups, report_meta),
-            "utf-8",
+        _write_report_output(
+            out=out,
+            content=to_json_report(
+                func_groups,
+                block_groups_report,
+                segment_groups,
+                report_meta,
+                block_group_facts,
+                new_function_group_keys=new_func,
+                new_block_group_keys=new_block,
+                new_segment_group_keys=set(segment_groups.keys()),
+            ),
+            label="JSON",
         )
         _print_output_notice(ui.fmt_path(ui.INFO_JSON_REPORT_SAVED, out))
 
     if text_out_path:
         out = text_out_path
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(
-            to_text_report(
+        _write_report_output(
+            out=out,
+            content=to_text_report(
                 meta=report_meta,
                 func_groups=func_groups,
-                block_groups=block_groups,
+                block_groups=block_groups_report,
                 segment_groups=segment_groups,
+                new_function_group_keys=new_func,
+                new_block_group_keys=new_block,
+                new_segment_group_keys=set(segment_groups.keys()),
             ),
-            "utf-8",
+            label="text",
         )
         _print_output_notice(ui.fmt_path(ui.INFO_TEXT_REPORT_SAVED, out))
 
+    if source_read_contract_failure:
+        console.print(
+            ui.fmt_contract_error(
+                ui.fmt_unreadable_source_in_gating(count=len(source_read_failures))
+            )
+        )
+        for failure in source_read_failures[:10]:
+            console.print(f"  • {failure}")
+        if len(source_read_failures) > 10:
+            console.print(f"  ... and {len(source_read_failures) - 10} more")
+        sys.exit(ExitCode.CONTRACT_ERROR)
+
     if baseline_failure_code is not None:
+        console.print(ui.fmt_contract_error(ui.ERR_BASELINE_GATING_REQUIRES_TRUSTED))
         sys.exit(baseline_failure_code)
 
     # Exit Codes
@@ -861,6 +866,7 @@ def main() -> None:
         if html_report_path is None and default_report.exists():
             html_report_path = str(default_report)
 
+        console.print(ui.fmt_gating_failure("New code clones detected."))
         console.print(f"\n{ui.FAIL_NEW_TITLE}")
         console.print(f"\n{ui.FAIL_NEW_SUMMARY_TITLE}")
         console.print(ui.FAIL_NEW_FUNCTION.format(count=len(new_func)))
@@ -880,15 +886,35 @@ def main() -> None:
                 console.print(f"\n{ui.FAIL_NEW_DETAIL_BLOCK}")
                 for h in sorted(new_block):
                     console.print(f"- {h}")
-        sys.exit(3)
+        sys.exit(ExitCode.GATING_FAILURE)
 
     if 0 <= args.fail_threshold < (func_clones_count + block_clones_count):
         total = func_clones_count + block_clones_count
-        console.print(ui.fmt_fail_threshold(total=total, threshold=args.fail_threshold))
-        sys.exit(2)
+        console.print(
+            ui.fmt_gating_failure(
+                ui.fmt_fail_threshold(total=total, threshold=args.fail_threshold)
+            )
+        )
+        sys.exit(ExitCode.GATING_FAILURE)
 
     if not args.update_baseline and not args.fail_on_new and new_clones_count > 0:
         console.print(ui.WARN_NEW_CLONES_WITHOUT_FAIL)
+
+
+def main() -> None:
+    try:
+        _main_impl()
+    except SystemExit:
+        raise
+    except Exception as e:
+        console.print(
+            ui.fmt_internal_error(
+                e,
+                issues_url=ISSUES_URL,
+                debug=_is_debug_enabled(),
+            )
+        )
+        sys.exit(ExitCode.INTERNAL_ERROR)
 
 
 if __name__ == "__main__":

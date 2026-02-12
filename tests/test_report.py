@@ -1,19 +1,29 @@
 import ast
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
 import pytest
 
 import codeclone.report as report_mod
+from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.report import (
+    GroupMap,
+    build_block_group_facts,
     build_block_groups,
     build_groups,
     build_segment_groups,
+    prepare_block_report_groups,
     prepare_segment_report_groups,
     to_json,
     to_json_report,
     to_text_report,
+)
+from tests._report_fixtures import (
+    REPEATED_STMT_HASH,
+    repeated_block_group_key,
+    write_repeated_assert_source,
 )
 
 
@@ -40,7 +50,180 @@ def test_block_groups_require_multiple_functions() -> None:
     assert len(groups) == 1
 
 
-def test_report_output_formats() -> None:
+def test_prepare_block_report_groups_merges_to_maximal_regions() -> None:
+    groups = {
+        "h": [
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:f",
+                "start_line": 20,
+                "end_line": 23,
+                "size": 4,
+            },
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:f",
+                "start_line": 10,
+                "end_line": 13,
+                "size": 4,
+            },
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:f",
+                "start_line": 13,
+                "end_line": 16,
+                "size": 4,
+            },
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:g",
+                "start_line": 10,
+                "end_line": 13,
+                "size": 4,
+            },
+        ]
+    }
+
+    prepared = prepare_block_report_groups(groups)
+    items = prepared["h"]
+    assert len(items) == 3
+
+    assert items[0]["qualname"] == "mod:f"
+    assert items[0]["start_line"] == 10
+    assert items[0]["end_line"] == 16
+    assert items[0]["size"] == 7
+
+    assert items[1]["qualname"] == "mod:f"
+    assert items[1]["start_line"] == 20
+    assert items[1]["end_line"] == 23
+    assert items[1]["size"] == 4
+
+    assert items[2]["qualname"] == "mod:g"
+    assert items[2]["start_line"] == 10
+    assert items[2]["end_line"] == 13
+    assert items[2]["size"] == 4
+
+
+def test_prepare_block_report_groups_skips_invalid_ranges() -> None:
+    groups = {
+        "h": [
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:f",
+                "start_line": "bad",
+                "end_line": 13,
+                "size": 4,
+            },
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:f",
+                "start_line": 30,
+                "end_line": 33,
+                "size": 4,
+            },
+        ]
+    }
+    prepared = prepare_block_report_groups(groups)
+    assert len(prepared["h"]) == 1
+    assert prepared["h"][0]["start_line"] == 30
+    assert prepared["h"][0]["end_line"] == 33
+
+
+def test_prepare_block_report_groups_all_invalid_ranges_fallback_sorted() -> None:
+    groups: GroupMap = {
+        "h": [
+            {
+                "block_hash": "h",
+                "filepath": "b.py",
+                "qualname": "mod:f",
+                "start_line": "bad",
+                "end_line": 13,
+                "size": 4,
+            },
+            {
+                "block_hash": "h",
+                "filepath": "a.py",
+                "qualname": "mod:f",
+                "start_line": None,
+                "end_line": 1,
+                "size": 4,
+            },
+        ]
+    }
+    prepared = prepare_block_report_groups(groups)
+    items = prepared["h"]
+    assert len(items) == 2
+    assert items[0]["filepath"] == "a.py"
+    assert items[1]["filepath"] == "b.py"
+
+
+def test_prepare_block_report_groups_handles_empty_item_list() -> None:
+    groups: GroupMap = {"h": []}
+    prepared = prepare_block_report_groups(groups)
+    assert prepared["h"] == []
+
+
+def test_build_block_group_facts_assert_only(tmp_path: Path) -> None:
+    group_key = repeated_block_group_key()
+    test_file = write_repeated_assert_source(tmp_path / "test_repeated_asserts.py")
+    facts = build_block_group_facts(
+        {
+            group_key: [
+                {
+                    "qualname": "pkg.mod:f",
+                    "filepath": str(test_file),
+                    "start_line": 2,
+                    "end_line": 5,
+                }
+            ]
+        }
+    )
+    group = facts[group_key]
+    assert group["match_rule"] == "normalized_sliding_window"
+    assert group["block_size"] == "4"
+    assert group["signature_kind"] == "stmt_hash_sequence"
+    assert group["merged_regions"] == "true"
+    assert group["pattern"] == "repeated_stmt_hash"
+    assert group["pattern_display"] == f"{REPEATED_STMT_HASH[:12]} x4"
+    assert group["hint"] == "assert_only"
+    assert group["hint_label"] == "Assert-only block"
+    assert group["hint_confidence"] == "deterministic"
+    assert group["assert_ratio"] == "100%"
+    assert group["consecutive_asserts"] == "4"
+    assert group["group_display_name"] == "Assert pattern block"
+    assert group["group_arity"] == "1"
+    assert group["instance_peer_count"] == "0"
+
+
+def test_build_block_group_facts_deterministic_item_order(tmp_path: Path) -> None:
+    group_key = repeated_block_group_key()
+    test_file = write_repeated_assert_source(tmp_path / "test_repeated_asserts.py")
+    item_a = {
+        "qualname": "pkg.mod:f",
+        "filepath": str(test_file),
+        "start_line": 2,
+        "end_line": 5,
+    }
+    item_b = {
+        "qualname": "pkg.mod:f",
+        "filepath": str(test_file),
+        "start_line": 2,
+        "end_line": 5,
+    }
+    facts_a = build_block_group_facts({group_key: [item_a, item_b]})
+    facts_b = build_block_group_facts({group_key: [item_b, item_a]})
+    assert facts_a == facts_b
+
+
+def test_report_output_formats(
+    report_meta_factory: Callable[..., dict[str, object]],
+) -> None:
     groups = {
         "k1": [
             {
@@ -68,18 +251,12 @@ def test_report_output_formats() -> None:
             },
         ],
     }
-    meta = {
-        "codeclone_version": "1.3.0",
-        "python_version": "3.13",
-        "baseline_path": "/tmp/codeclone.baseline.json",
-        "baseline_version": "1.3.0",
-        "baseline_schema_version": 1,
-        "baseline_python_version": "3.13",
-        "baseline_loaded": True,
-        "baseline_status": "ok",
-        "cache_path": "/tmp/cache.json",
-        "cache_used": True,
-    }
+    meta = report_meta_factory(
+        codeclone_version="1.3.0",
+        baseline_path="/tmp/codeclone.baseline.json",
+        baseline_schema_version=1,
+        cache_path="/tmp/cache.json",
+    )
     json_out = to_json(groups)
     report_out = to_json_report(groups, groups, {}, meta)
     text_out = to_text_report(
@@ -89,13 +266,42 @@ def test_report_output_formats() -> None:
         segment_groups={},
     )
 
-    assert "group_count" in json_out
-    assert '"meta"' in report_out
-    assert '"function_clones"' in report_out
-    assert '"baseline_schema_version": 1' in report_out
-    assert "REPORT METADATA" in text_out
-    assert "Baseline schema version: 1" in text_out
-    assert "Clone group #1" in text_out
+    expected_json = ["group_count"]
+    expected_report = [
+        '"meta"',
+        '"groups"',
+        '"groups_split"',
+        '"group_item_layout"',
+        f'"report_schema_version": "{REPORT_SCHEMA_VERSION}"',
+        '"baseline_schema_version": 1',
+        f'"baseline_payload_sha256": "{"a" * 64}"',
+        '"baseline_payload_sha256_verified": true',
+        '"cache_schema_version": "1.2"',
+        '"cache_status": "ok"',
+        '"files_skipped_source_io": 0',
+    ]
+    expected_text = [
+        "REPORT METADATA",
+        "Report schema version: 1.1",
+        "Python tag: cp313",
+        "Baseline schema version: 1",
+        "Baseline generator name: codeclone",
+        f"Baseline payload sha256: {'a' * 64}",
+        "Baseline payload verified: true",
+        "Cache schema version: 1.2",
+        "Cache status: ok",
+        "Source IO skipped: 0",
+        "FUNCTION CLONES (NEW) (groups=2)",
+        "FUNCTION CLONES (KNOWN) (groups=0)",
+        "Clone group #1",
+    ]
+
+    for token in expected_json:
+        assert token in json_out
+    for token in expected_report:
+        assert token in report_out
+    for token in expected_text:
+        assert token in text_out
 
 
 def test_report_json_deterministic_group_order() -> None:
@@ -126,7 +332,7 @@ def test_report_json_deterministic_group_order() -> None:
     assert out_a == out_b
 
 
-def test_report_json_group_order_prefers_size_then_key() -> None:
+def test_report_json_group_order_is_lexicographic() -> None:
     groups = {
         "b": [
             {
@@ -165,7 +371,7 @@ def test_report_json_group_order_prefers_size_then_key() -> None:
     }
     payload = to_json_report(groups, {}, {}, {"codeclone_version": "1.3.0"})
     report_obj = json.loads(payload)
-    assert list(report_obj["function_clones"].keys()) == ["c", "a", "b"]
+    assert list(report_obj["groups"]["functions"].keys()) == ["a", "b", "c"]
 
 
 def test_report_json_deterministic_with_shuffled_units() -> None:
@@ -196,6 +402,241 @@ def test_report_json_deterministic_with_shuffled_units() -> None:
     out_a = to_json_report(groups_a, {}, {}, meta)
     out_b = to_json_report(groups_b, {}, {}, meta)
     assert out_a == out_b
+
+
+def test_report_json_compact_v11_contract() -> None:
+    groups = {
+        "g1": [
+            {
+                "qualname": "m:a",
+                "filepath": "z.py",
+                "start_line": 3,
+                "end_line": 4,
+                "loc": 2,
+                "stmt_count": 1,
+                "fingerprint": "fp-z",
+                "loc_bucket": "0-19",
+            },
+            {
+                "qualname": "m:b",
+                "filepath": "a.py",
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+                "stmt_count": 1,
+                "fingerprint": "fp-a",
+                "loc_bucket": "0-19",
+            },
+        ]
+    }
+    payload = json.loads(to_json_report(groups, {}, {}, {"codeclone_version": "1.4.0"}))
+
+    assert payload["meta"]["report_schema_version"] == REPORT_SCHEMA_VERSION
+    assert payload["files"] == ["a.py", "z.py"]
+    assert set(payload["groups"]) == {"functions", "blocks", "segments"}
+    assert payload["groups_split"] == {
+        "functions": {"new": ["g1"], "known": []},
+        "blocks": {"new": [], "known": []},
+        "segments": {"new": [], "known": []},
+    }
+    assert payload["meta"]["groups_counts"] == {
+        "functions": {"total": 1, "new": 1, "known": 0},
+        "blocks": {"total": 0, "new": 0, "known": 0},
+        "segments": {"total": 0, "new": 0, "known": 0},
+    }
+    assert payload["group_item_layout"] == {
+        "functions": [
+            "file_i",
+            "qualname",
+            "start",
+            "end",
+            "loc",
+            "stmt_count",
+            "fingerprint",
+            "loc_bucket",
+        ],
+        "blocks": ["file_i", "qualname", "start", "end", "size"],
+        "segments": [
+            "file_i",
+            "qualname",
+            "start",
+            "end",
+            "size",
+            "segment_hash",
+            "segment_sig",
+        ],
+    }
+    assert "function_clones" not in payload
+    assert "block_clones" not in payload
+    assert "segment_clones" not in payload
+
+    function_rows = payload["groups"]["functions"]["g1"]
+    assert function_rows == [
+        [0, "m:b", 1, 2, 2, 1, "fp-a", "0-19"],
+        [1, "m:a", 3, 4, 2, 1, "fp-z", "0-19"],
+    ]
+
+
+def test_report_json_block_records_do_not_repeat_group_hash() -> None:
+    block_group_key = "hash-a|hash-b|hash-c|hash-d"
+    payload = json.loads(
+        to_json_report(
+            {},
+            {
+                block_group_key: [
+                    {
+                        "qualname": "m:f",
+                        "filepath": "a.py",
+                        "start_line": 10,
+                        "end_line": 13,
+                        "size": 4,
+                    }
+                ]
+            },
+            {},
+            {"codeclone_version": "1.4.0"},
+        )
+    )
+    rows = payload["groups"]["blocks"][block_group_key]
+    assert rows == [[0, "m:f", 10, 13, 4]]
+
+
+def test_report_json_includes_sorted_block_facts() -> None:
+    payload = json.loads(
+        to_json_report(
+            {},
+            {},
+            {},
+            {"codeclone_version": "1.4.0"},
+            block_facts={
+                "group-b": {"z": "3", "a": "x"},
+                "group-a": {"k": "v"},
+            },
+        )
+    )
+    assert payload["facts"] == {
+        "blocks": {
+            "group-a": {"k": "v"},
+            "group-b": {"a": "x", "z": "3"},
+        }
+    }
+
+
+def test_report_json_groups_split_trusted_baseline() -> None:
+    func_groups = {
+        "func-known": [
+            {
+                "qualname": "m:fk",
+                "filepath": "a.py",
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+                "stmt_count": 1,
+                "fingerprint": "fp-k",
+                "loc_bucket": "0-19",
+            }
+        ],
+        "func-new": [
+            {
+                "qualname": "m:fn",
+                "filepath": "b.py",
+                "start_line": 3,
+                "end_line": 4,
+                "loc": 2,
+                "stmt_count": 1,
+                "fingerprint": "fp-n",
+                "loc_bucket": "0-19",
+            }
+        ],
+    }
+    block_groups = {
+        "block-known": [
+            {
+                "qualname": "m:bk",
+                "filepath": "a.py",
+                "start_line": 10,
+                "end_line": 13,
+                "size": 4,
+            }
+        ],
+        "block-new": [
+            {
+                "qualname": "m:bn",
+                "filepath": "b.py",
+                "start_line": 20,
+                "end_line": 23,
+                "size": 4,
+            }
+        ],
+    }
+    segment_groups = {
+        "segment-new": [
+            {
+                "qualname": "m:sn",
+                "filepath": "b.py",
+                "start_line": 30,
+                "end_line": 35,
+                "size": 6,
+                "segment_hash": "seg-h",
+                "segment_sig": "seg-s",
+            }
+        ]
+    }
+    payload = json.loads(
+        to_json_report(
+            func_groups,
+            block_groups,
+            segment_groups,
+            {"baseline_loaded": True, "baseline_status": "ok"},
+            new_function_group_keys={"func-new"},
+            new_block_group_keys={"block-new"},
+            new_segment_group_keys={"segment-new"},
+        )
+    )
+    split = payload["groups_split"]
+    assert split["functions"] == {"new": ["func-new"], "known": ["func-known"]}
+    assert split["blocks"] == {"new": ["block-new"], "known": ["block-known"]}
+    assert split["segments"] == {"new": ["segment-new"], "known": []}
+    for section_name in ("functions", "blocks", "segments"):
+        new_keys = set(split[section_name]["new"])
+        known_keys = set(split[section_name]["known"])
+        group_keys = set(payload["groups"][section_name].keys())
+        assert new_keys.isdisjoint(known_keys)
+        assert new_keys | known_keys == group_keys
+        counts = payload["meta"]["groups_counts"][section_name]
+        assert counts["total"] == len(group_keys)
+        assert counts["new"] == len(new_keys)
+        assert counts["known"] == len(known_keys)
+
+
+def test_report_json_groups_split_untrusted_baseline() -> None:
+    func_groups = {
+        "func-a": [
+            {
+                "qualname": "m:f",
+                "filepath": "a.py",
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+                "stmt_count": 1,
+                "fingerprint": "fp-a",
+                "loc_bucket": "0-19",
+            }
+        ]
+    }
+    payload = json.loads(
+        to_json_report(
+            func_groups,
+            {},
+            {},
+            {"baseline_loaded": False, "baseline_status": "integrity_failed"},
+            new_function_group_keys=set(),
+        )
+    )
+    split = payload["groups_split"]
+    assert split["functions"] == {"new": ["func-a"], "known": []}
+    assert split["blocks"] == {"new": [], "known": []}
+    assert split["segments"] == {"new": [], "known": []}
 
 
 def test_text_report_deterministic_group_order() -> None:
@@ -236,13 +677,116 @@ def test_to_text_report_handles_missing_meta_fields() -> None:
         block_groups={},
         segment_groups={},
     )
-    assert "CodeClone version: n/a" in text_out
-    assert "Baseline status: n/a" in text_out
-    assert "Cache path:" not in text_out
-    assert "Cache used:" not in text_out
-    assert "FUNCTION CLONES\n(none)" in text_out
-    assert "BLOCK CLONES\n(none)" in text_out
-    assert "SEGMENT CLONES\n(none)" in text_out
+    assert "Report schema version: (none)" in text_out
+    assert "CodeClone version: (none)" in text_out
+    assert "Baseline status: (none)" in text_out
+    assert "Cache path: (none)" in text_out
+    assert "Cache used: (none)" in text_out
+    assert "Note: baseline is untrusted; all groups are treated as NEW." in text_out
+    assert "FUNCTION CLONES (NEW) (groups=0)\n(none)" in text_out
+    assert "FUNCTION CLONES (KNOWN) (groups=0)\n(none)" in text_out
+    assert "BLOCK CLONES (NEW) (groups=0)\n(none)" in text_out
+    assert "BLOCK CLONES (KNOWN) (groups=0)\n(none)" in text_out
+    assert "SEGMENT CLONES (NEW) (groups=0)\n(none)" in text_out
+    assert "SEGMENT CLONES (KNOWN) (groups=0)\n(none)" in text_out
+
+
+def test_to_text_report_uses_section_specific_metric_labels() -> None:
+    text_out = to_text_report(
+        meta={"codeclone_version": "1.4.0"},
+        func_groups={
+            "f": [
+                {
+                    "qualname": "pkg:f",
+                    "filepath": "a.py",
+                    "start_line": 1,
+                    "end_line": 10,
+                    "loc": 11,
+                }
+            ]
+        },
+        block_groups={
+            "b": [
+                {
+                    "qualname": "pkg:b",
+                    "filepath": "b.py",
+                    "start_line": 20,
+                    "end_line": 23,
+                    "size": 4,
+                }
+            ]
+        },
+        segment_groups={
+            "s": [
+                {
+                    "qualname": "pkg:s",
+                    "filepath": "c.py",
+                    "start_line": 30,
+                    "end_line": 35,
+                    "size": 6,
+                }
+            ]
+        },
+    )
+    assert "loc=11" in text_out
+    assert "size=4" in text_out
+    assert "size=6" in text_out
+
+
+def test_to_text_report_trusted_baseline_split_sections() -> None:
+    text_out = to_text_report(
+        meta={"baseline_loaded": True, "baseline_status": "ok"},
+        func_groups={
+            "func-known": [
+                {
+                    "qualname": "pkg:known",
+                    "filepath": "a.py",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "loc": 2,
+                }
+            ],
+            "func-new": [
+                {
+                    "qualname": "pkg:new",
+                    "filepath": "b.py",
+                    "start_line": 3,
+                    "end_line": 4,
+                    "loc": 2,
+                }
+            ],
+        },
+        block_groups={},
+        segment_groups={},
+        new_function_group_keys={"func-new"},
+    )
+    assert "Note: baseline is untrusted" not in text_out
+    assert "FUNCTION CLONES (NEW) (groups=1)" in text_out
+    assert "FUNCTION CLONES (KNOWN) (groups=1)" in text_out
+    assert "pkg:new b.py:3-4 loc=2" in text_out
+    assert "pkg:known a.py:1-2 loc=2" in text_out
+
+
+def test_to_text_report_untrusted_baseline_known_sections_empty() -> None:
+    text_out = to_text_report(
+        meta={"baseline_loaded": False, "baseline_status": "mismatch_schema_version"},
+        func_groups={
+            "func-a": [
+                {
+                    "qualname": "pkg:a",
+                    "filepath": "a.py",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "loc": 2,
+                }
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+    )
+    assert "Note: baseline is untrusted; all groups are treated as NEW." in text_out
+    assert "FUNCTION CLONES (NEW) (groups=1)" in text_out
+    assert "FUNCTION CLONES (KNOWN) (groups=0)\n(none)" in text_out
 
 
 def test_segment_groups_internal_only() -> None:
@@ -614,7 +1158,7 @@ def test_segment_helpers_cover_edge_cases(tmp_path: Path) -> None:
     class Dummy:
         body = None
 
-    dummy = cast(ast.FunctionDef, Dummy())
+    dummy = cast(ast.FunctionDef, cast(object, Dummy()))
     assert report_mod._segment_statements(dummy, 1, 2) == []
 
     func = ast.parse("def f():\n    x = 1\n").body[0]

@@ -51,7 +51,11 @@ def _build_summary_rows(
 
 
 def _build_summary_table(rows: list[tuple[str, int]]) -> Table:
-    summary_table = Table(title=ui.SUMMARY_TITLE, show_header=True)
+    summary_table = Table(
+        title=ui.SUMMARY_TITLE,
+        show_header=True,
+        width=ui.CLI_LAYOUT_WIDTH,
+    )
     summary_table.add_column("Metric")
     summary_table.add_column("Value", justify="right")
     for label, value in rows:

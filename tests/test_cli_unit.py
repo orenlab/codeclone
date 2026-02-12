@@ -6,10 +6,14 @@ from typing import cast
 import pytest
 from rich.text import Text
 
+import codeclone._cli_summary as cli_summary
 import codeclone.cli as cli
 from codeclone import __version__
 from codeclone import ui_messages as ui
-from codeclone.cli import expand_path, process_file
+from codeclone._cli_args import build_parser
+from codeclone._cli_paths import expand_path
+from codeclone.cli import process_file
+from codeclone.contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
 from codeclone.normalize import NormalizationConfig
 
 
@@ -48,6 +52,22 @@ def test_process_file_encoding_error(
     assert result.success is False
     assert result.error is not None
     assert "Encoding error" in result.error
+
+
+def test_process_file_read_oserror(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+
+    def _boom(*_args: object, **_kwargs: object) -> str:
+        raise OSError("read denied")
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+    result = process_file(str(src), str(tmp_path), NormalizationConfig(), 1, 1)
+    assert result.success is False
+    assert result.error is not None
+    assert "Cannot read file" in result.error
 
 
 def test_process_file_unexpected_error(
@@ -113,28 +133,114 @@ def test_cli_help_text_consistency(
     assert "Legacy alias for --cache-path" in out
     assert "--max-baseline-size-mb MB" in out
     assert "--max-cache-size-mb MB" in out
+    assert "--debug" in out
     assert "CI preset: --fail-on-new --no-color --quiet." in out
     assert "total clone groups (function +" in out
     assert "block) exceed this number" in out
+    assert "Exit codes" in out
+    assert "0 - success" in out
+    assert "2 - contract error" in out
+    assert "baseline missing/untrusted" in out
+    assert "invalid output extensions" in out
+    assert "3 - gating failure" in out
+    assert "new clones detected" in out
+    assert "threshold exceeded" in out
+    assert "5 - internal error" in out
+    assert "please report" in out
+    assert f"Repository: {REPOSITORY_URL}" in out
+    assert f"Issues: {ISSUES_URL}" in out
+    assert f"Docs: {DOCS_URL}" in out
+    assert "\x1b[" not in out
+
+
+def test_cli_internal_error_marker(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def _boom() -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "_main_impl", _boom)
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 5
+    out = capsys.readouterr().out
+    assert "INTERNAL ERROR:" in out
+    assert "Unexpected exception." in out
+    assert "Reason: RuntimeError: boom" in out
+    assert "Next steps:" in out
+    assert "Re-run with --debug to include a traceback." in out
+    assert f"{ISSUES_URL}/new?template=bug_report.yml" in out
+    assert "Traceback:" not in out
+
+
+def test_cli_internal_error_debug_flag_includes_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def _boom() -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "_main_impl", _boom)
+    monkeypatch.setattr(sys, "argv", ["codeclone", "--debug"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 5
+    out = capsys.readouterr().out
+    assert "INTERNAL ERROR:" in out
+    assert "DEBUG DETAILS" in out
+    assert "Traceback:" in out
+    assert "Command: codeclone --debug" in out
+
+
+def test_cli_internal_error_debug_env_includes_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def _boom() -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "_main_impl", _boom)
+    monkeypatch.setenv("CODECLONE_DEBUG", "1")
+    monkeypatch.setattr(sys, "argv", ["codeclone"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 5
+    out = capsys.readouterr().out
+    assert "INTERNAL ERROR:" in out
+    assert "DEBUG DETAILS" in out
+    assert "Traceback:" in out
+
+
+def test_argument_parser_contract_error_marker_for_invalid_args(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = build_parser(__version__)
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["--unknown-flag"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "CONTRACT ERROR:" in err
 
 
 def test_summary_value_style_mapping() -> None:
-    assert cli._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=0) == "dim"
     assert (
-        cli._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=2)
+        cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=0)
+        == "dim"
+    )
+    assert (
+        cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=2)
         == "bold green"
     )
     assert (
-        cli._summary_value_style(label=ui.SUMMARY_LABEL_SUPPRESSED, value=1) == "yellow"
+        cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_SUPPRESSED, value=1)
+        == "yellow"
     )
     assert (
-        cli._summary_value_style(label=ui.SUMMARY_LABEL_NEW_BASELINE, value=3)
+        cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_NEW_BASELINE, value=3)
         == "bold red"
     )
 
 
 def test_build_summary_table_rows_and_styles() -> None:
-    rows = cli._build_summary_rows(
+    rows = cli_summary._build_summary_rows(
         files_found=2,
         files_analyzed=0,
         cache_hits=2,
@@ -145,7 +251,7 @@ def test_build_summary_table_rows_and_styles() -> None:
         suppressed_segment_groups=1,
         new_clones_count=1,
     )
-    table = cli._build_summary_table(rows)
+    table = cli_summary._build_summary_table(rows)
     assert table.title == ui.SUMMARY_TITLE
     assert table.columns[0]._cells == [label for label, _ in rows]
     value_cells = table.columns[1]._cells
@@ -157,7 +263,7 @@ def test_build_summary_table_rows_and_styles() -> None:
 
 
 def test_build_summary_rows_order() -> None:
-    rows = cli._build_summary_rows(
+    rows = cli_summary._build_summary_rows(
         files_found=1,
         files_analyzed=1,
         cache_hits=0,
@@ -186,7 +292,8 @@ def test_print_summary_invariant_warning(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
-    cli._print_summary(
+    cli_summary._print_summary(
+        console=cli.console,
         quiet=False,
         files_found=1,
         files_analyzed=0,

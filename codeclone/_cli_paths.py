@@ -14,6 +14,9 @@ from pathlib import Path
 
 from rich.console import Console
 
+from .contracts import ExitCode
+from .ui_messages import fmt_contract_error
+
 
 def expand_path(p: str) -> Path:
     return Path(p).expanduser().resolve()
@@ -26,11 +29,20 @@ def _validate_output_path(
     label: str,
     console: Console,
     invalid_message: Callable[..., str],
+    invalid_path_message: Callable[..., str],
 ) -> Path:
     out = Path(path).expanduser()
     if out.suffix.lower() != expected_suffix:
         console.print(
-            invalid_message(label=label, path=out, expected_suffix=expected_suffix)
+            fmt_contract_error(
+                invalid_message(label=label, path=out, expected_suffix=expected_suffix)
+            )
         )
-        sys.exit(2)
-    return out.resolve()
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    try:
+        return out.resolve()
+    except OSError as e:
+        console.print(
+            fmt_contract_error(invalid_path_message(label=label, path=out, error=e))
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)

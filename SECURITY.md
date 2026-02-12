@@ -3,13 +3,14 @@
 ## Supported Versions
 
 CodeClone is a static analysis tool and does not execute analyzed code at runtime.
-Nevertheless, security and robustness are treated as first‑class concerns.
+Nevertheless, security and robustness are treated as first-class concerns.
 
 The following versions currently receive security updates:
 
 | Version | Supported |
 |---------|-----------|
-| 1.3.x   | Yes       |
+| 1.4.x   | Yes       |
+| 1.3.x   | No        |
 | 1.2.x   | No        |
 | 1.1.x   | No        |
 | 1.0.x   | No        |
@@ -38,15 +39,22 @@ Additional safeguards:
 
 - HTML report content is escaped in both text and attribute contexts to prevent script injection.
 - Reports are static and do not execute analyzed code.
+- Report explainability fields are generated in Python core; UI is rendering-only and does not infer semantics.
 - Scanner traversal is root-confined and prevents symlink-based path escape.
 - Baseline files are schema/type validated with size limits and tamper-evident integrity fields
-  (`generator`, `payload_sha256` for v1.3+).
+  (`meta.generator` as trust gate, `meta.payload_sha256` as integrity hash in baseline v1).
 - Baseline integrity is tamper-evident (audit signal), not tamper-proof cryptographic signing.
   An actor who can rewrite baseline content and recompute `payload_sha256` can still alter it.
-- In `--fail-on-new` / `--ci`, untrusted baseline states fail fast; otherwise baseline is ignored
+- Baseline hash covers canonical payload only (`clones.functions`, `clones.blocks`,
+  `meta.fingerprint_version`, `meta.python_tag`).
+- Baseline hash excludes non-semantic metadata (`created_at`, `meta.generator.version`).
+- `meta.schema_version` and `meta.generator.name` are validated as compatibility/trust gates and are
+  intentionally excluded from `payload_sha256`.
+- In `--ci` (or explicit `--fail-on-new`), untrusted baseline states fail fast; otherwise baseline is ignored
   with explicit warning and comparison proceeds against an empty baseline.
-- Cache files are HMAC-signed (constant-time comparison), size-limited, and ignored on mismatch.
-- Cache secrets are stored next to the cache (`.cache_secret`) and must not be committed.
+- Cache files are integrity-signed with canonical payload hashing (constant-time comparison),
+  size-limited, and ignored on mismatch.
+- Legacy cache secret files (`.cache/codeclone/.cache_secret`) are obsolete and should be removed.
 
 ---
 

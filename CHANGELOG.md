@@ -1,5 +1,159 @@
 # Changelog
 
+## [1.4.0] - 2026-02-12
+
+### Overview
+
+This release stabilizes the baseline contract for long-term CI reuse without changing clone-detection semantics. Key
+improvements include baseline schema standardization, enhanced cache efficiency, and hardened IO/contract behavior for
+CI environments.
+
+---
+
+### Baseline Schema & Compatibility
+
+**Stable v1 Schema**
+
+- Baseline now uses stable v1 schema with strict top-level `meta` + `clones` objects
+- Compatibility gated by `schema_version`, `fingerprint_version`, and `python_tag` (independent of package patch/minor
+  version)
+- Trust validation requires `meta.generator.name` to be `codeclone`
+- Legacy 1.3 baseline layouts treated as untrusted with explicit regeneration guidance
+
+**Integrity & Hash Calculation**
+
+- Baseline integrity uses canonical `payload_sha256` over semantic payload (`functions`, `blocks`,
+  `fingerprint_version`, `python_tag`)
+- Intentionally excluded from `payload_sha256`:
+    - `schema_version` (compatibility gate only)
+    - `meta.generator.name` (trust gate only)
+    - `meta.generator.version` and `meta.created_at` (informational only)
+- Hash inputs remain stable across future 1.x patch/minor releases
+- Baseline regeneration required only when `fingerprint_version` or `python_tag` changes
+
+**Migration Notes**
+
+- Early 1.4.0 development snapshots (before integrity canonicalization fix) may require one-time
+  `codeclone . --update-baseline`
+- After this one-time update, baselines are stable for long-term CI use
+
+---
+
+### File System & Storage
+
+**Atomic Operations**
+
+- Baseline writes use atomic `*.tmp` + `os.replace` pattern (same filesystem requirement)
+- Configurable size guards:
+    - `--max-baseline-size-mb`
+    - `--max-cache-size-mb`
+
+**Baseline Trust Model**
+
+- **Normal mode**: Untrusted baseline triggers warning and comparison against empty baseline
+- **CI preset** (`--ci`): Untrusted baseline causes fast-fail with exit code `2`
+- Deterministic behavior ensures predictable CI outcomes
+
+---
+
+### CLI & Exit Codes
+
+**Exit Code Contract** (explicit and stable)
+
+- `0` - Success
+- `2` - Contract error (unreadable files, untrusted baseline, integrity failures)
+- `3` - Gating failure (new clones, threshold violations)
+- `5` - Internal error
+
+**Exit Code Priority**
+
+- Contract errors (exit `2`) override gating failures (exit `3`) when both conditions present
+
+**CI/Gating Modes**
+
+- In CI/gating modes (`--ci`, `--fail-on-new`, `--fail-threshold`):
+    - Unreadable or decode-failed source files treated as contract errors (exit `2`)
+    - Prevents incomplete analysis from passing CI checks
+
+**Error Handling**
+
+- Standardized internal error UX: `INTERNAL ERROR` with reason and actionable next steps
+- New `--debug` flag (also `CODECLONE_DEBUG=1`) includes traceback + runtime environment details
+- CLI help now includes canonical exit-code descriptions plus `Repository` / `Issues` / `Docs` links
+
+---
+
+### Reporting Enhancements
+
+**JSON Report (v1.1 Schema)**
+
+- Compact deterministic layout with top-level `meta` + `files` + `groups`
+- Explicit `group_item_layout` for array-based group records
+- New `groups_split` structure with `new`/`known` keys per section
+- Deterministic `meta.groups_counts` aggregates
+- Legacy alias sections removed (`function_clones`, `block_clones`, `segment_clones`)
+
+**TXT Report (aligned to report meta v1.1)**
+
+- Normalized metadata/order as stable contract
+- Explicit section metrics: `loc` for functions, `size` for blocks/segments
+- Sections split into `(NEW)` and `(KNOWN)` for functions/blocks/segments
+- With untrusted baseline: `(KNOWN)` sections empty, all groups in `(NEW)`
+
+**HTML Report (aligned to report meta v1.1)**
+
+- New baseline split controls: `New duplicates` / `Known duplicates`
+- Consistent filtering behavior across report types
+- Block explainability now core-owned (`block_group_facts`)
+- Expanded `Report Provenance` section displays full meta information block
+
+**Cross-Format Metadata**
+
+- All formats (HTML/TXT/JSON) now include:
+    - `baseline_payload_sha256` and `baseline_payload_sha256_verified` for audit traceability
+    - Cache contract fields: `cache_schema_version`, `cache_status`, `cache_used`
+    - Baseline audit fields and trust status
+
+### Documentation
+
+- Added the contract documentation book `docs/book/`.
+
+---
+
+### Testing
+
+**Baseline Contract Testing**
+
+- Expanded matrix coverage:
+    - Legacy format handling
+    - Type/shape validation
+    - Compatibility mismatch scenarios
+    - Integrity failure cases
+    - Canonical hash determinism
+
+**Golden Snapshot Testing**
+
+- New detector golden snapshot fixture with canonical runtime policy
+- Golden assertions run on `cp313` (consistency)
+- Full invariant suite maintains matrix-wide coverage
+- Golden tests use same core `python_tag` source as CLI/baseline checks (prevents cross-layer drift)
+
+---
+
+### Roadmap Note
+
+Version 1.4.0 establishes a stable baseline/CI contract but revealed internal structure needs cleanup. Version 1.5 will
+focus on architecture refactoring for maintainability and orchestration, with strict constraints:
+
+**No changes to:**
+
+- Detection semantics
+- Fingerprint algorithms
+- Baseline hash inputs
+- Determinism guarantees
+
+The 1.4.0 contract remains stable and reliable for long-term CI integration.
+
 ## [1.3.0] - 2026-02-08
 
 ### Overview
@@ -59,8 +213,10 @@ codeclone . --update-baseline
 ### Cache & Security
 
 - Cache default moved to `<root>/.cache/codeclone/cache.json` with legacy path warning.
-- Cache schema was extended to include segment data (`CACHE_VERSION=1.1`).
+- Cache schema moved to compact signed payload format (`CACHE_VERSION=1.2`) with
+  relative file keys and fixed-array entries for faster IO and smaller files.
 - Cache integrity uses constant-time signature checks and deep schema validation.
+- Legacy `.cache_secret` is now treated as obsolete and triggers an explicit cleanup warning.
 - Invalid/oversized cache is ignored deterministically and rebuilt from source.
 - Added security regressions for traversal safety, report escaping, baseline/cache integrity,
   and deterministic report ordering across formats.

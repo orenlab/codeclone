@@ -1,8 +1,24 @@
 from __future__ import annotations
 
+import platform
+import shlex
+import sys
+import traceback
 from pathlib import Path
 
+from . import __version__
+from .contracts import ISSUES_URL
+
 BANNER_SUBTITLE = "[italic]Architectural duplication detector[/italic]"
+
+MARKER_CONTRACT_ERROR = "[error]CONTRACT ERROR:[/error]"
+MARKER_GATING_FAILURE = "[error]GATING FAILURE:[/error]"
+MARKER_INTERNAL_ERROR = "[error]INTERNAL ERROR:[/error]"
+
+REPORT_BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN = "Assert pattern block"
+REPORT_BLOCK_GROUP_COMPARE_NOTE_N_WAY = (
+    "N-way group: each block matches {peer_count} peers in this group."
+)
 
 HELP_VERSION = "Print the CodeClone version and exit."
 HELP_ROOT = "Project root directory to scan."
@@ -27,8 +43,10 @@ HELP_NO_PROGRESS = "Disable the progress bar (recommended for CI logs)."
 HELP_NO_COLOR = "Disable ANSI colors in output."
 HELP_QUIET = "Minimize output (still shows warnings and errors)."
 HELP_VERBOSE = "Print detailed hash identifiers for new clones."
+HELP_DEBUG = "Print debug details (traceback and environment) on internal errors."
 
 SUMMARY_TITLE = "Analysis Summary"
+CLI_LAYOUT_WIDTH = 40
 SUMMARY_LABEL_FILES_FOUND = "Files found"
 SUMMARY_LABEL_FILES_ANALYZED = "Files analyzed"
 SUMMARY_LABEL_CACHE_HITS = "Cache hits"
@@ -73,9 +91,23 @@ ERR_INVALID_OUTPUT_EXT = (
     "[error]Invalid {label} output extension: {path} "
     "(expected {expected_suffix}).[/error]"
 )
+ERR_INVALID_OUTPUT_PATH = (
+    "[error]Invalid {label} output path: {path} ({error}).[/error]"
+)
 ERR_ROOT_NOT_FOUND = "[error]Root path does not exist: {path}[/error]"
 ERR_INVALID_ROOT_PATH = "[error]Invalid root path: {error}[/error]"
 ERR_SCAN_FAILED = "[error]Scan failed: {error}[/error]"
+ERR_INVALID_BASELINE_PATH = "[error]Invalid baseline path: {path} ({error}).[/error]"
+ERR_BASELINE_WRITE_FAILED = (
+    "[error]Failed to write baseline file: {path} ({error}).[/error]"
+)
+ERR_REPORT_WRITE_FAILED = (
+    "[error]Failed to write {label} report: {path} ({error}).[/error]"
+)
+ERR_UNREADABLE_SOURCE_IN_GATING = (
+    "One or more source files could not be read in CI/gating mode.\n"
+    "Unreadable source files: {count}."
+)
 
 WARN_LEGACY_CACHE = (
     "[warning]Legacy cache file found at: {legacy_path}.[/warning]\n"
@@ -89,22 +121,20 @@ ERR_INVALID_BASELINE = (
     "{error}\n"
     "Please regenerate the baseline with --update-baseline."
 )
-ERR_BASELINE_VERSION_MISMATCH = "[error]Baseline version mismatch.[/error]"
-ERR_BASELINE_SCHEMA_MISMATCH = "[error]Baseline schema version mismatch.[/error]"
-WARN_BASELINE_PYTHON_MISMATCH = "[warning]Baseline Python version mismatch.[/warning]"
-ERR_BASELINE_SAME_PYTHON_REQUIRED = (
-    "[error]Baseline checks require the same Python version to "
-    "ensure deterministic results. Please regenerate the "
-    "baseline using the current interpreter.[/error]"
-)
+ACTION_UPDATE_BASELINE = "Run: codeclone . --update-baseline"
 WARN_BASELINE_MISSING = (
     "[warning]Baseline file not found at: [bold]{path}[/bold][/warning]\n"
     "[dim]Comparing against an empty baseline. "
-    "Use --update-baseline to create it.[/dim]"
+    "Use --update-baseline to create it.[/dim]\n"
+    f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
 )
 WARN_BASELINE_IGNORED = (
     "[warning]Baseline is not trusted for this run and will be ignored.[/warning]\n"
-    "[dim]Comparison will proceed against an empty baseline.[/dim]"
+    "[dim]Comparison will proceed against an empty baseline.[/dim]\n"
+    f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
+)
+ERR_BASELINE_GATING_REQUIRES_TRUSTED = (
+    f"[error]CI requires a trusted baseline.[/error]\n{ACTION_UPDATE_BASELINE}"
 )
 SUCCESS_BASELINE_UPDATED = "✔ Baseline updated: {path}"
 
@@ -118,9 +148,7 @@ FAIL_NEW_ACCEPT_COMMAND = "  codeclone . --update-baseline"
 FAIL_NEW_DETAIL_FUNCTION = "Details (function clone hashes):"
 FAIL_NEW_DETAIL_BLOCK = "Details (block clone hashes):"
 
-ERR_FAIL_THRESHOLD = (
-    "\n[error]❌ FAILED: Total clones ({total}) exceed threshold ({threshold})![/error]"
-)
+ERR_FAIL_THRESHOLD = "Total clones ({total}) exceed threshold ({threshold})."
 WARN_NEW_CLONES_WITHOUT_FAIL = (
     "\n[warning]New clones detected but --fail-on-new not set.[/warning]\n"
     "Run with --update-baseline to accept them as technical debt."
@@ -143,6 +171,26 @@ def fmt_invalid_output_extension(
     return ERR_INVALID_OUTPUT_EXT.format(
         label=label, path=path, expected_suffix=expected_suffix
     )
+
+
+def fmt_invalid_output_path(*, label: str, path: Path, error: object) -> str:
+    return ERR_INVALID_OUTPUT_PATH.format(label=label, path=path, error=error)
+
+
+def fmt_invalid_baseline_path(*, path: Path, error: object) -> str:
+    return ERR_INVALID_BASELINE_PATH.format(path=path, error=error)
+
+
+def fmt_baseline_write_failed(*, path: Path, error: object) -> str:
+    return ERR_BASELINE_WRITE_FAILED.format(path=path, error=error)
+
+
+def fmt_report_write_failed(*, label: str, path: Path, error: object) -> str:
+    return ERR_REPORT_WRITE_FAILED.format(label=label, path=path, error=error)
+
+
+def fmt_unreadable_source_in_gating(*, count: int) -> str:
+    return ERR_UNREADABLE_SOURCE_IN_GATING.format(count=count)
 
 
 def fmt_scanning_root(root: Path) -> str:
@@ -185,45 +233,6 @@ def fmt_invalid_baseline(error: object) -> str:
     return ERR_INVALID_BASELINE.format(error=error)
 
 
-def fmt_baseline_version_missing(current_version: str) -> str:
-    return (
-        f"{ERR_BASELINE_VERSION_MISMATCH}\n"
-        "Baseline version missing (legacy baseline format).\n"
-        f"Current version: {current_version}.\n"
-        "Please regenerate the baseline with --update-baseline."
-    )
-
-
-def fmt_baseline_version_mismatch(
-    *, baseline_version: str, current_version: str
-) -> str:
-    return (
-        f"{ERR_BASELINE_VERSION_MISMATCH}\n"
-        "Baseline was generated with CodeClone "
-        f"{baseline_version}.\n"
-        f"Current version: {current_version}.\n"
-        "Please regenerate the baseline with --update-baseline."
-    )
-
-
-def fmt_baseline_schema_mismatch(*, baseline_schema: int, current_schema: int) -> str:
-    return (
-        f"{ERR_BASELINE_SCHEMA_MISMATCH}\n"
-        f"Baseline schema: {baseline_schema}. "
-        f"Current schema: {current_schema}.\n"
-        "Please regenerate the baseline with --update-baseline."
-    )
-
-
-def fmt_baseline_python_mismatch(*, baseline_python: str, current_python: str) -> str:
-    return (
-        f"{WARN_BASELINE_PYTHON_MISMATCH}\n"
-        "Baseline was generated with Python "
-        f"{baseline_python}.\n"
-        f"Current interpreter: Python {current_python}."
-    )
-
-
 def fmt_path(template: str, path: Path) -> str:
     return template.format(path=path)
 
@@ -255,3 +264,60 @@ def fmt_summary_compact_clones(
 
 def fmt_fail_threshold(*, total: int, threshold: int) -> str:
     return ERR_FAIL_THRESHOLD.format(total=total, threshold=threshold)
+
+
+def fmt_contract_error(message: str) -> str:
+    return f"{MARKER_CONTRACT_ERROR}\n{message}"
+
+
+def fmt_gating_failure(message: str) -> str:
+    return f"{MARKER_GATING_FAILURE}\n{message}"
+
+
+def fmt_internal_error(
+    error: BaseException,
+    *,
+    issues_url: str = ISSUES_URL,
+    debug: bool = False,
+) -> str:
+    bug_report_url = issues_url.rstrip("/") + "/new?template=bug_report.yml"
+    error_name = type(error).__name__
+    error_text = str(error).strip() or "<no message>"
+    lines = [
+        MARKER_INTERNAL_ERROR,
+        "Unexpected exception.",
+        f"Reason: {error_name}: {error_text}",
+        "",
+        "Next steps:",
+        "- Re-run with --debug to include a traceback.",
+        f"- If this is reproducible, open an issue: {bug_report_url}.",
+        (
+            "- Attach: command line, CodeClone version, Python version, "
+            "and the report file if generated."
+        ),
+    ]
+    if not debug:
+        return "\n".join(lines)
+
+    traceback_lines = traceback.format_exception(
+        type(error), error, error.__traceback__
+    )
+    command_line = shlex.join(sys.argv)
+    lines.extend(
+        [
+            "",
+            "DEBUG DETAILS",
+            f"Platform: {platform.platform()}",
+            f"Python: {sys.version.split()[0]}",
+            f"CodeClone: {__version__}",
+            f"Command: {command_line}",
+            f"CWD: {Path.cwd()}",
+            "Traceback:",
+            "".join(traceback_lines).rstrip(),
+        ]
+    )
+    return "\n".join(lines)
+
+
+def fmt_report_block_group_compare_note_n_way(*, peer_count: int) -> str:
+    return REPORT_BLOCK_GROUP_COMPARE_NOTE_N_WAY.format(peer_count=peer_count)

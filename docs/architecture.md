@@ -1,5 +1,8 @@
 # CodeClone Architecture
 
+> Scope note: this file is an architecture narrative/deep-dive.  
+> Contract-level guarantees (schemas, statuses, exit codes, trust model, determinism) are defined in `docs/book/`.
+
 This document describes the high-level architecture of **CodeClone**.
 
 ---
@@ -133,15 +136,34 @@ Detected clone groups can be:
 
 All report formats include provenance metadata:
 
+- `report_schema_version`
 - `codeclone_version`
-- `python_version`
+- `python_version` (runtime major.minor, human-readable)
+- `python_tag` (runtime compatibility tag used by baseline/cache contracts)
 - `baseline_path`
-- `baseline_version`
+- `baseline_fingerprint_version`
 - `baseline_schema_version`
-- `baseline_python_version`
+- `baseline_python_tag`
+- `baseline_generator_name`
+- `baseline_generator_version`
+- `baseline_payload_sha256`
+- `baseline_payload_sha256_verified`
 - `baseline_loaded`
 - `baseline_status`
-  (`ok | missing | legacy | invalid | mismatch_version | mismatch_schema | mismatch_python | generator_mismatch | integrity_missing | integrity_failed | too_large`)
+  (
+  `ok | missing | too_large | invalid_json | invalid_type | missing_fields | mismatch_schema_version | mismatch_fingerprint_version | mismatch_python_version | generator_mismatch | integrity_missing | integrity_failed`;
+  `mismatch_python_version` is the status name used for `python_tag` mismatch)
+- `cache_path`
+- `cache_schema_version`
+- `cache_status`
+- `cache_used`
+- `files_skipped_source_io`
+
+Explainability contract (v1):
+
+- Explainability facts are produced only by Python core/report layer.
+- HTML/JS renderer is display-only and must not recalculate metrics or introduce new semantics.
+- UI can format, filter, and highlight facts, but cannot invent new hints.
 
 ---
 
@@ -150,35 +172,49 @@ All report formats include provenance metadata:
 Baseline comparison allows CI to fail **only on new clones**,
 enabling gradual architectural improvement.
 
-Baseline files are **versioned**. The baseline stores the CodeClone version and schema
-version used to generate it. Mismatches result in a hard stop and require regeneration.
-Baseline format in 1.3+ is tamper-evident (`generator`, `payload_sha256`) and validated
-before baseline diffing.
+Baseline files use a stable v1 contract. Compatibility is checked by
+`schema_version`, `fingerprint_version`, `python_tag`, and `generator.name`,
+not package patch/minor version.
+Regeneration is typically required when `fingerprint_version` or `python_tag` changes.
+Baseline integrity is tamper-evident via canonical `payload_sha256`, which covers
+`clones.functions`, `clones.blocks`, `meta.fingerprint_version`, and `meta.python_tag`.
+`schema_version` and `generator.name` are compatibility gates and intentionally
+excluded from the integrity hash.
+`created_at` and `generator.version` are informational metadata and do not affect
+integrity validation.
 
 Baseline validation order is deterministic:
 
 1. size guard (before JSON parse),
 2. JSON parse and root object/type checks,
-3. legacy/version/schema policy checks,
-4. Python version policy check,
-5. integrity checks (`generator`, `payload_sha256`) for v1.3+ baseline format only.
+3. required fields and type checks,
+4. compatibility checks (`generator`, `schema_version`, `fingerprint_version`, `python_tag`),
+5. integrity checks (`payload_sha256`).
 
 Baseline loading is strict: schema/type violations, integrity failures, generator mismatch,
 or oversized files are treated as untrusted input.
-In `--fail-on-new` / `--ci`, untrusted baseline states fail fast.
+In `--ci` (or explicit `--fail-on-new`), untrusted baseline states fail fast.
 Outside gating mode, untrusted baseline is ignored with warning and comparison proceeds
 against an empty baseline.
 Baseline size guard is configurable via `--max-baseline-size-mb`.
 
-## Python Version Consistency for Baseline Checks
+CLI exit code contract:
 
-Due to inherent differences in Python’s AST between interpreter versions, baseline
-generation and verification must be performed using the same Python version.
+- `0` success
+- `2` contract error (invalid arguments/output options, untrusted baseline, or unreadable source files in gating mode)
+- `3` gating failure (`--ci` new clones, or `--fail-threshold` exceeded)
+- `5` unexpected internal error (reserved)
 
-This ensures deterministic and reproducible clone detection results.
+`5` is reserved only for unexpected internal exception paths (tool bug), not for
+baseline/options contract violations.
 
-CI checks therefore pin baseline verification to a single Python version, while the
-test matrix continues to validate compatibility across Python 3.10–3.14.
+## Python Tag Consistency for Baseline Checks
+
+Due to inherent AST differences across interpreter builds, baseline compatibility
+is pinned to `python_tag` (for example `cp313`).
+
+This preserves deterministic and reproducible clone detection results while allowing
+patch updates within the same interpreter tag.
 
 ---
 

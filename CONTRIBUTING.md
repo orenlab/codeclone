@@ -6,20 +6,20 @@ CodeClone is an **AST + CFG-based code clone detector** focused on architectural
 not textual similarity.
 
 Contributions are welcome — especially those that improve **signal quality**, **CFG semantics**,
-and **real-world usability**.
+and **real-world CI usability**.
 
 ---
 
 ## Project Philosophy
 
-Before contributing, please understand the core principles of the project:
+Core principles:
 
 - **Low noise over high recall**
 - **Structural and control-flow similarity**, not semantic equivalence
 - **Deterministic and explainable behavior**
-- Optimized for **CI usage and architectural analysis**
+- Optimized for **CI usage** and architectural analysis
 
-If a change increases false positives or reduces explainability,
+If a change increases false positives, reduces determinism, or weakens explainability,
 it is unlikely to be accepted.
 
 ---
@@ -42,14 +42,16 @@ We especially welcome contributions in the following areas:
 
 Please use the appropriate **GitHub Issue Template**.
 
-When reporting bugs related to clone detection, include:
+When reporting issues related to clone detection, include:
 
-- minimal reproducible code snippets;
-- the Python version used;
+- minimal reproducible code snippets (preferred over screenshots);
+- the CodeClone version;
+- the Python version (`python_tag`, e.g. `cp313`);
 - whether the issue is primarily:
-  - AST-related,
-  - CFG-related,
-  - reporting / UI-related.
+    - AST-related,
+    - CFG-related,
+    - normalization-related,
+    - reporting / UI-related.
 
 Screenshots alone are usually insufficient for analysis.
 
@@ -73,12 +75,13 @@ Well-argued false-positive reports are valuable and appreciated.
 
 CFG behavior in CodeClone is intentionally conservative in the 1.x series.
 
-If proposing changes to CFG semantics, please include:
+If proposing changes to CFG semantics, include:
 
 - a description of the current behavior;
 - the proposed new behavior;
-- the expected impact on clone detection quality;
-- concrete code examples.
+- the expected impact on clone detection quality (noise/recall);
+- concrete code examples;
+- a note on determinism implications.
 
 Such changes often require design-level discussion and may be staged across versions.
 
@@ -87,19 +90,44 @@ Such changes often require design-level discussion and may be staged across vers
 ## Security & Safety Expectations
 
 - Assume **untrusted input** (paths and source code).
-- Add **negative tests** for any normalization or CFG change.
-- Changes must preserve determinism and avoid new false positives.
+- Prefer **fail-closed in gating modes** and **fail-open in normal modes** only when explicitly intended.
+- Add **negative tests** for any normalization/CFG change.
+- Changes must preserve determinism and avoid introducing new false positives.
 
 ---
 
 ## Baseline & CI
 
-- Baselines are **versioned**. Regenerate with `codeclone . --update-baseline`
-  when detection logic or CodeClone version changes.
-- Baselines in 1.3+ are tamper-evident (`generator`, `payload_sha256`).
-- Baseline verification must use the same Python `major.minor` version.
-- In `--fail-on-new` / `--ci`, untrusted baseline states fail fast. Outside gating
-  mode, baseline is ignored with warning and comparison proceeds against an empty baseline.
+### Baseline contract (v1)
+
+- The baseline schema is versioned (`meta.schema_version`).
+- Compatibility/trust gates include `schema_version`, `fingerprint_version`, `python_tag`,
+  and `meta.generator.name`.
+- Integrity is tamper-evident via `meta.payload_sha256` over canonical payload:
+  `clones.functions`, `clones.blocks`, `meta.fingerprint_version`, `meta.python_tag`.
+  `meta.schema_version`, `meta.generator.name`, `meta.generator.version`, and `created_at`
+  are excluded from payload hashing.
+
+### When baseline regeneration is required
+
+- Regenerate baseline with `codeclone . --update-baseline` when
+  `fingerprint_version` **or** `python_tag` changes.
+- Regeneration is **not** required for UI/report/CLI/cache/performance-only changes
+  if both `fingerprint_version` and `python_tag` are unchanged.
+
+### Gating behavior
+
+- In `--ci` (or explicit gating flags), **untrusted baseline states fail fast** as a contract error (exit 2).
+- Outside gating mode, an untrusted/missing baseline is ignored with a warning and comparison proceeds
+  against an empty baseline.
+
+### Exit codes contract
+
+- **0** — success
+- **2** — contract error (e.g., missing/untrusted baseline in gating, invalid output path/extension, incompatible
+  versions)
+- **3** — gating failure (new clones detected, `--fail-threshold` exceeded)
+- **5** — internal error (unexpected exception; please report)
 
 ---
 
@@ -108,9 +136,7 @@ Such changes often require design-level discussion and may be staged across vers
 ```bash
 git clone https://github.com/orenlab/codeclone.git
 cd codeclone
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .[dev]
+uv sync --all-extras --dev
 ```
 
 Run tests:
@@ -131,8 +157,9 @@ uv run ruff format .
 
 ## Code Style
 
-- Python 3.10+
+- Python **3.10–3.14**
 - Type annotations are required
+- `Any` should be minimized; prefer precise types and small typed helpers
 - `mypy` must pass
 - `ruff check` must pass
 - Code must be formatted with `ruff format`
@@ -145,11 +172,11 @@ uv run ruff format .
 CodeClone follows **semantic versioning**:
 
 - **MAJOR**: fundamental detection model changes
-- **MINOR**: new detection capabilities (for example, CFG improvements)
+- **MINOR**: new detection capabilities (e.g., new detectors or major CFG/normalization behavior shifts)
 - **PATCH**: bug fixes, performance improvements, and UI/UX polish
 
-Baselines are versioned. Any change to detection behavior must include documentation
-and tests, and may require baseline regeneration.
+Any change that affects detection behavior must include documentation and tests,
+and may require a `fingerprint_version` bump (and thus baseline regeneration).
 
 ---
 

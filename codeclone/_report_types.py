@@ -10,5 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
+# Any: report items aggregate heterogeneous JSON-like payloads from multiple
+# pipelines (function/block/segment) and are narrowed at access sites.
 GroupItem = dict[str, Any]
+
+
 GroupMap = dict[str, list[GroupItem]]

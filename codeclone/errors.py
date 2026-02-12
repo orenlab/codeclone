@@ -36,6 +36,6 @@ class BaselineValidationError(BaselineSchemaError):
 
     __slots__ = ("status",)
 
-    def __init__(self, message: str, *, status: str = "invalid") -> None:
+    def __init__(self, message: str, *, status: str = "invalid_type") -> None:
         super().__init__(message)
         self.status = status
