@@ -1,5 +1,6 @@
 import ast
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -18,6 +19,11 @@ from codeclone.report import (
     to_json,
     to_json_report,
     to_text_report,
+)
+from tests._report_fixtures import (
+    REPEATED_STMT_HASH,
+    repeated_block_group_key,
+    write_repeated_assert_source,
 )
 
 
@@ -164,17 +170,8 @@ def test_prepare_block_report_groups_handles_empty_item_list() -> None:
 
 
 def test_build_block_group_facts_assert_only(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
-    test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    assert 'b' in html\n"
-        "    assert 'c' in html\n"
-        "    assert 'd' in html\n",
-        "utf-8",
-    )
+    group_key = repeated_block_group_key()
+    test_file = write_repeated_assert_source(tmp_path / "test_repeated_asserts.py")
     facts = build_block_group_facts(
         {
             group_key: [
@@ -193,7 +190,7 @@ def test_build_block_group_facts_assert_only(tmp_path: Path) -> None:
     assert group["signature_kind"] == "stmt_hash_sequence"
     assert group["merged_regions"] == "true"
     assert group["pattern"] == "repeated_stmt_hash"
-    assert group["pattern_display"] == f"{repeated[:12]} x4"
+    assert group["pattern_display"] == f"{REPEATED_STMT_HASH[:12]} x4"
     assert group["hint"] == "assert_only"
     assert group["hint_label"] == "Assert-only block"
     assert group["hint_confidence"] == "deterministic"
@@ -205,17 +202,8 @@ def test_build_block_group_facts_assert_only(tmp_path: Path) -> None:
 
 
 def test_build_block_group_facts_deterministic_item_order(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
-    test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    assert 'b' in html\n"
-        "    assert 'c' in html\n"
-        "    assert 'd' in html\n",
-        "utf-8",
-    )
+    group_key = repeated_block_group_key()
+    test_file = write_repeated_assert_source(tmp_path / "test_repeated_asserts.py")
     item_a = {
         "qualname": "pkg.mod:f",
         "filepath": str(test_file),
@@ -233,7 +221,9 @@ def test_build_block_group_facts_deterministic_item_order(tmp_path: Path) -> Non
     assert facts_a == facts_b
 
 
-def test_report_output_formats() -> None:
+def test_report_output_formats(
+    report_meta_factory: Callable[..., dict[str, object]],
+) -> None:
     groups = {
         "k1": [
             {
@@ -261,27 +251,12 @@ def test_report_output_formats() -> None:
             },
         ],
     }
-    meta = {
-        "report_schema_version": REPORT_SCHEMA_VERSION,
-        "codeclone_version": "1.3.0",
-        "python_version": "3.13",
-        "python_tag": "cp313",
-        "baseline_path": "/tmp/codeclone.baseline.json",
-        "baseline_fingerprint_version": "1",
-        "baseline_schema_version": 1,
-        "baseline_python_tag": "cp313",
-        "baseline_generator_name": "codeclone",
-        "baseline_generator_version": "1.4.0",
-        "baseline_payload_sha256": "a" * 64,
-        "baseline_payload_sha256_verified": True,
-        "baseline_loaded": True,
-        "baseline_status": "ok",
-        "cache_path": "/tmp/cache.json",
-        "cache_schema_version": "1.2",
-        "cache_status": "ok",
-        "cache_used": True,
-        "files_skipped_source_io": 0,
-    }
+    meta = report_meta_factory(
+        codeclone_version="1.3.0",
+        baseline_path="/tmp/codeclone.baseline.json",
+        baseline_schema_version=1,
+        cache_path="/tmp/cache.json",
+    )
     json_out = to_json(groups)
     report_out = to_json_report(groups, groups, {}, meta)
     text_out = to_text_report(
@@ -524,6 +499,27 @@ def test_report_json_block_records_do_not_repeat_group_hash() -> None:
     )
     rows = payload["groups"]["blocks"][block_group_key]
     assert rows == [[0, "m:f", 10, 13, 4]]
+
+
+def test_report_json_includes_sorted_block_facts() -> None:
+    payload = json.loads(
+        to_json_report(
+            {},
+            {},
+            {},
+            {"codeclone_version": "1.4.0"},
+            block_facts={
+                "group-b": {"z": "3", "a": "x"},
+                "group-a": {"k": "v"},
+            },
+        )
+    )
+    assert payload["facts"] == {
+        "blocks": {
+            "group-a": {"k": "v"},
+            "group-b": {"a": "x", "z": "3"},
+        }
+    }
 
 
 def test_report_json_groups_split_trusted_baseline() -> None:

@@ -1,11 +1,14 @@
 from pathlib import Path
 
 from codeclone._report_explain import build_block_group_facts
+from tests._report_fixtures import (
+    repeated_block_group_key,
+    write_repeated_assert_source,
+)
 
 
 def test_build_block_group_facts_handles_missing_file() -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
+    group_key = repeated_block_group_key()
     facts = build_block_group_facts(
         {
             group_key: [
@@ -26,8 +29,7 @@ def test_build_block_group_facts_handles_missing_file() -> None:
 
 
 def test_build_block_group_facts_handles_syntax_error_file(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
+    group_key = repeated_block_group_key()
     broken = tmp_path / "broken.py"
     broken.write_text("def f(:\n    pass\n", "utf-8")
     facts = build_block_group_facts(
@@ -46,8 +48,7 @@ def test_build_block_group_facts_handles_syntax_error_file(tmp_path: Path) -> No
 
 
 def test_build_block_group_facts_assert_detection_with_calls(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
+    group_key = repeated_block_group_key()
     test_file = tmp_path / "test_calls.py"
     test_file.write_text(
         "def f(checker):\n"
@@ -75,8 +76,7 @@ def test_build_block_group_facts_assert_detection_with_calls(tmp_path: Path) -> 
 
 
 def test_build_block_group_facts_non_assert_breaks_hint(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
+    group_key = repeated_block_group_key()
     test_file = tmp_path / "test_mixed.py"
     test_file.write_text(
         "def f(html):\n"
@@ -117,8 +117,7 @@ def test_build_block_group_facts_non_repeated_signature_has_no_pattern() -> None
 
 
 def test_build_block_group_facts_handles_empty_stmt_range(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
+    group_key = repeated_block_group_key()
     test_file = tmp_path / "module.py"
     test_file.write_text("def f():\n    return 1\n", "utf-8")
     facts = build_block_group_facts(
@@ -139,8 +138,7 @@ def test_build_block_group_facts_handles_empty_stmt_range(tmp_path: Path) -> Non
 
 
 def test_build_block_group_facts_non_assert_call_shapes(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
+    group_key = repeated_block_group_key()
     test_file = tmp_path / "module.py"
     test_file.write_text(
         "def f(checker, x):\n    checker.validate(x)\n    (lambda y: y)(x)\n    x\n",
@@ -165,8 +163,7 @@ def test_build_block_group_facts_non_assert_call_shapes(tmp_path: Path) -> None:
 
 
 def test_build_block_group_facts_invalid_item_disables_assert_hint() -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
+    group_key = repeated_block_group_key()
     facts = build_block_group_facts(
         {
             group_key: [
@@ -187,8 +184,7 @@ def test_build_block_group_facts_invalid_item_disables_assert_hint() -> None:
 def test_build_block_group_facts_assert_only_without_test_context(
     tmp_path: Path,
 ) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
+    group_key = repeated_block_group_key()
     prod_file = tmp_path / "module.py"
     prod_file.write_text(
         "def f(html):\n"
@@ -216,17 +212,8 @@ def test_build_block_group_facts_assert_only_without_test_context(
 
 
 def test_build_block_group_facts_n_way_group_compare_facts(tmp_path: Path) -> None:
-    repeated = "0e8579f84e518d186950d012c9944a40cb872332"
-    group_key = "|".join([repeated] * 4)
-    test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    assert 'b' in html\n"
-        "    assert 'c' in html\n"
-        "    assert 'd' in html\n",
-        "utf-8",
-    )
+    group_key = repeated_block_group_key()
+    test_file = write_repeated_assert_source(tmp_path / "test_repeated_asserts.py")
     item = {
         "qualname": "pkg.mod:f",
         "filepath": str(test_file),

@@ -1,5 +1,6 @@
 import importlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -19,16 +20,15 @@ from codeclone.html_report import (
     build_html_report as _core_build_html_report,
 )
 from codeclone.report import build_block_group_facts, to_json_report
-
-_REPEATED_STMT_HASH = "0e8579f84e518d186950d012c9944a40cb872332"
-_REPEATED_BLOCK_GROUP_KEY = "|".join([_REPEATED_STMT_HASH] * 4)
-_REPEATED_ASSERT_SOURCE = (
-    "def f(html):\n"
-    "    assert 'a' in html\n"
-    "    assert 'b' in html\n"
-    "    assert 'c' in html\n"
-    "    assert 'd' in html\n"
+from tests._report_fixtures import (
+    REPEATED_ASSERT_SOURCE,
+    repeated_block_group_key,
 )
+from tests._report_fixtures import (
+    REPEATED_STMT_HASH as _REPEATED_STMT_HASH,
+)
+
+_REPEATED_BLOCK_GROUP_KEY = repeated_block_group_key()
 
 
 def build_html_report(
@@ -59,7 +59,7 @@ def _repeated_assert_block_groups(
     qualnames: tuple[str, ...] = ("pkg.mod:f",),
 ) -> tuple[str, dict[str, list[dict[str, Any]]]]:
     test_file = tmp_path / "test_repeated_asserts.py"
-    test_file.write_text(_REPEATED_ASSERT_SOURCE, "utf-8")
+    test_file.write_text(REPEATED_ASSERT_SOURCE, "utf-8")
     return _REPEATED_BLOCK_GROUP_KEY, {
         _REPEATED_BLOCK_GROUP_KEY: [
             {
@@ -466,7 +466,10 @@ def test_html_report_help_modal_links_present() -> None:
     assert 'rel="noopener noreferrer"' in html
 
 
-def test_html_report_includes_provenance_metadata(tmp_path: Path) -> None:
+def test_html_report_includes_provenance_metadata(
+    tmp_path: Path,
+    report_meta_factory: Callable[..., dict[str, object]],
+) -> None:
     f = tmp_path / "a.py"
     f.write_text("def f():\n    return 1\n", "utf-8")
     html = build_html_report(
@@ -482,24 +485,10 @@ def test_html_report_includes_provenance_metadata(tmp_path: Path) -> None:
         },
         block_groups={},
         segment_groups={},
-        report_meta={
-            "codeclone_version": "1.3.0",
-            "python_version": "3.13",
-            "baseline_path": "/repo/codeclone.baseline.json",
-            "baseline_fingerprint_version": "1",
-            "baseline_schema_version": 1,
-            "baseline_python_version": "3.13",
-            "baseline_generator_version": "1.4.0",
-            "baseline_payload_sha256": "a" * 64,
-            "baseline_payload_sha256_verified": True,
-            "baseline_loaded": True,
-            "baseline_status": "ok",
-            "cache_path": "/repo/.cache/codeclone/cache.json",
-            "cache_schema_version": "1.2",
-            "cache_status": "ok",
-            "cache_used": True,
-            "files_skipped_source_io": 0,
-        },
+        report_meta=report_meta_factory(
+            codeclone_version="1.3.0",
+            baseline_schema_version=1,
+        ),
     )
     expected = [
         "Report Provenance",
@@ -527,7 +516,10 @@ def test_html_report_includes_provenance_metadata(tmp_path: Path) -> None:
         assert token in html
 
 
-def test_html_report_escapes_meta_and_title(tmp_path: Path) -> None:
+def test_html_report_escapes_meta_and_title(
+    tmp_path: Path,
+    report_meta_factory: Callable[..., dict[str, object]],
+) -> None:
     f = tmp_path / "a.py"
     f.write_text("def f():\n    return 1\n", "utf-8")
     html = build_html_report(
@@ -544,11 +536,10 @@ def test_html_report_escapes_meta_and_title(tmp_path: Path) -> None:
         block_groups={},
         segment_groups={},
         title='<img src=x onerror="alert(1)">',
-        report_meta={
-            "baseline_path": '"/><script>alert(1)</script>',
-            "cache_path": 'x" onmouseover="alert(1)',
-            "baseline_status": "ok",
-        },
+        report_meta=report_meta_factory(
+            baseline_path='"/><script>alert(1)</script>',
+            cache_path='x" onmouseover="alert(1)',
+        ),
     )
     assert "<script>alert(1)</script>" not in html
     assert "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;" in html
