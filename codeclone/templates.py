@@ -55,7 +55,7 @@ REPORT_TEMPLATE = Template(
   --accent-primary: #3B82F6;
   --accent-secondary: #60A5FA;
   --accent-subtle: rgba(59, 130, 246, 0.1);
-  --accent-muted: rgba(59, 130, 246, 0.05);
+  --accent-muted: rgba(59, 130, 246, 0.13);
 
   /* Semantic Colors - Muted & Professional */
   --success: #10B981;
@@ -96,11 +96,11 @@ REPORT_TEMPLATE = Template(
   --radius-xl: 12px;
   --control-height: 36px;
   --control-height-sm: 30px;
-  --control-radius: 10px;
+  --control-radius: 6px;
   --badge-height: 22px;
-  --badge-pad-x: 10px;
+  --badge-pad-x: 8px;
   --badge-font-size: 0.72rem;
-  --badge-radius: 999px;
+  --badge-radius: 6px;
 
   /* Transitions - Calm & Smooth */
   --transition-fast: 120ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -127,7 +127,7 @@ html[data-theme="light"] {
   --accent-primary: #2563EB;
   --accent-secondary: #3B82F6;
   --accent-subtle: rgba(37, 99, 235, 0.1);
-  --accent-muted: rgba(37, 99, 235, 0.05);
+  --accent-muted: rgba(37, 99, 235, 0.10);
 
   --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.08);
   --elevation-2: 0 2px 6px rgba(0, 0, 0, 0.12);
@@ -332,16 +332,20 @@ html[data-theme="light"] .topbar {
 
 /* Form Elements */
 .select {
+  appearance: none;
+  -webkit-appearance: none;
   padding: 0 32px 0 12px;
   height: var(--control-height);
   border-radius: var(--control-radius);
   border: 1px solid var(--border-default);
-  background: var(--surface-1);
+  background: var(--surface-1) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") no-repeat right 10px center;
   color: var(--text-primary);
   font-size: var(--text-sm);
   font-family: var(--font-sans);
   cursor: pointer;
-  transition: all var(--transition-base);
+  transition:
+    border-color var(--transition-base),
+    background var(--transition-base);
 }
 
 .select:hover {
@@ -364,7 +368,7 @@ html[data-theme="light"] .topbar {
   margin-bottom: 18px;
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+  border-radius: 10px;
   overflow: hidden;
   box-shadow: var(--elevation-1);
 }
@@ -457,7 +461,7 @@ html[data-theme="light"] .topbar {
   align-items: center;
   gap: 6px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--badge-radius);
   font-size: var(--text-xs);
   font-weight: 600;
   border: 1px solid var(--border-default);
@@ -530,7 +534,7 @@ html[data-theme="light"] .topbar {
   padding: 12px;
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+  border-radius: 10px;
   box-shadow: var(--elevation-1);
 }
 
@@ -549,19 +553,20 @@ html[data-theme="light"] .topbar {
 
 .novelty-tabs {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0;
+  position: relative;
+  bottom: -1px;
 }
 
 .global-novelty {
   margin-top: 14px;
   margin-bottom: 18px;
-  padding: 14px 16px 12px;
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+  border-radius: 10px;
   box-shadow: var(--elevation-1);
+  overflow: hidden;
 }
 
 .global-novelty-head {
@@ -570,6 +575,8 @@ html[data-theme="light"] .topbar {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+  padding: 14px 16px 0;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .global-novelty-head h2 {
@@ -577,16 +584,23 @@ html[data-theme="light"] .topbar {
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.01em;
+  padding-bottom: 12px;
 }
 
 .novelty-tab {
-  height: var(--control-height-sm);
-  padding: 0 10px;
+  height: auto;
+  padding: 8px 14px 10px;
   font-size: var(--text-xs);
-  border-radius: 999px;
-  border: 1px solid var(--border-default);
-  background: var(--surface-0);
+  border-radius: 0;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
   color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .novelty-tab:hover {
@@ -595,9 +609,10 @@ html[data-theme="light"] .topbar {
 }
 
 .novelty-tab.is-active {
-  background: var(--accent-subtle);
-  border-color: color-mix(in oklab, var(--accent-primary) 45%, var(--border-default) 55%);
   color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
+  font-weight: 600;
+  background: transparent;
 }
 
 .novelty-count {
@@ -608,15 +623,21 @@ html[data-theme="light"] .topbar {
   height: 18px;
   margin-left: 4px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: color-mix(in oklab, var(--surface-2) 90%, var(--surface-0) 10%);
   font-family: var(--font-mono);
   font-size: 0.68rem;
   line-height: 1;
 }
 
+.novelty-tab.is-active .novelty-count {
+  background: color-mix(in oklab, var(--accent-primary) 15%, transparent 85%);
+  color: var(--accent-primary);
+}
+
 .novelty-note {
-  margin: 10px 2px 0;
+  margin: 0;
+  padding: 10px 16px 12px;
   color: var(--text-tertiary);
   font-size: var(--text-xs);
   line-height: 1.4;
@@ -638,7 +659,9 @@ html[data-theme="light"] .topbar {
   color: var(--text-primary);
   font-size: var(--text-sm);
   font-family: var(--font-sans);
-  transition: all var(--transition-base);
+  transition:
+    border-color var(--transition-base),
+    outline var(--transition-base);
 }
 
 .search-box input:focus {
@@ -678,7 +701,10 @@ html[data-theme="light"] .topbar {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--transition-base);
+  transition:
+    opacity var(--transition-base),
+    background var(--transition-fast),
+    color var(--transition-fast);
   opacity: 0;
   pointer-events: none;
 }
@@ -712,7 +738,7 @@ html[data-theme="light"] .topbar {
 .group {
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+  border-radius: 10px;
   margin-bottom: 18px;
   overflow: hidden;
   transition:
@@ -845,32 +871,25 @@ html[data-theme="light"] .topbar {
 }
 
 .item-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(190px, auto);
-  gap: 8px;
-  align-items: start;
-  padding: 10px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border-subtle);
   background: color-mix(in oklab, var(--surface-1) 82%, var(--surface-0) 18%);
   margin-bottom: 0;
-}
-
-.item-title,
-.item-loc {
   min-width: 0;
 }
 
 .item-title {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-primary);
   font-family: var(--font-mono);
   line-height: 1.36;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .item-loc {
@@ -878,13 +897,10 @@ html[data-theme="light"] .topbar {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   line-height: 1.4;
-  white-space: normal;
-  text-align: right;
-  justify-self: end;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  max-width: 42ch;
-  opacity: 0.95;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.85;
 }
 
 .item .codebox {
@@ -1007,10 +1023,10 @@ html[data-theme="light"] .topbar {
 
 .codebox pre {
   margin: 0;
-  padding: 10px 12px;
+  padding: 8px 12px;
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 18px;
 }
 
 .codebox code {
@@ -1021,10 +1037,16 @@ html[data-theme="light"] .topbar {
 .codebox .line,
 .codebox .hitline {
   white-space: pre;
+  margin: 0;
+  padding: 0 0 0 5px;
+  line-height: 18px;
+  min-height: 18px;
+  border-left: 3px solid transparent;
 }
 
 .codebox .hitline {
   background: var(--accent-muted);
+  border-left-color: var(--accent-primary);
 }
 
 /* Metrics modal */
@@ -1062,7 +1084,7 @@ html[data-theme="light"] .topbar {
   background: var(--surface-1);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-xl);
-  max-width: 600px;
+  max-width: 720px;
   width: 100%;
   max-height: 80vh;
   overflow-y: auto;
@@ -1110,7 +1132,10 @@ html[data-theme="light"] .topbar {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--transition-base);
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .metrics-close:hover {
@@ -1142,7 +1167,7 @@ html[data-theme="light"] .topbar {
 
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
 }
 
@@ -1163,6 +1188,7 @@ html[data-theme="light"] .topbar {
   font-size: var(--text-xs);
   color: var(--text-tertiary);
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .metric-value {
@@ -1175,7 +1201,7 @@ html[data-theme="light"] .topbar {
 .metric-value-compact {
   font-size: var(--text-sm);
   line-height: 1.4;
-  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .metric-badge {
@@ -1186,6 +1212,8 @@ html[data-theme="light"] .topbar {
   border-radius: 4px;
   font-size: var(--text-xs);
   font-weight: 500;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .metric-badge.success {
@@ -1233,7 +1261,10 @@ html[data-theme="light"] .topbar {
   background: var(--surface-2);
   color: var(--text-primary);
   text-decoration: none;
-  transition: all var(--transition-base);
+  transition:
+    border-color var(--transition-base),
+    background var(--transition-base),
+    transform var(--transition-base);
 }
 
 .help-link:hover {
@@ -1366,7 +1397,7 @@ html[data-theme="light"] .topbar {
   max-height: min(76vh, 680px);
   background: var(--surface-1);
   border: 1px solid var(--border-default);
-  border-radius: 16px;
+  border-radius: 10px;
   box-shadow: var(--elevation-4);
   overflow: hidden;
   display: flex;
@@ -1655,8 +1686,12 @@ ${pyg_light}
     grid-template-columns: 1fr;
   }
 
-  .global-novelty {
-    padding: 12px;
+  .global-novelty-head {
+    padding: 12px 12px 0;
+  }
+
+  .novelty-note {
+    padding: 10px 12px 12px;
   }
 
   .items {
@@ -1680,20 +1715,73 @@ ${pyg_light}
     margin-left: auto;
   }
 
-  .item-header {
-    grid-template-columns: 1fr;
-    gap: 6px;
-  }
-
-  .item-loc {
-    text-align: left;
-    justify-self: start;
-    max-width: 100%;
-  }
 
   .cmd-search {
     font-size: 1.35rem;
   }
+}
+
+/* Empty State */
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  padding: 40px 20px;
+}
+
+.empty-card {
+  text-align: center;
+  max-width: 480px;
+  padding: 40px 32px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  box-shadow: var(--elevation-2);
+}
+
+.empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 20px;
+  background: var(--success-subtle);
+  border-radius: 50%;
+  color: var(--success);
+}
+
+.empty-card h2 {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.empty-card p {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  margin-top: 4px;
+}
+
+.empty-card .muted {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* Section Color Accents */
+section[data-section="functions"] .group {
+  border-left: 3px solid #3B82F6;
+}
+
+section[data-section="blocks"] .group {
+  border-left: 3px solid #10B981;
+}
+
+section[data-section="segments"] .group {
+  border-left: 3px solid #F59E0B;
 }
 
 /* Print Styles */
@@ -1737,13 +1825,13 @@ ${pyg_light}
           <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
         </svg>
       </button>
-      <button class="btn hotkey" id="help-btn" aria-label="Open help" title="Open help (⌘I)">
-        <span>⌘I</span>
+      <button class="btn hotkey" id="help-btn" aria-label="Open help" data-shortcut-title="mod+I">
+        <span data-shortcut="mod+I"></span>
       </button>
-      <button class="btn hotkey" id="cmd-btn" aria-label="Open command palette" title="Open command palette (⌘K)">
-        <span>⌘K</span>
+      <button class="btn hotkey" id="cmd-btn" aria-label="Open command palette" data-shortcut-title="mod+K">
+        <span data-shortcut="mod+K"></span>
       </button>
-      <button class="btn primary" id="export-btn" aria-label="Export report as JSON" title="Export report (⌘E)">
+      <button class="btn primary" id="export-btn" aria-label="Export report as JSON" data-shortcut-title="mod+E">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5-5m0 0L7 8m5-5v12"/>
         </svg>
@@ -1759,7 +1847,7 @@ ${pyg_light}
   <div class="stats-grid" id="stats-dashboard" style="display: none;"></div>
   <div class="chart-container" id="complexity-chart" style="display: none;">
     <h3 class="chart-title">Clone Group Distribution</h3>
-    <canvas id="complexity-canvas" width="1200" height="260"></canvas>
+    <canvas id="complexity-canvas"></canvas>
   </div>
   ${func_section}
   ${block_section}
@@ -1772,10 +1860,10 @@ ${pyg_light}
     <span class="footer-kbd">/</span>
     <span class="footer-sep">•</span>
     <span>commands</span>
-    <span class="footer-kbd">⌘K</span>
+    <span class="footer-kbd" data-shortcut="mod+K"></span>
     <span class="footer-sep">•</span>
     <span>help</span>
-    <span class="footer-kbd">⌘I</span>
+    <span class="footer-kbd" data-shortcut="mod+I"></span>
     <span class="footer-sep">•</span>
     <span>theme</span>
     <span class="footer-kbd">T</span>
@@ -1830,7 +1918,7 @@ ${pyg_light}
         <div class="metrics-grid">
           <div class="metric-item">
             <div class="metric-label">Command Palette</div>
-            <div class="metric-badge info">⌘K / Ctrl+K</div>
+            <div class="metric-badge info" data-shortcut="mod+K"></div>
           </div>
           <div class="metric-item">
             <div class="metric-label">Search</div>
@@ -1929,6 +2017,21 @@ ${pyg_light}
     globalNovelty: 'all'
   };
   const sectionRefreshers = [];
+
+  // ========== Platform ==========
+  const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '');
+  const modKey = isMac ? '\u2318' : 'Ctrl+';
+
+  function initShortcutLabels() {
+    $$$$('[data-shortcut]').forEach(function (el) {
+      const raw = el.getAttribute('data-shortcut') || '';
+      el.textContent = raw.replace('mod+', modKey);
+    });
+    $$$$('[data-shortcut-title]').forEach(function (el) {
+      const raw = el.getAttribute('data-shortcut-title') || '';
+      el.setAttribute('title', raw.replace('mod+', modKey));
+    });
+  }
 
   // ========== Theme ==========
   function initTheme() {
@@ -2209,14 +2312,14 @@ ${pyg_light}
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 115.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
       title: 'Open Help',
       desc: 'Open shortcuts and support links',
-      shortcut: '⌘I',
+      shortcut: modKey + 'I',
       action: openHelpModal
     },
     {
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5-5m0 0L7 8m5-5v12"/></svg>',
       title: 'Export Report',
       desc: 'Download report as JSON',
-      shortcut: '⌘E',
+      shortcut: modKey + 'E',
       action: () => exportReport('json')
     },
     {
@@ -2230,7 +2333,7 @@ ${pyg_light}
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>',
       title: 'Toggle Statistics',
       desc: 'Show or hide stats dashboard',
-      shortcut: '⌘S',
+      shortcut: null,
       action: showStats
     },
     {
@@ -2281,7 +2384,7 @@ ${pyg_light}
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.58M20 20v-5h-.58"/><path d="M5.64 19.36A9 9 0 1020 15"/></svg>',
       title: 'Refresh View',
       desc: 'Reload the report page',
-      shortcut: '⌘R',
+      shortcut: null,
       action: () => location.reload()
     },
     {
@@ -2518,6 +2621,15 @@ ${pyg_light}
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const width = rect.width;
+    const height = rect.height;
+
     const labels = ['Function', 'Block', 'Segment'];
     const values = [
       $$$$('.group[data-group="functions"]').length,
@@ -2526,18 +2638,17 @@ ${pyg_light}
     ];
     const max = Math.max(...values, 1);
 
-    const width = canvas.width;
-    const height = canvas.height;
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = '#9CA3AF';
     ctx.font = '12px Inter, sans-serif';
 
     const left = 50;
-    const bottom = 30;
     const chartHeight = height - 50;
-    const barWidth = 90;
-    const gap = 140;
-    const startX = left + 40;
+    const barCount = labels.length;
+    const totalBarArea = width - left - 40;
+    const barWidth = Math.min(90, totalBarArea / barCount * 0.6);
+    const gap = totalBarArea / barCount;
+    const startX = left + (gap - barWidth) / 2;
 
     ctx.strokeStyle = '#374151';
     ctx.beginPath();
@@ -2546,7 +2657,7 @@ ${pyg_light}
     ctx.lineTo(width - 20, chartHeight + 20);
     ctx.stroke();
 
-    const colors = ['#60A5FA', '#10B981', '#F59E0B'];
+    const colors = ['#3B82F6', '#10B981', '#F59E0B'];
     values.forEach((val, i) => {
       const h = Math.round((val / max) * (chartHeight - 20));
       const x = startX + i * gap;
@@ -2554,9 +2665,11 @@ ${pyg_light}
       ctx.fillStyle = colors[i];
       ctx.fillRect(x, y, barWidth, h);
       ctx.fillStyle = '#D1D5DB';
-      ctx.fillText(String(val), x + barWidth / 2 - 5, y - 8);
-      ctx.fillText(labels[i], x + 12, chartHeight + 40);
+      ctx.textAlign = 'center';
+      ctx.fillText(String(val), x + barWidth / 2, y - 8);
+      ctx.fillText(labels[i], x + barWidth / 2, chartHeight + 40);
     });
+    ctx.textAlign = 'start';
   }
 
   function showCharts() {
@@ -2702,22 +2815,10 @@ ${pyg_light}
       toggleTheme();
     }
 
-    // S - Show stats
-    if ((e.metaKey || e.ctrlKey) && key === 's') {
-      e.preventDefault();
-      showStats();
-    }
-
     // E - Export
     if ((e.metaKey || e.ctrlKey) && key === 'e') {
       e.preventDefault();
       exportReport('json');
-    }
-
-    // R - Refresh view
-    if ((e.metaKey || e.ctrlKey) && key === 'r') {
-      e.preventDefault();
-      location.reload();
     }
 
     // Escape - Close modals
@@ -2984,6 +3085,7 @@ ${pyg_light}
   }
 
   // ========== Initialize ==========
+  initShortcutLabels();
   initTheme();
   initCommandPalette();
   initGlobalNovelty();
@@ -2993,13 +3095,6 @@ ${pyg_light}
   initSection('segments');
   calculateStats();
 
-  // Welcome message
-  setTimeout(() => {
-    const groupCount = $$$$('.group').length;
-    if (groupCount > 0) {
-      showToast(groupCount + ' clone groups loaded', 'success');
-    }
-  }, 500);
 })();
 </script>
 </body>

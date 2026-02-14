@@ -3278,7 +3278,7 @@ def test_cli_fail_on_new_verbose_and_report_path(
     assert exc.value.code == 3
     out = capsys.readouterr().out
     assert "See detailed report:" in out
-    assert str(html_out) in out
+    assert html_out.name in out
     assert "Details (function clone hashes):" in out
     assert "- fhash1" in out
     assert "Details (block clone hashes):" in out

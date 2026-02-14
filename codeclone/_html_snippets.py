@@ -196,9 +196,16 @@ def _render_code_block(
             rendered.append(
                 f'<div class="{cls}">{html.escape(text, quote=False)}</div>'
             )
-        body = "\n".join(rendered)
+        body = "".join(rendered)
     else:
-        body = highlighted
+        hit_flags = [hit for hit, _ in numbered]
+        pyg_lines = highlighted.split("\n")
+        rendered_pyg: list[str] = []
+        for i, pyg_line in enumerate(pyg_lines):
+            hit = hit_flags[i] if i < len(hit_flags) else False
+            cls = "hitline" if hit else "line"
+            rendered_pyg.append(f'<div class="{cls}">{pyg_line}</div>')
+        body = "".join(rendered_pyg)
 
     return _Snippet(
         filepath=filepath,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
@@ -17,6 +18,7 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
+from rich.rule import Rule
 from rich.theme import Theme
 
 from . import __version__
@@ -76,7 +78,7 @@ LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
 
 
 def _make_console(*, no_color: bool) -> Console:
-    return Console(theme=custom_theme, width=200, no_color=no_color)
+    return Console(theme=custom_theme, width=100, no_color=no_color)
 
 
 console = _make_console(no_color=False)
@@ -237,6 +239,8 @@ def _main_impl() -> None:
             ui.fmt_contract_error("Size limits must be non-negative integers (MB).")
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
+
+    t0 = time.monotonic()
 
     if not args.quiet:
         print_banner()
@@ -749,6 +753,9 @@ def _main_impl() -> None:
     new_func, new_block = baseline_for_diff.diff(func_groups, block_groups)
     new_clones_count = len(new_func) + len(new_block)
 
+    if not args.quiet:
+        console.print(Rule(style="dim"))
+
     _print_summary(
         console=console,
         quiet=args.quiet,
@@ -899,6 +906,10 @@ def _main_impl() -> None:
 
     if not args.update_baseline and not args.fail_on_new and new_clones_count > 0:
         console.print(ui.WARN_NEW_CLONES_WITHOUT_FAIL)
+
+    if not args.quiet:
+        elapsed = time.monotonic() - t0
+        console.print(f"\n[dim]Done in {elapsed:.1f}s[/dim]")
 
 
 def main() -> None:

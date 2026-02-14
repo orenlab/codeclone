@@ -73,9 +73,9 @@ STATUS_GROUPING = "[bold green]Grouping clones..."
 
 INFO_SCANNING_ROOT = "[info]Scanning root:[/info] {root}"
 INFO_PROCESSING_CHANGED = "[info]Processing {count} changed files...[/info]"
-INFO_HTML_REPORT_SAVED = "[info]HTML report saved:[/info] {path}"
-INFO_JSON_REPORT_SAVED = "[info]JSON report saved:[/info] {path}"
-INFO_TEXT_REPORT_SAVED = "[info]Text report saved:[/info] {path}"
+INFO_HTML_REPORT_SAVED = "[info]HTML report saved:[/info] [bold]{path}[/bold]"
+INFO_JSON_REPORT_SAVED = "[info]JSON report saved:[/info] [bold]{path}[/bold]"
+INFO_TEXT_REPORT_SAVED = "[info]Text report saved:[/info] [bold]{path}[/bold]"
 
 WARN_SKIPPING_FILE = "[warning]Skipping file {path}: {error}[/warning]"
 WARN_WORKER_FAILED = "[warning]Worker failed: {error}[/warning]"

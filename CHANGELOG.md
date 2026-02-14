@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.1] - 2026-02-15
+
+### CLI
+
+- Semantic summary colors: clone counts → `bold yellow`, file metrics → neutral `bold`
+- Phase separator, bold report paths, "Done in X.Xs" timing line
+
+### HTML Report
+
+- HiDPI chart canvas, hit-line markers with Pygments, cross-browser `<select>`
+- Platform-aware shortcut labels (`⌘` / `Ctrl+`), color-coded section borders
+- Compact code lines, proper tab-bar for novelty filter, polished transitions
+- Rounded-rect badges (`6px`), tighter card radii (`10px`), cleaner empty states
+
+---
+
 ## [1.4.0] - 2026-02-12
 
 ### Overview
