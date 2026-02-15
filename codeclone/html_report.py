@@ -760,10 +760,9 @@ def build_html_report(
         f'<div class="meta-panel" id="report-meta" {meta_attrs}>'
         '<div class="meta-header">'
         '<div class="meta-title">'
-        f"{chevron_icon}"
         "Report Provenance"
         "</div>"
-        '<div class="meta-toggle collapsed">▸</div>'
+        f'<div class="meta-toggle collapsed">{chevron_icon}</div>'
         "</div>"
         '<div class="meta-content collapsed">'
         f'<div class="meta-grid">{meta_rows_html}</div>'

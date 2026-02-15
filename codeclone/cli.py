@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
@@ -70,7 +71,6 @@ custom_theme = Theme(
         "dim": "dim",
     }
 )
-
 
 LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
 
@@ -237,6 +237,8 @@ def _main_impl() -> None:
             ui.fmt_contract_error("Size limits must be non-negative integers (MB).")
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
+
+    t0 = time.monotonic()
 
     if not args.quiet:
         print_banner()
@@ -899,6 +901,10 @@ def _main_impl() -> None:
 
     if not args.update_baseline and not args.fail_on_new and new_clones_count > 0:
         console.print(ui.WARN_NEW_CLONES_WITHOUT_FAIL)
+
+    if not args.quiet:
+        elapsed = time.monotonic() - t0
+        console.print(f"\n[dim]Done in {elapsed:.1f}s[/dim]")
 
 
 def main() -> None:

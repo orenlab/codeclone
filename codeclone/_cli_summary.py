@@ -14,6 +14,14 @@ from rich.text import Text
 
 from . import ui_messages as ui
 
+_CLONE_LABELS = frozenset(
+    {
+        ui.SUMMARY_LABEL_FUNCTION,
+        ui.SUMMARY_LABEL_BLOCK,
+        ui.SUMMARY_LABEL_SEGMENT,
+    }
+)
+
 
 def _summary_value_style(*, label: str, value: int) -> str:
     if value == 0:
@@ -22,7 +30,9 @@ def _summary_value_style(*, label: str, value: int) -> str:
         return "bold red"
     if label == ui.SUMMARY_LABEL_SUPPRESSED:
         return "yellow"
-    return "bold green"
+    if label in _CLONE_LABELS:
+        return "bold yellow"
+    return "bold"
 
 
 def _build_summary_rows(

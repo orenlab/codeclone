@@ -227,7 +227,7 @@ def test_summary_value_style_mapping() -> None:
     )
     assert (
         cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=2)
-        == "bold green"
+        == "bold yellow"
     )
     assert (
         cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_SUPPRESSED, value=1)
