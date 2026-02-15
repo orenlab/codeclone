@@ -18,7 +18,6 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
-from rich.rule import Rule
 from rich.theme import Theme
 
 from . import __version__
@@ -73,12 +72,11 @@ custom_theme = Theme(
     }
 )
 
-
 LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
 
 
 def _make_console(*, no_color: bool) -> Console:
-    return Console(theme=custom_theme, width=100, no_color=no_color)
+    return Console(theme=custom_theme, width=200, no_color=no_color)
 
 
 console = _make_console(no_color=False)
@@ -752,9 +750,6 @@ def _main_impl() -> None:
     )
     new_func, new_block = baseline_for_diff.diff(func_groups, block_groups)
     new_clones_count = len(new_func) + len(new_block)
-
-    if not args.quiet:
-        console.print(Rule(style="dim"))
 
     _print_summary(
         console=console,
