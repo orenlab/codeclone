@@ -122,14 +122,14 @@ def process_file(
     """
 
     try:
-        # Check file size
+        # Single os.stat() for both size check and cache signature
         try:
-            st_size = os.path.getsize(filepath)
-            if st_size > MAX_FILE_SIZE:
+            st = os.stat(filepath)
+            if st.st_size > MAX_FILE_SIZE:
                 return ProcessingResult(
                     filepath=filepath,
                     success=False,
-                    error=f"File too large: {st_size} bytes (max {MAX_FILE_SIZE})",
+                    error=f"File too large: {st.st_size} bytes (max {MAX_FILE_SIZE})",
                     error_kind="file_too_large",
                 )
         except OSError as e:
@@ -139,6 +139,8 @@ def process_file(
                 error=f"Cannot stat file: {e}",
                 error_kind="stat_error",
             )
+
+        stat: FileStat = {"mtime_ns": st.st_mtime_ns, "size": st.st_size}
 
         try:
             source = Path(filepath).read_text("utf-8")
@@ -157,7 +159,6 @@ def process_file(
                 error_kind="source_read_error",
             )
 
-        stat = file_stat_signature(filepath)
         module_name = module_name_from_path(root, filepath)
 
         units, blocks, segments = extract_units_from_source(
@@ -355,68 +356,44 @@ def _main_impl() -> None:
             return None, str(e)
 
     # Discovery phase
+    def _discover_files() -> None:
+        nonlocal files_found, cache_hits, files_skipped
+        for fp in iter_py_files(str(root_path)):
+            files_found += 1
+            stat, cached, warn = _get_cached_entry(fp)
+            if warn:
+                console.print(warn)
+                files_skipped += 1
+                continue
+            if cached and cached.get("stat") == stat:
+                cache_hits += 1
+                all_units.extend(
+                    cast(
+                        list[GroupItem],
+                        cast(object, cached.get("units", [])),
+                    )
+                )
+                all_blocks.extend(
+                    cast(
+                        list[GroupItem],
+                        cast(object, cached.get("blocks", [])),
+                    )
+                )
+                all_segments.extend(
+                    cast(
+                        list[GroupItem],
+                        cast(object, cached.get("segments", [])),
+                    )
+                )
+            else:
+                files_to_process.append(fp)
+
     try:
         if args.quiet:
-            for fp in iter_py_files(str(root_path)):
-                files_found += 1
-                stat, cached, warn = _get_cached_entry(fp)
-                if warn:
-                    console.print(warn)
-                    files_skipped += 1
-                    continue
-                if cached and cached.get("stat") == stat:
-                    cache_hits += 1
-                    all_units.extend(
-                        cast(
-                            list[GroupItem],
-                            cast(object, cached.get("units", [])),
-                        )
-                    )
-                    all_blocks.extend(
-                        cast(
-                            list[GroupItem],
-                            cast(object, cached.get("blocks", [])),
-                        )
-                    )
-                    all_segments.extend(
-                        cast(
-                            list[GroupItem],
-                            cast(object, cached.get("segments", [])),
-                        )
-                    )
-                else:
-                    files_to_process.append(fp)
+            _discover_files()
         else:
             with console.status(ui.STATUS_DISCOVERING, spinner="dots"):
-                for fp in iter_py_files(str(root_path)):
-                    files_found += 1
-                    stat, cached, warn = _get_cached_entry(fp)
-                    if warn:
-                        console.print(warn)
-                        files_skipped += 1
-                        continue
-                    if cached and cached.get("stat") == stat:
-                        cache_hits += 1
-                        all_units.extend(
-                            cast(
-                                list[GroupItem],
-                                cast(object, cached.get("units", [])),
-                            )
-                        )
-                        all_blocks.extend(
-                            cast(
-                                list[GroupItem],
-                                cast(object, cached.get("blocks", [])),
-                            )
-                        )
-                        all_segments.extend(
-                            cast(
-                                list[GroupItem],
-                                cast(object, cached.get("segments", [])),
-                            )
-                        )
-                    else:
-                        files_to_process.append(fp)
+                _discover_files()
     except OSError as e:
         console.print(ui.fmt_contract_error(ui.ERR_SCAN_FAILED.format(error=e)))
         sys.exit(ExitCode.CONTRACT_ERROR)
