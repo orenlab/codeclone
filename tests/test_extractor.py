@@ -374,6 +374,111 @@ def f():
     assert segments == []
 
 
+def test_extract_generates_segments_without_blocks_when_only_segment_gate_met() -> None:
+    lines = ["def f():"]
+    for i in range(12):
+        lines.append(f"    x{i} = {i}")
+        lines.append("")
+        lines.append("")
+    src = "\n".join(lines)
+
+    units, blocks, segments = extract_units_from_source(
+        source=src,
+        filepath="x.py",
+        module_name="mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert units
+    assert blocks == []
+    assert segments
+
+
+def test_extract_generates_blocks_without_segments_when_only_block_gate_met() -> None:
+    lines = ["def f():"]
+    for i in range(10):
+        lines.append(f"    x{i} = {i}")
+        lines.append("")
+        lines.append("")
+        lines.append("")
+        lines.append("")
+    src = "\n".join(lines)
+
+    units, blocks, segments = extract_units_from_source(
+        source=src,
+        filepath="x.py",
+        module_name="mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert units
+    assert blocks
+    assert segments == []
+
+
+def test_extract_handles_non_list_function_body_for_hash_reuse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lines = ["def f():"]
+    for i in range(12):
+        lines.append(f"    x{i} = {i}")
+        lines.append("")
+        lines.append("")
+    tree = ast.parse("\n".join(lines))
+    func = tree.body[0]
+    assert isinstance(func, ast.FunctionDef)
+    func.body = tuple(func.body)  # type: ignore[assignment]
+
+    captured_hashes: dict[str, object] = {}
+
+    def _fake_parse(_source: str, _timeout_s: int) -> ast.AST:
+        return tree
+
+    def _fake_fingerprint(
+        _node: ast.FunctionDef | ast.AsyncFunctionDef,
+        _cfg: NormalizationConfig,
+        _qualname: str,
+    ) -> str:
+        return "f" * 40
+
+    def _fake_extract_segments(
+        _node: ast.FunctionDef | ast.AsyncFunctionDef,
+        filepath: str,
+        qualname: str,
+        cfg: NormalizationConfig,
+        window_size: int = 6,
+        max_segments: int = 60,
+        *,
+        precomputed_hashes: list[str] | None = None,
+    ) -> list[object]:
+        del filepath, qualname, cfg, window_size, max_segments
+        captured_hashes["value"] = precomputed_hashes
+        return []
+
+    monkeypatch.setattr(extractor, "_parse_with_limits", _fake_parse)
+    monkeypatch.setattr(extractor, "_stmt_count", lambda _node: 12)
+    monkeypatch.setattr(extractor, "get_cfg_fingerprint", _fake_fingerprint)
+    monkeypatch.setattr(extractor, "extract_segments", _fake_extract_segments)
+
+    units, blocks, segments = extract_units_from_source(
+        source="def f():\n    pass\n",
+        filepath="x.py",
+        module_name="mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert len(units) == 1
+    assert blocks == []
+    assert segments == []
+    assert captured_hashes["value"] is None
+
+
 def test_extract_skips_invalid_positions(monkeypatch: pytest.MonkeyPatch) -> None:
     tree = ast.parse(
         """
