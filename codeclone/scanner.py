@@ -77,8 +77,9 @@ def iter_py_files(
             if root_str.startswith(sensitive + "/"):
                 raise ValidationError(f"Cannot scan under sensitive directory: {root}")
 
-    file_count = 0
-    for p in sorted(rootp.rglob("*.py"), key=lambda path: str(path)):
+    # Collect and filter first, then sort — avoids sorting excluded paths
+    candidates: list[Path] = []
+    for p in rootp.rglob("*.py"):
         # Verify path is actually under root (prevent symlink attacks)
         try:
             p.resolve().relative_to(rootp)
@@ -90,12 +91,15 @@ def iter_py_files(
         if any(ex in parts for ex in excludes):
             continue
 
-        file_count += 1
-        if file_count > max_files:
-            raise ValidationError(
-                f"File count exceeds limit of {max_files}. "
-                "Use more specific root or increase limit."
-            )
+        candidates.append(p)
+
+    if len(candidates) > max_files:
+        raise ValidationError(
+            f"File count exceeds limit of {max_files}. "
+            "Use more specific root or increase limit."
+        )
+
+    for p in sorted(candidates, key=lambda path: str(path)):
         yield str(p)
 
 

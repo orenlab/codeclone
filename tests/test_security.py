@@ -30,18 +30,34 @@ def test_process_file_size_limit() -> None:
 
     try:
         cfg = NormalizationConfig()
+        real_stat = os.stat(tmp_path)
 
-        # Mock os.path.getsize to return huge size
-        with patch("os.path.getsize", return_value=MAX_FILE_SIZE + 1):
+        # Mock os.stat to return huge st_size
+        def _huge_stat(path: str, *args: object, **kwargs: object) -> os.stat_result:
+            return os.stat_result(
+                (
+                    real_stat.st_mode,
+                    real_stat.st_ino,
+                    real_stat.st_dev,
+                    real_stat.st_nlink,
+                    real_stat.st_uid,
+                    real_stat.st_gid,
+                    MAX_FILE_SIZE + 1,  # st_size
+                    int(real_stat.st_atime),
+                    int(real_stat.st_mtime),
+                    int(real_stat.st_ctime),
+                )
+            )
+
+        with patch("os.stat", side_effect=_huge_stat):
             result = process_file(tmp_path, os.path.dirname(tmp_path), cfg, 0, 0)
             assert result.success is False
             assert result.error is not None
             assert "File too large" in result.error
 
-        # Normal size should pass
-        with patch("os.path.getsize", return_value=10):
-            result = process_file(tmp_path, os.path.dirname(tmp_path), cfg, 0, 0)
-            assert result.success is True
+        # Normal size should pass (no mock — real stat)
+        result = process_file(tmp_path, os.path.dirname(tmp_path), cfg, 0, 0)
+        assert result.success is True
 
     finally:
         os.remove(tmp_path)

@@ -344,14 +344,14 @@ class Cache:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             wire_files: dict[str, object] = {}
-            for runtime_path in sorted(
-                self.data["files"], key=self._wire_filepath_from_runtime
-            ):
+            wire_map = {
+                rp: self._wire_filepath_from_runtime(rp) for rp in self.data["files"]
+            }
+            for runtime_path in sorted(self.data["files"], key=wire_map.__getitem__):
                 entry = self.get_file_entry(runtime_path)
                 if entry is None:
                     continue
-                wire_path = self._wire_filepath_from_runtime(runtime_path)
-                wire_files[wire_path] = _encode_wire_file_entry(entry)
+                wire_files[wire_map[runtime_path]] = _encode_wire_file_entry(entry)
 
             payload: dict[str, object] = {
                 "py": current_python_tag(),

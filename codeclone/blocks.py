@@ -9,6 +9,7 @@ Licensed under the MIT License.
 from __future__ import annotations
 
 import ast
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .blockhash import stmt_hash
@@ -45,12 +46,20 @@ def extract_blocks(
     cfg: NormalizationConfig,
     block_size: int,
     max_blocks: int,
+    precomputed_hashes: Sequence[str] | None = None,
 ) -> list[BlockUnit]:
     body = getattr(func_node, "body", None)
     if not isinstance(body, list) or len(body) < block_size:
         return []
 
-    stmt_hashes = [stmt_hash(stmt, cfg) for stmt in body]
+    if precomputed_hashes is not None:
+        assert len(precomputed_hashes) == len(body), (
+            f"precomputed_hashes length {len(precomputed_hashes)} "
+            f"!= body length {len(body)}"
+        )
+        stmt_hashes = precomputed_hashes
+    else:
+        stmt_hashes = [stmt_hash(stmt, cfg) for stmt in body]
 
     blocks: list[BlockUnit] = []
     last_start: int | None = None
@@ -94,12 +103,20 @@ def extract_segments(
     cfg: NormalizationConfig,
     window_size: int,
     max_segments: int,
+    precomputed_hashes: Sequence[str] | None = None,
 ) -> list[SegmentUnit]:
     body = getattr(func_node, "body", None)
     if not isinstance(body, list) or len(body) < window_size:
         return []
 
-    stmt_hashes = [stmt_hash(stmt, cfg) for stmt in body]
+    if precomputed_hashes is not None:
+        assert len(precomputed_hashes) == len(body), (
+            f"precomputed_hashes length {len(precomputed_hashes)} "
+            f"!= body length {len(body)}"
+        )
+        stmt_hashes = precomputed_hashes
+    else:
+        stmt_hashes = [stmt_hash(stmt, cfg) for stmt in body]
 
     segments: list[SegmentUnit] = []
 

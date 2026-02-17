@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from .blockhash import stmt_hash
 from .blocks import BlockUnit, SegmentUnit, extract_blocks, extract_segments
 from .cfg import CFGBuilder
 from .errors import ParseError
@@ -250,28 +251,42 @@ def extract_units_from_source(
             )
         )
 
-        # Block-level units (exclude __init__)
-        if not local_name.endswith("__init__") and loc >= 40 and stmt_count >= 10:
-            blocks = extract_blocks(
-                node,
-                filepath=filepath,
-                qualname=qualname,
-                cfg=cfg,
-                block_size=4,
-                max_blocks=15,
-            )
-            block_units.extend(blocks)
+        # Block-level and segment-level units share statement hashes
+        needs_blocks = (
+            not local_name.endswith("__init__") and loc >= 40 and stmt_count >= 10
+        )
+        needs_segments = loc >= 30 and stmt_count >= 12
 
-        # Segment-level units (windows within functions, for internal clones)
-        if loc >= 30 and stmt_count >= 12:
-            segments = extract_segments(
-                node,
-                filepath=filepath,
-                qualname=qualname,
-                cfg=cfg,
-                window_size=6,
-                max_segments=60,
-            )
-            segment_units.extend(segments)
+        if needs_blocks or needs_segments:
+            body = getattr(node, "body", None)
+            hashes: list[str] | None = None
+            if isinstance(body, list):
+                hashes = [stmt_hash(stmt, cfg) for stmt in body]
+
+            if needs_blocks:
+                block_units.extend(
+                    extract_blocks(
+                        node,
+                        filepath=filepath,
+                        qualname=qualname,
+                        cfg=cfg,
+                        block_size=4,
+                        max_blocks=15,
+                        precomputed_hashes=hashes,
+                    )
+                )
+
+            if needs_segments:
+                segment_units.extend(
+                    extract_segments(
+                        node,
+                        filepath=filepath,
+                        qualname=qualname,
+                        cfg=cfg,
+                        window_size=6,
+                        max_segments=60,
+                        precomputed_hashes=hashes,
+                    )
+                )
 
     return units, block_units, segment_units

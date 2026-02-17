@@ -1,5 +1,56 @@
 # Changelog
 
+## [1.4.2] - 2026-02-17
+
+### Overview
+
+This patch release is a maintenance update. Determinism remains guaranteed: reports are stable and ordering is
+unchanged.
+
+### Performance & Implementation Cleanup
+
+- `process_file()` now uses a single `os.stat()` call to obtain both size (size guard) and `st_mtime_ns`/`st_size` (file
+  stat signature), removing a redundant `os.path.getsize()` call.
+- Discovery logic was deduplicated by extracting `_discover_files()`; quiet/non-quiet behavior differs only by UI status
+  wrapper, not by semantics or filtering.
+- Cache path wiring now precomputes `wire_map` so `_wire_filepath_from_runtime()` is evaluated once per key.
+
+### Hash Reuse for Block/Segment Analysis
+
+- `extract_blocks()` and `extract_segments()` accept optional `precomputed_hashes`. When provided, they reuse hashes
+  instead of recomputing.
+- The extractor computes function body hashes once and passes them to both block and segment extraction when both
+  analyses run for the same function.
+
+### Scanner Efficiency (No Semantic Change)
+
+- `iter_py_files()` now filters candidates before sorting, so only valid candidates are sorted. The final order remains
+  deterministic and equivalent to previous behavior.
+
+### Contract Tightening
+
+- `precomputed_hashes` type strengthened: `list[str] | None` → `Sequence[str] | None` (read-only intent in the type
+  contract).
+- Added `assert len(precomputed_hashes) == len(body)` in both `extract_blocks()` and `extract_segments()` to catch
+  mismatched inputs early (development-time invariant).
+
+### Testing & Determinism
+
+- Byte-identical JSON reports verified across repeated runs; differences, when present, are limited to
+  volatile/provenance meta fields (e.g., cache status/path, timestamps), while semantic payload remains stable.
+- Unit tests updated to mock `os.stat` instead of `os.path.getsize` where applicable (`test_process_file_stat_error`,
+  `test_process_file_size_limit`).
+
+### Notes
+
+- No changes to:
+  - detection semantics / fingerprints
+  - baseline hash inputs (`payload_sha256` semantic payload)
+  - exit code contract and precedence
+  - schema versions (baseline v1.0, cache v1.2, report v1.1)
+
+---
+
 ## [1.4.1] - 2026-02-15
 
 ### CLI

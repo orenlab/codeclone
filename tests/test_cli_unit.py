@@ -28,10 +28,14 @@ def test_process_file_stat_error(
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
 
-    def _boom(_path: str) -> int:
-        raise OSError("nope")
+    _original_stat = os.stat
 
-    monkeypatch.setattr(os.path, "getsize", _boom)
+    def _boom(path: str, *args: object, **kwargs: object) -> os.stat_result:
+        if str(path) == str(src):
+            raise OSError("nope")
+        return _original_stat(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "stat", _boom)
     result = process_file(str(src), str(tmp_path), NormalizationConfig(), 1, 1)
     assert result.success is False
     assert result.error is not None
