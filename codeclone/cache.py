@@ -39,6 +39,7 @@ class CacheStatus(str, Enum):
     VERSION_MISMATCH = "version_mismatch"
     PYTHON_TAG_MISMATCH = "python_tag_mismatch"
     FINGERPRINT_MISMATCH = "mismatch_fingerprint_version"
+    ANALYSIS_PROFILE_MISMATCH = "analysis_profile_mismatch"
     INTEGRITY_FAILED = "integrity_failed"
 
 
@@ -84,15 +85,22 @@ class CacheEntry(TypedDict):
     segments: list[SegmentDict]
 
 
+class AnalysisProfile(TypedDict):
+    min_loc: int
+    min_stmt: int
+
+
 class CacheData(TypedDict):
     version: str
     python_tag: str
     fingerprint_version: str
+    analysis_profile: AnalysisProfile
     files: dict[str, CacheEntry]
 
 
 class Cache:
     __slots__ = (
+        "analysis_profile",
         "cache_schema_version",
         "data",
         "fingerprint_version",
@@ -112,14 +120,21 @@ class Cache:
         *,
         root: str | Path | None = None,
         max_size_bytes: int | None = None,
+        min_loc: int = 15,
+        min_stmt: int = 6,
     ):
         self.path = Path(path)
         self.root = _resolve_root(root)
         self.fingerprint_version = BASELINE_FINGERPRINT_VERSION
+        self.analysis_profile: AnalysisProfile = {
+            "min_loc": min_loc,
+            "min_stmt": min_stmt,
+        }
         self.data: CacheData = _empty_cache_data(
             version=self._CACHE_VERSION,
             python_tag=current_python_tag(),
             fingerprint_version=self.fingerprint_version,
+            analysis_profile=self.analysis_profile,
         )
         self.legacy_secret_warning = self._detect_legacy_secret_warning()
         self.cache_schema_version: str | None = None
@@ -164,6 +179,7 @@ class Cache:
             version=self._CACHE_VERSION,
             python_tag=current_python_tag(),
             fingerprint_version=self.fingerprint_version,
+            analysis_profile=self.analysis_profile,
         )
 
     def _sign_data(self, data: Mapping[str, object]) -> str:
@@ -309,6 +325,28 @@ class Cache:
             )
             return None
 
+        analysis_profile = _as_analysis_profile(payload.get("ap"))
+        if analysis_profile is None:
+            self._ignore_cache(
+                "Cache format invalid; ignoring cache.",
+                status=CacheStatus.INVALID_TYPE,
+                schema_version=version,
+            )
+            return None
+
+        if analysis_profile != self.analysis_profile:
+            self._ignore_cache(
+                "Cache analysis profile mismatch "
+                f"(found min_loc={analysis_profile['min_loc']}, "
+                f"min_stmt={analysis_profile['min_stmt']}; "
+                f"expected min_loc={self.analysis_profile['min_loc']}, "
+                f"min_stmt={self.analysis_profile['min_stmt']}); "
+                "ignoring cache.",
+                status=CacheStatus.ANALYSIS_PROFILE_MISMATCH,
+                schema_version=version,
+            )
+            return None
+
         files_obj = payload.get("files")
         files_dict = _as_str_dict(files_obj)
         if files_dict is None:
@@ -337,6 +375,7 @@ class Cache:
             "version": self._CACHE_VERSION,
             "python_tag": runtime_tag,
             "fingerprint_version": self.fingerprint_version,
+            "analysis_profile": self.analysis_profile,
             "files": parsed_files,
         }
 
@@ -356,6 +395,7 @@ class Cache:
             payload: dict[str, object] = {
                 "py": current_python_tag(),
                 "fp": self.fingerprint_version,
+                "ap": self.analysis_profile,
                 "files": wire_files,
             }
             signed_doc = {
@@ -371,6 +411,7 @@ class Cache:
             self.data["version"] = self._CACHE_VERSION
             self.data["python_tag"] = current_python_tag()
             self.data["fingerprint_version"] = self.fingerprint_version
+            self.data["analysis_profile"] = self.analysis_profile
 
         except OSError as e:
             raise CacheError(f"Failed to save cache: {e}") from e
@@ -508,11 +549,13 @@ def _empty_cache_data(
     version: str,
     python_tag: str,
     fingerprint_version: str,
+    analysis_profile: AnalysisProfile,
 ) -> CacheData:
     return {
         "version": version,
         "python_tag": python_tag,
         "fingerprint_version": fingerprint_version,
+        "analysis_profile": analysis_profile,
         "files": {},
     }
 
@@ -540,6 +583,22 @@ def _as_str_dict(value: object) -> dict[str, object] | None:
         if not isinstance(key, str):
             return None
     return value
+
+
+def _as_analysis_profile(value: object) -> AnalysisProfile | None:
+    obj = _as_str_dict(value)
+    if obj is None:
+        return None
+
+    if set(obj.keys()) != {"min_loc", "min_stmt"}:
+        return None
+
+    min_loc = _as_int(obj.get("min_loc"))
+    min_stmt = _as_int(obj.get("min_stmt"))
+    if min_loc is None or min_stmt is None:
+        return None
+
+    return {"min_loc": min_loc, "min_stmt": min_stmt}
 
 
 def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:

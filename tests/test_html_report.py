@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from codeclone.contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
+from codeclone.contracts import CACHE_VERSION, DOCS_URL, ISSUES_URL, REPOSITORY_URL
 from codeclone.errors import FileProcessingError
 from codeclone.html_report import (
     _FileCache,
@@ -507,7 +507,7 @@ def test_html_report_includes_provenance_metadata(
         'data-cache-used="true"',
         "Cache schema",
         "Cache status",
-        'data-cache-schema-version="1.2"',
+        f'data-cache-schema-version="{CACHE_VERSION}"',
         'data-cache-status="ok"',
         'data-files-skipped-source-io="0"',
         "Source IO skipped",

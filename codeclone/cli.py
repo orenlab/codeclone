@@ -310,6 +310,8 @@ def _main_impl() -> None:
         cache_path,
         root=root_path,
         max_size_bytes=args.max_cache_size_mb * 1024 * 1024,
+        min_loc=args.min_loc,
+        min_stmt=args.min_stmt,
     )
     cache.load()
     if cache.load_warning:
