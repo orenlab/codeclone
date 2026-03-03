@@ -7,7 +7,7 @@ from typing import cast
 import pytest
 
 import codeclone.report as report_mod
-from codeclone.contracts import REPORT_SCHEMA_VERSION
+from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.report import (
     GroupMap,
     build_block_group_facts,
@@ -276,7 +276,7 @@ def test_report_output_formats(
         '"baseline_schema_version": 1',
         f'"baseline_payload_sha256": "{"a" * 64}"',
         '"baseline_payload_sha256_verified": true',
-        '"cache_schema_version": "1.2"',
+        f'"cache_schema_version": "{CACHE_VERSION}"',
         '"cache_status": "ok"',
         '"files_skipped_source_io": 0',
     ]
@@ -288,7 +288,7 @@ def test_report_output_formats(
         "Baseline generator name: codeclone",
         f"Baseline payload sha256: {'a' * 64}",
         "Baseline payload verified: true",
-        "Cache schema version: 1.2",
+        f"Cache schema version: {CACHE_VERSION}",
         "Cache status: ok",
         "Source IO skipped: 0",
         "FUNCTION CLONES (NEW) (groups=2)",

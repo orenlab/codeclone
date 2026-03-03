@@ -14,7 +14,7 @@ from typing import Final
 BASELINE_SCHEMA_VERSION: Final = "1.0"
 BASELINE_FINGERPRINT_VERSION: Final = "1"
 
-CACHE_VERSION: Final = "1.2"
+CACHE_VERSION: Final = "1.3"
 REPORT_SCHEMA_VERSION: Final = "1.1"
 
 

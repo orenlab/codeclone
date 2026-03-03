@@ -117,12 +117,12 @@ Full contract details: [`docs/book/06-baseline.md`](docs/book/06-baseline.md)
 
 CodeClone uses a deterministic exit code contract:
 
-| Code | Meaning                                                                     |
-|------|-----------------------------------------------------------------------------|
-| `0`  | Success — run completed without gating failures                             |
+| Code | Meaning                                                                                                                             |
+|------|-------------------------------------------------------------------------------------------------------------------------------------|
+| `0`  | Success — run completed without gating failures                                                                                     |
 | `2`  | Contract error — baseline missing/untrusted, invalid output extensions, incompatible versions, unreadable source files in CI/gating |
-| `3`  | Gating failure — new clones detected or threshold exceeded                  |
-| `5`  | Internal error — unexpected exception                                       |
+| `3`  | Gating failure — new clones detected or threshold exceeded                                                                          |
+| `5`  | Internal error — unexpected exception                                                                                               |
 
 **Priority:** Contract errors (`2`) override gating failures (`3`) when both occur.
 
@@ -182,7 +182,7 @@ Canonical report contract: [`docs/book/08-report.md`](docs/book/08-report.md)
     "cache_path": "/path/to/.cache/codeclone/cache.json",
     "cache_used": true,
     "cache_status": "ok",
-    "cache_schema_version": "1.2",
+    "cache_schema_version": "1.3",
     "files_skipped_source_io": 0,
     "groups_counts": {
       "functions": {
@@ -263,7 +263,8 @@ Canonical report contract: [`docs/book/08-report.md`](docs/book/08-report.md)
 Cache is an optimization layer only and is never a source of truth.
 
 - Default path: `<root>/.cache/codeclone/cache.json`
-- Schema version: **v1.2**
+- Schema version: **v1.3**
+- Compatibility includes analysis profile (`min_loc`, `min_stmt`)
 - Invalid or oversized cache is ignored with warning and rebuilt (fail-open)
 
 Full contract details: [`docs/book/07-cache.md`](docs/book/07-cache.md)

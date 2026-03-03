@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.4.3] - 2026-03-03
+
+### Cache Contract
+
+- Cache schema bumped from `v1.2` to `v1.3`.
+- Added signed analysis profile to cache payload:
+    - `payload.ap.min_loc`
+    - `payload.ap.min_stmt`
+- Cache compatibility now requires `payload.ap` to match current CLI analysis thresholds. On mismatch, cache is ignored
+  with `cache_status=analysis_profile_mismatch` and analysis continues without cache.
+
+### CLI
+
+- CLI now constructs cache context with effective `--min-loc` and `--min-stmt` values, so cache reuse is consistent
+  with active analysis thresholds.
+
+### Tests
+
+- Added regression coverage for analysis-profile cache mismatch/match behavior in:
+    - `tests/test_cache.py`
+    - `tests/test_cli_inprocess.py`
+
+### Contract Notes
+
+- Baseline contract is unchanged (`schema v1.0`, `fingerprint version 1`).
+- Report schema is unchanged (`v1.1`); cache metadata adds a new `cache_status` enum value.
+
 ## [1.4.2] - 2026-02-17
 
 ### Overview
@@ -44,10 +71,10 @@ unchanged.
 ### Notes
 
 - No changes to:
-  - detection semantics / fingerprints
-  - baseline hash inputs (`payload_sha256` semantic payload)
-  - exit code contract and precedence
-  - schema versions (baseline v1.0, cache v1.2, report v1.1)
+    - detection semantics / fingerprints
+    - baseline hash inputs (`payload_sha256` semantic payload)
+    - exit code contract and precedence
+    - schema versions (baseline v1.0, cache v1.2, report v1.1)
 
 ---
 

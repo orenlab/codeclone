@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import pytest
 
-from codeclone.contracts import REPORT_SCHEMA_VERSION
+from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 
 ReportMetaFactory = Callable[..., dict[str, object]]
 
@@ -28,7 +28,7 @@ def report_meta_factory() -> ReportMetaFactory:
             "baseline_loaded": True,
             "baseline_status": "ok",
             "cache_path": "/repo/.cache/codeclone/cache.json",
-            "cache_schema_version": "1.2",
+            "cache_schema_version": CACHE_VERSION,
             "cache_status": "ok",
             "cache_used": True,
             "files_skipped_source_io": 0,

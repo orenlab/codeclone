@@ -708,7 +708,7 @@ def test_cli_cache_status_string_fallback(
         def __init__(self, _path: Path, **_kwargs: object) -> None:
             self.load_warning = load_warning
             self.load_status = "not-a-cache-status"
-            self.cache_schema_version = "1.2"
+            self.cache_schema_version = CACHE_VERSION
 
         def load(self) -> None:
             return None
@@ -1714,6 +1714,122 @@ def test_cli_reports_cache_meta_when_cache_missing(
     assert meta["cache_used"] is False
     assert meta["cache_status"] == "missing"
     assert meta["cache_schema_version"] is None
+
+
+@pytest.mark.parametrize(
+    (
+        "first_min_loc",
+        "first_min_stmt",
+        "second_min_loc",
+        "second_min_stmt",
+        "expected_cache_used",
+        "expected_cache_status",
+        "expected_functions_total",
+        "expected_warning",
+    ),
+    [
+        (
+            1,
+            1,
+            15,
+            6,
+            False,
+            "analysis_profile_mismatch",
+            0,
+            "analysis profile mismatch",
+        ),
+        (
+            15,
+            6,
+            1,
+            1,
+            False,
+            "analysis_profile_mismatch",
+            1,
+            "analysis profile mismatch",
+        ),
+        (1, 1, 1, 1, True, "ok", 1, None),
+    ],
+)
+def test_cli_cache_analysis_profile_compatibility(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    first_min_loc: int,
+    first_min_stmt: int,
+    second_min_loc: int,
+    second_min_stmt: int,
+    expected_cache_used: bool,
+    expected_cache_status: str,
+    expected_functions_total: int,
+    expected_warning: str | None,
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text(
+        """
+def f1():
+    x = 1
+    return x
+
+def f2():
+    y = 1
+    return y
+""",
+        "utf-8",
+    )
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    cache_path = tmp_path / "cache.json"
+    json_first = tmp_path / "report-first.json"
+    json_second = tmp_path / "report-second.json"
+    _patch_parallel(monkeypatch)
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--cache-path",
+            str(cache_path),
+            "--json",
+            str(json_first),
+            "--min-loc",
+            str(first_min_loc),
+            "--min-stmt",
+            str(first_min_stmt),
+            "--no-progress",
+        ],
+    )
+    capsys.readouterr()
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--cache-path",
+            str(cache_path),
+            "--json",
+            str(json_second),
+            "--min-loc",
+            str(second_min_loc),
+            "--min-stmt",
+            str(second_min_stmt),
+            "--no-progress",
+        ],
+    )
+    out = capsys.readouterr().out
+    payload = json.loads(json_second.read_text("utf-8"))
+    meta = payload["meta"]
+    if expected_warning is not None:
+        assert expected_warning in out
+    assert meta["cache_used"] is expected_cache_used
+    assert meta["cache_status"] == expected_cache_status
+    assert meta["groups_counts"]["functions"]["total"] == expected_functions_total
 
 
 @pytest.mark.parametrize(

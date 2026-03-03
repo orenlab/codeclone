@@ -50,6 +50,15 @@ def _make_segment(filepath: str) -> SegmentUnit:
     )
 
 
+def _analysis_payload(cache: Cache, *, files: object) -> dict[str, object]:
+    return {
+        "py": cache.data["python_tag"],
+        "fp": cache.data["fingerprint_version"],
+        "ap": cache.data["analysis_profile"],
+        "files": files,
+    }
+
+
 def test_cache_roundtrip(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
@@ -97,7 +106,7 @@ def test_get_file_entry_missing_after_fallback_returns_none(tmp_path: Path) -> N
     assert cache.get_file_entry(str(root / "pkg" / "missing.py")) is None
 
 
-def test_cache_v12_uses_relpaths_when_root_set(tmp_path: Path) -> None:
+def test_cache_v13_uses_relpaths_when_root_set(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     target = project_root / "pkg" / "module.py"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -121,14 +130,10 @@ def test_cache_v12_uses_relpaths_when_root_set(tmp_path: Path) -> None:
     assert str(target) not in files
 
 
-def test_cache_v12_missing_optional_sections_default_empty(tmp_path: Path) -> None:
+def test_cache_v13_missing_optional_sections_default_empty(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
-    payload = {
-        "py": cache.data["python_tag"],
-        "fp": cache.data["fingerprint_version"],
-        "files": {"x.py": {"st": [1, 2]}},
-    }
+    payload = _analysis_payload(cache, files={"x.py": {"st": [1, 2]}})
     signature = cache._sign_data(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
@@ -201,11 +206,7 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
 def test_cache_v_field_version_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
-    payload = {
-        "py": cache.data["python_tag"],
-        "fp": cache.data["fingerprint_version"],
-        "files": {},
-    }
+    payload = _analysis_payload(cache, files={})
     signature = cache._sign_data(payload)
     cache_path.write_text(
         json.dumps({"v": "0.0", "payload": payload, "sig": signature}), "utf-8"
@@ -527,11 +528,7 @@ def test_cache_load_unreadable_read_graceful_ignore(
 def test_cache_load_invalid_files_type(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
-    payload = {
-        "py": cache.data["python_tag"],
-        "fp": cache.data["fingerprint_version"],
-        "files": [],
-    }
+    payload = _analysis_payload(cache, files=[])
     signature = cache._sign_data(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
@@ -644,11 +641,7 @@ def test_cache_load_invalid_top_level_type(tmp_path: Path) -> None:
 def test_cache_load_missing_v_field(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
-    payload = {
-        "py": cache.data["python_tag"],
-        "fp": cache.data["fingerprint_version"],
-        "files": {},
-    }
+    payload = _analysis_payload(cache, files={})
     sig = cache._sign_data(payload)
     cache_path.write_text(json.dumps({"payload": payload, "sig": sig}), "utf-8")
     cache.load()
@@ -683,7 +676,12 @@ def test_cache_load_missing_python_tag_in_payload(tmp_path: Path) -> None:
 def test_cache_load_python_tag_mismatch(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
-    payload = {"py": "cp999", "fp": cache.data["fingerprint_version"], "files": {}}
+    payload = {
+        "py": "cp999",
+        "fp": cache.data["fingerprint_version"],
+        "ap": cache.data["analysis_profile"],
+        "files": {},
+    }
     sig = cache._sign_data(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
@@ -709,7 +707,12 @@ def test_cache_load_missing_fingerprint_version(tmp_path: Path) -> None:
 def test_cache_load_fingerprint_version_mismatch(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
-    payload = {"py": cache.data["python_tag"], "fp": "old", "files": {}}
+    payload = {
+        "py": cache.data["python_tag"],
+        "fp": "old",
+        "ap": cache.data["analysis_profile"],
+        "files": {},
+    }
     sig = cache._sign_data(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
@@ -719,14 +722,78 @@ def test_cache_load_fingerprint_version_mismatch(tmp_path: Path) -> None:
     assert "fingerprint version mismatch" in cache.load_warning
 
 
-def test_cache_load_invalid_wire_file_entry(tmp_path: Path) -> None:
+def test_cache_load_analysis_profile_mismatch(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path, min_loc=1, min_stmt=1)
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    loaded = Cache(cache_path, min_loc=15, min_stmt=6)
+    loaded.load()
+
+    assert loaded.load_warning is not None
+    assert "analysis profile mismatch" in loaded.load_warning
+    assert loaded.data["files"] == {}
+    assert loaded.load_status == CacheStatus.ANALYSIS_PROFILE_MISMATCH
+    assert loaded.cache_schema_version == Cache._CACHE_VERSION
+
+
+def test_cache_load_missing_analysis_profile_in_payload(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = {
         "py": cache.data["python_tag"],
         "fp": cache.data["fingerprint_version"],
-        "files": {"x.py": {"st": "bad"}},
+        "files": {},
     }
+    sig = cache._sign_data(payload)
+    cache_path.write_text(
+        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
+    )
+
+    cache.load()
+    assert cache.load_warning is not None
+    assert "format invalid" in cache.load_warning
+    assert cache.load_status == CacheStatus.INVALID_TYPE
+    assert cache.cache_schema_version == Cache._CACHE_VERSION
+    assert cache.data["files"] == {}
+
+
+@pytest.mark.parametrize(
+    "bad_analysis_profile",
+    [
+        {"min_loc": 15},
+        {"min_loc": "15", "min_stmt": 6},
+    ],
+)
+def test_cache_load_invalid_analysis_profile_payload(
+    tmp_path: Path, bad_analysis_profile: object
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    payload = {
+        "py": cache.data["python_tag"],
+        "fp": cache.data["fingerprint_version"],
+        "ap": bad_analysis_profile,
+        "files": {},
+    }
+    sig = cache._sign_data(payload)
+    cache_path.write_text(
+        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
+    )
+
+    cache.load()
+    assert cache.load_warning is not None
+    assert "format invalid" in cache.load_warning
+    assert cache.load_status == CacheStatus.INVALID_TYPE
+    assert cache.cache_schema_version == Cache._CACHE_VERSION
+    assert cache.data["files"] == {}
+
+
+def test_cache_load_invalid_wire_file_entry(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    payload = _analysis_payload(cache, files={"x.py": {"st": "bad"}})
     sig = cache._sign_data(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
