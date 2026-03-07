@@ -1,0 +1,106 @@
+{
+  "baseline_loaded": false,
+  "baseline_status": "missing",
+  "block_group_keys": [],
+  "cache_used": false,
+  "clone_types": {
+    "blocks": {},
+    "functions": {
+      "c35ab49bab0141cbc3b2745742d0ff6e186ae15f|0-19": "Type-1"
+    },
+    "segments": {}
+  },
+  "clones": {
+    "blocks": {
+      "count": 0,
+      "groups": {},
+      "split": {
+        "known": [],
+        "new": []
+      }
+    },
+    "clone_types": {
+      "blocks": {},
+      "functions": {
+        "c35ab49bab0141cbc3b2745742d0ff6e186ae15f|0-19": "Type-1"
+      },
+      "segments": {}
+    },
+    "functions": {
+      "count": 1,
+      "groups": {
+        "c35ab49bab0141cbc3b2745742d0ff6e186ae15f|0-19": [
+          [
+            0,
+            "pkg.one:tiny",
+            1,
+            3,
+            3,
+            2,
+            "c35ab49bab0141cbc3b2745742d0ff6e186ae15f",
+            "0-19",
+            1,
+            0,
+            "low",
+            "defec0bcf8d53396770ba701a132e88d4b484248"
+          ],
+          [
+            1,
+            "pkg.two:tiny",
+            1,
+            3,
+            3,
+            2,
+            "c35ab49bab0141cbc3b2745742d0ff6e186ae15f",
+            "0-19",
+            1,
+            0,
+            "low",
+            "defec0bcf8d53396770ba701a132e88d4b484248"
+          ]
+        ]
+      },
+      "split": {
+        "known": [],
+        "new": [
+          "c35ab49bab0141cbc3b2745742d0ff6e186ae15f|0-19"
+        ]
+      }
+    },
+    "segments": {
+      "count": 0,
+      "groups": {},
+      "split": {
+        "known": [],
+        "new": []
+      }
+    }
+  },
+  "function_group_keys": [
+    "c35ab49bab0141cbc3b2745742d0ff6e186ae15f|0-19"
+  ],
+  "groups_counts": {
+    "blocks": {
+      "known": 0,
+      "new": 0,
+      "total": 0
+    },
+    "functions": {
+      "known": 0,
+      "new": 1,
+      "total": 1
+    },
+    "segments": {
+      "known": 0,
+      "new": 0,
+      "total": 0
+    }
+  },
+  "meta": {
+    "python_tag": "cp313"
+  },
+  "project_name": "pyproject_defaults",
+  "report_schema_version": "2.0",
+  "scan_root_name": "pyproject_defaults",
+  "segment_group_keys": []
+}

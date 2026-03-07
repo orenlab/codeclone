@@ -1,19 +1,8 @@
-"""
-CodeClone — AST and CFG-based code clone detector for Python
-focused on architectural duplication.
-
-Copyright (c) 2026 Den Rozhnovskiy
-Licensed under the MIT License.
-"""
+"""Core explainability constants and deterministic formatting helpers."""
 
 from __future__ import annotations
 
 from typing import Final
-
-from .ui_messages import (
-    REPORT_BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN,
-    fmt_report_block_group_compare_note_n_way,
-)
 
 BLOCK_PATTERN_REPEATED_STMT_HASH: Final = "repeated_stmt_hash"
 
@@ -25,9 +14,13 @@ BLOCK_HINT_ASSERT_ONLY_NOTE: Final = (
     "This often occurs in test suites."
 )
 
+GROUP_DISPLAY_NAME_BY_HINT_ID: Final[dict[str, str]] = {
+    BLOCK_HINT_ASSERT_ONLY: "Assert pattern block",
+}
+
 
 def format_n_way_group_compare_note(*, peer_count: int) -> str:
-    return fmt_report_block_group_compare_note_n_way(peer_count=peer_count)
+    return f"N-way group: each block matches {peer_count} peers in this group."
 
 
 def resolve_group_compare_note(*, group_arity: int, peer_count: int) -> str | None:
@@ -37,9 +30,9 @@ def resolve_group_compare_note(*, group_arity: int, peer_count: int) -> str | No
 
 
 def resolve_group_display_name(*, hint_id: str | None) -> str | None:
-    if hint_id == BLOCK_HINT_ASSERT_ONLY:
-        return REPORT_BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN
-    return None
+    if hint_id is None:
+        return None
+    return GROUP_DISPLAY_NAME_BY_HINT_ID.get(hint_id)
 
 
 def format_group_instance_compare_meta(

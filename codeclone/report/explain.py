@@ -1,17 +1,11 @@
-"""
-CodeClone — AST and CFG-based code clone detector for Python
-focused on architectural duplication.
-
-Copyright (c) 2026 Den Rozhnovskiy
-Licensed under the MIT License.
-"""
+"""Deterministic explainability facts for clone report groups."""
 
 from __future__ import annotations
 
 import ast
 from pathlib import Path
 
-from ._report_explain_contract import (
+from .explain_contract import (
     BLOCK_HINT_ASSERT_ONLY,
     BLOCK_HINT_ASSERT_ONLY_LABEL,
     BLOCK_HINT_ASSERT_ONLY_NOTE,
@@ -20,14 +14,27 @@ from ._report_explain_contract import (
     resolve_group_compare_note,
     resolve_group_display_name,
 )
-from ._report_types import GroupItem, GroupMap
+from .types import GroupItemsLike, GroupMapLike
 
 
-def _signature_parts(group_key: str) -> list[str]:
+def signature_parts(group_key: str) -> list[str]:
     return [part for part in group_key.split("|") if part]
 
 
-def _parsed_file_tree(
+def _as_int(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
+def parsed_file_tree(
     filepath: str, *, ast_cache: dict[str, ast.AST | None]
 ) -> ast.AST | None:
     if filepath in ast_cache:
@@ -42,11 +49,11 @@ def _parsed_file_tree(
     return tree
 
 
-def _is_assert_like_stmt(stmt: ast.stmt) -> bool:
-    if isinstance(stmt, ast.Assert):
+def is_assert_like_stmt(statement: ast.stmt) -> bool:
+    if isinstance(statement, ast.Assert):
         return True
-    if isinstance(stmt, ast.Expr):
-        value = stmt.value
+    if isinstance(statement, ast.Expr):
+        value = statement.value
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
             return True
         if isinstance(value, ast.Call):
@@ -58,7 +65,7 @@ def _is_assert_like_stmt(stmt: ast.stmt) -> bool:
     return False
 
 
-def _assert_range_stats(
+def assert_range_stats(
     *,
     filepath: str,
     start_line: int,
@@ -70,39 +77,39 @@ def _assert_range_stats(
     if cache_key in range_cache:
         return range_cache[cache_key]
 
-    tree = _parsed_file_tree(filepath, ast_cache=ast_cache)
+    tree = parsed_file_tree(filepath, ast_cache=ast_cache)
     if tree is None:
         range_cache[cache_key] = (0, 0, 0)
         return 0, 0, 0
 
-    stmts = [
+    statements = [
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.stmt)
         and int(getattr(node, "lineno", 0)) >= start_line
         and int(getattr(node, "end_lineno", 0)) <= end_line
     ]
-    if not stmts:
+    if not statements:
         range_cache[cache_key] = (0, 0, 0)
         return 0, 0, 0
 
-    ordered_stmts = sorted(
-        stmts,
-        key=lambda stmt: (
-            int(getattr(stmt, "lineno", 0)),
-            int(getattr(stmt, "end_lineno", 0)),
-            int(getattr(stmt, "col_offset", 0)),
-            int(getattr(stmt, "end_col_offset", 0)),
-            type(stmt).__name__,
+    ordered_statements = sorted(
+        statements,
+        key=lambda statement: (
+            int(getattr(statement, "lineno", 0)),
+            int(getattr(statement, "end_lineno", 0)),
+            int(getattr(statement, "col_offset", 0)),
+            int(getattr(statement, "end_col_offset", 0)),
+            type(statement).__name__,
         ),
     )
 
-    total = len(ordered_stmts)
+    total = len(ordered_statements)
     assert_like = 0
     max_consecutive = 0
     current_consecutive = 0
-    for stmt in ordered_stmts:
-        if _is_assert_like_stmt(stmt):
+    for statement in ordered_statements:
+        if is_assert_like_stmt(statement):
             assert_like += 1
             current_consecutive += 1
             if current_consecutive > max_consecutive:
@@ -115,7 +122,7 @@ def _assert_range_stats(
     return stats
 
 
-def _is_assert_only_range(
+def is_assert_only_range(
     *,
     filepath: str,
     start_line: int,
@@ -123,7 +130,7 @@ def _is_assert_only_range(
     ast_cache: dict[str, ast.AST | None],
     range_cache: dict[tuple[str, int, int], tuple[int, int, int]],
 ) -> bool:
-    total, assert_like, _ = _assert_range_stats(
+    total, assert_like, _ = assert_range_stats(
         filepath=filepath,
         start_line=start_line,
         end_line=end_line,
@@ -133,12 +140,10 @@ def _is_assert_only_range(
     return total > 0 and total == assert_like
 
 
-def _base_block_facts(group_key: str) -> dict[str, str]:
-    signature_parts = _signature_parts(group_key)
-    window_size = max(1, len(signature_parts))
-    repeated_signature = len(signature_parts) > 1 and all(
-        part == signature_parts[0] for part in signature_parts
-    )
+def base_block_facts(group_key: str) -> dict[str, str]:
+    parts = signature_parts(group_key)
+    window_size = max(1, len(parts))
+    repeated_signature = len(parts) > 1 and all(part == parts[0] for part in parts)
     facts: dict[str, str] = {
         "match_rule": "normalized_sliding_window",
         "block_size": str(window_size),
@@ -148,14 +153,14 @@ def _base_block_facts(group_key: str) -> dict[str, str]:
     if repeated_signature:
         facts["pattern"] = BLOCK_PATTERN_REPEATED_STMT_HASH
         facts["pattern_label"] = BLOCK_PATTERN_REPEATED_STMT_HASH
-        facts["pattern_display"] = f"{signature_parts[0][:12]} x{window_size}"
+        facts["pattern_display"] = f"{parts[0][:12]} x{window_size}"
     return facts
 
 
-def _enrich_with_assert_facts(
+def enrich_with_assert_facts(
     *,
     facts: dict[str, str],
-    items: list[GroupItem],
+    items: GroupItemsLike,
     ast_cache: dict[str, ast.AST | None],
     range_cache: dict[tuple[str, int, int], tuple[int, int, int]],
 ) -> None:
@@ -169,14 +174,14 @@ def _enrich_with_assert_facts(
 
     for item in items:
         filepath = str(item.get("filepath", ""))
-        start_line = int(item.get("start_line", 0))
-        end_line = int(item.get("end_line", 0))
+        start_line = _as_int(item.get("start_line", 0))
+        end_line = _as_int(item.get("end_line", 0))
 
         range_total = 0
         range_assert = 0
         range_max_consecutive = 0
         if filepath and start_line > 0 and end_line > 0:
-            range_total, range_assert, range_max_consecutive = _assert_range_stats(
+            range_total, range_assert, range_max_consecutive = assert_range_stats(
                 filepath=filepath,
                 start_line=start_line,
                 end_line=end_line,
@@ -186,14 +191,15 @@ def _enrich_with_assert_facts(
             total_statements += range_total
             assert_statements += range_assert
             max_consecutive_asserts = max(
-                max_consecutive_asserts, range_max_consecutive
+                max_consecutive_asserts,
+                range_max_consecutive,
             )
 
         if (
             not filepath
             or start_line <= 0
             or end_line <= 0
-            or not _is_assert_only_range(
+            or not is_assert_only_range(
                 filepath=filepath,
                 start_line=start_line,
                 end_line=end_line,
@@ -215,7 +221,7 @@ def _enrich_with_assert_facts(
         facts["hint_note"] = BLOCK_HINT_ASSERT_ONLY_NOTE
 
 
-def build_block_group_facts(block_groups: GroupMap) -> dict[str, dict[str, str]]:
+def build_block_group_facts(block_groups: GroupMapLike) -> dict[str, dict[str, str]]:
     """
     Build deterministic explainability facts for block clone groups.
 
@@ -227,8 +233,8 @@ def build_block_group_facts(block_groups: GroupMap) -> dict[str, dict[str, str]]
     facts_by_group: dict[str, dict[str, str]] = {}
 
     for group_key, items in block_groups.items():
-        facts = _base_block_facts(group_key)
-        _enrich_with_assert_facts(
+        facts = base_block_facts(group_key)
+        enrich_with_assert_facts(
             facts=facts,
             items=items,
             ast_cache=ast_cache,
@@ -239,7 +245,8 @@ def build_block_group_facts(block_groups: GroupMap) -> dict[str, dict[str, str]]
         facts["group_arity"] = str(group_arity)
         facts["instance_peer_count"] = str(peer_count)
         compare_note = resolve_group_compare_note(
-            group_arity=group_arity, peer_count=peer_count
+            group_arity=group_arity,
+            peer_count=peer_count,
         )
         if compare_note is not None:
             facts["group_compare_note"] = compare_note

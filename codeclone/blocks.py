@@ -10,32 +10,13 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Sequence
-from dataclasses import dataclass
 
-from .blockhash import stmt_hash
+from .blockhash import stmt_hashes
 from .fingerprint import sha1
+from .models import BlockUnit, SegmentUnit
 from .normalize import NormalizationConfig
 
-
-@dataclass(frozen=True, slots=True)
-class BlockUnit:
-    block_hash: str
-    filepath: str
-    qualname: str
-    start_line: int
-    end_line: int
-    size: int
-
-
-@dataclass(frozen=True, slots=True)
-class SegmentUnit:
-    segment_hash: str
-    segment_sig: str
-    filepath: str
-    qualname: str
-    start_line: int
-    end_line: int
-    size: int
+__all__ = ["BlockUnit", "SegmentUnit", "extract_blocks", "extract_segments"]
 
 
 def extract_blocks(
@@ -57,16 +38,16 @@ def extract_blocks(
             f"precomputed_hashes length {len(precomputed_hashes)} "
             f"!= body length {len(body)}"
         )
-        stmt_hashes = precomputed_hashes
+        stmt_hash_rows = precomputed_hashes
     else:
-        stmt_hashes = [stmt_hash(stmt, cfg) for stmt in body]
+        stmt_hash_rows = stmt_hashes(body, cfg)
 
     blocks: list[BlockUnit] = []
     last_start: int | None = None
     # Allow some overlap (50%), but at least 3 lines apart
     min_line_distance = max(block_size // 2, 3)
 
-    for i in range(len(stmt_hashes) - block_size + 1):
+    for i in range(len(stmt_hash_rows) - block_size + 1):
         start = getattr(body[i], "lineno", None)
         end = getattr(body[i + block_size - 1], "end_lineno", None)
         if not start or not end:
@@ -75,7 +56,7 @@ def extract_blocks(
         if last_start is not None and start - last_start < min_line_distance:
             continue
 
-        bh = "|".join(stmt_hashes[i : i + block_size])
+        bh = "|".join(stmt_hash_rows[i : i + block_size])
 
         blocks.append(
             BlockUnit(
@@ -114,19 +95,19 @@ def extract_segments(
             f"precomputed_hashes length {len(precomputed_hashes)} "
             f"!= body length {len(body)}"
         )
-        stmt_hashes = precomputed_hashes
+        stmt_hash_rows = precomputed_hashes
     else:
-        stmt_hashes = [stmt_hash(stmt, cfg) for stmt in body]
+        stmt_hash_rows = stmt_hashes(body, cfg)
 
     segments: list[SegmentUnit] = []
 
-    for i in range(len(stmt_hashes) - window_size + 1):
+    for i in range(len(stmt_hash_rows) - window_size + 1):
         start = getattr(body[i], "lineno", None)
         end = getattr(body[i + window_size - 1], "end_lineno", None)
         if not start or not end:
             continue
 
-        window = stmt_hashes[i : i + window_size]
+        window = stmt_hash_rows[i : i + window_size]
         segment_hash = sha1("|".join(window))
         segment_sig = sha1("|".join(sorted(window)))
 

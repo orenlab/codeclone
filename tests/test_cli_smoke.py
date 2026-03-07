@@ -56,7 +56,7 @@ def f():
 
     assert result.returncode == 0
     assert "Analysis Summary" in result.stdout
-    assert "Function clone groups" in result.stdout
+    assert "Function clones" in result.stdout
 
 
 def test_cli_baseline_missing_warning(tmp_path: Path) -> None:

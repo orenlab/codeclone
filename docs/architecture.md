@@ -158,6 +158,12 @@ All report formats include provenance metadata:
 - `cache_status`
 - `cache_used`
 - `files_skipped_source_io`
+- `metrics_baseline_path`
+- `metrics_baseline_loaded`
+- `metrics_baseline_status`
+- `metrics_baseline_schema_version`
+- `metrics_baseline_payload_sha256`
+- `metrics_baseline_payload_sha256_verified`
 
 Explainability contract (v1):
 
@@ -172,7 +178,8 @@ Explainability contract (v1):
 Baseline comparison allows CI to fail **only on new clones**,
 enabling gradual architectural improvement.
 
-Baseline files use a stable v1 contract. Compatibility is checked by
+Baseline files use a stable v2 contract (schema `2.0`, with compatibility
+support for major `1` legacy schema checks where applicable). Compatibility is checked by
 `schema_version`, `fingerprint_version`, `python_tag`, and `generator.name`,
 not package patch/minor version.
 Regeneration is typically required when `fingerprint_version` or `python_tag` changes.

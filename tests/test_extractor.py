@@ -9,8 +9,35 @@ import pytest
 
 from codeclone import extractor
 from codeclone.errors import ParseError
-from codeclone.extractor import extract_units_from_source
+from codeclone.metrics import find_unused
+from codeclone.models import BlockUnit, ModuleDep, SegmentUnit
 from codeclone.normalize import NormalizationConfig
+
+
+def extract_units_from_source(
+    *,
+    source: str,
+    filepath: str,
+    module_name: str,
+    cfg: NormalizationConfig,
+    min_loc: int,
+    min_stmt: int,
+) -> tuple[
+    list[extractor.Unit],
+    list[BlockUnit],
+    list[SegmentUnit],
+]:
+    units, blocks, segments, _source_stats, _file_metrics = (
+        extractor.extract_units_and_stats_from_source(
+            source=source,
+            filepath=filepath,
+            module_name=module_name,
+            cfg=cfg,
+            min_loc=min_loc,
+            min_stmt=min_stmt,
+        )
+    )
+    return units, blocks, segments
 
 
 def test_extracts_function_unit() -> None:
@@ -286,6 +313,206 @@ def test_parse_limits_restore_failure_is_ignored(
         pass
 
 
+def test_resolve_import_target_absolute_and_relative() -> None:
+    absolute = ast.ImportFrom(module="pkg.util", names=[], level=0)
+    assert extractor._resolve_import_target("root.mod.sub", absolute) == "pkg.util"
+
+    relative = ast.ImportFrom(module="helpers", names=[], level=1)
+    assert (
+        extractor._resolve_import_target("root.mod.sub", relative) == "root.mod.helpers"
+    )
+
+    relative_no_module = ast.ImportFrom(module=None, names=[], level=2)
+    assert (
+        extractor._resolve_import_target("root.mod.sub", relative_no_module) == "root"
+    )
+
+
+def test_collect_module_facts_imports_and_references() -> None:
+    tree = ast.parse(
+        """
+import os as operating_system
+import json
+from .pkg import utils
+from .. import parent
+
+value = obj.attr
+foo()
+obj.method()
+""".strip()
+    )
+    import_names, deps, referenced_names = extractor._collect_module_facts(
+        tree=tree,
+        module_name="root.mod.sub",
+        collect_referenced_names=True,
+    )
+    assert import_names == frozenset({"operating_system", "json", "root"})
+    assert deps == (
+        ModuleDep(
+            source="root.mod.sub",
+            target="json",
+            import_type="import",
+            line=2,
+        ),
+        ModuleDep(
+            source="root.mod.sub",
+            target="os",
+            import_type="import",
+            line=1,
+        ),
+        ModuleDep(
+            source="root.mod.sub",
+            target="root",
+            import_type="from_import",
+            line=4,
+        ),
+        ModuleDep(
+            source="root.mod.sub",
+            target="root.mod.pkg",
+            import_type="from_import",
+            line=3,
+        ),
+    )
+    assert referenced_names == frozenset({"obj", "attr", "foo", "method"})
+
+
+def test_collect_module_facts_edge_branches() -> None:
+    tree = ast.parse("from .... import parent")
+    import_names, deps, referenced_names = extractor._collect_module_facts(
+        tree=tree,
+        module_name="pkg.mod",
+        collect_referenced_names=True,
+    )
+    assert import_names == frozenset()
+    assert deps == ()
+    assert referenced_names == frozenset()
+
+    lambda_call_tree = ast.parse("(lambda x: x)(1)")
+    _, _, lambda_referenced_names = extractor._collect_module_facts(
+        tree=lambda_call_tree,
+        module_name="pkg.mod",
+        collect_referenced_names=True,
+    )
+    assert lambda_referenced_names == frozenset({"x"})
+
+
+def test_extract_stats_drops_referenced_names_for_test_filepaths() -> None:
+    src = """
+from pkg.mod import live
+
+live()
+"""
+    _, _, _, _, test_metrics = extractor.extract_units_and_stats_from_source(
+        source=src,
+        filepath="pkg/tests/test_usage.py",
+        module_name="pkg.tests.test_usage",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    _, _, _, _, regular_metrics = extractor.extract_units_and_stats_from_source(
+        source=src,
+        filepath="pkg/usage.py",
+        module_name="pkg.usage",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert test_metrics.referenced_names == frozenset()
+    assert "live" in regular_metrics.referenced_names
+
+
+def test_dead_code_marks_symbol_dead_when_referenced_only_by_tests() -> None:
+    src_prod = """
+def orphan():
+    return 1
+"""
+    src_test = """
+from pkg.mod import orphan
+
+def test_orphan_usage():
+    assert orphan() == 1
+"""
+
+    _, _, _, _, prod_metrics = extractor.extract_units_and_stats_from_source(
+        source=src_prod,
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    _, _, _, _, test_metrics = extractor.extract_units_and_stats_from_source(
+        source=src_test,
+        filepath="pkg/tests/test_mod.py",
+        module_name="pkg.tests.test_mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    dead = find_unused(
+        definitions=prod_metrics.dead_candidates,
+        referenced_names=(
+            prod_metrics.referenced_names | test_metrics.referenced_names
+        ),
+    )
+    assert dead and dead[0].qualname == "pkg.mod:orphan"
+
+
+def test_collect_dead_candidates_and_extract_skip_classes_without_lineno(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collector = extractor._QualnameCollector()
+    collector.visit(
+        ast.parse(
+            """
+def used():
+    return 1
+""".strip()
+        )
+    )
+    broken_class = ast.ClassDef(
+        name="Broken",
+        bases=[],
+        keywords=[],
+        body=[],
+        decorator_list=[],
+    )
+    broken_class.lineno = 0
+    broken_class.end_lineno = 0
+    collector.class_nodes.append(("Broken", broken_class))
+    dead = extractor._collect_dead_candidates(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        collector=collector,
+    )
+    assert all(item.qualname != "pkg.mod:Broken" for item in dead)
+
+    class _CollectorNoClassMetrics:
+        def __init__(self) -> None:
+            self.units: list[tuple[str, extractor.FunctionNode]] = []
+            self.class_nodes = [("Broken", broken_class)]
+            self.function_count = 0
+            self.method_count = 0
+            self.class_count = 1
+
+        def visit(self, _tree: ast.AST) -> None:
+            return None
+
+    monkeypatch.setattr(extractor, "_QualnameCollector", _CollectorNoClassMetrics)
+    _, _, _, _, file_metrics = extractor.extract_units_and_stats_from_source(
+        source="class Broken:\n    pass\n",
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    assert file_metrics.class_metrics == ()
+
+
 def test_extract_syntax_error() -> None:
     with pytest.raises(ParseError):
         extract_units_from_source(
@@ -442,8 +669,8 @@ def test_extract_handles_non_list_function_body_for_hash_reuse(
         _node: ast.FunctionDef | ast.AsyncFunctionDef,
         _cfg: NormalizationConfig,
         _qualname: str,
-    ) -> str:
-        return "f" * 40
+    ) -> tuple[str, int]:
+        return "f" * 40, 1
 
     def _fake_extract_segments(
         _node: ast.FunctionDef | ast.AsyncFunctionDef,
@@ -461,7 +688,7 @@ def test_extract_handles_non_list_function_body_for_hash_reuse(
 
     monkeypatch.setattr(extractor, "_parse_with_limits", _fake_parse)
     monkeypatch.setattr(extractor, "_stmt_count", lambda _node: 12)
-    monkeypatch.setattr(extractor, "get_cfg_fingerprint", _fake_fingerprint)
+    monkeypatch.setattr(extractor, "_cfg_fingerprint_and_complexity", _fake_fingerprint)
     monkeypatch.setattr(extractor, "extract_segments", _fake_extract_segments)
 
     units, blocks, segments = extract_units_from_source(

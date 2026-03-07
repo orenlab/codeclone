@@ -11,11 +11,33 @@ from __future__ import annotations
 from enum import IntEnum
 from typing import Final
 
-BASELINE_SCHEMA_VERSION: Final = "1.0"
+BASELINE_SCHEMA_VERSION: Final = "2.0"
 BASELINE_FINGERPRINT_VERSION: Final = "1"
 
-CACHE_VERSION: Final = "1.3"
-REPORT_SCHEMA_VERSION: Final = "1.1"
+CACHE_VERSION: Final = "2.0"
+REPORT_SCHEMA_VERSION: Final = "2.0"
+METRICS_BASELINE_SCHEMA_VERSION: Final = "1.0"
+
+DEFAULT_COMPLEXITY_THRESHOLD: Final = 20
+DEFAULT_COUPLING_THRESHOLD: Final = 10
+DEFAULT_COHESION_THRESHOLD: Final = 4
+DEFAULT_HEALTH_THRESHOLD: Final = 60
+
+COMPLEXITY_RISK_LOW_MAX: Final = 10
+COMPLEXITY_RISK_MEDIUM_MAX: Final = 20
+COUPLING_RISK_LOW_MAX: Final = 5
+COUPLING_RISK_MEDIUM_MAX: Final = 10
+COHESION_RISK_MEDIUM_MAX: Final = 3
+
+HEALTH_WEIGHTS: Final[dict[str, float]] = {
+    "clones": 0.25,
+    "complexity": 0.20,
+    "coupling": 0.15,
+    "cohesion": 0.10,
+    "dead_code": 0.10,
+    "dependencies": 0.10,
+    "coverage": 0.10,
+}
 
 
 class ExitCode(IntEnum):
@@ -40,7 +62,10 @@ EXIT_CODE_DESCRIPTIONS: Final[tuple[tuple[ExitCode, str], ...]] = (
     ),
     (
         ExitCode.GATING_FAILURE,
-        "gating failure (new clones detected, threshold exceeded)",
+        (
+            "gating failure (new clones detected, threshold exceeded, "
+            "or metrics quality gates failed)"
+        ),
     ),
     (
         ExitCode.INTERNAL_ERROR,

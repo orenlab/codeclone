@@ -1,20 +1,16 @@
-"""
-CodeClone — AST and CFG-based code clone detector for Python
-focused on architectural duplication.
-
-Copyright (c) 2026 Den Rozhnovskiy
-Licensed under the MIT License.
-"""
+"""Report serialization for JSON and text outputs."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Collection, Mapping
 
-from ._report_types import GroupItem, GroupMap
-from .contracts import REPORT_SCHEMA_VERSION
+from ..contracts import REPORT_SCHEMA_VERSION
+from ..models import Suggestion
+from .suggestions import classify_clone_type
+from .types import GroupItemLike, GroupMap, GroupMapLike
 
-FunctionRecord = tuple[int, str, int, int, int, int, str, str]
+FunctionRecord = tuple[int, str, int, int, int, int, str, str, int, int, str, str]
 BlockRecord = tuple[int, str, int, int, int]
 SegmentRecord = tuple[int, str, int, int, int, str, str]
 SplitLists = dict[str, list[str]]
@@ -30,6 +26,10 @@ GROUP_ITEM_LAYOUT: dict[str, list[str]] = {
         "stmt_count",
         "fingerprint",
         "loc_bucket",
+        "cyclomatic_complexity",
+        "nesting_depth",
+        "risk",
+        "raw_hash",
     ],
     "blocks": ["file_i", "qualname", "start", "end", "size"],
     "segments": [
@@ -44,20 +44,24 @@ GROUP_ITEM_LAYOUT: dict[str, list[str]] = {
 }
 
 
-def _item_sort_key(item: GroupItem) -> tuple[str, int, int, str]:
-    return (
-        str(item.get("filepath", "")),
-        int(item.get("start_line", 0)),
-        int(item.get("end_line", 0)),
-        str(item.get("qualname", "")),
-    )
+def _as_int(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
 
 
 def _collect_files(
     *,
-    func_groups: GroupMap,
-    block_groups: GroupMap,
-    segment_groups: GroupMap,
+    func_groups: GroupMapLike,
+    block_groups: GroupMapLike,
+    segment_groups: GroupMapLike,
 ) -> list[str]:
     files: set[str] = set()
     for groups in (func_groups, block_groups, segment_groups):
@@ -67,36 +71,40 @@ def _collect_files(
     return sorted(files)
 
 
-def _encode_function_item(item: GroupItem, file_id: int) -> FunctionRecord:
+def _encode_function_item(item: GroupItemLike, file_id: int) -> FunctionRecord:
     return (
         file_id,
         str(item.get("qualname", "")),
-        int(item.get("start_line", 0)),
-        int(item.get("end_line", 0)),
-        int(item.get("loc", 0)),
-        int(item.get("stmt_count", 0)),
+        _as_int(item.get("start_line", 0)),
+        _as_int(item.get("end_line", 0)),
+        _as_int(item.get("loc", 0)),
+        _as_int(item.get("stmt_count", 0)),
         str(item.get("fingerprint", "")),
         str(item.get("loc_bucket", "")),
+        _as_int(item.get("cyclomatic_complexity", 1)),
+        _as_int(item.get("nesting_depth", 0)),
+        str(item.get("risk", "low")),
+        str(item.get("raw_hash", "")),
     )
 
 
-def _encode_block_item(item: GroupItem, file_id: int) -> BlockRecord:
+def _encode_block_item(item: GroupItemLike, file_id: int) -> BlockRecord:
     return (
         file_id,
         str(item.get("qualname", "")),
-        int(item.get("start_line", 0)),
-        int(item.get("end_line", 0)),
-        int(item.get("size", 0)),
+        _as_int(item.get("start_line", 0)),
+        _as_int(item.get("end_line", 0)),
+        _as_int(item.get("size", 0)),
     )
 
 
-def _encode_segment_item(item: GroupItem, file_id: int) -> SegmentRecord:
+def _encode_segment_item(item: GroupItemLike, file_id: int) -> SegmentRecord:
     return (
         file_id,
         str(item.get("qualname", "")),
-        int(item.get("start_line", 0)),
-        int(item.get("end_line", 0)),
-        int(item.get("size", 0)),
+        _as_int(item.get("start_line", 0)),
+        _as_int(item.get("end_line", 0)),
+        _as_int(item.get("size", 0)),
         str(item.get("segment_hash", "")),
         str(item.get("segment_sig", "")),
     )
@@ -114,12 +122,18 @@ def _segment_record_sort_key(record: SegmentRecord) -> tuple[int, str, int, int]
     return record[0], record[1], record[2], record[3]
 
 
-def _resolve_metric_value(item: GroupItem, metric_name: str) -> int:
+def _resolve_metric_value(item: GroupItemLike, metric_name: str) -> int:
     raw_value = item.get(metric_name)
     if raw_value is None:
         fallback_metric = "size" if metric_name == "loc" else "loc"
         raw_value = item.get(fallback_metric, 0)
-    return int(raw_value)
+    if isinstance(raw_value, bool):
+        return int(raw_value)
+    if isinstance(raw_value, int):
+        return raw_value
+    if isinstance(raw_value, str):
+        return _as_int(raw_value)
+    return 0
 
 
 def _baseline_is_trusted(meta: Mapping[str, object]) -> bool:
@@ -129,38 +143,20 @@ def _baseline_is_trusted(meta: Mapping[str, object]) -> bool:
     )
 
 
-def to_json(groups: GroupMap) -> str:
-    def _sorted_items(items: list[GroupItem]) -> list[GroupItem]:
-        return sorted(items, key=_item_sort_key)
-
-    return json.dumps(
-        {
-            "group_count": len(groups),
-            "groups": [
-                {"key": k, "count": len(v), "items": _sorted_items(v)}
-                for k, v in sorted(
-                    groups.items(),
-                    key=lambda kv: (-len(kv[1]), kv[0]),
-                )
-            ],
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
-
-
 def to_json_report(
-    func_groups: GroupMap,
-    block_groups: GroupMap,
-    segment_groups: GroupMap,
+    func_groups: GroupMapLike,
+    block_groups: GroupMapLike,
+    segment_groups: GroupMapLike,
     meta: Mapping[str, object] | None = None,
     block_facts: Mapping[str, Mapping[str, str]] | None = None,
     new_function_group_keys: Collection[str] | None = None,
     new_block_group_keys: Collection[str] | None = None,
     new_segment_group_keys: Collection[str] | None = None,
+    metrics: Mapping[str, object] | None = None,
+    suggestions: Collection[Suggestion] | None = None,
 ) -> str:
     """
-    Serialize report JSON schema v1.1.
+    Serialize report JSON schema v2.0.
 
     NEW/KNOWN split contract:
     - if baseline is not trusted, all groups are NEW and KNOWN is empty
@@ -184,7 +180,8 @@ def to_json_report(
             for item in func_groups[group_key]
         ]
         function_groups[group_key] = sorted(
-            function_records, key=_function_record_sort_key
+            function_records,
+            key=_function_record_sort_key,
         )
 
     block_groups_out: dict[str, list[BlockRecord]] = {}
@@ -202,7 +199,8 @@ def to_json_report(
             for item in segment_groups[group_key]
         ]
         segment_groups_out[group_key] = sorted(
-            segment_records, key=_segment_record_sort_key
+            segment_records,
+            key=_segment_record_sort_key,
         )
 
     baseline_trusted = _baseline_is_trusted(meta_payload)
@@ -247,7 +245,32 @@ def to_json_report(
         for section_name, section_split in groups_split.items()
     }
 
+    clone_types = {
+        "functions": {
+            group_key: classify_clone_type(
+                items=func_groups[group_key],
+                kind="function",
+            )
+            for group_key in sorted(func_groups)
+        },
+        "blocks": {
+            group_key: classify_clone_type(
+                items=block_groups[group_key],
+                kind="block",
+            )
+            for group_key in sorted(block_groups)
+        },
+        "segments": {
+            group_key: classify_clone_type(
+                items=segment_groups[group_key],
+                kind="segment",
+            )
+            for group_key in sorted(segment_groups)
+        },
+    }
+
     payload: dict[str, object] = {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "meta": meta_payload,
         "files": files,
         "groups": {
@@ -257,6 +280,25 @@ def to_json_report(
         },
         "groups_split": groups_split,
         "group_item_layout": GROUP_ITEM_LAYOUT,
+        "clones": {
+            "functions": {
+                "groups": function_groups,
+                "split": groups_split["functions"],
+                "count": len(function_groups),
+            },
+            "blocks": {
+                "groups": block_groups_out,
+                "split": groups_split["blocks"],
+                "count": len(block_groups_out),
+            },
+            "segments": {
+                "groups": segment_groups_out,
+                "split": groups_split["segments"],
+                "count": len(segment_groups_out),
+            },
+            "clone_types": clone_types,
+        },
+        "clone_types": clone_types,
     }
 
     if block_facts:
@@ -268,6 +310,23 @@ def to_json_report(
             }
         payload["facts"] = {"blocks": sorted_block_facts}
 
+    if metrics is not None:
+        payload["metrics"] = dict(metrics)
+
+    if suggestions is not None:
+        payload["suggestions"] = [
+            {
+                "severity": suggestion.severity,
+                "category": suggestion.category,
+                "title": suggestion.title,
+                "location": suggestion.location,
+                "steps": list(suggestion.steps),
+                "effort": suggestion.effort,
+                "priority": suggestion.priority,
+            }
+            for suggestion in suggestions
+        ]
+
     return json.dumps(
         payload,
         ensure_ascii=False,
@@ -275,21 +334,21 @@ def to_json_report(
     )
 
 
-def to_text(groups: GroupMap, *, metric_name: str = "loc") -> str:
+def to_text(groups: GroupMapLike, *, metric_name: str = "loc") -> str:
     lines: list[str] = []
-    for i, (_, v) in enumerate(
+    for i, (_, items_unsorted) in enumerate(
         sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     ):
         items = sorted(
-            v,
+            items_unsorted,
             key=lambda item: (
                 str(item.get("filepath", "")),
-                int(item.get("start_line", 0)),
-                int(item.get("end_line", 0)),
+                _as_int(item.get("start_line", 0)),
+                _as_int(item.get("end_line", 0)),
                 str(item.get("qualname", "")),
             ),
         )
-        lines.append(f"\n=== Clone group #{i + 1} (count={len(v)}) ===")
+        lines.append(f"\n=== Clone group #{i + 1} (count={len(items_unsorted)}) ===")
         lines.extend(
             [
                 f"- {item['qualname']} "
@@ -301,7 +360,7 @@ def to_text(groups: GroupMap, *, metric_name: str = "loc") -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def _format_meta_text_value(value: object) -> str:
+def format_meta_text_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if value is None:
@@ -313,25 +372,25 @@ def _format_meta_text_value(value: object) -> str:
 def to_text_report(
     *,
     meta: Mapping[str, object],
-    func_groups: GroupMap,
-    block_groups: GroupMap,
-    segment_groups: GroupMap,
+    func_groups: GroupMapLike,
+    block_groups: GroupMapLike,
+    segment_groups: GroupMapLike,
     new_function_group_keys: Collection[str] | None = None,
     new_block_group_keys: Collection[str] | None = None,
     new_segment_group_keys: Collection[str] | None = None,
+    metrics: Mapping[str, object] | None = None,
+    suggestions: Collection[Suggestion] | None = None,
 ) -> str:
     """
     Serialize deterministic TXT report.
 
-    NEW/KNOWN split follows the same contract as JSON v1.1.
+    NEW/KNOWN split follows the same contract as JSON report output.
     """
 
     baseline_trusted = _baseline_is_trusted(meta)
 
     def _split_for(
-        *,
-        groups: GroupMap,
-        new_keys: Collection[str] | None,
+        *, groups: GroupMapLike, new_keys: Collection[str] | None
     ) -> SplitLists:
         sorted_keys = sorted(groups.keys())
         if not baseline_trusted:
@@ -354,38 +413,87 @@ def to_text_report(
     lines = [
         "REPORT METADATA",
         "Report schema version: "
-        f"{_format_meta_text_value(meta.get('report_schema_version'))}",
-        f"CodeClone version: {_format_meta_text_value(meta.get('codeclone_version'))}",
-        f"Python version: {_format_meta_text_value(meta.get('python_version'))}",
-        f"Python tag: {_format_meta_text_value(meta.get('python_tag'))}",
-        f"Baseline path: {_format_meta_text_value(meta.get('baseline_path'))}",
+        f"{format_meta_text_value(meta.get('report_schema_version'))}",
+        f"CodeClone version: {format_meta_text_value(meta.get('codeclone_version'))}",
+        f"Project name: {format_meta_text_value(meta.get('project_name'))}",
+        f"Scan root: {format_meta_text_value(meta.get('scan_root'))}",
+        f"Python version: {format_meta_text_value(meta.get('python_version'))}",
+        f"Python tag: {format_meta_text_value(meta.get('python_tag'))}",
+        f"Baseline path: {format_meta_text_value(meta.get('baseline_path'))}",
         "Baseline fingerprint version: "
-        f"{_format_meta_text_value(meta.get('baseline_fingerprint_version'))}",
+        f"{format_meta_text_value(meta.get('baseline_fingerprint_version'))}",
         "Baseline schema version: "
-        f"{_format_meta_text_value(meta.get('baseline_schema_version'))}",
+        f"{format_meta_text_value(meta.get('baseline_schema_version'))}",
         "Baseline Python tag: "
-        f"{_format_meta_text_value(meta.get('baseline_python_tag'))}",
+        f"{format_meta_text_value(meta.get('baseline_python_tag'))}",
         "Baseline generator name: "
-        f"{_format_meta_text_value(meta.get('baseline_generator_name'))}",
+        f"{format_meta_text_value(meta.get('baseline_generator_name'))}",
         "Baseline generator version: "
-        f"{_format_meta_text_value(meta.get('baseline_generator_version'))}",
+        f"{format_meta_text_value(meta.get('baseline_generator_version'))}",
         "Baseline payload sha256: "
-        f"{_format_meta_text_value(meta.get('baseline_payload_sha256'))}",
+        f"{format_meta_text_value(meta.get('baseline_payload_sha256'))}",
         "Baseline payload verified: "
-        f"{_format_meta_text_value(meta.get('baseline_payload_sha256_verified'))}",
-        f"Baseline loaded: {_format_meta_text_value(meta.get('baseline_loaded'))}",
-        f"Baseline status: {_format_meta_text_value(meta.get('baseline_status'))}",
-        f"Cache path: {_format_meta_text_value(meta.get('cache_path'))}",
+        f"{format_meta_text_value(meta.get('baseline_payload_sha256_verified'))}",
+        f"Baseline loaded: {format_meta_text_value(meta.get('baseline_loaded'))}",
+        f"Baseline status: {format_meta_text_value(meta.get('baseline_status'))}",
+        f"Cache path: {format_meta_text_value(meta.get('cache_path'))}",
         "Cache schema version: "
-        f"{_format_meta_text_value(meta.get('cache_schema_version'))}",
-        f"Cache status: {_format_meta_text_value(meta.get('cache_status'))}",
-        f"Cache used: {_format_meta_text_value(meta.get('cache_used'))}",
+        f"{format_meta_text_value(meta.get('cache_schema_version'))}",
+        f"Cache status: {format_meta_text_value(meta.get('cache_status'))}",
+        f"Cache used: {format_meta_text_value(meta.get('cache_used'))}",
         "Source IO skipped: "
-        f"{_format_meta_text_value(meta.get('files_skipped_source_io'))}",
+        f"{format_meta_text_value(meta.get('files_skipped_source_io'))}",
+        "Metrics baseline path: "
+        f"{format_meta_text_value(meta.get('metrics_baseline_path'))}",
+        "Metrics baseline loaded: "
+        f"{format_meta_text_value(meta.get('metrics_baseline_loaded'))}",
+        "Metrics baseline status: "
+        f"{format_meta_text_value(meta.get('metrics_baseline_status'))}",
+        "Metrics baseline schema version: "
+        f"{format_meta_text_value(meta.get('metrics_baseline_schema_version'))}",
+        "Metrics baseline payload sha256: "
+        f"{format_meta_text_value(meta.get('metrics_baseline_payload_sha256'))}",
+        "Metrics baseline payload verified: "
+        f"{format_meta_text_value(meta.get('metrics_baseline_payload_sha256_verified'))}",
+        f"Analysis mode: {format_meta_text_value(meta.get('analysis_mode'))}",
+        f"Metrics computed: {format_meta_text_value(meta.get('metrics_computed'))}",
+        f"Health score: {format_meta_text_value(meta.get('health_score'))}",
+        f"Health grade: {format_meta_text_value(meta.get('health_grade'))}",
     ]
 
     if not baseline_trusted:
         lines.append("Note: baseline is untrusted; all groups are treated as NEW.")
+
+    if metrics:
+        lines.extend(
+            [
+                "",
+                "METRICS",
+                json.dumps(dict(metrics), ensure_ascii=False, sort_keys=True),
+            ]
+        )
+    if suggestions is not None:
+        lines.extend(
+            [
+                "",
+                "SUGGESTIONS",
+                json.dumps(
+                    [
+                        {
+                            "severity": suggestion.severity,
+                            "category": suggestion.category,
+                            "title": suggestion.title,
+                            "location": suggestion.location,
+                            "effort": suggestion.effort,
+                            "priority": suggestion.priority,
+                        }
+                        for suggestion in suggestions
+                    ],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            ]
+        )
 
     sections = (
         ("FUNCTION CLONES", "functions", func_groups, "loc"),
@@ -395,12 +503,12 @@ def to_text_report(
     for title, section_key, groups, metric_name in sections:
         split = groups_split[section_key]
         new_groups: GroupMap = {
-            group_key: groups[group_key]
+            group_key: [dict(item) for item in groups[group_key]]
             for group_key in split["new"]
             if group_key in groups
         }
         known_groups: GroupMap = {
-            group_key: groups[group_key]
+            group_key: [dict(item) for item in groups[group_key]]
             for group_key in split["known"]
             if group_key in groups
         }

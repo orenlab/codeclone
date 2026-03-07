@@ -31,8 +31,7 @@ from .errors import BaselineValidationError
 # and narrowed before entering compatibility/integrity checks.
 
 BASELINE_GENERATOR = "codeclone"
-BASELINE_SCHEMA_MAJOR = 1
-BASELINE_SCHEMA_MAX_MINOR = 0
+_BASELINE_SCHEMA_MAX_MINOR_BY_MAJOR = {1: 0, 2: 0}
 MAX_BASELINE_SIZE_BYTES = 5 * 1024 * 1024
 
 
@@ -81,7 +80,9 @@ def coerce_baseline_status(
     return BaselineStatus.INVALID_TYPE
 
 
-_TOP_LEVEL_KEYS = {"meta", "clones"}
+_TOP_LEVEL_REQUIRED_KEYS = {"meta", "clones"}
+_TOP_LEVEL_OPTIONAL_KEYS = {"metrics"}
+_TOP_LEVEL_ALLOWED_KEYS = _TOP_LEVEL_REQUIRED_KEYS | _TOP_LEVEL_OPTIONAL_KEYS
 _META_REQUIRED_KEYS = {
     "generator",
     "schema_version",
@@ -121,7 +122,12 @@ class Baseline:
         self.payload_sha256: str | None = None
         self.generator_version: str | None = None
 
-    def load(self, *, max_size_bytes: int | None = None) -> None:
+    def load(
+        self,
+        *,
+        max_size_bytes: int | None = None,
+        preloaded_payload: dict[str, Any] | None = None,
+    ) -> None:
         try:
             exists = self.path.exists()
         except OSError as e:
@@ -144,7 +150,15 @@ class Baseline:
                 status=BaselineStatus.TOO_LARGE,
             )
 
-        payload = _load_json_object(self.path)
+        if preloaded_payload is None:
+            payload = _load_json_object(self.path)
+        else:
+            if not isinstance(preloaded_payload, dict):
+                raise BaselineValidationError(
+                    f"Baseline payload must be an object at {self.path}",
+                    status=BaselineStatus.INVALID_TYPE,
+                )
+            payload = preloaded_payload
         if _is_legacy_baseline_payload(payload):
             raise BaselineValidationError(
                 "Baseline format is legacy (<=1.3.x) and must be regenerated. "
@@ -173,6 +187,17 @@ class Baseline:
 
         generator, generator_version = _parse_generator_meta(meta_obj, path=self.path)
         schema_version = _require_semver_str(meta_obj, "schema_version", path=self.path)
+        schema_major, _, _ = _parse_semver(
+            schema_version,
+            key="schema_version",
+            path=self.path,
+        )
+        if schema_major < 2 and "metrics" in payload:
+            raise BaselineValidationError(
+                f"Invalid baseline schema at {self.path}: "
+                "top-level 'metrics' requires baseline schema >= 2.0.",
+                status=BaselineStatus.MISMATCH_SCHEMA_VERSION,
+            )
         fingerprint_version = _require_str(
             meta_obj, "fingerprint_version", path=self.path
         )
@@ -215,7 +240,48 @@ class Baseline:
             generator_version=self.generator_version,
             created_at=self.created_at,
         )
+        preserved_metrics, preserved_metrics_hash = _preserve_embedded_metrics(
+            self.path
+        )
+        if preserved_metrics is not None:
+            payload["metrics"] = preserved_metrics
+            if preserved_metrics_hash is not None:
+                meta_obj = payload.get("meta")
+                if isinstance(meta_obj, dict):
+                    meta_obj["metrics_payload_sha256"] = preserved_metrics_hash
         _atomic_write_json(self.path, payload)
+
+        meta_obj = payload.get("meta")
+        if not isinstance(meta_obj, dict):
+            return
+
+        generator_obj = meta_obj.get("generator")
+        if isinstance(generator_obj, dict):
+            generator_name = generator_obj.get("name")
+            generator_version = generator_obj.get("version")
+            if isinstance(generator_name, str):
+                self.generator = generator_name
+            if isinstance(generator_version, str):
+                self.generator_version = generator_version
+        elif isinstance(generator_obj, str):
+            self.generator = generator_obj
+
+        schema_version = meta_obj.get("schema_version")
+        fingerprint_version = meta_obj.get("fingerprint_version")
+        python_tag = meta_obj.get("python_tag")
+        created_at = meta_obj.get("created_at")
+        payload_sha256 = meta_obj.get("payload_sha256")
+
+        if isinstance(schema_version, str):
+            self.schema_version = schema_version
+        if isinstance(fingerprint_version, str):
+            self.fingerprint_version = fingerprint_version
+        if isinstance(python_tag, str):
+            self.python_tag = python_tag
+        if isinstance(created_at, str):
+            self.created_at = created_at
+        if isinstance(payload_sha256, str):
+            self.payload_sha256 = payload_sha256
 
     def verify_compatibility(self, *, current_python_tag: str) -> None:
         if self.generator != BASELINE_GENERATOR:
@@ -242,18 +308,22 @@ class Baseline:
         schema_major, schema_minor, _ = _parse_semver(
             self.schema_version, key="schema_version", path=self.path
         )
-        if schema_major != BASELINE_SCHEMA_MAJOR:
+        max_minor = _BASELINE_SCHEMA_MAX_MINOR_BY_MAJOR.get(schema_major)
+        if max_minor is None:
+            supported = ",".join(
+                str(major) for major in sorted(_BASELINE_SCHEMA_MAX_MINOR_BY_MAJOR)
+            )
             raise BaselineValidationError(
                 "Baseline schema version mismatch: "
                 f"baseline={self.schema_version}, "
-                f"supported_major={BASELINE_SCHEMA_MAJOR}.",
+                f"supported_majors={supported}.",
                 status=BaselineStatus.MISMATCH_SCHEMA_VERSION,
             )
-        if schema_minor > BASELINE_SCHEMA_MAX_MINOR:
+        if schema_minor > max_minor:
             raise BaselineValidationError(
                 "Baseline schema version is newer than supported: "
                 f"baseline={self.schema_version}, "
-                f"max=1.{BASELINE_SCHEMA_MAX_MINOR}.",
+                f"max={schema_major}.{max_minor}.",
                 status=BaselineStatus.MISMATCH_SCHEMA_VERSION,
             )
         if self.fingerprint_version != BASELINE_FINGERPRINT_VERSION:
@@ -391,8 +461,8 @@ def _load_json_object(path: Path) -> dict[str, Any]:
 
 def _validate_top_level_structure(payload: dict[str, Any], *, path: Path) -> None:
     keys = set(payload.keys())
-    missing = _TOP_LEVEL_KEYS - keys
-    extra = keys - _TOP_LEVEL_KEYS
+    missing = _TOP_LEVEL_REQUIRED_KEYS - keys
+    extra = keys - _TOP_LEVEL_ALLOWED_KEYS
     if missing:
         raise BaselineValidationError(
             f"Invalid baseline schema at {path}: missing top-level keys: "
@@ -432,6 +502,23 @@ def _validate_exact_clone_keys(clones: dict[str, Any], *, path: Path) -> None:
 
 def _is_legacy_baseline_payload(payload: dict[str, Any]) -> bool:
     return "functions" in payload and "blocks" in payload
+
+
+def _preserve_embedded_metrics(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        payload = _load_json_object(path)
+    except BaselineValidationError:
+        return None, None
+    metrics_obj = payload.get("metrics")
+    if not isinstance(metrics_obj, dict):
+        return None, None
+    meta_obj = payload.get("meta")
+    if not isinstance(meta_obj, dict):
+        return dict(metrics_obj), None
+    metrics_hash = meta_obj.get("metrics_payload_sha256")
+    if not isinstance(metrics_hash, str):
+        return dict(metrics_obj), None
+    return dict(metrics_obj), metrics_hash
 
 
 def _parse_generator_meta(

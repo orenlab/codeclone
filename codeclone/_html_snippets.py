@@ -10,19 +10,11 @@ from __future__ import annotations
 
 import html
 import importlib
-import itertools
-from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import NamedTuple, cast
 
 from .errors import FileProcessingError
-
-
-def pairwise(iterable: Iterable[object]) -> Iterable[tuple[object, object]]:
-    a, b = itertools.tee(iterable)
-    next(b, None)
-    return zip(a, b, strict=False)
 
 
 @dataclass(slots=True)

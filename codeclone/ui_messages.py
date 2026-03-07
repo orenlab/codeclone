@@ -9,16 +9,12 @@ from pathlib import Path
 from . import __version__
 from .contracts import ISSUES_URL
 
-BANNER_SUBTITLE = "[italic]Architectural duplication detector[/italic]"
+BANNER_SUBTITLE = "[italic]Architectural duplication and code-health analysis[/italic]"
 
 MARKER_CONTRACT_ERROR = "[error]CONTRACT ERROR:[/error]"
-MARKER_GATING_FAILURE = "[error]GATING FAILURE:[/error]"
 MARKER_INTERNAL_ERROR = "[error]INTERNAL ERROR:[/error]"
 
 REPORT_BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN = "Assert pattern block"
-REPORT_BLOCK_GROUP_COMPARE_NOTE_N_WAY = (
-    "N-way group: each block matches {peer_count} peers in this group."
-)
 
 HELP_VERSION = "Print the CodeClone version and exit."
 HELP_ROOT = "Project root directory to scan."
@@ -29,40 +25,79 @@ HELP_CACHE_PATH = "Path to the cache file. Default: <root>/.cache/codeclone/cach
 HELP_CACHE_DIR_LEGACY = "Legacy alias for --cache-path."
 HELP_MAX_BASELINE_SIZE_MB = "Maximum baseline file size in MB."
 HELP_MAX_CACHE_SIZE_MB = "Maximum cache file size in MB."
-HELP_BASELINE = "Path to the baseline file (stored in repo)."
+HELP_BASELINE = "Path to baseline file (omit value to use default path)."
 HELP_UPDATE_BASELINE = "Overwrite the baseline file with current results."
 HELP_FAIL_ON_NEW = "Exit with error if NEW clones (not in baseline) are detected."
 HELP_FAIL_THRESHOLD = (
     "Exit with error if total clone groups (function + block) exceed this number."
 )
+HELP_FAIL_COMPLEXITY = "Exit with error if any function has CC above this threshold."
+HELP_FAIL_COUPLING = "Exit with error if any class has CBO above this threshold."
+HELP_FAIL_COHESION = "Exit with error if any class has LCOM4 above this threshold."
+HELP_FAIL_CYCLES = "Exit with error if circular module dependencies are detected."
+HELP_FAIL_DEAD_CODE = "Exit with error if high-confidence dead code is detected."
+HELP_FAIL_HEALTH = "Exit with error if health score is below this threshold."
+HELP_FAIL_ON_NEW_METRICS = (
+    "Exit with error if new metric violations appear vs metrics baseline."
+)
 HELP_CI = "CI preset: --fail-on-new --no-color --quiet."
-HELP_HTML = "Generate an HTML report to FILE."
-HELP_JSON = "Generate a JSON report to FILE."
-HELP_TEXT = "Generate a text report to FILE."
+HELP_UPDATE_METRICS_BASELINE = "Overwrite metrics baseline with current metrics."
+HELP_METRICS_BASELINE = (
+    "Path to metrics baseline file (omit value to use default path)."
+)
+HELP_SKIP_METRICS = "Skip full metrics analysis (clone-only mode)."
+HELP_SKIP_DEAD_CODE = "Skip dead code detection stage."
+HELP_SKIP_DEPENDENCIES = "Skip dependency graph analysis stage."
+HELP_HTML = (
+    "Generate HTML report (optional FILE, default: .cache/codeclone/report.html)."
+)
+HELP_JSON = (
+    "Generate JSON report (optional FILE, default: .cache/codeclone/report.json)."
+)
+HELP_TEXT = (
+    "Generate text report (optional FILE, default: .cache/codeclone/report.txt)."
+)
 HELP_NO_PROGRESS = "Disable the progress bar (recommended for CI logs)."
+HELP_PROGRESS = "Enable progress bar output."
 HELP_NO_COLOR = "Disable ANSI colors in output."
+HELP_COLOR = "Enable ANSI colors in output."
 HELP_QUIET = "Minimize output (still shows warnings and errors)."
 HELP_VERBOSE = "Print detailed hash identifiers for new clones."
 HELP_DEBUG = "Print debug details (traceback and environment) on internal errors."
 
 SUMMARY_TITLE = "Analysis Summary"
-CLI_LAYOUT_WIDTH = 40
+METRICS_TITLE = "Quality Metrics"
+REPORTS_TITLE = "Reports"
+
+CLI_LAYOUT_MAX_WIDTH = 80
+
 SUMMARY_LABEL_FILES_FOUND = "Files found"
-SUMMARY_LABEL_FILES_ANALYZED = "Files analyzed"
-SUMMARY_LABEL_CACHE_HITS = "Cache hits"
-SUMMARY_LABEL_FILES_SKIPPED = "Files skipped"
-SUMMARY_LABEL_FUNCTION = "Function clone groups"
-SUMMARY_LABEL_BLOCK = "Block clone groups"
-SUMMARY_LABEL_SEGMENT = "Segment clone groups"
-SUMMARY_LABEL_SUPPRESSED = "Suppressed segment groups"
+SUMMARY_LABEL_FILES_ANALYZED = "  analyzed"
+SUMMARY_LABEL_CACHE_HITS = "  from cache"
+SUMMARY_LABEL_FILES_SKIPPED = "  skipped"
+SUMMARY_LABEL_LINES_ANALYZED = "Lines (this run)"
+SUMMARY_LABEL_FUNCTIONS_ANALYZED = "Functions (this run)"
+SUMMARY_LABEL_METHODS_ANALYZED = "Methods (this run)"
+SUMMARY_LABEL_CLASSES_ANALYZED = "Classes (this run)"
+SUMMARY_LABEL_FUNCTION = "Function clones"
+SUMMARY_LABEL_BLOCK = "Block clones"
+SUMMARY_LABEL_SEGMENT = "Segment clones"
+SUMMARY_LABEL_SUPPRESSED = "  suppressed"
 SUMMARY_LABEL_NEW_BASELINE = "New vs baseline"
-SUMMARY_COMPACT_INPUT = (
-    "Input: found={found} analyzed={analyzed} cache_hits={cache_hits} skipped={skipped}"
+
+SUMMARY_COMPACT = (
+    "Summary  found={found}  analyzed={analyzed}  cache={cache_hits}  skipped={skipped}"
 )
 SUMMARY_COMPACT_CLONES = (
-    "Clone groups: function={function} block={block} "
-    "segment={segment} suppressed={suppressed} new_vs_baseline={new}"
+    "Clones   func={function}  block={block}  seg={segment}"
+    "  suppressed={suppressed}  new={new}"
 )
+SUMMARY_COMPACT_METRICS = (
+    "Metrics  CC={cc_avg}/{cc_max}  CBO={cbo_avg}/{cbo_max}"
+    "  LCOM4={lcom_avg}/{lcom_max}  cycles={cycles}  dead={dead}"
+    "  health={health}({grade})"
+)
+
 WARN_SUMMARY_ACCOUNTING_MISMATCH = (
     "Summary accounting mismatch: "
     "files_found != files_analyzed + cache_hits + files_skipped"
@@ -71,13 +106,8 @@ WARN_SUMMARY_ACCOUNTING_MISMATCH = (
 STATUS_DISCOVERING = "[bold green]Discovering Python files..."
 STATUS_GROUPING = "[bold green]Grouping clones..."
 
-INFO_SCANNING_ROOT = "[info]Scanning root:[/info] {root}"
 INFO_PROCESSING_CHANGED = "[info]Processing {count} changed files...[/info]"
-INFO_HTML_REPORT_SAVED = "[info]HTML report saved:[/info] [bold]{path}[/bold]"
-INFO_JSON_REPORT_SAVED = "[info]JSON report saved:[/info] [bold]{path}[/bold]"
-INFO_TEXT_REPORT_SAVED = "[info]Text report saved:[/info] [bold]{path}[/bold]"
 
-WARN_SKIPPING_FILE = "[warning]Skipping file {path}: {error}[/warning]"
 WARN_WORKER_FAILED = "[warning]Worker failed: {error}[/warning]"
 WARN_BATCH_ITEM_FAILED = "[warning]Failed to process batch item: {error}[/warning]"
 WARN_PARALLEL_FALLBACK = (
@@ -147,22 +177,30 @@ FAIL_NEW_ACCEPT_TITLE = "To accept these clones as technical debt, run:"
 FAIL_NEW_ACCEPT_COMMAND = "  codeclone . --update-baseline"
 FAIL_NEW_DETAIL_FUNCTION = "Details (function clone hashes):"
 FAIL_NEW_DETAIL_BLOCK = "Details (block clone hashes):"
+FAIL_METRICS_TITLE = "[error]FAILED: Metrics quality gate triggered.[/error]"
 
-ERR_FAIL_THRESHOLD = "Total clones ({total}) exceed threshold ({threshold})."
 WARN_NEW_CLONES_WITHOUT_FAIL = (
     "\n[warning]New clones detected but --fail-on-new not set.[/warning]\n"
     "Run with --update-baseline to accept them as technical debt."
 )
 
 
+def cli_layout_width(console_width: int | None) -> int:
+    return min(console_width or 80, CLI_LAYOUT_MAX_WIDTH)
+
+
 def version_output(version: str) -> str:
     return f"CodeClone {version}"
 
 
-def banner_title(version: str) -> str:
-    return (
-        f"[bold white]CodeClone[/bold white] [dim]v{version}[/dim]\n{BANNER_SUBTITLE}"
+def banner_title(version: str, *, root: Path | None = None) -> str:
+    line1 = (
+        f"[bold white]CodeClone[/bold white] [dim]v{version}[/dim]"
+        f"  [dim]·[/dim]  {BANNER_SUBTITLE}"
     )
+    if root is None:
+        return line1
+    return f"{line1}\n[dim]{root}[/dim]"
 
 
 def fmt_invalid_output_extension(
@@ -193,16 +231,8 @@ def fmt_unreadable_source_in_gating(*, count: int) -> str:
     return ERR_UNREADABLE_SOURCE_IN_GATING.format(count=count)
 
 
-def fmt_scanning_root(root: Path) -> str:
-    return INFO_SCANNING_ROOT.format(root=root)
-
-
 def fmt_processing_changed(count: int) -> str:
     return INFO_PROCESSING_CHANGED.format(count=count)
-
-
-def fmt_skipping_file(path: str, error: object) -> str:
-    return WARN_SKIPPING_FILE.format(path=path, error=error)
 
 
 def fmt_worker_failed(error: object) -> str:
@@ -237,10 +267,10 @@ def fmt_path(template: str, path: Path) -> str:
     return template.format(path=path)
 
 
-def fmt_summary_compact_input(
+def fmt_summary_compact(
     *, found: int, analyzed: int, cache_hits: int, skipped: int
 ) -> str:
-    return SUMMARY_COMPACT_INPUT.format(
+    return SUMMARY_COMPACT.format(
         found=found, analyzed=analyzed, cache_hits=cache_hits, skipped=skipped
     )
 
@@ -262,16 +292,35 @@ def fmt_summary_compact_clones(
     )
 
 
-def fmt_fail_threshold(*, total: int, threshold: int) -> str:
-    return ERR_FAIL_THRESHOLD.format(total=total, threshold=threshold)
+def fmt_summary_compact_metrics(
+    *,
+    cc_avg: float,
+    cc_max: int,
+    cbo_avg: float,
+    cbo_max: int,
+    lcom_avg: float,
+    lcom_max: int,
+    cycles: int,
+    dead: int,
+    health: int,
+    grade: str,
+) -> str:
+    return SUMMARY_COMPACT_METRICS.format(
+        cc_avg=f"{cc_avg:.1f}",
+        cc_max=cc_max,
+        cbo_avg=f"{cbo_avg:.1f}",
+        cbo_max=cbo_max,
+        lcom_avg=f"{lcom_avg:.1f}",
+        lcom_max=lcom_max,
+        cycles=cycles,
+        dead=dead,
+        health=health,
+        grade=grade,
+    )
 
 
 def fmt_contract_error(message: str) -> str:
     return f"{MARKER_CONTRACT_ERROR}\n{message}"
-
-
-def fmt_gating_failure(message: str) -> str:
-    return f"{MARKER_GATING_FAILURE}\n{message}"
 
 
 def fmt_internal_error(
@@ -317,7 +366,3 @@ def fmt_internal_error(
         ]
     )
     return "\n".join(lines)
-
-
-def fmt_report_block_group_compare_note_n_way(*, peer_count: int) -> str:
-    return REPORT_BLOCK_GROUP_COMPARE_NOTE_N_WAY.format(peer_count=peer_count)

@@ -7,9 +7,12 @@ import codeclone.normalize as normalize_mod
 from codeclone.meta_markers import CFG_META_PREFIX
 from codeclone.normalize import (
     NormalizationConfig,
-    normalized_ast_dump,
     normalized_ast_dump_from_list,
 )
+
+
+def normalized_ast_dump(node: ast.AST, cfg: NormalizationConfig) -> str:
+    return normalized_ast_dump_from_list([node], cfg)
 
 
 def _normalized_dump(source: str, cfg: NormalizationConfig) -> str:

@@ -543,22 +543,10 @@ def test_cache_save_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
 
-    original_write_text = Path.write_text
+    def _raise_fsync(_fd: int) -> None:
+        raise OSError("nope")
 
-    def _raise_write_text(
-        self: Path,
-        data: str,
-        encoding: str | None = None,
-        errors: str | None = None,
-        newline: str | None = None,
-    ) -> int:
-        if self.name.endswith(".tmp"):
-            raise OSError("nope")
-        return original_write_text(
-            self, data, encoding=encoding, errors=errors, newline=newline
-        )
-
-    monkeypatch.setattr(Path, "write_text", _raise_write_text)
+    monkeypatch.setattr(os, "fsync", _raise_fsync)
 
     with pytest.raises(CacheError):
         cache.save()
@@ -928,6 +916,23 @@ def test_decode_wire_item_type_failures() -> None:
     assert cache_mod._decode_wire_segment(["q", 1, 2, "3", "h", "sig"], "x.py") is None
 
 
+def test_decode_wire_item_rejects_invalid_risk_fields() -> None:
+    assert (
+        cache_mod._decode_wire_unit(
+            ["q", 1, 2, 3, 4, "fp", "0-19", 2, 1, "critical", "raw"],
+            "x.py",
+        )
+        is None
+    )
+    assert (
+        cache_mod._decode_wire_class_metric(
+            ["pkg.mod:Service", 1, 10, 3, 2, 4, 1, 7, 8],
+            "x.py",
+        )
+        is None
+    )
+
+
 def test_resolve_root_oserror_returns_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -940,3 +945,359 @@ def test_resolve_root_oserror_returns_none(
 
     monkeypatch.setattr(Path, "resolve", _resolve_with_error)
     assert cache_mod._resolve_root(tmp_path) is None
+
+
+def test_cache_entry_rejects_invalid_metrics_sections(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": [],
+            "class_metrics": "bad",
+            "module_deps": [],
+            "dead_candidates": [],
+            "referenced_names": [],
+            "import_names": [],
+            "class_names": [],
+        },
+    )
+    assert cache.get_file_entry("x.py") is None
+
+
+def test_decode_wire_file_entry_rejects_metrics_related_invalid_sections() -> None:
+    assert (
+        cache_mod._decode_wire_file_entry({"st": [1, 2], "cm": "bad"}, "x.py") is None
+    )
+    assert (
+        cache_mod._decode_wire_file_entry(
+            {"st": [1, 2], "cm": [["Q", 1, 2, 3, 4, 5, 6, "low"]]},
+            "x.py",
+        )
+        is None
+    )
+    assert (
+        cache_mod._decode_wire_file_entry({"st": [1, 2], "md": "bad"}, "x.py") is None
+    )
+    assert (
+        cache_mod._decode_wire_file_entry(
+            {"st": [1, 2], "md": [["source", "target", "import"]]},
+            "x.py",
+        )
+        is None
+    )
+    assert (
+        cache_mod._decode_wire_file_entry({"st": [1, 2], "dc": "bad"}, "x.py") is None
+    )
+    assert (
+        cache_mod._decode_wire_file_entry(
+            {"st": [1, 2], "dc": [["q", "n", 1, 2, "function"]]},
+            "x.py",
+        )
+        is None
+    )
+    assert cache_mod._decode_wire_file_entry({"st": [1, 2], "rn": [1]}, "x.py") is None
+    assert cache_mod._decode_wire_file_entry({"st": [1, 2], "in": [1]}, "x.py") is None
+    assert cache_mod._decode_wire_file_entry({"st": [1, 2], "cn": [1]}, "x.py") is None
+    assert (
+        cache_mod._decode_wire_file_entry({"st": [1, 2], "cc": "bad"}, "x.py") is None
+    )
+    assert (
+        cache_mod._decode_wire_file_entry({"st": [1, 2], "cc": [["Q"]]}, "x.py") is None
+    )
+    assert (
+        cache_mod._decode_wire_file_entry(
+            {"st": [1, 2], "cc": [["Q", ["A", 1]]]},
+            "x.py",
+        )
+        is None
+    )
+
+
+def test_decode_wire_file_entry_accepts_metrics_sections() -> None:
+    decoded = cache_mod._decode_wire_file_entry(
+        {
+            "st": [1, 2],
+            "cm": [["pkg.mod:Service", 1, 10, 3, 2, 4, 1, "low", "medium"]],
+            "cc": [["pkg.mod:Service", ["Zeta", "Alpha"]]],
+            "md": [["a", "b", "import", 1]],
+            "dc": [["pkg.mod:unused", "unused", 1, 2, "function", "x.py"]],
+            "rn": ["name"],
+            "in": ["typing", "os"],
+            "cn": ["Service", "Model"],
+        },
+        "x.py",
+    )
+    assert decoded is not None
+    assert decoded["class_metrics"][0]["qualname"] == "pkg.mod:Service"
+    assert decoded["class_metrics"][0]["coupled_classes"] == ["Alpha", "Zeta"]
+    assert decoded["module_deps"][0]["target"] == "b"
+    assert decoded["dead_candidates"][0]["qualname"] == "pkg.mod:unused"
+    assert decoded["import_names"] == ["typing", "os"]
+    assert decoded["class_names"] == ["Service", "Model"]
+
+
+def test_decode_optional_wire_coupled_classes_rejects_non_string_qualname() -> None:
+    assert (
+        cache_mod._decode_optional_wire_coupled_classes(
+            obj={"cc": [[1, ["A"]]]},
+            key="cc",
+        )
+        is None
+    )
+
+
+def test_decode_wire_file_entry_skips_empty_coupled_classes_mapping() -> None:
+    decoded = cache_mod._decode_wire_file_entry(
+        {
+            "st": [1, 2],
+            "cm": [["pkg.mod:Service", 1, 10, 3, 2, 4, 1, "low", "medium"]],
+            "cc": [["pkg.mod:Service", ["", ""]]],
+        },
+        "x.py",
+    )
+    assert decoded is not None
+    assert "coupled_classes" not in decoded["class_metrics"][0]
+
+
+def test_decode_wire_metrics_items_and_deps_roundtrip_shape() -> None:
+    class_metric = cache_mod._decode_wire_class_metric(
+        ["pkg.mod:Service", 1, 10, 3, 2, 4, 1, "low", "medium"],
+        "x.py",
+    )
+    assert class_metric is not None
+    assert class_metric["filepath"] == "x.py"
+    assert (
+        cache_mod._decode_wire_class_metric(
+            ["pkg.mod:Service", "1", 10, 3, 2, 4, 1, "low", "medium"],
+            "x.py",
+        )
+        is None
+    )
+
+    module_dep = cache_mod._decode_wire_module_dep(["a", "b", "import", 1])
+    assert module_dep is not None
+    assert module_dep["source"] == "a"
+    assert cache_mod._decode_wire_module_dep(["a", "b", "import", "1"]) is None
+
+    dead_candidate = cache_mod._decode_wire_dead_candidate(
+        ["pkg.mod:unused", "unused", 1, 2, "function", ""],
+        "fallback.py",
+    )
+    assert dead_candidate is not None
+    assert dead_candidate["filepath"] == "fallback.py"
+    assert (
+        cache_mod._decode_wire_dead_candidate(
+            ["pkg.mod:unused", "unused", "1", 2, "function", "x.py"],
+            "fallback.py",
+        )
+        is None
+    )
+
+
+def test_encode_wire_file_entry_includes_optional_metrics_sections() -> None:
+    entry: cache_mod.CacheEntry = {
+        "stat": {"mtime_ns": 1, "size": 2},
+        "units": [],
+        "blocks": [],
+        "segments": [],
+        "class_metrics": [
+            {
+                "qualname": "pkg.mod:Service",
+                "filepath": "x.py",
+                "start_line": 1,
+                "end_line": 10,
+                "cbo": 3,
+                "lcom4": 2,
+                "method_count": 4,
+                "instance_var_count": 1,
+                "risk_coupling": "low",
+                "risk_cohesion": "medium",
+                "coupled_classes": ["ServiceB", "ServiceA"],
+            }
+        ],
+        "module_deps": [
+            {"source": "a", "target": "b", "import_type": "import", "line": 1}
+        ],
+        "dead_candidates": [],
+        "referenced_names": [],
+        "import_names": ["z", "a"],
+        "class_names": ["B", "A"],
+    }
+    wire = cache_mod._encode_wire_file_entry(entry)
+    assert "cm" in wire
+    assert "cc" in wire
+    assert "md" in wire
+    assert wire["cc"] == [["pkg.mod:Service", ["ServiceA", "ServiceB"]]]
+    assert wire["in"] == ["a", "z"]
+    assert wire["cn"] == ["A", "B"]
+
+
+def test_encode_wire_file_entry_skips_empty_or_invalid_coupled_classes() -> None:
+    entry: cache_mod.CacheEntry = {
+        "stat": {"mtime_ns": 1, "size": 2},
+        "units": [],
+        "blocks": [],
+        "segments": [],
+        "class_metrics": [
+            {
+                "qualname": "pkg.mod:Empty",
+                "filepath": "x.py",
+                "start_line": 1,
+                "end_line": 2,
+                "cbo": 1,
+                "lcom4": 1,
+                "method_count": 1,
+                "instance_var_count": 1,
+                "risk_coupling": "low",
+                "risk_cohesion": "low",
+                "coupled_classes": [],
+            },
+            {
+                "qualname": "pkg.mod:Invalid",
+                "filepath": "x.py",
+                "start_line": 3,
+                "end_line": 4,
+                "cbo": 1,
+                "lcom4": 1,
+                "method_count": 1,
+                "instance_var_count": 1,
+                "risk_coupling": "low",
+                "risk_cohesion": "low",
+                "coupled_classes": cast(Any, [1]),
+            },
+        ],
+        "module_deps": [],
+        "dead_candidates": [],
+        "referenced_names": [],
+        "import_names": [],
+        "class_names": [],
+    }
+    wire = cache_mod._encode_wire_file_entry(entry)
+    assert "cc" not in wire
+
+
+def test_get_file_entry_sorts_coupled_classes_in_runtime_payload(
+    tmp_path: Path,
+) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.data["files"]["x.py"] = cast(
+        Any,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": [],
+            "class_metrics": [
+                {
+                    "qualname": "pkg.mod:NoDeps",
+                    "filepath": "x.py",
+                    "start_line": 0,
+                    "end_line": 0,
+                    "cbo": 0,
+                    "lcom4": 1,
+                    "method_count": 0,
+                    "instance_var_count": 0,
+                    "risk_coupling": "low",
+                    "risk_cohesion": "low",
+                    "coupled_classes": [],
+                },
+                {
+                    "qualname": "pkg.mod:Service",
+                    "filepath": "x.py",
+                    "start_line": 1,
+                    "end_line": 10,
+                    "cbo": 2,
+                    "lcom4": 1,
+                    "method_count": 3,
+                    "instance_var_count": 1,
+                    "risk_coupling": "low",
+                    "risk_cohesion": "low",
+                    "coupled_classes": ["Zeta", "Alpha", "Alpha"],
+                },
+            ],
+            "module_deps": [],
+            "dead_candidates": [],
+            "referenced_names": [],
+            "import_names": [],
+            "class_names": [],
+        },
+    )
+    entry = cache.get_file_entry("x.py")
+    assert entry is not None
+    assert len(entry["class_metrics"]) == 2
+    assert entry["class_metrics"][0]["qualname"] == "pkg.mod:NoDeps"
+    assert entry["class_metrics"][1]["coupled_classes"] == ["Alpha", "Zeta"]
+
+
+def test_cache_type_predicates_reject_non_dict_variants() -> None:
+    assert cache_mod._is_class_metrics_dict([]) is False
+    assert cache_mod._is_module_dep_dict([]) is False
+    assert cache_mod._is_dead_candidate_dict([]) is False
+    assert (
+        cache_mod._is_class_metrics_dict(
+            {
+                "qualname": "pkg.mod:Service",
+                "filepath": "x.py",
+                "start_line": 1,
+                "end_line": 10,
+                "cbo": 3,
+                "lcom4": 2,
+                "method_count": 4,
+                "instance_var_count": 1,
+                "risk_coupling": "low",
+                "risk_cohesion": "high",
+            }
+        )
+        is True
+    )
+    assert (
+        cache_mod._is_class_metrics_dict(
+            {
+                "qualname": "pkg.mod:Service",
+                "filepath": "x.py",
+                "start_line": 1,
+                "end_line": 10,
+                "cbo": 3,
+                "lcom4": 2,
+                "method_count": 4,
+                "instance_var_count": 1,
+                "risk_coupling": "low",
+                "risk_cohesion": "high",
+                "coupled_classes": ["Alpha", "Beta"],
+            }
+        )
+        is True
+    )
+    assert (
+        cache_mod._is_class_metrics_dict(
+            {
+                "qualname": "pkg.mod:Service",
+                "filepath": "x.py",
+                "start_line": 1,
+                "end_line": 10,
+                "cbo": 3,
+                "lcom4": 2,
+                "method_count": 4,
+                "instance_var_count": 1,
+                "risk_coupling": "low",
+                "risk_cohesion": "high",
+                "coupled_classes": [1],
+            }
+        )
+        is False
+    )
+    assert cache_mod._is_class_metrics_dict({"qualname": "pkg.mod:Service"}) is False
+    assert (
+        cache_mod._is_module_dep_dict(
+            {
+                "source": "a",
+                "target": "b",
+                "import_type": "import",
+                "line": 1,
+            }
+        )
+        is True
+    )

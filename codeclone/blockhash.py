@@ -10,12 +10,22 @@ from __future__ import annotations
 
 import ast
 import hashlib
+from collections.abc import Sequence
 
 from .normalize import AstNormalizer, NormalizationConfig
 
 
-def stmt_hash(stmt: ast.stmt, cfg: NormalizationConfig) -> str:
+def _normalized_stmt_dump(stmt: ast.stmt, normalizer: AstNormalizer) -> str:
+    normalized = normalizer.visit(stmt)
+    assert isinstance(normalized, ast.AST)
+    return ast.dump(normalized, annotate_fields=True, include_attributes=False)
+
+
+def stmt_hashes(statements: Sequence[ast.stmt], cfg: NormalizationConfig) -> list[str]:
     normalizer = AstNormalizer(cfg)
-    stmt = ast.fix_missing_locations(normalizer.visit(stmt))
-    dump = ast.dump(stmt, annotate_fields=True, include_attributes=False)
-    return hashlib.sha1(dump.encode("utf-8")).hexdigest()
+    return [
+        hashlib.sha1(
+            _normalized_stmt_dump(stmt, normalizer).encode("utf-8")
+        ).hexdigest()
+        for stmt in statements
+    ]

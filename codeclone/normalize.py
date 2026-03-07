@@ -209,28 +209,23 @@ def _is_proven_commutative_constant(value: object, op: ast.operator) -> bool:
     return False
 
 
-def normalized_ast_dump(func_node: ast.AST, cfg: NormalizationConfig) -> str:
-    """
-    Dump the normalized AST.
-    WARNING: This modifies the AST in-place for performance.
-    """
-    normalizer = AstNormalizer(cfg)
-    new_node = ast.fix_missing_locations(normalizer.visit(func_node))
-    return ast.dump(new_node, annotate_fields=True, include_attributes=False)
-
-
 def normalized_ast_dump_from_list(
-    nodes: Sequence[ast.AST], cfg: NormalizationConfig
+    nodes: Sequence[ast.AST],
+    cfg: NormalizationConfig,
+    *,
+    normalizer: AstNormalizer | None = None,
 ) -> str:
     """
     Dump a list of AST nodes after normalization.
     WARNING: This modifies the AST nodes in-place for performance.
     """
-    normalizer = AstNormalizer(cfg)
+    active_normalizer = normalizer or AstNormalizer(cfg)
     dumps: list[str] = []
 
     for node in nodes:
-        new_node = ast.fix_missing_locations(normalizer.visit(node))
+        # Fingerprints ignore location attributes, so we skip location repair.
+        new_node = active_normalizer.visit(node)
+        assert isinstance(new_node, ast.AST)
         dumps.append(ast.dump(new_node, annotate_fields=True, include_attributes=False))
 
     return ";".join(dumps)

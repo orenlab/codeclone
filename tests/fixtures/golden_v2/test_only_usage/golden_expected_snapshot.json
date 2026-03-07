@@ -1,0 +1,39 @@
+{
+  "files": {
+    "classes": 0,
+    "count": 4,
+    "functions": 5,
+    "lines": 33,
+    "methods": 0
+  },
+  "groups": {
+    "block_keys": [],
+    "function_keys": [],
+    "segment_keys": []
+  },
+  "meta": {
+    "python_tag": "cp313"
+  },
+  "metrics": {
+    "cohesion_max": 0,
+    "complexity_max": 1,
+    "coupling_max": 0,
+    "dead_items": [
+      {
+        "confidence": "high",
+        "filepath": "pkg/core.py",
+        "kind": "function",
+        "qualname": "pkg.core:orphan"
+      }
+    ],
+    "dependency_cycles": [],
+    "dependency_max_depth": 3,
+    "health": {
+      "grade": "A",
+      "total": 98
+    },
+    "high_risk_classes": [],
+    "high_risk_functions": [],
+    "low_cohesion_classes": []
+  }
+}

@@ -18,9 +18,9 @@ This directory has two documentation layers.
 - Exit codes and failure policy: [`docs/book/03-contracts-exit-codes.md`](book/03-contracts-exit-codes.md)
 - Config and defaults: [`docs/book/04-config-and-defaults.md`](book/04-config-and-defaults.md)
 - Core pipeline and invariants: [`docs/book/05-core-pipeline.md`](book/05-core-pipeline.md)
-- Baseline contract (schema v1): [`docs/book/06-baseline.md`](book/06-baseline.md)
-- Cache contract (schema v1.3): [`docs/book/07-cache.md`](book/07-cache.md)
-- Report contract (schema v1.1): [`docs/book/08-report.md`](book/08-report.md)
+- Baseline contract (schema v2.0): [`docs/book/06-baseline.md`](book/06-baseline.md)
+- Cache contract (schema v2.0): [`docs/book/07-cache.md`](book/07-cache.md)
+- Report contract (schema v2.0): [`docs/book/08-report.md`](book/08-report.md)
 
 ## Interfaces
 
@@ -34,6 +34,12 @@ This directory has two documentation layers.
 - Tests as specification: [`docs/book/13-testing-as-spec.md`](book/13-testing-as-spec.md)
 - Compatibility and versioning rules: [
   `docs/book/14-compatibility-and-versioning.md`](book/14-compatibility-and-versioning.md)
+
+## Quality Contracts
+
+- Metrics mode and quality gates: [`docs/book/15-metrics-and-quality-gates.md`](book/15-metrics-and-quality-gates.md)
+- Dead-code contract and test-boundary policy: [`docs/book/16-dead-code-contract.md`](book/16-dead-code-contract.md)
+- Suggestions and clone typing contract: [`docs/book/17-suggestions-and-clone-typing.md`](book/17-suggestions-and-clone-typing.md)
 
 ## Deep Dives
 

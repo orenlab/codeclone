@@ -18,10 +18,6 @@ from .contracts import ExitCode
 from .ui_messages import fmt_contract_error
 
 
-def expand_path(p: str) -> Path:
-    return Path(p).expanduser().resolve()
-
-
 def _validate_output_path(
     path: str,
     *,

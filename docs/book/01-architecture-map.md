@@ -2,68 +2,76 @@
 
 ## Purpose
 
-Document the current module boundaries and ownership in the codebase.
+Document current module boundaries and ownership in CodeClone v2.x.
 
 ## Public surface
 
 Main ownership layers:
 
-- Core detection pipeline: scanner → extractor → cfg/normalize → grouping.
-- Contracts/IO: baseline, cache, CLI validation, exit semantics.
-- Report model/serialization: JSON/TXT generation and explainability facts.
+- Core detection pipeline: scanner -> extractor -> cfg/normalize -> grouping.
+- Quality metrics pipeline: complexity/coupling/cohesion/dependencies/dead-code/health.
+- Contracts and persistence: baseline, metrics baseline, cache, exit semantics.
+- Report model and serialization: deterministic JSON/TXT + explainability facts.
 - Render layer: HTML rendering and template assets.
 
 ## Data model
 
-| Layer                  | Modules                                                                                                                          | Responsibility                                                                    |
-|------------------------|----------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
-| Contracts              | `codeclone/contracts.py`, `codeclone/errors.py`                                                                                  | Shared schema versions, URLs, exit-code enum, typed exceptions                    |
-| Discovery + parsing    | `codeclone/scanner.py`, `codeclone/extractor.py`                                                                                 | Enumerate files, parse AST, extract function/block/segment units                  |
-| Structural analysis    | `codeclone/cfg.py`, `codeclone/normalize.py`, `codeclone/blockhash.py`, `codeclone/fingerprint.py`, `codeclone/blocks.py`        | CFG, normalization, statement hashes, block/segment windows                       |
-| Grouping + report core | `codeclone/_report_grouping.py`, `codeclone/_report_blocks.py`, `codeclone/_report_segments.py`, `codeclone/_report_explain.py`  | Build groups, merge windows, suppress segment noise, compute explainability facts |
-| Report serialization   | `codeclone/_report_serialize.py`, `codeclone/_cli_meta.py`                                                                       | Canonical JSON/TXT schema + shared report metadata                                |
-| Rendering              | `codeclone/html_report.py`, `codeclone/_html_escape.py`, `codeclone/_html_snippets.py`, `codeclone/templates.py`                 | HTML-only view layer over report model                                            |
-| Runtime orchestration  | `codeclone/cli.py`, `codeclone/_cli_args.py`, `codeclone/_cli_paths.py`, `codeclone/_cli_summary.py`, `codeclone/ui_messages.py` | CLI UX, status handling, outputs, error category markers                          |
+| Layer                 | Modules                                                                                                                                                                               | Responsibility                                                                       |
+|-----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| Contracts             | `codeclone/contracts.py`, `codeclone/errors.py`                                                                                                                                       | Shared schema versions, URLs, exit-code enum, typed exceptions                       |
+| Domain models         | `codeclone/models.py`                                                                                                                                                                 | Typed dataclasses/enums used across pipeline/report/metrics                          |
+| Discovery + parsing   | `codeclone/scanner.py`, `codeclone/extractor.py`                                                                                                                                      | Enumerate files, parse AST, extract function/block/segment units                     |
+| Structural analysis   | `codeclone/cfg.py`, `codeclone/normalize.py`, `codeclone/blockhash.py`, `codeclone/fingerprint.py`, `codeclone/blocks.py`                                                             | CFG, normalization, statement hashes, block/segment windows                          |
+| Grouping              | `codeclone/grouping.py`                                                                                                                                                               | Build function/block/segment groups                                                  |
+| Metrics               | `codeclone/metrics/*`                                                                                                                                                                 | Compute complexity/coupling/cohesion/dependency/dead-code/health signals             |
+| Report core           | `codeclone/report/*`, `codeclone/_cli_meta.py`                                                                                                                                        | Merge windows, explainability facts, deterministic JSON/TXT schema + shared metadata |
+| Persistence           | `codeclone/baseline.py`, `codeclone/metrics_baseline.py`, `codeclone/cache.py`                                                                                                        | Baseline/cache trust/compat/integrity and atomic persistence                         |
+| Runtime orchestration | `codeclone/pipeline.py`, `codeclone/cli.py`, `codeclone/_cli_args.py`, `codeclone/_cli_paths.py`, `codeclone/_cli_summary.py`, `codeclone/_cli_config.py`, `codeclone/ui_messages.py` | CLI UX, stage orchestration, status handling, outputs, error markers                 |
+| Rendering             | `codeclone/html_report.py`, `codeclone/_html_escape.py`, `codeclone/_html_snippets.py`, `codeclone/templates.py`                                                                      | HTML-only view layer over report data                                                |
 
 Refs:
 
-- `codeclone/report.py`
+- `codeclone/pipeline.py`
 - `codeclone/cli.py:_main_impl`
 
 ## Contracts
 
-- Core pipeline does not depend on HTML modules.
-- HTML rendering receives already-computed report data/facts.
-- Baseline and cache contracts are validated before being trusted.
+- Core analysis modules do not depend on render/UI modules.
+- HTML renderer receives already-computed report data/facts and does not
+  recompute detection semantics.
+- Baseline, metrics baseline, and cache are validated before being trusted.
 
 Refs:
 
-- `codeclone/report.py`
+- `codeclone/report/serialize.py:to_json_report`
 - `codeclone/html_report.py:build_html_report`
 - `codeclone/baseline.py:Baseline.load`
+- `codeclone/metrics_baseline.py:MetricsBaseline.load`
 - `codeclone/cache.py:Cache.load`
 
 ## Invariants (MUST)
 
 - Report serialization is deterministic and schema-versioned.
-- UI is render-only and must not recompute detection semantics.
-- Status enums are domain-owned in baseline/cache modules.
+- UI is render-only and must not change gating semantics.
+- Status enums remain domain-owned in baseline/metrics-baseline/cache modules.
 
 Refs:
 
-- `codeclone/_report_serialize.py:to_json_report`
-- `codeclone/_report_explain.py:build_block_group_facts`
+- `codeclone/report/serialize.py:to_json_report`
+- `codeclone/report/explain.py:build_block_group_facts`
 - `codeclone/baseline.py:BaselineStatus`
+- `codeclone/metrics_baseline.py:MetricsBaselineStatus`
 - `codeclone/cache.py:CacheStatus`
 
 ## Failure modes
 
-| Condition                              | Layer                                             |
-|----------------------------------------|---------------------------------------------------|
-| Invalid CLI args / invalid output path | Runtime orchestration (`_cli_args`, `_cli_paths`) |
-| Baseline schema/integrity mismatch     | Baseline contract layer                           |
-| Cache corruption/version mismatch      | Cache contract layer (fail-open)                  |
-| HTML snippet read failure              | Render layer fallback snippet                     |
+| Condition                                  | Layer                                             |
+|--------------------------------------------|---------------------------------------------------|
+| Invalid CLI args / invalid output path     | Runtime orchestration (`_cli_args`, `_cli_paths`) |
+| Baseline schema/integrity mismatch         | Baseline contract layer                           |
+| Metrics baseline schema/integrity mismatch | Metrics baseline contract layer                   |
+| Cache corruption/version mismatch          | Cache contract layer (fail-open)                  |
+| HTML snippet read failure                  | Render layer fallback snippet                     |
 
 ## Determinism / canonicalization
 
@@ -73,16 +81,32 @@ Refs:
 Refs:
 
 - `codeclone/scanner.py:iter_py_files`
-- `codeclone/_report_serialize.py:GROUP_ITEM_LAYOUT`
+- `codeclone/report/serialize.py:GROUP_ITEM_LAYOUT`
 
 ## Locked by tests
 
-- `tests/test_report.py::test_report_json_compact_v11_contract`
+- `tests/test_report.py::test_report_json_compact_v20_contract`
 - `tests/test_html_report.py::test_html_report_uses_core_block_group_facts`
 - `tests/test_cache.py::test_cache_v13_uses_relpaths_when_root_set`
 - `tests/test_cli_unit.py::test_argument_parser_contract_error_marker_for_invalid_args`
+- `tests/test_architecture.py::test_architecture_layer_violations`
 
 ## Non-guarantees
 
-- Internal module split may change in v1.x if public contracts are preserved.
-- Import tree acyclicity is a policy goal, not currently enforced by tooling.
+- Internal module split may evolve in v2.x if public contracts are preserved.
+- Import tree acyclicity is policy and test-enforced where explicitly asserted.
+
+## Chapter map
+
+| Topic | Primary chapters |
+| --- | --- |
+| CLI behavior and failure routing | [03-contracts-exit-codes.md](03-contracts-exit-codes.md), [09-cli.md](09-cli.md) |
+| Config precedence and defaults | [04-config-and-defaults.md](04-config-and-defaults.md) |
+| Core processing pipeline | [05-core-pipeline.md](05-core-pipeline.md) |
+| Clone baseline trust/compat/integrity | [06-baseline.md](06-baseline.md) |
+| Cache trust and fail-open behavior | [07-cache.md](07-cache.md) |
+| Report schema and provenance | [08-report.md](08-report.md), [10-html-render.md](10-html-render.md) |
+| Metrics gates and metrics baseline | [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md) |
+| Dead-code liveness policy | [16-dead-code-contract.md](16-dead-code-contract.md) |
+| Suggestions and clone typing | [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md) |
+| Determinism and versioning policy | [12-determinism.md](12-determinism.md), [14-compatibility-and-versioning.md](14-compatibility-and-versioning.md) |

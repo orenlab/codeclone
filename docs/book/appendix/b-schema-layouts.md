@@ -4,20 +4,21 @@
 
 Provide concise structural layouts for baseline/cache/report contracts.
 
-## Baseline schema (v1.0)
+## Baseline schema (v2.0)
 
 ```json
 {
   "meta": {
     "generator": {
       "name": "codeclone",
-      "version": "1.4.0"
+      "version": "2.0.0"
     },
-    "schema_version": "1.0",
+    "schema_version": "2.0",
     "fingerprint_version": "1",
     "python_tag": "cp313",
-    "created_at": "2026-02-11T12:00:00Z",
-    "payload_sha256": "..."
+    "created_at": "2026-03-06T12:00:00Z",
+    "payload_sha256": "...",
+    "metrics_payload_sha256": "..."
   },
   "clones": {
     "functions": [
@@ -26,19 +27,38 @@ Provide concise structural layouts for baseline/cache/report contracts.
     "blocks": [
       "..."
     ]
+  },
+  "metrics": {
+    "max_complexity": 21,
+    "high_risk_functions": [],
+    "max_coupling": 8,
+    "high_coupling_classes": [],
+    "max_cohesion": 3,
+    "low_cohesion_classes": [],
+    "dependency_cycles": [],
+    "dependency_max_depth": 4,
+    "dead_code_items": [],
+    "health_score": 89,
+    "health_grade": "A"
   }
 }
 ```
 
+Notes:
+
+- Top-level `metrics` is optional.
+- `metrics_payload_sha256` is present when metrics are embedded.
+
 Refs:
 
 - `codeclone/baseline.py:_baseline_payload`
+- `codeclone/metrics_baseline.py:_build_payload`
 
-## Cache schema (v1.3)
+## Cache schema (v2.0)
 
 ```json
 {
-  "v": "1.3",
+  "v": "2.0",
   "payload": {
     "py": "cp313",
     "fp": "1",
@@ -52,36 +72,9 @@ Refs:
           1730000000000000000,
           2048
         ],
-        "u": [
-          [
-            "mod:f",
-            1,
-            10,
-            10,
-            3,
-            "fp",
-            "0-19"
-          ]
-        ],
-        "b": [
-          [
-            "mod:f",
-            3,
-            6,
-            4,
-            "h1|h2|h3|h4"
-          ]
-        ],
-        "s": [
-          [
-            "mod:f",
-            3,
-            8,
-            6,
-            "segment_hash",
-            "segment_sig"
-          ]
-        ]
+        "u": [],
+        "b": [],
+        "s": []
       }
     }
   },
@@ -94,101 +87,78 @@ Refs:
 - `codeclone/cache.py:Cache.save`
 - `codeclone/cache.py:_encode_wire_file_entry`
 
-## Report schema (v1.1)
+## Report schema (v2.0)
 
 ```json
 {
+  "report_schema_version": "2.0",
   "meta": {
-    "report_schema_version": "1.1",
-    "codeclone_version": "1.4.0",
+    "report_schema_version": "2.0",
+    "codeclone_version": "2.0.0",
+    "project_name": "my-project",
+    "scan_root": "/abs/path/to/my-project",
     "python_version": "3.13",
     "python_tag": "cp313",
     "baseline_status": "ok",
-    "cache_status": "ok",
-    "groups_counts": {
-      "functions": {
-        "total": 1,
-        "new": 0,
-        "known": 1
-      },
-      "blocks": {
-        "total": 7,
-        "new": 0,
-        "known": 7
-      },
-      "segments": {
-        "total": 0,
-        "new": 0,
-        "known": 0
-      }
-    }
+    "cache_status": "ok"
   },
   "files": [
     "/abs/path.py"
   ],
   "groups": {
-    "functions": {
-      "group_key": [
-        [
-          0,
-          "mod:f",
-          1,
-          20,
-          20,
-          6,
-          "fp",
-          "20-49"
-        ]
-      ]
-    },
-    "blocks": {
-      "group_key": [
-        [
-          0,
-          "mod:f",
-          5,
-          8,
-          4
-        ]
-      ]
-    },
-    "segments": {
-      "group_key": [
-        [
-          0,
-          "mod:f",
-          5,
-          10,
-          6,
-          "h",
-          "s"
-        ]
-      ]
-    }
+    "functions": {},
+    "blocks": {},
+    "segments": {}
   },
   "groups_split": {
     "functions": {
-      "new": [
-        "..."
-      ],
-      "known": [
-        "..."
-      ]
+      "new": [],
+      "known": []
     },
     "blocks": {
-      "new": [
-        "..."
-      ],
-      "known": [
-        "..."
-      ]
+      "new": [],
+      "known": []
     },
     "segments": {
-      "new": [
-        "..."
-      ],
+      "new": [],
       "known": []
     }
+  },
+  "clones": {
+    "functions": {
+      "groups": {},
+      "split": {
+        "new": [],
+        "known": []
+      },
+      "count": 0
+    },
+    "blocks": {
+      "groups": {},
+      "split": {
+        "new": [],
+        "known": []
+      },
+      "count": 0
+    },
+    "segments": {
+      "groups": {},
+      "split": {
+        "new": [],
+        "known": []
+      },
+      "count": 0
+    },
+    "clone_types": {
+      "functions": {},
+      "blocks": {},
+      "segments": {}
+    }
+  },
+  "clone_types": {
+    "functions": {},
+    "blocks": {},
+    "segments": {}
   },
   "group_item_layout": {
     "functions": [
@@ -199,7 +169,11 @@ Refs:
       "loc",
       "stmt_count",
       "fingerprint",
-      "loc_bucket"
+      "loc_bucket",
+      "cyclomatic_complexity",
+      "nesting_depth",
+      "risk",
+      "raw_hash"
     ],
     "blocks": [
       "file_i",
@@ -223,8 +197,8 @@ Refs:
 
 Refs:
 
-- `codeclone/_report_serialize.py:to_json_report`
-- `codeclone/_report_serialize.py:GROUP_ITEM_LAYOUT`
+- `codeclone/report/serialize.py:to_json_report`
+- `codeclone/report/serialize.py:GROUP_ITEM_LAYOUT`
 
 ## TXT report sections
 
@@ -241,4 +215,4 @@ SEGMENT CLONES (KNOWN)
 
 Refs:
 
-- `codeclone/_report_serialize.py:to_text_report`
+- `codeclone/report/serialize.py:to_text_report`

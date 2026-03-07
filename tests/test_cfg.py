@@ -6,7 +6,7 @@ import pytest
 from codeclone.cfg import CFG, CFGBuilder
 from codeclone.cfg_model import CFG as CFGModel
 from codeclone.cfg_model import Block
-from codeclone.extractor import get_cfg_fingerprint
+from codeclone.extractor import _cfg_fingerprint_and_complexity
 from codeclone.meta_markers import CFG_META_PREFIX
 from codeclone.normalize import NormalizationConfig
 
@@ -65,7 +65,7 @@ def _cfg_fingerprint(
 ) -> str:
     func = _parse_function(source, skip_reason=skip_reason)
     cfg = NormalizationConfig()
-    return get_cfg_fingerprint(func, cfg, qualname)
+    return _cfg_fingerprint_and_complexity(func, cfg, qualname)[0]
 
 
 def _assert_fingerprint_diff(

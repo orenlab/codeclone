@@ -14,6 +14,8 @@ Contract tests are concentrated in:
 - `tests/test_cli_inprocess.py`
 - `tests/test_cli_unit.py`
 - `tests/test_html_report.py`
+- `tests/test_detector_golden.py`
+- `tests/test_golden_v2.py`
 
 ## Data model
 
@@ -32,7 +34,7 @@ The following matrix is treated as executable contract:
 | Baseline schema/integrity/compat gates     | `tests/test_baseline.py`                                                                                      |
 | Cache fail-open + status mapping           | `tests/test_cache.py`, `tests/test_cli_inprocess.py::test_cli_reports_cache_too_large_respects_max_size_flag` |
 | Exit code categories and markers           | `tests/test_cli_unit.py`, `tests/test_cli_inprocess.py`                                                       |
-| Report schema v1.1 JSON/TXT split + layout | `tests/test_report.py`                                                                                        |
+| Report schema v2.0 JSON/TXT split + layout | `tests/test_report.py`                                                                                        |
 | HTML render-only explainability + escaping | `tests/test_html_report.py`                                                                                   |
 | Scanner traversal safety                   | `tests/test_scanner_extra.py`, `tests/test_security.py`                                                       |
 
@@ -41,10 +43,14 @@ The following matrix is treated as executable contract:
 - Every schema/status contract change requires tests and docs update.
 - Golden detector fixture is canonicalized to one Python tag.
 - Untrusted baseline behavior must be tested for both normal and gating modes.
+- V2 golden fixtures lock dead-code/test-path semantics, metrics/dependency aggregates,
+  and CLI+`pyproject.toml` contract behavior.
 
 Refs:
 
 - `tests/test_detector_golden.py::test_detector_output_matches_golden_fixture`
+- `tests/test_golden_v2.py::test_golden_v2_analysis_contracts`
+- `tests/test_golden_v2.py::test_golden_v2_cli_pyproject_contract`
 - `tests/test_cli_inprocess.py::test_cli_legacy_baseline_normal_mode_ignored_and_exit_zero`
 - `tests/test_cli_inprocess.py::test_cli_legacy_baseline_fail_on_new_fails_fast_exit_2`
 
@@ -54,7 +60,7 @@ Refs:
 |---------------------------------|-----------------------------------------|
 | Baseline payload contract drift | baseline integrity/canonical tests fail |
 | Cache schema drift              | cache version/parse tests fail          |
-| Report schema drift             | compact v1.1 layout tests fail          |
+| Report schema drift             | compact layout tests fail               |
 | Exit priority drift             | CI inprocess tests fail                 |
 
 ## Determinism / canonicalization
@@ -65,9 +71,12 @@ Refs:
 
 - `tests/test_baseline.py::test_baseline_payload_fields_contract_invariant`
 - `tests/test_cache.py::test_cache_v13_missing_optional_sections_default_empty`
-- `tests/test_report.py::test_report_json_compact_v11_contract`
+- `tests/test_report.py::test_report_json_compact_v20_contract`
 - `tests/test_cli_inprocess.py::test_cli_contract_error_priority_over_gating_failure_for_unreadable_source`
 - `tests/test_html_report.py::test_html_and_json_group_order_consistent`
+- `tests/test_detector_golden.py::test_detector_output_matches_golden_fixture`
+- `tests/test_golden_v2.py::test_golden_v2_analysis_contracts`
+- `tests/test_golden_v2.py::test_golden_v2_cli_pyproject_contract`
 
 ## Non-guarantees
 

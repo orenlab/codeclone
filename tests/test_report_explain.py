@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from codeclone._report_explain import build_block_group_facts
+import codeclone.report.explain as explain_mod
+from codeclone.report import build_block_group_facts
 from tests._report_fixtures import (
     repeated_block_group_key,
     write_repeated_assert_source,
@@ -227,3 +228,10 @@ def test_build_block_group_facts_n_way_group_compare_facts(tmp_path: Path) -> No
     assert group["group_compare_note"] == (
         "N-way group: each block matches 2 peers in this group."
     )
+
+
+def test_explain_as_int_variants() -> None:
+    assert explain_mod._as_int(True) == 1
+    assert explain_mod._as_int("7") == 7
+    assert explain_mod._as_int("bad") == 0
+    assert explain_mod._as_int(1.5) == 0

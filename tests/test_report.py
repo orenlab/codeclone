@@ -7,6 +7,8 @@ from typing import cast
 import pytest
 
 import codeclone.report as report_mod
+import codeclone.report.merge as merge_mod
+import codeclone.report.serialize as serialize_mod
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.report import (
     GroupMap,
@@ -16,7 +18,6 @@ from codeclone.report import (
     build_segment_groups,
     prepare_block_report_groups,
     prepare_segment_report_groups,
-    to_json,
     to_json_report,
     to_text_report,
 )
@@ -257,7 +258,6 @@ def test_report_output_formats(
         baseline_schema_version=1,
         cache_path="/tmp/cache.json",
     )
-    json_out = to_json(groups)
     report_out = to_json_report(groups, groups, {}, meta)
     text_out = to_text_report(
         meta=meta,
@@ -266,7 +266,6 @@ def test_report_output_formats(
         segment_groups={},
     )
 
-    expected_json = ["group_count"]
     expected_report = [
         '"meta"',
         '"groups"',
@@ -282,7 +281,7 @@ def test_report_output_formats(
     ]
     expected_text = [
         "REPORT METADATA",
-        "Report schema version: 1.1",
+        f"Report schema version: {REPORT_SCHEMA_VERSION}",
         "Python tag: cp313",
         "Baseline schema version: 1",
         "Baseline generator name: codeclone",
@@ -296,8 +295,6 @@ def test_report_output_formats(
         "Clone group #1",
     ]
 
-    for token in expected_json:
-        assert token in json_out
     for token in expected_report:
         assert token in report_out
     for token in expected_text:
@@ -404,7 +401,7 @@ def test_report_json_deterministic_with_shuffled_units() -> None:
     assert out_a == out_b
 
 
-def test_report_json_compact_v11_contract() -> None:
+def test_report_json_compact_v20_contract() -> None:
     groups = {
         "g1": [
             {
@@ -454,6 +451,10 @@ def test_report_json_compact_v11_contract() -> None:
             "stmt_count",
             "fingerprint",
             "loc_bucket",
+            "cyclomatic_complexity",
+            "nesting_depth",
+            "risk",
+            "raw_hash",
         ],
         "blocks": ["file_i", "qualname", "start", "end", "size"],
         "segments": [
@@ -472,8 +473,8 @@ def test_report_json_compact_v11_contract() -> None:
 
     function_rows = payload["groups"]["functions"]["g1"]
     assert function_rows == [
-        [0, "m:b", 1, 2, 2, 1, "fp-a", "0-19"],
-        [1, "m:a", 3, 4, 2, 1, "fp-z", "0-19"],
+        [0, "m:b", 1, 2, 2, 1, "fp-a", "0-19", 1, 0, "low", ""],
+        [1, "m:a", 3, 4, 2, 1, "fp-z", "0-19", 1, 0, "low", ""],
     ]
 
 
@@ -1300,3 +1301,24 @@ def test_collect_file_functions_class_and_async(tmp_path: Path) -> None:
     ]
     groups = build_segment_groups(segments)
     assert groups == {}
+
+
+def test_report_serialize_helpers_and_text_metrics_section() -> None:
+    assert merge_mod.coerce_positive_int(True) == 1
+    assert serialize_mod._as_int(True) == 1
+    assert serialize_mod._as_int("42") == 42
+    assert serialize_mod._as_int("bad") == 0
+    assert serialize_mod._as_int(1.2) == 0
+    assert serialize_mod._resolve_metric_value({"loc": True}, "loc") == 1
+    assert serialize_mod._resolve_metric_value({"loc": "7"}, "loc") == 7
+    assert serialize_mod._resolve_metric_value({"loc": object()}, "loc") == 0
+
+    text_report = to_text_report(
+        meta={},
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        metrics={"health": {"score": 90}},
+    )
+    assert "METRICS" in text_report
+    assert '"health"' in text_report

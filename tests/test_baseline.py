@@ -111,6 +111,30 @@ def test_baseline_roundtrip_v1(tmp_path: Path) -> None:
     assert loaded.blocks == {_block_id()}
 
 
+def test_baseline_save_updates_runtime_meta_fields(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    baseline = Baseline.from_groups(
+        {_func_id(): []},
+        {_block_id(): []},
+        path=baseline_path,
+    )
+
+    assert baseline.payload_sha256 is None
+    assert baseline.created_at is None
+
+    baseline.save()
+
+    assert baseline.schema_version == BASELINE_SCHEMA_VERSION
+    assert baseline.fingerprint_version == BASELINE_FINGERPRINT_VERSION
+    assert baseline.python_tag == _python_tag()
+    assert baseline.generator == "codeclone"
+    assert isinstance(baseline.generator_version, str)
+    assert isinstance(baseline.created_at, str)
+    assert isinstance(baseline.payload_sha256, str)
+    assert len(baseline.payload_sha256) == 64
+    baseline.verify_integrity()
+
+
 def test_baseline_save_atomic(tmp_path: Path) -> None:
     baseline_path = tmp_path / "baseline.json"
     baseline = Baseline(baseline_path)
@@ -660,7 +684,7 @@ def test_baseline_from_groups_defaults() -> None:
 
 def test_baseline_verify_schema_major_mismatch(tmp_path: Path) -> None:
     baseline_path = tmp_path / "baseline.json"
-    _write_payload(baseline_path, _trusted_payload(schema_version="2.0"))
+    _write_payload(baseline_path, _trusted_payload(schema_version="3.0"))
     baseline = Baseline(baseline_path)
     baseline.load()
     with pytest.raises(BaselineValidationError, match="schema version mismatch") as exc:
@@ -874,3 +898,220 @@ def test_baseline_require_sorted_unique_ids_non_string(tmp_path: Path) -> None:
             path=path,
         )
     assert exc.value.status == "invalid_type"
+
+
+def test_baseline_load_rejects_metrics_section_for_schema_v1(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    payload = _trusted_payload(schema_version="1.0")
+    assert isinstance(payload, dict)
+    payload["metrics"] = {"health_score": 80}
+    _write_payload(baseline_path, payload)
+    baseline = Baseline(baseline_path)
+    with pytest.raises(
+        BaselineValidationError, match=r"requires baseline schema >= 2\.0"
+    ) as exc:
+        baseline.load()
+    assert exc.value.status == "mismatch_schema_version"
+
+
+def test_baseline_save_preserves_embedded_metrics_and_hash(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    payload = _trusted_payload()
+    assert isinstance(payload, dict)
+    payload["metrics"] = {"health_score": 70}
+    meta = payload.get("meta")
+    assert isinstance(meta, dict)
+    meta["metrics_payload_sha256"] = "f" * 64
+    _write_payload(baseline_path, payload)
+
+    baseline = Baseline(baseline_path)
+    baseline.load()
+    baseline.save()
+
+    saved = json.loads(baseline_path.read_text("utf-8"))
+    saved_meta = saved.get("meta")
+    assert isinstance(saved_meta, dict)
+    assert saved["metrics"] == {"health_score": 70}
+    assert saved_meta["metrics_payload_sha256"] == "f" * 64
+
+
+def test_baseline_save_preserves_embedded_metrics_without_hash(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    payload = _trusted_payload()
+    assert isinstance(payload, dict)
+    payload["metrics"] = {"health_score": 65}
+    meta = payload.get("meta")
+    assert isinstance(meta, dict)
+    meta.pop("metrics_payload_sha256", None)
+    _write_payload(baseline_path, payload)
+
+    baseline = Baseline(baseline_path)
+    baseline.load()
+    baseline.save()
+
+    saved = json.loads(baseline_path.read_text("utf-8"))
+    saved_meta = saved.get("meta")
+    assert isinstance(saved_meta, dict)
+    assert saved["metrics"] == {"health_score": 65}
+    assert "metrics_payload_sha256" not in saved_meta
+
+
+def test_preserve_embedded_metrics_variants(tmp_path: Path) -> None:
+    path = tmp_path / "baseline.json"
+    _write_payload(path, {"meta": {}, "clones": {"functions": [], "blocks": []}})
+    assert baseline_mod._preserve_embedded_metrics(path) == (None, None)
+
+    _write_payload(
+        path,
+        {
+            "meta": [],
+            "clones": {"functions": [], "blocks": []},
+            "metrics": {"x": 1},
+        },
+    )
+    assert baseline_mod._preserve_embedded_metrics(path) == ({"x": 1}, None)
+
+    _write_payload(
+        path,
+        {
+            "meta": {"metrics_payload_sha256": 1},
+            "clones": {"functions": [], "blocks": []},
+            "metrics": {"x": 2},
+        },
+    )
+    assert baseline_mod._preserve_embedded_metrics(path) == ({"x": 2}, None)
+
+    _write_payload(
+        path,
+        {
+            "meta": {"metrics_payload_sha256": "a" * 64},
+            "clones": {"functions": [], "blocks": []},
+            "metrics": {"x": 3},
+        },
+    )
+    assert baseline_mod._preserve_embedded_metrics(path) == ({"x": 3}, "a" * 64)
+
+
+def test_baseline_save_defensive_non_mapping_meta(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    baseline = Baseline.from_groups(
+        {_func_id(): []},
+        {_block_id(): []},
+        path=baseline_path,
+    )
+
+    def _payload(**_kwargs: object) -> dict[str, object]:
+        return {
+            "meta": "broken-meta",
+            "clones": {"functions": [], "blocks": []},
+        }
+
+    monkeypatch.setattr(baseline_mod, "_baseline_payload", _payload)
+    monkeypatch.setattr(
+        baseline_mod,
+        "_preserve_embedded_metrics",
+        lambda _path: ({"health_score": 1}, "a" * 64),
+    )
+    baseline.save()
+
+    saved = json.loads(baseline_path.read_text("utf-8"))
+    assert saved["meta"] == "broken-meta"
+    assert saved["metrics"] == {"health_score": 1}
+    assert baseline.payload_sha256 is None
+    assert baseline.generator == "codeclone"
+
+
+def test_baseline_save_syncs_generator_when_meta_uses_string(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    baseline = Baseline(baseline_path)
+
+    def _payload(**_kwargs: object) -> dict[str, object]:
+        return {
+            "meta": {
+                "generator": "custom-generator",
+                "schema_version": "2.0",
+                "fingerprint_version": "1",
+                "python_tag": "cp313",
+                "created_at": "2026-03-07T12:00:00Z",
+                "payload_sha256": "f" * 64,
+            },
+            "clones": {"functions": [], "blocks": []},
+        }
+
+    monkeypatch.setattr(baseline_mod, "_baseline_payload", _payload)
+    baseline.save()
+
+    assert baseline.generator == "custom-generator"
+    assert baseline.schema_version == "2.0"
+    assert baseline.fingerprint_version == "1"
+    assert baseline.python_tag == "cp313"
+    assert baseline.created_at == "2026-03-07T12:00:00Z"
+    assert baseline.payload_sha256 == "f" * 64
+
+
+def test_baseline_save_skips_non_string_meta_updates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    baseline = Baseline(baseline_path)
+    baseline.generator = "keep-generator"
+    baseline.generator_version = "2.0.0"
+    baseline.schema_version = "2.0"
+    baseline.fingerprint_version = "1"
+    baseline.python_tag = "cp313"
+    baseline.created_at = "2026-03-07T00:00:00Z"
+    baseline.payload_sha256 = "e" * 64
+
+    def _payload(**_kwargs: object) -> dict[str, object]:
+        return {
+            "meta": {
+                "generator": {"name": 1, "version": 2},
+                "schema_version": 2,
+                "fingerprint_version": 1,
+                "python_tag": 313,
+                "created_at": None,
+                "payload_sha256": 42,
+            },
+            "clones": {"functions": [], "blocks": []},
+        }
+
+    monkeypatch.setattr(baseline_mod, "_baseline_payload", _payload)
+    baseline.save()
+
+    assert baseline.generator == "keep-generator"
+    assert baseline.generator_version == "2.0.0"
+    assert baseline.schema_version == "2.0"
+    assert baseline.fingerprint_version == "1"
+    assert baseline.python_tag == "cp313"
+    assert baseline.created_at == "2026-03-07T00:00:00Z"
+    assert baseline.payload_sha256 == "e" * 64
+
+
+def test_baseline_save_ignores_non_string_non_mapping_generator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    baseline = Baseline(baseline_path)
+    baseline.generator = "keep-generator"
+
+    def _payload(**_kwargs: object) -> dict[str, object]:
+        return {
+            "meta": {
+                "generator": 123,
+                "schema_version": "2.0",
+                "fingerprint_version": "1",
+                "python_tag": "cp313",
+                "created_at": "2026-03-07T12:00:00Z",
+                "payload_sha256": "a" * 64,
+            },
+            "clones": {"functions": [], "blocks": []},
+        }
+
+    monkeypatch.setattr(baseline_mod, "_baseline_payload", _payload)
+    baseline.save()
+
+    assert baseline.generator == "keep-generator"

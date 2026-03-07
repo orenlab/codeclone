@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define cache schema v1.3, integrity verification, and fail-open behavior.
+Define cache schema v2.0, integrity verification, and fail-open behavior.
 
 ## Public surface
 
@@ -13,19 +13,19 @@ Define cache schema v1.3, integrity verification, and fail-open behavior.
 
 ## Data model
 
-On-disk schema (`v == "1.3"`):
+On-disk schema (`v == "2.0"`):
 
 - Top-level: `v`, `payload`, `sig`
 - `payload` keys: `py`, `fp`, `ap`, `files`
 - `ap` (`analysis_profile`) keys: `min_loc`, `min_stmt`
 - `files` map stores compact per-file entries:
     - `st`: `[mtime_ns, size]`
-    - optional `u` (units), `b` (blocks), `s` (segments)
+    - optional analysis sections (`u`/`b`/`s` and metrics-related sections)
 - file keys are wire relpaths when `root` is configured
 
 Refs:
 
-- `codeclone/cache.py:Cache._parse_cache_document`
+- `codeclone/cache.py:Cache.load`
 - `codeclone/cache.py:_encode_wire_file_entry`
 - `codeclone/cache.py:_decode_wire_file_entry`
 
