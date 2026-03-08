@@ -2,8 +2,8 @@
 
 Thank you for your interest in contributing to **CodeClone**.
 
-CodeClone is an **AST + CFG-based code clone detector** focused on architectural duplication,
-not textual similarity.
+CodeClone provides **structural code quality analysis** for Python, including clone detection,
+quality metrics, and baseline-aware CI governance.
 
 Contributions are welcome — especially those that improve **signal quality**, **CFG semantics**,
 and **real-world CI usability**.

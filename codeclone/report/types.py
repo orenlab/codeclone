@@ -1,4 +1,5 @@
-"""Typed contracts for report-level group processing."""
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 

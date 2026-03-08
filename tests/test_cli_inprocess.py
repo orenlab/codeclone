@@ -328,22 +328,27 @@ def _assert_fail_on_new_summary(out: str, *, include_blocks: bool = True) -> Non
     assert "codeclone . --update-baseline" in out
 
 
-def _summary_metric(out: str, label: str) -> int:
-    aliases = [label]
-    if label == "Files skipped":
-        aliases.append("skipped")
-    if label == "Files analyzed":
-        aliases.append("analyzed")
-    if label == "Cache hits":
-        aliases.append("from cache")
+_SUMMARY_METRIC_MAP: dict[str, str] = {
+    "Files found": "found",
+    "Files analyzed": "analyzed",
+    "analyzed": "analyzed",
+    "Cache hits": "cached",
+    "from cache": "cached",
+    "Files skipped": "skipped",
+    "skipped": "skipped",
+    "New vs baseline": "new",
+    "Function clones": "func",
+    "Block clones": "block",
+    "Segment clones": "seg",
+    "suppressed": "suppressed",
+}
 
-    for alias in aliases:
-        match = re.search(rf"{re.escape(alias)}:\s+(\d+)", out)
-        if match:
-            return int(match.group(1))
-        match = re.search(rf"{re.escape(alias)}\s+[│|]\s+(\d+)", out)
-        if match:
-            return int(match.group(1))
+
+def _summary_metric(out: str, label: str) -> int:
+    keyword = _SUMMARY_METRIC_MAP.get(label, label)
+    match = re.search(rf"(\d[\d,]*)\s+{re.escape(keyword)}", out)
+    if match:
+        return int(match.group(1).replace(",", ""))
     raise AssertionError(f"summary label not found: {label}\n{out}")
 
 
@@ -419,8 +424,8 @@ def f2():
         ],
     )
     out = capsys.readouterr().out
-    assert "Analysis Summary" in out
-    assert "Function clones" in out
+    assert "Summary" in out
+    assert "func" in out
 
 
 def test_cli_default_cache_dir_uses_root(
@@ -949,7 +954,7 @@ def test_cli_main_outputs(
     assert "HTML" in out
     assert "JSON" in out
     assert "Text" in out
-    assert out.index("Analysis Summary") < out.index("Reports")
+    assert out.index("Summary") < out.index("report saved:")
 
 
 def test_cli_reports_include_audit_metadata_ok(
@@ -3120,9 +3125,9 @@ def test_cli_summary_format_stable(
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     out = capsys.readouterr().out
-    assert "Analysis Summary" in out
-    assert out.count("Analysis Summary") == 1
-    assert "│ Metric" in out
+    assert "Summary" in out
+    assert out.count("Summary") == 1
+    assert "Metrics" in out
     assert "Files parsed" not in out
     assert "Input" not in out
     assert _summary_metric(out, "Files found") >= 0
@@ -3131,7 +3136,6 @@ def test_cli_summary_format_stable(
     assert _summary_metric(out, "skipped") >= 0
     assert _summary_metric(out, "Function clones") >= 0
     assert _summary_metric(out, "Block clones") >= 0
-    assert _summary_metric(out, "Segment clones") >= 0
     assert _summary_metric(out, "suppressed") >= 0
     assert _summary_metric(out, "New vs baseline") >= 0
 

@@ -1,4 +1,5 @@
-"""Public metrics API."""
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 

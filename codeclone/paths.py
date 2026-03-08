@@ -1,4 +1,5 @@
-"""Path classification helpers used across analysis stages."""
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 

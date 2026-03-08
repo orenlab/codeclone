@@ -1,7 +1,7 @@
 name: CodeClone
 description: >
-  AST-based Python code clone detector focused on architectural duplication
-  and CI-friendly baseline enforcement.
+  Structural code quality analysis for Python with
+  CI-friendly baseline enforcement.
 
 author: OrenLab
 

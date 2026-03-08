@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
+
 from __future__ import annotations
 
 import platform
@@ -9,7 +12,7 @@ from pathlib import Path
 from . import __version__
 from .contracts import ISSUES_URL
 
-BANNER_SUBTITLE = "[italic]Architectural duplication and code-health analysis[/italic]"
+BANNER_SUBTITLE = "Structural code analysis"
 
 MARKER_CONTRACT_ERROR = "[error]CONTRACT ERROR:[/error]"
 MARKER_INTERNAL_ERROR = "[error]INTERNAL ERROR:[/error]"
@@ -65,9 +68,8 @@ HELP_QUIET = "Minimize output (still shows warnings and errors)."
 HELP_VERBOSE = "Print detailed hash identifiers for new clones."
 HELP_DEBUG = "Print debug details (traceback and environment) on internal errors."
 
-SUMMARY_TITLE = "Analysis Summary"
-METRICS_TITLE = "Quality Metrics"
-REPORTS_TITLE = "Reports"
+SUMMARY_TITLE = "Summary"
+METRICS_TITLE = "Metrics"
 
 CLI_LAYOUT_MAX_WIDTH = 80
 
@@ -185,22 +187,15 @@ WARN_NEW_CLONES_WITHOUT_FAIL = (
 )
 
 
-def cli_layout_width(console_width: int | None) -> int:
-    return min(console_width or 80, CLI_LAYOUT_MAX_WIDTH)
-
-
 def version_output(version: str) -> str:
     return f"CodeClone {version}"
 
 
-def banner_title(version: str, *, root: Path | None = None) -> str:
-    line1 = (
-        f"[bold white]CodeClone[/bold white] [dim]v{version}[/dim]"
-        f"  [dim]·[/dim]  {BANNER_SUBTITLE}"
+def banner_title(version: str) -> str:
+    return (
+        f"  [bold white]CodeClone[/bold white] [dim]v{version}[/dim]"
+        f"  [dim]\u00b7[/dim]  [dim]{BANNER_SUBTITLE}[/dim]"
     )
-    if root is None:
-        return line1
-    return f"{line1}\n[dim]{root}[/dim]"
 
 
 def fmt_invalid_output_extension(
@@ -317,6 +312,117 @@ def fmt_summary_compact_metrics(
         health=health,
         grade=grade,
     )
+
+
+_HEALTH_GRADE_STYLE: dict[str, str] = {
+    "A": "bold green",
+    "B": "green",
+    "C": "yellow",
+    "D": "bold red",
+    "F": "bold red",
+}
+
+_L = 12  # label column width (after 2-space indent)
+
+
+def _v(n: int, style: str = "") -> str:
+    """Format value: dim if zero, styled otherwise."""
+    if n == 0:
+        return f"[dim]{n}[/dim]"
+    if style:
+        return f"[{style}]{n}[/{style}]"
+    return str(n)
+
+
+def _vn(n: int, style: str = "") -> str:
+    """Format value with comma separator: dim if zero, styled otherwise."""
+    if n == 0:
+        return f"[dim]{n:,}[/dim]"
+    if style:
+        return f"[{style}]{n:,}[/{style}]"
+    return f"{n:,}"
+
+
+def fmt_summary_files(*, found: int, analyzed: int, cached: int, skipped: int) -> str:
+    parts = [
+        f"{_v(found, 'bold')} found",
+        f"{_v(analyzed, 'bold cyan')} analyzed",
+        f"{_v(cached)} cached",
+        f"{_v(skipped)} skipped",
+    ]
+    val = " \u00b7 ".join(parts)
+    return f"  {'Files':<{_L}}{val}"
+
+
+def fmt_summary_parsed(
+    *, lines: int, functions: int, methods: int, classes: int
+) -> str | None:
+    if lines == 0 and functions == 0 and methods == 0 and classes == 0:
+        return None
+    parts = [f"{_vn(lines, 'bold cyan')} lines"]
+    if functions:
+        parts.append(f"{_v(functions, 'bold cyan')} functions")
+    if methods:
+        parts.append(f"{_v(methods, 'bold cyan')} methods")
+    if classes:
+        parts.append(f"{_v(classes, 'bold cyan')} classes")
+    val = " \u00b7 ".join(parts)
+    return f"  {'Parsed':<{_L}}{val}"
+
+
+def fmt_summary_clones(
+    *, func: int, block: int, segment: int, suppressed: int, new: int
+) -> str:
+    clone_parts = [
+        f"{_v(func, 'bold yellow')} func",
+        f"{_v(block, 'bold yellow')} block",
+    ]
+    if segment:
+        clone_parts.append(f"{_v(segment, 'bold yellow')} seg")
+    main = " \u00b7 ".join(clone_parts)
+    quals = [
+        f"{_v(suppressed, 'yellow')} suppressed",
+        f"{_v(new, 'bold red')} new",
+    ]
+    return f"  {'Clones':<{_L}}{main} ({', '.join(quals)})"
+
+
+def fmt_metrics_health(total: int, grade: str) -> str:
+    s = _HEALTH_GRADE_STYLE.get(grade, "bold")
+    return f"  {'Health':<{_L}}[{s}]{total}/100 ({grade})[/{s}]"
+
+
+def fmt_metrics_cc(avg: float, max_val: int, high_risk: int) -> str:
+    hr = (
+        f"[bold red]{high_risk} high-risk[/bold red]"
+        if high_risk
+        else "[dim]0 high-risk[/dim]"
+    )
+    return f"  {'CC':<{_L}}avg {avg:.1f} \u00b7 max {max_val} \u00b7 {hr}"
+
+
+def fmt_metrics_coupling(avg: float, max_val: int) -> str:
+    return f"  {'Coupling':<{_L}}avg {avg:.1f} \u00b7 max {max_val}"
+
+
+def fmt_metrics_cohesion(avg: float, max_val: int) -> str:
+    return f"  {'Cohesion':<{_L}}avg {avg:.1f} \u00b7 max {max_val}"
+
+
+def fmt_metrics_cycles(count: int) -> str:
+    if count == 0:
+        return f"  {'Cycles':<{_L}}[green]\u2714 clean[/green]"
+    return f"  {'Cycles':<{_L}}[bold red]{count} detected[/bold red]"
+
+
+def fmt_metrics_dead_code(count: int) -> str:
+    if count == 0:
+        return f"  {'Dead code':<{_L}}[green]\u2714 clean[/green]"
+    return f"  {'Dead code':<{_L}}[bold red]{count} found[/bold red]"
+
+
+def fmt_pipeline_done(elapsed: float) -> str:
+    return f"  [dim]Pipeline done in {elapsed:.2f}s[/dim]"
 
 
 def fmt_contract_error(message: str) -> str:

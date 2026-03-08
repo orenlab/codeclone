@@ -1,4 +1,5 @@
-"""Shared merge utilities for overlapping clone windows."""
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 

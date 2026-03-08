@@ -3,10 +3,8 @@ import os
 import sys
 from argparse import Namespace
 from pathlib import Path
-from typing import cast
 
 import pytest
-from rich.text import Text
 
 import codeclone._cli_summary as cli_summary
 import codeclone.baseline as baseline_mod
@@ -226,25 +224,6 @@ def test_argument_parser_contract_error_marker_for_invalid_args(
     assert "CONTRACT ERROR:" in err
 
 
-def test_summary_value_style_mapping() -> None:
-    assert (
-        cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=0)
-        == "dim"
-    )
-    assert (
-        cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_FUNCTION, value=2)
-        == "bold yellow"
-    )
-    assert (
-        cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_SUPPRESSED, value=1)
-        == "yellow"
-    )
-    assert (
-        cli_summary._summary_value_style(label=ui.SUMMARY_LABEL_NEW_BASELINE, value=3)
-        == "bold red"
-    )
-
-
 def test_make_console_caps_width_to_layout_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -265,7 +244,7 @@ def test_make_console_caps_width_to_layout_limit(
 
     monkeypatch.setattr(cli, "Console", _DummyConsole)
     console = cli._make_console(no_color=True)
-    assert len(created) == 2
+    assert len(created) == 1
     assert isinstance(console, _DummyConsole)
     assert console.width == ui.CLI_LAYOUT_MAX_WIDTH
 
@@ -274,60 +253,6 @@ def test_banner_title_without_root_returns_single_line() -> None:
     title = ui.banner_title("2.0.0")
     assert "[bold white]CodeClone[/bold white]" in title
     assert "\n" not in title
-
-
-def test_build_summary_table_rows_and_styles() -> None:
-    rows = cli_summary._build_summary_rows(
-        files_found=2,
-        files_analyzed=0,
-        cache_hits=2,
-        files_skipped=0,
-        func_clones_count=1,
-        block_clones_count=0,
-        segment_clones_count=0,
-        suppressed_segment_groups=1,
-        new_clones_count=1,
-    )
-    table = cli_summary._build_summary_table(rows)
-    assert table.title is None  # title is now in Rule, not Table
-    value_cells = table.columns[1]._cells
-    assert isinstance(value_cells[0], Text)
-    assert str(value_cells[0]) == "2"
-    assert cast(Text, value_cells[1]).style == "dim"
-    # With structure section hidden (all zeros), clone rows start at index 4
-    # suppressed is index 7 (was 11), new_baseline is index 8 (was 12)
-    assert cast(Text, value_cells[7]).style == "yellow"
-    assert cast(Text, value_cells[8]).style == "bold red"
-
-
-def test_build_summary_rows_order() -> None:
-    rows = cli_summary._build_summary_rows(
-        files_found=1,
-        files_analyzed=1,
-        cache_hits=0,
-        files_skipped=0,
-        func_clones_count=0,
-        block_clones_count=0,
-        segment_clones_count=0,
-        suppressed_segment_groups=0,
-        new_clones_count=0,
-    )
-    labels = [label for label, _ in rows]
-    assert labels == [
-        ui.SUMMARY_LABEL_FILES_FOUND,
-        ui.SUMMARY_LABEL_FILES_ANALYZED,
-        ui.SUMMARY_LABEL_CACHE_HITS,
-        ui.SUMMARY_LABEL_FILES_SKIPPED,
-        ui.SUMMARY_LABEL_LINES_ANALYZED,
-        ui.SUMMARY_LABEL_FUNCTIONS_ANALYZED,
-        ui.SUMMARY_LABEL_METHODS_ANALYZED,
-        ui.SUMMARY_LABEL_CLASSES_ANALYZED,
-        ui.SUMMARY_LABEL_FUNCTION,
-        ui.SUMMARY_LABEL_BLOCK,
-        ui.SUMMARY_LABEL_SEGMENT,
-        ui.SUMMARY_LABEL_SUPPRESSED,
-        ui.SUMMARY_LABEL_NEW_BASELINE,
-    ]
 
 
 def test_print_summary_invariant_warning(

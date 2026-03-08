@@ -1,10 +1,5 @@
-"""
-CodeClone — AST and CFG-based code clone detector for Python
-focused on architectural duplication.
-
-Copyright (c) 2026 Den Rozhnovskiy
-Licensed under the MIT License.
-"""
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 
@@ -49,7 +44,7 @@ class _HelpFormatter(
 def build_parser(version: str) -> argparse.ArgumentParser:
     ap = _ArgumentParser(
         prog="codeclone",
-        description="AST and CFG-based code clone detector for Python.",
+        description="Structural code quality analysis for Python.",
         formatter_class=_HelpFormatter,
         epilog=cli_help_epilog(),
     )

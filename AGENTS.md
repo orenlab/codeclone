@@ -28,12 +28,25 @@ It is optimized for **determinism**, **CI stability**, and **reproducible change
 5. **Golden tests are contract sentinels.**
     - Do not update golden snapshots to “fix” failing tests unless the contract change is intentional, versioned where
       required, documented, and explicitly approved.
+6. **Fingerprint-adjacent optimization policy**
+
+    - Performance work must not change AST normalization, fingerprint inputs, or clone identity semantics while
+      `FINGERPRINT_VERSION` remains unchanged.
+
+    - If a change in AST/core analysis can affect fingerprint bytes, clone identity, NEW vs KNOWN classification, or
+      baseline compatibility semantics, it is not a routine optimization. It must be treated as an explicit fingerprint
+      contract change and requires:
+        - `FINGERPRINT_VERSION` review or bump
+        - documentation updates
+        - migration/release notes
+        - explicit maintainer approval
+    - Performance alone is never a sufficient reason to change fingerprint semantics.
 
 ---
 
 ## 2) Quick orientation
 
-CodeClone is an AST/CFG-informed clone detector for Python. It supports:
+CodeClone provides structural code quality analysis for Python. It supports:
 
 - **function clones** (strongest signal)
 - **block clones** (sliding window of statements, may be noisy on boilerplate)

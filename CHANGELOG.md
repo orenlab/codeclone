@@ -473,7 +473,7 @@ codeclone . --update-baseline
 
 ### Overview
 
-This release focuses on security hardening, robustness, and long-term maintainability.  
+This release focuses on security hardening, robustness, and long-term maintainability.
 No breaking API changes were introduced.
 
 The goal of this release is to provide users with a safe, deterministic, and CI-friendly
@@ -481,49 +481,49 @@ tool suitable for security-sensitive and large-scale environments.
 
 ### Security & Robustness
 
-- **Path Traversal Protection**  
+- **Path Traversal Protection**
   Implemented strict path validation to prevent scanning outside the project root or
   accessing sensitive system directories, including macOS `/private` paths.
 
-- **Cache Integrity Protection**  
+- **Cache Integrity Protection**
   Added HMAC-SHA256 signing for cache files to prevent cache poisoning and detect tampering.
 
-- **Parser Safety Limits**  
+- **Parser Safety Limits**
   Introduced AST parsing time limits to mitigate risks from pathological or adversarial inputs.
 
-- **Resource Exhaustion Protection**  
+- **Resource Exhaustion Protection**
   Enforced a maximum file size limit (10MB) and a maximum file count per scan to prevent
   excessive memory or CPU usage.
 
-- **Structured Error Handling**  
+- **Structured Error Handling**
   Introduced a dedicated exception hierarchy (`ParseError`, `CacheError`, etc.) and replaced
   broad exception handling with graceful, user-friendly failure reporting.
 
 ### Performance Improvements
 
-- **Optimized AST Normalization**  
+- **Optimized AST Normalization**
   Replaced expensive `deepcopy` operations with in-place AST normalization, significantly
   reducing CPU and memory overhead.
 
-- **Improved Memory Efficiency**  
+- **Improved Memory Efficiency**
   Added an LRU cache for file reading and optimized string concatenation during fingerprint
   generation.
 
-- **HTML Report Memory Bounds**  
+- **HTML Report Memory Bounds**
   HTML reports now read only the required line ranges instead of entire files, reducing peak
   memory usage on large codebases.
 
 ### Architecture & Maintainability
 
-- **Strict Type Safety**  
+- **Strict Type Safety**
   Migrated all optional typing to Python 3.10+ `| None` syntax and achieved 100% `mypy` strict
   compliance.
 
-- **Modular CFG Design**  
+- **Modular CFG Design**
   Split CFG data structures and builder logic into separate modules (`cfg_model.py` and
   `cfg.py`) for improved clarity and extensibility.
 
-- **Template Extraction**  
+- **Template Extraction**
   Extracted HTML templates into a dedicated `templates.py` module.
 
 - Added a `py.typed` marker for downstream type checkers.
@@ -565,13 +565,13 @@ support for Python 3.10–3.14 across the test matrix.
 
 ### Fixed
 
-- **CFG Exception Handling**  
+- **CFG Exception Handling**
   Fixed incorrect control-flow linking for `try`/`except` blocks.
 
-- **Pattern Matching Support**  
+- **Pattern Matching Support**
   Added missing structural handling for `match`/`case` statements in the CFG.
 
-- **Block Detection Scaling**  
+- **Block Detection Scaling**
   Made `MIN_LINE_DISTANCE` dynamic based on block size to improve clone detection accuracy
   across differently sized functions.
 
@@ -581,7 +581,7 @@ support for Python 3.10–3.14 across the test matrix.
 
 ### BREAKING CHANGES
 
-- **CLI Arguments**  
+- **CLI Arguments**
   Renamed output flags for brevity and consistency:
     - `--json-out` → `--json`
     - `--text-out` → `--text`

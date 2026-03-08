@@ -1,10 +1,6 @@
-"""
-CodeClone — AST and CFG-based code clone detector for Python
-focused on architectural duplication.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
 
-Copyright (c) 2026 Den Rozhnovskiy
-Licensed under the MIT License.
-"""
 # ruff: noqa: E501
 
 from __future__ import annotations

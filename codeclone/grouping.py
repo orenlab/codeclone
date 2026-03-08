@@ -1,9 +1,5 @@
-"""
-CodeClone — clone group construction logic.
-
-Copyright (c) 2026 Den Rozhnovskiy
-Licensed under the MIT License.
-"""
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 

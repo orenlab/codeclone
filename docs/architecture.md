@@ -1,6 +1,6 @@
 # CodeClone Architecture
 
-> Scope note: this file is an architecture narrative/deep-dive.  
+> Scope note: this file is an architecture narrative/deep-dive.
 > Contract-level guarantees (schemas, statuses, exit codes, trust model, determinism) are defined in `docs/book/`.
 
 This document describes the high-level architecture of **CodeClone**.
@@ -236,5 +236,5 @@ patch updates within the same interpreter tag.
 
 ## Summary
 
-CodeClone is an **architectural duplication radar**,
-not a static analyzer or linter.
+CodeClone provides **structural code quality analysis** for Python —
+clone detection, quality metrics, and baseline-aware CI governance.

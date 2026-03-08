@@ -30,7 +30,8 @@ Summary metrics:
 
 Refs:
 
-- `codeclone/_cli_summary.py:_build_summary_rows`
+- `codeclone/_cli_summary.py:_print_summary`
+- `codeclone/ui_messages.py:fmt_summary_files`
 
 ## Contracts
 
@@ -82,7 +83,7 @@ Refs:
 
 Refs:
 
-- `codeclone/_cli_summary.py:_build_summary_rows`
+- `codeclone/_cli_summary.py:_print_summary`
 - `codeclone/contracts.py:EXIT_CODE_DESCRIPTIONS`
 
 ## Locked by tests

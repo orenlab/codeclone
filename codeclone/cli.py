@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
+
 from __future__ import annotations
 
 import json
@@ -11,7 +14,6 @@ from pathlib import Path
 from typing import cast
 
 from rich.console import Console
-from rich.panel import Panel
 from rich.progress import (
     BarColumn,
     Progress,
@@ -95,11 +97,7 @@ LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
 
 
 def _make_console(*, no_color: bool) -> Console:
-    auto = Console(theme=custom_theme, no_color=no_color)
-    max_w = ui.CLI_LAYOUT_MAX_WIDTH
-    if auto.width > max_w:
-        return Console(theme=custom_theme, no_color=no_color, width=max_w)
-    return auto
+    return Console(theme=custom_theme, no_color=no_color, width=ui.CLI_LAYOUT_MAX_WIDTH)
 
 
 console = _make_console(no_color=False)
@@ -148,15 +146,18 @@ class _MetricsBaselineSectionProbe:
 
 
 def print_banner(*, root: Path | None = None) -> None:
-    w = ui.cli_layout_width(console.width)
+    console.print(ui.banner_title(__version__))
+    console.print()
+    project_name = root.name if root is not None else ""
     console.print(
-        Panel(
-            ui.banner_title(__version__, root=root),
-            border_style="blue",
-            padding=(0, 2),
-            width=w,
+        Rule(
+            title=f"Analyze: {project_name}" if project_name else "Analyze",
+            style="dim",
+            characters="\u2500",
         )
     )
+    if root is not None:
+        console.print(f"  [dim]Root:[/dim] [dim]{root}[/dim]")
 
 
 def _is_debug_enabled(
@@ -749,13 +750,13 @@ def _write_report_outputs(
 
     if saved_reports and not args.quiet:
         cwd = Path.cwd()
-        console.print(Rule(title=ui.REPORTS_TITLE, style="dim", characters="─"))
+        console.print()
         for label, path in saved_reports:
             try:
                 display = path.relative_to(cwd)
             except ValueError:
                 display = path
-            console.print(f"  [bold]{label:5}[/bold] [dim]{display}[/dim]")
+            console.print(f"  [bold]{label} report saved:[/bold] [dim]{display}[/dim]")
 
     return html_report_path
 
@@ -814,18 +815,12 @@ def _enforce_gating(
         if reason.startswith("metric:")
     ]
     if metric_reasons:
-        body = "Metrics quality gate triggered.\n\n"
-        for reason in metric_reasons:
-            body += f"  - {reason}\n"
         console.print(
-            Panel(
-                body.rstrip(),
-                title="Gating Failure",
-                border_style="red",
-                width=ui.cli_layout_width(console.width),
-                expand=False,
-            )
+            "\n[bold red]\u2717 GATING FAILURE:[/bold red] "
+            "Metrics quality gate triggered."
         )
+        for reason in metric_reasons:
+            console.print(f"    - {reason}")
         sys.exit(ExitCode.GATING_FAILURE)
 
     if "clone:new" in gate_result.reasons:
@@ -834,40 +829,26 @@ def _enforce_gating(
         if resolved_html_report_path is None and default_report.exists():
             resolved_html_report_path = str(default_report)
 
-        body_lines = [
-            "New code clones detected.",
-            "",
-            "Summary:",
-            f"  Function clone groups: {len(new_func)}",
-            f"  Block clone groups: {len(new_block)}",
-        ]
-        if resolved_html_report_path:
-            body_lines.extend(["", f"See report: {resolved_html_report_path}"])
-        body_lines.extend(
-            ["", "To accept as technical debt:", "  codeclone . --update-baseline"]
+        console.print(
+            "\n[bold red]\u2717 GATING FAILURE:[/bold red] New code clones detected."
         )
+        console.print(f"    Function clone groups: {len(new_func)}")
+        console.print(f"    Block clone groups: {len(new_block)}")
+        if resolved_html_report_path:
+            console.print(f"\n    See report: {resolved_html_report_path}")
+        console.print("\n    To accept as technical debt:")
+        console.print("      codeclone . --update-baseline")
 
         if args.verbose:
             if new_func:
-                body_lines.extend(["", "Function clone hashes:"])
-                body_lines.extend(
-                    f"  - {clone_hash}" for clone_hash in sorted(new_func)
-                )
+                console.print("\n    Function clone hashes:")
+                for clone_hash in sorted(new_func):
+                    console.print(f"      - {clone_hash}")
             if new_block:
-                body_lines.extend(["", "Block clone hashes:"])
-                body_lines.extend(
-                    f"  - {clone_hash}" for clone_hash in sorted(new_block)
-                )
+                console.print("\n    Block clone hashes:")
+                for clone_hash in sorted(new_block):
+                    console.print(f"      - {clone_hash}")
 
-        console.print(
-            Panel(
-                "\n".join(body_lines),
-                title="Gating Failure",
-                border_style="red",
-                width=ui.cli_layout_width(console.width),
-                expand=False,
-            )
-        )
         sys.exit(ExitCode.GATING_FAILURE)
 
     threshold_reason = next(
@@ -883,13 +864,8 @@ def _enforce_gating(
         total = int(total_raw)
         threshold = int(threshold_raw)
         console.print(
-            Panel(
-                f"Total clones ({total}) exceed threshold ({threshold}).",
-                title="Gating Failure",
-                border_style="red",
-                width=ui.cli_layout_width(console.width),
-                expand=False,
-            )
+            "\n[bold red]\u2717 GATING FAILURE:[/bold red] "
+            f"Total clones ({total}) exceed threshold ({threshold})."
         )
         sys.exit(ExitCode.GATING_FAILURE)
 
@@ -1249,13 +1225,8 @@ def _main_impl() -> None:
 
     if not args.quiet:
         elapsed = time.monotonic() - run_started_at
-        console.print(
-            Rule(
-                title=f"Pipeline done in {elapsed:.2f}s",
-                style="dim",
-                characters="─",
-            )
-        )
+        console.print()
+        console.print(ui.fmt_pipeline_done(elapsed))
 
 
 def main() -> None:

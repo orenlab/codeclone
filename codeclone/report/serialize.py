@@ -1,4 +1,5 @@
-"""Report serialization for JSON and text outputs."""
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 
