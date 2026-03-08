@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/codeclone-wordmark.svg" alt="CodeClone" height="48">
+  <img src="docs/assets/codeclone-wordmark.svg" alt="CodeClone" height="60">
 </p>
 
 <p align="center">
