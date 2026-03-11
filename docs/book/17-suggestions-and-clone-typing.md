@@ -3,7 +3,8 @@
 ## Purpose
 
 Define deterministic clone-type classification and suggestion generation
-contracts used by JSON/TXT/HTML reports.
+contracts used by canonical report projections (`JSON` / `TXT` / `Markdown` /
+`HTML`).
 
 ## Public surface
 
@@ -19,7 +20,7 @@ Suggestion shape:
 
 - `severity`: `critical|warning|info`
 - `category`:
-  `clone|complexity|coupling|cohesion|dead_code|dependency`
+  `clone|structural|complexity|coupling|cohesion|dead_code|dependency`
 - `title`, `location`, `steps`, `effort`, `priority`
 
 Clone typing:
@@ -41,6 +42,7 @@ Refs:
 - Suggestions are generated only in full metrics mode
   (`skip_metrics=false`).
 - Suggestions are advisory only and never directly control exit code.
+- SARIF projection is finding-driven and does not consume suggestion cards.
 - JSON report stores clone typing at group level:
     - `findings.groups.clones.<kind>[*].clone_type`
 - Suggestion location is deterministic: first item by stable path/line sort.
@@ -57,7 +59,9 @@ Refs:
 - Suggestion priority formula is stable:
   `severity_weight / effort_weight`.
 - Suggestion output is sorted by:
-  `(-priority, severity, category, location, title)`.
+  `(-priority, severity, category, source_kind, location, title, subject_key)`.
+- Derived suggestion serialization in report JSON applies deterministic ordering by
+  `(-priority, severity_rank, title, finding_id)`.
 - Clone type output for a given group is deterministic for identical inputs.
 
 Refs:

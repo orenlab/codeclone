@@ -34,7 +34,8 @@ Version bump rules:
 - Bump **baseline schema** only for baseline JSON layout/type changes.
 - Bump **fingerprint version** when clone key semantics change.
 - Bump **cache schema** for cache wire-format/validation changes.
-- Bump **report schema** for JSON/TXT/HTML report data-contract changes.
+- Bump **report schema** for canonical report document contract changes
+  (`report_schema_version`, consumed by JSON/TXT/Markdown/SARIF and HTML provenance/view).
 - Bump **metrics-baseline schema** only for standalone metrics-baseline payload changes.
 
 Baseline compatibility rules:

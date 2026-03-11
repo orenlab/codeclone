@@ -897,6 +897,10 @@ def _run_analysis_stages(
         )
 
     _print_failed_files(processing_result.failed_files)
+    # Keep unreadable-source diagnostics visible in normal mode even if
+    # failed_files was filtered/empty due upstream transport differences.
+    if not processing_result.failed_files and processing_result.source_read_failures:
+        _print_failed_files(processing_result.source_read_failures)
 
     if use_status:
         with console.status(ui.STATUS_GROUPING, spinner="dots"):

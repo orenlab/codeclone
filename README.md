@@ -42,6 +42,21 @@ codeclone . --json --md --sarif --text   # generate machine-readable reports
 codeclone . --ci             # CI mode (--fail-on-new --no-color --quiet)
 ```
 
+## Reproducible Docker Benchmark
+
+```bash
+./benchmarks/run_docker_benchmark.sh
+```
+
+The wrapper builds `benchmarks/Dockerfile`, runs isolated container benchmarks, and
+writes deterministic results to `.cache/benchmarks/codeclone-benchmark.json`.
+Use environment overrides to pin benchmark envelope:
+
+```bash
+CPUSET=0 CPUS=1.0 MEMORY=2g RUNS=16 WARMUPS=4 \
+  ./benchmarks/run_docker_benchmark.sh
+```
+
 <details>
 <summary>Run without install</summary>
 
@@ -62,6 +77,8 @@ codeclone . --ci
 ```
 
 The `--ci` preset equals `--fail-on-new --no-color --quiet`.
+When a trusted metrics baseline is loaded, CI mode also enables
+`--fail-on-new-metrics`.
 
 ### Quality Gates
 
@@ -135,13 +152,13 @@ Contract errors (`2`) take precedence over gating failures (`3`).
 
 ## Reports
 
-| Format | Flag     | Default path                   |
-|--------|----------|--------------------------------|
-| HTML   | `--html` | `.cache/codeclone/report.html` |
-| JSON   | `--json` | `.cache/codeclone/report.json` |
-| Markdown | `--md` | `.cache/codeclone/report.md` |
-| SARIF  | `--sarif` | `.cache/codeclone/report.sarif` |
-| Text   | `--text` | `.cache/codeclone/report.txt`  |
+| Format   | Flag      | Default path                    |
+|----------|-----------|---------------------------------|
+| HTML     | `--html`  | `.cache/codeclone/report.html`  |
+| JSON     | `--json`  | `.cache/codeclone/report.json`  |
+| Markdown | `--md`    | `.cache/codeclone/report.md`    |
+| SARIF    | `--sarif` | `.cache/codeclone/report.sarif` |
+| Text     | `--text`  | `.cache/codeclone/report.txt`   |
 
 All report formats are rendered from one canonical JSON report document.
 
@@ -154,32 +171,73 @@ All report formats are rendered from one canonical JSON report document.
   "meta": {
     "codeclone_version": "2.0.0b1",
     "project_name": "...",
-    "scan_root": "...",
+    "scan_root": ".",
     "report_mode": "full",
-    "baseline": { "...": "..." },
-    "cache": { "...": "..." },
-    "metrics_baseline": { "...": "..." },
-    "runtime": { "report_generated_at_utc": "..." }
-  },
-  "inventory": {
-    "files": { "...": "..." },
-    "code": { "...": "..." },
-    "file_registry": { "encoding": "relative_path", "items": [] }
-  },
-  "findings": {
-    "summary": { "...": "..." },
-    "groups": {
-      "clones": { "functions": [], "blocks": [], "segments": [] },
-      "structural": { "groups": [] },
-      "dead_code": { "groups": [] },
-      "design": { "groups": [] }
+    "baseline": {
+      "...": "..."
+    },
+    "cache": {
+      "...": "..."
+    },
+    "metrics_baseline": {
+      "...": "..."
+    },
+    "runtime": {
+      "report_generated_at_utc": "..."
     }
   },
-  "metrics": { "summary": {}, "families": {} },
-  "derived": { "suggestions": [], "overview": {}, "hotlists": {} },
+  "inventory": {
+    "files": {
+      "...": "..."
+    },
+    "code": {
+      "...": "..."
+    },
+    "file_registry": {
+      "encoding": "relative_path",
+      "items": []
+    }
+  },
+  "findings": {
+    "summary": {
+      "...": "..."
+    },
+    "groups": {
+      "clones": {
+        "functions": [],
+        "blocks": [],
+        "segments": []
+      },
+      "structural": {
+        "groups": []
+      },
+      "dead_code": {
+        "groups": []
+      },
+      "design": {
+        "groups": []
+      }
+    }
+  },
+  "metrics": {
+    "summary": {},
+    "families": {}
+  },
+  "derived": {
+    "suggestions": [],
+    "overview": {},
+    "hotlists": {}
+  },
   "integrity": {
-    "canonicalization": { "version": "1", "scope": "canonical_only" },
-    "digest": { "algorithm": "sha256", "verified": true, "value": "..." }
+    "canonicalization": {
+      "version": "1",
+      "scope": "canonical_only"
+    },
+    "digest": {
+      "algorithm": "sha256",
+      "verified": true,
+      "value": "..."
+    }
   }
 }
 ```
@@ -212,7 +270,31 @@ Architecture: [`docs/architecture.md`](docs/architecture.md) · CFG semantics: [
 | Report contract            | [`docs/book/08-report.md`](docs/book/08-report.md)                                       |
 | Metrics & quality gates    | [`docs/book/15-metrics-and-quality-gates.md`](docs/book/15-metrics-and-quality-gates.md) |
 | Dead code                  | [`docs/book/16-dead-code-contract.md`](docs/book/16-dead-code-contract.md)               |
+| Docker benchmark contract  | [`docs/book/18-benchmarking.md`](docs/book/18-benchmarking.md)                           |
 | Determinism                | [`docs/book/12-determinism.md`](docs/book/12-determinism.md)                             |
+
+<details>
+<summary>Benchmarking</summary>
+
+## Reproducible Docker Benchmark
+
+```bash
+./benchmarks/run_docker_benchmark.sh
+```
+
+The wrapper builds `benchmarks/Dockerfile`, runs isolated container benchmarks, and writes results to
+`.cache/benchmarks/codeclone-benchmark.json`.
+
+Use environment overrides to pin the benchmark envelope:
+
+```bash
+CPUSET=0 CPUS=1.0 MEMORY=2g RUNS=16 WARMUPS=4 \
+  ./benchmarks/run_docker_benchmark.sh
+```
+
+Benchmark contract: [docs/book/18-benchmarking.md](docs/book/18-benchmarking.md)￼
+
+</details>
 
 ## Links
 

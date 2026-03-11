@@ -428,17 +428,16 @@ def build_structural_findings_html_panel(
             )
             count = len(deduped_items)
             why_template_id = f"finding-why-template-{g.finding_key}"
+            why_template_html = _finding_why_template_html(
+                g,
+                deduped_items,
+                file_cache=resolved_file_cache,
+                context_lines=context_lines,
+                max_snippet_lines=max_snippet_lines,
+            )
             why_templates.append(
                 f'<template id="{_escape_attr(why_template_id)}">'
-                f"{
-                    _finding_why_template_html(
-                        g,
-                        deduped_items,
-                        file_cache=resolved_file_cache,
-                        context_lines=context_lines,
-                        max_snippet_lines=max_snippet_lines,
-                    )
-                }"
+                f"{why_template_html}"
                 "</template>"
             )
             occ_word = "occurrence" if count == 1 else "occurrences"

@@ -74,6 +74,8 @@ Refs:
 ## Contracts
 
 - `--ci` is a preset: enables `fail_on_new`, `no_color`, `quiet`.
+- In CI mode, if trusted metrics baseline is loaded, runtime also enables
+  `fail_on_new_metrics`.
 - `--quiet` implies `--no-progress`.
 - Negative size limits are contract errors.
 

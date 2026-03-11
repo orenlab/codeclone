@@ -54,6 +54,8 @@ Per-group common axes (family-specific fields may extend):
 - Derived layer (`suggestions`, `overview`, `hotlists`) does not replace canonical
   findings/metrics.
 - `report_generated_at_utc` is carried in `meta.runtime` and reused by UI/renderers.
+- Canonical `meta.scan_root` is normalized to `"."`; absolute runtime paths are
+  exposed under `meta.runtime.*_absolute`.
 - `clone_type` and `novelty` are group-level properties inside clone groups.
 
 ## Invariants (MUST)
@@ -66,11 +68,11 @@ Per-group common axes (family-specific fields may extend):
 
 ## Failure modes
 
-| Condition                         | Behavior |
-|-----------------------------------|----------|
-| Missing optional UI/meta fields   | Renderer falls back to empty/`(none)` display |
-| Untrusted baseline                | Clone novelty resolves to `new` for all groups |
-| Missing snippet source in HTML    | Safe fallback snippet block |
+| Condition                       | Behavior                                       |
+|---------------------------------|------------------------------------------------|
+| Missing optional UI/meta fields | Renderer falls back to empty/`(none)` display  |
+| Untrusted baseline              | Clone novelty resolves to `new` for all groups |
+| Missing snippet source in HTML  | Safe fallback snippet block                    |
 
 ## Determinism / canonicalization
 

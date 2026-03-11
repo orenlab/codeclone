@@ -15,10 +15,12 @@ Document HTML rendering as a pure view layer over report data/facts.
 
 Inputs to renderer:
 
-- grouped clone data (`func_groups`, `block_groups`, `segment_groups`)
-- block explainability facts (`block_group_facts`)
-- novelty key sets (`new_function_group_keys`, `new_block_group_keys`)
-- shared report metadata (`report_meta`)
+- canonical report document (`report_document`) when available (preferred path)
+- compatibility inputs for direct rendering path:
+    - grouped clone data (`func_groups`, `block_groups`, `segment_groups`)
+    - block explainability facts (`block_group_facts`)
+    - novelty key sets (`new_function_group_keys`, `new_block_group_keys`)
+    - shared report metadata (`report_meta`)
 
 Output:
 
@@ -38,7 +40,7 @@ Refs:
 
 - `codeclone/report/explain.py:build_block_group_facts`
 - `codeclone/html_report.py:_render_group_explanation`
-- `codeclone/html_report.py:report_meta_html`
+- `codeclone/html_report.py:_build_report_meta_panel`
 
 ## Invariants (MUST)
 

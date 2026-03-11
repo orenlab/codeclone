@@ -96,3 +96,6 @@ Refs:
 - Determinism and compatibility path:
   [12-determinism.md](12-determinism.md) ->
   [14-compatibility-and-versioning.md](14-compatibility-and-versioning.md)
+- Benchmarking path:
+  [12-determinism.md](12-determinism.md) ->
+  [18-benchmarking.md](18-benchmarking.md)

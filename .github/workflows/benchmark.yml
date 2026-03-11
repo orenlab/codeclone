@@ -1,0 +1,193 @@
+name: benchmark
+run-name: benchmark • ${{ github.event_name }} • ${{ github.ref_name }}
+
+on:
+  push:
+    branches: [ "feat/2.0.0" ]
+  pull_request:
+    branches: [ "feat/2.0.0" ]
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Benchmark profile
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - extended
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: >-
+      bench • ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.timeout_minutes }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # default profile for push / PR
+          - profile: smoke
+            label: linux-smoke
+            os: ubuntu-latest
+            runs: 12
+            warmups: 3
+            cpus: "1.0"
+            memory: "2g"
+            timeout_minutes: 45
+
+          # extended profile for manual runs
+          - profile: extended
+            label: linux-extended
+            os: ubuntu-latest
+            runs: 16
+            warmups: 4
+            cpus: "1.0"
+            memory: "2g"
+            timeout_minutes: 50
+
+          - profile: extended
+            label: macos-extended
+            os: macos-latest
+            runs: 12
+            warmups: 3
+            cpus: ""
+            memory: ""
+            timeout_minutes: 60
+
+    if: >
+      (github.event_name != 'workflow_dispatch' && matrix.profile == 'smoke') ||
+      (github.event_name == 'workflow_dispatch' && matrix.profile == inputs.profile)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set benchmark output path
+        shell: bash
+        run: |
+          mkdir -p .cache/benchmarks
+          echo "BENCH_JSON=.cache/benchmarks/codeclone-benchmark-${{ matrix.label }}.json" >> "$GITHUB_ENV"
+
+      - name: Build and run Docker benchmark (Linux)
+        if: runner.os == 'Linux'
+        env:
+          RUNS: ${{ matrix.runs }}
+          WARMUPS: ${{ matrix.warmups }}
+          CPUS: ${{ matrix.cpus }}
+          MEMORY: ${{ matrix.memory }}
+        run: |
+          ./benchmarks/run_docker_benchmark.sh
+          cp .cache/benchmarks/codeclone-benchmark.json "$BENCH_JSON"
+
+      - name: Run local benchmark (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          uv run python benchmarks/run_benchmark.py \
+            --target . \
+            --runs "${{ matrix.runs }}" \
+            --warmups "${{ matrix.warmups }}" \
+            --tmp-dir "/tmp/codeclone-bench-${{ matrix.label }}" \
+            --output "$BENCH_JSON"
+
+      - name: Print benchmark summary
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path(os.environ["BENCH_JSON"])
+          if not report_path.exists():
+              print(f"benchmark report not found: {report_path}")
+              raise SystemExit(1)
+
+          payload = json.loads(report_path.read_text(encoding="utf-8"))
+          scenarios = payload.get("scenarios", [])
+          comparisons = payload.get("comparisons", {})
+
+          print("CodeClone benchmark summary")
+          print(f"label={os.environ.get('RUNNER_OS','unknown').lower()} / {os.environ.get('GITHUB_JOB','benchmark')}")
+          for scenario in scenarios:
+              name = str(scenario.get("name", "unknown"))
+              stats = scenario.get("stats_seconds", {})
+              median = float(stats.get("median", 0.0))
+              p95 = float(stats.get("p95", 0.0))
+              stdev = float(stats.get("stdev", 0.0))
+              digest = str(scenario.get("digest", ""))
+              print(
+                  f"- {name:16s} median={median:.4f}s "
+                  f"p95={p95:.4f}s stdev={stdev:.4f}s digest={digest}"
+              )
+
+          if comparisons:
+              print("ratios:")
+              for key, value in sorted(comparisons.items()):
+                  print(f"- {key}={float(value):.3f}x")
+
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+          if not summary_file:
+              raise SystemExit(0)
+
+          lines = [
+              f"## CodeClone benchmark — {os.environ.get('RUNNER_OS', 'unknown')} / ${{ matrix.label }}",
+              "",
+              f"- Tool: `{payload['tool']['name']} {payload['tool']['version']}`",
+              f"- Target: `{payload['config']['target']}`",
+              f"- Runs: `{payload['config']['runs']}`",
+              f"- Warmups: `{payload['config']['warmups']}`",
+              f"- Generated: `{payload['generated_at_utc']}`",
+              "",
+              "### Scenarios",
+              "",
+              "| Scenario | Median (s) | p95 (s) | Stdev (s) | Deterministic | Digest |",
+              "|---|---:|---:|---:|:---:|---|",
+          ]
+
+          for scenario in scenarios:
+              stats = scenario.get("stats_seconds", {})
+              lines.append(
+                  "| "
+                  f"{scenario.get('name', '')} | "
+                  f"{float(stats.get('median', 0.0)):.4f} | "
+                  f"{float(stats.get('p95', 0.0)):.4f} | "
+                  f"{float(stats.get('stdev', 0.0)):.4f} | "
+                  f"{'yes' if bool(scenario.get('deterministic')) else 'no'} | "
+                  f"{scenario.get('digest', '')} |"
+              )
+
+          if comparisons:
+              lines.extend(
+                  [
+                      "",
+                      "### Ratios",
+                      "",
+                      "| Metric | Value |",
+                      "|---|---:|",
+                  ]
+              )
+              for key, value in sorted(comparisons.items()):
+                  lines.append(f"| {key} | {float(value):.3f}x |")
+
+          with Path(summary_file).open("a", encoding="utf-8") as fh:
+              fh.write("\n".join(lines) + "\n")
+          PY
+
+      - name: Upload benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: codeclone-benchmark-${{ matrix.label }}
+          path: ${{ env.BENCH_JSON }}
+          if-no-files-found: error

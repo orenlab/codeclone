@@ -20,6 +20,7 @@ On-disk schema (`v == "2.1"`):
 - `ap` (`analysis_profile`) keys: `min_loc`, `min_stmt`
 - `files` map stores compact per-file entries:
     - `st`: `[mtime_ns, size]`
+    - `ss`: `[lines, functions, methods, classes]` (source stats snapshot)
     - optional analysis sections (`u`/`b`/`s` and metrics-related sections)
 - file keys are wire relpaths when `root` is configured
 - per-file `dc` (`dead_candidates`) rows do not repeat filepath; path is implied by
@@ -35,6 +36,8 @@ Refs:
 
 - Cache is optimization-only; invalid cache never blocks analysis.
 - Any cache trust failure triggers warning + empty cache fallback.
+- Cached file entry without valid `ss` (`source_stats`) is treated as cache-miss for
+  processing counters and reprocessed.
 - Cache compatibility gates:
     - version `v == CACHE_VERSION`
     - `payload.py == current_python_tag()`
@@ -52,12 +55,15 @@ Refs:
 
 - Cache save writes canonical JSON and atomically replaces target file.
 - Empty sections (`u`, `b`, `s`) are omitted from written wire entries.
+- `ss` is written when source stats are available and is required for full cache-hit
+  accounting in discovery stage.
 - Legacy secret file `.cache_secret` is never used for trust; warning only.
 
 Refs:
 
 - `codeclone/cache.py:Cache.save`
 - `codeclone/cache.py:_encode_wire_file_entry`
+- `codeclone/pipeline.py:discover`
 - `codeclone/cache.py:LEGACY_CACHE_SECRET_FILENAME`
 
 ## Failure modes
