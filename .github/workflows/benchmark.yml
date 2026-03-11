@@ -64,22 +64,52 @@ jobs:
             memory: ""
             timeout_minutes: 60
 
-    if: >
-      (github.event_name != 'workflow_dispatch' && matrix.profile == 'smoke') ||
-      (github.event_name == 'workflow_dispatch' && matrix.profile == inputs.profile)
-
     steps:
+      - name: Resolve run profile gate
+        shell: bash
+        run: |
+          enabled=0
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            if [ "${{ matrix.profile }}" = "smoke" ]; then
+              enabled=1
+            fi
+          else
+            if [ "${{ matrix.profile }}" = "${{ inputs.profile }}" ]; then
+              enabled=1
+            fi
+          fi
+          echo "BENCH_ENABLED=$enabled" >> "$GITHUB_ENV"
+
       - name: Checkout
-        uses: actions/checkout@v6
+        if: env.BENCH_ENABLED == '1'
+        uses: actions/checkout@v6.0.2
+
+      - name: Set up Python (macOS local benchmark)
+        if: env.BENCH_ENABLED == '1' && runner.os == 'macOS'
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.13"
+          allow-prereleases: true
+
+      - name: Set up uv (macOS local benchmark)
+        if: env.BENCH_ENABLED == '1' && runner.os == 'macOS'
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (macOS local benchmark)
+        if: env.BENCH_ENABLED == '1' && runner.os == 'macOS'
+        run: uv sync --all-extras --dev
 
       - name: Set benchmark output path
+        if: env.BENCH_ENABLED == '1'
         shell: bash
         run: |
           mkdir -p .cache/benchmarks
           echo "BENCH_JSON=.cache/benchmarks/codeclone-benchmark-${{ matrix.label }}.json" >> "$GITHUB_ENV"
 
       - name: Build and run Docker benchmark (Linux)
-        if: runner.os == 'Linux'
+        if: env.BENCH_ENABLED == '1' && runner.os == 'Linux'
         env:
           RUNS: ${{ matrix.runs }}
           WARMUPS: ${{ matrix.warmups }}
@@ -90,7 +120,7 @@ jobs:
           cp .cache/benchmarks/codeclone-benchmark.json "$BENCH_JSON"
 
       - name: Run local benchmark (macOS)
-        if: runner.os == 'macOS'
+        if: env.BENCH_ENABLED == '1' && runner.os == 'macOS'
         run: |
           uv run python benchmarks/run_benchmark.py \
             --target . \
@@ -100,7 +130,7 @@ jobs:
             --output "$BENCH_JSON"
 
       - name: Print benchmark summary
-        if: always()
+        if: env.BENCH_ENABLED == '1'
         shell: bash
         run: |
           python - <<'PY'
@@ -184,9 +214,13 @@ jobs:
               fh.write("\n".join(lines) + "\n")
           PY
 
+      - name: Skip non-selected profile
+        if: env.BENCH_ENABLED != '1'
+        run: echo "Skipping matrix profile '${{ matrix.profile }}' for event '${{ github.event_name }}'"
+
       - name: Upload benchmark artifact
-        if: always()
-        uses: actions/upload-artifact@v7
+        if: env.BENCH_ENABLED == '1'
+        uses: actions/upload-artifact@v4
         with:
           name: codeclone-benchmark-${{ matrix.label }}
           path: ${{ env.BENCH_JSON }}

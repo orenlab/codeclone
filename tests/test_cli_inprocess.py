@@ -2930,10 +2930,11 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
     monkeypatch.setattr(pipeline, "process_file", _source_read_error)
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
-    out = capsys.readouterr().out
-    assert "Cannot read file" in out
-    assert "CONTRACT ERROR:" not in out
-    assert _summary_metric(out, "Files skipped") == 1
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "Cannot read file" in combined
+    assert "CONTRACT ERROR:" not in combined
+    assert _summary_metric(captured.out, "Files skipped") == 1
 
 
 def test_cli_unreadable_source_fails_in_ci_with_contract_error(

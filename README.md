@@ -29,7 +29,7 @@ all with baseline-aware governance that separates **known** technical debt from 
 - **Baseline governance** — known debt stays accepted; CI blocks only new clones and metric regressions
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
-- **Fast** — incremental caching, parallel processing, warm-run optimization
+- **Fast*** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
 
 ## Quick Start
 
@@ -40,21 +40,6 @@ codeclone .                  # analyze current directory
 codeclone . --html           # generate HTML report
 codeclone . --json --md --sarif --text   # generate machine-readable reports
 codeclone . --ci             # CI mode (--fail-on-new --no-color --quiet)
-```
-
-## Reproducible Docker Benchmark
-
-```bash
-./benchmarks/run_docker_benchmark.sh
-```
-
-The wrapper builds `benchmarks/Dockerfile`, runs isolated container benchmarks, and
-writes deterministic results to `.cache/benchmarks/codeclone-benchmark.json`.
-Use environment overrides to pin benchmark envelope:
-
-```bash
-CPUSET=0 CPUS=1.0 MEMORY=2g RUNS=16 WARMUPS=4 \
-  ./benchmarks/run_docker_benchmark.sh
 ```
 
 <details>
@@ -273,10 +258,10 @@ Architecture: [`docs/architecture.md`](docs/architecture.md) · CFG semantics: [
 | Docker benchmark contract  | [`docs/book/18-benchmarking.md`](docs/book/18-benchmarking.md)                           |
 | Determinism                | [`docs/book/12-determinism.md`](docs/book/12-determinism.md)                             |
 
-<details>
-<summary>Benchmarking</summary>
+## Benchmarking
 
-## Reproducible Docker Benchmark
+<details>
+<summary>Reproducible Docker Benchmark</summary>
 
 ```bash
 ./benchmarks/run_docker_benchmark.sh
@@ -292,7 +277,8 @@ CPUSET=0 CPUS=1.0 MEMORY=2g RUNS=16 WARMUPS=4 \
   ./benchmarks/run_docker_benchmark.sh
 ```
 
-Benchmark contract: [docs/book/18-benchmarking.md](docs/book/18-benchmarking.md)￼
+* Performance claims are backed by the reproducible benchmark workflow documented
+  in [docs/book/18-benchmarking.md](docs/book/18-benchmarking.md)￼
 
 </details>
 
