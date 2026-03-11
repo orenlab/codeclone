@@ -10,6 +10,9 @@ CPUS="${CPUS:-1.0}"
 MEMORY="${MEMORY:-2g}"
 RUNS="${RUNS:-12}"
 WARMUPS="${WARMUPS:-3}"
+HOST_UID="$(id -u)"
+HOST_GID="$(id -g)"
+CONTAINER_USER="${CONTAINER_USER:-${HOST_UID}:${HOST_GID}}"
 
 mkdir -p "$OUT_DIR"
 
@@ -23,6 +26,7 @@ docker build \
 echo "[bench] running benchmark container"
 docker run \
   --rm \
+  --user "$CONTAINER_USER" \
   --cpuset-cpus="$CPUSET" \
   --cpus="$CPUS" \
   --memory="$MEMORY" \

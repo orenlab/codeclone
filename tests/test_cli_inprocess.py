@@ -2921,6 +2921,7 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
 ) -> None:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
+    cache_path = tmp_path / "cache.json"
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
@@ -2929,7 +2930,10 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
 
     monkeypatch.setattr(pipeline, "process_file", _source_read_error)
     _patch_parallel(monkeypatch)
-    _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
+    _run_main(
+        monkeypatch,
+        [str(tmp_path), "--no-progress", "--cache-path", str(cache_path)],
+    )
     captured = capsys.readouterr()
     combined = captured.out + captured.err
     assert "Cannot read file" in combined
@@ -2944,6 +2948,7 @@ def test_cli_unreadable_source_fails_in_ci_with_contract_error(
 ) -> None:
     _src, baseline_path = _prepare_source_and_baseline(tmp_path)
     json_out = tmp_path / "report.json"
+    cache_path = tmp_path / "cache.json"
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
@@ -2962,6 +2967,8 @@ def test_cli_unreadable_source_fails_in_ci_with_contract_error(
                 str(baseline_path),
                 "--json",
                 str(json_out),
+                "--cache-path",
+                str(cache_path),
             ],
         )
     assert exc.value.code == 2
@@ -2978,6 +2985,7 @@ def test_cli_reports_include_source_io_skipped_zero(
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
     json_out = tmp_path / "report.json"
+    cache_path = tmp_path / "cache.json"
 
     _patch_parallel(monkeypatch)
     _run_main(
@@ -2987,6 +2995,8 @@ def test_cli_reports_include_source_io_skipped_zero(
             "--json",
             str(json_out),
             "--no-progress",
+            "--cache-path",
+            str(cache_path),
         ],
     )
     payload = json.loads(json_out.read_text("utf-8"))
@@ -2999,6 +3009,7 @@ def test_cli_contract_error_priority_over_gating_failure_for_unreadable_source(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _src, baseline_path = _prepare_source_and_baseline(tmp_path)
+    cache_path = tmp_path / "cache.json"
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
@@ -3022,6 +3033,8 @@ def test_cli_contract_error_priority_over_gating_failure_for_unreadable_source(
                 "--baseline",
                 str(baseline_path),
                 "--no-progress",
+                "--cache-path",
+                str(cache_path),
             ],
         )
     assert exc.value.code == 2
@@ -3041,6 +3054,7 @@ def test_cli_unreadable_source_ci_shows_overflow_summary(
         tmp_path / "baseline.json",
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
     )
+    cache_path = tmp_path / "cache.json"
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
@@ -3057,6 +3071,8 @@ def test_cli_unreadable_source_ci_shows_overflow_summary(
                 "--ci",
                 "--baseline",
                 str(_baseline),
+                "--cache-path",
+                str(cache_path),
             ],
         )
     assert exc.value.code == 2

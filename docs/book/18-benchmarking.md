@@ -18,9 +18,9 @@ Benchmark output (`benchmark_schema_version=1.0`) contains:
 - benchmark config (`target`, `runs`, `warmups`)
 - execution environment (platform, cpu limits/affinity, cgroup limits)
 - scenario results:
-  - `cold_full` (cold cache each run)
-  - `warm_full` (shared warm cache)
-  - `warm_clones_only` (shared warm cache with `--skip-metrics`)
+    - `cold_full` (cold cache each run)
+    - `warm_full` (shared warm cache)
+    - `warm_clones_only` (shared warm cache with `--skip-metrics`)
 - latency stats per scenario (`min`, `max`, `mean`, `median`, `p95`, `stdev`)
 - deterministic digest check (`integrity.digest.value` must be stable within scenario)
 - cross-scenario comparisons (speedup ratios)
@@ -45,12 +45,12 @@ Benchmark output (`benchmark_schema_version=1.0`) contains:
 
 ## Failure modes
 
-| Condition                              | Behavior                                      |
-|----------------------------------------|-----------------------------------------------|
-| Docker unavailable                     | Host wrapper fails fast                       |
-| Non-zero CLI exit in any run           | Runner aborts with command stdout/stderr tail |
+| Condition                               | Behavior                                      |
+|-----------------------------------------|-----------------------------------------------|
+| Docker unavailable                      | Host wrapper fails fast                       |
+| Non-zero CLI exit in any run            | Runner aborts with command stdout/stderr tail |
 | Missing/invalid report integrity digest | Runner aborts as invalid benchmark sample     |
-| Digest mismatch in one scenario        | Runner aborts as non-deterministic            |
+| Digest mismatch in one scenario         | Runner aborts as non-deterministic            |
 
 ## Determinism / canonicalization
 
@@ -78,17 +78,24 @@ CPUSET=0 CPUS=1.0 MEMORY=2g RUNS=16 WARMUPS=4 \
   ./benchmarks/run_docker_benchmark.sh
 ```
 
+Permissions note:
+
+- The host wrapper runs the container as host `uid:gid` by default
+  (`--user "$(id -u):$(id -g)"`) so benchmark artifact writes to bind-mounted
+  output paths are stable in CI.
+- Override explicitly if needed: `CONTAINER_USER=10001:10001`.
+
 ## GitHub Actions
 
 - Workflow: `.github/workflows/benchmark.yml`
 - Triggers:
-  - manual (`workflow_dispatch`)
-  - pull requests targeting `feat/2.0.0`
+    - manual (`workflow_dispatch`)
+    - pull requests targeting `feat/2.0.0`
 - Job behavior:
-  - runs Docker benchmark with pinned runner limits
-  - uploads `.cache/benchmarks/codeclone-benchmark.json` as artifact
-  - emits scenario table and ratio table into `GITHUB_STEP_SUMMARY`
-  - prints ratios in job logs (important for quick trend checks)
+    - runs Docker benchmark with pinned runner limits
+    - uploads `.cache/benchmarks/codeclone-benchmark.json` as artifact
+    - emits scenario table and ratio table into `GITHUB_STEP_SUMMARY`
+    - prints ratios in job logs (important for quick trend checks)
 
 ## Non-guarantees
 
