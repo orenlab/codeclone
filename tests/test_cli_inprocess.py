@@ -22,6 +22,21 @@ from codeclone.contracts import (
 )
 from codeclone.errors import CacheError
 from codeclone.models import Unit
+from tests._report_access import (
+    report_clone_groups as _report_clone_groups,
+)
+from tests._report_access import (
+    report_inventory_files as _report_inventory_files,
+)
+from tests._report_access import (
+    report_meta_baseline as _report_meta_baseline,
+)
+from tests._report_access import (
+    report_meta_cache as _report_meta_cache,
+)
+from tests._report_access import (
+    report_structural_groups as _report_structural_groups,
+)
 
 
 @dataclass(slots=True)
@@ -140,6 +155,16 @@ def _patch_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
 def _run_main(monkeypatch: pytest.MonkeyPatch, args: Iterable[str]) -> None:
     monkeypatch.setattr(sys, "argv", ["codeclone", *args])
     cli.main()
+
+
+def _write_python_module(
+    directory: Path,
+    filename: str,
+    source: str = "def f():\n    return 1\n",
+) -> Path:
+    path = directory / filename
+    path.write_text(source, "utf-8")
+    return path
 
 
 def _patch_fixed_executor(
@@ -313,18 +338,16 @@ def _assert_baseline_failure_meta(
         assert "Baseline is not trusted for this run and will be ignored" in out
         assert "Run: codeclone . --update-baseline" in out
     payload_out = json.loads(json_out.read_text("utf-8"))
-    meta = payload_out["meta"]
-    assert meta["baseline_status"] == expected_status
-    assert meta["baseline_loaded"] is False
+    baseline_meta = _report_meta_baseline(payload_out)
+    assert baseline_meta["status"] == expected_status
+    assert baseline_meta["loaded"] is False
 
 
 def _assert_fail_on_new_summary(out: str, *, include_blocks: bool = True) -> None:
-    assert (
-        "FAILED: New code clones detected." in out or "New code clones detected." in out
-    )
-    assert "New function clone groups" in out or "Function clone groups:" in out
+    assert "GATING FAILURE [new-clones]" in out
+    assert "new_function_clone_groups" in out
     if include_blocks:
-        assert "New block clone groups" in out or "Block clone groups:" in out
+        assert "new_block_clone_groups" in out
     assert "codeclone . --update-baseline" in out
 
 
@@ -455,6 +478,7 @@ def test_cli_default_cache_dir_uses_root(
             _segments: object,
             *,
             file_metrics: object | None = None,
+            structural_findings: object | None = None,
         ) -> None:
             return None
 
@@ -495,6 +519,7 @@ def test_cli_cache_dir_override_respected(
             _segments: object,
             *,
             file_metrics: object | None = None,
+            structural_findings: object | None = None,
         ) -> None:
             return None
 
@@ -547,6 +572,7 @@ def test_cli_default_cache_dir_per_root(
             _segments: object,
             *,
             file_metrics: object | None = None,
+            structural_findings: object | None = None,
         ) -> None:
             return None
 
@@ -720,6 +746,7 @@ def test_cli_no_legacy_warning_when_paths_match(
             _segments: object,
             *,
             file_metrics: object | None = None,
+            structural_findings: object | None = None,
         ) -> None:
             return None
 
@@ -768,6 +795,7 @@ def test_cli_cache_status_string_fallback(
             _segments: object,
             *,
             file_metrics: object | None = None,
+            structural_findings: object | None = None,
         ) -> None:
             return None
 
@@ -788,7 +816,7 @@ def test_cli_cache_status_string_fallback(
         ],
     )
     payload = json.loads(json_out.read_text("utf-8"))
-    assert payload["meta"]["cache_status"] == expected_status
+    assert _report_meta_cache(payload)["status"] == expected_status
 
 
 def test_cli_main_progress_fallback(
@@ -921,10 +949,11 @@ def test_cli_unexpected_html_render_failure_is_internal(
 def test_cli_main_outputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     html_out = tmp_path / "out.html"
     json_out = tmp_path / "out.json"
+    md_out = tmp_path / "out.md"
+    sarif_out = tmp_path / "out.sarif"
     text_out = tmp_path / "out.txt"
     baseline = tmp_path / "baseline.json"
     _write_baseline(
@@ -942,18 +971,20 @@ def test_cli_main_outputs(
             str(html_out),
             "--json",
             str(json_out),
+            "--md",
+            str(md_out),
+            "--sarif",
+            str(sarif_out),
             "--text",
             str(text_out),
             "--no-progress",
         ],
     )
-    assert html_out.exists()
-    assert json_out.exists()
-    assert text_out.exists()
+    for artifact in (html_out, json_out, md_out, sarif_out, text_out):
+        assert artifact.exists()
     out = capsys.readouterr().out
-    assert "HTML" in out
-    assert "JSON" in out
-    assert "Text" in out
+    for label in ("HTML", "JSON", "Markdown", "SARIF", "Text"):
+        assert label in out
     assert out.index("Summary") < out.index("report saved:")
 
 
@@ -982,32 +1013,44 @@ def test_cli_reports_include_audit_metadata_ok(
     )
 
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["baseline_status"] == "ok"
-    assert meta["baseline_loaded"] is True
-    assert meta["baseline_fingerprint_version"] == BASELINE_FINGERPRINT_VERSION
-    assert meta["baseline_schema_version"] == BASELINE_SCHEMA_VERSION
-    assert meta["baseline_generator_version"] == __version__
-    assert isinstance(meta["baseline_payload_sha256"], str)
-    assert meta["baseline_payload_sha256_verified"] is True
-    assert meta["baseline_path"] == str(baseline_path.resolve())
-    assert payload["meta"]["report_schema_version"] == REPORT_SCHEMA_VERSION
-    assert "files" in payload
-    assert "groups" in payload
-    assert "group_item_layout" in payload
-    assert set(payload["groups"]) == {"functions", "blocks", "segments"}
-    assert set(payload["group_item_layout"]) == {"functions", "blocks", "segments"}
+    baseline_meta = _report_meta_baseline(payload)
+    assert baseline_meta["status"] == "ok"
+    assert baseline_meta["loaded"] is True
+    assert baseline_meta["fingerprint_version"] == BASELINE_FINGERPRINT_VERSION
+    assert baseline_meta["schema_version"] == BASELINE_SCHEMA_VERSION
+    assert baseline_meta["generator_version"] == __version__
+    assert isinstance(baseline_meta["payload_sha256"], str)
+    assert baseline_meta["payload_sha256_verified"] is True
+    assert baseline_meta["path"] == baseline_path.name
+    assert baseline_meta["path_scope"] == "in_root"
+    assert payload["report_schema_version"] == REPORT_SCHEMA_VERSION
+    assert "report_schema_version" not in payload["meta"]
+    assert "inventory" in payload
+    assert "findings" in payload
+    runtime_meta = payload["meta"]["runtime"]
+    assert isinstance(runtime_meta["report_generated_at_utc"], str)
+    assert runtime_meta["report_generated_at_utc"].endswith("Z")
+    clones = payload["findings"]["groups"]["clones"]
+    assert set(clones) == {"functions", "blocks", "segments"}
 
     text = text_out.read_text("utf-8")
-    assert "REPORT METADATA" in text
-    assert "Baseline status: ok" in text
-    assert f"Baseline schema version: {BASELINE_SCHEMA_VERSION}" in text
+    for needle in (
+        "REPORT METADATA",
+        "Report generated (UTC): ",
+        "Baseline status: ok",
+        f"Baseline schema version: {BASELINE_SCHEMA_VERSION}",
+    ):
+        assert needle in text
 
     html = html_out.read_text("utf-8")
-    assert "Report Provenance" in html
-    assert 'data-baseline-status="ok"' in html
-    assert 'data-baseline-payload-verified="true"' in html
-    assert "Baseline schema" in html
+    for needle in (
+        "Report Provenance",
+        "Report generated (UTC)",
+        'data-baseline-status="ok"',
+        'data-baseline-payload-verified="true"',
+        "Baseline schema",
+    ):
+        assert needle in html
 
 
 def test_cli_reports_include_audit_metadata_missing_baseline(
@@ -1029,13 +1072,13 @@ def test_cli_reports_include_audit_metadata_missing_baseline(
         ],
     )
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["baseline_status"] == "missing"
-    assert meta["baseline_loaded"] is False
-    assert meta["baseline_fingerprint_version"] is None
-    assert meta["baseline_schema_version"] is None
-    assert meta["baseline_payload_sha256"] is None
-    assert meta["baseline_payload_sha256_verified"] is False
+    baseline_meta = _report_meta_baseline(payload)
+    assert baseline_meta["status"] == "missing"
+    assert baseline_meta["loaded"] is False
+    assert baseline_meta["fingerprint_version"] is None
+    assert baseline_meta["schema_version"] is None
+    assert baseline_meta["payload_sha256"] is None
+    assert baseline_meta["payload_sha256_verified"] is False
 
 
 def test_cli_reports_include_audit_metadata_fingerprint_mismatch(
@@ -1066,10 +1109,10 @@ def test_cli_reports_include_audit_metadata_fingerprint_mismatch(
     out = capsys.readouterr().out
     assert "fingerprint version mismatch" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["baseline_status"] == "mismatch_fingerprint_version"
-    assert meta["baseline_loaded"] is False
-    assert meta["baseline_fingerprint_version"] == "0.0.0"
+    baseline_meta = _report_meta_baseline(payload)
+    assert baseline_meta["status"] == "mismatch_fingerprint_version"
+    assert baseline_meta["loaded"] is False
+    assert baseline_meta["fingerprint_version"] == "0.0.0"
 
 
 def test_cli_reports_include_audit_metadata_schema_mismatch(
@@ -1100,10 +1143,10 @@ def test_cli_reports_include_audit_metadata_schema_mismatch(
     out = capsys.readouterr().out
     assert "schema version is newer than supported" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["baseline_status"] == "mismatch_schema_version"
-    assert meta["baseline_loaded"] is False
-    assert meta["baseline_schema_version"] == "1.1"
+    baseline_meta = _report_meta_baseline(payload)
+    assert baseline_meta["status"] == "mismatch_schema_version"
+    assert baseline_meta["loaded"] is False
+    assert baseline_meta["schema_version"] == "1.1"
 
 
 def test_cli_reports_include_audit_metadata_python_mismatch(
@@ -1136,10 +1179,10 @@ def test_cli_reports_include_audit_metadata_python_mismatch(
     out = capsys.readouterr().out
     assert "python tag mismatch" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["baseline_status"] == "mismatch_python_version"
-    assert meta["baseline_loaded"] is False
-    assert meta["baseline_python_tag"] == "cp00"
+    baseline_meta = _report_meta_baseline(payload)
+    assert baseline_meta["status"] == "mismatch_python_version"
+    assert baseline_meta["loaded"] is False
+    assert baseline_meta["python_tag"] == "cp00"
 
 
 def test_cli_reports_include_audit_metadata_invalid_baseline(
@@ -1168,9 +1211,9 @@ def test_cli_reports_include_audit_metadata_invalid_baseline(
     assert "Invalid baseline file" in out
     assert "Baseline is not trusted for this run and will be ignored" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["baseline_status"] == "invalid_json"
-    assert meta["baseline_loaded"] is False
+    baseline_meta = _report_meta_baseline(payload)
+    assert baseline_meta["status"] == "invalid_json"
+    assert baseline_meta["loaded"] is False
 
 
 def test_cli_reports_include_audit_metadata_legacy_baseline(
@@ -1208,9 +1251,9 @@ def test_cli_reports_include_audit_metadata_legacy_baseline(
     out = capsys.readouterr().out
     assert "legacy" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["baseline_status"] == "missing_fields"
-    assert meta["baseline_loaded"] is False
+    baseline_meta = _report_meta_baseline(payload)
+    assert baseline_meta["status"] == "missing_fields"
+    assert baseline_meta["loaded"] is False
 
 
 def test_cli_legacy_baseline_normal_mode_ignored_and_exit_zero(
@@ -1252,11 +1295,14 @@ def test_cli_legacy_baseline_normal_mode_ignored_and_exit_zero(
         ],
     )
     out = capsys.readouterr().out
-    assert "legacy (<=1.3.x)" in out
-    assert "Baseline is not trusted for this run and will be ignored" in out
-    assert "Comparison will proceed against an empty baseline" in out
-    assert "Run: codeclone . --update-baseline" in out
-    assert "New clones detected but --fail-on-new not set." in out
+    for needle in (
+        "legacy (<=1.3.x)",
+        "Baseline is not trusted for this run and will be ignored",
+        "Comparison will proceed against an empty baseline",
+        "Run: codeclone . --update-baseline",
+        "New clones detected but --fail-on-new not set.",
+    ):
+        assert needle in out
 
 
 def test_cli_legacy_baseline_fail_on_new_fails_fast_exit_2(
@@ -1332,9 +1378,9 @@ def test_cli_reports_include_audit_metadata_integrity_failed(
     assert "integrity check failed" in out
     assert "Baseline is not trusted for this run and will be ignored" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["baseline_status"] == "integrity_failed"
-    assert meta["baseline_loaded"] is False
+    baseline_meta = _report_meta_baseline(payload)
+    assert baseline_meta["status"] == "integrity_failed"
+    assert baseline_meta["loaded"] is False
 
 
 def test_cli_reports_include_audit_metadata_generator_mismatch(
@@ -1366,9 +1412,9 @@ def test_cli_reports_include_audit_metadata_generator_mismatch(
     assert "generator mismatch" in out
     assert "Baseline is not trusted for this run and will be ignored" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["baseline_status"] == "generator_mismatch"
-    assert meta["baseline_loaded"] is False
+    baseline_meta = _report_meta_baseline(payload)
+    assert baseline_meta["status"] == "generator_mismatch"
+    assert baseline_meta["loaded"] is False
 
 
 @pytest.mark.parametrize(
@@ -1439,9 +1485,9 @@ def test_cli_reports_include_audit_metadata_integrity_missing(
     assert "missing required fields" in out or "Invalid baseline schema" in out
     assert "Baseline is not trusted for this run and will be ignored" in out
     payload_out = json.loads(json_out.read_text("utf-8"))
-    meta = payload_out["meta"]
-    assert meta["baseline_status"] == "missing_fields"
-    assert meta["baseline_loaded"] is False
+    baseline_meta = _report_meta_baseline(payload_out)
+    assert baseline_meta["status"] == "missing_fields"
+    assert baseline_meta["loaded"] is False
 
 
 def test_cli_reports_include_audit_metadata_baseline_too_large(
@@ -1471,9 +1517,9 @@ def test_cli_reports_include_audit_metadata_baseline_too_large(
     assert "too large" in out
     assert "Baseline is not trusted for this run and will be ignored" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["baseline_status"] == "too_large"
-    assert meta["baseline_loaded"] is False
+    baseline_meta = _report_meta_baseline(payload)
+    assert baseline_meta["status"] == "too_large"
+    assert baseline_meta["loaded"] is False
 
 
 def test_cli_untrusted_baseline_ignored_for_diff(
@@ -1535,8 +1581,8 @@ def f2():
     assert "Baseline is not trusted for this run and will be ignored" in out
     assert _summary_metric(out, "New vs baseline") > 0
     report = json.loads(json_out.read_text("utf-8"))
-    assert report["meta"]["baseline_status"] == "generator_mismatch"
-    assert report["meta"]["baseline_loaded"] is False
+    assert _report_meta_baseline(report)["status"] == "generator_mismatch"
+    assert _report_meta_baseline(report)["loaded"] is False
 
 
 @pytest.mark.parametrize(
@@ -1613,8 +1659,8 @@ def test_cli_invalid_baseline_fails_in_ci(
     out = capsys.readouterr().out
     assert "Invalid baseline file" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    assert payload["meta"]["baseline_status"] == "invalid_json"
-    assert payload["meta"]["baseline_loaded"] is False
+    assert _report_meta_baseline(payload)["status"] == "invalid_json"
+    assert _report_meta_baseline(payload)["loaded"] is False
 
 
 def test_cli_too_large_baseline_fails_in_ci(
@@ -1646,8 +1692,8 @@ def test_cli_too_large_baseline_fails_in_ci(
     out = capsys.readouterr().out
     assert "too large" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    assert payload["meta"]["baseline_status"] == "too_large"
-    assert payload["meta"]["baseline_loaded"] is False
+    assert _report_meta_baseline(payload)["status"] == "too_large"
+    assert _report_meta_baseline(payload)["loaded"] is False
 
 
 def test_cli_reports_cache_used_false_on_warning(
@@ -1684,10 +1730,10 @@ def test_cli_reports_cache_used_false_on_warning(
     out = capsys.readouterr().out
     assert "signature" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["cache_used"] is False
-    assert meta["cache_status"] == "integrity_failed"
-    assert meta["cache_schema_version"] == CACHE_VERSION
+    cache_meta = _report_meta_cache(payload)
+    assert cache_meta["used"] is False
+    assert cache_meta["status"] == "integrity_failed"
+    assert cache_meta["schema_version"] == CACHE_VERSION
 
 
 def test_cli_reports_cache_too_large_respects_max_size_flag(
@@ -1724,10 +1770,10 @@ def test_cli_reports_cache_too_large_respects_max_size_flag(
     out = capsys.readouterr().out
     assert "Cache file too large" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["cache_used"] is False
-    assert meta["cache_status"] == "too_large"
-    assert meta["cache_schema_version"] is None
+    cache_meta = _report_meta_cache(payload)
+    assert cache_meta["used"] is False
+    assert cache_meta["status"] == "too_large"
+    assert cache_meta["schema_version"] is None
 
 
 def test_cli_reports_cache_meta_when_cache_missing(
@@ -1757,10 +1803,10 @@ def test_cli_reports_cache_meta_when_cache_missing(
         ],
     )
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["cache_used"] is False
-    assert meta["cache_status"] == "missing"
-    assert meta["cache_schema_version"] is None
+    cache_meta = _report_meta_cache(payload)
+    assert cache_meta["used"] is False
+    assert cache_meta["status"] == "missing"
+    assert cache_meta["schema_version"] is None
 
 
 @pytest.mark.parametrize(
@@ -1871,12 +1917,15 @@ def f2():
     )
     out = capsys.readouterr().out
     payload = json.loads(json_second.read_text("utf-8"))
-    meta = payload["meta"]
     if expected_warning is not None:
         assert expected_warning in out
-    assert meta["cache_used"] is expected_cache_used
-    assert meta["cache_status"] == expected_cache_status
-    assert meta["groups_counts"]["functions"]["total"] == expected_functions_total
+    cache_meta = _report_meta_cache(payload)
+    assert cache_meta["used"] is expected_cache_used
+    assert cache_meta["status"] == expected_cache_status
+    assert (
+        payload["findings"]["summary"]["clones"]["functions"]
+        == expected_functions_total
+    )
 
 
 @pytest.mark.parametrize(
@@ -1884,6 +1933,8 @@ def f2():
     [
         ("--html", "report.exe", "HTML", ".html"),
         ("--json", "report.txt", "JSON", ".json"),
+        ("--md", "report.txt", "Markdown", ".md"),
+        ("--sarif", "report.json", "SARIF", ".sarif"),
         ("--text", "report.json", "text", ".txt"),
     ],
 )
@@ -2099,12 +2150,12 @@ def test_cli_update_baseline_report_meta_uses_updated_payload_hash(
     )
 
     payload = json.loads(json_out.read_text("utf-8"))
-    meta = payload["meta"]
-    assert meta["baseline_status"] == "ok"
-    assert meta["baseline_loaded"] is True
-    assert isinstance(meta["baseline_payload_sha256"], str)
-    assert len(meta["baseline_payload_sha256"]) == 64
-    assert meta["baseline_payload_sha256_verified"] is True
+    baseline_meta = _report_meta_baseline(payload)
+    assert baseline_meta["status"] == "ok"
+    assert baseline_meta["loaded"] is True
+    assert isinstance(baseline_meta["payload_sha256"], str)
+    assert len(baseline_meta["payload_sha256"]) == 64
+    assert baseline_meta["payload_sha256_verified"] is True
 
 
 def test_cli_update_baseline_write_error_is_contract_error(
@@ -2378,7 +2429,7 @@ def test_cli_baseline_schema_version_mismatch_fails(
     out = capsys.readouterr().out
     assert "schema version is newer than supported" in out
     payload = json.loads(json_out.read_text("utf-8"))
-    assert payload["meta"]["baseline_status"] == "mismatch_schema_version"
+    assert _report_meta_baseline(payload)["status"] == "mismatch_schema_version"
 
 
 def test_cli_baseline_schema_and_fingerprint_mismatch_status_prefers_schema(
@@ -2414,7 +2465,7 @@ def test_cli_baseline_schema_and_fingerprint_mismatch_status_prefers_schema(
     assert "schema version is newer than supported" in out
     assert "fingerprint version mismatch" not in out
     payload = json.loads(json_out.read_text("utf-8"))
-    assert payload["meta"]["baseline_status"] == "mismatch_schema_version"
+    assert _report_meta_baseline(payload)["status"] == "mismatch_schema_version"
 
 
 def test_cli_baseline_fingerprint_and_python_mismatch_status_prefers_fingerprint(
@@ -2449,7 +2500,7 @@ def test_cli_baseline_fingerprint_and_python_mismatch_status_prefers_fingerprint
     assert "fingerprint version mismatch" in out
     assert "Python version mismatch" not in out
     payload = json.loads(json_out.read_text("utf-8"))
-    assert payload["meta"]["baseline_status"] == "mismatch_fingerprint_version"
+    assert _report_meta_baseline(payload)["status"] == "mismatch_fingerprint_version"
 
 
 def test_cli_baseline_python_version_mismatch_fails(
@@ -2634,7 +2685,7 @@ def f2():
         )
     assert exc.value.code == 3
     out = capsys.readouterr().out
-    assert "GATING FAILURE:" in out or "Gating Failure" in out
+    assert "GATING FAILURE [new-clones]" in out
     _assert_fail_on_new_summary(out, include_blocks=False)
     assert "CodeClone v" not in out
 
@@ -2852,7 +2903,7 @@ def test_cli_discovery_skip_oserror(
     if "--ci" in extra_args:
         files_found = _compact_summary_metric(out, "found")
         files_analyzed = _compact_summary_metric(out, "analyzed")
-        cache_hits = _compact_summary_metric(out, "cache")
+        cache_hits = _compact_summary_metric(out, "cached")
         files_skipped = _compact_summary_metric(out, "skipped")
     else:
         files_found = _summary_metric(out, "Files found")
@@ -2916,7 +2967,7 @@ def test_cli_unreadable_source_fails_in_ci_with_contract_error(
     out = capsys.readouterr().out
     _assert_unreadable_source_contract_error(out)
     payload = json.loads(json_out.read_text("utf-8"))
-    assert payload["meta"]["files_skipped_source_io"] == 1
+    assert _report_inventory_files(payload)["source_io_skipped"] == 1
 
 
 def test_cli_reports_include_source_io_skipped_zero(
@@ -2938,7 +2989,7 @@ def test_cli_reports_include_source_io_skipped_zero(
         ],
     )
     payload = json.loads(json_out.read_text("utf-8"))
-    assert payload["meta"]["files_skipped_source_io"] == 0
+    assert _report_inventory_files(payload)["source_io_skipped"] == 0
 
 
 def test_cli_contract_error_priority_over_gating_failure_for_unreadable_source(
@@ -3047,7 +3098,8 @@ def test_cli_report_meta_cache_path_resolve_oserror_fallback(
     )
     payload = json.loads(json_out.read_text("utf-8"))
     assert resolve_called["cache"] is True
-    assert payload["meta"]["cache_path"] == str(cache_path)
+    assert _report_meta_cache(payload)["path"] == cache_path.name
+    assert _report_meta_cache(payload)["path_scope"] == "in_root"
 
 
 def test_cli_ci_discovery_cache_hit(
@@ -3090,7 +3142,7 @@ def test_cli_ci_discovery_cache_hit(
     assert "new=" in out
     assert _compact_summary_metric(out, "found") == 1
     assert _compact_summary_metric(out, "analyzed") == 0
-    assert _compact_summary_metric(out, "cache") == 1
+    assert _compact_summary_metric(out, "cached") == 1
     assert _compact_summary_metric(out, "skipped") == 0
 
 
@@ -3388,8 +3440,7 @@ def test_cli_fail_on_new_no_report_path(
         )
     assert exc.value.code == 3
     out = capsys.readouterr().out
-    assert "See detailed report:" not in out
-    assert "See report:" not in out
+    assert "\n  report" not in out
 
 
 @pytest.mark.parametrize(
@@ -3487,7 +3538,7 @@ def test_cli_fail_on_new_verbose_and_report_path(
         )
     assert exc.value.code == 3
     out = capsys.readouterr().out
-    assert "See detailed report:" in out or "See report:" in out
+    assert "report" in out
     assert str(html_out) in out or html_out.name in out
     assert "Details (function clone hashes):" in out or "Function clone hashes:" in out
     assert "- fhash1" in out
@@ -3529,7 +3580,7 @@ def test_cli_fail_on_new_default_report_path(
         )
     assert exc.value.code == 3
     out = capsys.readouterr().out
-    assert "See detailed report:" in out or "See report:" in out
+    assert "report" in out
     assert ".cache/codeclone/report.html" in out
 
 
@@ -3589,3 +3640,118 @@ def test_cli_failed_batch_item_progress(
     _run_main(monkeypatch, [str(tmp_path), "--processes", "2"])
     out = capsys.readouterr().out
     assert "Worker failed" in out
+
+
+# ---------------------------------------------------------------------------
+# Contract protection: structural findings are report-only
+# ---------------------------------------------------------------------------
+
+_DUPLICATED_BRANCHES_SOURCE = """\
+__all__ = ["fn"]
+
+
+def fn(x):
+    if x == 1:
+        return 1
+    elif x == 2:
+        return 2
+"""
+
+
+def test_structural_findings_do_not_affect_clone_counts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Structural findings must not alter function clone group counts."""
+    # File with duplicated branches
+    src = tmp_path / "dup.py"
+    src.write_text(_DUPLICATED_BRANCHES_SOURCE, "utf-8")
+    # File without any duplicated branches
+    src2 = tmp_path / "clean.py"
+    src2.write_text("def g(x):\n    return x\n", "utf-8")
+
+    json_out = tmp_path / "report.json"
+    _run_main(
+        monkeypatch,
+        [str(tmp_path), "--json", str(json_out), "--no-progress"],
+    )
+    payload = json.loads(json_out.read_text("utf-8"))
+
+    # No function clones expected (both functions are unique)
+    func_groups = _report_clone_groups(payload, "functions")
+    assert len(func_groups) == 0, "Structural findings must not create clone groups"
+
+
+def test_structural_findings_do_not_affect_exit_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Structural findings must not change exit code (should be 0 for no clones)."""
+    src = tmp_path / "dup.py"
+    src.write_text(_DUPLICATED_BRANCHES_SOURCE, "utf-8")
+
+    # Run without --ci to avoid baseline requirement; structural findings must not
+    # cause gating failure — exit must be SUCCESS (0), not GATING_FAILURE (3).
+    _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
+
+
+def test_structural_findings_recomputed_when_cache_was_built_without_reports(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = tmp_path / "dup.py"
+    src.write_text(
+        """\
+def fn(x):
+    a = 1
+    b = 2
+    c = 3
+    d = 4
+    e = 5
+    f = 6
+    g = 7
+    if x == 1:
+        log("a")
+        value = x + 1
+        return value
+    elif x == 2:
+        log("b")
+        value = x + 2
+        return value
+    return a + b + c + d + e + f + g
+""",
+        "utf-8",
+    )
+    cache_path = tmp_path / "cache.json"
+    json_out = tmp_path / "report.json"
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--cache-path",
+            str(cache_path),
+            "--no-progress",
+        ],
+    )
+    cache_payload = json.loads(cache_path.read_text("utf-8"))
+    files_before = cache_payload["payload"]["files"]
+    assert all("sf" not in entry for entry in files_before.values())
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--cache-path",
+            str(cache_path),
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
+    report_payload = json.loads(json_out.read_text("utf-8"))
+    assert _report_structural_groups(report_payload)
+
+    cache_payload = json.loads(cache_path.read_text("utf-8"))
+    files_after = cache_payload["payload"]["files"]
+    assert any("sf" in entry for entry in files_after.values())

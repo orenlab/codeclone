@@ -37,6 +37,8 @@ Key defaults:
 - bare reporting flags use default report paths:
     - `--html` -> `<root>/.cache/codeclone/report.html`
     - `--json` -> `<root>/.cache/codeclone/report.json`
+    - `--md` -> `<root>/.cache/codeclone/report.md`
+    - `--sarif` -> `<root>/.cache/codeclone/report.sarif`
     - `--text` -> `<root>/.cache/codeclone/report.txt`
 
 Example project-level config:
@@ -83,7 +85,7 @@ Refs:
 
 - Detection thresholds (`min-loc`, `min-stmt`) affect extraction.
 - Detection thresholds (`min-loc`, `min-stmt`) are part of cache compatibility (`payload.ap`).
-- Reporting flags (`--html/--json/--text`) affect output only.
+- Reporting flags (`--html/--json/--md/--sarif/--text`) affect output only.
 - Reporting flags accept optional path values; passing bare flag writes to
   deterministic default path under `.cache/codeclone/`.
 - `--cache-path` overrides project-local cache default; legacy alias `--cache-dir` maps to same destination.

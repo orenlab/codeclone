@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 
 
@@ -124,11 +124,25 @@ class HealthScore:
     dimensions: dict[str, int]
 
 
+SourceKind = Literal["production", "tests", "fixtures", "mixed", "other"]
+
+
+@dataclass(frozen=True, slots=True)
+class ReportLocation:
+    filepath: str
+    relative_path: str
+    start_line: int
+    end_line: int
+    qualname: str
+    source_kind: SourceKind
+
+
 @dataclass(frozen=True, slots=True)
 class Suggestion:
     severity: Literal["critical", "warning", "info"]
     category: Literal[
         "clone",
+        "structural",
         "complexity",
         "coupling",
         "cohesion",
@@ -140,6 +154,20 @@ class Suggestion:
     steps: tuple[str, ...]
     effort: Literal["easy", "moderate", "hard"]
     priority: float
+    finding_family: Literal["clones", "structural", "metrics"] = "metrics"
+    finding_kind: str = ""
+    subject_key: str = ""
+    fact_kind: str = ""
+    fact_summary: str = ""
+    fact_count: int = 0
+    spread_files: int = 0
+    spread_functions: int = 0
+    clone_type: str = ""
+    confidence: Literal["high", "medium", "low"] = "medium"
+    source_kind: SourceKind = "other"
+    source_breakdown: tuple[tuple[SourceKind, int], ...] = field(default_factory=tuple)
+    representative_locations: tuple[ReportLocation, ...] = field(default_factory=tuple)
+    location_label: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,3 +259,26 @@ class SegmentGroupItem(TypedDict):
 
 
 GroupMap = dict[str, list[GroupItem]]
+
+
+@dataclass(frozen=True, slots=True)
+class StructuralFindingOccurrence:
+    """Single occurrence of a structural finding (e.g. one duplicate branch)."""
+
+    finding_kind: str
+    finding_key: str
+    file_path: str
+    qualname: str
+    start: int
+    end: int
+    signature: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class StructuralFindingGroup:
+    """Group of structurally equivalent occurrences (e.g. duplicate branches)."""
+
+    finding_kind: str
+    finding_key: str
+    signature: dict[str, str]
+    items: tuple[StructuralFindingOccurrence, ...]

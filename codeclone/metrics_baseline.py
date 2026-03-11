@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Final, Literal, cast
 
 from . import __version__
+from ._schema_validation import validate_top_level_structure
 from .baseline import current_python_tag
 from .contracts import BASELINE_SCHEMA_VERSION, METRICS_BASELINE_SCHEMA_VERSION
 from .errors import BaselineValidationError
@@ -482,21 +483,15 @@ def _load_json_object(path: Path) -> dict[str, Any]:
 
 
 def _validate_top_level_structure(payload: dict[str, Any], *, path: Path) -> None:
-    keys = set(payload.keys())
-    missing = _TOP_LEVEL_REQUIRED_KEYS - keys
-    extra = keys - _TOP_LEVEL_ALLOWED_KEYS
-    if missing:
-        raise BaselineValidationError(
-            "Invalid metrics baseline schema at "
-            f"{path}: missing top-level keys: {', '.join(sorted(missing))}",
-            status=MetricsBaselineStatus.MISSING_FIELDS,
-        )
-    if extra:
-        raise BaselineValidationError(
-            "Invalid metrics baseline schema at "
-            f"{path}: unexpected top-level keys: {', '.join(sorted(extra))}",
-            status=MetricsBaselineStatus.INVALID_TYPE,
-        )
+    validate_top_level_structure(
+        payload,
+        path=path,
+        required_keys=_TOP_LEVEL_REQUIRED_KEYS,
+        allowed_keys=_TOP_LEVEL_ALLOWED_KEYS,
+        schema_label="metrics baseline",
+        missing_status=MetricsBaselineStatus.MISSING_FIELDS,
+        extra_status=MetricsBaselineStatus.INVALID_TYPE,
+    )
 
 
 def _validate_required_keys(

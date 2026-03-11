@@ -2,10 +2,8 @@
 
 This directory has two documentation layers.
 
-- [`docs/book/`](book/): **contract-first** documentation. This is the canonical source for **schemas**, **statuses**, *
-  *exit codes**, **trust model**, and **determinism guarantees**. Everything here is derived from code + locked tests.
-- [`docs/architecture.md`](architecture.md), [`docs/cfg.md`](cfg.md): **deep-dive narrative** docs (architecture and CFG
-  semantics). These may include rationale and design intent, but must not contradict the contract book.
+- [`docs/book/`](book/): **contract-first** documentation. This is the canonical source for **schemas**, **statuses**, **exit codes**, **trust model**, and **determinism guarantees**. Everything here is derived from code + locked tests.
+- [`docs/architecture.md`](architecture.md), [`docs/cfg.md`](cfg.md): **deep-dive narrative** docs (architecture and CFG semantics). These may include rationale and design intent, but must not contradict the contract book.
 
 ## Start Here
 
@@ -19,8 +17,8 @@ This directory has two documentation layers.
 - Config and defaults: [`docs/book/04-config-and-defaults.md`](book/04-config-and-defaults.md)
 - Core pipeline and invariants: [`docs/book/05-core-pipeline.md`](book/05-core-pipeline.md)
 - Baseline contract (schema v2.0): [`docs/book/06-baseline.md`](book/06-baseline.md)
-- Cache contract (schema v2.0): [`docs/book/07-cache.md`](book/07-cache.md)
-- Report contract (schema v2.0): [`docs/book/08-report.md`](book/08-report.md)
+- Cache contract (schema v2.1): [`docs/book/07-cache.md`](book/07-cache.md)
+- Report contract (schema v2.1): [`docs/book/08-report.md`](book/08-report.md)
 
 ## Interfaces
 
@@ -32,8 +30,7 @@ This directory has two documentation layers.
 - Security model and threat boundaries: [`docs/book/11-security-model.md`](book/11-security-model.md)
 - Determinism policy: [`docs/book/12-determinism.md`](book/12-determinism.md)
 - Tests as specification: [`docs/book/13-testing-as-spec.md`](book/13-testing-as-spec.md)
-- Compatibility and versioning rules: [
-  `docs/book/14-compatibility-and-versioning.md`](book/14-compatibility-and-versioning.md)
+- Compatibility and versioning rules: [`docs/book/14-compatibility-and-versioning.md`](book/14-compatibility-and-versioning.md)
 
 ## Quality Contracts
 

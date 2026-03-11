@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Collection, Mapping, Sequence
-from datetime import datetime, timezone
 from typing import Literal
 
 from . import __version__
@@ -17,10 +16,18 @@ from ._html_snippets import (
     _render_code_block,
     _try_pygments,
 )
-from .contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
-from .models import GroupItemLike, GroupMapLike, Suggestion
+from .contracts import DOCS_URL, ISSUES_URL, REPORT_SCHEMA_VERSION, REPOSITORY_URL
+from .models import GroupItemLike, GroupMapLike, StructuralFindingGroup, Suggestion
+from .report.derived import (
+    combine_source_kinds,
+    group_spread,
+    report_location_from_group_item,
+)
 from .report.explain_contract import format_group_instance_compare_meta
+from .report.findings import build_structural_findings_html_panel
+from .report.overview import build_report_overview
 from .report.suggestions import classify_clone_type
+from .structural_findings import normalize_structural_findings
 from .templates import FONT_CSS_URL, REPORT_TEMPLATE
 
 __all__ = [
@@ -90,6 +97,8 @@ def build_html_report(
     report_meta: Mapping[str, object] | None = None,
     metrics: Mapping[str, object] | None = None,
     suggestions: Sequence[Suggestion] | None = None,
+    structural_findings: Sequence[StructuralFindingGroup] | None = None,
+    report_document: Mapping[str, object] | None = None,
     title: str = "CodeClone Report",
     context_lines: int = 3,
     max_snippet_lines: int = 220,
@@ -109,7 +118,41 @@ def build_html_report(
         return normalized.rsplit("/", maxsplit=1)[-1]
 
     meta = dict(report_meta or {})
-    scan_root_raw = str(meta.get("scan_root", "")).strip()
+    baseline_meta = _as_mapping(meta.get("baseline"))
+    cache_meta = _as_mapping(meta.get("cache"))
+    metrics_baseline_meta = _as_mapping(meta.get("metrics_baseline"))
+    runtime_meta = _as_mapping(meta.get("runtime"))
+    report_document_map = _as_mapping(report_document)
+    derived_map = _as_mapping(report_document_map.get("derived"))
+    integrity_map = _as_mapping(report_document_map.get("integrity"))
+
+    def _meta_pick(*values: object) -> object | None:
+        for value in values:
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            return value
+        return None
+
+    report_schema_version = str(
+        meta.get("report_schema_version") or REPORT_SCHEMA_VERSION
+    )
+    report_generated_at = str(
+        _meta_pick(
+            meta.get("report_generated_at_utc"),
+            runtime_meta.get("report_generated_at_utc"),
+        )
+        or ""
+    ).strip()
+    brand_meta = (
+        f"Generated at {report_generated_at}"
+        if report_generated_at
+        else f"Report schema {report_schema_version}"
+    )
+    scan_root_raw = str(
+        _meta_pick(meta.get("scan_root"), runtime_meta.get("scan_root_absolute")) or ""
+    ).strip()
     project_name_raw = str(meta.get("project_name", "")).strip()
     brand_project_html = (
         f' <span class="brand-project">for '
@@ -173,6 +216,45 @@ def build_html_report(
                 f"{_escape_html(r)}</span>"
             )
         return _escape_html(risk_text)
+
+    def _source_kind_label(source_kind: str) -> str:
+        return {
+            "production": "Production",
+            "tests": "Tests",
+            "fixtures": "Fixtures",
+            "mixed": "Mixed",
+            "other": "Other",
+        }.get(source_kind, source_kind.title() or "Other")
+
+    def _source_kind_badge_html(source_kind: str) -> str:
+        normalized = source_kind.strip().lower() or "other"
+        return (
+            f'<span class="source-kind-badge source-kind-{_escape_attr(normalized)}">'
+            f"{_escape_html(_source_kind_label(normalized))}</span>"
+        )
+
+    def _format_source_breakdown(
+        source_breakdown: Mapping[str, object] | Sequence[object],
+    ) -> str:
+        rows: list[tuple[str, int]] = []
+        if isinstance(source_breakdown, Mapping):
+            rows = [
+                (str(key), _as_int(value))
+                for key, value in source_breakdown.items()
+                if _as_int(value) > 0
+            ]
+        else:
+            rows = [
+                (str(pair[0]), _as_int(pair[1]))
+                for pair in source_breakdown
+                if isinstance(pair, Sequence)
+                and len(pair) == 2
+                and _as_int(pair[1]) > 0
+            ]
+        rows.sort(key=lambda item: (item[0], item[1]))
+        return " · ".join(
+            f"{_source_kind_label(kind)} {count}" for kind, count in rows if count > 0
+        )
 
     baseline_loaded = bool(meta.get("baseline_loaded"))
     baseline_status = str(meta.get("baseline_status", "")).strip().lower()
@@ -452,6 +534,40 @@ def build_html_report(
     </div>
     <button class="btn" type="button" data-collapse-all="{section_id}">Collapse</button>
     <button class="btn" type="button" data-expand-all="{section_id}">Expand</button>
+    <label class="muted" for="source-kind-{section_id}">Context:</label>
+    <select
+      class="select"
+      id="source-kind-{section_id}"
+      data-source-kind-filter="{section_id}"
+    >
+      <option value="all">all</option>
+      <option value="production">production</option>
+      <option value="tests">tests</option>
+      <option value="fixtures">fixtures</option>
+      <option value="mixed">mixed</option>
+    </select>
+    <label class="muted" for="clone-type-{section_id}">Type:</label>
+    <select
+      class="select"
+      id="clone-type-{section_id}"
+      data-clone-type-filter="{section_id}"
+    >
+      <option value="all">all</option>
+      <option value="Type-1">Type-1</option>
+      <option value="Type-2">Type-2</option>
+      <option value="Type-3">Type-3</option>
+      <option value="Type-4">Type-4</option>
+    </select>
+    <label class="muted" for="spread-{section_id}">Spread:</label>
+    <select class="select" id="spread-{section_id}" data-spread-filter="{section_id}">
+      <option value="all">all</option>
+      <option value="high">high</option>
+      <option value="low">low</option>
+    </select>
+    <label class="inline-check">
+      <input type="checkbox" data-min-occurrences-filter="{section_id}" />
+      <span>4+ occurrences</span>
+    </label>
   </div>
 
   <div class="toolbar-right">
@@ -516,6 +632,18 @@ def build_html_report(
                 else "segment"
             )
             clone_type = classify_clone_type(items=items, kind=clone_kind)
+            group_locations = tuple(
+                report_location_from_group_item(item, scan_root=scan_root_raw)
+                for item in items
+            )
+            group_source_kind = combine_source_kinds(
+                location.source_kind for location in group_locations
+            )
+            spread_files, spread_functions = group_spread(group_locations)
+            spread_bucket = (
+                "high" if spread_files > 1 or spread_functions > 1 else "low"
+            )
+            group_summary += f" • spread {spread_functions} fn / {spread_files} files"
             block_group_attrs = ""
             if block_meta:
                 attrs = {
@@ -557,6 +685,16 @@ def build_html_report(
             arity_attr = _escape_attr(str(group_arity))
             block_group_attrs += f' data-group-arity="{arity_attr}"'
             block_group_attrs += f' data-clone-type="{_escape_attr(clone_type)}"'
+            block_group_attrs += (
+                f' data-source-kind="{_escape_attr(group_source_kind)}"'
+            )
+            block_group_attrs += f' data-spread-bucket="{_escape_attr(spread_bucket)}"'
+            block_group_attrs += (
+                f' data-spread-files="{_escape_attr(str(spread_files))}"'
+            )
+            block_group_attrs += (
+                f' data-spread-functions="{_escape_attr(str(spread_functions))}"'
+            )
 
             metrics_button = ""
             if section_id == "blocks":
@@ -584,6 +722,7 @@ def build_html_report(
                 "</div>"
                 "</div>"
                 '<div class="group-head-right">'
+                f"{_source_kind_badge_html(group_source_kind)}"
                 f'<span class="clone-type-badge">{_escape_html(clone_type)}</span>'
                 f'<span class="clone-count-badge">{group_arity}</span>'
                 f"{metrics_button}"
@@ -1190,8 +1329,19 @@ def build_html_report(
         )
         for item in dead_items_data[:200]
     ]
+    dead_high_confidence_items = sum(
+        1
+        for item in dead_items_data
+        if str(_as_mapping(item).get("confidence", "")).strip().lower() == "high"
+    )
 
     suggestions_rows = list(suggestions or ())
+    overview_data = _as_mapping(derived_map.get("overview"))
+    if not overview_data:
+        overview_data = build_report_overview(
+            suggestions=suggestions_rows,
+            metrics=metrics_map,
+        )
 
     def _glossary_tip(label: str) -> str:
         tip = _GLOSSARY.get(label.lower(), "")
@@ -1238,7 +1388,12 @@ def build_html_report(
     dependency_cycle_count = len(dep_cycles)
     dependency_max_depth = _as_int(dependencies_map.get("max_depth"))
     dead_total = _as_int(dead_code_summary.get("total"))
-    dead_high_confidence = _as_int(dead_code_summary.get("critical"))
+    dead_summary_high_confidence = _as_int(
+        dead_code_summary.get("high_confidence", dead_code_summary.get("critical"))
+    )
+    dead_high_confidence = dead_summary_high_confidence
+    if dead_total > 0 and dead_high_confidence == 0 and dead_high_confidence_items > 0:
+        dead_high_confidence = min(dead_total, dead_high_confidence_items)
 
     health_score_raw = health_map.get("score")
     health_score_known = (
@@ -1383,6 +1538,200 @@ def build_html_report(
             tip="Potentially unused functions, classes, or imports",
         ),
     ]
+
+    def _overview_cluster_header(title: str, subtitle: str | None = None) -> str:
+        subtitle_html = (
+            f'<p class="overview-cluster-copy">{_escape_html(subtitle)}</p>'
+            if subtitle
+            else ""
+        )
+        return (
+            '<div class="overview-cluster-header">'
+            f'<h3 class="subsection-title">{_escape_html(title)}</h3>'
+            f"{subtitle_html}"
+            "</div>"
+        )
+
+    def _overview_summary_list_html(items: Sequence[str]) -> str:
+        cleaned = [str(item).strip() for item in items if str(item).strip()]
+        if not cleaned:
+            return '<div class="overview-summary-value">none</div>'
+        return (
+            '<ul class="overview-summary-list">'
+            + "".join(f"<li>{_escape_html(item)}</li>" for item in cleaned)
+            + "</ul>"
+        )
+
+    def _overview_source_breakdown_html(
+        breakdown: Mapping[str, object],
+    ) -> str:
+        rows = tuple(
+            f"{_source_kind_label(str(kind))} {_as_int(count)}"
+            for kind, count in sorted(
+                breakdown.items(),
+                key=lambda item: (str(item[0]), _as_int(item[1])),
+            )
+            if _as_int(count) > 0
+        )
+        if rows:
+            return _overview_summary_list_html(rows)
+        return '<div class="overview-summary-value">n/a</div>'
+
+    def _overview_summary_item_html(
+        *,
+        label: str,
+        body_html: str,
+    ) -> str:
+        return (
+            '<article class="overview-summary-item">'
+            f'<div class="overview-summary-label">{_escape_html(label)}</div>'
+            f"{body_html}"
+            "</article>"
+        )
+
+    def _summary_chip_row(parts: Sequence[str], *, css_class: str) -> str:
+        cleaned = [str(part).strip() for part in parts if str(part).strip()]
+        if not cleaned:
+            return ""
+        return (
+            f'<div class="{css_class}">'
+            + "".join(
+                f'<span class="group-explain-item">{_escape_html(part)}</span>'
+                for part in cleaned
+            )
+            + "</div>"
+        )
+
+    def _overview_row_html(card: Mapping[str, object]) -> str:
+        severity = str(card.get("severity", "info"))
+        source_kind = str(card.get("source_kind", "other"))
+        category = str(card.get("category", ""))
+        title = str(card.get("title", ""))
+        summary_text = str(card.get("summary", ""))
+        confidence_text = str(card.get("confidence", ""))
+        location_text = str(card.get("location", ""))
+        count = _as_int(card.get("count"))
+        spread = _as_mapping(card.get("spread"))
+        spread_files = _as_int(spread.get("files"))
+        spread_functions = _as_int(spread.get("functions"))
+        clone_type = str(card.get("clone_type", "")).strip()
+        context_parts = [
+            severity,
+            _source_kind_label(source_kind),
+            category.replace("_", " "),
+        ]
+        if clone_type:
+            context_parts.append(clone_type)
+        context_text = " · ".join(part for part in context_parts if part)
+        stats_html = _summary_chip_row(
+            (
+                f"count={count}",
+                f"spread={spread_functions} fn / {spread_files} files",
+                f"confidence={confidence_text}",
+            ),
+            css_class="overview-row-stats",
+        )
+        return (
+            '<article class="overview-row" '
+            f'data-severity="{_escape_attr(severity)}" '
+            f'data-source-kind="{_escape_attr(source_kind)}">'
+            '<div class="overview-row-main">'
+            f'<div class="overview-row-title">{_escape_html(title)}</div>'
+            f'<div class="overview-row-summary">{_escape_html(summary_text)}</div>'
+            "</div>"
+            '<div class="overview-row-side">'
+            f'<div class="overview-row-context">{_escape_html(context_text)}</div>'
+            f"{stats_html}"
+            f'<div class="overview-row-location">{_escape_html(location_text)}</div>'
+            "</div>"
+            "</article>"
+        )
+
+    def _overview_section_html(
+        *,
+        title: str,
+        subtitle: str,
+        cards: Sequence[object],
+        empty_message: str,
+    ) -> str:
+        typed_cards = [_as_mapping(card) for card in cards if _as_mapping(card)]
+        if not typed_cards:
+            return (
+                '<section class="overview-cluster">'
+                f"{_overview_cluster_header(title, subtitle)}"
+                '<div class="overview-cluster-empty">'
+                f"{_escape_html(empty_message)}"
+                "</div>"
+                "</section>"
+            )
+        return (
+            '<section class="overview-cluster">'
+            f"{_overview_cluster_header(title, subtitle)}"
+            '<div class="overview-list">'
+            + "".join(_overview_row_html(card) for card in typed_cards)
+            + "</div></section>"
+        )
+
+    health_overview = _as_mapping(overview_data.get("health"))
+    top_risks = [
+        str(item).strip()
+        for item in _as_sequence(overview_data.get("top_risks"))
+        if str(item).strip()
+    ]
+    strongest_dimension = str(
+        health_overview.get("strongest_dimension", "n/a")
+    ).replace("_", " ")
+    weakest_dimension = str(health_overview.get("weakest_dimension", "n/a")).replace(
+        "_", " "
+    )
+    family_counts = _as_mapping(overview_data.get("families"))
+    executive_summary = (
+        '<section class="overview-cluster">'
+        + _overview_cluster_header(
+            "Executive Summary",
+            "Project-wide context derived from the full scanned root.",
+        )
+        + '<div class="overview-summary-grid">'
+        + _overview_summary_item_html(
+            label="Families",
+            body_html=_overview_summary_list_html(
+                (
+                    f"{_as_int(family_counts.get('clone_groups'))} clone groups",
+                    (
+                        f"{_as_int(family_counts.get('structural_findings'))} "
+                        "structural findings"
+                    ),
+                    f"{_as_int(family_counts.get('dead_code'))} dead code items",
+                    f"{_as_int(family_counts.get('metric_hotspots'))} metric hotspots",
+                )
+            ),
+        )
+        + _overview_summary_item_html(
+            label="Top risks",
+            body_html=_overview_summary_list_html(tuple(top_risks)),
+        )
+        + _overview_summary_item_html(
+            label="Health snapshot",
+            body_html=_overview_summary_list_html(
+                (
+                    "Score "
+                    f"{_escape_html(str(health_overview.get('score', 'n/a')))}"
+                    " / grade "
+                    f"{_escape_html(str(health_overview.get('grade', 'n/a')))}",
+                    f"Strongest dimension: {strongest_dimension}",
+                    f"Weakest dimension: {weakest_dimension}",
+                )
+            ),
+        )
+        + _overview_summary_item_html(
+            label="Source breakdown",
+            body_html=_overview_source_breakdown_html(
+                _as_mapping(overview_data.get("source_breakdown"))
+            ),
+        )
+        + "</div>"
+        + "</section>"
+    )
     health_gauge = _health_gauge_html(health_score, health_grade)
     overview_panel = (
         _insight_block(
@@ -1398,6 +1747,25 @@ def build_html_report(
         + "".join(overview_kpis)
         + "</div>"
         + "</div>"
+        + executive_summary
+        + _overview_section_html(
+            title="Highest Spread",
+            subtitle="Findings that touch the widest surface area first.",
+            cards=_as_sequence(overview_data.get("highest_spread")),
+            empty_message="No spread-heavy findings were recorded.",
+        )
+        + _overview_section_html(
+            title="Production Hotspots",
+            subtitle="Runtime-facing hotspots across production code.",
+            cards=_as_sequence(overview_data.get("production_hotspots")),
+            empty_message="No production-coded hotspots were identified.",
+        )
+        + _overview_section_html(
+            title="Test/Fixture Hotspots",
+            subtitle="Context-rich hotspots rooted in tests and fixtures.",
+            cards=_as_sequence(overview_data.get("test_fixture_hotspots")),
+            empty_message="No hotspots from tests or fixtures were identified.",
+        )
     )
 
     def _complexity_answer_and_tone() -> tuple[str, _Tone]:
@@ -1814,6 +2182,140 @@ def build_html_report(
         empty_message="No dead code detected.",
     )
 
+    def _suggestion_locations_html(suggestion: Suggestion) -> str:
+        if not suggestion.representative_locations:
+            return '<div class="suggestion-empty">No representative locations.</div>'
+        example_count = len(suggestion.representative_locations)
+        items_html = "".join(
+            "<li>"
+            f'<span class="suggestion-location-path">'
+            f"{_escape_html(location.relative_path)}"
+            f":{location.start_line}-{location.end_line}</span>"
+            f'<span class="suggestion-location-qualname">'
+            f"{_escape_html(_bare_qualname(location.qualname, location.filepath))}"
+            "</span>"
+            "</li>"
+            for location in suggestion.representative_locations
+        )
+        return (
+            '<details class="suggestion-disclosure suggestion-location-details">'
+            "<summary>"
+            "<span>Example locations</span>"
+            f'<span class="suggestion-disclosure-count">{example_count}</span>'
+            "</summary>"
+            f'<ul class="suggestion-location-list">{items_html}</ul>'
+            "</details>"
+        )
+
+    def _render_suggestion_card(suggestion: Suggestion) -> str:
+        actionable = "true" if suggestion.severity != "info" else "false"
+        spread_bucket = (
+            "high"
+            if suggestion.spread_files > 1 or suggestion.spread_functions > 1
+            else "low"
+        )
+        source_breakdown_text = _format_source_breakdown(suggestion.source_breakdown)
+        facts_title = _escape_html(suggestion.fact_kind or suggestion.category)
+        facts_summary = _escape_html(suggestion.fact_summary)
+        facts_spread = (
+            f"{suggestion.spread_functions} functions / {suggestion.spread_files} files"
+        )
+        facts_source = _escape_html(
+            source_breakdown_text or _source_kind_label(suggestion.source_kind)
+        )
+        facts_location = _escape_html(suggestion.location_label or suggestion.location)
+        context_parts = [
+            suggestion.severity,
+            _source_kind_label(suggestion.source_kind),
+            suggestion.category.replace("_", " "),
+        ]
+        if suggestion.clone_type:
+            context_parts.append(suggestion.clone_type)
+        context_text = " · ".join(part for part in context_parts if part)
+        steps_html = "".join(
+            f"<li>{_escape_html(step)}</li>" for step in suggestion.steps
+        )
+        spread_label = (
+            f"spread={suggestion.spread_functions} fn / {suggestion.spread_files} files"
+        )
+        stats_html = _summary_chip_row(
+            (
+                f"count={suggestion.fact_count}",
+                spread_label,
+                f"confidence={suggestion.confidence}",
+                f"priority={suggestion.priority:.2f}",
+                f"effort={suggestion.effort}",
+            ),
+            css_class="suggestion-card-stats",
+        )
+        next_step = (
+            _escape_html(suggestion.steps[0])
+            if suggestion.steps
+            else "No explicit refactoring steps provided."
+        )
+        steps_disclosure_html = (
+            '<details class="suggestion-disclosure">'
+            "<summary>"
+            "<span>Refactoring steps</span>"
+            f'<span class="suggestion-disclosure-count">{len(suggestion.steps)}</span>'
+            "</summary>"
+            f'<ol class="suggestion-steps">{steps_html}</ol>'
+            "</details>"
+            if suggestion.steps
+            else ""
+        )
+        return (
+            '<article class="suggestion-card" '
+            'data-suggestion-card="true" '
+            f'data-severity="{_escape_attr(suggestion.severity)}" '
+            f'data-category="{_escape_attr(suggestion.category)}" '
+            f'data-family="{_escape_attr(suggestion.finding_family)}" '
+            f'data-source-kind="{_escape_attr(suggestion.source_kind)}" '
+            f'data-clone-type="{_escape_attr(suggestion.clone_type)}" '
+            f'data-actionable="{actionable}" '
+            f'data-spread-bucket="{spread_bucket}" '
+            f'data-count="{_escape_attr(str(suggestion.fact_count))}">'
+            '<div class="suggestion-card-head">'
+            f'<div class="suggestion-card-title">{_escape_html(suggestion.title)}</div>'
+            f'<div class="suggestion-card-context">{_escape_html(context_text)}</div>'
+            "</div>"
+            f'<div class="suggestion-card-summary">{facts_summary}</div>'
+            f"{stats_html}"
+            '<div class="suggestion-sections">'
+            '<section class="suggestion-section">'
+            '<div class="suggestion-section-title">Facts</div>'
+            '<dl class="suggestion-fact-list">'
+            f"<div><dt>Finding</dt><dd>{facts_title}</dd></div>"
+            f"<div><dt>Summary</dt><dd>{facts_summary}</dd></div>"
+            f"<div><dt>Spread</dt><dd>{_escape_html(facts_spread)}</dd></div>"
+            f"<div><dt>Source breakdown</dt><dd>{facts_source}</dd></div>"
+            f"<div><dt>Representative scope</dt><dd>{facts_location}</dd></div>"
+            "</dl>"
+            "</section>"
+            '<section class="suggestion-section">'
+            '<div class="suggestion-section-title">Assessment</div>'
+            '<dl class="suggestion-fact-list">'
+            f"<div><dt>Severity</dt><dd>{_escape_html(suggestion.severity)}</dd></div>"
+            f"<div><dt>Confidence</dt><dd>{_escape_html(suggestion.confidence)}</dd></div>"
+            f"<div><dt>Priority</dt><dd>{_escape_html(f'{suggestion.priority:.2f}')}</dd></div>"
+            f"<div><dt>Family</dt><dd>{_escape_html(suggestion.finding_family)}</dd></div>"
+            "</dl>"
+            "</section>"
+            '<section class="suggestion-section">'
+            '<div class="suggestion-section-title">Suggested action</div>'
+            '<dl class="suggestion-fact-list">'
+            f"<div><dt>Effort</dt><dd>{_escape_html(suggestion.effort)}</dd></div>"
+            f"<div><dt>Next step</dt><dd>{next_step}</dd></div>"
+            "</dl>"
+            "</section>"
+            "</div>"
+            '<div class="suggestion-disclosures">'
+            f"{_suggestion_locations_html(suggestion)}"
+            f"{steps_disclosure_html}"
+            "</div>"
+            "</article>"
+        )
+
     def _build_suggestions_panel() -> str:
         suggestions_critical = sum(
             1 for suggestion in suggestions_rows if suggestion.severity == "critical"
@@ -1842,62 +2344,8 @@ def build_html_report(
             ),
             tone=("risk" if suggestions_critical > 0 else "warn"),
         )
-
-        def _th_sug(header: str) -> str:
-            tip = _escape_attr(_GLOSSARY.get(header.lower(), ""))
-            return (
-                f"<th>{_escape_html(header)} "
-                f'<span class="kpi-help" data-tip="{tip}">?</span></th>'
-            )
-
-        suggestions_header_html = "".join(
-            _th_sug(header)
-            for header in (
-                "Priority",
-                "Severity",
-                "Category",
-                "Title",
-                "Location",
-                "Effort",
-                "Steps",
-            )
-        )
-        suggestions_colgroup = (
-            "<colgroup>"
-            '<col style="width:74px">'  # Priority
-            '<col style="width:82px">'  # Severity
-            '<col style="width:100px">'  # Category
-            "<col>"  # Title (flex)
-            "<col>"  # Location (flex)
-            '<col style="width:78px">'  # Effort
-            '<col style="width:120px">'  # Steps
-            "</colgroup>"
-        )
-        suggestions_body_html = "".join(
-            (
-                "<tr "
-                f'data-suggestion-row="true" '
-                f'data-severity="{_escape_attr(suggestion.severity)}" '
-                f'data-category="{_escape_attr(suggestion.category)}">'
-                f'<td class="col-num">{_escape_html(f"{suggestion.priority:.2f}")}</td>'
-                f'<td class="col-badge">{_risk_badge_html(suggestion.severity)}</td>'
-                f'<td class="col-cat"><span class="category-badge">'
-                f"{_escape_html(suggestion.category)}</span></td>"
-                f'<td class="col-wide">{_escape_html(suggestion.title)}</td>'
-                f'<td class="col-path" title="{_escape_attr(suggestion.location)}">'
-                f"{_escape_html(_relative_path(suggestion.location))}</td>"
-                f'<td class="col-badge">{_risk_badge_html(suggestion.effort)}</td>'
-                '<td class="col-steps">'
-                "<details>"
-                "<summary>Show steps</summary>"
-                "<ol>"
-                + "".join(f"<li>{_escape_html(step)}</li>" for step in suggestion.steps)
-                + "</ol>"
-                "</details>"
-                "</td>"
-                "</tr>"
-            )
-            for suggestion in suggestions_rows
+        cards_html = "".join(
+            _render_suggestion_card(suggestion) for suggestion in suggestions_rows
         )
         return (
             suggestions_intro
@@ -1921,7 +2369,36 @@ def build_html_report(
             '<option value="cohesion">cohesion</option>'
             '<option value="dead_code">dead_code</option>'
             '<option value="dependency">dependency</option>'
+            '<option value="structural">structural</option>'
             "</select>"
+            '<label class="muted" for="suggestions-family">Family:</label>'
+            '<select class="select" id="suggestions-family" '
+            "data-suggestions-family>"
+            '<option value="all">All</option>'
+            '<option value="clones">clones</option>'
+            '<option value="structural">structural</option>'
+            '<option value="metrics">metrics</option>'
+            "</select>"
+            '<label class="muted" for="suggestions-source-kind">Context:</label>'
+            '<select class="select" id="suggestions-source-kind" '
+            "data-suggestions-source-kind>"
+            '<option value="all">All</option>'
+            '<option value="production">production</option>'
+            '<option value="tests">tests</option>'
+            '<option value="fixtures">fixtures</option>'
+            '<option value="mixed">mixed</option>'
+            "</select>"
+            '<label class="muted" for="suggestions-spread">Spread:</label>'
+            '<select class="select" id="suggestions-spread" '
+            "data-suggestions-spread>"
+            '<option value="all">All</option>'
+            '<option value="high">high</option>'
+            '<option value="low">low</option>'
+            "</select>"
+            '<label class="inline-check">'
+            '<input type="checkbox" data-suggestions-actionable />'
+            "<span>Only actionable</span>"
+            "</label>"
             "</div>"
             '<div class="toolbar-right">'
             '<span class="page-meta" data-suggestions-count>'
@@ -1929,14 +2406,26 @@ def build_html_report(
             "</span>"
             "</div>"
             "</div>"
-            '<div class="table-wrap"><table class="table">'
-            f"{suggestions_colgroup}"
-            f"<thead><tr>{suggestions_header_html}</tr></thead>"
-            f"<tbody data-suggestions-body>{suggestions_body_html}</tbody>"
-            "</table></div>"
+            '<div class="suggestions-grid" data-suggestions-body>'
+            f"{cards_html}"
+            "</div>"
         )
 
     suggestions_panel = _build_suggestions_panel()
+
+    sf_groups = list(normalize_structural_findings(structural_findings or ()))
+    sf_files: list[str] = sorted(
+        {occ.file_path for group in sf_groups for occ in group.items}
+    )
+    structural_findings_panel = build_structural_findings_html_panel(
+        sf_groups,
+        sf_files,
+        scan_root=scan_root_raw,
+        file_cache=file_cache,
+        context_lines=context_lines,
+        max_snippet_lines=max_snippet_lines,
+    )
+
     tab_defs = (
         ("overview", "Overview", overview_panel, ""),
         (
@@ -1978,6 +2467,12 @@ def build_html_report(
             suggestions_panel,
             _tab_badge(len(suggestions_rows)),
         ),
+        (
+            "structural-findings",
+            "Structural Findings",
+            structural_findings_panel,
+            _tab_badge(len(sf_groups)),
+        ),
     )
     tab_buttons_html = "".join(
         (
@@ -2005,84 +2500,280 @@ def build_html_report(
     )
 
     def _build_report_meta_panel() -> str:
-        baseline_path_value = meta.get("baseline_path")
-        scan_root_value = meta.get("scan_root")
+        baseline_path_value = _meta_pick(
+            meta.get("baseline_path"),
+            baseline_meta.get("path"),
+            runtime_meta.get("baseline_path_absolute"),
+        )
+        cache_path_value = _meta_pick(
+            meta.get("cache_path"),
+            cache_meta.get("path"),
+            runtime_meta.get("cache_path_absolute"),
+        )
+        metrics_baseline_path_value = _meta_pick(
+            meta.get("metrics_baseline_path"),
+            metrics_baseline_meta.get("path"),
+            runtime_meta.get("metrics_baseline_path_absolute"),
+        )
+        scan_root_value = _meta_pick(
+            meta.get("scan_root"),
+            runtime_meta.get("scan_root_absolute"),
+        )
+        python_tag_value = _meta_pick(meta.get("python_tag"))
+        report_mode_value = _meta_pick(meta.get("report_mode"), "full")
+        metrics_computed_value = _meta_pick(
+            meta.get("metrics_computed"),
+            meta.get("computed_metric_families"),
+        )
+        integrity_canonicalization = _as_mapping(integrity_map.get("canonicalization"))
+        integrity_digest = _as_mapping(integrity_map.get("digest"))
+        canonical_sections = ", ".join(
+            str(item)
+            for item in _as_sequence(integrity_canonicalization.get("sections"))
+            if str(item).strip()
+        )
         general_meta_rows: list[tuple[str, object]] = [
-            ("Report schema", meta.get("report_schema_version")),
-            ("CodeClone", meta.get("codeclone_version", __version__)),
-            ("Project", meta.get("project_name")),
+            ("CodeClone", _meta_pick(meta.get("codeclone_version"), __version__)),
+            ("Project", _meta_pick(meta.get("project_name"))),
+            ("Report schema", report_schema_version),
             ("Scan root", scan_root_value),
-            ("Python", meta.get("python_version")),
-            ("Analysis mode", meta.get("analysis_mode")),
+            ("Python", _meta_pick(meta.get("python_version"))),
+            ("Python tag", python_tag_value),
+            ("Analysis mode", _meta_pick(meta.get("analysis_mode"))),
+            ("Report mode", report_mode_value),
+            ("Report generated (UTC)", report_generated_at),
             (
                 "Metrics computed",
-                ", ".join(
-                    str(item) for item in _as_sequence(meta.get("metrics_computed"))
-                ),
+                ", ".join(str(item) for item in _as_sequence(metrics_computed_value)),
             ),
-            ("Health score", meta.get("health_score")),
-            ("Health grade", meta.get("health_grade")),
-            ("Source IO skipped", meta.get("files_skipped_source_io")),
+            ("Health score", _meta_pick(meta.get("health_score"))),
+            ("Health grade", _meta_pick(meta.get("health_grade"))),
+            ("Source IO skipped", _meta_pick(meta.get("files_skipped_source_io"))),
         ]
         clone_baseline_rows: list[tuple[str, object]] = [
             ("Baseline file", _path_basename(baseline_path_value)),
-            ("Baseline fingerprint", meta.get("baseline_fingerprint_version")),
-            ("Baseline schema", meta.get("baseline_schema_version")),
-            ("Baseline Python tag", meta.get("baseline_python_tag")),
-            ("Baseline generator name", meta.get("baseline_generator_name")),
-            ("Baseline generator version", meta.get("baseline_generator_version")),
-            ("Baseline payload sha256", meta.get("baseline_payload_sha256")),
+            ("Baseline path", baseline_path_value),
+            (
+                "Baseline status",
+                _meta_pick(meta.get("baseline_status"), baseline_meta.get("status")),
+            ),
+            (
+                "Baseline loaded",
+                _meta_pick(meta.get("baseline_loaded"), baseline_meta.get("loaded")),
+            ),
+            (
+                "Baseline fingerprint",
+                _meta_pick(
+                    meta.get("baseline_fingerprint_version"),
+                    baseline_meta.get("fingerprint_version"),
+                ),
+            ),
+            (
+                "Baseline schema",
+                _meta_pick(
+                    meta.get("baseline_schema_version"),
+                    baseline_meta.get("schema_version"),
+                ),
+            ),
+            (
+                "Baseline Python tag",
+                _meta_pick(
+                    meta.get("baseline_python_tag"),
+                    baseline_meta.get("python_tag"),
+                ),
+            ),
+            (
+                "Baseline generator name",
+                _meta_pick(
+                    meta.get("baseline_generator_name"),
+                    baseline_meta.get("generator_name"),
+                ),
+            ),
+            (
+                "Baseline generator version",
+                _meta_pick(
+                    meta.get("baseline_generator_version"),
+                    baseline_meta.get("generator_version"),
+                ),
+            ),
+            (
+                "Baseline payload sha256",
+                _meta_pick(
+                    meta.get("baseline_payload_sha256"),
+                    baseline_meta.get("payload_sha256"),
+                ),
+            ),
             (
                 "Baseline payload verified",
-                meta.get("baseline_payload_sha256_verified"),
+                _meta_pick(
+                    meta.get("baseline_payload_sha256_verified"),
+                    baseline_meta.get("payload_sha256_verified"),
+                ),
             ),
-            ("Baseline loaded", meta.get("baseline_loaded")),
-            ("Baseline status", meta.get("baseline_status")),
-            ("Baseline path", baseline_path_value),
         ]
         metrics_baseline_rows: list[tuple[str, object]] = [
-            ("Metrics baseline path", meta.get("metrics_baseline_path")),
-            ("Metrics baseline loaded", meta.get("metrics_baseline_loaded")),
-            ("Metrics baseline status", meta.get("metrics_baseline_status")),
+            ("Metrics baseline path", metrics_baseline_path_value),
+            (
+                "Metrics baseline loaded",
+                _meta_pick(
+                    meta.get("metrics_baseline_loaded"),
+                    metrics_baseline_meta.get("loaded"),
+                ),
+            ),
+            (
+                "Metrics baseline status",
+                _meta_pick(
+                    meta.get("metrics_baseline_status"),
+                    metrics_baseline_meta.get("status"),
+                ),
+            ),
             (
                 "Metrics baseline schema",
-                meta.get("metrics_baseline_schema_version"),
+                _meta_pick(
+                    meta.get("metrics_baseline_schema_version"),
+                    metrics_baseline_meta.get("schema_version"),
+                ),
             ),
             (
                 "Metrics baseline payload sha256",
-                meta.get("metrics_baseline_payload_sha256"),
+                _meta_pick(
+                    meta.get("metrics_baseline_payload_sha256"),
+                    metrics_baseline_meta.get("payload_sha256"),
+                ),
             ),
             (
                 "Metrics baseline payload verified",
-                meta.get("metrics_baseline_payload_sha256_verified"),
+                _meta_pick(
+                    meta.get("metrics_baseline_payload_sha256_verified"),
+                    metrics_baseline_meta.get("payload_sha256_verified"),
+                ),
             ),
         ]
-        cache_rows: list[tuple[str, object]] = []
-        if "cache_path" in meta:
-            cache_rows.append(("Cache path", meta.get("cache_path")))
-        if "cache_schema_version" in meta:
-            cache_rows.append(("Cache schema", meta.get("cache_schema_version")))
-        if "cache_status" in meta:
-            cache_rows.append(("Cache status", meta.get("cache_status")))
-        if "cache_used" in meta:
-            cache_rows.append(("Cache used", meta.get("cache_used")))
+        cache_rows: list[tuple[str, object]] = [
+            ("Cache path", cache_path_value),
+            (
+                "Cache schema",
+                _meta_pick(
+                    meta.get("cache_schema_version"),
+                    cache_meta.get("schema_version"),
+                ),
+            ),
+            (
+                "Cache status",
+                _meta_pick(meta.get("cache_status"), cache_meta.get("status")),
+            ),
+            ("Cache used", _meta_pick(meta.get("cache_used"), cache_meta.get("used"))),
+        ]
+        runtime_rows = [
+            row
+            for row in (
+                ("Scan root absolute", runtime_meta.get("scan_root_absolute")),
+                ("Baseline path absolute", runtime_meta.get("baseline_path_absolute")),
+                ("Cache path absolute", runtime_meta.get("cache_path_absolute")),
+                (
+                    "Metrics baseline path absolute",
+                    runtime_meta.get("metrics_baseline_path_absolute"),
+                ),
+            )
+            if _meta_pick(row[1]) is not None
+        ]
+        integrity_rows = [
+            row
+            for row in (
+                ("Canonicalization version", integrity_canonicalization.get("version")),
+                ("Canonicalization scope", integrity_canonicalization.get("scope")),
+                ("Canonical sections", canonical_sections),
+                ("Digest algorithm", integrity_digest.get("algorithm")),
+                ("Digest value", integrity_digest.get("value")),
+                ("Digest verified", integrity_digest.get("verified")),
+            )
+            if _meta_pick(row[1]) is not None
+        ]
 
         meta_sections = [
             ("General", general_meta_rows),
             ("Clone Baseline", clone_baseline_rows),
             ("Metrics Baseline", metrics_baseline_rows),
             ("Cache", cache_rows),
+            ("Runtime", runtime_rows),
+            ("Integrity", integrity_rows),
         ]
         metrics_computed_csv = ",".join(
-            str(item) for item in _as_sequence(meta.get("metrics_computed"))
+            str(item) for item in _as_sequence(metrics_computed_value)
+        )
+        baseline_fingerprint_version = _meta_pick(
+            meta.get("baseline_fingerprint_version"),
+            baseline_meta.get("fingerprint_version"),
+        )
+        baseline_schema_version = _meta_pick(
+            meta.get("baseline_schema_version"),
+            baseline_meta.get("schema_version"),
+        )
+        baseline_python_tag = _meta_pick(
+            meta.get("baseline_python_tag"),
+            baseline_meta.get("python_tag"),
+        )
+        baseline_generator_name = _meta_pick(
+            meta.get("baseline_generator_name"),
+            baseline_meta.get("generator_name"),
+        )
+        baseline_generator_version = _meta_pick(
+            meta.get("baseline_generator_version"),
+            baseline_meta.get("generator_version"),
+        )
+        baseline_payload_sha256 = _meta_pick(
+            meta.get("baseline_payload_sha256"),
+            baseline_meta.get("payload_sha256"),
+        )
+        baseline_payload_verified = _meta_display(
+            _meta_pick(
+                meta.get("baseline_payload_sha256_verified"),
+                baseline_meta.get("payload_sha256_verified"),
+            )
+        )
+        baseline_loaded = _meta_display(
+            _meta_pick(meta.get("baseline_loaded"), baseline_meta.get("loaded"))
+        )
+        baseline_status = _meta_pick(
+            meta.get("baseline_status"),
+            baseline_meta.get("status"),
+        )
+        cache_schema_version = _meta_pick(
+            meta.get("cache_schema_version"),
+            cache_meta.get("schema_version"),
+        )
+        cache_status = _meta_pick(meta.get("cache_status"), cache_meta.get("status"))
+        cache_used = _meta_display(
+            _meta_pick(meta.get("cache_used"), cache_meta.get("used"))
+        )
+        metrics_baseline_loaded = _meta_display(
+            _meta_pick(
+                meta.get("metrics_baseline_loaded"),
+                metrics_baseline_meta.get("loaded"),
+            )
+        )
+        metrics_baseline_status = _meta_pick(
+            meta.get("metrics_baseline_status"),
+            metrics_baseline_meta.get("status"),
+        )
+        metrics_baseline_schema_version = _meta_pick(
+            meta.get("metrics_baseline_schema_version"),
+            metrics_baseline_meta.get("schema_version"),
+        )
+        metrics_baseline_payload_sha256 = _meta_pick(
+            meta.get("metrics_baseline_payload_sha256"),
+            metrics_baseline_meta.get("payload_sha256"),
+        )
+        metrics_baseline_payload_verified = _meta_display(
+            _meta_pick(
+                meta.get("metrics_baseline_payload_sha256_verified"),
+                metrics_baseline_meta.get("payload_sha256_verified"),
+            )
         )
 
         meta_attrs = " ".join(
             [
-                (
-                    'data-report-schema-version="'
-                    f'{_escape_attr(meta.get("report_schema_version"))}"'
-                ),
+                (f'data-report-schema-version="{_escape_attr(report_schema_version)}"'),
                 (
                     'data-codeclone-version="'
                     f'{_escape_attr(meta.get("codeclone_version", __version__))}"'
@@ -2090,7 +2781,10 @@ def build_html_report(
                 f'data-project-name="{_escape_attr(meta.get("project_name"))}"',
                 f'data-scan-root="{_escape_attr(scan_root_value)}"',
                 f'data-python-version="{_escape_attr(meta.get("python_version"))}"',
+                f'data-python-tag="{_escape_attr(python_tag_value)}"',
                 f'data-analysis-mode="{_escape_attr(meta.get("analysis_mode"))}"',
+                f'data-report-mode="{_escape_attr(report_mode_value)}"',
+                (f'data-report-generated-at-utc="{_escape_attr(report_generated_at)}"'),
                 (f'data-metrics-computed="{_escape_attr(metrics_computed_csv)}"'),
                 f'data-health-score="{_escape_attr(meta.get("health_score"))}"',
                 f'data-health-grade="{_escape_attr(meta.get("health_grade"))}"',
@@ -2098,65 +2792,96 @@ def build_html_report(
                 f'data-baseline-path="{_escape_attr(baseline_path_value)}"',
                 (
                     'data-baseline-fingerprint-version="'
-                    f'{_escape_attr(meta.get("baseline_fingerprint_version"))}"'
+                    f'{_escape_attr(baseline_fingerprint_version)}"'
                 ),
-                f'data-baseline-schema-version="{_escape_attr(meta.get("baseline_schema_version"))}"',
                 (
-                    'data-baseline-python-tag="'
-                    f'{_escape_attr(meta.get("baseline_python_tag"))}"'
+                    'data-baseline-schema-version="'
+                    f'{_escape_attr(baseline_schema_version)}"'
                 ),
+                (f'data-baseline-python-tag="{_escape_attr(baseline_python_tag)}"'),
                 (
                     'data-baseline-generator-name="'
-                    f'{_escape_attr(meta.get("baseline_generator_name"))}"'
+                    f'{_escape_attr(baseline_generator_name)}"'
                 ),
                 (
                     'data-baseline-generator-version="'
-                    f'{_escape_attr(meta.get("baseline_generator_version"))}"'
+                    f'{_escape_attr(baseline_generator_version)}"'
                 ),
                 (
                     'data-baseline-payload-sha256="'
-                    f'{_escape_attr(meta.get("baseline_payload_sha256"))}"'
+                    f'{_escape_attr(baseline_payload_sha256)}"'
                 ),
                 (
                     'data-baseline-payload-verified="'
-                    f'{_escape_attr(_meta_display(meta.get("baseline_payload_sha256_verified")))}"'
+                    f'{_escape_attr(baseline_payload_verified)}"'
                 ),
-                f'data-baseline-loaded="{_escape_attr(_meta_display(meta.get("baseline_loaded")))}"',
-                f'data-baseline-status="{_escape_attr(meta.get("baseline_status"))}"',
-                f'data-cache-path="{_escape_attr(meta.get("cache_path"))}"',
-                (
-                    'data-cache-schema-version="'
-                    f'{_escape_attr(meta.get("cache_schema_version"))}"'
-                ),
-                f'data-cache-status="{_escape_attr(meta.get("cache_status"))}"',
-                f'data-cache-used="{_escape_attr(_meta_display(meta.get("cache_used")))}"',
+                f'data-baseline-loaded="{_escape_attr(baseline_loaded)}"',
+                f'data-baseline-status="{_escape_attr(baseline_status)}"',
+                f'data-cache-path="{_escape_attr(cache_path_value)}"',
+                (f'data-cache-schema-version="{_escape_attr(cache_schema_version)}"'),
+                f'data-cache-status="{_escape_attr(cache_status)}"',
+                f'data-cache-used="{_escape_attr(cache_used)}"',
                 (
                     'data-files-skipped-source-io="'
                     f'{_escape_attr(meta.get("files_skipped_source_io"))}"'
                 ),
                 (
                     'data-metrics-baseline-path="'
-                    f'{_escape_attr(meta.get("metrics_baseline_path"))}"'
+                    f'{_escape_attr(metrics_baseline_path_value)}"'
                 ),
                 (
                     'data-metrics-baseline-loaded="'
-                    f'{_escape_attr(_meta_display(meta.get("metrics_baseline_loaded")))}"'
+                    f'{_escape_attr(metrics_baseline_loaded)}"'
                 ),
                 (
                     'data-metrics-baseline-status="'
-                    f'{_escape_attr(meta.get("metrics_baseline_status"))}"'
+                    f'{_escape_attr(metrics_baseline_status)}"'
                 ),
                 (
                     'data-metrics-baseline-schema-version="'
-                    f'{_escape_attr(meta.get("metrics_baseline_schema_version"))}"'
+                    f'{_escape_attr(metrics_baseline_schema_version)}"'
                 ),
                 (
                     'data-metrics-baseline-payload-sha256="'
-                    f'{_escape_attr(meta.get("metrics_baseline_payload_sha256"))}"'
+                    f'{_escape_attr(metrics_baseline_payload_sha256)}"'
                 ),
                 (
                     'data-metrics-baseline-payload-verified="'
-                    f'{_escape_attr(_meta_display(meta.get("metrics_baseline_payload_sha256_verified")))}"'
+                    f'{_escape_attr(metrics_baseline_payload_verified)}"'
+                ),
+                (
+                    'data-runtime-scan-root-absolute="'
+                    f'{_escape_attr(runtime_meta.get("scan_root_absolute"))}"'
+                ),
+                (
+                    'data-runtime-baseline-path-absolute="'
+                    f'{_escape_attr(runtime_meta.get("baseline_path_absolute"))}"'
+                ),
+                (
+                    'data-runtime-cache-path-absolute="'
+                    f'{_escape_attr(runtime_meta.get("cache_path_absolute"))}"'
+                ),
+                (
+                    'data-runtime-metrics-baseline-path-absolute="'
+                    f'{_escape_attr(runtime_meta.get("metrics_baseline_path_absolute"))}"'
+                ),
+                (
+                    'data-canonicalization-version="'
+                    f'{_escape_attr(integrity_canonicalization.get("version"))}"'
+                ),
+                (
+                    'data-canonicalization-scope="'
+                    f'{_escape_attr(integrity_canonicalization.get("scope"))}"'
+                ),
+                (f'data-canonical-sections="{_escape_attr(canonical_sections)}"'),
+                (
+                    'data-digest-algorithm="'
+                    f'{_escape_attr(integrity_digest.get("algorithm"))}"'
+                ),
+                (f'data-digest-value="{_escape_attr(integrity_digest.get("value"))}"'),
+                (
+                    'data-digest-verified="'
+                    f'{_escape_attr(_meta_display(integrity_digest.get("verified")))}"'
                 ),
             ]
         )
@@ -2169,6 +2894,12 @@ def build_html_report(
                 "Baseline payload sha256",
                 "Metrics baseline payload sha256",
                 "Metrics baseline path",
+                "Scan root absolute",
+                "Baseline path absolute",
+                "Cache path absolute",
+                "Metrics baseline path absolute",
+                "Canonical sections",
+                "Digest value",
             }:
                 cls.append("meta-item-wide")
             if label in {
@@ -2177,6 +2908,7 @@ def build_html_report(
                 "Cache used",
                 "Metrics baseline loaded",
                 "Metrics baseline payload verified",
+                "Digest verified",
             }:
                 cls.append("meta-item-boolean")
             return " ".join(cls)
@@ -2188,6 +2920,7 @@ def build_html_report(
                 "Cache used",
                 "Metrics baseline loaded",
                 "Metrics baseline payload verified",
+                "Digest verified",
             } and isinstance(value, bool):
                 badge_cls = "meta-bool-true" if value else "meta-bool-false"
                 text = "true" if value else "false"
@@ -2229,8 +2962,11 @@ def build_html_report(
             return f'<span class="prov-badge {color}">{_escape_html(label)}</span>'
 
         prov_badges: list[str] = []
-        bl_verified = meta.get("baseline_payload_sha256_verified")
-        bl_loaded = meta.get("baseline_loaded")
+        bl_verified = _meta_pick(
+            meta.get("baseline_payload_sha256_verified"),
+            baseline_meta.get("payload_sha256_verified"),
+        )
+        bl_loaded = _meta_pick(meta.get("baseline_loaded"), baseline_meta.get("loaded"))
         if bl_verified is True:
             prov_badges.append(_prov_badge("Baseline verified", "green"))
         elif bl_loaded is True and bl_verified is not True:
@@ -2238,32 +2974,47 @@ def build_html_report(
         elif bl_loaded is False or bl_loaded is None:
             prov_badges.append(_prov_badge("Baseline missing", "amber"))
 
-        schema_ver = meta.get("report_schema_version")
+        schema_ver = report_schema_version
         if schema_ver:
             prov_badges.append(_prov_badge(f"Schema {schema_ver}", "neutral"))
 
-        fp_ver = meta.get("baseline_fingerprint_version")
+        fp_ver = _meta_pick(
+            meta.get("baseline_fingerprint_version"),
+            baseline_meta.get("fingerprint_version"),
+        )
         if fp_ver is not None:
             prov_badges.append(_prov_badge(f"Fingerprint {fp_ver}", "neutral"))
 
-        gen_name = meta.get("baseline_generator_name", "")
+        gen_name = str(
+            _meta_pick(
+                meta.get("baseline_generator_name"),
+                baseline_meta.get("generator_name"),
+            )
+            or ""
+        )
         if gen_name and gen_name != "codeclone":
             prov_badges.append(_prov_badge(f"Generator mismatch: {gen_name}", "red"))
 
-        cache_used = meta.get("cache_used")
-        if cache_used is True:
+        cache_used_value = _meta_pick(meta.get("cache_used"), cache_meta.get("used"))
+        if cache_used_value is True:
             prov_badges.append(_prov_badge("Cache hit", "green"))
-        elif cache_used is False:
+        elif cache_used_value is False:
             prov_badges.append(_prov_badge("Cache miss", "amber"))
         else:
             prov_badges.append(_prov_badge("Cache N/A", "neutral"))
 
-        analysis_mode = meta.get("analysis_mode", "")
+        analysis_mode = str(_meta_pick(meta.get("analysis_mode")) or "")
         if analysis_mode:
             prov_badges.append(_prov_badge(f"Mode: {analysis_mode}", "neutral"))
 
-        mbl_loaded = meta.get("metrics_baseline_loaded")
-        mbl_verified = meta.get("metrics_baseline_payload_sha256_verified")
+        mbl_loaded = _meta_pick(
+            meta.get("metrics_baseline_loaded"),
+            metrics_baseline_meta.get("loaded"),
+        )
+        mbl_verified = _meta_pick(
+            meta.get("metrics_baseline_payload_sha256_verified"),
+            metrics_baseline_meta.get("payload_sha256_verified"),
+        )
         if mbl_verified is True:
             prov_badges.append(_prov_badge("Metrics baseline verified", "green"))
         elif mbl_loaded is True and mbl_verified is not True:
@@ -2303,7 +3054,7 @@ def build_html_report(
         title=_escape_html(title),
         version=__version__,
         brand_project_html=brand_project_html,
-        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        brand_meta=_escape_html(brand_meta),
         pyg_dark=pyg_dark,
         pyg_light=pyg_light,
         global_novelty_html=global_novelty_html,

@@ -8,7 +8,7 @@ Define terms exactly as used by code and tests.
 
 - Baseline identifiers and statuses: `codeclone/baseline.py`
 - Cache statuses and compact layout: `codeclone/cache.py`
-- Report schema and group layouts: `codeclone/report/serialize.py`
+- Report schema and group layouts: `codeclone/report/json_contract.py`
 
 ## Data model
 
@@ -20,7 +20,7 @@ Define terms exactly as used by code and tests.
 - **schema_version**:
     - baseline schema (`meta.schema_version`) for baseline compatibility.
     - cache schema (`v`) for cache compatibility.
-    - report schema (`meta.report_schema_version`) for report format compatibility.
+    - report schema (`report_schema_version`) for report format compatibility.
 - **payload_sha256**: canonical baseline semantic hash.
 - **trusted baseline**: baseline loaded + status `ok`.
 
@@ -40,7 +40,7 @@ Refs:
 
 Refs:
 
-- `codeclone/report/serialize.py:to_json_report`
+- `codeclone/report/json_contract.py:build_report_document`
 - `codeclone/cli.py:_main_impl`
 
 ## Invariants (MUST)

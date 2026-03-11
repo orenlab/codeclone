@@ -3,6 +3,7 @@ import os
 import sys
 from argparse import Namespace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -260,7 +261,7 @@ def test_print_summary_invariant_warning(
 ) -> None:
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
     cli_summary._print_summary(
-        console=cli.console,
+        console=cast("cli_summary._Printer", cli.console),
         quiet=False,
         files_found=1,
         files_analyzed=0,
@@ -274,6 +275,52 @@ def test_print_summary_invariant_warning(
     )
     out = capsys.readouterr().out
     assert "Summary accounting mismatch" in out
+
+
+def test_compact_summary_labels_use_machine_scannable_keys() -> None:
+    assert (
+        ui.fmt_summary_compact(found=93, analyzed=1, cache_hits=92, skipped=0)
+        == "Summary  found=93  analyzed=1  cached=92  skipped=0"
+    )
+    assert (
+        ui.fmt_summary_compact_metrics(
+            cc_avg=2.8,
+            cc_max=21,
+            cbo_avg=0.6,
+            cbo_max=8,
+            lcom_avg=1.2,
+            lcom_max=4,
+            cycles=0,
+            dead=1,
+            health=85,
+            grade="B",
+        )
+        == "Metrics  cc=2.8/21  cbo=0.6/8  lcom4=1.2/4"
+        "  cycles=0  dead_code=1  health=85(B)"
+    )
+
+
+def test_ui_summary_formatters_cover_optional_branches() -> None:
+    assert ui._vn(0) == "[dim]0[/dim]"
+    assert ui._vn(1200) == "1,200"
+
+    parsed = ui.fmt_summary_parsed(lines=1200, functions=3, methods=2, classes=1)
+    assert parsed is not None
+    assert "1,200" in parsed
+    assert "[bold cyan]3[/bold cyan] functions" in parsed
+    assert "[bold cyan]2[/bold cyan] methods" in parsed
+    assert "[bold cyan]1[/bold cyan] classes" in parsed
+
+    clones = ui.fmt_summary_clones(
+        func=1,
+        block=2,
+        segment=3,
+        suppressed=1,
+        new=0,
+    )
+    assert "[bold yellow]3[/bold yellow] seg" in clones
+
+    assert "5 detected" in ui.fmt_metrics_cycles(5)
 
 
 def test_configure_metrics_mode_rejects_skip_metrics_with_metrics_flags(
@@ -401,6 +448,7 @@ def _stub_discovery_result() -> pipeline.DiscoveryResult:
         files_found=0,
         cache_hits=0,
         files_skipped=0,
+        all_file_paths=(),
         cached_units=(),
         cached_blocks=(),
         cached_segments=(),
@@ -546,7 +594,9 @@ def test_main_impl_update_metrics_baseline_requires_project_metrics(
 
 
 def test_main_impl_prints_metric_gate_reasons_and_exits_gating_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
     monkeypatch.setattr(
@@ -569,12 +619,23 @@ def test_main_impl_prints_metric_gate_reasons_and_exits_gating_failure(
         "gate",
         lambda **_kwargs: pipeline.GatingResult(
             exit_code=3,
-            reasons=("metric:health regression", "metric:complexity threshold"),
+            reasons=(
+                "metric:Health score regressed vs metrics baseline: delta=-1.",
+                "metric:Complexity threshold exceeded: max CC=21, threshold=20.",
+            ),
         ),
     )
     with pytest.raises(SystemExit) as exc:
         cli._main_impl()
     assert exc.value.code == 3
+    out = capsys.readouterr().out
+    for needle in (
+        "GATING FAILURE [metrics]",
+        "policy",
+        "complexity_max",
+        "health_delta",
+    ):
+        assert needle in out
 
 
 def test_main_impl_uses_configured_metrics_baseline_without_cli_flag(

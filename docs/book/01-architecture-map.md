@@ -43,7 +43,7 @@ Refs:
 
 Refs:
 
-- `codeclone/report/serialize.py:to_json_report`
+- `codeclone/report/json_contract.py:build_report_document`
 - `codeclone/html_report.py:build_html_report`
 - `codeclone/baseline.py:Baseline.load`
 - `codeclone/metrics_baseline.py:MetricsBaseline.load`
@@ -57,7 +57,7 @@ Refs:
 
 Refs:
 
-- `codeclone/report/serialize.py:to_json_report`
+- `codeclone/report/json_contract.py:build_report_document`
 - `codeclone/report/explain.py:build_block_group_facts`
 - `codeclone/baseline.py:BaselineStatus`
 - `codeclone/metrics_baseline.py:MetricsBaselineStatus`
@@ -81,11 +81,11 @@ Refs:
 Refs:
 
 - `codeclone/scanner.py:iter_py_files`
-- `codeclone/report/serialize.py:GROUP_ITEM_LAYOUT`
+- `codeclone/report/json_contract.py:build_report_document`
 
 ## Locked by tests
 
-- `tests/test_report.py::test_report_json_compact_v20_contract`
+- `tests/test_report.py::test_report_json_compact_v21_contract`
 - `tests/test_html_report.py::test_html_report_uses_core_block_group_facts`
 - `tests/test_cache.py::test_cache_v13_uses_relpaths_when_root_set`
 - `tests/test_cli_unit.py::test_argument_parser_contract_error_marker_for_invalid_args`
@@ -98,15 +98,15 @@ Refs:
 
 ## Chapter map
 
-| Topic | Primary chapters |
-| --- | --- |
-| CLI behavior and failure routing | [03-contracts-exit-codes.md](03-contracts-exit-codes.md), [09-cli.md](09-cli.md) |
-| Config precedence and defaults | [04-config-and-defaults.md](04-config-and-defaults.md) |
-| Core processing pipeline | [05-core-pipeline.md](05-core-pipeline.md) |
-| Clone baseline trust/compat/integrity | [06-baseline.md](06-baseline.md) |
-| Cache trust and fail-open behavior | [07-cache.md](07-cache.md) |
-| Report schema and provenance | [08-report.md](08-report.md), [10-html-render.md](10-html-render.md) |
-| Metrics gates and metrics baseline | [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md) |
-| Dead-code liveness policy | [16-dead-code-contract.md](16-dead-code-contract.md) |
-| Suggestions and clone typing | [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md) |
-| Determinism and versioning policy | [12-determinism.md](12-determinism.md), [14-compatibility-and-versioning.md](14-compatibility-and-versioning.md) |
+| Topic                                 | Primary chapters                                                                                                 |
+|---------------------------------------|------------------------------------------------------------------------------------------------------------------|
+| CLI behavior and failure routing      | [03-contracts-exit-codes.md](03-contracts-exit-codes.md), [09-cli.md](09-cli.md)                                 |
+| Config precedence and defaults        | [04-config-and-defaults.md](04-config-and-defaults.md)                                                           |
+| Core processing pipeline              | [05-core-pipeline.md](05-core-pipeline.md)                                                                       |
+| Clone baseline trust/compat/integrity | [06-baseline.md](06-baseline.md)                                                                                 |
+| Cache trust and fail-open behavior    | [07-cache.md](07-cache.md)                                                                                       |
+| Report schema and provenance          | [08-report.md](08-report.md), [10-html-render.md](10-html-render.md)                                             |
+| Metrics gates and metrics baseline    | [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)                                               |
+| Dead-code liveness policy             | [16-dead-code-contract.md](16-dead-code-contract.md)                                                             |
+| Suggestions and clone typing          | [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)                                         |
+| Determinism and versioning policy     | [12-determinism.md](12-determinism.md), [14-compatibility-and-versioning.md](14-compatibility-and-versioning.md) |

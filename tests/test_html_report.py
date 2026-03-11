@@ -18,8 +18,14 @@ from codeclone.html_report import (
 from codeclone.html_report import (
     build_html_report as _core_build_html_report,
 )
-from codeclone.models import Suggestion
-from codeclone.report import build_block_group_facts, to_json_report
+from codeclone.models import (
+    StructuralFindingGroup,
+    StructuralFindingOccurrence,
+    Suggestion,
+)
+from codeclone.report import build_block_group_facts
+from codeclone.report.json_contract import build_report_document
+from codeclone.report.serialize import render_json_report_document
 from tests._report_fixtures import (
     REPEATED_ASSERT_SOURCE,
     repeated_block_group_key,
@@ -29,6 +35,19 @@ from tests._report_fixtures import (
 )
 
 _REPEATED_BLOCK_GROUP_KEY = repeated_block_group_key()
+
+
+def to_json_report(
+    func_groups: dict[str, list[dict[str, Any]]],
+    block_groups: dict[str, list[dict[str, Any]]],
+    segment_groups: dict[str, list[dict[str, Any]]],
+) -> str:
+    payload = build_report_document(
+        func_groups=func_groups,
+        block_groups=block_groups,
+        segment_groups=segment_groups,
+    )
+    return render_json_report_document(payload)
 
 
 def build_html_report(
@@ -306,6 +325,160 @@ def test_html_report_exposes_scope_counter_hooks_for_clone_ui(tmp_path: Path) ->
     assert "updateCloneScopeCounters" in html
 
 
+def test_html_report_structural_findings_tab_uses_normalized_groups() -> None:
+    meaningful_sig = {
+        "calls": "0",
+        "has_loop": "1",
+        "has_try": "0",
+        "nested_if": "0",
+        "raises": "0",
+        "stmt_seq": "Expr,For",
+        "terminal": "fallthrough",
+    }
+    trivial_sig = {
+        "calls": "2+",
+        "has_loop": "0",
+        "has_try": "0",
+        "nested_if": "0",
+        "raises": "0",
+        "stmt_seq": "Expr",
+        "terminal": "expr",
+    }
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        structural_findings=[
+            StructuralFindingGroup(
+                finding_kind="duplicated_branches",
+                finding_key="a" * 40,
+                signature=meaningful_sig,
+                items=(
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key="a" * 40,
+                        file_path="/proj/a.py",
+                        qualname="mod:fn",
+                        start=10,
+                        end=12,
+                        signature=meaningful_sig,
+                    ),
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key="a" * 40,
+                        file_path="/proj/a.py",
+                        qualname="mod:fn",
+                        start=20,
+                        end=22,
+                        signature=meaningful_sig,
+                    ),
+                ),
+            ),
+            StructuralFindingGroup(
+                finding_kind="duplicated_branches",
+                finding_key="b" * 40,
+                signature=trivial_sig,
+                items=(
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key="b" * 40,
+                        file_path="/proj/a.py",
+                        qualname="mod:fn",
+                        start=30,
+                        end=30,
+                        signature=trivial_sig,
+                    ),
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key="b" * 40,
+                        file_path="/proj/a.py",
+                        qualname="mod:fn",
+                        start=40,
+                        end=40,
+                        signature=trivial_sig,
+                    ),
+                ),
+            ),
+        ],
+    )
+    assert 'data-tab="structural-findings"' in html
+    assert ">1</span>" in html
+    assert "Repeated non-overlapping branch-body shapes" in html
+    assert "scope=1 function" in html
+    assert "stmt_seq=Expr,For" in html
+    assert "stmt_seq=Expr</span>" not in html
+
+
+def test_html_report_structural_findings_why_modal_renders_examples(
+    tmp_path: Path,
+) -> None:
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "def fn(x):\n"
+        "    if x == 1:\n"
+        '        warn("a")\n'
+        "        return None\n"
+        "    elif x == 2:\n"
+        '        warn("b")\n'
+        "        return None\n",
+        "utf-8",
+    )
+    sig = {
+        "calls": "1",
+        "has_loop": "0",
+        "has_try": "0",
+        "nested_if": "0",
+        "raises": "0",
+        "stmt_seq": "Expr,Return",
+        "terminal": "return_const",
+    }
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        structural_findings=[
+            StructuralFindingGroup(
+                finding_kind="duplicated_branches",
+                finding_key="c" * 40,
+                signature=sig,
+                items=(
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key="c" * 40,
+                        file_path=str(sample),
+                        qualname="pkg.mod:fn",
+                        start=3,
+                        end=4,
+                        signature=sig,
+                    ),
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key="c" * 40,
+                        file_path=str(sample),
+                        qualname="pkg.mod:fn",
+                        start=6,
+                        end=7,
+                        signature=sig,
+                    ),
+                ),
+            )
+        ],
+        context_lines=0,
+        max_snippet_lines=20,
+    )
+    for needle in (
+        'data-finding-why-btn="finding-why-template-cccc',
+        'id="finding-why-modal"',
+        "Why This Finding Was Reported",
+        "Matching Branch Examples",
+        "Example A",
+        "Example B",
+        "warn",
+        "codebox",
+    ):
+        assert needle in html
+
+
 def test_html_report_block_group_includes_match_basis_and_compact_key() -> None:
     group_key = _REPEATED_BLOCK_GROUP_KEY
     html = build_html_report(
@@ -493,7 +666,8 @@ def test_html_report_command_palette_full_actions_present() -> None:
     assert "Expand All" in html
     assert "Collapse All" in html
     assert "window.print();" in html
-    assert "Generated at " in html
+    assert "Report schema 2.1" in html
+    assert "Generated at" not in html
     assert 'data-shortcut="mod+K"' in html
     assert 'data-shortcut="mod+I"' in html
     assert "key === 'i'" in html
@@ -536,6 +710,7 @@ def test_html_report_includes_provenance_metadata(
     expected = [
         "Report Provenance",
         "CodeClone",
+        "Report generated (UTC)",
         "Baseline file",
         "Baseline path",
         "Baseline schema",
@@ -546,6 +721,7 @@ def test_html_report_includes_provenance_metadata(
         'data-baseline-status="ok"',
         'data-baseline-payload-verified="true"',
         'data-baseline-file="codeclone.baseline.json"',
+        'data-report-generated-at-utc="2026-03-10T12:00:00Z"',
         "/repo/codeclone.baseline.json",
         'data-cache-used="true"',
         "Cache schema",
@@ -557,6 +733,9 @@ def test_html_report_includes_provenance_metadata(
     ]
     for token in expected:
         assert token in html
+    assert "Generated at 2026-03-10T12:00:00Z" in html
+    assert "generated 2026-03-10T12:00:00Z" not in html
+    assert "deterministic render" not in html
 
 
 def test_html_report_escapes_meta_and_title(
@@ -695,8 +874,10 @@ def test_html_and_json_group_order_consistent(tmp_path: Path) -> None:
     }
     html = build_html_report(func_groups=groups, block_groups={}, segment_groups={})
     json_report = json.loads(to_json_report(groups, {}, {}))
-    json_keys = list(json_report["groups"]["functions"].keys())
-    assert json_keys == ["a", "b", "c"]
+    json_keys = [
+        row["id"] for row in json_report["findings"]["groups"]["clones"]["functions"]
+    ]
+    assert json_keys == ["clone:function:c", "clone:function:a", "clone:function:b"]
     assert html.find('data-group-key="c"') < html.find('data-group-key="a"')
     assert html.find('data-group-key="a"') < html.find('data-group-key="b"')
 
@@ -1196,6 +1377,8 @@ def test_html_report_metrics_risk_branches() -> None:
     assert "insight-risk" in html
     assert 'stroke="var(--error)"' in html
     assert "Cycles: 1; max dependency depth: 4." in html
+    assert "5 candidates total; 2 high-confidence items." in html
+    assert 'Dead Code<span class="tab-count">2</span>' in html
 
 
 def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
@@ -1607,7 +1790,7 @@ def test_html_report_bare_qualname_keeps_non_python_path_prefix() -> None:
     assert "pkg.mod.txt." in html
 
 
-def test_html_report_suggestions_headers_include_help_tips() -> None:
+def test_html_report_suggestions_cards_split_facts_assessment_and_action() -> None:
     html = build_html_report(
         func_groups={},
         block_groups={},
@@ -1622,16 +1805,71 @@ def test_html_report_suggestions_headers_include_help_tips() -> None:
                 steps=("Extract helper",),
                 effort="easy",
                 priority=0.5,
+                finding_family="clones",
+                fact_kind="Block clone group",
+                fact_summary="same repeated setup/assert pattern",
+                fact_count=4,
+                spread_files=1,
+                spread_functions=1,
+                clone_type="Type-4",
+                confidence="high",
+                source_kind="production",
+                source_breakdown=(("production", 4),),
             ),
         ),
     )
-    assert (
-        '<th>Priority <span class="kpi-help" data-tip="'
-        "Computed priority score (higher = more urgent)"
-        '">?</span></th>'
-    ) in html
-    assert (
-        '<th>Severity <span class="kpi-help" data-tip="'
-        "Issue severity: critical, warning, or info"
-        '">?</span></th>'
-    ) in html
+    assert "Facts" in html
+    assert "Assessment" in html
+    assert "Suggestion" in html
+    assert "Source breakdown" in html
+    assert "Refactor duplicate block" in html
+
+
+def test_html_report_overview_includes_hotspot_sections_without_quick_views() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/repo"},
+        metrics=_metrics_payload(
+            health_score=87,
+            health_grade="B",
+            complexity_max=21,
+            complexity_high_risk=1,
+            coupling_high_risk=0,
+            cohesion_low=1,
+            dep_cycles=[],
+            dep_max_depth=2,
+            dead_total=1,
+            dead_critical=1,
+        ),
+        suggestions=(
+            Suggestion(
+                severity="warning",
+                category="clone",
+                title="Function clone group (Type-2)",
+                location="2 occurrences across 2 files / 2 functions",
+                steps=("Extract shared function",),
+                effort="easy",
+                priority=2.0,
+                finding_family="clones",
+                fact_kind="Function clone group",
+                fact_summary="same parameterized function body",
+                fact_count=2,
+                spread_files=2,
+                spread_functions=2,
+                clone_type="Type-2",
+                confidence="high",
+                source_kind="production",
+                source_breakdown=(("production", 2),),
+                location_label="2 occurrences across 2 files / 2 functions",
+            ),
+        ),
+    )
+    assert "Executive Summary" in html
+    assert "Highest Spread" in html
+    assert "Production Hotspots" in html
+    assert "Test/Fixture Hotspots" in html
+    assert "Most Actionable" not in html
+    assert 'data-quick-view="' not in html
+    assert 'class="suggestion-card-context"' in html

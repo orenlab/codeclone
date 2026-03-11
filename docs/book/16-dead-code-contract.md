@@ -59,12 +59,12 @@ Refs:
 
 ## Failure modes
 
-| Condition | Behavior |
-| --- | --- |
-| Dynamic method pattern (dunder/visitor/setup hook) | Candidate skipped as non-actionable |
-| Definition appears only in tests | Candidate skipped |
-| Symbol used only from tests | Remains actionable dead-code candidate |
-| `--fail-dead-code` with high-confidence dead items | Gating failure, exit `3` |
+| Condition                                          | Behavior                               |
+|----------------------------------------------------|----------------------------------------|
+| Dynamic method pattern (dunder/visitor/setup hook) | Candidate skipped as non-actionable    |
+| Definition appears only in tests                   | Candidate skipped                      |
+| Symbol used only from tests                        | Remains actionable dead-code candidate |
+| `--fail-dead-code` with high-confidence dead items | Gating failure, exit `3`               |
 
 ## Determinism / canonicalization
 

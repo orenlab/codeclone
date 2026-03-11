@@ -32,6 +32,7 @@ def report_meta_factory() -> ReportMetaFactory:
             "cache_status": "ok",
             "cache_used": True,
             "files_skipped_source_io": 0,
+            "report_generated_at_utc": "2026-03-10T12:00:00Z",
         }
         meta.update(overrides)
         return meta

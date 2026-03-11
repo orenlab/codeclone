@@ -22,7 +22,7 @@ version, same baseline/cache/report schemas):
 
 Refs:
 
-- `codeclone/report/serialize.py:to_json_report`
+- `codeclone/report/json_contract.py:build_report_document`
 - `codeclone/baseline.py:Baseline.verify_compatibility`
 - `codeclone/cache.py:Cache.load`
 - `codeclone/contracts.py:ExitCode`
@@ -62,7 +62,7 @@ Refs:
 Refs:
 
 - `codeclone/scanner.py:iter_py_files`
-- `codeclone/report/serialize.py:to_json_report`
+- `codeclone/report/json_contract.py:build_report_document`
 - `codeclone/baseline.py:_compute_payload_sha256`
 - `codeclone/cache.py:_canonical_json`
 

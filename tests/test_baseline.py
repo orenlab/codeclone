@@ -185,22 +185,26 @@ def test_baseline_load_stat_error(
     assert exc.value.status == "invalid_type"
 
 
-def test_baseline_load_invalid_json(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("raw_payload", "error_match", "expected_status"),
+    [
+        ("{broken json", "Corrupted baseline file", "invalid_json"),
+        ("[]", "must be an object", "invalid_type"),
+    ],
+    ids=["invalid_json", "non_object_payload"],
+)
+def test_baseline_load_rejects_invalid_json_shapes(
+    tmp_path: Path,
+    raw_payload: str,
+    error_match: str,
+    expected_status: str,
+) -> None:
     baseline_path = tmp_path / "baseline.json"
-    baseline_path.write_text("{broken json", "utf-8")
+    baseline_path.write_text(raw_payload, "utf-8")
     baseline = Baseline(baseline_path)
-    with pytest.raises(BaselineValidationError, match="Corrupted baseline file") as exc:
+    with pytest.raises(BaselineValidationError, match=error_match) as exc:
         baseline.load()
-    assert exc.value.status == "invalid_json"
-
-
-def test_baseline_load_non_object_payload(tmp_path: Path) -> None:
-    baseline_path = tmp_path / "baseline.json"
-    baseline_path.write_text("[]", "utf-8")
-    baseline = Baseline(baseline_path)
-    with pytest.raises(BaselineValidationError, match="must be an object") as exc:
-        baseline.load()
-    assert exc.value.status == "invalid_type"
+    assert exc.value.status == expected_status
 
 
 def test_baseline_load_legacy_payload(tmp_path: Path) -> None:
@@ -372,12 +376,22 @@ def test_baseline_verify_generator_mismatch(tmp_path: Path) -> None:
     assert exc.value.status == "generator_mismatch"
 
 
-def test_baseline_verify_schema_too_new(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("schema_version", "error_match"),
+    [
+        ("1.1", "newer than supported"),
+        ("3.0", "schema version mismatch"),
+    ],
+    ids=["schema_too_new", "schema_major_mismatch"],
+)
+def test_baseline_verify_schema_incompatibilities(
+    tmp_path: Path, schema_version: str, error_match: str
+) -> None:
     baseline_path = tmp_path / "baseline.json"
-    _write_payload(baseline_path, _trusted_payload(schema_version="1.1"))
+    _write_payload(baseline_path, _trusted_payload(schema_version=schema_version))
     baseline = Baseline(baseline_path)
     baseline.load()
-    with pytest.raises(BaselineValidationError, match="newer than supported") as exc:
+    with pytest.raises(BaselineValidationError, match=error_match) as exc:
         baseline.verify_compatibility(current_python_tag=_python_tag())
     assert exc.value.status == "mismatch_schema_version"
 
@@ -680,16 +694,6 @@ def test_baseline_from_groups_defaults() -> None:
     assert baseline.fingerprint_version == BASELINE_FINGERPRINT_VERSION
     assert baseline.python_tag == _python_tag()
     assert baseline.generator == "codeclone"
-
-
-def test_baseline_verify_schema_major_mismatch(tmp_path: Path) -> None:
-    baseline_path = tmp_path / "baseline.json"
-    _write_payload(baseline_path, _trusted_payload(schema_version="3.0"))
-    baseline = Baseline(baseline_path)
-    baseline.load()
-    with pytest.raises(BaselineValidationError, match="schema version mismatch") as exc:
-        baseline.verify_compatibility(current_python_tag=_python_tag())
-    assert exc.value.status == "mismatch_schema_version"
 
 
 @pytest.mark.parametrize(

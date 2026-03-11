@@ -52,7 +52,7 @@ Refs:
 
 ## Invariants (MUST)
 
-- Report writes (`--html/--json/--text`) are path-validated and write failures are contract errors.
+- Report writes (`--html/--json/--md/--sarif/--text`) are path-validated and write failures are contract errors.
 - Bare reporting flags write to default deterministic paths under
   `.cache/codeclone/`.
 - Baseline update write failure is contract error.

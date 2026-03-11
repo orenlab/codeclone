@@ -2,79 +2,44 @@
 
 ## Purpose
 
-Provide concise structural layouts for baseline/cache/report contracts.
+Compact structural layouts for baseline/cache/report contracts in `2.0.0b1`.
 
-## Baseline schema (v2.0)
+## Baseline schema (`2.0`)
 
 ```json
 {
   "meta": {
-    "generator": {
-      "name": "codeclone",
-      "version": "2.0.0"
-    },
+    "generator": { "name": "codeclone", "version": "2.0.0b1" },
     "schema_version": "2.0",
     "fingerprint_version": "1",
     "python_tag": "cp313",
-    "created_at": "2026-03-06T12:00:00Z",
+    "created_at": "2026-03-11T00:00:00Z",
     "payload_sha256": "...",
     "metrics_payload_sha256": "..."
   },
   "clones": {
-    "functions": [
-      "..."
-    ],
-    "blocks": [
-      "..."
-    ]
+    "functions": ["<fingerprint>|<loc_bucket>"],
+    "blocks": ["<block_hash>|<block_hash>|<block_hash>|<block_hash>"]
   },
-  "metrics": {
-    "max_complexity": 21,
-    "high_risk_functions": [],
-    "max_coupling": 8,
-    "high_coupling_classes": [],
-    "max_cohesion": 3,
-    "low_cohesion_classes": [],
-    "dependency_cycles": [],
-    "dependency_max_depth": 4,
-    "dead_code_items": [],
-    "health_score": 89,
-    "health_grade": "A"
-  }
+  "metrics": { "...": "optional embedded metrics snapshot" }
 }
 ```
 
-Notes:
-
-- Top-level `metrics` is optional.
-- `metrics_payload_sha256` is present when metrics are embedded.
-
-Refs:
-
-- `codeclone/baseline.py:_baseline_payload`
-- `codeclone/metrics_baseline.py:_build_payload`
-
-## Cache schema (v2.0)
+## Cache schema (`2.1`)
 
 ```json
 {
-  "v": "2.0",
+  "v": "2.1",
   "payload": {
     "py": "cp313",
     "fp": "1",
-    "ap": {
-      "min_loc": 15,
-      "min_stmt": 6
-    },
+    "ap": { "min_loc": 15, "min_stmt": 6 },
     "files": {
-      "rel/path.py": {
-        "st": [
-          1730000000000000000,
-          2048
-        ],
-        "u": [],
-        "b": [],
-        "s": []
+      "codeclone/cache.py": {
+        "st": [1730000000000000000, 2048],
+        "u": [["qualname", 1, 2, 2, 1, "fp", "0-19", 1, 0, "low", "raw_hash"]],
+        "b": [["qualname", 10, 14, 5, "block_hash"]],
+        "s": [["qualname", 10, 14, 5, "segment_hash", "segment_sig"]]
       }
     }
   },
@@ -82,137 +47,134 @@ Refs:
 }
 ```
 
-Refs:
+Notes:
 
-- `codeclone/cache.py:Cache.save`
-- `codeclone/cache.py:_encode_wire_file_entry`
+- File keys are wire paths (repo-relative when root is configured).
+- Optional sections are omitted when empty.
 
-## Report schema (v2.0)
+## Report schema (`2.1`)
 
 ```json
 {
-  "report_schema_version": "2.0",
+  "report_schema_version": "2.1",
   "meta": {
-    "report_schema_version": "2.0",
-    "codeclone_version": "2.0.0",
-    "project_name": "my-project",
-    "scan_root": "/abs/path/to/my-project",
-    "python_version": "3.13",
-    "python_tag": "cp313",
-    "baseline_status": "ok",
-    "cache_status": "ok"
+    "codeclone_version": "2.0.0b1",
+    "project_name": "codeclone",
+    "scan_root": ".",
+    "analysis_mode": "full",
+    "report_mode": "full",
+    "baseline": { "...": "..." },
+    "cache": { "...": "..." },
+    "metrics_baseline": { "...": "..." },
+    "runtime": { "report_generated_at_utc": "2026-03-11T08:36:32Z" }
   },
-  "files": [
-    "/abs/path.py"
-  ],
-  "groups": {
-    "functions": {},
-    "blocks": {},
-    "segments": {}
+  "inventory": {
+    "files": { "...": "..." },
+    "code": { "...": "..." },
+    "file_registry": { "encoding": "relative_path", "items": [] }
   },
-  "groups_split": {
-    "functions": {
-      "new": [],
-      "known": []
-    },
-    "blocks": {
-      "new": [],
-      "known": []
-    },
-    "segments": {
-      "new": [],
-      "known": []
+  "findings": {
+    "summary": { "...": "..." },
+    "groups": {
+      "clones": { "functions": [], "blocks": [], "segments": [] },
+      "structural": { "groups": [] },
+      "dead_code": { "groups": [] },
+      "design": { "groups": [] }
     }
   },
-  "clones": {
-    "functions": {
-      "groups": {},
-      "split": {
-        "new": [],
-        "known": []
-      },
-      "count": 0
+  "metrics": {
+    "summary": { "...": "..." },
+    "families": { "complexity": {}, "coupling": {}, "cohesion": {}, "dependencies": {}, "dead_code": {}, "health": {} }
+  },
+  "derived": {
+    "suggestions": [],
+    "overview": {},
+    "hotlists": {}
+  },
+  "integrity": {
+    "canonicalization": {
+      "version": "1",
+      "scope": "canonical_only",
+      "sections": ["report_schema_version", "meta", "inventory", "findings", "metrics"]
     },
-    "blocks": {
-      "groups": {},
-      "split": {
-        "new": [],
-        "known": []
-      },
-      "count": 0
-    },
-    "segments": {
-      "groups": {},
-      "split": {
-        "new": [],
-        "known": []
-      },
-      "count": 0
-    },
-    "clone_types": {
-      "functions": {},
-      "blocks": {},
-      "segments": {}
+    "digest": {
+      "verified": true,
+      "algorithm": "sha256",
+      "value": "..."
     }
-  },
-  "clone_types": {
-    "functions": {},
-    "blocks": {},
-    "segments": {}
-  },
-  "group_item_layout": {
-    "functions": [
-      "file_i",
-      "qualname",
-      "start",
-      "end",
-      "loc",
-      "stmt_count",
-      "fingerprint",
-      "loc_bucket",
-      "cyclomatic_complexity",
-      "nesting_depth",
-      "risk",
-      "raw_hash"
-    ],
-    "blocks": [
-      "file_i",
-      "qualname",
-      "start",
-      "end",
-      "size"
-    ],
-    "segments": [
-      "file_i",
-      "qualname",
-      "start",
-      "end",
-      "size",
-      "segment_hash",
-      "segment_sig"
-    ]
   }
 }
 ```
 
-Refs:
+## Markdown projection (`1.0`)
 
-- `codeclone/report/serialize.py:to_json_report`
-- `codeclone/report/serialize.py:GROUP_ITEM_LAYOUT`
+```text
+# CodeClone Report
+- Markdown schema: 1.0
+- Source report schema: 2.1
+...
+## Overview
+## Inventory
+## Findings Summary
+## Top Risks
+## Suggestions
+## Findings
+## Metrics
+## Integrity
+```
+
+## SARIF projection (`2.1.0`, profile `1.0`)
+
+```json
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "codeclone",
+          "version": "2.0.0b1",
+          "rules": []
+        }
+      },
+      "properties": {
+        "format": "sarif",
+        "profileVersion": "1.0",
+        "sourceReportSchemaVersion": "2.1"
+      },
+      "results": []
+    }
+  ]
+}
+```
 
 ## TXT report sections
 
 ```text
 REPORT METADATA
-...
+INVENTORY
+FINDINGS SUMMARY
+METRICS SUMMARY
+DERIVED OVERVIEW
+SUGGESTIONS
 FUNCTION CLONES (NEW)
 FUNCTION CLONES (KNOWN)
 BLOCK CLONES (NEW)
 BLOCK CLONES (KNOWN)
 SEGMENT CLONES (NEW)
 SEGMENT CLONES (KNOWN)
+STRUCTURAL FINDINGS
+DEAD CODE FINDINGS
+DESIGN FINDINGS
+INTEGRITY
 ```
 
-Refs:
+## Refs
 
-- `codeclone/report/serialize.py:to_text_report`
+- `codeclone/baseline.py`
+- `codeclone/cache.py`
+- `codeclone/report/json_contract.py`
+- `codeclone/report/serialize.py`
+- `codeclone/report/markdown.py`
+- `codeclone/report/sarif.py`

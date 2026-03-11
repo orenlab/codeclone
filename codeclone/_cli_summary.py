@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from rich.console import Console
-from rich.rule import Rule
+from typing import Protocol
 
 from . import ui_messages as ui
 
@@ -26,9 +24,13 @@ class MetricsSnapshot:
     health_grade: str
 
 
+class _Printer(Protocol):
+    def print(self, *objects: object, **kwargs: object) -> None: ...
+
+
 def _print_summary(
     *,
-    console: Console,
+    console: _Printer,
     quiet: bool,
     files_found: int,
     files_analyzed: int,
@@ -65,6 +67,8 @@ def _print_summary(
             )
         )
     else:
+        from rich.rule import Rule
+
         console.print()
         console.print(Rule(title=ui.SUMMARY_TITLE, style="dim", characters="\u2500"))
         console.print(
@@ -99,7 +103,7 @@ def _print_summary(
 
 def _print_metrics(
     *,
-    console: Console,
+    console: _Printer,
     quiet: bool,
     metrics: MetricsSnapshot,
 ) -> None:
@@ -119,6 +123,8 @@ def _print_metrics(
             )
         )
     else:
+        from rich.rule import Rule
+
         console.print()
         console.print(Rule(title=ui.METRICS_TITLE, style="dim", characters="\u2500"))
         console.print(ui.fmt_metrics_health(metrics.health_total, metrics.health_grade))

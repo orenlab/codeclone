@@ -77,12 +77,12 @@ Refs:
 
 ## Failure modes
 
-| Condition | Behavior |
-| --- | --- |
-| `--skip-metrics` with metrics flags | Contract error, exit `2` |
-| `--fail-on-new-metrics` without trusted baseline | Contract error, exit `2` |
+| Condition                                                  | Behavior                 |
+|------------------------------------------------------------|--------------------------|
+| `--skip-metrics` with metrics flags                        | Contract error, exit `2` |
+| `--fail-on-new-metrics` without trusted baseline           | Contract error, exit `2` |
 | `--update-metrics-baseline` when metrics were not computed | Contract error, exit `2` |
-| Threshold breach or NEW-vs-baseline metric regressions | Gating failure, exit `3` |
+| Threshold breach or NEW-vs-baseline metric regressions     | Gating failure, exit `3` |
 
 ## Determinism / canonicalization
 

@@ -11,7 +11,7 @@ compatibility is enforced.
 - Baseline compatibility checks: `codeclone/baseline.py:Baseline.verify_compatibility`
 - Metrics baseline compatibility checks: `codeclone/metrics_baseline.py:MetricsBaseline.verify_compatibility`
 - Cache compatibility checks: `codeclone/cache.py:Cache.load`
-- Report schema assignment: `codeclone/report/serialize.py:to_json_report`
+- Report schema assignment: `codeclone/report/json_contract.py:build_report_document`
 
 ## Data model
 
@@ -19,8 +19,8 @@ Current contract versions:
 
 - `BASELINE_SCHEMA_VERSION = "2.0"`
 - `BASELINE_FINGERPRINT_VERSION = "1"`
-- `CACHE_VERSION = "2.0"`
-- `REPORT_SCHEMA_VERSION = "2.0"`
+- `CACHE_VERSION = "2.1"`
+- `REPORT_SCHEMA_VERSION = "2.1"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.0"` (standalone metrics-baseline file)
 
 Refs:
@@ -87,7 +87,7 @@ Refs:
 - `tests/test_baseline.py::test_baseline_verify_schema_major_mismatch`
 - `tests/test_baseline.py::test_baseline_verify_fingerprint_mismatch`
 - `tests/test_cache.py::test_cache_v_field_version_mismatch_warns`
-- `tests/test_report.py::test_report_json_compact_v20_contract`
+- `tests/test_report.py::test_report_json_compact_v21_contract`
 
 ## Non-guarantees
 

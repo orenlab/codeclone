@@ -4,16 +4,22 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
 
 from .baseline import Baseline, current_python_tag
-from .contracts import REPORT_SCHEMA_VERSION
 from .metrics_baseline import MetricsBaseline
 
 
 def _current_python_version() -> str:
     return f"{sys.version_info.major}.{sys.version_info.minor}"
+
+
+def _current_report_timestamp_utc() -> str:
+    return (
+        datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
 
 
 class ReportMeta(TypedDict):
@@ -28,7 +34,6 @@ class ReportMeta(TypedDict):
     - cache_*: cache status/provenance for run transparency
     """
 
-    report_schema_version: str
     codeclone_version: str
     project_name: str
     scan_root: str
@@ -59,6 +64,7 @@ class ReportMeta(TypedDict):
     health_grade: str | None
     analysis_mode: str
     metrics_computed: list[str]
+    report_generated_at_utc: str
 
 
 def _build_report_meta(
@@ -85,7 +91,6 @@ def _build_report_meta(
 ) -> ReportMeta:
     project_name = scan_root.name or str(scan_root)
     return {
-        "report_schema_version": REPORT_SCHEMA_VERSION,
         "codeclone_version": codeclone_version,
         "project_name": project_name,
         "scan_root": str(scan_root),
@@ -124,4 +129,5 @@ def _build_report_meta(
         "health_grade": health_grade,
         "analysis_mode": analysis_mode,
         "metrics_computed": list(metrics_computed),
+        "report_generated_at_utc": _current_report_timestamp_utc(),
     }

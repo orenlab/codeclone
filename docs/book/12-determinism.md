@@ -29,21 +29,21 @@ Deterministic outputs depend on:
 
 Refs:
 
-- `codeclone/report/serialize.py:to_json_report`
-- `codeclone/report/serialize.py:to_text_report`
+- `codeclone/report/json_contract.py:build_report_document`
+- `codeclone/report/serialize.py:render_text_report_document`
 - `codeclone/baseline.py:_compute_payload_sha256`
 - `codeclone/cache.py:_sign_data`
 
 ## Invariants (MUST)
 
-- `files` list is lexicographically sorted.
-- `groups_split` key lists are lexicographically sorted.
+- `inventory.file_registry.items` is lexicographically sorted.
+- finding groups/items and derived hotlists are deterministically ordered.
 - Baseline clone lists are sorted and unique.
 - Golden detector test runs only on canonical Python tag from fixture metadata.
 
 Refs:
 
-- `codeclone/report/serialize.py:_collect_files`
+- `codeclone/report/json_contract.py:_build_inventory_payload`
 - `codeclone/baseline.py:_require_sorted_unique_ids`
 - `tests/test_detector_golden.py::test_detector_output_matches_golden_fixture`
 
@@ -68,7 +68,7 @@ Refs:
 
 - `codeclone/baseline.py:_compute_payload_sha256`
 - `codeclone/cache.py:_canonical_json`
-- `codeclone/report/serialize.py:_function_record_sort_key`
+- `codeclone/report/json_contract.py:_build_integrity_payload`
 
 ## Locked by tests
 

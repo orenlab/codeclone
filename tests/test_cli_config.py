@@ -112,12 +112,16 @@ def test_load_pyproject_config_normalizes_relative_and_absolute_paths(
 min_loc = 5
 cache_path = ".cache/codeclone/cache.json"
 json_out = "/tmp/report.json"
+md_out = "reports/report.md"
+sarif_out = "reports/report.sarif"
 """.strip(),
     )
     loaded = cfg_mod.load_pyproject_config(tmp_path)
     assert loaded["min_loc"] == 5
     assert loaded["cache_path"] == str(tmp_path / ".cache/codeclone/cache.json")
     assert loaded["json_out"] == "/tmp/report.json"
+    assert loaded["md_out"] == str(tmp_path / "reports/report.md")
+    assert loaded["sarif_out"] == str(tmp_path / "reports/report.sarif")
 
 
 def test_apply_pyproject_config_overrides_respects_explicit_cli_flags() -> None:

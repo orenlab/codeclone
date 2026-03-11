@@ -174,6 +174,36 @@ def test_scanner_internal_path_guards_and_symlink_resolve_error(
     )
 
 
+def test_is_included_python_file_non_py_rejected(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    txt = root / "a.txt"
+    txt.write_text("x", "utf-8")
+    assert (
+        scanner._is_included_python_file(
+            file_path=txt,
+            excludes_set=set(),
+            rootp=root,
+        )
+        is False
+    )
+
+
+def test_is_included_python_file_regular_py_accepted(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    pyf = root / "a.py"
+    pyf.write_text("x = 1\n", "utf-8")
+    assert (
+        scanner._is_included_python_file(
+            file_path=pyf,
+            excludes_set=set(),
+            rootp=root,
+        )
+        is True
+    )
+
+
 def test_iter_py_files_excluded_root_short_circuit(tmp_path: Path) -> None:
     excluded_root = tmp_path / "__pycache__"
     excluded_root.mkdir()

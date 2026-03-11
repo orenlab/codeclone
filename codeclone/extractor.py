@@ -23,7 +23,6 @@ from .metrics import (
     compute_lcom4,
     coupling_risk,
     cyclomatic_complexity,
-    nesting_depth,
     risk_level,
 )
 from .models import (
@@ -34,6 +33,7 @@ from .models import (
     ModuleDep,
     SegmentUnit,
     SourceStats,
+    StructuralFindingGroup,
     Unit,
 )
 from .normalize import (
@@ -42,6 +42,7 @@ from .normalize import (
     normalized_ast_dump_from_list,
 )
 from .paths import is_test_filepath
+from .structural_findings import scan_function_structure
 
 __all__ = [
     "Unit",
@@ -269,46 +270,66 @@ def _collect_module_facts(
     deps: list[ModuleDep] = []
     referenced: set[str] = set()
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                alias_name = alias.asname or alias.name.split(".", 1)[0]
-                import_names.add(alias_name)
-                deps.append(
-                    ModuleDep(
-                        source=module_name,
-                        target=alias.name,
-                        import_type="import",
-                        line=int(getattr(node, "lineno", 0)),
+    if collect_referenced_names:
+        referenced_add = referenced.add
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                line = int(getattr(node, "lineno", 0))
+                for alias in node.names:
+                    alias_name = alias.asname or alias.name.split(".", 1)[0]
+                    import_names.add(alias_name)
+                    deps.append(
+                        ModuleDep(
+                            source=module_name,
+                            target=alias.name,
+                            import_type="import",
+                            line=line,
+                        )
                     )
-                )
-        elif isinstance(node, ast.ImportFrom):
-            target = _resolve_import_target(module_name, node)
-            if target:
-                import_names.add(target.split(".", 1)[0])
-                deps.append(
-                    ModuleDep(
-                        source=module_name,
-                        target=target,
-                        import_type="from_import",
-                        line=int(getattr(node, "lineno", 0)),
+            elif isinstance(node, ast.ImportFrom):
+                target = _resolve_import_target(module_name, node)
+                if target:
+                    import_names.add(target.split(".", 1)[0])
+                    deps.append(
+                        ModuleDep(
+                            source=module_name,
+                            target=target,
+                            import_type="from_import",
+                            line=int(getattr(node, "lineno", 0)),
+                        )
                     )
-                )
 
-        if not collect_referenced_names:
-            continue
-
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-            referenced.add(node.id)
-            continue
-        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
-            referenced.add(node.attr)
-            continue
-        if isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name):
-                referenced.add(node.func.id)
-            elif isinstance(node.func, ast.Attribute):
-                referenced.add(node.func.attr)
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                referenced_add(node.id)
+            elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+                referenced_add(node.attr)
+    else:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                line = int(getattr(node, "lineno", 0))
+                for alias in node.names:
+                    alias_name = alias.asname or alias.name.split(".", 1)[0]
+                    import_names.add(alias_name)
+                    deps.append(
+                        ModuleDep(
+                            source=module_name,
+                            target=alias.name,
+                            import_type="import",
+                            line=line,
+                        )
+                    )
+            elif isinstance(node, ast.ImportFrom):
+                target = _resolve_import_target(module_name, node)
+                if target:
+                    import_names.add(target.split(".", 1)[0])
+                    deps.append(
+                        ModuleDep(
+                            source=module_name,
+                            target=target,
+                            import_type="from_import",
+                            line=int(getattr(node, "lineno", 0)),
+                        )
+                    )
 
     deps_sorted = tuple(
         sorted(
@@ -386,7 +407,16 @@ def extract_units_and_stats_from_source(
     cfg: NormalizationConfig,
     min_loc: int,
     min_stmt: int,
-) -> tuple[list[Unit], list[BlockUnit], list[SegmentUnit], SourceStats, FileMetrics]:
+    *,
+    collect_structural_findings: bool = True,
+) -> tuple[
+    list[Unit],
+    list[BlockUnit],
+    list[SegmentUnit],
+    SourceStats,
+    FileMetrics,
+    list[StructuralFindingGroup],
+]:
     try:
         tree = _parse_with_limits(source, PARSE_TIMEOUT_SECONDS)
     except SyntaxError as e:
@@ -411,6 +441,7 @@ def extract_units_and_stats_from_source(
     units: list[Unit] = []
     block_units: list[BlockUnit] = []
     segment_units: list[SegmentUnit] = []
+    structural_findings: list[StructuralFindingGroup] = []
 
     for local_name, node in collector.units:
         start = getattr(node, "lineno", None)
@@ -427,7 +458,13 @@ def extract_units_and_stats_from_source(
 
         qualname = f"{module_name}:{local_name}"
         fingerprint, complexity = _cfg_fingerprint_and_complexity(node, cfg, qualname)
-        depth = nesting_depth(node)
+        structure_facts = scan_function_structure(
+            node,
+            filepath,
+            qualname,
+            collect_findings=collect_structural_findings,
+        )
+        depth = structure_facts.nesting_depth
         risk = risk_level(complexity)
         raw_hash = _raw_source_hash_for_range(source_lines, start, end)
 
@@ -486,6 +523,10 @@ def extract_units_and_stats_from_source(
                         precomputed_hashes=hashes,
                     )
                 )
+
+        # Structural findings extraction (report-only, no re-parse)
+        if collect_structural_findings:
+            structural_findings.extend(structure_facts.structural_findings)
 
     for class_qualname, class_node in collector.class_nodes:
         start = int(getattr(class_node, "lineno", 0))
@@ -550,4 +591,5 @@ def extract_units_and_stats_from_source(
             import_names=import_names,
             class_names=class_names,
         ),
+        structural_findings,
     )

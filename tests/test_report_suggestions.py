@@ -56,7 +56,6 @@ def test_suggestion_helpers_convert_types() -> None:
     assert suggestions_mod._as_int(object(), default=9) == 9
     assert suggestions_mod._as_str("value", default="x") == "value"
     assert suggestions_mod._as_str(10, default="x") == "x"
-    assert suggestions_mod._first_location([]) == "(unknown)"
 
 
 def test_classify_clone_type_all_modes() -> None:
@@ -222,13 +221,30 @@ def test_generate_suggestions_covers_clone_metrics_and_dependency_categories() -
     }
     assert any(item.title.endswith("(Type-1)") for item in suggestions)
     assert any(item.title.endswith("(Type-2)") for item in suggestions)
-    assert any(item.title == "Extreme function complexity" for item in suggestions)
-    assert any(item.title == "High function complexity" for item in suggestions)
+    assert any(
+        item.category == "complexity"
+        and item.severity == "critical"
+        and item.title == "Reduce function complexity"
+        for item in suggestions
+    )
+    assert any(
+        item.category == "complexity"
+        and item.severity == "warning"
+        and item.title == "Reduce function complexity"
+        for item in suggestions
+    )
+    assert any(
+        item.category == "clone"
+        and item.fact_kind == "Function clone group"
+        and item.fact_summary == "same exact function body"
+        and item.source_kind == "production"
+        for item in suggestions
+    )
     assert all(
         not (
             item.category == "dead_code"
-            and item.location == "pkg/mod.py:20"
-            and item.title == "Unused code with high confidence"
+            and item.location == "pkg/mod.py:20-22"
+            and item.title == "Remove or explicitly keep unused code"
         )
         for item in suggestions
     )
@@ -240,8 +256,10 @@ def test_generate_suggestions_covers_clone_metrics_and_dependency_categories() -
             -item.priority,
             item.severity,
             item.category,
-            item.location,
+            item.source_kind,
+            item.location_label or item.location,
             item.title,
+            item.subject_key,
         ),
     )
 
@@ -290,3 +308,61 @@ def test_generate_suggestions_covers_skip_branches_for_optional_rules() -> None:
     assert any(item.category == "cohesion" for item in suggestions)
     assert not any(item.title.endswith("(Type-1)") for item in suggestions)
     assert not any(item.title.endswith("(Type-2)") for item in suggestions)
+
+
+def test_generate_suggestions_uses_full_spread_for_group_location_label() -> None:
+    suggestions = generate_suggestions(
+        project_metrics=_project_metrics(),
+        units=(),
+        class_metrics=(),
+        func_groups={
+            "type2": [
+                {
+                    "qualname": "pkg.alpha:transform_alpha",
+                    "filepath": "/root/tests/fixtures/alpha.py",
+                    "start_line": 1,
+                    "end_line": 10,
+                    "fingerprint": "fp-shared",
+                    "raw_hash": "",
+                },
+                {
+                    "qualname": "pkg.beta:transform_beta",
+                    "filepath": "/root/tests/fixtures/beta.py",
+                    "start_line": 1,
+                    "end_line": 10,
+                    "fingerprint": "fp-shared",
+                    "raw_hash": "",
+                },
+                {
+                    "qualname": "pkg.gamma:transform_gamma",
+                    "filepath": "/root/tests/fixtures/gamma.py",
+                    "start_line": 1,
+                    "end_line": 10,
+                    "fingerprint": "fp-shared",
+                    "raw_hash": "",
+                },
+                {
+                    "qualname": "pkg.delta:transform_delta",
+                    "filepath": "/root/tests/fixtures/delta.py",
+                    "start_line": 1,
+                    "end_line": 10,
+                    "fingerprint": "fp-shared",
+                    "raw_hash": "",
+                },
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        scan_root="/root",
+    )
+    clone_suggestion = next(
+        suggestion
+        for suggestion in suggestions
+        if suggestion.finding_family == "clones"
+    )
+    assert len(clone_suggestion.representative_locations) == 3
+    assert clone_suggestion.spread_files == 4
+    assert clone_suggestion.spread_functions == 4
+    assert (
+        clone_suggestion.location_label == "4 occurrences across 4 files / 4 functions"
+    )

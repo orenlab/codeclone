@@ -81,9 +81,9 @@ Refs:
 Refs:
 
 - `codeclone/scanner.py:iter_py_files`
-- `codeclone/report/serialize.py:_function_record_sort_key`
-- `codeclone/report/serialize.py:_block_record_sort_key`
-- `codeclone/report/serialize.py:_segment_record_sort_key`
+- `codeclone/report/json_contract.py:_build_clone_groups`
+- `codeclone/report/json_contract.py:_build_structural_groups`
+- `codeclone/report/json_contract.py:_build_integrity_payload`
 
 ## Locked by tests
 

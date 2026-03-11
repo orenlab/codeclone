@@ -5,24 +5,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from argparse import Namespace
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
-
-from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-)
-from rich.rule import Rule
-from rich.theme import Theme
+from typing import TYPE_CHECKING, Protocol, cast
 
 from . import __version__
 from . import ui_messages as ui
@@ -82,25 +73,235 @@ from .pipeline import (
 ProcessingResult = FileProcessResult
 __all__ = ["MAX_FILE_SIZE", "ProcessingResult", "main", "process_file"]
 
-# Custom theme for Rich
-custom_theme = Theme(
-    {
-        "info": "cyan",
-        "warning": "yellow",
-        "error": "bold red",
-        "success": "bold green",
-        "dim": "dim",
-    }
-)
+_RICH_THEME_STYLES: dict[str, str] = {
+    "info": "cyan",
+    "warning": "yellow",
+    "error": "bold red",
+    "success": "bold green",
+    "dim": "dim",
+}
+_RICH_MARKUP_TAG_RE = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_ .#:-]*]")
+
+if TYPE_CHECKING:
+    from rich.console import Console as RichConsole
+    from rich.progress import BarColumn as RichBarColumn
+    from rich.progress import Progress as RichProgress
+    from rich.progress import SpinnerColumn as RichSpinnerColumn
+    from rich.progress import TextColumn as RichTextColumn
+    from rich.progress import TimeElapsedColumn as RichTimeElapsedColumn
+    from rich.rule import Rule as RichRule
+    from rich.theme import Theme as RichTheme
+
+Console: type[RichConsole] | None = None
+Theme: type[RichTheme] | None = None
+Rule: type[RichRule] | None = None
+Progress: type[RichProgress] | None = None
+SpinnerColumn: type[RichSpinnerColumn] | None = None
+TextColumn: type[RichTextColumn] | None = None
+BarColumn: type[RichBarColumn] | None = None
+TimeElapsedColumn: type[RichTimeElapsedColumn] | None = None
+
+
+class _PrinterLike(Protocol):
+    def print(self, *objects: object, **kwargs: object) -> None: ...
+
 
 LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
 
 
-def _make_console(*, no_color: bool) -> Console:
-    return Console(theme=custom_theme, no_color=no_color, width=ui.CLI_LAYOUT_MAX_WIDTH)
+class _PlainConsole:
+    """Lightweight console for quiet/no-progress mode."""
+
+    def print(
+        self,
+        *objects: object,
+        sep: str = " ",
+        end: str = "\n",
+        markup: bool = True,
+        **_: object,
+    ) -> None:
+        text = sep.join(str(obj) for obj in objects)
+        if markup:
+            text = _RICH_MARKUP_TAG_RE.sub("", text)
+        print(text, end=end)
+
+    def status(self, *_: object, **__: object) -> AbstractContextManager[None]:
+        return nullcontext()
 
 
-console = _make_console(no_color=False)
+def _ensure_rich_console_symbols() -> None:
+    global Console, Theme, Rule
+
+    if Console is None or Theme is None or Rule is None:
+        from rich.console import Console as _RichConsole
+        from rich.rule import Rule as _RichRule
+        from rich.theme import Theme as _RichTheme
+
+        if Console is None:
+            Console = _RichConsole
+        if Theme is None:
+            Theme = _RichTheme
+        if Rule is None:
+            Rule = _RichRule
+
+
+def _ensure_rich_progress_symbols() -> None:
+    global BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+    if (
+        Progress is None
+        or SpinnerColumn is None
+        or TextColumn is None
+        or BarColumn is None
+        or TimeElapsedColumn is None
+    ):
+        import rich.progress as _rich_progress
+
+        if Progress is None:
+            Progress = _rich_progress.Progress
+        if SpinnerColumn is None:
+            SpinnerColumn = _rich_progress.SpinnerColumn
+        if TextColumn is None:
+            TextColumn = _rich_progress.TextColumn
+        if BarColumn is None:
+            BarColumn = _rich_progress.BarColumn
+        if TimeElapsedColumn is None:
+            TimeElapsedColumn = _rich_progress.TimeElapsedColumn
+
+
+def _make_console(*, no_color: bool) -> RichConsole:
+    _ensure_rich_console_symbols()
+    assert Console is not None
+    assert Theme is not None
+
+    return Console(
+        theme=Theme(_RICH_THEME_STYLES),
+        no_color=no_color,
+        width=ui.CLI_LAYOUT_MAX_WIDTH,
+    )
+
+
+def _make_plain_console() -> _PlainConsole:
+    return _PlainConsole()
+
+
+console: RichConsole | _PlainConsole = _make_plain_console()
+
+
+def _strip_terminal_period(text: str) -> str:
+    return text[:-1] if text.endswith(".") else text
+
+
+def _parse_metric_reason_entry(reason: str) -> tuple[str, str]:
+    trimmed = _strip_terminal_period(reason)
+    if trimmed.startswith("New high-risk functions vs metrics baseline: "):
+        return (
+            "new_high_risk_functions",
+            trimmed.split(": ", maxsplit=1)[1],
+        )
+    if trimmed.startswith("New high-coupling classes vs metrics baseline: "):
+        return (
+            "new_high_coupling_classes",
+            trimmed.split(": ", maxsplit=1)[1],
+        )
+    if trimmed.startswith("New dependency cycles vs metrics baseline: "):
+        return (
+            "new_dependency_cycles",
+            trimmed.split(": ", maxsplit=1)[1],
+        )
+    if trimmed.startswith("New dead code items vs metrics baseline: "):
+        return (
+            "new_dead_code_items",
+            trimmed.split(": ", maxsplit=1)[1],
+        )
+    if trimmed.startswith("Health score regressed vs metrics baseline: delta="):
+        return (
+            "health_delta",
+            trimmed.rsplit("=", maxsplit=1)[1],
+        )
+    if trimmed.startswith("Dependency cycles detected: "):
+        return (
+            "dependency_cycles",
+            trimmed.split(": ", maxsplit=1)[1].replace(" cycle(s)", ""),
+        )
+    if trimmed.startswith("Dead code detected (high confidence): "):
+        return (
+            "dead_code_items",
+            trimmed.split(": ", maxsplit=1)[1].replace(" item(s)", ""),
+        )
+    if trimmed.startswith("Complexity threshold exceeded: "):
+        max_part, threshold_part = trimmed.split(": ", maxsplit=1)[1].split(", ")
+        return (
+            "complexity_max",
+            f"{max_part.rsplit('=', maxsplit=1)[1]} "
+            f"(threshold={threshold_part.rsplit('=', maxsplit=1)[1]})",
+        )
+    if trimmed.startswith("Coupling threshold exceeded: "):
+        max_part, threshold_part = trimmed.split(": ", maxsplit=1)[1].split(", ")
+        return (
+            "coupling_max",
+            f"{max_part.rsplit('=', maxsplit=1)[1]} "
+            f"(threshold={threshold_part.rsplit('=', maxsplit=1)[1]})",
+        )
+    if trimmed.startswith("Cohesion threshold exceeded: "):
+        max_part, threshold_part = trimmed.split(": ", maxsplit=1)[1].split(", ")
+        return (
+            "cohesion_max",
+            f"{max_part.rsplit('=', maxsplit=1)[1]} "
+            f"(threshold={threshold_part.rsplit('=', maxsplit=1)[1]})",
+        )
+    if trimmed.startswith("Health score below threshold: "):
+        score_part, threshold_part = trimmed.split(": ", maxsplit=1)[1].split(", ")
+        return (
+            "health_score",
+            f"{score_part.rsplit('=', maxsplit=1)[1]} "
+            f"(threshold={threshold_part.rsplit('=', maxsplit=1)[1]})",
+        )
+    return ("detail", trimmed)
+
+
+def _policy_context(*, args: Namespace, gate_kind: str) -> str:
+    if args.ci:
+        return "ci"
+
+    parts: list[str] = []
+    if gate_kind == "metrics":
+        if args.fail_on_new_metrics:
+            parts.append("fail-on-new-metrics")
+        if args.fail_complexity >= 0:
+            parts.append(f"fail-complexity={args.fail_complexity}")
+        if args.fail_coupling >= 0:
+            parts.append(f"fail-coupling={args.fail_coupling}")
+        if args.fail_cohesion >= 0:
+            parts.append(f"fail-cohesion={args.fail_cohesion}")
+        if args.fail_cycles:
+            parts.append("fail-cycles")
+        if args.fail_dead_code:
+            parts.append("fail-dead-code")
+        if args.fail_health >= 0:
+            parts.append(f"fail-health={args.fail_health}")
+    elif gate_kind == "new-clones":
+        if args.fail_on_new:
+            parts.append("fail-on-new")
+    elif gate_kind == "threshold" and args.fail_threshold >= 0:
+        parts.append(f"fail-threshold={args.fail_threshold}")
+
+    return ", ".join(parts) if parts else "custom"
+
+
+def _print_gating_failure_block(
+    *,
+    code: str,
+    entries: Sequence[tuple[str, object]],
+    args: Namespace,
+) -> None:
+    console.print(f"\n\u2717 GATING FAILURE [{code}]", style="bold red", markup=False)
+    normalized_entries = [("policy", _policy_context(args=args, gate_kind=code))]
+    normalized_entries.extend((key, str(value)) for key, value in entries)
+    width = max(len(key) for key, _ in normalized_entries)
+    console.print()
+    for key, value in normalized_entries:
+        console.print(f"  {key:<{width}}: {value}")
 
 
 def build_html_report(*args: object, **kwargs: object) -> str:
@@ -146,6 +347,9 @@ class _MetricsBaselineSectionProbe:
 
 
 def print_banner(*, root: Path | None = None) -> None:
+    _ensure_rich_console_symbols()
+    assert Rule is not None
+
     console.print(ui.banner_title(__version__))
     console.print()
     project_name = root.name if root is not None else ""
@@ -173,41 +377,42 @@ def _is_debug_enabled(
 
 
 def _resolve_output_paths(args: Namespace) -> OutputPaths:
-    html_out_path: Path | None = None
-    json_out_path: Path | None = None
-    text_out_path: Path | None = None
+    printer = cast(_PrinterLike, console)
+    resolved: dict[str, Path | None] = {
+        "html": None,
+        "json": None,
+        "md": None,
+        "sarif": None,
+        "text": None,
+    }
+    output_specs = (
+        ("html", "html_out", ".html", "HTML"),
+        ("json", "json_out", ".json", "JSON"),
+        ("md", "md_out", ".md", "Markdown"),
+        ("sarif", "sarif_out", ".sarif", "SARIF"),
+        ("text", "text_out", ".txt", "text"),
+    )
 
-    if getattr(args, "html_out", None):
-        html_out_path = _validate_output_path(
-            args.html_out,
-            expected_suffix=".html",
-            label="HTML",
-            console=console,
+    for field_name, arg_name, expected_suffix, label in output_specs:
+        raw_value = getattr(args, arg_name, None)
+        if not raw_value:
+            continue
+        resolved[field_name] = _validate_output_path(
+            raw_value,
+            expected_suffix=expected_suffix,
+            label=label,
+            console=printer,
             invalid_message=ui.fmt_invalid_output_extension,
             invalid_path_message=ui.fmt_invalid_output_path,
         )
 
-    if getattr(args, "json_out", None):
-        json_out_path = _validate_output_path(
-            args.json_out,
-            expected_suffix=".json",
-            label="JSON",
-            console=console,
-            invalid_message=ui.fmt_invalid_output_extension,
-            invalid_path_message=ui.fmt_invalid_output_path,
-        )
-
-    if getattr(args, "text_out", None):
-        text_out_path = _validate_output_path(
-            args.text_out,
-            expected_suffix=".txt",
-            label="text",
-            console=console,
-            invalid_message=ui.fmt_invalid_output_extension,
-            invalid_path_message=ui.fmt_invalid_output_path,
-        )
-
-    return OutputPaths(html=html_out_path, json=json_out_path, text=text_out_path)
+    return OutputPaths(
+        html=resolved["html"],
+        json=resolved["json"],
+        text=resolved["text"],
+        md=resolved["md"],
+        sarif=resolved["sarif"],
+    )
 
 
 def _resolve_cache_path(*, root_path: Path, args: Namespace, from_args: bool) -> Path:
@@ -645,13 +850,20 @@ def _run_analysis_stages(
         console.print(ui.fmt_processing_changed(total_files))
 
     if total_files > 0 and not args.no_progress:
+        _ensure_rich_progress_symbols()
+        assert Progress is not None
+        assert SpinnerColumn is not None
+        assert TextColumn is not None
+        assert BarColumn is not None
+        assert TimeElapsedColumn is not None
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             TimeElapsedColumn(),
-            console=console,
+            console=cast("RichConsole", console),
         ) as progress_ui:
             task_id = progress_ui.add_task(
                 f"Analyzing {total_files} files...",
@@ -743,6 +955,16 @@ def _write_report_outputs(
         _write_report_output(out=out, content=report_artifacts.json, label="JSON")
         saved_reports.append(("JSON", out))
 
+    if output_paths.md and report_artifacts.md is not None:
+        out = output_paths.md
+        _write_report_output(out=out, content=report_artifacts.md, label="Markdown")
+        saved_reports.append(("Markdown", out))
+
+    if output_paths.sarif and report_artifacts.sarif is not None:
+        out = output_paths.sarif
+        _write_report_output(out=out, content=report_artifacts.sarif, label="SARIF")
+        saved_reports.append(("SARIF", out))
+
     if output_paths.text and report_artifacts.text is not None:
         out = output_paths.text
         _write_report_output(out=out, content=report_artifacts.text, label="text")
@@ -815,12 +1037,11 @@ def _enforce_gating(
         if reason.startswith("metric:")
     ]
     if metric_reasons:
-        console.print(
-            "\n[bold red]\u2717 GATING FAILURE:[/bold red] "
-            "Metrics quality gate triggered."
+        _print_gating_failure_block(
+            code="metrics",
+            entries=[_parse_metric_reason_entry(reason) for reason in metric_reasons],
+            args=args,
         )
-        for reason in metric_reasons:
-            console.print(f"    - {reason}")
         sys.exit(ExitCode.GATING_FAILURE)
 
     if "clone:new" in gate_result.reasons:
@@ -829,15 +1050,18 @@ def _enforce_gating(
         if resolved_html_report_path is None and default_report.exists():
             resolved_html_report_path = str(default_report)
 
-        console.print(
-            "\n[bold red]\u2717 GATING FAILURE:[/bold red] New code clones detected."
-        )
-        console.print(f"    Function clone groups: {len(new_func)}")
-        console.print(f"    Block clone groups: {len(new_block)}")
+        clone_entries: list[tuple[str, object]] = [
+            ("new_function_clone_groups", len(new_func)),
+            ("new_block_clone_groups", len(new_block)),
+        ]
         if resolved_html_report_path:
-            console.print(f"\n    See report: {resolved_html_report_path}")
-        console.print("\n    To accept as technical debt:")
-        console.print("      codeclone . --update-baseline")
+            clone_entries.append(("report", resolved_html_report_path))
+        clone_entries.append(("accept", "codeclone . --update-baseline"))
+        _print_gating_failure_block(
+            code="new-clones",
+            entries=clone_entries,
+            args=args,
+        )
 
         if args.verbose:
             if new_func:
@@ -863,9 +1087,13 @@ def _enforce_gating(
         _, _, total_raw, threshold_raw = threshold_reason.split(":", maxsplit=3)
         total = int(total_raw)
         threshold = int(threshold_raw)
-        console.print(
-            "\n[bold red]\u2717 GATING FAILURE:[/bold red] "
-            f"Total clones ({total}) exceed threshold ({threshold})."
+        _print_gating_failure_block(
+            code="threshold",
+            entries=(
+                ("clone_groups_total", total),
+                ("clone_groups_limit", threshold),
+            ),
+            args=args,
         )
         sys.exit(ExitCode.GATING_FAILURE)
 
@@ -933,7 +1161,11 @@ def _main_impl() -> None:
             args.no_color = True
             args.quiet = True
 
-        console = _make_console(no_color=args.no_color)
+        console = (
+            _make_plain_console()
+            if args.quiet
+            else _make_console(no_color=args.no_color)
+        )
 
         if not _validate_numeric_args(args):
             console.print(
@@ -1155,7 +1387,7 @@ def _main_impl() -> None:
         )
 
     _print_summary(
-        console=console,
+        console=cast(_PrinterLike, console),
         quiet=args.quiet,
         files_found=discovery_result.files_found,
         files_analyzed=processing_result.files_analyzed,
@@ -1175,7 +1407,7 @@ def _main_impl() -> None:
     if analysis_result.project_metrics is not None:
         pm = analysis_result.project_metrics
         _print_metrics(
-            console=console,
+            console=cast(_PrinterLike, console),
             quiet=args.quiet,
             metrics=MetricsSnapshot(
                 complexity_avg=pm.complexity_avg,
@@ -1194,6 +1426,8 @@ def _main_impl() -> None:
 
     report_artifacts = report(
         boot=boot,
+        discovery=discovery_result,
+        processing=processing_result,
         analysis=analysis_result,
         report_meta=report_meta,
         new_func=new_func,

@@ -9,6 +9,7 @@ The following versions currently receive security updates:
 
 | Version | Supported |
 |---------|-----------|
+| 2.0.x   | Yes       |
 | 1.4.x   | Yes       |
 | 1.3.x   | No        |
 | 1.2.x   | No        |
@@ -42,7 +43,7 @@ Additional safeguards:
 - Report explainability fields are generated in Python core; UI is rendering-only and does not infer semantics.
 - Scanner traversal is root-confined and prevents symlink-based path escape.
 - Baseline files are schema/type validated with size limits and tamper-evident integrity fields
-  (`meta.generator` as trust gate, `meta.payload_sha256` as integrity hash in baseline v1).
+  (`meta.generator` as trust gate, `meta.payload_sha256` as integrity hash in baseline schema `2.0`).
 - Baseline integrity is tamper-evident (audit signal), not tamper-proof cryptographic signing.
   An actor who can rewrite baseline content and recompute `payload_sha256` can still alter it.
 - Baseline hash covers canonical payload only (`clones.functions`, `clones.blocks`,

@@ -1,0 +1,489 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
+
+"""CodeClone — structural code quality analysis for Python.
+
+Serialization and rendering helpers for structural findings (report-only layer).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from .._html_escape import _escape_attr, _escape_html
+from .._html_snippets import _FileCache, _render_code_block
+from ..models import StructuralFindingGroup, StructuralFindingOccurrence
+from ..structural_findings import normalize_structural_findings
+from .derived import (
+    combine_source_kinds,
+    group_spread,
+    relative_report_path,
+    report_location_from_structural_occurrence,
+)
+
+__all__ = [
+    "build_structural_findings_html_panel",
+]
+
+# Human-readable label per finding kind
+_KIND_LABEL: dict[str, str] = {
+    "duplicated_branches": "Duplicated branches",
+}
+
+
+def _spread(items: Sequence[StructuralFindingOccurrence]) -> dict[str, int]:
+    """Compute spread metadata: unique files and functions in a finding group."""
+    files: set[str] = set()
+    functions: set[str] = set()
+    for item in items:
+        files.add(item.file_path)
+        functions.add(item.qualname)
+    return {"files": len(files), "functions": len(functions)}
+
+
+def _sort_key_group(g: StructuralFindingGroup) -> tuple[str, int, str]:
+    unique_count = len(
+        {(item.file_path, item.qualname, item.start, item.end) for item in g.items}
+    )
+    return (g.finding_kind, -unique_count, g.finding_key)
+
+
+def _sort_key_item(o: StructuralFindingOccurrence) -> tuple[str, str, int, int]:
+    return (o.file_path, o.qualname, o.start, o.end)
+
+
+def _dedupe_items(
+    items: Sequence[StructuralFindingOccurrence],
+) -> tuple[StructuralFindingOccurrence, ...]:
+    unique: dict[tuple[str, str, int, int], StructuralFindingOccurrence] = {}
+    for item in sorted(items, key=_sort_key_item):
+        key = (item.file_path, item.qualname, item.start, item.end)
+        if key not in unique:
+            unique[key] = item
+    return tuple(unique.values())
+
+
+# ---------------------------------------------------------------------------
+# HTML panel rendering
+# ---------------------------------------------------------------------------
+
+_EMPTY_SVG = (
+    '<svg class="tab-empty-icon" viewBox="0 0 24 24" fill="none" '
+    'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" '
+    'stroke-linejoin="round">'
+    '<circle cx="12" cy="12" r="10"/>'
+    '<polyline points="16 9 10.5 15 8 12.5"/>'
+    "</svg>"
+)
+
+
+def _signature_chips_html(sig: dict[str, str]) -> str:
+    """Render signature key=value pairs as category-badge chips."""
+    chips: list[str] = []
+    for k, v in sorted(sig.items()):
+        chips.append(
+            f'<span class="category-badge">{_escape_html(k)}={_escape_html(v)}</span>'
+        )
+    return " ".join(chips)
+
+
+def _source_kind_label(source_kind: str) -> str:
+    return {
+        "production": "Production",
+        "tests": "Tests",
+        "fixtures": "Fixtures",
+        "mixed": "Mixed",
+        "other": "Other",
+    }.get(source_kind, source_kind.title() or "Other")
+
+
+def _source_kind_badge_html(source_kind: str) -> str:
+    normalized = source_kind.strip().lower() or "other"
+    return (
+        f'<span class="source-kind-badge source-kind-{_escape_attr(normalized)}">'
+        f"{_escape_html(_source_kind_label(normalized))}</span>"
+    )
+
+
+def _occurrences_table_html(
+    items: Sequence[StructuralFindingOccurrence],
+    *,
+    scan_root: str,
+    visible_limit: int = 4,
+) -> str:
+    """Render occurrences as a styled table using the existing table CSS."""
+    deduped_items = _dedupe_items(items)
+    visible_items = deduped_items[:visible_limit]
+    hidden_items = deduped_items[visible_limit:]
+
+    def _rows_for(entries: Sequence[StructuralFindingOccurrence]) -> str:
+        rows: list[str] = []
+        for item in entries:
+            location = report_location_from_structural_occurrence(
+                item,
+                scan_root=scan_root,
+            )
+            short_path = relative_report_path(item.file_path, scan_root=scan_root)
+            rows.append(
+                "<tr>"
+                f'<td class="col-path" title="{_escape_html(item.file_path)}">'
+                f"{_escape_html(short_path)}</td>"
+                f'<td class="col-name">{_source_kind_badge_html(location.source_kind)} '
+                f"{_escape_html(item.qualname)}</td>"
+                f'<td class="col-num">{item.start}-{item.end}</td>'
+                "</tr>"
+            )
+        return "".join(rows)
+
+    hidden_details = ""
+    if hidden_items:
+        hidden_details = (
+            '<details class="finding-occurrences-more">'
+            f"<summary>Show {len(hidden_items)} more occurrences</summary>"
+            '<div class="table-wrap"><table class="table">'
+            '<colgroup><col><col><col style="width:80px"></colgroup>'
+            "<thead><tr><th>File</th><th>Location</th><th>Lines</th></tr></thead>"
+            f"<tbody>{_rows_for(hidden_items)}</tbody>"
+            "</table></div></details>"
+        )
+    return (
+        '<div class="table-wrap"><table class="table">'
+        "<colgroup>"
+        "<col>"
+        "<col>"
+        '<col style="width:80px">'
+        "</colgroup>"
+        "<thead><tr>"
+        "<th>File</th>"
+        "<th>Location</th>"
+        "<th>Lines</th>"
+        "</tr></thead>"
+        f"<tbody>{_rows_for(visible_items)}</tbody>"
+        "</table></div>"
+        f"{hidden_details}"
+    )
+
+
+def _short_path(file_path: str) -> str:
+    parts = file_path.replace("\\", "/").split("/")
+    return "/".join(parts[-2:]) if len(parts) > 1 else file_path
+
+
+def _finding_scope_text(items: Sequence[StructuralFindingOccurrence]) -> str:
+    spread = _spread(items)
+    if spread["functions"] == 1:
+        return f"inside `{items[0].qualname}`"
+    return (
+        f"across {spread['functions']} functions in {spread['files']} "
+        f"{'file' if spread['files'] == 1 else 'files'}"
+    )
+
+
+def _finding_reason_list_html(
+    group: StructuralFindingGroup,
+    items: Sequence[StructuralFindingOccurrence],
+) -> str:
+    spread = _spread(items)
+    stmt_seq = group.signature.get("stmt_seq", "n/a")
+    terminal = group.signature.get("terminal", "n/a")
+    reasons = [
+        (
+            f"{len(items)} non-overlapping branch bodies remained after "
+            "deduplication and overlap pruning."
+        ),
+        (
+            f"All occurrences belong to {spread['functions']} "
+            f"{'function' if spread['functions'] == 1 else 'functions'} in "
+            f"{spread['files']} {'file' if spread['files'] == 1 else 'files'}."
+        ),
+        (
+            f"The detector grouped them by structural signature: "
+            f"`stmt_seq={stmt_seq}` and `terminal={terminal}`."
+        ),
+        (
+            "Call/raise buckets and nested control-flow flags must also match "
+            "for branches to land in the same finding group."
+        ),
+        (
+            "This is a local, report-only hint. It does not change clone groups "
+            "or CI verdicts."
+        ),
+    ]
+    return (
+        '<ul class="finding-why-list">'
+        + "".join(f"<li>{_escape_html(reason)}</li>" for reason in reasons)
+        + "</ul>"
+    )
+
+
+def _finding_matters_html(
+    group: StructuralFindingGroup,
+    items: Sequence[StructuralFindingOccurrence],
+) -> str:
+    spread = _spread(items)
+    count = len(items)
+    terminal = str(group.signature.get("terminal", "")).strip()
+    stmt_seq = str(group.signature.get("stmt_seq", "")).strip()
+    if spread["functions"] > 1 or spread["files"] > 1:
+        message = (
+            f"This pattern repeats across {spread['functions']} functions and "
+            f"{spread['files']} files, so the same branch policy may be copied "
+            "between multiple code paths."
+        )
+    elif terminal == "raise":
+        message = (
+            "This group points to repeated guard or validation exits inside one "
+            "function. Consolidating the shared exit policy usually reduces "
+            "branch noise."
+        )
+    elif terminal == "return":
+        message = (
+            "This group points to repeated return-path logic inside one function. "
+            "A helper can often keep the branch predicate local while sharing "
+            "the emitted behavior."
+        )
+    else:
+        message = (
+            f"This group reports {count} branches with the same local shape "
+            f"({stmt_seq or 'unknown signature'}). Review whether the shared "
+            "branch body should stay duplicated or become a helper."
+        )
+    return f'<p class="finding-why-text">{_escape_html(message)}</p>'
+
+
+def _finding_example_card_html(
+    item: StructuralFindingOccurrence,
+    *,
+    label: str,
+    file_cache: _FileCache,
+    context_lines: int,
+    max_snippet_lines: int,
+) -> str:
+    snippet = _render_code_block(
+        filepath=item.file_path,
+        start_line=item.start,
+        end_line=item.end,
+        file_cache=file_cache,
+        context=context_lines,
+        max_lines=max_snippet_lines,
+    )
+    return (
+        '<div class="finding-why-example">'
+        '<div class="finding-why-example-head">'
+        f'<span class="finding-why-example-label">{_escape_html(label)}</span>'
+        f'<span class="finding-why-example-meta">{_escape_html(item.qualname)}</span>'
+        f'<span class="finding-why-example-meta">'
+        f"{_escape_html(_short_path(item.file_path))}:{item.start}-{item.end}</span>"
+        "</div>"
+        f"{snippet.code_html}"
+        "</div>"
+    )
+
+
+def _finding_why_template_html(
+    group: StructuralFindingGroup,
+    items: Sequence[StructuralFindingOccurrence],
+    *,
+    file_cache: _FileCache,
+    context_lines: int,
+    max_snippet_lines: int,
+) -> str:
+    preview_items = list(items[:2])
+    examples_html = "".join(
+        _finding_example_card_html(
+            item,
+            label=f"Example {'AB'[idx] if idx < 2 else idx + 1}",
+            file_cache=file_cache,
+            context_lines=context_lines,
+            max_snippet_lines=max_snippet_lines,
+        )
+        for idx, item in enumerate(preview_items)
+    )
+    showing_note = (
+        f"Showing the first {len(preview_items)} matching branches from "
+        f"{len(items)} total occurrences."
+    )
+    return (
+        '<div class="metrics-section">'
+        '<div class="metrics-section-title">Why This Matters</div>'
+        f"{_finding_matters_html(group, items)}"
+        "</div>"
+        '<div class="metrics-section">'
+        '<div class="metrics-section-title">Why This Was Reported</div>'
+        f'<p class="finding-why-text">CodeClone reported this group because it found '
+        f"{len(items)} structurally matching branch bodies "
+        f"{_escape_html(_finding_scope_text(items))}.</p>"
+        f"{_finding_reason_list_html(group, items)}"
+        "</div>"
+        '<div class="metrics-section">'
+        '<div class="metrics-section-title">Detection Signature</div>'
+        f'<div class="finding-why-chips">{_signature_chips_html(group.signature)}</div>'
+        "</div>"
+        '<div class="metrics-section">'
+        '<div class="metrics-section-title">Matching Branch Examples</div>'
+        f'<div class="finding-why-note">{_escape_html(showing_note)}</div>'
+        f'<div class="finding-why-examples">{examples_html}</div>'
+        "</div>"
+    )
+
+
+def build_structural_findings_html_panel(
+    groups: Sequence[StructuralFindingGroup],
+    files: list[str],
+    *,
+    scan_root: str = "",
+    file_cache: _FileCache | None = None,
+    context_lines: int = 3,
+    max_snippet_lines: int = 220,
+) -> str:
+    """Build HTML content for the Structural Findings tab panel."""
+    normalized_groups = normalize_structural_findings(groups)
+    if not normalized_groups:
+        return (
+            '<div class="tab-empty">'
+            f"{_EMPTY_SVG}"
+            '<div class="tab-empty-title">No structural findings detected.</div>'
+            '<div class="tab-empty-desc">'
+            "Nothing to report - keep up the good work."
+            "</div>"
+            "</div>"
+        )
+
+    intro = (
+        '<div class="insight-banner insight-info">'
+        '<div class="insight-question">What are structural findings?</div>'
+        '<div class="insight-answer">Repeated non-overlapping branch-body shapes '
+        "detected inside individual functions. These are local, report-only "
+        "refactoring hints and do not affect clone detection or CI verdicts. "
+        "Spread shows how many unique functions and files each finding reaches. "
+        "Context badges mark whether the finding comes from production, tests, "
+        "fixtures, or a mixed slice.</div>"
+        "</div>"
+    )
+    findings_file_count = len({item for item in files if item})
+
+    # Group by finding_kind for subsection headers
+    by_kind: dict[str, list[StructuralFindingGroup]] = {}
+    for g in sorted(normalized_groups, key=_sort_key_group):
+        by_kind.setdefault(g.finding_kind, []).append(g)
+
+    resolved_file_cache = file_cache if file_cache is not None else _FileCache()
+    sections: list[str] = [
+        '<div class="toolbar" role="toolbar" aria-label="Structural finding filters">'
+        '<div class="toolbar-left">'
+        '<label class="muted" for="sf-source-kind">Context:</label>'
+        '<select class="select" id="sf-source-kind" data-sf-source-kind>'
+        '<option value="all">all</option>'
+        '<option value="production">production</option>'
+        '<option value="tests">tests</option>'
+        '<option value="fixtures">fixtures</option>'
+        '<option value="mixed">mixed</option>'
+        "</select>"
+        '<label class="muted" for="sf-spread">Spread:</label>'
+        '<select class="select" id="sf-spread" data-sf-spread>'
+        '<option value="all">all</option>'
+        '<option value="high">high</option>'
+        '<option value="low">low</option>'
+        "</select>"
+        '<label class="inline-check">'
+        '<input type="checkbox" data-sf-actionable />'
+        "<span>Only actionable</span>"
+        "</label>"
+        "</div>"
+        '<div class="toolbar-right">'
+        '<span class="page-meta" data-sf-count>'
+        f"{len(normalized_groups)} shown"
+        "</span>"
+        "</div>"
+        "</div>"
+    ]
+    why_templates: list[str] = []
+    for kind in sorted(by_kind):
+        label = _KIND_LABEL.get(kind, kind)
+        kind_groups = by_kind[kind]
+        total = sum(len(_dedupe_items(g.items)) for g in kind_groups)
+
+        group_rows: list[str] = []
+        for g in kind_groups:
+            deduped_items = _dedupe_items(g.items)
+            spread = _spread(deduped_items)
+            chips_html = _signature_chips_html(g.signature)
+            report_locations = tuple(
+                report_location_from_structural_occurrence(
+                    item,
+                    scan_root=scan_root,
+                )
+                for item in deduped_items
+            )
+            source_kind = combine_source_kinds(
+                location.source_kind for location in report_locations
+            )
+            spread_files, spread_functions = group_spread(report_locations)
+            spread_bucket = (
+                "high" if spread_files > 1 or spread_functions > 1 else "low"
+            )
+            table_html = _occurrences_table_html(
+                deduped_items,
+                scan_root=scan_root,
+            )
+            count = len(deduped_items)
+            why_template_id = f"finding-why-template-{g.finding_key}"
+            why_templates.append(
+                f'<template id="{_escape_attr(why_template_id)}">'
+                f"{
+                    _finding_why_template_html(
+                        g,
+                        deduped_items,
+                        file_cache=resolved_file_cache,
+                        context_lines=context_lines,
+                        max_snippet_lines=max_snippet_lines,
+                    )
+                }"
+                "</template>"
+            )
+            occ_word = "occurrence" if count == 1 else "occurrences"
+            func_word = "function" if spread["functions"] == 1 else "functions"
+            file_word = "file" if spread["files"] == 1 else "files"
+            _hdr_style = (
+                "display:flex;align-items:center;gap:.5rem;"
+                "margin-bottom:.5rem;flex-wrap:wrap"
+            )
+            actionable = "true" if count >= 4 or spread_functions > 1 else "false"
+            group_rows.append(
+                '<div style="margin-bottom:1.25rem" '
+                'data-sf-group="true" '
+                f'data-source-kind="{_escape_attr(source_kind)}" '
+                f'data-spread-bucket="{_escape_attr(spread_bucket)}" '
+                f'data-actionable="{actionable}">'
+                f'<div style="{_hdr_style}">'
+                f'<span style="font-weight:600;white-space:nowrap">'
+                f"{count} non-overlapping {occ_word}</span>"
+                f'<button class="btn ghost" type="button" '
+                f'data-finding-why-btn="{_escape_attr(why_template_id)}" '
+                'aria-haspopup="dialog">Why?</button>'
+                f"{_source_kind_badge_html(source_kind)}"
+                f'<span class="category-badge">scope='
+                f"{spread['functions']} {func_word} · {spread['files']} {file_word}"
+                "</span>"
+                f"{chips_html}"
+                "</div>"
+                f"{table_html}"
+                "</div>"
+            )
+
+        _meta_style = "font-weight:normal;color:var(--text-secondary)"
+        sections.append(
+            f'<h3 class="subsection-title">'
+            f"{_escape_html(label)}"
+            f' &nbsp;<small style="{_meta_style}">'
+            f"{len(kind_groups)} groups &middot; {total} occurrences</small>"
+            "</h3>" + "".join(group_rows)
+        )
+
+    summary = (
+        '<div class="section-subtext">'
+        f"{len(normalized_groups)} findings across "
+        f"{findings_file_count} files with structural motifs."
+        "</div>"
+    )
+    return intro + summary + "".join(sections) + "".join(why_templates)

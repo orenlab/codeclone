@@ -48,6 +48,8 @@ _CONFIG_KEY_SPECS: Final[dict[str, _ConfigKeySpec]] = {
     "skip_dependencies": _ConfigKeySpec(bool),
     "html_out": _ConfigKeySpec(str, allow_none=True),
     "json_out": _ConfigKeySpec(str, allow_none=True),
+    "md_out": _ConfigKeySpec(str, allow_none=True),
+    "sarif_out": _ConfigKeySpec(str, allow_none=True),
     "text_out": _ConfigKeySpec(str, allow_none=True),
     "no_progress": _ConfigKeySpec(bool),
     "no_color": _ConfigKeySpec(bool),
@@ -62,6 +64,8 @@ _PATH_CONFIG_KEYS: Final[frozenset[str]] = frozenset(
         "metrics_baseline",
         "html_out",
         "json_out",
+        "md_out",
+        "sarif_out",
         "text_out",
     }
 )

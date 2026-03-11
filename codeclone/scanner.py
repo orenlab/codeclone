@@ -110,14 +110,19 @@ def iter_py_files(
         return
 
     # Collect and filter first, then sort for deterministic output.
-    candidates: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(rootp, topdown=True, followlinks=False):
+    candidates: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(
+        rootp,
+        topdown=True,
+        followlinks=False,
+    ):
         dirnames[:] = [name for name in dirnames if name not in excludes_set]
-        base = Path(dirpath)
         for filename in filenames:
-            file_path = base / filename
-            if not _is_included_python_file(
-                file_path=file_path,
+            if not filename.endswith(".py"):
+                continue
+            file_path = os.path.join(dirpath, filename)
+            if os.path.islink(file_path) and not _is_included_python_file(
+                file_path=Path(file_path),
                 excludes_set=excludes_set,
                 rootp=rootp,
             ):
@@ -129,8 +134,7 @@ def iter_py_files(
                     "Use more specific root or increase limit."
                 )
 
-    for p in sorted(candidates, key=lambda path: str(path)):
-        yield str(p)
+    yield from sorted(candidates)
 
 
 def module_name_from_path(root: str, filepath: str) -> str:

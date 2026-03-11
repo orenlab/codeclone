@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from . import __version__
+from ._schema_validation import validate_top_level_structure
 from .contracts import (
     BASELINE_FINGERPRINT_VERSION,
     BASELINE_SCHEMA_VERSION,
@@ -89,6 +90,7 @@ _META_REQUIRED_KEYS = {
 _CLONES_REQUIRED_KEYS = {"functions", "blocks"}
 _FUNCTION_ID_RE = re.compile(r"^[0-9a-f]{40}\|(?:\d+-\d+|\d+\+)$")
 _BLOCK_ID_RE = re.compile(r"^[0-9a-f]{40}\|[0-9a-f]{40}\|[0-9a-f]{40}\|[0-9a-f]{40}$")
+_UTC_ISO8601_Z_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
 class Baseline:
@@ -455,21 +457,15 @@ def _load_json_object(path: Path) -> dict[str, Any]:
 
 
 def _validate_top_level_structure(payload: dict[str, Any], *, path: Path) -> None:
-    keys = set(payload.keys())
-    missing = _TOP_LEVEL_REQUIRED_KEYS - keys
-    extra = keys - _TOP_LEVEL_ALLOWED_KEYS
-    if missing:
-        raise BaselineValidationError(
-            f"Invalid baseline schema at {path}: missing top-level keys: "
-            f"{', '.join(sorted(missing))}",
-            status=BaselineStatus.MISSING_FIELDS,
-        )
-    if extra:
-        raise BaselineValidationError(
-            f"Invalid baseline schema at {path}: unexpected top-level keys: "
-            f"{', '.join(sorted(extra))}",
-            status=BaselineStatus.INVALID_TYPE,
-        )
+    validate_top_level_structure(
+        payload,
+        path=path,
+        required_keys=_TOP_LEVEL_REQUIRED_KEYS,
+        allowed_keys=_TOP_LEVEL_ALLOWED_KEYS,
+        schema_label="baseline",
+        missing_status=BaselineStatus.MISSING_FIELDS,
+        extra_status=BaselineStatus.INVALID_TYPE,
+    )
 
 
 def _validate_required_keys(
@@ -692,8 +688,21 @@ def _require_python_tag(obj: dict[str, Any], key: str, *, path: Path) -> str:
 
 def _require_utc_iso8601_z(obj: dict[str, Any], key: str, *, path: Path) -> str:
     value = _require_str(obj, key, path=path)
+    if not _UTC_ISO8601_Z_RE.fullmatch(value):
+        raise BaselineValidationError(
+            f"Invalid baseline schema at {path}: '{key}' must be UTC ISO-8601 with Z",
+            status=BaselineStatus.INVALID_TYPE,
+        )
     try:
-        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+        datetime(
+            int(value[0:4]),
+            int(value[5:7]),
+            int(value[8:10]),
+            int(value[11:13]),
+            int(value[14:16]),
+            int(value[17:19]),
+            tzinfo=timezone.utc,
+        )
     except ValueError as e:
         raise BaselineValidationError(
             f"Invalid baseline schema at {path}: '{key}' must be UTC ISO-8601 with Z",

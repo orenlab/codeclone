@@ -8,6 +8,8 @@ from ..grouping import build_block_groups, build_groups, build_segment_groups
 from .blocks import merge_block_items as _merge_block_items
 from .blocks import prepare_block_report_groups
 from .explain import build_block_group_facts
+from .markdown import render_markdown_report_document, to_markdown_report
+from .sarif import render_sarif_report_document, to_sarif_report
 from .segments import (
     _CONTROL_FLOW_STMTS,
     _FORBIDDEN_STMTS,
@@ -34,9 +36,8 @@ from .serialize import (
     format_meta_text_value as _format_meta_text_value,
 )
 from .serialize import (
-    to_json_report,
-    to_text,
-    to_text_report,
+    render_json_report_document,
+    render_text_report_document,
 )
 from .suggestions import classify_clone_type, generate_suggestions
 from .types import GroupItem, GroupMap
@@ -64,7 +65,10 @@ __all__ = [
     "generate_suggestions",
     "prepare_block_report_groups",
     "prepare_segment_report_groups",
-    "to_json_report",
-    "to_text",
-    "to_text_report",
+    "render_json_report_document",
+    "render_markdown_report_document",
+    "render_sarif_report_document",
+    "render_text_report_document",
+    "to_markdown_report",
+    "to_sarif_report",
 ]

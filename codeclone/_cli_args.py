@@ -20,6 +20,8 @@ from .contracts import (
 DEFAULT_BASELINE_PATH = "codeclone.baseline.json"
 DEFAULT_HTML_REPORT_PATH = ".cache/codeclone/report.html"
 DEFAULT_JSON_REPORT_PATH = ".cache/codeclone/report.json"
+DEFAULT_MARKDOWN_REPORT_PATH = ".cache/codeclone/report.md"
+DEFAULT_SARIF_REPORT_PATH = ".cache/codeclone/report.sarif"
 DEFAULT_TEXT_REPORT_PATH = ".cache/codeclone/report.txt"
 
 
@@ -254,6 +256,22 @@ def build_parser(version: str) -> argparse.ArgumentParser:
         metavar="FILE",
         const=DEFAULT_JSON_REPORT_PATH,
         help=ui.HELP_JSON,
+    )
+    out_group.add_argument(
+        "--md",
+        dest="md_out",
+        nargs="?",
+        metavar="FILE",
+        const=DEFAULT_MARKDOWN_REPORT_PATH,
+        help=ui.HELP_MD,
+    )
+    out_group.add_argument(
+        "--sarif",
+        dest="sarif_out",
+        nargs="?",
+        metavar="FILE",
+        const=DEFAULT_SARIF_REPORT_PATH,
+        help=ui.HELP_SARIF,
     )
     out_group.add_argument(
         "--text",

@@ -46,6 +46,8 @@ REPORT_TEMPLATE = Template(
   --border-subtle: #1F2937;
   --border-default: #374151;
   --border-strong: #4B5563;
+  --border: var(--border-default);
+  --border-soft: var(--border-subtle);
 
   /* Refined Accent - Blue */
   --accent-primary: #3B82F6;
@@ -56,12 +58,19 @@ REPORT_TEMPLATE = Template(
   /* Semantic Colors - Muted & Professional */
   --success: #10B981;
   --success-subtle: rgba(16, 185, 129, 0.1);
+  --success-strong: var(--success);
   --warning: #F59E0B;
   --warning-subtle: rgba(245, 158, 11, 0.1);
+  --warning-strong: var(--warning);
   --error: #EF4444;
   --error-subtle: rgba(239, 68, 68, 0.1);
+  --danger: var(--error);
+  --danger-subtle: var(--error-subtle);
   --info: #3B82F6;
   --info-subtle: rgba(59, 130, 246, 0.1);
+  --panel: color-mix(in oklab, var(--surface-1) 84%, var(--surface-0) 16%);
+  --panel-soft: color-mix(in oklab, var(--surface-1) 74%, var(--surface-0) 26%);
+  --shadow-sm: var(--elevation-1);
 
   /* Elevation - Subtle Professional Shadows */
   --elevation-0: none;
@@ -119,11 +128,20 @@ html[data-theme="light"] {
   --border-subtle: #E5E7EB;
   --border-default: #D1D5DB;
   --border-strong: #9CA3AF;
+  --border: var(--border-default);
+  --border-soft: var(--border-subtle);
 
   --accent-primary: #2563EB;
   --accent-secondary: #3B82F6;
   --accent-subtle: rgba(37, 99, 235, 0.1);
   --accent-muted: rgba(37, 99, 235, 0.10);
+  --success-strong: var(--success);
+  --warning-strong: var(--warning);
+  --danger: var(--error);
+  --danger-subtle: var(--error-subtle);
+  --panel: color-mix(in oklab, var(--surface-1) 94%, white 6%);
+  --panel-soft: color-mix(in oklab, var(--surface-2) 92%, white 8%);
+  --shadow-sm: var(--elevation-1);
 
   --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.08);
   --elevation-2: 0 2px 6px rgba(0, 0, 0, 0.12);
@@ -1296,6 +1314,69 @@ h2.section-title {
   max-width: min(1140px, 96vw);
 }
 
+.finding-why-card {
+  max-width: min(1180px, 96vw);
+}
+
+.finding-why-text {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.finding-why-list {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.finding-why-list li + li {
+  margin-top: 8px;
+}
+
+.finding-why-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.finding-why-note {
+  margin: 0 0 12px;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.finding-why-examples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.finding-why-example {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.finding-why-example-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.finding-why-example-label {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.finding-why-example-meta {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
 @keyframes slideUp {
   from {
     opacity: 0;
@@ -2275,8 +2356,8 @@ html[data-theme="dark"] .prov-badge.amber { background: rgba(251,191,36,0.15); c
 .overview-kpi {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
+  gap: 8px;
+  padding: 14px 16px;
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
@@ -2289,9 +2370,9 @@ html[data-theme="dark"] .prov-badge.amber { background: rgba(251,191,36,0.15); c
 }
 
 .overview-kpi-label {
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--text-tertiary);
-  font-weight: 500;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -2305,7 +2386,7 @@ html[data-theme="dark"] .prov-badge.amber { background: rgba(251,191,36,0.15); c
 }
 
 .kpi-detail {
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   line-height: 1.3;
@@ -2492,6 +2573,359 @@ html[data-theme="dark"] .prov-badge.amber { background: rgba(251,191,36,0.15); c
   line-height: 1.6;
 }
 
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.source-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+  color: var(--text-secondary);
+}
+
+.source-kind-production {
+  border-color: color-mix(in srgb, var(--success) 32%, var(--border));
+  color: var(--success-strong);
+}
+
+.source-kind-tests {
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+  color: var(--warning-strong);
+}
+
+.source-kind-fixtures {
+  border-color: color-mix(in srgb, var(--accent-primary) 35%, var(--border));
+  color: var(--accent-secondary);
+}
+
+.source-kind-mixed {
+  border-color: color-mix(in srgb, var(--danger) 25%, var(--border));
+  color: var(--danger);
+}
+
+.overview-cluster {
+  margin-top: 24px;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-1);
+  box-shadow: var(--elevation-1);
+}
+
+.overview-cluster-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.overview-cluster-header .subsection-title {
+  margin: 0;
+}
+
+.overview-cluster-copy {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+  max-width: 68ch;
+}
+
+.overview-cluster-empty {
+  border: 1px dashed var(--border-soft);
+  border-radius: 16px;
+  background: var(--panel-soft);
+  color: var(--text-secondary);
+  padding: 16px 18px;
+}
+
+.overview-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.suggestions-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.overview-summary-item,
+.suggestion-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: none;
+}
+
+.overview-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  background: var(--surface-0);
+}
+
+.overview-summary-label {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.overview-summary-value {
+  color: var(--text-primary);
+  line-height: 1.55;
+}
+
+.overview-summary-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.overview-summary-list li + li {
+  margin-top: 6px;
+}
+
+.overview-list {
+  display: grid;
+  gap: 12px;
+}
+
+.overview-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 14px;
+  align-items: start;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-0);
+  padding: 14px 16px;
+}
+
+.overview-row-main,
+.overview-row-side,
+.suggestion-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.overview-row-title,
+.suggestion-card-title {
+  font-size: 0.94rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.overview-row-summary,
+.suggestion-card-summary {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+.overview-row-summary {
+  color: var(--text-secondary);
+}
+
+.overview-row-context,
+.overview-row-location,
+.suggestion-card-context {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.overview-row-stats,
+.suggestion-card-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.overview-row-location {
+  font-family: var(--font-mono);
+}
+
+.suggestion-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--surface-1);
+}
+
+.suggestion-card-summary {
+  color: var(--text-primary);
+  max-width: 76ch;
+}
+
+.suggestion-card-context {
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+
+.suggestion-sections {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 0;
+}
+
+.suggestion-disclosures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 0;
+}
+
+.suggestion-section {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-0);
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.suggestion-section-title {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.suggestion-fact-list {
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.suggestion-fact-list div {
+  display: grid;
+  gap: 4px;
+}
+
+.suggestion-fact-list dt,
+.suggestion-context-line .muted {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+}
+
+.suggestion-fact-list dd {
+  margin: 0;
+  color: var(--text-primary);
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.suggestion-empty {
+  color: var(--text-secondary);
+}
+
+.suggestion-location-list,
+.suggestion-steps {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--text-primary);
+}
+
+.suggestion-location-list li {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.suggestion-location-path {
+  word-break: break-word;
+  font-size: var(--text-sm);
+}
+
+.suggestion-location-qualname {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  word-break: break-word;
+}
+
+.suggestion-disclosure,
+.suggestion-extra {
+  margin: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-0);
+  padding: 12px 14px;
+}
+
+.suggestion-disclosure summary,
+.suggestion-extra summary {
+  cursor: pointer;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  list-style: none;
+}
+
+.suggestion-disclosure-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--surface-3) 75%, var(--surface-0) 25%);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+}
+
+.suggestion-disclosure[open] summary,
+.suggestion-extra[open] summary {
+  margin-bottom: 8px;
+}
+
+.suggestion-disclosure summary::-webkit-details-marker,
+.suggestion-extra summary::-webkit-details-marker {
+  display: none;
+}
+
+.finding-occurrences-more {
+  margin-top: 10px;
+}
+
+.finding-occurrences-more summary {
+  cursor: pointer;
+  color: var(--accent-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
 /* Pygments token styles */
 ${pyg_dark}
 ${pyg_light}
@@ -2499,6 +2933,10 @@ ${pyg_light}
 @media (max-width: 1280px) {
   .meta-item {
     grid-column: span 4;
+  }
+
+  .suggestions-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -2508,6 +2946,20 @@ ${pyg_light}
   }
 
   .items {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-cluster-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .overview-row {
+    grid-template-columns: 1fr;
+  }
+
+  .suggestion-sections,
+  .suggestion-disclosures {
     grid-template-columns: 1fr;
   }
 }
@@ -2716,7 +3168,7 @@ section[data-section="segments"] .group {
       </svg>
       <div class="brand-text">
         <h1>CodeClone Report${brand_project_html}</h1>
-        <div class="brand-meta">Generated at ${generated_at}</div>
+        <div class="brand-meta">${brand_meta}</div>
       </div>
     </div>
     <div class="top-actions">
@@ -2890,6 +3342,23 @@ section[data-section="segments"] .group {
   </div>
 </div>
 
+<!-- Structural Finding Why Modal -->
+<div class="metrics-modal" id="finding-why-modal">
+  <div class="metrics-card finding-why-card">
+    <div class="metrics-header">
+      <h3>Why This Finding Was Reported</h3>
+      <button class="metrics-close" id="finding-why-close" aria-label="Close Why dialog">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="metrics-body" id="finding-why-body">
+      <!-- Filled dynamically by JavaScript -->
+    </div>
+  </div>
+</div>
+
 <!-- Toast Container -->
 <div class="toast-container" id="toast-container"></div>
 
@@ -2905,6 +3374,7 @@ section[data-section="segments"] .group {
     commandPaletteOpen: false,
     chartVisible: false,
     stats: {},
+    findingWhyModalOpen: false,
     currentMetrics: null,
     helpModalOpen: false,
     globalNovelty: 'all',
@@ -3150,7 +3620,7 @@ section[data-section="segments"] .group {
     if (!modal) return;
 
     modal.classList.remove('active');
-    if (!state.helpModalOpen) {
+    if (!state.helpModalOpen && !state.findingWhyModalOpen) {
       document.body.style.overflow = '';
     }
     state.currentMetrics = null;
@@ -3169,7 +3639,35 @@ section[data-section="segments"] .group {
     if (!modal) return;
     modal.classList.remove('active');
     state.helpModalOpen = false;
-    if (!state.currentMetrics) {
+    if (!state.currentMetrics && !state.findingWhyModalOpen) {
+      document.body.style.overflow = '';
+    }
+  }
+
+  function openFindingWhyModal(templateId) {
+    const modal = $$('#finding-why-modal');
+    const body = $$('#finding-why-body');
+    const template = document.getElementById(templateId);
+    if (!modal || !body || !template) return;
+
+    if (state.currentMetrics) closeMetricsModal();
+    if (state.helpModalOpen) closeHelpModal();
+
+    body.innerHTML = template.innerHTML;
+    modal.classList.add('active');
+    state.findingWhyModalOpen = true;
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeFindingWhyModal() {
+    const modal = $$('#finding-why-modal');
+    const body = $$('#finding-why-body');
+    if (!modal || !body) return;
+
+    modal.classList.remove('active');
+    body.innerHTML = '';
+    state.findingWhyModalOpen = false;
+    if (!state.helpModalOpen && !state.currentMetrics) {
       document.body.style.overflow = '';
     }
   }
@@ -3723,6 +4221,8 @@ section[data-section="segments"] .group {
     if (key === 'escape') {
       if (state.helpModalOpen) {
         closeHelpModal();
+      } else if (state.findingWhyModalOpen) {
+        closeFindingWhyModal();
       } else if (state.currentMetrics) {
         closeMetricsModal();
       } else {
@@ -3791,6 +4291,20 @@ section[data-section="segments"] .group {
   $$('#metrics-modal')?.addEventListener('click', (e) => {
     if (e.target.id === 'metrics-modal') {
       closeMetricsModal();
+    }
+  });
+  $$$$('[data-finding-why-btn]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const templateId = btn.getAttribute('data-finding-why-btn');
+      if (!templateId) return;
+      openFindingWhyModal(templateId);
+    });
+  });
+  $$('#finding-why-close')?.addEventListener('click', closeFindingWhyModal);
+  $$('#finding-why-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'finding-why-modal') {
+      closeFindingWhyModal();
     }
   });
   $$('#help-close')?.addEventListener('click', closeHelpModal);
@@ -3879,6 +4393,10 @@ section[data-section="segments"] .group {
     const btnClear = $$('[data-clear="' + sectionId + '"]');
     const btnCollapseAll = $$('[data-collapse-all="' + sectionId + '"]');
     const btnExpandAll = $$('[data-expand-all="' + sectionId + '"]');
+    const sourceKindSelect = $$('[data-source-kind-filter="' + sectionId + '"]');
+    const cloneTypeSelect = $$('[data-clone-type-filter="' + sectionId + '"]');
+    const spreadSelect = $$('[data-spread-filter="' + sectionId + '"]');
+    const minOccurrencesCheckbox = $$('[data-min-occurrences-filter="' + sectionId + '"]');
     const pill = $$('[data-count-pill="' + sectionId + '"]');
     const hasNoveltyFilter = section.getAttribute('data-has-novelty-filter') === 'true';
 
@@ -3888,6 +4406,10 @@ section[data-section="segments"] .group {
       page: 1,
       pageSize: parseInt(selPageSize?.value || '10', 10),
       novelty: hasNoveltyFilter ? defaultNovelty : 'all',
+      sourceKind: sourceKindSelect?.value || 'all',
+      cloneType: cloneTypeSelect?.value || 'all',
+      spread: spreadSelect?.value || 'all',
+      minOccurrences: Boolean(minOccurrencesCheckbox?.checked),
       totalGroups: groups.length,
       scopeCount: groups.length,
       filtered: groups
@@ -3950,6 +4472,27 @@ section[data-section="segments"] .group {
       sectionState.scopeCount = noveltyFilteredGroups.length;
 
       let filteredGroups = noveltyFilteredGroups;
+      if (sectionState.sourceKind !== 'all') {
+        filteredGroups = filteredGroups.filter(g => {
+          return (g.getAttribute('data-source-kind') || '') === sectionState.sourceKind;
+        });
+      }
+      if (sectionState.cloneType !== 'all') {
+        filteredGroups = filteredGroups.filter(g => {
+          return (g.getAttribute('data-clone-type') || '') === sectionState.cloneType;
+        });
+      }
+      if (sectionState.spread !== 'all') {
+        filteredGroups = filteredGroups.filter(g => {
+          return (g.getAttribute('data-spread-bucket') || 'low') === sectionState.spread;
+        });
+      }
+      if (sectionState.minOccurrences) {
+        filteredGroups = filteredGroups.filter(g => {
+          const count = parseInt(g.getAttribute('data-group-arity') || '0', 10);
+          return Number.isFinite(count) && count >= 4;
+        });
+      }
       if (q) {
         filteredGroups = filteredGroups.filter(g => {
           const blob = g.getAttribute('data-search') || '';
@@ -3969,6 +4512,22 @@ section[data-section="segments"] .group {
     btnClear?.addEventListener('click', () => {
       if (searchInput) searchInput.value = '';
       sectionState.q = '';
+      applyFilter();
+    });
+    sourceKindSelect?.addEventListener('change', () => {
+      sectionState.sourceKind = sourceKindSelect.value || 'all';
+      applyFilter();
+    });
+    cloneTypeSelect?.addEventListener('change', () => {
+      sectionState.cloneType = cloneTypeSelect.value || 'all';
+      applyFilter();
+    });
+    spreadSelect?.addEventListener('change', () => {
+      sectionState.spread = spreadSelect.value || 'all';
+      applyFilter();
+    });
+    minOccurrencesCheckbox?.addEventListener('change', () => {
+      sectionState.minOccurrences = Boolean(minOccurrencesCheckbox.checked);
       applyFilter();
     });
 
@@ -4088,36 +4647,144 @@ section[data-section="segments"] .group {
   function initSuggestionsFilters() {
     const severitySelect = $$('[data-suggestions-severity]');
     const categorySelect = $$('[data-suggestions-category]');
+    const familySelect = $$('[data-suggestions-family]');
+    const sourceKindSelect = $$('[data-suggestions-source-kind]');
+    const spreadSelect = $$('[data-suggestions-spread]');
+    const actionableCheckbox = $$('[data-suggestions-actionable]');
     const body = $$('[data-suggestions-body]');
     const count = $$('[data-suggestions-count]');
     if (!severitySelect || !categorySelect || !body) return;
 
-    const rows = Array.from(body.querySelectorAll('[data-suggestion-row]'));
-    if (!rows.length) return;
+    const cards = Array.from(body.querySelectorAll('[data-suggestion-card]'));
+    if (!cards.length) return;
 
-    const apply = () => {
+    let minCount = 0;
+
+    window.applySuggestionQuickView = function(view) {
+      minCount = 0;
+      if (view === 'actionable' && actionableCheckbox) {
+        actionableCheckbox.checked = true;
+      }
+      if (view === 'production' && sourceKindSelect) {
+        sourceKindSelect.value = 'production';
+      }
+      if (view === 'structural') {
+        if (familySelect) familySelect.value = 'structural';
+        if (window.activateReportTab) window.activateReportTab('suggestions');
+      }
+      if (view === 'dead-code') {
+        if (categorySelect) categorySelect.value = 'dead_code';
+        if (window.activateReportTab) window.activateReportTab('suggestions');
+      }
+      if (view === 'clone-4plus') {
+        if (categorySelect) categorySelect.value = 'clone';
+        if (window.activateReportTab) window.activateReportTab('suggestions');
+        minCount = 4;
+      }
+      apply();
+    };
+
+    function apply() {
       const severity = severitySelect.value || 'all';
       const category = categorySelect.value || 'all';
+      const family = familySelect?.value || 'all';
+      const sourceKind = sourceKindSelect?.value || 'all';
+      const spread = spreadSelect?.value || 'all';
+      const actionableOnly = Boolean(actionableCheckbox?.checked);
       let visibleCount = 0;
 
-      rows.forEach((row) => {
-        const rowSeverity = row.getAttribute('data-severity') || '';
-        const rowCategory = row.getAttribute('data-category') || '';
+      cards.forEach((card) => {
+        const rowSeverity = card.getAttribute('data-severity') || '';
+        const rowCategory = card.getAttribute('data-category') || '';
+        const rowFamily = card.getAttribute('data-family') || '';
+        const rowSourceKind = card.getAttribute('data-source-kind') || '';
+        const rowSpread = card.getAttribute('data-spread-bucket') || 'low';
+        const actionable = card.getAttribute('data-actionable') === 'true';
+        const rowCount = parseInt(card.getAttribute('data-count') || '0', 10);
         const severityMatch = severity === 'all' || rowSeverity === severity;
         const categoryMatch = category === 'all' || rowCategory === category;
-        const visible = severityMatch && categoryMatch;
-        row.style.display = visible ? '' : 'none';
+        const familyMatch = family === 'all' || rowFamily === family;
+        const sourceKindMatch = sourceKind === 'all' || rowSourceKind === sourceKind;
+        const spreadMatch = spread === 'all' || rowSpread === spread;
+        const actionableMatch = !actionableOnly || actionable;
+        const countMatch = !minCount || (Number.isFinite(rowCount) && rowCount >= minCount);
+        const visible =
+          severityMatch &&
+          categoryMatch &&
+          familyMatch &&
+          sourceKindMatch &&
+          spreadMatch &&
+          actionableMatch &&
+          countMatch;
+        card.style.display = visible ? '' : 'none';
         if (visible) visibleCount += 1;
       });
 
       if (count) {
         count.textContent = visibleCount + ' shown';
       }
-    };
+    }
 
     severitySelect.addEventListener('change', apply);
     categorySelect.addEventListener('change', apply);
+    familySelect?.addEventListener('change', apply);
+    sourceKindSelect?.addEventListener('change', apply);
+    spreadSelect?.addEventListener('change', apply);
+    actionableCheckbox?.addEventListener('change', apply);
     apply();
+  }
+
+  function initStructuralFindingFilters() {
+    const sourceKindSelect = $$('[data-sf-source-kind]');
+    const spreadSelect = $$('[data-sf-spread]');
+    const actionableCheckbox = $$('[data-sf-actionable]');
+    const count = $$('[data-sf-count]');
+    const groups = Array.from(document.querySelectorAll('[data-sf-group]'));
+    if (!groups.length) return;
+
+    const apply = () => {
+      const sourceKind = sourceKindSelect?.value || 'all';
+      const spread = spreadSelect?.value || 'all';
+      const actionableOnly = Boolean(actionableCheckbox?.checked);
+      let visibleCount = 0;
+      groups.forEach((group) => {
+        const rowSourceKind = group.getAttribute('data-source-kind') || '';
+        const rowSpread = group.getAttribute('data-spread-bucket') || 'low';
+        const actionable = group.getAttribute('data-actionable') === 'true';
+        const visible =
+          (sourceKind === 'all' || rowSourceKind === sourceKind) &&
+          (spread === 'all' || rowSpread === spread) &&
+          (!actionableOnly || actionable);
+        group.style.display = visible ? '' : 'none';
+        if (visible) visibleCount += 1;
+      });
+      if (count) count.textContent = visibleCount + ' shown';
+    };
+
+    sourceKindSelect?.addEventListener('change', apply);
+    spreadSelect?.addEventListener('change', apply);
+    actionableCheckbox?.addEventListener('change', apply);
+    apply();
+  }
+
+  function initQuickViewButtons() {
+    document.querySelectorAll('[data-quick-view]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const view = button.getAttribute('data-quick-view') || '';
+        if (view === 'structural') {
+          if (window.activateReportTab) window.activateReportTab('structural-findings');
+          return;
+        }
+        if (view === 'dead-code') {
+          if (window.activateReportTab) window.activateReportTab('dead-code');
+          return;
+        }
+        if (window.activateReportTab) window.activateReportTab('suggestions');
+        if (window.applySuggestionQuickView) {
+          window.applySuggestionQuickView(view);
+        }
+      });
+    });
   }
 
   function initTableTooltips() {
@@ -4149,6 +4816,8 @@ section[data-section="segments"] .group {
   initTabs();
   initCloneSubTabs();
   initSuggestionsFilters();
+  initStructuralFindingFilters();
+  initQuickViewButtons();
   initTableTooltips();
   initSection('functions');
   initSection('blocks');

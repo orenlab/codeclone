@@ -1,15 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="182" height="32" viewBox="0 0 182 32" fill="none">
-  <rect x="9" y="4" width="15" height="19" rx="3.2" stroke="#58A6FF" stroke-width="1.8" opacity="0.28"/>
-  <rect x="6" y="7" width="15" height="19" rx="3.2" stroke="#58A6FF" stroke-width="1.8"/>
-  <path d="M11.2 13.8L8.9 16.1L11.2 18.4" stroke="#58A6FF" stroke-width="2.15" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M15.8 13.8L18.1 16.1L15.8 18.4" stroke="#58A6FF" stroke-width="2.15" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="9" y="4" width="15" height="19" rx="3.2" stroke="#58A6FF" stroke-width="1.8" opacity="0.28"/>
+    <rect x="6" y="7" width="15" height="19" rx="3.2" stroke="#58A6FF" stroke-width="1.8"/>
+    <path d="M11.2 13.8L8.9 16.1L11.2 18.4" stroke="#58A6FF" stroke-width="2.15" stroke-linecap="round"
+          stroke-linejoin="round"/>
+    <path d="M15.8 13.8L18.1 16.1L15.8 18.4" stroke="#58A6FF" stroke-width="2.15" stroke-linecap="round"
+          stroke-linejoin="round"/>
 
-  <text x="36" y="16"
-        fill="#E6EDF3"
-        font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace"
-        font-size="14"
-        font-weight="700"
-        letter-spacing="-0.1"
-        dominant-baseline="middle"
-        text-anchor="start">CodeClone</text>
+    <text x="36" y="16"
+          fill="#E6EDF3"
+          font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace"
+          font-size="14"
+          font-weight="700"
+          letter-spacing="-0.1"
+          dominant-baseline="middle"
+          text-anchor="start">CodeClone
+    </text>
 </svg>

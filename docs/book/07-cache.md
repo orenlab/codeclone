@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define cache schema v2.0, integrity verification, and fail-open behavior.
+Define cache schema v2.1, integrity verification, and fail-open behavior.
 
 ## Public surface
 
@@ -13,7 +13,7 @@ Define cache schema v2.0, integrity verification, and fail-open behavior.
 
 ## Data model
 
-On-disk schema (`v == "2.0"`):
+On-disk schema (`v == "2.1"`):
 
 - Top-level: `v`, `payload`, `sig`
 - `payload` keys: `py`, `fp`, `ap`, `files`
@@ -22,6 +22,8 @@ On-disk schema (`v == "2.0"`):
     - `st`: `[mtime_ns, size]`
     - optional analysis sections (`u`/`b`/`s` and metrics-related sections)
 - file keys are wire relpaths when `root` is configured
+- per-file `dc` (`dead_candidates`) rows do not repeat filepath; path is implied by
+  the containing file entry
 
 Refs:
 
@@ -84,6 +86,8 @@ Refs:
 
 - Cache signatures are computed over canonical JSON payload.
 - Wire file paths and row arrays are sorted before write.
+- Current schema decodes only the canonical row shapes that current runtime writes;
+  older cache schemas are ignored and rebuilt.
 
 Refs:
 

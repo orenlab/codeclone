@@ -126,8 +126,8 @@ In CFG v1:
 
 - `break` and `continue` are explicit terminating statements,
 - each maps to a deterministic jump target through loop context:
-  - `break` -> loop after-block,
-  - `continue` -> loop condition/iteration block,
+    - `break` -> loop after-block,
+    - `continue` -> loop condition/iteration block,
 - `for/while ... else` remains reachable only on normal loop completion
   (not through `break` paths).
 

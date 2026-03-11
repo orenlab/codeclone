@@ -6,11 +6,14 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 from pathlib import Path
-
-from rich.console import Console
+from typing import Protocol
 
 from .contracts import ExitCode
 from .ui_messages import fmt_contract_error
+
+
+class _Printer(Protocol):
+    def print(self, *objects: object, **kwargs: object) -> None: ...
 
 
 def _validate_output_path(
@@ -18,7 +21,7 @@ def _validate_output_path(
     *,
     expected_suffix: str,
     label: str,
-    console: Console,
+    console: _Printer,
     invalid_message: Callable[..., str],
     invalid_path_message: Callable[..., str],
 ) -> Path:

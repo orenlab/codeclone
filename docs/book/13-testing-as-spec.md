@@ -34,7 +34,7 @@ The following matrix is treated as executable contract:
 | Baseline schema/integrity/compat gates     | `tests/test_baseline.py`                                                                                      |
 | Cache fail-open + status mapping           | `tests/test_cache.py`, `tests/test_cli_inprocess.py::test_cli_reports_cache_too_large_respects_max_size_flag` |
 | Exit code categories and markers           | `tests/test_cli_unit.py`, `tests/test_cli_inprocess.py`                                                       |
-| Report schema v2.0 JSON/TXT split + layout | `tests/test_report.py`                                                                                        |
+| Report schema v2.1 canonical/derived/integrity + JSON/TXT/MD/SARIF projections | `tests/test_report.py`, `tests/test_report_contract_coverage.py`, `tests/test_report_branch_invariants.py` |
 | HTML render-only explainability + escaping | `tests/test_html_report.py`                                                                                   |
 | Scanner traversal safety                   | `tests/test_scanner_extra.py`, `tests/test_security.py`                                                       |
 
@@ -71,7 +71,7 @@ Refs:
 
 - `tests/test_baseline.py::test_baseline_payload_fields_contract_invariant`
 - `tests/test_cache.py::test_cache_v13_missing_optional_sections_default_empty`
-- `tests/test_report.py::test_report_json_compact_v20_contract`
+- `tests/test_report.py::test_report_json_compact_v21_contract`
 - `tests/test_cli_inprocess.py::test_cli_contract_error_priority_over_gating_failure_for_unreadable_source`
 - `tests/test_html_report.py::test_html_and_json_group_order_consistent`
 - `tests/test_detector_golden.py::test_detector_output_matches_golden_fixture`

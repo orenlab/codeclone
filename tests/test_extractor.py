@@ -27,7 +27,7 @@ def extract_units_from_source(
     list[BlockUnit],
     list[SegmentUnit],
 ]:
-    units, blocks, segments, _source_stats, _file_metrics = (
+    units, blocks, segments, _source_stats, _file_metrics, _sf = (
         extractor.extract_units_and_stats_from_source(
             source=source,
             filepath=filepath,
@@ -88,6 +88,38 @@ class A:
     assert len(units) == 1
     assert blocks == []
     assert segments == []
+
+
+def test_extract_units_can_skip_structural_findings() -> None:
+    src = """
+def foo(x):
+    a = 1
+    b = 2
+    c = 3
+    d = 4
+    e = 5
+    if x == 1:
+        log("a")
+        value = x + 1
+        return value
+    elif x == 2:
+        log("b")
+        value = x + 2
+        return value
+    return a + b + c + d + e
+"""
+    _units, _blocks, _segments, _source_stats, _file_metrics, sf = (
+        extractor.extract_units_and_stats_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="mod",
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            collect_structural_findings=False,
+        )
+    )
+    assert sf == []
 
 
 def test_parse_timeout_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -402,7 +434,7 @@ from pkg.mod import live
 
 live()
 """
-    _, _, _, _, test_metrics = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, test_metrics, _ = extractor.extract_units_and_stats_from_source(
         source=src,
         filepath="pkg/tests/test_usage.py",
         module_name="pkg.tests.test_usage",
@@ -410,7 +442,7 @@ live()
         min_loc=1,
         min_stmt=1,
     )
-    _, _, _, _, regular_metrics = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, regular_metrics, _ = extractor.extract_units_and_stats_from_source(
         source=src,
         filepath="pkg/usage.py",
         module_name="pkg.usage",
@@ -435,7 +467,7 @@ def test_orphan_usage():
     assert orphan() == 1
 """
 
-    _, _, _, _, prod_metrics = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, prod_metrics, _ = extractor.extract_units_and_stats_from_source(
         source=src_prod,
         filepath="pkg/mod.py",
         module_name="pkg.mod",
@@ -443,7 +475,7 @@ def test_orphan_usage():
         min_loc=1,
         min_stmt=1,
     )
-    _, _, _, _, test_metrics = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, test_metrics, _ = extractor.extract_units_and_stats_from_source(
         source=src_test,
         filepath="pkg/tests/test_mod.py",
         module_name="pkg.tests.test_mod",
@@ -502,7 +534,7 @@ def used():
             return None
 
     monkeypatch.setattr(extractor, "_QualnameCollector", _CollectorNoClassMetrics)
-    _, _, _, _, file_metrics = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
         source="class Broken:\n    pass\n",
         filepath="pkg/mod.py",
         module_name="pkg.mod",

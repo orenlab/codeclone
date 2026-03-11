@@ -9,7 +9,7 @@ This beta introduces:
 
 - a new stage-based architecture
 - unified clone + metrics baseline flow
-- report schema `2.0`, cache schema `2.0`, and richer report provenance
+- report schema `2.1`, cache schema `2.1`, and richer report provenance
 - expanded code-health analysis (complexity, coupling, cohesion, dependencies, dead code, health)
 - improved HTML and CLI reporting surfaces
 - substantial performance work for faster cold and warm runs
@@ -41,8 +41,15 @@ final `2.0.0` release.
 - Added unified baseline flow with optional top-level `metrics` stored in the same baseline file as clone keys.
 - Tracked embedded metrics snapshot integrity via `meta.metrics_payload_sha256`.
 - Preserved embedded metrics payload and hash when updating clone baseline content.
-- Bumped cache schema to `2.0`.
-- Bumped report schema to `2.0`.
+- Bumped cache schema to `2.1`.
+- Bumped report schema to `2.1`.
+- Consolidated report contract around canonical sections:
+  `meta`, `inventory`, `findings`, `metrics`, with `derived` and `integrity`
+  as explicit companion layers.
+- Structural findings now deduplicate repeated occurrences and use explicit
+  `file_path` item layout instead of a sentinel `file_i=-1`.
+- Tightened `duplicated_branches` reporting to suppress trivial single-statement
+  branch boilerplate without structural mass.
 
 ### Configuration and CLI UX
 
@@ -52,6 +59,8 @@ final `2.0.0` release.
 - Added optional-value report flags with deterministic defaults when passed without a path:
     - `--html` -> `.cache/codeclone/report.html`
     - `--json` -> `.cache/codeclone/report.json`
+    - `--md` -> `.cache/codeclone/report.md`
+    - `--sarif` -> `.cache/codeclone/report.sarif`
     - `--text` -> `.cache/codeclone/report.txt`
 - Added optional-value path flags for default-path intent:
     - `--baseline`
@@ -110,7 +119,8 @@ final `2.0.0` release.
 - Improved warm-run responsiveness substantially while preserving deterministic behavior and output contracts.
 - Deferred HTML renderer import in CLI so non-HTML runs do not pay template/render startup cost.
 - Disabled transient status spinner contexts when `--no-progress` is active to reduce terminal I/O overhead.
-- Added canonical cache-entry fast-path for already validated runtime entries while preserving fallback validation for raw
+- Added canonical cache-entry fast-path for already validated runtime entries while preserving fallback validation for
+  raw
   or externally mutated payloads.
 - Reused a shared parsed baseline payload when clone and metrics baselines point to the same file to avoid duplicate
   JSON reads/parses in one run.
@@ -137,7 +147,7 @@ final `2.0.0` release.
   `pre-commit run --all-files` passes with the CI gate enabled.
 - Added targeted branch and invariant tests for `baseline`, `cache`, `cli`, `html_report`, `extractor`,
   `pipeline.process`, and metrics modules.
-- Full suite now reaches `100%` coverage.
+- Coverage gate is enforced at `>=99%` with contract-focused branch/invariant tests.
 
 ### Stability Notes
 

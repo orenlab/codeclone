@@ -27,7 +27,7 @@ all with baseline-aware governance that separates **known** technical debt from 
 - **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, dead code, health
   score
 - **Baseline governance** — known debt stays accepted; CI blocks only new clones and metric regressions
-- **Reports** — interactive HTML, deterministic JSON (schema v2.0), plain text — all with NEW/KNOWN split
+- **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Fast** — incremental caching, parallel processing, warm-run optimization
 
@@ -38,6 +38,7 @@ pip install codeclone        # or: uv tool install codeclone
 
 codeclone .                  # analyze current directory
 codeclone . --html           # generate HTML report
+codeclone . --json --md --sarif --text   # generate machine-readable reports
 codeclone . --ci             # CI mode (--fail-on-new --no-color --quiet)
 ```
 
@@ -103,6 +104,9 @@ skip_metrics = false
 quiet = true
 html_out = ".cache/codeclone/report.html"
 json_out = ".cache/codeclone/report.json"
+md_out = ".cache/codeclone/report.md"
+sarif_out = ".cache/codeclone/report.sarif"
+text_out = ".cache/codeclone/report.txt"
 ```
 
 Precedence: CLI flags > `pyproject.toml` > built-in defaults.
@@ -135,54 +139,48 @@ Contract errors (`2`) take precedence over gating failures (`3`).
 |--------|----------|--------------------------------|
 | HTML   | `--html` | `.cache/codeclone/report.html` |
 | JSON   | `--json` | `.cache/codeclone/report.json` |
+| Markdown | `--md` | `.cache/codeclone/report.md` |
+| SARIF  | `--sarif` | `.cache/codeclone/report.sarif` |
 | Text   | `--text` | `.cache/codeclone/report.txt`  |
 
-All reports include NEW/KNOWN split, matched code snippets, and provenance metadata.
+All report formats are rendered from one canonical JSON report document.
 
 <details>
-<summary>JSON report shape (v2.0)</summary>
+<summary>JSON report shape (v2.1)</summary>
 
 ```json
 {
-  "report_schema_version": "2.0",
+  "report_schema_version": "2.1",
   "meta": {
+    "codeclone_version": "2.0.0b1",
     "project_name": "...",
-    "scan_root": "..."
+    "scan_root": "...",
+    "report_mode": "full",
+    "baseline": { "...": "..." },
+    "cache": { "...": "..." },
+    "metrics_baseline": { "...": "..." },
+    "runtime": { "report_generated_at_utc": "..." }
   },
-  "files": [],
-  "groups": {
-    "functions": {},
-    "blocks": {},
-    "segments": {}
+  "inventory": {
+    "files": { "...": "..." },
+    "code": { "...": "..." },
+    "file_registry": { "encoding": "relative_path", "items": [] }
   },
-  "groups_split": {
-    "functions": {
-      "new": [],
-      "known": []
-    },
-    "blocks": {
-      "new": [],
-      "known": []
-    },
-    "segments": {
-      "new": [],
-      "known": []
+  "findings": {
+    "summary": { "...": "..." },
+    "groups": {
+      "clones": { "functions": [], "blocks": [], "segments": [] },
+      "structural": { "groups": [] },
+      "dead_code": { "groups": [] },
+      "design": { "groups": [] }
     }
   },
-  "group_item_layout": {
-    "functions": [
-      "..."
-    ],
-    "blocks": [
-      "..."
-    ],
-    "segments": [
-      "..."
-    ]
-  },
-  "facts": {},
-  "metrics": {},
-  "suggestions": []
+  "metrics": { "summary": {}, "families": {} },
+  "derived": { "suggestions": [], "overview": {}, "hotlists": {} },
+  "integrity": {
+    "canonicalization": { "version": "1", "scope": "canonical_only" },
+    "digest": { "algorithm": "sha256", "verified": true, "value": "..." }
+  }
 }
 ```
 

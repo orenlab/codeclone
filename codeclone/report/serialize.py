@@ -4,45 +4,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping, Sequence
 
-from ..contracts import REPORT_SCHEMA_VERSION
-from ..models import Suggestion
-from .suggestions import classify_clone_type
-from .types import GroupItemLike, GroupMap, GroupMapLike
-
-FunctionRecord = tuple[int, str, int, int, int, int, str, str, int, int, str, str]
-BlockRecord = tuple[int, str, int, int, int]
-SegmentRecord = tuple[int, str, int, int, int, str, str]
-SplitLists = dict[str, list[str]]
-GroupsSplit = dict[str, SplitLists]
-
-GROUP_ITEM_LAYOUT: dict[str, list[str]] = {
-    "functions": [
-        "file_i",
-        "qualname",
-        "start",
-        "end",
-        "loc",
-        "stmt_count",
-        "fingerprint",
-        "loc_bucket",
-        "cyclomatic_complexity",
-        "nesting_depth",
-        "risk",
-        "raw_hash",
-    ],
-    "blocks": ["file_i", "qualname", "start", "end", "size"],
-    "segments": [
-        "file_i",
-        "qualname",
-        "start",
-        "end",
-        "size",
-        "segment_hash",
-        "segment_sig",
-    ],
-}
+from ._formatting import format_spread_text
 
 
 def _as_int(value: object) -> int:
@@ -58,276 +22,7 @@ def _as_int(value: object) -> int:
     return 0
 
 
-def _collect_files(
-    *,
-    func_groups: GroupMapLike,
-    block_groups: GroupMapLike,
-    segment_groups: GroupMapLike,
-) -> list[str]:
-    files: set[str] = set()
-    for groups in (func_groups, block_groups, segment_groups):
-        for items in groups.values():
-            for item in items:
-                files.add(str(item.get("filepath", "")))
-    return sorted(files)
-
-
-def _encode_function_item(item: GroupItemLike, file_id: int) -> FunctionRecord:
-    return (
-        file_id,
-        str(item.get("qualname", "")),
-        _as_int(item.get("start_line", 0)),
-        _as_int(item.get("end_line", 0)),
-        _as_int(item.get("loc", 0)),
-        _as_int(item.get("stmt_count", 0)),
-        str(item.get("fingerprint", "")),
-        str(item.get("loc_bucket", "")),
-        _as_int(item.get("cyclomatic_complexity", 1)),
-        _as_int(item.get("nesting_depth", 0)),
-        str(item.get("risk", "low")),
-        str(item.get("raw_hash", "")),
-    )
-
-
-def _encode_block_item(item: GroupItemLike, file_id: int) -> BlockRecord:
-    return (
-        file_id,
-        str(item.get("qualname", "")),
-        _as_int(item.get("start_line", 0)),
-        _as_int(item.get("end_line", 0)),
-        _as_int(item.get("size", 0)),
-    )
-
-
-def _encode_segment_item(item: GroupItemLike, file_id: int) -> SegmentRecord:
-    return (
-        file_id,
-        str(item.get("qualname", "")),
-        _as_int(item.get("start_line", 0)),
-        _as_int(item.get("end_line", 0)),
-        _as_int(item.get("size", 0)),
-        str(item.get("segment_hash", "")),
-        str(item.get("segment_sig", "")),
-    )
-
-
-def _function_record_sort_key(record: FunctionRecord) -> tuple[int, str, int, int]:
-    return record[0], record[1], record[2], record[3]
-
-
-def _block_record_sort_key(record: BlockRecord) -> tuple[int, str, int, int]:
-    return record[0], record[1], record[2], record[3]
-
-
-def _segment_record_sort_key(record: SegmentRecord) -> tuple[int, str, int, int]:
-    return record[0], record[1], record[2], record[3]
-
-
-def _resolve_metric_value(item: GroupItemLike, metric_name: str) -> int:
-    raw_value = item.get(metric_name)
-    if raw_value is None:
-        fallback_metric = "size" if metric_name == "loc" else "loc"
-        raw_value = item.get(fallback_metric, 0)
-    if isinstance(raw_value, bool):
-        return int(raw_value)
-    if isinstance(raw_value, int):
-        return raw_value
-    if isinstance(raw_value, str):
-        return _as_int(raw_value)
-    return 0
-
-
-def _baseline_is_trusted(meta: Mapping[str, object]) -> bool:
-    return (
-        meta.get("baseline_loaded") is True
-        and str(meta.get("baseline_status", "")).strip().lower() == "ok"
-    )
-
-
-def to_json_report(
-    func_groups: GroupMapLike,
-    block_groups: GroupMapLike,
-    segment_groups: GroupMapLike,
-    meta: Mapping[str, object] | None = None,
-    block_facts: Mapping[str, Mapping[str, str]] | None = None,
-    new_function_group_keys: Collection[str] | None = None,
-    new_block_group_keys: Collection[str] | None = None,
-    new_segment_group_keys: Collection[str] | None = None,
-    metrics: Mapping[str, object] | None = None,
-    suggestions: Collection[Suggestion] | None = None,
-) -> str:
-    """
-    Serialize report JSON schema v2.0.
-
-    NEW/KNOWN split contract:
-    - if baseline is not trusted, all groups are NEW and KNOWN is empty
-    - if baseline is trusted, callers must pass `new_*_group_keys` computed by
-      the core baseline diff pipeline; keys absent from `new_*` are treated as KNOWN
-    """
-    meta_payload = dict(meta or {})
-    meta_payload["report_schema_version"] = REPORT_SCHEMA_VERSION
-
-    files = _collect_files(
-        func_groups=func_groups,
-        block_groups=block_groups,
-        segment_groups=segment_groups,
-    )
-    file_ids = {filepath: idx for idx, filepath in enumerate(files)}
-
-    function_groups: dict[str, list[FunctionRecord]] = {}
-    for group_key in sorted(func_groups):
-        function_records = [
-            _encode_function_item(item, file_ids[str(item.get("filepath", ""))])
-            for item in func_groups[group_key]
-        ]
-        function_groups[group_key] = sorted(
-            function_records,
-            key=_function_record_sort_key,
-        )
-
-    block_groups_out: dict[str, list[BlockRecord]] = {}
-    for group_key in sorted(block_groups):
-        block_records = [
-            _encode_block_item(item, file_ids[str(item.get("filepath", ""))])
-            for item in block_groups[group_key]
-        ]
-        block_groups_out[group_key] = sorted(block_records, key=_block_record_sort_key)
-
-    segment_groups_out: dict[str, list[SegmentRecord]] = {}
-    for group_key in sorted(segment_groups):
-        segment_records = [
-            _encode_segment_item(item, file_ids[str(item.get("filepath", ""))])
-            for item in segment_groups[group_key]
-        ]
-        segment_groups_out[group_key] = sorted(
-            segment_records,
-            key=_segment_record_sort_key,
-        )
-
-    baseline_trusted = _baseline_is_trusted(meta_payload)
-
-    def _split_for(
-        *,
-        keys: Collection[str],
-        new_keys: Collection[str] | None,
-    ) -> SplitLists:
-        sorted_keys = sorted(keys)
-        if not baseline_trusted:
-            return {"new": sorted_keys, "known": []}
-        if new_keys is None:
-            return {"new": sorted_keys, "known": []}
-        new_key_set = set(new_keys)
-        new_list = [group_key for group_key in sorted_keys if group_key in new_key_set]
-        known_list = [
-            group_key for group_key in sorted_keys if group_key not in new_key_set
-        ]
-        return {"new": new_list, "known": known_list}
-
-    groups_split: GroupsSplit = {
-        "functions": _split_for(
-            keys=function_groups.keys(),
-            new_keys=new_function_group_keys,
-        ),
-        "blocks": _split_for(
-            keys=block_groups_out.keys(),
-            new_keys=new_block_group_keys,
-        ),
-        "segments": _split_for(
-            keys=segment_groups_out.keys(),
-            new_keys=new_segment_group_keys,
-        ),
-    }
-    meta_payload["groups_counts"] = {
-        section_name: {
-            "total": len(section_split["new"]) + len(section_split["known"]),
-            "new": len(section_split["new"]),
-            "known": len(section_split["known"]),
-        }
-        for section_name, section_split in groups_split.items()
-    }
-
-    clone_types = {
-        "functions": {
-            group_key: classify_clone_type(
-                items=func_groups[group_key],
-                kind="function",
-            )
-            for group_key in sorted(func_groups)
-        },
-        "blocks": {
-            group_key: classify_clone_type(
-                items=block_groups[group_key],
-                kind="block",
-            )
-            for group_key in sorted(block_groups)
-        },
-        "segments": {
-            group_key: classify_clone_type(
-                items=segment_groups[group_key],
-                kind="segment",
-            )
-            for group_key in sorted(segment_groups)
-        },
-    }
-
-    payload: dict[str, object] = {
-        "report_schema_version": REPORT_SCHEMA_VERSION,
-        "meta": meta_payload,
-        "files": files,
-        "groups": {
-            "functions": function_groups,
-            "blocks": block_groups_out,
-            "segments": segment_groups_out,
-        },
-        "groups_split": groups_split,
-        "group_item_layout": GROUP_ITEM_LAYOUT,
-        "clones": {
-            "functions": {
-                "groups": function_groups,
-                "split": groups_split["functions"],
-                "count": len(function_groups),
-            },
-            "blocks": {
-                "groups": block_groups_out,
-                "split": groups_split["blocks"],
-                "count": len(block_groups_out),
-            },
-            "segments": {
-                "groups": segment_groups_out,
-                "split": groups_split["segments"],
-                "count": len(segment_groups_out),
-            },
-            "clone_types": clone_types,
-        },
-        "clone_types": clone_types,
-    }
-
-    if block_facts:
-        sorted_block_facts: dict[str, dict[str, str]] = {}
-        for group_key in sorted(block_facts):
-            sorted_block_facts[group_key] = {
-                fact_key: str(block_facts[group_key][fact_key])
-                for fact_key in sorted(block_facts[group_key])
-            }
-        payload["facts"] = {"blocks": sorted_block_facts}
-
-    if metrics is not None:
-        payload["metrics"] = dict(metrics)
-
-    if suggestions is not None:
-        payload["suggestions"] = [
-            {
-                "severity": suggestion.severity,
-                "category": suggestion.category,
-                "title": suggestion.title,
-                "location": suggestion.location,
-                "steps": list(suggestion.steps),
-                "effort": suggestion.effort,
-                "priority": suggestion.priority,
-            }
-            for suggestion in suggestions
-        ]
-
+def render_json_report_document(payload: Mapping[str, object]) -> str:
     return json.dumps(
         payload,
         ensure_ascii=False,
@@ -335,193 +30,618 @@ def to_json_report(
     )
 
 
-def to_text(groups: GroupMapLike, *, metric_name: str = "loc") -> str:
-    lines: list[str] = []
-    for i, (_, items_unsorted) in enumerate(
-        sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
-    ):
-        items = sorted(
-            items_unsorted,
-            key=lambda item: (
-                str(item.get("filepath", "")),
-                _as_int(item.get("start_line", 0)),
-                _as_int(item.get("end_line", 0)),
-                str(item.get("qualname", "")),
-            ),
-        )
-        lines.append(f"\n=== Clone group #{i + 1} (count={len(items_unsorted)}) ===")
-        lines.extend(
-            [
-                f"- {item['qualname']} "
-                f"{item['filepath']}:{item['start_line']}-{item['end_line']} "
-                f"{metric_name}={_resolve_metric_value(item, metric_name)}"
-                for item in items
-            ]
-        )
-    return "\n".join(lines).strip() + "\n"
-
-
 def format_meta_text_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if value is None:
         return "(none)"
+    if isinstance(value, float):
+        return f"{value:.2f}".rstrip("0").rstrip(".") or "0"
+    if isinstance(value, Sequence) and not isinstance(
+        value,
+        (str, bytes, bytearray),
+    ):
+        formatted = [format_meta_text_value(item) for item in value]
+        return ", ".join(formatted) if formatted else "(none)"
     text = str(value).strip()
     return text if text else "(none)"
 
 
-def to_text_report(
+def _as_mapping(value: object) -> Mapping[str, object]:
+    if isinstance(value, Mapping):
+        return value
+    return {}
+
+
+def _as_sequence(value: object) -> Sequence[object]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return value
+    return ()
+
+
+def _format_key_values(
+    mapping: Mapping[str, object],
+    keys: Sequence[str],
     *,
-    meta: Mapping[str, object],
-    func_groups: GroupMapLike,
-    block_groups: GroupMapLike,
-    segment_groups: GroupMapLike,
-    new_function_group_keys: Collection[str] | None = None,
-    new_block_group_keys: Collection[str] | None = None,
-    new_segment_group_keys: Collection[str] | None = None,
-    metrics: Mapping[str, object] | None = None,
-    suggestions: Collection[Suggestion] | None = None,
+    skip_empty: bool = False,
 ) -> str:
-    """
-    Serialize deterministic TXT report.
+    parts: list[str] = []
+    for key in keys:
+        if key not in mapping:
+            continue
+        formatted = format_meta_text_value(mapping.get(key))
+        if skip_empty and formatted == "(none)":
+            continue
+        parts.append(f"{key}={formatted}")
+    return " ".join(parts) if parts else "(none)"
 
-    NEW/KNOWN split follows the same contract as JSON report output.
-    """
 
-    baseline_trusted = _baseline_is_trusted(meta)
+def _spread_text(spread: Mapping[str, object]) -> str:
+    return format_spread_text(
+        _as_int(spread.get("files")),
+        _as_int(spread.get("functions")),
+    )
 
-    def _split_for(
-        *, groups: GroupMapLike, new_keys: Collection[str] | None
-    ) -> SplitLists:
-        sorted_keys = sorted(groups.keys())
-        if not baseline_trusted:
-            return {"new": sorted_keys, "known": []}
-        if new_keys is None:
-            return {"new": sorted_keys, "known": []}
-        new_key_set = set(new_keys)
-        new_list = [group_key for group_key in sorted_keys if group_key in new_key_set]
-        known_list = [
-            group_key for group_key in sorted_keys if group_key not in new_key_set
-        ]
-        return {"new": new_list, "known": known_list}
 
-    groups_split: GroupsSplit = {
-        "functions": _split_for(groups=func_groups, new_keys=new_function_group_keys),
-        "blocks": _split_for(groups=block_groups, new_keys=new_block_group_keys),
-        "segments": _split_for(groups=segment_groups, new_keys=new_segment_group_keys),
+def _scope_text(source_scope: Mapping[str, object]) -> str:
+    dominant = str(source_scope.get("dominant_kind", "")).strip() or "other"
+    impact = str(source_scope.get("impact_scope", "")).strip() or "non_runtime"
+    return f"{dominant}/{impact}"
+
+
+def _structural_kind_label(kind: object) -> str:
+    kind_text = str(kind).strip()
+    if kind_text == "duplicated_branches":
+        return "Duplicated branches"
+    return kind_text or "(none)"
+
+
+def _location_line(
+    item: Mapping[str, object],
+    *,
+    metric_name: str | None = None,
+) -> str:
+    metric_suffix = ""
+    if metric_name is not None and metric_name in item:
+        metric_suffix = (
+            f" {metric_name}={format_meta_text_value(item.get(metric_name))}"
+        )
+    return (
+        f"- {format_meta_text_value(item.get('qualname'))} "
+        f"{format_meta_text_value(item.get('relative_path'))}:"
+        f"{format_meta_text_value(item.get('start_line'))}-"
+        f"{format_meta_text_value(item.get('end_line'))}"
+        f"{metric_suffix}"
+    )
+
+
+def _append_clone_section(
+    lines: list[str],
+    *,
+    title: str,
+    groups: Sequence[object],
+    novelty: str,
+    metric_name: str,
+) -> None:
+    section_groups = [
+        _as_mapping(group)
+        for group in groups
+        if str(_as_mapping(group).get("novelty", "")) == novelty
+    ]
+    lines.append(f"{title} ({novelty.upper()}) (groups={len(section_groups)})")
+    if not section_groups:
+        lines.append("(none)")
+        return
+    for idx, group in enumerate(section_groups, start=1):
+        lines.append(f"=== Clone group #{idx} ===")
+        lines.append(
+            "id="
+            f"{format_meta_text_value(group.get('id'))} "
+            f"clone_type={format_meta_text_value(group.get('clone_type'))} "
+            f"severity={format_meta_text_value(group.get('severity'))} "
+            f"count={format_meta_text_value(group.get('count'))} "
+            f"spread={_spread_text(_as_mapping(group.get('spread')))} "
+            f"scope={_scope_text(_as_mapping(group.get('source_scope')))}"
+        )
+        facts = _as_mapping(group.get("facts"))
+        if facts:
+            lines.append(
+                "facts: "
+                + _format_key_values(
+                    facts,
+                    tuple(sorted(str(key) for key in facts)),
+                    skip_empty=True,
+                )
+            )
+        display_facts = _as_mapping(group.get("display_facts"))
+        if display_facts:
+            lines.append(
+                "display_facts: "
+                + _format_key_values(
+                    display_facts,
+                    tuple(sorted(str(key) for key in display_facts)),
+                    skip_empty=True,
+                )
+            )
+        lines.extend(
+            _location_line(item, metric_name=metric_name)
+            for item in map(_as_mapping, _as_sequence(group.get("items")))
+        )
+        lines.append("")
+    if lines[-1] == "":
+        lines.pop()
+
+
+def _append_structural_findings(lines: list[str], groups: Sequence[object]) -> None:
+    structural_groups = [_as_mapping(group) for group in groups]
+    lines.append(f"STRUCTURAL FINDINGS (groups={len(structural_groups)})")
+    if not structural_groups:
+        lines.append("(none)")
+        return
+    for idx, group in enumerate(structural_groups, start=1):
+        lines.append(f"=== Structural finding #{idx} ===")
+        signature = _as_mapping(group.get("signature"))
+        stable = _as_mapping(signature.get("stable"))
+        control_flow = _as_mapping(stable.get("control_flow"))
+        lines.append(
+            "id="
+            f"{format_meta_text_value(group.get('id'))} "
+            f"kind={format_meta_text_value(group.get('kind'))} "
+            f"label={_structural_kind_label(group.get('kind'))} "
+            f"severity={format_meta_text_value(group.get('severity'))} "
+            f"confidence={format_meta_text_value(group.get('confidence'))} "
+            f"count={format_meta_text_value(group.get('count'))} "
+            f"spread={_spread_text(_as_mapping(group.get('spread')))} "
+            f"scope={_scope_text(_as_mapping(group.get('source_scope')))}"
+        )
+        lines.append(
+            "signature: "
+            f"stmt_shape={format_meta_text_value(stable.get('stmt_shape'))} "
+            f"terminal_kind={format_meta_text_value(stable.get('terminal_kind'))} "
+            f"has_loop={format_meta_text_value(control_flow.get('has_loop'))} "
+            f"has_try={format_meta_text_value(control_flow.get('has_try'))} "
+            f"nested_if={format_meta_text_value(control_flow.get('nested_if'))}"
+        )
+        facts = _as_mapping(group.get("facts"))
+        if facts:
+            lines.append(
+                "facts: "
+                + _format_key_values(
+                    facts,
+                    tuple(sorted(str(key) for key in facts)),
+                    skip_empty=True,
+                )
+            )
+        items = list(map(_as_mapping, _as_sequence(group.get("items"))))
+        visible_items = items[:3]
+        lines.extend(_location_line(item) for item in visible_items)
+        if len(items) > len(visible_items):
+            lines.append(f"... and {len(items) - len(visible_items)} more occurrences")
+        lines.append("")
+    if lines[-1] == "":
+        lines.pop()
+
+
+def _append_single_item_findings(
+    lines: list[str],
+    *,
+    title: str,
+    groups: Sequence[object],
+    fact_keys: Sequence[str],
+) -> None:
+    finding_groups = [_as_mapping(group) for group in groups]
+    lines.append(f"{title} (groups={len(finding_groups)})")
+    if not finding_groups:
+        lines.append("(none)")
+        return
+    for idx, group in enumerate(finding_groups, start=1):
+        lines.append(f"=== Finding #{idx} ===")
+        lines.append(
+            "id="
+            f"{format_meta_text_value(group.get('id'))} "
+            f"category={format_meta_text_value(group.get('category'))} "
+            f"kind={format_meta_text_value(group.get('kind'))} "
+            f"severity={format_meta_text_value(group.get('severity'))} "
+            f"confidence={format_meta_text_value(group.get('confidence'))} "
+            f"scope={_scope_text(_as_mapping(group.get('source_scope')))}"
+        )
+        facts = _as_mapping(group.get("facts"))
+        if facts:
+            lines.append(
+                f"facts: {_format_key_values(facts, fact_keys, skip_empty=True)}"
+            )
+        lines.extend(
+            _location_line(item)
+            for item in map(_as_mapping, _as_sequence(group.get("items")))
+        )
+        lines.append("")
+    if lines[-1] == "":
+        lines.pop()
+
+
+def _flatten_findings(findings: Mapping[str, object]) -> list[Mapping[str, object]]:
+    groups = _as_mapping(findings.get("groups"))
+    clone_groups = _as_mapping(groups.get("clones"))
+    flat_groups = [
+        *map(_as_mapping, _as_sequence(clone_groups.get("functions"))),
+        *map(_as_mapping, _as_sequence(clone_groups.get("blocks"))),
+        *map(_as_mapping, _as_sequence(clone_groups.get("segments"))),
+        *map(
+            _as_mapping,
+            _as_sequence(_as_mapping(groups.get("structural")).get("groups")),
+        ),
+        *map(
+            _as_mapping,
+            _as_sequence(_as_mapping(groups.get("dead_code")).get("groups")),
+        ),
+        *map(
+            _as_mapping,
+            _as_sequence(_as_mapping(groups.get("design")).get("groups")),
+        ),
+    ]
+    return flat_groups
+
+
+def _append_suggestions(
+    lines: list[str],
+    *,
+    suggestions: Sequence[object],
+    findings: Mapping[str, object],
+) -> None:
+    suggestion_rows = [_as_mapping(item) for item in suggestions]
+    finding_index = {
+        str(group.get("id")): group for group in _flatten_findings(findings)
     }
+    lines.append(f"SUGGESTIONS (count={len(suggestion_rows)})")
+    if not suggestion_rows:
+        lines.append("(none)")
+        return
+    for idx, suggestion in enumerate(suggestion_rows, start=1):
+        finding = finding_index.get(str(suggestion.get("finding_id")), {})
+        lines.append(
+            f"{idx}. "
+            f"[{format_meta_text_value(finding.get('severity'))}] "
+            f"{format_meta_text_value(suggestion.get('title'))}"
+        )
+        lines.append(
+            "   "
+            f"finding_id={format_meta_text_value(suggestion.get('finding_id'))} "
+            f"effort={format_meta_text_value(_as_mapping(suggestion.get('action')).get('effort'))}"
+        )
+        summary = str(suggestion.get("summary", "")).strip()
+        if summary:
+            lines.append(f"   summary: {summary}")
+        lines.append(
+            f"   location: {format_meta_text_value(suggestion.get('location_label'))}"
+        )
+        representative = list(
+            map(_as_mapping, _as_sequence(suggestion.get("representative_locations")))
+        )
+        if representative:
+            lines.append(f"   example: {_location_line(representative[0])[2:]}")
+        steps = [
+            str(step).strip()
+            for step in _as_sequence(_as_mapping(suggestion.get("action")).get("steps"))
+            if str(step).strip()
+        ]
+        lines.extend(f"   - {step}" for step in steps[:2])
+
+
+def _append_overview(
+    lines: list[str],
+    overview: Mapping[str, object],
+    hotlists: Mapping[str, object],
+) -> None:
+    lines.append("DERIVED OVERVIEW")
+    families = _as_mapping(overview.get("families"))
+    lines.append(
+        "Families: "
+        + _format_key_values(
+            families,
+            ("clones", "structural", "dead_code", "design"),
+        )
+    )
+    source_breakdown = _as_mapping(overview.get("source_scope_breakdown"))
+    lines.append(
+        "Source scope breakdown: "
+        + _format_key_values(
+            source_breakdown,
+            ("production", "tests", "fixtures", "other"),
+        )
+    )
+    health_snapshot = _as_mapping(overview.get("health_snapshot"))
+    lines.append(
+        "Health snapshot: "
+        + _format_key_values(
+            health_snapshot,
+            ("score", "grade", "strongest_dimension", "weakest_dimension"),
+        )
+    )
+    hotlist_counts = {
+        "most_actionable": len(_as_sequence(hotlists.get("most_actionable_ids"))),
+        "highest_spread": len(_as_sequence(hotlists.get("highest_spread_ids"))),
+        "production_hotspots": len(
+            _as_sequence(hotlists.get("production_hotspot_ids"))
+        ),
+        "test_fixture_hotspots": len(
+            _as_sequence(hotlists.get("test_fixture_hotspot_ids"))
+        ),
+    }
+    lines.append(
+        "Hotlists: "
+        + _format_key_values(
+            hotlist_counts,
+            (
+                "most_actionable",
+                "highest_spread",
+                "production_hotspots",
+                "test_fixture_hotspots",
+            ),
+        )
+    )
+    top_risks = list(map(_as_mapping, _as_sequence(overview.get("top_risks"))))
+    if not top_risks:
+        lines.append("Top risks: (none)")
+        return
+    lines.append("Top risks:")
+    lines.extend(
+        (
+            "- "
+            f"{format_meta_text_value(risk.get('family'))} "
+            f"count={format_meta_text_value(risk.get('count'))} "
+            f"scope={format_meta_text_value(risk.get('scope'))} "
+            f"label={format_meta_text_value(risk.get('label'))}"
+        )
+        for risk in top_risks
+    )
+
+
+def render_text_report_document(payload: Mapping[str, object]) -> str:
+    meta_payload = _as_mapping(payload.get("meta"))
+    baseline = _as_mapping(meta_payload.get("baseline"))
+    cache = _as_mapping(meta_payload.get("cache"))
+    metrics_baseline = _as_mapping(meta_payload.get("metrics_baseline"))
+    inventory_payload = _as_mapping(payload.get("inventory"))
+    inventory_files = _as_mapping(inventory_payload.get("files"))
+    inventory_code = _as_mapping(inventory_payload.get("code"))
+    file_registry = _as_mapping(inventory_payload.get("file_registry"))
+    findings = _as_mapping(payload.get("findings"))
+    findings_summary = _as_mapping(findings.get("summary"))
+    findings_families = _as_mapping(findings_summary.get("families"))
+    findings_severity = _as_mapping(findings_summary.get("severity"))
+    findings_impact_scope = _as_mapping(findings_summary.get("impact_scope"))
+    findings_clones = _as_mapping(findings_summary.get("clones"))
+    metrics_payload = _as_mapping(payload.get("metrics"))
+    metrics_summary = _as_mapping(metrics_payload.get("summary"))
+    derived = _as_mapping(payload.get("derived"))
+    overview = _as_mapping(derived.get("overview"))
+    hotlists = _as_mapping(derived.get("hotlists"))
+    suggestions_payload = _as_sequence(derived.get("suggestions"))
+    integrity = _as_mapping(payload.get("integrity"))
+    canonicalization = _as_mapping(integrity.get("canonicalization"))
+    digest = _as_mapping(integrity.get("digest"))
+    findings_groups = _as_mapping(findings.get("groups"))
+    clone_groups = _as_mapping(findings_groups.get("clones"))
+    runtime_meta = _as_mapping(meta_payload.get("runtime"))
 
     lines = [
         "REPORT METADATA",
         "Report schema version: "
-        f"{format_meta_text_value(meta.get('report_schema_version'))}",
-        f"CodeClone version: {format_meta_text_value(meta.get('codeclone_version'))}",
-        f"Project name: {format_meta_text_value(meta.get('project_name'))}",
-        f"Scan root: {format_meta_text_value(meta.get('scan_root'))}",
-        f"Python version: {format_meta_text_value(meta.get('python_version'))}",
-        f"Python tag: {format_meta_text_value(meta.get('python_tag'))}",
-        f"Baseline path: {format_meta_text_value(meta.get('baseline_path'))}",
+        f"{format_meta_text_value(payload.get('report_schema_version'))}",
+        "CodeClone version: "
+        f"{format_meta_text_value(meta_payload.get('codeclone_version'))}",
+        f"Project name: {format_meta_text_value(meta_payload.get('project_name'))}",
+        f"Scan root: {format_meta_text_value(meta_payload.get('scan_root'))}",
+        f"Python version: {format_meta_text_value(meta_payload.get('python_version'))}",
+        f"Python tag: {format_meta_text_value(meta_payload.get('python_tag'))}",
+        f"Analysis mode: {format_meta_text_value(meta_payload.get('analysis_mode'))}",
+        f"Report mode: {format_meta_text_value(meta_payload.get('report_mode'))}",
+        "Report generated (UTC): "
+        f"{format_meta_text_value(runtime_meta.get('report_generated_at_utc'))}",
+        "Computed metric families: "
+        f"{format_meta_text_value(meta_payload.get('computed_metric_families'))}",
+        f"Baseline path: {format_meta_text_value(baseline.get('path'))}",
         "Baseline fingerprint version: "
-        f"{format_meta_text_value(meta.get('baseline_fingerprint_version'))}",
+        f"{format_meta_text_value(baseline.get('fingerprint_version'))}",
         "Baseline schema version: "
-        f"{format_meta_text_value(meta.get('baseline_schema_version'))}",
-        "Baseline Python tag: "
-        f"{format_meta_text_value(meta.get('baseline_python_tag'))}",
+        f"{format_meta_text_value(baseline.get('schema_version'))}",
+        f"Baseline Python tag: {format_meta_text_value(baseline.get('python_tag'))}",
         "Baseline generator name: "
-        f"{format_meta_text_value(meta.get('baseline_generator_name'))}",
+        f"{format_meta_text_value(baseline.get('generator_name'))}",
         "Baseline generator version: "
-        f"{format_meta_text_value(meta.get('baseline_generator_version'))}",
+        f"{format_meta_text_value(baseline.get('generator_version'))}",
         "Baseline payload sha256: "
-        f"{format_meta_text_value(meta.get('baseline_payload_sha256'))}",
+        f"{format_meta_text_value(baseline.get('payload_sha256'))}",
         "Baseline payload verified: "
-        f"{format_meta_text_value(meta.get('baseline_payload_sha256_verified'))}",
-        f"Baseline loaded: {format_meta_text_value(meta.get('baseline_loaded'))}",
-        f"Baseline status: {format_meta_text_value(meta.get('baseline_status'))}",
-        f"Cache path: {format_meta_text_value(meta.get('cache_path'))}",
-        "Cache schema version: "
-        f"{format_meta_text_value(meta.get('cache_schema_version'))}",
-        f"Cache status: {format_meta_text_value(meta.get('cache_status'))}",
-        f"Cache used: {format_meta_text_value(meta.get('cache_used'))}",
-        "Source IO skipped: "
-        f"{format_meta_text_value(meta.get('files_skipped_source_io'))}",
+        f"{format_meta_text_value(baseline.get('payload_sha256_verified'))}",
+        f"Baseline loaded: {format_meta_text_value(baseline.get('loaded'))}",
+        f"Baseline status: {format_meta_text_value(baseline.get('status'))}",
+        f"Cache path: {format_meta_text_value(cache.get('path'))}",
+        f"Cache schema version: {format_meta_text_value(cache.get('schema_version'))}",
+        f"Cache status: {format_meta_text_value(cache.get('status'))}",
+        f"Cache used: {format_meta_text_value(cache.get('used'))}",
         "Metrics baseline path: "
-        f"{format_meta_text_value(meta.get('metrics_baseline_path'))}",
+        f"{format_meta_text_value(metrics_baseline.get('path'))}",
         "Metrics baseline loaded: "
-        f"{format_meta_text_value(meta.get('metrics_baseline_loaded'))}",
+        f"{format_meta_text_value(metrics_baseline.get('loaded'))}",
         "Metrics baseline status: "
-        f"{format_meta_text_value(meta.get('metrics_baseline_status'))}",
+        f"{format_meta_text_value(metrics_baseline.get('status'))}",
         "Metrics baseline schema version: "
-        f"{format_meta_text_value(meta.get('metrics_baseline_schema_version'))}",
+        f"{format_meta_text_value(metrics_baseline.get('schema_version'))}",
         "Metrics baseline payload sha256: "
-        f"{format_meta_text_value(meta.get('metrics_baseline_payload_sha256'))}",
+        f"{format_meta_text_value(metrics_baseline.get('payload_sha256'))}",
         "Metrics baseline payload verified: "
-        f"{format_meta_text_value(meta.get('metrics_baseline_payload_sha256_verified'))}",
-        f"Analysis mode: {format_meta_text_value(meta.get('analysis_mode'))}",
-        f"Metrics computed: {format_meta_text_value(meta.get('metrics_computed'))}",
-        f"Health score: {format_meta_text_value(meta.get('health_score'))}",
-        f"Health grade: {format_meta_text_value(meta.get('health_grade'))}",
+        f"{format_meta_text_value(metrics_baseline.get('payload_sha256_verified'))}",
     ]
 
-    if not baseline_trusted:
+    if (
+        baseline.get("loaded") is not True
+        or str(baseline.get("status", "")).strip().lower() != "ok"
+    ):
         lines.append("Note: baseline is untrusted; all groups are treated as NEW.")
 
-    if metrics:
-        lines.extend(
-            [
-                "",
-                "METRICS",
-                json.dumps(dict(metrics), ensure_ascii=False, sort_keys=True),
-            ]
-        )
-    if suggestions is not None:
-        lines.extend(
-            [
-                "",
-                "SUGGESTIONS",
-                json.dumps(
-                    [
-                        {
-                            "severity": suggestion.severity,
-                            "category": suggestion.category,
-                            "title": suggestion.title,
-                            "location": suggestion.location,
-                            "effort": suggestion.effort,
-                            "priority": suggestion.priority,
-                        }
-                        for suggestion in suggestions
-                    ],
-                    ensure_ascii=False,
-                    sort_keys=True,
+    lines.extend(
+        [
+            "",
+            "INVENTORY",
+            "Files: "
+            + _format_key_values(
+                inventory_files,
+                (
+                    "total_found",
+                    "analyzed",
+                    "cached",
+                    "skipped",
+                    "source_io_skipped",
                 ),
-            ]
-        )
-
-    sections = (
-        ("FUNCTION CLONES", "functions", func_groups, "loc"),
-        ("BLOCK CLONES", "blocks", block_groups, "size"),
-        ("SEGMENT CLONES", "segments", segment_groups, "size"),
+            ),
+            "Code: "
+            + _format_key_values(
+                inventory_code,
+                ("scope", "parsed_lines", "functions", "methods", "classes"),
+            ),
+            "File registry: "
+            f"encoding={format_meta_text_value(file_registry.get('encoding'))} "
+            f"count={len(_as_sequence(file_registry.get('items')))}",
+            "",
+            "FINDINGS SUMMARY",
+            f"Total groups: {format_meta_text_value(findings_summary.get('total'))}",
+            "Families: "
+            + _format_key_values(
+                findings_families,
+                ("clones", "structural", "dead_code", "design"),
+            ),
+            "Severity: "
+            + _format_key_values(
+                findings_severity,
+                ("critical", "warning", "info"),
+            ),
+            "Impact scope: "
+            + _format_key_values(
+                findings_impact_scope,
+                ("runtime", "non_runtime", "mixed"),
+            ),
+            "Clones: "
+            + _format_key_values(
+                findings_clones,
+                ("functions", "blocks", "segments", "new", "known"),
+            ),
+            "",
+            "METRICS SUMMARY",
+        ]
     )
-    for title, section_key, groups, metric_name in sections:
-        split = groups_split[section_key]
-        new_groups: GroupMap = {
-            group_key: [dict(item) for item in groups[group_key]]
-            for group_key in split["new"]
-            if group_key in groups
-        }
-        known_groups: GroupMap = {
-            group_key: [dict(item) for item in groups[group_key]]
-            for group_key in split["known"]
-            if group_key in groups
-        }
+    for family_name in (
+        "complexity",
+        "coupling",
+        "cohesion",
+        "dependencies",
+        "dead_code",
+        "health",
+    ):
+        family_summary = _as_mapping(metrics_summary.get(family_name))
+        keys: Sequence[str]
+        if family_name in {"complexity", "coupling"}:
+            keys = ("total", "average", "max", "high_risk")
+        elif family_name == "cohesion":
+            keys = ("total", "average", "max", "low_cohesion")
+        elif family_name == "dependencies":
+            keys = ("modules", "edges", "cycles", "max_depth")
+        elif family_name == "dead_code":
+            keys = ("total", "high_confidence")
+        else:
+            keys = ("score", "grade")
+        lines.append(f"{family_name}: {_format_key_values(family_summary, keys)}")
 
-        lines.append("")
-        lines.append(f"{title} (NEW) (groups={len(split['new'])})")
-        new_block = to_text(new_groups, metric_name=metric_name).rstrip()
-        lines.append(new_block if new_block else "(none)")
+    lines.append("")
+    _append_overview(lines, overview, hotlists)
 
-        lines.append("")
-        lines.append(f"{title} (KNOWN) (groups={len(split['known'])})")
-        known_block = to_text(known_groups, metric_name=metric_name).rstrip()
-        lines.append(known_block if known_block else "(none)")
+    lines.append("")
+    _append_suggestions(lines, suggestions=suggestions_payload, findings=findings)
+
+    lines.append("")
+    _append_clone_section(
+        lines,
+        title="FUNCTION CLONES",
+        groups=_as_sequence(clone_groups.get("functions")),
+        novelty="new",
+        metric_name="loc",
+    )
+    lines.append("")
+    _append_clone_section(
+        lines,
+        title="FUNCTION CLONES",
+        groups=_as_sequence(clone_groups.get("functions")),
+        novelty="known",
+        metric_name="loc",
+    )
+    lines.append("")
+    _append_clone_section(
+        lines,
+        title="BLOCK CLONES",
+        groups=_as_sequence(clone_groups.get("blocks")),
+        novelty="new",
+        metric_name="size",
+    )
+    lines.append("")
+    _append_clone_section(
+        lines,
+        title="BLOCK CLONES",
+        groups=_as_sequence(clone_groups.get("blocks")),
+        novelty="known",
+        metric_name="size",
+    )
+    lines.append("")
+    _append_clone_section(
+        lines,
+        title="SEGMENT CLONES",
+        groups=_as_sequence(clone_groups.get("segments")),
+        novelty="new",
+        metric_name="size",
+    )
+    lines.append("")
+    _append_clone_section(
+        lines,
+        title="SEGMENT CLONES",
+        groups=_as_sequence(clone_groups.get("segments")),
+        novelty="known",
+        metric_name="size",
+    )
+    lines.append("")
+    _append_structural_findings(
+        lines,
+        _as_sequence(_as_mapping(findings_groups.get("structural")).get("groups")),
+    )
+    lines.append("")
+    _append_single_item_findings(
+        lines,
+        title="DEAD CODE FINDINGS",
+        groups=_as_sequence(
+            _as_mapping(findings_groups.get("dead_code")).get("groups")
+        ),
+        fact_keys=("kind", "confidence"),
+    )
+    lines.append("")
+    _append_single_item_findings(
+        lines,
+        title="DESIGN FINDINGS",
+        groups=_as_sequence(_as_mapping(findings_groups.get("design")).get("groups")),
+        fact_keys=("lcom4", "method_count", "instance_var_count", "fan_out", "risk"),
+    )
+    lines.extend(
+        [
+            "",
+            "INTEGRITY",
+            "Canonicalization: "
+            + _format_key_values(
+                canonicalization,
+                ("version", "scope", "sections"),
+            ),
+            "Digest: "
+            + _format_key_values(
+                digest,
+                ("algorithm", "verified", "value"),
+            ),
+        ]
+    )
 
     return "\n".join(lines).rstrip() + "\n"

@@ -10,7 +10,7 @@ import os
 from collections.abc import Callable, Mapping, Sequence
 from enum import Enum
 from pathlib import Path
-from typing import Literal, TypedDict, TypeVar, cast
+from typing import Literal, TypedDict, TypeGuard, TypeVar, cast
 
 from .baseline import current_python_tag
 from .contracts import BASELINE_FINGERPRINT_VERSION, CACHE_VERSION
@@ -18,12 +18,18 @@ from .errors import CacheError
 from .models import (
     BlockGroupItem,
     BlockUnit,
+    ClassMetrics,
+    DeadCandidate,
     FileMetrics,
     FunctionGroupItem,
+    ModuleDep,
     SegmentGroupItem,
     SegmentUnit,
+    StructuralFindingGroup,
+    StructuralFindingOccurrence,
     Unit,
 )
+from .structural_findings import normalize_structural_finding_group
 
 MAX_CACHE_SIZE_BYTES = 50 * 1024 * 1024
 LEGACY_CACHE_SECRET_FILENAME = ".cache_secret"
@@ -46,6 +52,13 @@ class CacheStatus(str, Enum):
 class FileStat(TypedDict):
     mtime_ns: int
     size: int
+
+
+class SourceStatsDict(TypedDict):
+    lines: int
+    functions: int
+    methods: int
+    classes: int
 
 
 UnitDict = FunctionGroupItem
@@ -86,6 +99,19 @@ class DeadCandidateDict(TypedDict):
     kind: str
 
 
+class StructuralFindingOccurrenceDict(TypedDict):
+    qualname: str
+    start: int
+    end: int
+
+
+class StructuralFindingGroupDict(TypedDict):
+    finding_kind: str
+    finding_key: str
+    signature: dict[str, str]
+    items: list[StructuralFindingOccurrenceDict]
+
+
 class CacheEntryBase(TypedDict):
     stat: FileStat
     units: list[UnitDict]
@@ -94,12 +120,14 @@ class CacheEntryBase(TypedDict):
 
 
 class CacheEntry(CacheEntryBase, total=False):
+    source_stats: SourceStatsDict
     class_metrics: list[ClassMetricsDict]
     module_deps: list[ModuleDepDict]
     dead_candidates: list[DeadCandidateDict]
     referenced_names: list[str]
     import_names: list[str]
     class_names: list[str]
+    structural_findings: list[StructuralFindingGroupDict]
 
 
 class AnalysisProfile(TypedDict):
@@ -115,7 +143,69 @@ class CacheData(TypedDict):
     files: dict[str, CacheEntry]
 
 
+def _normalize_cached_structural_group(
+    group: StructuralFindingGroupDict,
+    *,
+    filepath: str,
+) -> StructuralFindingGroupDict | None:
+    signature = dict(group["signature"])
+    finding_kind = group["finding_kind"]
+    finding_key = group["finding_key"]
+    normalized = normalize_structural_finding_group(
+        StructuralFindingGroup(
+            finding_kind=finding_kind,
+            finding_key=finding_key,
+            signature=signature,
+            items=tuple(
+                StructuralFindingOccurrence(
+                    finding_kind=finding_kind,
+                    finding_key=finding_key,
+                    file_path=filepath,
+                    qualname=item["qualname"],
+                    start=item["start"],
+                    end=item["end"],
+                    signature=signature,
+                )
+                for item in group["items"]
+            ),
+        )
+    )
+    if normalized is None:
+        return None
+    return StructuralFindingGroupDict(
+        finding_kind=normalized.finding_kind,
+        finding_key=normalized.finding_key,
+        signature=dict(normalized.signature),
+        items=[
+            StructuralFindingOccurrenceDict(
+                qualname=item.qualname,
+                start=item.start,
+                end=item.end,
+            )
+            for item in normalized.items
+        ],
+    )
+
+
+def _normalize_cached_structural_groups(
+    groups: Sequence[StructuralFindingGroupDict],
+    *,
+    filepath: str,
+) -> list[StructuralFindingGroupDict]:
+    normalized = [
+        candidate
+        for candidate in (
+            _normalize_cached_structural_group(group, filepath=filepath)
+            for group in groups
+        )
+        if candidate is not None
+    ]
+    normalized.sort(key=lambda group: (-len(group["items"]), group["finding_key"]))
+    return normalized
+
+
 _DecodedItemT = TypeVar("_DecodedItemT")
+_ValidatedItemT = TypeVar("_ValidatedItemT")
 
 
 class Cache:
@@ -205,7 +295,8 @@ class Cache:
         )
         self._canonical_runtime_paths = set()
 
-    def _sign_data(self, data: Mapping[str, object]) -> str:
+    @staticmethod
+    def _sign_data(data: Mapping[str, object]) -> str:
         """Create deterministic SHA-256 signature for canonical payload data."""
         canonical = _canonical_json(data)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -396,13 +487,13 @@ class Cache:
             parsed_files[runtime_path] = _canonicalize_cache_entry(parsed_entry)
 
         self.cache_schema_version = version
-        return {
-            "version": self._CACHE_VERSION,
-            "python_tag": runtime_tag,
-            "fingerprint_version": self.fingerprint_version,
-            "analysis_profile": self.analysis_profile,
-            "files": parsed_files,
-        }
+        return CacheData(
+            version=self._CACHE_VERSION,
+            python_tag=runtime_tag,
+            fingerprint_version=self.fingerprint_version,
+            analysis_profile=self.analysis_profile,
+            files=parsed_files,
+        )
 
     def save(self) -> None:
         try:
@@ -445,10 +536,12 @@ class Cache:
         except OSError as e:
             raise CacheError(f"Failed to save cache: {e}") from e
 
-    def _decode_entry(self, value: object, filepath: str) -> CacheEntry | None:
+    @staticmethod
+    def _decode_entry(value: object, filepath: str) -> CacheEntry | None:
         return _decode_wire_file_entry(value, filepath)
 
-    def _encode_entry(self, entry: CacheEntry) -> dict[str, object]:
+    @staticmethod
+    def _encode_entry(entry: CacheEntry) -> dict[str, object]:
         return _encode_wire_file_entry(entry)
 
     def _wire_filepath_from_runtime(self, runtime_filepath: str) -> str:
@@ -483,69 +576,72 @@ class Cache:
 
     def get_file_entry(self, filepath: str) -> CacheEntry | None:
         runtime_lookup_key = filepath
-        entry = self.data["files"].get(runtime_lookup_key)
-        if entry is None:
+        entry_obj = self.data["files"].get(runtime_lookup_key)
+        if entry_obj is None:
             wire_key = self._wire_filepath_from_runtime(filepath)
             runtime_lookup_key = self._runtime_filepath_from_wire(wire_key)
-            entry = self.data["files"].get(runtime_lookup_key)
+            entry_obj = self.data["files"].get(runtime_lookup_key)
 
-        if entry is None:
-            return None
-
-        if not isinstance(entry, dict):
+        if entry_obj is None:
             return None
 
         if runtime_lookup_key in self._canonical_runtime_paths:
-            if _has_cache_entry_container_shape(entry):
-                return entry
+            if _is_canonical_cache_entry(entry_obj):
+                return entry_obj
             self._canonical_runtime_paths.discard(runtime_lookup_key)
+
+        if not isinstance(entry_obj, dict):
+            return None
+        entry = entry_obj
 
         required = {"stat", "units", "blocks", "segments"}
         if not required.issubset(entry.keys()):
             return None
 
-        stat = entry.get("stat")
-        units = entry.get("units")
-        blocks = entry.get("blocks")
-        segments = entry.get("segments")
-        if not (
-            _is_file_stat_dict(stat)
-            and _is_unit_list(units)
-            and _is_block_list(blocks)
-            and _is_segment_list(segments)
-        ):
+        stat = _as_file_stat_dict(entry.get("stat"))
+        units = _as_typed_unit_list(entry.get("units"))
+        blocks = _as_typed_block_list(entry.get("blocks"))
+        segments = _as_typed_segment_list(entry.get("segments"))
+        if stat is None or units is None or blocks is None or segments is None:
             return None
 
-        class_metrics_raw = entry.get("class_metrics", [])
-        module_deps_raw = entry.get("module_deps", [])
-        dead_candidates_raw = entry.get("dead_candidates", [])
-        referenced_names_raw = entry.get("referenced_names", [])
-        import_names_raw = entry.get("import_names", [])
-        class_names_raw = entry.get("class_names", [])
-        if not (
-            _is_class_metrics_list(class_metrics_raw)
-            and _is_module_deps_list(module_deps_raw)
-            and _is_dead_candidates_list(dead_candidates_raw)
-            and _is_string_list(referenced_names_raw)
-            and _is_string_list(import_names_raw)
-            and _is_string_list(class_names_raw)
-        ):
-            return None
-
-        canonical_entry = _canonicalize_cache_entry(
-            {
-                "stat": stat,
-                "units": units,
-                "blocks": blocks,
-                "segments": segments,
-                "class_metrics": class_metrics_raw,
-                "module_deps": module_deps_raw,
-                "dead_candidates": dead_candidates_raw,
-                "referenced_names": referenced_names_raw,
-                "import_names": import_names_raw,
-                "class_names": class_names_raw,
-            }
+        class_metrics_raw = _as_typed_class_metrics_list(entry.get("class_metrics", []))
+        module_deps_raw = _as_typed_module_deps_list(entry.get("module_deps", []))
+        dead_candidates_raw = _as_typed_dead_candidates_list(
+            entry.get("dead_candidates", [])
         )
+        referenced_names_raw = _as_typed_string_list(entry.get("referenced_names", []))
+        import_names_raw = _as_typed_string_list(entry.get("import_names", []))
+        class_names_raw = _as_typed_string_list(entry.get("class_names", []))
+        if (
+            class_metrics_raw is None
+            or module_deps_raw is None
+            or dead_candidates_raw is None
+            or referenced_names_raw is None
+            or import_names_raw is None
+            or class_names_raw is None
+        ):
+            return None
+
+        entry_to_canonicalize: CacheEntry = CacheEntry(
+            stat=stat,
+            units=units,
+            blocks=blocks,
+            segments=segments,
+            class_metrics=class_metrics_raw,
+            module_deps=module_deps_raw,
+            dead_candidates=dead_candidates_raw,
+            referenced_names=referenced_names_raw,
+            import_names=import_names_raw,
+            class_names=class_names_raw,
+        )
+        source_stats = _as_source_stats_dict(entry.get("source_stats"))
+        if source_stats is not None:
+            entry_to_canonicalize["source_stats"] = source_stats
+        sf_raw = entry.get("structural_findings")
+        if isinstance(sf_raw, list):
+            entry_to_canonicalize["structural_findings"] = sf_raw
+        canonical_entry = _canonicalize_cache_entry(entry_to_canonicalize)
         self.data["files"][runtime_lookup_key] = canonical_entry
         self._canonical_runtime_paths.add(runtime_lookup_key)
         return canonical_entry
@@ -558,53 +654,18 @@ class Cache:
         blocks: list[BlockUnit],
         segments: list[SegmentUnit],
         *,
+        source_stats: SourceStatsDict | None = None,
         file_metrics: FileMetrics | None = None,
+        structural_findings: list[StructuralFindingGroup] | None = None,
     ) -> None:
         runtime_path = self._runtime_filepath_from_wire(
             self._wire_filepath_from_runtime(filepath)
         )
 
-        unit_rows: list[UnitDict] = [
-            {
-                "qualname": unit.qualname,
-                "filepath": runtime_path,
-                "start_line": unit.start_line,
-                "end_line": unit.end_line,
-                "loc": unit.loc,
-                "stmt_count": unit.stmt_count,
-                "fingerprint": unit.fingerprint,
-                "loc_bucket": unit.loc_bucket,
-                "cyclomatic_complexity": unit.cyclomatic_complexity,
-                "nesting_depth": unit.nesting_depth,
-                "risk": unit.risk,
-                "raw_hash": unit.raw_hash,
-            }
-            for unit in units
-        ]
-
-        block_rows: list[BlockDict] = [
-            {
-                "block_hash": block.block_hash,
-                "filepath": runtime_path,
-                "qualname": block.qualname,
-                "start_line": block.start_line,
-                "end_line": block.end_line,
-                "size": block.size,
-            }
-            for block in blocks
-        ]
-
-        segment_rows: list[SegmentDict] = [
-            {
-                "segment_hash": segment.segment_hash,
-                "segment_sig": segment.segment_sig,
-                "filepath": runtime_path,
-                "qualname": segment.qualname,
-                "start_line": segment.start_line,
-                "end_line": segment.end_line,
-                "size": segment.size,
-            }
-            for segment in segments
+        unit_rows = [_unit_dict_from_model(unit, runtime_path) for unit in units]
+        block_rows = [_block_dict_from_model(block, runtime_path) for block in blocks]
+        segment_rows = [
+            _segment_dict_from_model(segment, runtime_path) for segment in segments
         ]
 
         (
@@ -617,69 +678,58 @@ class Cache:
         ) = _new_optional_metrics_payload()
         if file_metrics is not None:
             class_metrics_rows = [
-                {
-                    "qualname": metric.qualname,
-                    "filepath": runtime_path,
-                    "start_line": metric.start_line,
-                    "end_line": metric.end_line,
-                    "cbo": metric.cbo,
-                    "lcom4": metric.lcom4,
-                    "method_count": metric.method_count,
-                    "instance_var_count": metric.instance_var_count,
-                    "risk_coupling": metric.risk_coupling,
-                    "risk_cohesion": metric.risk_cohesion,
-                    "coupled_classes": sorted(set(metric.coupled_classes)),
-                }
+                _class_metrics_dict_from_model(metric, runtime_path)
                 for metric in file_metrics.class_metrics
             ]
             module_dep_rows = [
-                {
-                    "source": dep.source,
-                    "target": dep.target,
-                    "import_type": dep.import_type,
-                    "line": dep.line,
-                }
-                for dep in file_metrics.module_deps
+                _module_dep_dict_from_model(dep) for dep in file_metrics.module_deps
             ]
             dead_candidate_rows = [
-                {
-                    "qualname": candidate.qualname,
-                    "local_name": candidate.local_name,
-                    "filepath": runtime_path,
-                    "start_line": candidate.start_line,
-                    "end_line": candidate.end_line,
-                    "kind": candidate.kind,
-                }
+                _dead_candidate_dict_from_model(candidate, runtime_path)
                 for candidate in file_metrics.dead_candidates
             ]
             referenced_names = sorted(set(file_metrics.referenced_names))
             import_names = sorted(set(file_metrics.import_names))
             class_names = sorted(set(file_metrics.class_names))
 
-        canonical_entry = _canonicalize_cache_entry(
-            {
-                "stat": stat_sig,
-                "units": unit_rows,
-                "blocks": block_rows,
-                "segments": segment_rows,
-                "class_metrics": class_metrics_rows,
-                "module_deps": module_dep_rows,
-                "dead_candidates": dead_candidate_rows,
-                "referenced_names": referenced_names,
-                "import_names": import_names,
-                "class_names": class_names,
-            }
+        source_stats_payload = source_stats or SourceStatsDict(
+            lines=0,
+            functions=0,
+            methods=0,
+            classes=0,
         )
+        entry_dict = CacheEntry(
+            stat=stat_sig,
+            source_stats=source_stats_payload,
+            units=unit_rows,
+            blocks=block_rows,
+            segments=segment_rows,
+            class_metrics=class_metrics_rows,
+            module_deps=module_dep_rows,
+            dead_candidates=dead_candidate_rows,
+            referenced_names=referenced_names,
+            import_names=import_names,
+            class_names=class_names,
+        )
+        if structural_findings is not None:
+            entry_dict["structural_findings"] = _normalize_cached_structural_groups(
+                [
+                    _structural_group_dict_from_model(group)
+                    for group in structural_findings
+                ],
+                filepath=runtime_path,
+            )
+        canonical_entry = _canonicalize_cache_entry(entry_dict)
         self.data["files"][runtime_path] = canonical_entry
         self._canonical_runtime_paths.add(runtime_path)
 
 
 def file_stat_signature(path: str) -> FileStat:
     st = os.stat(path)
-    return {
-        "mtime_ns": st.st_mtime_ns,
-        "size": st.st_size,
-    }
+    return FileStat(
+        mtime_ns=st.st_mtime_ns,
+        size=st.st_size,
+    )
 
 
 def _empty_cache_data(
@@ -689,13 +739,13 @@ def _empty_cache_data(
     fingerprint_version: str,
     analysis_profile: AnalysisProfile,
 ) -> CacheData:
-    return {
-        "version": version,
-        "python_tag": python_tag,
-        "fingerprint_version": fingerprint_version,
-        "analysis_profile": analysis_profile,
-        "files": {},
-    }
+    return CacheData(
+        version=version,
+        python_tag=python_tag,
+        fingerprint_version=fingerprint_version,
+        analysis_profile=analysis_profile,
+        files={},
+    )
 
 
 def _canonical_json(data: object) -> str:
@@ -714,6 +764,16 @@ def _as_list(value: object) -> list[object] | None:
     return value if isinstance(value, list) else None
 
 
+def _as_risk_literal(value: object) -> Literal["low", "medium", "high"] | None:
+    if value == "low":
+        return "low"
+    if value == "medium":
+        return "medium"
+    if value == "high":
+        return "high"
+    return None
+
+
 def _new_optional_metrics_payload() -> tuple[
     list[ClassMetricsDict],
     list[ModuleDepDict],
@@ -723,6 +783,189 @@ def _new_optional_metrics_payload() -> tuple[
     list[str],
 ]:
     return [], [], [], [], [], []
+
+
+def _unit_dict_from_model(unit: Unit, filepath: str) -> UnitDict:
+    return FunctionGroupItem(
+        qualname=unit.qualname,
+        filepath=filepath,
+        start_line=unit.start_line,
+        end_line=unit.end_line,
+        loc=unit.loc,
+        stmt_count=unit.stmt_count,
+        fingerprint=unit.fingerprint,
+        loc_bucket=unit.loc_bucket,
+        cyclomatic_complexity=unit.cyclomatic_complexity,
+        nesting_depth=unit.nesting_depth,
+        risk=unit.risk,
+        raw_hash=unit.raw_hash,
+    )
+
+
+def _block_dict_from_model(block: BlockUnit, filepath: str) -> BlockDict:
+    return BlockGroupItem(
+        block_hash=block.block_hash,
+        filepath=filepath,
+        qualname=block.qualname,
+        start_line=block.start_line,
+        end_line=block.end_line,
+        size=block.size,
+    )
+
+
+def _segment_dict_from_model(segment: SegmentUnit, filepath: str) -> SegmentDict:
+    return SegmentGroupItem(
+        segment_hash=segment.segment_hash,
+        segment_sig=segment.segment_sig,
+        filepath=filepath,
+        qualname=segment.qualname,
+        start_line=segment.start_line,
+        end_line=segment.end_line,
+        size=segment.size,
+    )
+
+
+def _class_metrics_dict_from_model(
+    metric: ClassMetrics,
+    filepath: str,
+) -> ClassMetricsDict:
+    return ClassMetricsDict(
+        qualname=metric.qualname,
+        filepath=filepath,
+        start_line=metric.start_line,
+        end_line=metric.end_line,
+        cbo=metric.cbo,
+        lcom4=metric.lcom4,
+        method_count=metric.method_count,
+        instance_var_count=metric.instance_var_count,
+        risk_coupling=metric.risk_coupling,
+        risk_cohesion=metric.risk_cohesion,
+        coupled_classes=sorted(set(metric.coupled_classes)),
+    )
+
+
+def _module_dep_dict_from_model(dep: ModuleDep) -> ModuleDepDict:
+    return ModuleDepDict(
+        source=dep.source,
+        target=dep.target,
+        import_type=dep.import_type,
+        line=dep.line,
+    )
+
+
+def _dead_candidate_dict_from_model(
+    candidate: DeadCandidate,
+    filepath: str,
+) -> DeadCandidateDict:
+    return DeadCandidateDict(
+        qualname=candidate.qualname,
+        local_name=candidate.local_name,
+        filepath=filepath,
+        start_line=candidate.start_line,
+        end_line=candidate.end_line,
+        kind=candidate.kind,
+    )
+
+
+def _structural_occurrence_dict_from_model(
+    occurrence: StructuralFindingOccurrence,
+) -> StructuralFindingOccurrenceDict:
+    return StructuralFindingOccurrenceDict(
+        qualname=occurrence.qualname,
+        start=occurrence.start,
+        end=occurrence.end,
+    )
+
+
+def _structural_group_dict_from_model(
+    group: StructuralFindingGroup,
+) -> StructuralFindingGroupDict:
+    return StructuralFindingGroupDict(
+        finding_kind=group.finding_kind,
+        finding_key=group.finding_key,
+        signature=dict(group.signature),
+        items=[
+            _structural_occurrence_dict_from_model(occurrence)
+            for occurrence in group.items
+        ],
+    )
+
+
+def _as_file_stat_dict(value: object) -> FileStat | None:
+    if not _is_file_stat_dict(value):
+        return None
+    obj = cast(Mapping[str, object], value)
+    mtime_ns = obj.get("mtime_ns")
+    size = obj.get("size")
+    if not isinstance(mtime_ns, int) or not isinstance(size, int):
+        return None
+    return FileStat(mtime_ns=mtime_ns, size=size)
+
+
+def _as_source_stats_dict(value: object) -> SourceStatsDict | None:
+    if not _is_source_stats_dict(value):
+        return None
+    obj = cast(Mapping[str, object], value)
+    lines = obj.get("lines")
+    functions = obj.get("functions")
+    methods = obj.get("methods")
+    classes = obj.get("classes")
+    assert isinstance(lines, int)
+    assert isinstance(functions, int)
+    assert isinstance(methods, int)
+    assert isinstance(classes, int)
+    return SourceStatsDict(
+        lines=lines,
+        functions=functions,
+        methods=methods,
+        classes=classes,
+    )
+
+
+def _as_typed_list(
+    value: object,
+    *,
+    predicate: Callable[[object], bool],
+) -> list[_ValidatedItemT] | None:
+    if not isinstance(value, list):
+        return None
+    if not all(predicate(item) for item in value):
+        return None
+    return cast(list[_ValidatedItemT], value)
+
+
+def _as_typed_unit_list(value: object) -> list[UnitDict] | None:
+    return _as_typed_list(value, predicate=_is_unit_dict)
+
+
+def _as_typed_block_list(value: object) -> list[BlockDict] | None:
+    return _as_typed_list(value, predicate=_is_block_dict)
+
+
+def _as_typed_segment_list(value: object) -> list[SegmentDict] | None:
+    return _as_typed_list(value, predicate=_is_segment_dict)
+
+
+def _as_typed_class_metrics_list(value: object) -> list[ClassMetricsDict] | None:
+    return _as_typed_list(value, predicate=_is_class_metrics_dict)
+
+
+def _as_typed_dead_candidates_list(
+    value: object,
+) -> list[DeadCandidateDict] | None:
+    return _as_typed_list(value, predicate=_is_dead_candidate_dict)
+
+
+def _as_typed_module_deps_list(value: object) -> list[ModuleDepDict] | None:
+    return _as_typed_list(value, predicate=_is_module_dep_dict)
+
+
+def _as_typed_string_list(value: object) -> list[str] | None:
+    return _as_typed_list(value, predicate=lambda item: isinstance(item, str))
+
+
+def _is_canonical_cache_entry(value: object) -> TypeGuard[CacheEntry]:
+    return isinstance(value, dict) and _has_cache_entry_container_shape(value)
 
 
 def _has_cache_entry_container_shape(entry: Mapping[str, object]) -> bool:
@@ -737,6 +980,9 @@ def _has_cache_entry_container_shape(entry: Mapping[str, object]) -> bool:
         return False
     if not isinstance(entry.get("segments"), list):
         return False
+    source_stats = entry.get("source_stats")
+    if source_stats is not None and not _is_source_stats_dict(source_stats):
+        return False
     optional_list_keys = (
         "class_metrics",
         "module_deps",
@@ -744,6 +990,7 @@ def _has_cache_entry_container_shape(entry: Mapping[str, object]) -> bool:
         "referenced_names",
         "import_names",
         "class_names",
+        "structural_findings",
     )
     return all(isinstance(entry.get(key, []), list) for key in optional_list_keys)
 
@@ -752,7 +999,6 @@ def _canonicalize_cache_entry(entry: CacheEntry) -> CacheEntry:
     class_metrics_sorted = sorted(
         entry["class_metrics"],
         key=lambda item: (
-            item["filepath"],
             item["start_line"],
             item["end_line"],
             item["qualname"],
@@ -775,14 +1021,15 @@ def _canonicalize_cache_entry(entry: CacheEntry) -> CacheEntry:
     dead_candidates_sorted = sorted(
         entry["dead_candidates"],
         key=lambda item: (
-            item["filepath"],
             item["start_line"],
             item["end_line"],
             item["qualname"],
+            item["local_name"],
+            item["kind"],
         ),
     )
 
-    return {
+    result: CacheEntry = {
         "stat": entry["stat"],
         "units": entry["units"],
         "blocks": entry["blocks"],
@@ -794,6 +1041,13 @@ def _canonicalize_cache_entry(entry: CacheEntry) -> CacheEntry:
         "import_names": sorted(set(entry["import_names"])),
         "class_names": sorted(set(entry["class_names"])),
     }
+    sf = entry.get("structural_findings")
+    if sf is not None:
+        result["structural_findings"] = sf
+    source_stats = entry.get("source_stats")
+    if source_stats is not None:
+        result["source_stats"] = source_stats
+    return result
 
 
 def _decode_wire_qualname_span(
@@ -829,7 +1083,7 @@ def _as_analysis_profile(value: object) -> AnalysisProfile | None:
     if min_loc is None or min_stmt is None:
         return None
 
-    return {"min_loc": min_loc, "min_stmt": min_stmt}
+    return AnalysisProfile(min_loc=min_loc, min_stmt=min_stmt)
 
 
 def _decode_wire_stat(obj: dict[str, object]) -> FileStat | None:
@@ -840,7 +1094,40 @@ def _decode_wire_stat(obj: dict[str, object]) -> FileStat | None:
     size = _as_int(stat_list[1])
     if mtime_ns is None or size is None:
         return None
-    return {"mtime_ns": mtime_ns, "size": size}
+    return FileStat(mtime_ns=mtime_ns, size=size)
+
+
+def _decode_optional_wire_source_stats(
+    *,
+    obj: dict[str, object],
+) -> SourceStatsDict | None:
+    raw = obj.get("ss")
+    if raw is None:
+        return None
+    row = _as_list(raw)
+    if row is None or len(row) != 4:
+        return None
+    lines = _as_int(row[0])
+    functions = _as_int(row[1])
+    methods = _as_int(row[2])
+    classes = _as_int(row[3])
+    if (
+        lines is None
+        or functions is None
+        or methods is None
+        or classes is None
+        or lines < 0
+        or functions < 0
+        or methods < 0
+        or classes < 0
+    ):
+        return None
+    return SourceStatsDict(
+        lines=lines,
+        functions=functions,
+        methods=methods,
+        classes=classes,
+    )
 
 
 def _decode_optional_wire_items(
@@ -915,43 +1202,44 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
     stat = _decode_wire_stat(obj)
     if stat is None:
         return None
+    source_stats = _decode_optional_wire_source_stats(obj=obj)
 
-    units = _decode_optional_wire_items(
+    units: list[UnitDict] | None = _decode_optional_wire_items(
         obj=obj,
         key="u",
         decode_item=lambda item: _decode_wire_unit(item, filepath),
     )
     if units is None:
         return None
-    blocks = _decode_optional_wire_items(
+    blocks: list[BlockDict] | None = _decode_optional_wire_items(
         obj=obj,
         key="b",
         decode_item=lambda item: _decode_wire_block(item, filepath),
     )
     if blocks is None:
         return None
-    segments = _decode_optional_wire_items(
+    segments: list[SegmentDict] | None = _decode_optional_wire_items(
         obj=obj,
         key="s",
         decode_item=lambda item: _decode_wire_segment(item, filepath),
     )
     if segments is None:
         return None
-    class_metrics = _decode_optional_wire_items(
+    class_metrics: list[ClassMetricsDict] | None = _decode_optional_wire_items(
         obj=obj,
         key="cm",
         decode_item=lambda item: _decode_wire_class_metric(item, filepath),
     )
     if class_metrics is None:
         return None
-    module_deps = _decode_optional_wire_items(
+    module_deps: list[ModuleDepDict] | None = _decode_optional_wire_items(
         obj=obj,
         key="md",
         decode_item=_decode_wire_module_dep,
     )
     if module_deps is None:
         return None
-    dead_candidates = _decode_optional_wire_items(
+    dead_candidates: list[DeadCandidateDict] | None = _decode_optional_wire_items(
         obj=obj,
         key="dc",
         decode_item=lambda item: _decode_wire_dead_candidate(item, filepath),
@@ -976,23 +1264,119 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
         if names:
             metric["coupled_classes"] = names
 
-    return {
-        "stat": stat,
-        "units": units,
-        "blocks": blocks,
-        "segments": segments,
-        "class_metrics": class_metrics,
-        "module_deps": module_deps,
-        "dead_candidates": dead_candidates,
-        "referenced_names": referenced_names,
-        "import_names": import_names,
-        "class_names": class_names,
-    }
+    has_structural_findings = "sf" in obj
+    structural_findings = _decode_wire_structural_findings_optional(obj)
+    if structural_findings is None:
+        return None
+
+    result = CacheEntry(
+        stat=stat,
+        units=units,
+        blocks=blocks,
+        segments=segments,
+        class_metrics=class_metrics,
+        module_deps=module_deps,
+        dead_candidates=dead_candidates,
+        referenced_names=referenced_names,
+        import_names=import_names,
+        class_names=class_names,
+    )
+    if source_stats is not None:
+        result["source_stats"] = source_stats
+    if has_structural_findings:
+        result["structural_findings"] = _normalize_cached_structural_groups(
+            structural_findings,
+            filepath=filepath,
+        )
+    return result
+
+
+def _decode_wire_structural_findings_optional(
+    obj: dict[str, object],
+) -> list[StructuralFindingGroupDict] | None:
+    """Decode optional 'sf' wire key. Returns [] if absent, None on invalid format."""
+    raw = obj.get("sf")
+    if raw is None:
+        return []
+    groups_raw = _as_list(raw)
+    if groups_raw is None:
+        return None
+    groups: list[StructuralFindingGroupDict] = []
+    for group_raw in groups_raw:
+        group = _decode_wire_structural_group(group_raw)
+        if group is None:
+            return None
+        groups.append(group)
+    return groups
+
+
+def _decode_wire_structural_group(value: object) -> StructuralFindingGroupDict | None:
+    group_row = _as_list(value)
+    if group_row is None or len(group_row) != 4:
+        return None
+    finding_kind = _as_str(group_row[0])
+    finding_key = _as_str(group_row[1])
+    items_raw = _as_list(group_row[3])
+    signature = _decode_wire_structural_signature(group_row[2])
+    if (
+        finding_kind is None
+        or finding_key is None
+        or items_raw is None
+        or signature is None
+    ):
+        return None
+    items: list[StructuralFindingOccurrenceDict] = []
+    for item_raw in items_raw:
+        item = _decode_wire_structural_occurrence(item_raw)
+        if item is None:
+            return None
+        items.append(item)
+    return StructuralFindingGroupDict(
+        finding_kind=finding_kind,
+        finding_key=finding_key,
+        signature=signature,
+        items=items,
+    )
+
+
+def _decode_wire_structural_signature(value: object) -> dict[str, str] | None:
+    sig_raw = _as_list(value)
+    if sig_raw is None:
+        return None
+    signature: dict[str, str] = {}
+    for pair in sig_raw:
+        pair_list = _as_list(pair)
+        if pair_list is None or len(pair_list) != 2:
+            return None
+        key = _as_str(pair_list[0])
+        val = _as_str(pair_list[1])
+        if key is None or val is None:
+            return None
+        signature[key] = val
+    return signature
+
+
+def _decode_wire_structural_occurrence(
+    value: object,
+) -> StructuralFindingOccurrenceDict | None:
+    item_list = _as_list(value)
+    if item_list is None or len(item_list) != 3:
+        return None
+    qualname = _as_str(item_list[0])
+    start = _as_int(item_list[1])
+    end = _as_int(item_list[2])
+    if qualname is None or start is None or end is None:
+        return None
+    return StructuralFindingOccurrenceDict(
+        qualname=qualname,
+        start=start,
+        end=end,
+    )
 
 
 def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
     row = _as_list(value)
-    if row is None or len(row) not in {7, 11}:
+    if row is None or len(row) != 11:
         return None
 
     qualname_span = _decode_wire_qualname_span(row)
@@ -1003,10 +1387,10 @@ def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
     stmt_count = _as_int(row[4])
     fingerprint = _as_str(row[5])
     loc_bucket = _as_str(row[6])
-    cyclomatic_complexity = _as_int(row[7]) if len(row) == 11 else 1
-    nesting_depth = _as_int(row[8]) if len(row) == 11 else 0
-    risk = _as_str(row[9]) if len(row) == 11 else "low"
-    raw_hash = _as_str(row[10]) if len(row) == 11 else ""
+    cyclomatic_complexity = _as_int(row[7])
+    nesting_depth = _as_int(row[8])
+    risk = _as_risk_literal(row[9])
+    raw_hash = _as_str(row[10])
 
     if (
         loc is None
@@ -1015,26 +1399,24 @@ def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
         or loc_bucket is None
         or cyclomatic_complexity is None
         or nesting_depth is None
-        or risk not in {"low", "medium", "high"}
+        or risk is None
         or raw_hash is None
     ):
         return None
-    risk_value = cast(Literal["low", "medium", "high"], risk)
-
-    return {
-        "qualname": qualname,
-        "filepath": filepath,
-        "start_line": start_line,
-        "end_line": end_line,
-        "loc": loc,
-        "stmt_count": stmt_count,
-        "fingerprint": fingerprint,
-        "loc_bucket": loc_bucket,
-        "cyclomatic_complexity": cyclomatic_complexity,
-        "nesting_depth": nesting_depth,
-        "risk": risk_value,
-        "raw_hash": raw_hash,
-    }
+    return FunctionGroupItem(
+        qualname=qualname,
+        filepath=filepath,
+        start_line=start_line,
+        end_line=end_line,
+        loc=loc,
+        stmt_count=stmt_count,
+        fingerprint=fingerprint,
+        loc_bucket=loc_bucket,
+        cyclomatic_complexity=cyclomatic_complexity,
+        nesting_depth=nesting_depth,
+        risk=risk,
+        raw_hash=raw_hash,
+    )
 
 
 def _decode_wire_block(value: object, filepath: str) -> BlockDict | None:
@@ -1057,14 +1439,14 @@ def _decode_wire_block(value: object, filepath: str) -> BlockDict | None:
     ):
         return None
 
-    return {
-        "block_hash": block_hash,
-        "filepath": filepath,
-        "qualname": qualname,
-        "start_line": start_line,
-        "end_line": end_line,
-        "size": size,
-    }
+    return BlockGroupItem(
+        block_hash=block_hash,
+        filepath=filepath,
+        qualname=qualname,
+        start_line=start_line,
+        end_line=end_line,
+        size=size,
+    )
 
 
 def _decode_wire_segment(value: object, filepath: str) -> SegmentDict | None:
@@ -1089,15 +1471,15 @@ def _decode_wire_segment(value: object, filepath: str) -> SegmentDict | None:
     ):
         return None
 
-    return {
-        "segment_hash": segment_hash,
-        "segment_sig": segment_sig,
-        "filepath": filepath,
-        "qualname": qualname,
-        "start_line": start_line,
-        "end_line": end_line,
-        "size": size,
-    }
+    return SegmentGroupItem(
+        segment_hash=segment_hash,
+        segment_sig=segment_sig,
+        filepath=filepath,
+        qualname=qualname,
+        start_line=start_line,
+        end_line=end_line,
+        size=size,
+    )
 
 
 def _decode_wire_class_metric(
@@ -1127,18 +1509,18 @@ def _decode_wire_class_metric(
         or risk_cohesion is None
     ):
         return None
-    return {
-        "qualname": qualname,
-        "filepath": filepath,
-        "start_line": start_line,
-        "end_line": end_line,
-        "cbo": cbo,
-        "lcom4": lcom4,
-        "method_count": method_count,
-        "instance_var_count": instance_var_count,
-        "risk_coupling": risk_coupling,
-        "risk_cohesion": risk_cohesion,
-    }
+    return ClassMetricsDict(
+        qualname=qualname,
+        filepath=filepath,
+        start_line=start_line,
+        end_line=end_line,
+        cbo=cbo,
+        lcom4=lcom4,
+        method_count=method_count,
+        instance_var_count=instance_var_count,
+        risk_coupling=risk_coupling,
+        risk_cohesion=risk_cohesion,
+    )
 
 
 def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
@@ -1151,12 +1533,12 @@ def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
     line = _as_int(row[3])
     if source is None or target is None or import_type is None or line is None:
         return None
-    return {
-        "source": source,
-        "target": target,
-        "import_type": import_type,
-        "line": line,
-    }
+    return ModuleDepDict(
+        source=source,
+        target=target,
+        import_type=import_type,
+        line=line,
+    )
 
 
 def _decode_wire_dead_candidate(
@@ -1164,37 +1546,43 @@ def _decode_wire_dead_candidate(
     filepath: str,
 ) -> DeadCandidateDict | None:
     row = _as_list(value)
-    if row is None or len(row) != 6:
+    if row is None or len(row) != 5:
         return None
     qualname = _as_str(row[0])
     local_name = _as_str(row[1])
     start_line = _as_int(row[2])
     end_line = _as_int(row[3])
     kind = _as_str(row[4])
-    candidate_filepath = _as_str(row[5])
     if (
         qualname is None
         or local_name is None
         or start_line is None
         or end_line is None
         or kind is None
-        or candidate_filepath is None
     ):
         return None
-    return {
-        "qualname": qualname,
-        "local_name": local_name,
-        "filepath": candidate_filepath or filepath,
-        "start_line": start_line,
-        "end_line": end_line,
-        "kind": kind,
-    }
+    return DeadCandidateDict(
+        qualname=qualname,
+        local_name=local_name,
+        filepath=filepath,
+        start_line=start_line,
+        end_line=end_line,
+        kind=kind,
+    )
 
 
 def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
     wire: dict[str, object] = {
         "st": [entry["stat"]["mtime_ns"], entry["stat"]["size"]],
     }
+    source_stats = entry.get("source_stats")
+    if source_stats is not None:
+        wire["ss"] = [
+            source_stats["lines"],
+            source_stats["functions"],
+            source_stats["methods"],
+            source_stats["classes"],
+        ]
 
     units = sorted(
         entry["units"],
@@ -1269,7 +1657,6 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
     class_metrics = sorted(
         entry["class_metrics"],
         key=lambda metric: (
-            metric["filepath"],
             metric["start_line"],
             metric["end_line"],
             metric["qualname"],
@@ -1320,13 +1707,16 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
     dead_candidates = sorted(
         entry["dead_candidates"],
         key=lambda candidate: (
-            candidate["filepath"],
             candidate["start_line"],
             candidate["end_line"],
             candidate["qualname"],
+            candidate["local_name"],
+            candidate["kind"],
         ),
     )
     if dead_candidates:
+        # Dead candidates are stored inside a per-file cache entry, so the
+        # filepath is implicit and does not need to be repeated in every row.
         wire["dc"] = [
             [
                 candidate["qualname"],
@@ -1334,7 +1724,6 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
                 candidate["start_line"],
                 candidate["end_line"],
                 candidate["kind"],
-                candidate["filepath"],
             ]
             for candidate in dead_candidates
         ]
@@ -1345,6 +1734,21 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
         wire["in"] = sorted(set(entry["import_names"]))
     if entry["class_names"]:
         wire["cn"] = sorted(set(entry["class_names"]))
+
+    if "structural_findings" in entry:
+        sf = entry.get("structural_findings", [])
+        wire["sf"] = [
+            [
+                group["finding_kind"],
+                group["finding_key"],
+                sorted(group["signature"].items()),
+                [
+                    [item["qualname"], item["start"], item["end"]]
+                    for item in group["items"]
+                ],
+            ]
+            for group in sf
+        ]
 
     return wire
 
@@ -1362,6 +1766,25 @@ def _is_file_stat_dict(value: object) -> bool:
     if not isinstance(value, dict):
         return False
     return isinstance(value.get("mtime_ns"), int) and isinstance(value.get("size"), int)
+
+
+def _is_source_stats_dict(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    lines = value.get("lines")
+    functions = value.get("functions")
+    methods = value.get("methods")
+    classes = value.get("classes")
+    return (
+        isinstance(lines, int)
+        and lines >= 0
+        and isinstance(functions, int)
+        and functions >= 0
+        and isinstance(methods, int)
+        and methods >= 0
+        and isinstance(classes, int)
+        and classes >= 0
+    )
 
 
 def _is_unit_dict(value: object) -> bool:
@@ -1398,18 +1821,6 @@ def _is_segment_dict(value: object) -> bool:
     string_keys = ("segment_hash", "segment_sig", "filepath", "qualname")
     int_keys = ("start_line", "end_line", "size")
     return _has_typed_fields(value, string_keys=string_keys, int_keys=int_keys)
-
-
-def _is_unit_list(value: object) -> bool:
-    return isinstance(value, list) and all(_is_unit_dict(item) for item in value)
-
-
-def _is_block_list(value: object) -> bool:
-    return isinstance(value, list) and all(_is_block_dict(item) for item in value)
-
-
-def _is_segment_list(value: object) -> bool:
-    return isinstance(value, list) and all(_is_segment_dict(item) for item in value)
 
 
 def _is_class_metrics_dict(value: object) -> bool:
@@ -1457,22 +1868,6 @@ def _is_dead_candidate_dict(value: object) -> bool:
         value,
         string_keys=("qualname", "local_name", "filepath", "kind"),
         int_keys=("start_line", "end_line"),
-    )
-
-
-def _is_class_metrics_list(value: object) -> bool:
-    return isinstance(value, list) and all(
-        _is_class_metrics_dict(item) for item in value
-    )
-
-
-def _is_module_deps_list(value: object) -> bool:
-    return isinstance(value, list) and all(_is_module_dep_dict(item) for item in value)
-
-
-def _is_dead_candidates_list(value: object) -> bool:
-    return isinstance(value, list) and all(
-        _is_dead_candidate_dict(item) for item in value
     )
 
 

@@ -93,6 +93,7 @@ def _collect_analysis_snapshot(project_root: Path) -> dict[str, object]:
             file_segments,
             source_stats,
             file_metrics,
+            _sf,
         ) = extract_units_and_stats_from_source(
             source=source,
             filepath=relative_filepath,
@@ -247,20 +248,20 @@ def _collect_cli_snapshot(
 
     payload = json.loads(report_path.read_text("utf-8"))
     meta = payload["meta"]
+    findings = payload["findings"]
+    clone_groups = findings["groups"]["clones"]
     return {
         "meta": {"python_tag": current_python_tag()},
         "report_schema_version": payload["report_schema_version"],
         "project_name": meta["project_name"],
-        "scan_root_name": Path(meta["scan_root"]).name,
-        "baseline_status": meta["baseline_status"],
-        "baseline_loaded": meta["baseline_loaded"],
-        "cache_used": meta["cache_used"],
-        "clones": payload["clones"],
-        "clone_types": payload["clone_types"],
-        "groups_counts": meta["groups_counts"],
-        "function_group_keys": sorted(payload["groups"]["functions"].keys()),
-        "block_group_keys": sorted(payload["groups"]["blocks"].keys()),
-        "segment_group_keys": sorted(payload["groups"]["segments"].keys()),
+        "scan_root": meta["scan_root"],
+        "baseline_status": meta["baseline"]["status"],
+        "baseline_loaded": meta["baseline"]["loaded"],
+        "cache_used": meta["cache"]["used"],
+        "findings_summary": findings["summary"],
+        "function_group_ids": [group["id"] for group in clone_groups["functions"]],
+        "block_group_ids": [group["id"] for group in clone_groups["blocks"]],
+        "segment_group_ids": [group["id"] for group in clone_groups["segments"]],
     }
 
 

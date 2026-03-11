@@ -21,7 +21,7 @@ def _detect_group_keys(project_root: Path) -> tuple[list[str], list[str]]:
     for path in sorted(project_root.glob("*.py")):
         source = path.read_text("utf-8")
         module_name = module_name_from_path(str(project_root), str(path))
-        units, blocks, _segments, _source_stats, _file_metrics = (
+        units, blocks, _segments, _source_stats, _file_metrics, _sf = (
             extractor.extract_units_and_stats_from_source(
                 source=source,
                 filepath=str(path),

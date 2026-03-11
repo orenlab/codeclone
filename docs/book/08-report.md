@@ -2,127 +2,105 @@
 
 ## Purpose
 
-Define report schema v2.0 and shared metadata contract across JSON/TXT/HTML.
+Define report contracts in `2.0.0b1`: canonical JSON (`report_schema_version=2.1`)
+plus deterministic TXT/Markdown/SARIF projections.
 
 ## Public surface
 
-- JSON/TXT serializer: `codeclone/report/serialize.py`
-- Shared metadata builder: `codeclone/_cli_meta.py:_build_report_meta`
+- Canonical report builder: `codeclone/report/json_contract.py:build_report_document`
+- JSON/TXT renderers: `codeclone/report/serialize.py`
+- Markdown renderer: `codeclone/report/markdown.py`
+- SARIF renderer: `codeclone/report/sarif.py`
 - HTML renderer: `codeclone/html_report.py:build_html_report`
+- Shared metadata source: `codeclone/_cli_meta.py:_build_report_meta`
 
 ## Data model
 
-JSON v2.0 top-level fields:
+JSON report top-level (v2.1):
 
 - `report_schema_version`
 - `meta`
-- `files`
-- `groups`
-- `groups_split`
-- `group_item_layout`
-- `clones`
-- `clone_types`
-- optional `facts`
-- optional `metrics`
-- optional `suggestions`
+- `inventory`
+- `findings`
+- `metrics`
+- `derived`
+- `integrity`
 
-`group_item_layout` is explicit positional schema for compact arrays.
+Canonical vs non-canonical split:
 
-Refs:
+- Canonical: `report_schema_version`, `meta`, `inventory`, `findings`, `metrics`
+- Non-canonical projection layer: `derived`
+- Integrity metadata: `integrity` (`canonicalization` + `digest`)
 
-- `codeclone/report/serialize.py:GROUP_ITEM_LAYOUT`
-- `codeclone/contracts.py:REPORT_SCHEMA_VERSION`
+Finding families:
+
+- `findings.groups.clones.{functions,blocks,segments}`
+- `findings.groups.structural.groups`
+- `findings.groups.dead_code.groups`
+- `findings.groups.design.groups`
+
+Per-group common axes (family-specific fields may extend):
+
+- identity: `id`, `family`, `category`, `kind`
+- assessment: `severity`, `confidence`, `priority`
+- scope: `source_scope` (`dominant_kind`, `breakdown`, `impact_scope`)
+- spread: `spread.files`, `spread.functions`
+- evidence: `items`, `facts` (+ optional `display_facts`)
 
 ## Contracts
 
-Shared `meta` contract is produced once in CLI and consumed by all formats.
-Key fields include:
-
-- runtime: `codeclone_version`, `python_version`, `python_tag`,
-  `report_schema_version`
-- scan identity: `project_name`, `scan_root`
-- baseline provenance: `baseline_*`, including payload verification fields
-- metrics-baseline provenance: `metrics_baseline_*`
-- cache provenance: `cache_path`, `cache_used`, `cache_status`,
-  `cache_schema_version`
-- run transparency: `files_skipped_source_io`, `analysis_mode`,
-  `metrics_computed`, `health_score`, `health_grade`
-
-Refs:
-
-- `codeclone/_cli_meta.py:ReportMeta`
-- `codeclone/_cli_meta.py:_build_report_meta`
-
-NEW/KNOWN split contract:
-
-- Trusted baseline (`baseline_loaded=true` and `baseline_status=ok`):
-  `new` comes from `new_*_group_keys`, `known` is the remaining keys.
-- Untrusted baseline: all groups are NEW, KNOWN is empty.
-
-Refs:
-
-- `codeclone/report/serialize.py:_baseline_is_trusted`
-- `codeclone/report/serialize.py:to_json_report`
-- `codeclone/report/serialize.py:to_text_report`
+- JSON is source of truth for report semantics.
+- Markdown and SARIF are deterministic projections from the same report document.
+- Derived layer (`suggestions`, `overview`, `hotlists`) does not replace canonical
+  findings/metrics.
+- `report_generated_at_utc` is carried in `meta.runtime` and reused by UI/renderers.
+- `clone_type` and `novelty` are group-level properties inside clone groups.
 
 ## Invariants (MUST)
 
-- `groups_split` is key-index only; clone payload stays in `groups`.
-- For each section:
-  `new ∩ known = ∅` and `new ∪ known = groups.keys()`.
-- Facts are core-owned and renderers only display them.
-
-Refs:
-
-- `codeclone/report/serialize.py:to_json_report`
-- `codeclone/report/explain.py:build_block_group_facts`
+- Stable ordering for groups/items/suggestions/hotlists.
+- `derived[*].finding_id` references existing canonical finding IDs.
+- `integrity.digest` is computed from canonical sections only (derived excluded).
+- `source_scope.impact_scope` is explicit and deterministic (`runtime`,
+  `non_runtime`, `mixed`).
 
 ## Failure modes
 
-| Condition                          | Behavior                                                       |
-|------------------------------------|----------------------------------------------------------------|
-| Missing meta fields at render time | TXT/HTML render placeholders `(none)` or empty values          |
-| Untrusted baseline                 | JSON/TXT classify all groups as NEW; HTML shows untrusted note |
-| Missing source snippets            | HTML shows safe fallback snippet                               |
-
-Refs:
-
-- `codeclone/report/serialize.py:format_meta_text_value`
-- `codeclone/html_report.py:build_html_report`
-- `codeclone/_html_snippets.py:_render_code_block`
+| Condition                         | Behavior |
+|-----------------------------------|----------|
+| Missing optional UI/meta fields   | Renderer falls back to empty/`(none)` display |
+| Untrusted baseline                | Clone novelty resolves to `new` for all groups |
+| Missing snippet source in HTML    | Safe fallback snippet block |
 
 ## Determinism / canonicalization
 
-- `files` list is sorted and unique by collection strategy.
-- Group keys are serialized in sorted order.
-- Items are encoded and sorted by deterministic tuple keys.
-- `meta.cache_*` fields are deterministic for fixed run state, but may differ
-  between cold/warm runs by design.
+- Canonical payload is serialized with sorted keys for digest computation.
+- Inventory file registry is normalized to relative paths.
+- Structural findings are normalized, deduplicated, and sorted before serialization.
 
 Refs:
 
-- `codeclone/report/serialize.py:_collect_files`
-- `codeclone/report/serialize.py:_function_record_sort_key`
-- `codeclone/report/serialize.py:_block_record_sort_key`
+- `codeclone/report/json_contract.py:_build_integrity_payload`
+- `codeclone/report/json_contract.py:_build_inventory_payload`
+- `codeclone/structural_findings.py:normalize_structural_findings`
 
 ## Locked by tests
 
-- `tests/test_report.py::test_report_json_compact_v20_contract`
-- `tests/test_report.py::test_report_json_groups_split_trusted_baseline`
-- `tests/test_report.py::test_report_json_groups_split_untrusted_baseline`
-- `tests/test_report.py::test_to_text_report_trusted_baseline_split_sections`
-- `tests/test_report.py::test_to_text_report_untrusted_baseline_known_sections_empty`
+- `tests/test_report.py::test_report_json_compact_v21_contract`
+- `tests/test_report.py::test_report_json_integrity_matches_canonical_sections`
+- `tests/test_report.py::test_report_json_integrity_ignores_derived_changes`
+- `tests/test_report_contract_coverage.py::test_report_document_rich_invariants_and_renderers`
+- `tests/test_report_contract_coverage.py::test_markdown_and_sarif_reuse_prebuilt_report_document`
+- `tests/test_report_branch_invariants.py::test_overview_and_sarif_branch_invariants`
 
 ## Non-guarantees
 
-- Optional `facts`/`metrics`/`suggestions` payload sections may expand in v2.x
-  without changing clone-group semantics.
-- HTML visual controls are not part of JSON schema contract.
-- Reports from different cache provenance states (for example `missing` vs
-  `ok`) are not byte-identical because `meta.cache_*` is contract data.
+- Human-readable wording in `derived` or HTML may evolve without schema bump.
+- CSS/layout changes are not part of JSON contract.
 
 ## See also
 
+- [07-cache.md](07-cache.md)
+- [09-cli.md](09-cli.md)
 - [10-html-render.md](10-html-render.md)
-- [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
 - [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)

@@ -10,7 +10,7 @@ contracts used by JSON/TXT/HTML reports.
 - Clone-type classifier: `codeclone/report/suggestions.py:classify_clone_type`
 - Suggestion engine: `codeclone/report/suggestions.py:generate_suggestions`
 - Pipeline integration: `codeclone/pipeline.py:compute_suggestions`
-- Report serialization: `codeclone/report/serialize.py:to_json_report`
+- Report serialization: `codeclone/report/json_contract.py:build_report_document`
 - HTML render integration: `codeclone/html_report.py:build_html_report`
 
 ## Data model
@@ -25,10 +25,10 @@ Suggestion shape:
 Clone typing:
 
 - function groups:
-  - Type-1: identical `raw_hash`
-  - Type-2: identical normalized `fingerprint`
-  - Type-3: mixed fingerprints (same group semantics)
-  - Type-4: fallback
+    - Type-1: identical `raw_hash`
+    - Type-2: identical normalized `fingerprint`
+    - Type-3: mixed fingerprints (same group semantics)
+    - Type-4: fallback
 - block/segment groups: Type-4
 
 Refs:
@@ -41,17 +41,16 @@ Refs:
 - Suggestions are generated only in full metrics mode
   (`skip_metrics=false`).
 - Suggestions are advisory only and never directly control exit code.
-- JSON report exposes clone typing in both:
-  - top-level `clone_types`
-  - `clones.clone_types`
+- JSON report stores clone typing at group level:
+    - `findings.groups.clones.<kind>[*].clone_type`
 - Suggestion location is deterministic: first item by stable path/line sort.
 
 Refs:
 
 - `codeclone/pipeline.py:analyze`
 - `codeclone/pipeline.py:gate`
-- `codeclone/report/serialize.py:to_json_report`
-- `codeclone/report/suggestions.py:_first_location`
+- `codeclone/report/json_contract.py:build_report_document`
+- `codeclone/report/suggestions.py:generate_suggestions`
 
 ## Invariants (MUST)
 
@@ -68,10 +67,10 @@ Refs:
 
 ## Failure modes
 
-| Condition | Behavior |
-| --- | --- |
-| Metrics mode skipped | Suggestions list is empty |
-| No eligible findings | Suggestions list is empty |
+| Condition                              | Behavior                              |
+|----------------------------------------|---------------------------------------|
+| Metrics mode skipped                   | Suggestions list is empty             |
+| No eligible findings                   | Suggestions list is empty             |
 | Missing optional fields in group items | Classifier/renderer use safe defaults |
 
 ## Determinism / canonicalization
@@ -83,7 +82,7 @@ Refs:
 
 - `codeclone/report/suggestions.py:classify_clone_type`
 - `codeclone/report/suggestions.py:generate_suggestions`
-- `codeclone/report/serialize.py:to_json_report`
+- `codeclone/report/json_contract.py:build_report_document`
 
 ## Locked by tests
 

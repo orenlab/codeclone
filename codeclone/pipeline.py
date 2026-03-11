@@ -18,6 +18,8 @@ from .cache import (
     DeadCandidateDict,
     FileStat,
     ModuleDepDict,
+    SourceStatsDict,
+    StructuralFindingGroupDict,
     file_stat_signature,
 )
 from .contracts import ExitCode
@@ -38,6 +40,8 @@ from .models import (
     ModuleDep,
     ProjectMetrics,
     SegmentUnit,
+    StructuralFindingGroup,
+    StructuralFindingOccurrence,
     Suggestion,
     Unit,
 )
@@ -47,9 +51,12 @@ from .report import (
     build_block_group_facts,
     prepare_block_report_groups,
     prepare_segment_report_groups,
-    to_json_report,
-    to_text_report,
+    render_json_report_document,
+    render_text_report_document,
+    to_markdown_report,
+    to_sarif_report,
 )
+from .report.json_contract import build_report_document
 from .report.suggestions import generate_suggestions
 from .scanner import iter_py_files, module_name_from_path
 
@@ -61,9 +68,11 @@ PARALLEL_MIN_FILES_FLOOR = 16
 
 @dataclass(frozen=True, slots=True)
 class OutputPaths:
-    html: Path | None
-    json: Path | None
-    text: Path | None
+    html: Path | None = None
+    json: Path | None = None
+    text: Path | None = None
+    md: Path | None = None
+    sarif: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +89,7 @@ class DiscoveryResult:
     files_found: int
     cache_hits: int
     files_skipped: int
+    all_file_paths: tuple[str, ...]
     cached_units: tuple[GroupItem, ...]
     cached_blocks: tuple[GroupItem, ...]
     cached_segments: tuple[GroupItem, ...]
@@ -89,6 +99,11 @@ class DiscoveryResult:
     cached_referenced_names: frozenset[str]
     files_to_process: tuple[str, ...]
     skipped_warnings: tuple[str, ...]
+    cached_structural_findings: tuple[StructuralFindingGroup, ...] = ()
+    cached_lines: int = 0
+    cached_functions: int = 0
+    cached_methods: int = 0
+    cached_classes: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +121,7 @@ class FileProcessResult:
     stat: FileStat | None = None
     error_kind: str | None = None
     file_metrics: FileMetrics | None = None
+    structural_findings: list[StructuralFindingGroup] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +141,7 @@ class ProcessingResult:
     analyzed_classes: int
     failed_files: tuple[str, ...]
     source_read_failures: tuple[str, ...]
+    structural_findings: tuple[StructuralFindingGroup, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +159,7 @@ class AnalysisResult:
     project_metrics: ProjectMetrics | None
     metrics_payload: dict[str, object] | None
     suggestions: tuple[Suggestion, ...]
+    structural_findings: tuple[StructuralFindingGroup, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,9 +170,11 @@ class GatingResult:
 
 @dataclass(frozen=True, slots=True)
 class ReportArtifacts:
-    html: str | None
-    json: str | None
-    text: str | None
+    html: str | None = None
+    json: str | None = None
+    text: str | None = None
+    md: str | None = None
+    sarif: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +276,19 @@ def _parallel_min_files(processes: int) -> int:
     return max(PARALLEL_MIN_FILES_FLOOR, processes * PARALLEL_MIN_FILES_PER_WORKER)
 
 
+def _should_collect_structural_findings(output_paths: OutputPaths) -> bool:
+    return any(
+        path is not None
+        for path in (
+            output_paths.html,
+            output_paths.json,
+            output_paths.md,
+            output_paths.sarif,
+            output_paths.text,
+        )
+    )
+
+
 def _should_use_parallel(files_count: int, processes: int) -> bool:
     if processes <= 1:
         return False
@@ -274,6 +307,34 @@ def _new_discovery_buffers() -> tuple[
     list[str],
 ]:
     return [], [], [], [], [], [], set(), [], []
+
+
+def _decode_cached_structural_finding_group(
+    group_dict: StructuralFindingGroupDict,
+    filepath: str,
+) -> StructuralFindingGroup:
+    """Convert a StructuralFindingGroupDict (from cache) to a StructuralFindingGroup."""
+    finding_kind = group_dict["finding_kind"]
+    finding_key = group_dict["finding_key"]
+    signature = group_dict["signature"]
+    items = tuple(
+        StructuralFindingOccurrence(
+            finding_kind=finding_kind,
+            finding_key=finding_key,
+            file_path=filepath,
+            qualname=item["qualname"],
+            start=item["start"],
+            end=item["end"],
+            signature=signature,
+        )
+        for item in group_dict["items"]
+    )
+    return StructuralFindingGroup(
+        finding_kind=finding_kind,
+        finding_key=finding_key,
+        signature=signature,
+        items=items,
+    )
 
 
 def bootstrap(
@@ -299,6 +360,32 @@ def _cache_entry_has_metrics(entry: CacheEntry) -> bool:
         or bool(entry.get("dead_candidates"))
         or bool(entry.get("referenced_names"))
     )
+
+
+def _cache_entry_has_structural_findings(entry: CacheEntry) -> bool:
+    return "structural_findings" in entry
+
+
+def _cache_entry_source_stats(entry: CacheEntry) -> tuple[int, int, int, int] | None:
+    stats_obj = entry.get("source_stats")
+    if not isinstance(stats_obj, dict):
+        return None
+    lines = stats_obj.get("lines")
+    functions = stats_obj.get("functions")
+    methods = stats_obj.get("methods")
+    classes = stats_obj.get("classes")
+    if not (
+        isinstance(lines, int)
+        and isinstance(functions, int)
+        and isinstance(methods, int)
+        and isinstance(classes, int)
+        and lines >= 0
+        and functions >= 0
+        and methods >= 0
+        and classes >= 0
+    ):
+        return None
+    return lines, functions, methods, classes
 
 
 def _load_cached_metrics(
@@ -371,6 +458,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     files_found = 0
     cache_hits = 0
     files_skipped = 0
+    collect_structural_findings = _should_collect_structural_findings(boot.output_paths)
 
     (
         cached_units,
@@ -383,9 +471,16 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         files_to_process,
         skipped_warnings,
     ) = _new_discovery_buffers()
+    cached_sf: list[StructuralFindingGroup] = []
+    cached_lines = 0
+    cached_functions = 0
+    cached_methods = 0
+    cached_classes = 0
+    all_file_paths: list[str] = []
 
     for filepath in iter_py_files(str(boot.root)):
         files_found += 1
+        all_file_paths.append(filepath)
         try:
             stat = file_stat_signature(filepath)
         except OSError as exc:
@@ -398,8 +493,22 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
             if not boot.args.skip_metrics and not _cache_entry_has_metrics(cached):
                 files_to_process.append(filepath)
                 continue
+            if collect_structural_findings and not _cache_entry_has_structural_findings(
+                cached
+            ):
+                files_to_process.append(filepath)
+                continue
+            cached_source_stats = _cache_entry_source_stats(cached)
+            if cached_source_stats is None:
+                files_to_process.append(filepath)
+                continue
 
             cache_hits += 1
+            lines, functions, methods, classes = cached_source_stats
+            cached_lines += lines
+            cached_functions += functions
+            cached_methods += methods
+            cached_classes += classes
             cached_units.extend(dict(item) for item in cached["units"])
             cached_blocks.extend(dict(item) for item in cached["blocks"])
             cached_segments.extend(dict(item) for item in cached["segments"])
@@ -412,6 +521,11 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                 cached_module_deps.extend(module_deps)
                 cached_dead_candidates.extend(dead_candidates)
                 cached_referenced_names.update(referenced_names)
+            if collect_structural_findings:
+                cached_sf.extend(
+                    _decode_cached_structural_finding_group(group_dict, filepath)
+                    for group_dict in cached.get("structural_findings") or []
+                )
             continue
 
         files_to_process.append(filepath)
@@ -420,6 +534,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         files_found=files_found,
         cache_hits=cache_hits,
         files_skipped=files_skipped,
+        all_file_paths=tuple(sorted(all_file_paths)),
         cached_units=tuple(sorted(cached_units, key=_group_item_sort_key)),
         cached_blocks=tuple(sorted(cached_blocks, key=_group_item_sort_key)),
         cached_segments=tuple(sorted(cached_segments, key=_group_item_sort_key)),
@@ -433,6 +548,11 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         cached_referenced_names=frozenset(cached_referenced_names),
         files_to_process=tuple(files_to_process),
         skipped_warnings=tuple(sorted(skipped_warnings)),
+        cached_structural_findings=tuple(cached_sf),
+        cached_lines=cached_lines,
+        cached_functions=cached_functions,
+        cached_methods=cached_methods,
+        cached_classes=cached_classes,
     )
 
 
@@ -442,6 +562,7 @@ def process_file(
     cfg: NormalizationConfig,
     min_loc: int,
     min_stmt: int,
+    collect_structural_findings: bool = True,
 ) -> FileProcessResult:
     try:
         try:
@@ -487,7 +608,7 @@ def process_file(
             )
 
         module_name = module_name_from_path(root, filepath)
-        units, blocks, segments, source_stats, file_metrics = (
+        units, blocks, segments, source_stats, file_metrics, sf = (
             extract_units_and_stats_from_source(
                 source=source,
                 filepath=filepath,
@@ -495,6 +616,7 @@ def process_file(
                 cfg=cfg,
                 min_loc=min_loc,
                 min_stmt=min_stmt,
+                collect_structural_findings=collect_structural_findings,
             )
         )
 
@@ -510,6 +632,7 @@ def process_file(
             classes=source_stats.classes,
             stat=stat,
             file_metrics=file_metrics,
+            structural_findings=sf,
         )
     except Exception as exc:  # pragma: no cover - defensive shell around workers
         return FileProcessResult(
@@ -546,12 +669,16 @@ def process(
     analyzed_methods = 0
     analyzed_classes = 0
 
+    all_structural_findings: list[StructuralFindingGroup] = list(
+        discovery.cached_structural_findings
+    )
     failed_files: list[str] = []
     source_read_failures: list[str] = []
     root_str = str(boot.root)
     processes = max(1, int(boot.args.processes))
     min_loc = int(boot.args.min_loc)
     min_stmt = int(boot.args.min_stmt)
+    collect_structural_findings = _should_collect_structural_findings(boot.output_paths)
 
     def _accept_result(result: FileProcessResult) -> None:
         nonlocal files_analyzed
@@ -562,14 +689,38 @@ def process(
         nonlocal analyzed_classes
 
         if result.success and result.stat is not None:
-            cache.put_file_entry(
-                result.filepath,
-                result.stat,
-                result.units or [],
-                result.blocks or [],
-                result.segments or [],
-                file_metrics=result.file_metrics,
+            source_stats_payload = SourceStatsDict(
+                lines=result.lines,
+                functions=result.functions,
+                methods=result.methods,
+                classes=result.classes,
             )
+            structural_payload = (
+                result.structural_findings if collect_structural_findings else None
+            )
+            try:
+                cache.put_file_entry(
+                    result.filepath,
+                    result.stat,
+                    result.units or [],
+                    result.blocks or [],
+                    result.segments or [],
+                    source_stats=source_stats_payload,
+                    file_metrics=result.file_metrics,
+                    structural_findings=structural_payload,
+                )
+            except TypeError as exc:
+                if "source_stats" not in str(exc):
+                    raise
+                cache.put_file_entry(
+                    result.filepath,
+                    result.stat,
+                    result.units or [],
+                    result.blocks or [],
+                    result.segments or [],
+                    file_metrics=result.file_metrics,
+                    structural_findings=structural_payload,
+                )
             files_analyzed += 1
             analyzed_lines += result.lines
             analyzed_functions += result.functions
@@ -586,6 +737,8 @@ def process(
                 all_segments.extend(
                     _segment_to_group_item(segment) for segment in result.segments
                 )
+            if result.structural_findings:
+                all_structural_findings.extend(result.structural_findings)
 
             if not boot.args.skip_metrics and result.file_metrics is not None:
                 all_class_metrics.extend(result.file_metrics.class_metrics)
@@ -609,6 +762,7 @@ def process(
                     boot.config,
                     min_loc,
                     min_stmt,
+                    collect_structural_findings,
                 )
             )
             if on_advance is not None:
@@ -629,6 +783,7 @@ def process(
                                 boot.config,
                                 min_loc,
                                 min_stmt,
+                                collect_structural_findings,
                             )
                             for filepath in batch
                         ]
@@ -672,6 +827,7 @@ def process(
         analyzed_classes=analyzed_classes,
         failed_files=tuple(sorted(failed_files)),
         source_read_failures=tuple(sorted(source_read_failures)),
+        structural_findings=tuple(all_structural_findings),
     )
 
 
@@ -822,6 +978,9 @@ def compute_suggestions(
     func_groups: Mapping[str, Sequence[GroupItemLike]],
     block_groups: Mapping[str, Sequence[GroupItemLike]],
     segment_groups: Mapping[str, Sequence[GroupItemLike]],
+    block_group_facts: Mapping[str, Mapping[str, str]] | None = None,
+    structural_findings: Sequence[StructuralFindingGroup] | None = None,
+    scan_root: str = "",
 ) -> tuple[Suggestion, ...]:
     return generate_suggestions(
         project_metrics=project_metrics,
@@ -830,6 +989,9 @@ def compute_suggestions(
         func_groups=func_groups,
         block_groups=block_groups,
         segment_groups=segment_groups,
+        block_group_facts=block_group_facts,
+        structural_findings=structural_findings,
+        scan_root=scan_root,
     )
 
 
@@ -953,6 +1115,9 @@ def build_metrics_report_payload(
                 "critical": sum(
                     1 for item in project_metrics.dead_code if item.confidence == "high"
                 ),
+                "high_confidence": sum(
+                    1 for item in project_metrics.dead_code if item.confidence == "high"
+                ),
             },
         },
         "health": {
@@ -1009,6 +1174,9 @@ def analyze(
             func_groups=func_groups,
             block_groups=block_groups_report,
             segment_groups=segment_groups,
+            block_group_facts=block_group_facts,
+            structural_findings=processing.structural_findings,
+            scan_root=str(boot.root),
         )
         metrics_payload = build_metrics_report_payload(
             project_metrics=project_metrics,
@@ -1030,24 +1198,75 @@ def analyze(
         project_metrics=project_metrics,
         metrics_payload=metrics_payload,
         suggestions=suggestions,
+        structural_findings=processing.structural_findings,
     )
 
 
 def report(
     *,
     boot: BootstrapResult,
+    discovery: DiscoveryResult,
+    processing: ProcessingResult,
     analysis: AnalysisResult,
     report_meta: Mapping[str, object],
     new_func: Collection[str],
     new_block: Collection[str],
     html_builder: Callable[..., str] | None = None,
 ) -> ReportArtifacts:
-    html_content: str | None = None
-    json_content: str | None = None
-    text_content: str | None = None
+    contents: dict[str, str | None] = {
+        "html": None,
+        "json": None,
+        "md": None,
+        "sarif": None,
+        "text": None,
+    }
+
+    sf = analysis.structural_findings if analysis.structural_findings else None
+    report_inventory = {
+        "files": {
+            "total_found": discovery.files_found,
+            "analyzed": processing.files_analyzed,
+            "cached": discovery.cache_hits,
+            "skipped": processing.files_skipped,
+            "source_io_skipped": len(processing.source_read_failures),
+        },
+        "code": {
+            "parsed_lines": processing.analyzed_lines + discovery.cached_lines,
+            "functions": processing.analyzed_functions + discovery.cached_functions,
+            "methods": processing.analyzed_methods + discovery.cached_methods,
+            "classes": processing.analyzed_classes + discovery.cached_classes,
+        },
+        "file_list": list(discovery.all_file_paths),
+    }
+    report_document: dict[str, object] | None = None
+    needs_report_document = boot.output_paths.html is not None or any(
+        path is not None
+        for path in (
+            boot.output_paths.json,
+            boot.output_paths.md,
+            boot.output_paths.sarif,
+            boot.output_paths.text,
+        )
+    )
+
+    if needs_report_document:
+        report_document = build_report_document(
+            func_groups=analysis.func_groups,
+            block_groups=analysis.block_groups_report,
+            segment_groups=analysis.segment_groups,
+            meta=report_meta,
+            inventory=report_inventory,
+            block_facts=analysis.block_group_facts,
+            new_function_group_keys=new_func,
+            new_block_group_keys=new_block,
+            new_segment_group_keys=set(analysis.segment_groups.keys()),
+            metrics=analysis.metrics_payload,
+            suggestions=analysis.suggestions,
+            structural_findings=sf,
+        )
 
     if boot.output_paths.html and html_builder is not None:
-        html_content = html_builder(
+        contents["html"] = html_builder(
             func_groups=analysis.func_groups,
             block_groups=analysis.block_groups_report,
             segment_groups=analysis.segment_groups,
@@ -1057,42 +1276,70 @@ def report(
             report_meta=report_meta,
             metrics=analysis.metrics_payload,
             suggestions=analysis.suggestions,
+            structural_findings=sf,
+            report_document=report_document,
             title="CodeClone Report",
             context_lines=3,
             max_snippet_lines=220,
         )
 
-    if boot.output_paths.json:
-        json_content = to_json_report(
-            analysis.func_groups,
-            analysis.block_groups_report,
-            analysis.segment_groups,
-            report_meta,
-            analysis.block_group_facts,
-            new_function_group_keys=new_func,
-            new_block_group_keys=new_block,
-            new_segment_group_keys=set(analysis.segment_groups.keys()),
-            metrics=analysis.metrics_payload,
-            suggestions=analysis.suggestions,
+    if any(
+        path is not None
+        for path in (
+            boot.output_paths.json,
+            boot.output_paths.md,
+            boot.output_paths.sarif,
+            boot.output_paths.text,
         )
+    ):
+        assert report_document is not None
 
-    if boot.output_paths.text:
-        text_content = to_text_report(
+    if boot.output_paths.json and report_document is not None:
+        contents["json"] = render_json_report_document(report_document)
+
+    if boot.output_paths.md and report_document is not None:
+        contents["md"] = to_markdown_report(
+            report_document=report_document,
             meta=report_meta,
+            inventory=report_inventory,
             func_groups=analysis.func_groups,
             block_groups=analysis.block_groups_report,
             segment_groups=analysis.segment_groups,
+            block_facts=analysis.block_group_facts,
             new_function_group_keys=new_func,
             new_block_group_keys=new_block,
             new_segment_group_keys=set(analysis.segment_groups.keys()),
             metrics=analysis.metrics_payload,
             suggestions=analysis.suggestions,
+            structural_findings=sf,
         )
 
+    if boot.output_paths.sarif and report_document is not None:
+        contents["sarif"] = to_sarif_report(
+            report_document=report_document,
+            meta=report_meta,
+            inventory=report_inventory,
+            func_groups=analysis.func_groups,
+            block_groups=analysis.block_groups_report,
+            segment_groups=analysis.segment_groups,
+            block_facts=analysis.block_group_facts,
+            new_function_group_keys=new_func,
+            new_block_group_keys=new_block,
+            new_segment_group_keys=set(analysis.segment_groups.keys()),
+            metrics=analysis.metrics_payload,
+            suggestions=analysis.suggestions,
+            structural_findings=sf,
+        )
+
+    if boot.output_paths.text and report_document is not None:
+        contents["text"] = render_text_report_document(report_document)
+
     return ReportArtifacts(
-        html=html_content,
-        json=json_content,
-        text=text_content,
+        html=contents["html"],
+        json=contents["json"],
+        md=contents["md"],
+        sarif=contents["sarif"],
+        text=contents["text"],
     )
 
 

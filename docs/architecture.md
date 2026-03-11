@@ -128,42 +128,27 @@ Noise filters applied:
 
 ## 8. Reporting
 
-Detected clone groups can be:
+Detected findings can be rendered as:
 
-- printed as text,
-- exported as JSON,
-- rendered as an interactive HTML report.
+- interactive HTML (`--html`),
+- canonical JSON (`--json`, schema `2.1`),
+- deterministic text projection (`--text`),
+- deterministic Markdown projection (`--md`),
+- deterministic SARIF projection (`--sarif`).
 
-All report formats include provenance metadata:
+Reporting uses a layered model:
 
-- `report_schema_version`
-- `codeclone_version`
-- `python_version` (runtime major.minor, human-readable)
-- `python_tag` (runtime compatibility tag used by baseline/cache contracts)
-- `baseline_path`
-- `baseline_fingerprint_version`
-- `baseline_schema_version`
-- `baseline_python_tag`
-- `baseline_generator_name`
-- `baseline_generator_version`
-- `baseline_payload_sha256`
-- `baseline_payload_sha256_verified`
-- `baseline_loaded`
-- `baseline_status`
-  (
-  `ok | missing | too_large | invalid_json | invalid_type | missing_fields | mismatch_schema_version | mismatch_fingerprint_version | mismatch_python_version | generator_mismatch | integrity_missing | integrity_failed`;
-  `mismatch_python_version` is the status name used for `python_tag` mismatch)
-- `cache_path`
-- `cache_schema_version`
-- `cache_status`
-- `cache_used`
-- `files_skipped_source_io`
-- `metrics_baseline_path`
-- `metrics_baseline_loaded`
-- `metrics_baseline_status`
-- `metrics_baseline_schema_version`
-- `metrics_baseline_payload_sha256`
-- `metrics_baseline_payload_sha256_verified`
+- canonical sections: `report_schema_version`, `meta`, `inventory`, `findings`, `metrics`
+- non-canonical view layer: `derived`
+- integrity metadata: `integrity` (`canonicalization` + `digest`)
+
+Provenance is carried through `meta` and includes:
+
+- runtime/context (`codeclone_version`, `python_version`, `python_tag`, `analysis_mode`, `report_mode`)
+- baseline status block (`meta.baseline.*`)
+- cache status block (`meta.cache.*`)
+- metrics-baseline status block (`meta.metrics_baseline.*`)
+- generation timestamp (`meta.runtime.report_generated_at_utc`)
 
 Explainability contract (v1):
 

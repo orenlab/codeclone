@@ -57,6 +57,13 @@ HELP_HTML = (
 HELP_JSON = (
     "Generate JSON report (optional FILE, default: .cache/codeclone/report.json)."
 )
+HELP_MD = (
+    "Generate Markdown report (optional FILE, default: .cache/codeclone/report.md)."
+)
+HELP_SARIF = (
+    "Generate SARIF 2.1.0 report "
+    "(optional FILE, default: .cache/codeclone/report.sarif)."
+)
 HELP_TEXT = (
     "Generate text report (optional FILE, default: .cache/codeclone/report.txt)."
 )
@@ -88,15 +95,16 @@ SUMMARY_LABEL_SUPPRESSED = "  suppressed"
 SUMMARY_LABEL_NEW_BASELINE = "New vs baseline"
 
 SUMMARY_COMPACT = (
-    "Summary  found={found}  analyzed={analyzed}  cache={cache_hits}  skipped={skipped}"
+    "Summary  found={found}  analyzed={analyzed}"
+    "  cached={cache_hits}  skipped={skipped}"
 )
 SUMMARY_COMPACT_CLONES = (
     "Clones   func={function}  block={block}  seg={segment}"
     "  suppressed={suppressed}  new={new}"
 )
 SUMMARY_COMPACT_METRICS = (
-    "Metrics  CC={cc_avg}/{cc_max}  CBO={cbo_avg}/{cbo_max}"
-    "  LCOM4={lcom_avg}/{lcom_max}  cycles={cycles}  dead={dead}"
+    "Metrics  cc={cc_avg}/{cc_max}  cbo={cbo_avg}/{cbo_max}"
+    "  lcom4={lcom_avg}/{lcom_max}  cycles={cycles}  dead_code={dead}"
     "  health={health}({grade})"
 )
 
