@@ -2922,6 +2922,7 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
     cache_path = tmp_path / "cache.json"
+    json_out = tmp_path / "report.json"
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
@@ -2932,13 +2933,21 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
     _patch_parallel(monkeypatch)
     _run_main(
         monkeypatch,
-        [str(tmp_path), "--no-progress", "--cache-path", str(cache_path)],
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--cache-path",
+            str(cache_path),
+            "--json",
+            str(json_out),
+        ],
     )
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    assert "Cannot read file" in combined
     assert "CONTRACT ERROR:" not in combined
     assert _summary_metric(captured.out, "Files skipped") == 1
+    payload = json.loads(json_out.read_text("utf-8"))
+    assert _report_inventory_files(payload)["source_io_skipped"] == 1
 
 
 def test_cli_unreadable_source_fails_in_ci_with_contract_error(
