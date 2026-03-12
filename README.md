@@ -259,7 +259,7 @@ Architecture: [`docs/architecture.md`](docs/architecture.md) · CFG semantics: [
 | Docker benchmark contract  | [`docs/book/18-benchmarking.md`](docs/book/18-benchmarking.md)                           |
 | Determinism                | [`docs/book/12-determinism.md`](docs/book/12-determinism.md)                             |
 
-## Benchmarking
+## * Benchmarking
 
 <details>
 <summary>Reproducible Docker Benchmark</summary>
@@ -278,8 +278,8 @@ CPUSET=0 CPUS=1.0 MEMORY=2g RUNS=16 WARMUPS=4 \
   ./benchmarks/run_docker_benchmark.sh
 ```
 
-* Performance claims are backed by the reproducible benchmark workflow documented
-  in [docs/book/18-benchmarking.md](docs/book/18-benchmarking.md)￼
+Performance claims are backed by the reproducible benchmark workflow documented
+in [docs/book/18-benchmarking.md](docs/book/18-benchmarking.md)￼
 
 </details>
 
