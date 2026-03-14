@@ -64,7 +64,7 @@ If you believe you have discovered a security vulnerability, **do not open a pub
 
 Please report it privately via email:
 
-**Email:** `pytelemonbot@mail.ru`  
+**Email:** `pytelemonbot@mail.ru`
 **Subject:** `Security issue in CodeClone`
 
 When reporting a vulnerability, please include:
