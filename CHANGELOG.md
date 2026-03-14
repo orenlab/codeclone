@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.0b1] - 2026-03-09
+## [2.0.0b1]
 
 CodeClone 2.0 is a major upgrade that expands the project from a structural clone detector into a broader *
 *baseline-aware code-health and CI governance tool** for Python.
@@ -22,6 +22,23 @@ Compatibility remains a first-class concern in this release:
 
 This is a beta release intended to validate the new architecture, reporting surface, and performance profile before the
 final `2.0.0` release.
+
+### Fixes (feat/2.0.0)
+
+- Fixed scanner root-exclude short-circuit: only an explicitly excluded root
+  directory is skipped; excluded segments in parent path no longer suppress
+  valid scans (prevents silent zero-file analysis for roots like `build/project`).
+- Optimized HTML snippet rendering path:
+  - `_FileCache` now caches full file lines once per file and serves
+    line-range slices without repeated full-file scans.
+  - Pygments imports are cached per importer identity to avoid repeated
+    dynamic import overhead in hot snippet loops while preserving testability.
+- Optimized block explainability AST stats:
+  - added per-file statement index and range lookup via `bisect`,
+    replacing repeated full `ast.walk()` scans per range.
+- Added scanner regression coverage for roots under excluded parent directories.
+- No baseline/cache/report schema contract changes; detector identity semantics
+  and golden compatibility preserved.
 
 ### Architecture
 

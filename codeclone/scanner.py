@@ -104,9 +104,10 @@ def iter_py_files(
 
     excludes_set = set(excludes)
 
-    # Keep legacy behavior: if root path already includes an excluded segment,
-    # no files are yielded.
-    if any(part in excludes_set for part in rootp.parts):
+    # Keep legacy behavior only when the requested root directory itself is excluded
+    # (e.g. scanning "<repo>/__pycache__"). Parent directories must not suppress
+    # scanning, otherwise valid roots like ".../build/project" become empty.
+    if rootp.name in excludes_set:
         return
 
     # Collect and filter first, then sort for deterministic output.

@@ -211,6 +211,16 @@ def test_iter_py_files_excluded_root_short_circuit(tmp_path: Path) -> None:
     assert list(iter_py_files(str(excluded_root))) == []
 
 
+def test_iter_py_files_excluded_parent_dir_does_not_short_circuit(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "build" / "project"
+    root.mkdir(parents=True)
+    src = root / "a.py"
+    src.write_text("x = 1\n", "utf-8")
+    assert list(iter_py_files(str(root))) == [str(src)]
+
+
 def test_sensitive_prefix_blocked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

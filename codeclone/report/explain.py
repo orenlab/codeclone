@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import ast
+from bisect import bisect_left, bisect_right
+from dataclasses import dataclass
 from pathlib import Path
 
 from .explain_contract import (
@@ -16,6 +18,19 @@ from .explain_contract import (
     resolve_group_display_name,
 )
 from .types import GroupItemsLike, GroupMapLike
+
+
+@dataclass(frozen=True, slots=True)
+class _StatementRecord:
+    node: ast.stmt
+    start_line: int
+    end_line: int
+    start_col: int
+    end_col: int
+    type_name: str
+
+
+_StatementIndex = tuple[tuple[_StatementRecord, ...], tuple[int, ...]]
 
 
 def signature_parts(group_key: str) -> list[str]:
@@ -50,6 +65,53 @@ def parsed_file_tree(
     return tree
 
 
+def _build_statement_index(tree: ast.AST) -> _StatementIndex:
+    records = tuple(
+        sorted(
+            (
+                _StatementRecord(
+                    node=node,
+                    start_line=int(getattr(node, "lineno", 0)),
+                    end_line=int(getattr(node, "end_lineno", 0)),
+                    start_col=int(getattr(node, "col_offset", 0)),
+                    end_col=int(getattr(node, "end_col_offset", 0)),
+                    type_name=type(node).__name__,
+                )
+                for node in ast.walk(tree)
+                if isinstance(node, ast.stmt)
+            ),
+            key=lambda record: (
+                record.start_line,
+                record.end_line,
+                record.start_col,
+                record.end_col,
+                record.type_name,
+            ),
+        )
+    )
+    start_lines = tuple(record.start_line for record in records)
+    return records, start_lines
+
+
+def parsed_statement_index(
+    filepath: str,
+    *,
+    ast_cache: dict[str, ast.AST | None],
+    stmt_index_cache: dict[str, _StatementIndex | None],
+) -> _StatementIndex | None:
+    if filepath in stmt_index_cache:
+        return stmt_index_cache[filepath]
+
+    tree = parsed_file_tree(filepath, ast_cache=ast_cache)
+    if tree is None:
+        stmt_index_cache[filepath] = None
+        return None
+
+    index = _build_statement_index(tree)
+    stmt_index_cache[filepath] = index
+    return index
+
+
 def is_assert_like_stmt(statement: ast.stmt) -> bool:
     if isinstance(statement, ast.Assert):
         return True
@@ -72,51 +134,49 @@ def assert_range_stats(
     start_line: int,
     end_line: int,
     ast_cache: dict[str, ast.AST | None],
+    stmt_index_cache: dict[str, _StatementIndex | None],
     range_cache: dict[tuple[str, int, int], tuple[int, int, int]],
 ) -> tuple[int, int, int]:
     cache_key = (filepath, start_line, end_line)
     if cache_key in range_cache:
         return range_cache[cache_key]
 
-    tree = parsed_file_tree(filepath, ast_cache=ast_cache)
-    if tree is None:
-        range_cache[cache_key] = (0, 0, 0)
-        return 0, 0, 0
-
-    statements = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.stmt)
-        and int(getattr(node, "lineno", 0)) >= start_line
-        and int(getattr(node, "end_lineno", 0)) <= end_line
-    ]
-    if not statements:
-        range_cache[cache_key] = (0, 0, 0)
-        return 0, 0, 0
-
-    ordered_statements = sorted(
-        statements,
-        key=lambda statement: (
-            int(getattr(statement, "lineno", 0)),
-            int(getattr(statement, "end_lineno", 0)),
-            int(getattr(statement, "col_offset", 0)),
-            int(getattr(statement, "end_col_offset", 0)),
-            type(statement).__name__,
-        ),
+    statement_index = parsed_statement_index(
+        filepath,
+        ast_cache=ast_cache,
+        stmt_index_cache=stmt_index_cache,
     )
+    if statement_index is None:
+        range_cache[cache_key] = (0, 0, 0)
+        return 0, 0, 0
 
-    total = len(ordered_statements)
-    assert_like = 0
-    max_consecutive = 0
-    current_consecutive = 0
-    for statement in ordered_statements:
-        if is_assert_like_stmt(statement):
+    records, start_lines = statement_index
+    if not records:
+        range_cache[cache_key] = (0, 0, 0)
+        return 0, 0, 0
+
+    left = bisect_left(start_lines, start_line)
+    right = bisect_right(start_lines, end_line)
+    if left >= right:
+        range_cache[cache_key] = (0, 0, 0)
+        return 0, 0, 0
+
+    total, assert_like, max_consecutive, current_consecutive = (0, 0, 0, 0)
+    for record in records[left:right]:
+        if record.end_line > end_line:
+            continue
+        total += 1
+        if is_assert_like_stmt(record.node):
             assert_like += 1
             current_consecutive += 1
             if current_consecutive > max_consecutive:
                 max_consecutive = current_consecutive
         else:
             current_consecutive = 0
+
+    if total == 0:
+        range_cache[cache_key] = (0, 0, 0)
+        return 0, 0, 0
 
     stats = (total, assert_like, max_consecutive)
     range_cache[cache_key] = stats
@@ -129,6 +189,7 @@ def is_assert_only_range(
     start_line: int,
     end_line: int,
     ast_cache: dict[str, ast.AST | None],
+    stmt_index_cache: dict[str, _StatementIndex | None],
     range_cache: dict[tuple[str, int, int], tuple[int, int, int]],
 ) -> bool:
     total, assert_like, _ = assert_range_stats(
@@ -136,6 +197,7 @@ def is_assert_only_range(
         start_line=start_line,
         end_line=end_line,
         ast_cache=ast_cache,
+        stmt_index_cache=stmt_index_cache,
         range_cache=range_cache,
     )
     return total > 0 and total == assert_like
@@ -163,6 +225,7 @@ def enrich_with_assert_facts(
     facts: dict[str, str],
     items: GroupItemsLike,
     ast_cache: dict[str, ast.AST | None],
+    stmt_index_cache: dict[str, _StatementIndex | None],
     range_cache: dict[tuple[str, int, int], tuple[int, int, int]],
 ) -> None:
     assert_only = True
@@ -187,6 +250,7 @@ def enrich_with_assert_facts(
                 start_line=start_line,
                 end_line=end_line,
                 ast_cache=ast_cache,
+                stmt_index_cache=stmt_index_cache,
                 range_cache=range_cache,
             )
             total_statements += range_total
@@ -205,6 +269,7 @@ def enrich_with_assert_facts(
                 start_line=start_line,
                 end_line=end_line,
                 ast_cache=ast_cache,
+                stmt_index_cache=stmt_index_cache,
                 range_cache=range_cache,
             )
         ):
@@ -230,6 +295,7 @@ def build_block_group_facts(block_groups: GroupMapLike) -> dict[str, dict[str, s
     Renderers (HTML/TXT/JSON) should only display these facts.
     """
     ast_cache: dict[str, ast.AST | None] = {}
+    stmt_index_cache: dict[str, _StatementIndex | None] = {}
     range_cache: dict[tuple[str, int, int], tuple[int, int, int]] = {}
     facts_by_group: dict[str, dict[str, str]] = {}
 
@@ -239,6 +305,7 @@ def build_block_group_facts(block_groups: GroupMapLike) -> dict[str, dict[str, s
             facts=facts,
             items=items,
             ast_cache=ast_cache,
+            stmt_index_cache=stmt_index_cache,
             range_cache=range_cache,
         )
         group_arity = len(items)

@@ -7,6 +7,7 @@ import html
 import importlib
 from dataclasses import dataclass
 from functools import lru_cache
+from types import ModuleType
 from typing import NamedTuple, cast
 
 from .errors import FileProcessingError
@@ -21,33 +22,19 @@ class _Snippet:
 
 
 class _FileCache:
-    __slots__ = ("_get_lines_impl", "maxsize")
+    __slots__ = ("_get_file_lines_impl", "maxsize")
 
     def __init__(self, maxsize: int = 128) -> None:
         self.maxsize = maxsize
-        self._get_lines_impl = lru_cache(maxsize=maxsize)(self._read_file_range)
+        self._get_file_lines_impl = lru_cache(maxsize=maxsize)(self._read_file_lines)
 
     @staticmethod
-    def _read_file_range(
-        filepath: str, start_line: int, end_line: int
-    ) -> tuple[str, ...]:
-        if start_line < 1:
-            start_line = 1
-        if end_line < start_line:
-            return ()
-
+    def _read_file_lines(filepath: str) -> tuple[str, ...]:
         try:
 
             def _read_with_errors(errors: str) -> tuple[str, ...]:
-                lines: list[str] = []
                 with open(filepath, encoding="utf-8", errors=errors) as f:
-                    for lineno, line in enumerate(f, start=1):
-                        if lineno < start_line:
-                            continue
-                        if lineno > end_line:
-                            break
-                        lines.append(line.rstrip("\n"))
-                return tuple(lines)
+                    return tuple(line.rstrip("\n") for line in f)
 
             try:
                 return _read_with_errors("strict")
@@ -59,7 +46,16 @@ class _FileCache:
     def get_lines_range(
         self, filepath: str, start_line: int, end_line: int
     ) -> tuple[str, ...]:
-        return self._get_lines_impl(filepath, start_line, end_line)
+        if start_line < 1:
+            start_line = 1
+        if end_line < start_line:
+            return ()
+        lines = self._get_file_lines_impl(filepath)
+        start_index = start_line - 1
+        if start_index >= len(lines):
+            return ()
+        end_index = min(len(lines), end_line)
+        return lines[start_index:end_index]
 
     class _CacheInfo(NamedTuple):
         hits: int
@@ -68,16 +64,46 @@ class _FileCache:
         currsize: int
 
     def cache_info(self) -> _CacheInfo:
-        return cast(_FileCache._CacheInfo, self._get_lines_impl.cache_info())
+        return cast(_FileCache._CacheInfo, self._get_file_lines_impl.cache_info())
 
 
-def _try_pygments(code: str) -> str | None:
+_PYGMENTS_IMPORTER_ID: int | None = None
+_PYGMENTS_API: tuple[ModuleType, ModuleType, ModuleType] | None = None
+
+
+def _load_pygments_api() -> tuple[ModuleType, ModuleType, ModuleType] | None:
+    """
+    Load pygments modules once per import-function identity.
+
+    Tests monkeypatch `importlib.import_module`; tracking importer identity keeps
+    behavior deterministic and allows import-error branches to stay testable.
+    """
+    global _PYGMENTS_IMPORTER_ID
+    global _PYGMENTS_API
+
+    importer_id = id(importlib.import_module)
+    if importer_id != _PYGMENTS_IMPORTER_ID:
+        _PYGMENTS_IMPORTER_ID = importer_id
+        _PYGMENTS_API = None
+    if _PYGMENTS_API is not None:
+        return _PYGMENTS_API
+
     try:
         pygments = importlib.import_module("pygments")
         formatters = importlib.import_module("pygments.formatters")
         lexers = importlib.import_module("pygments.lexers")
     except ImportError:
         return None
+
+    _PYGMENTS_API = (pygments, formatters, lexers)
+    return _PYGMENTS_API
+
+
+def _try_pygments(code: str) -> str | None:
+    pygments_api = _load_pygments_api()
+    if pygments_api is None:
+        return None
+    pygments, formatters, lexers = pygments_api
 
     highlight = pygments.highlight
     formatter_cls = formatters.HtmlFormatter
@@ -91,10 +117,10 @@ def _pygments_css(style_name: str) -> str:
     Returns CSS for pygments tokens. Scoped to `.codebox` to avoid leaking styles.
     If Pygments is not available or style missing, returns "".
     """
-    try:
-        formatters = importlib.import_module("pygments.formatters")
-    except ImportError:
+    pygments_api = _load_pygments_api()
+    if pygments_api is None:
         return ""
+    _, formatters, _ = pygments_api
 
     try:
         formatter_cls = formatters.HtmlFormatter
