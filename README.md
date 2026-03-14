@@ -8,7 +8,7 @@
 ![Baseline](https://img.shields.io/badge/baseline-versioned-green?style=flat-square)
 [![License](https://img.shields.io/pypi/l/codeclone.svg?style=flat-square)](LICENSE)
 
-**CodeClone** is a Python code clone detector based on **normalized AST and Control Flow Graphs (CFG)**.  
+**CodeClone** is a Python code clone detector based on **normalized AST and Control Flow Graphs (CFG)**.
 It discovers architectural duplication and prevents new copy-paste from entering your codebase via CI.
 
 ---
@@ -34,13 +34,13 @@ Unlike token-based tools, CodeClone compares **structure and control flow**, mak
 
 **Three Detection Levels:**
 
-1. **Function clones (CFG fingerprint)**  
+1. **Function clones (CFG fingerprint)**
    Strong structural signal for cross-layer duplication
 
-2. **Block clones (statement windows)**  
+2. **Block clones (statement windows)**
    Detects repeated local logic patterns
 
-3. **Segment clones (report-only)**  
+3. **Segment clones (report-only)**
    Internal function repetition for explainability; not used for baseline gating
 
 **CI-Ready Features:**

@@ -1,6 +1,6 @@
 # CodeClone Architecture
 
-> Scope note: this file is an architecture narrative/deep-dive.  
+> Scope note: this file is an architecture narrative/deep-dive.
 > Contract-level guarantees (schemas, statuses, exit codes, trust model, determinism) are defined in `docs/book/`.
 
 This document describes the high-level architecture of **CodeClone**.
