@@ -172,6 +172,24 @@ final `2.0.0` release.
 - Fingerprint compatibility contract unchanged (`BASELINE_FINGERPRINT_VERSION = "1"`).
 - Deterministic ordering and canonicalization contracts for baseline, cache, and report remain in force.
 
+## [1.4.4] - 2026-03-14
+
+### Performance
+
+- Backported report hot-path optimizations from `2.0.0b1` to the `1.4.x` line:
+    - file snippets now reuse cached full-file lines and slice ranges without
+      repeated full-file scans
+    - Pygments modules are loaded once per importer identity instead of
+      re-importing for each snippet
+- Optimized block explainability range stats:
+    - replaced repeated full `ast.walk()` scans per range with a per-file
+      statement index + `bisect` window lookup
+
+### Contract Notes
+
+- No baseline/cache/report schema changes.
+- No clone detection or fingerprint semantic changes.
+
 ## [1.4.3] - 2026-03-03
 
 ### Cache Contract
