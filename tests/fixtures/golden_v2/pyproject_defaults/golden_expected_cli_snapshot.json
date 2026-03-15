@@ -38,5 +38,7 @@
     "clone:function:c35ab49bab0141cbc3b2745742d0ff6e186ae15f|0-19"
   ],
   "block_group_ids": [],
-  "segment_group_ids": []
+  "segment_group_ids": [],
+  "structural_group_ids": [],
+  "structural_group_kinds": []
 }

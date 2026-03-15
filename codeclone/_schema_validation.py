@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Set
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .errors import BaselineValidationError
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Set
+    from pathlib import Path
 
 __all__ = ["validate_top_level_structure"]
 

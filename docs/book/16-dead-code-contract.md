@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define dead-code liveness rules, test-path boundaries, and gating semantics.
+Define dead-code liveness rules, canonical symbol-usage boundaries, and gating semantics.
 
 ## Public surface
 
@@ -18,7 +18,8 @@ Define dead-code liveness rules, test-path boundaries, and gating semantics.
 - Candidate model: `DeadCandidate`
 - Output model: `DeadItem` (`confidence=high|medium`)
 - Global liveness input:
-  `referenced_names: frozenset[str]`
+  - `referenced_names: frozenset[str]`
+  - `referenced_qualnames: frozenset[str]`
 
 Refs:
 
@@ -34,8 +35,13 @@ Refs:
 - Methods are filtered as non-actionable when dynamic/runtime dispatch is
   expected:
   dunder methods, `visit_*`, setup/teardown hooks.
+- Candidate extraction excludes non-runtime declaration surfaces:
+  methods on `Protocol` classes, and callables decorated with
+  `@overload` / `@abstractmethod`.
+- A symbol referenced by exact canonical qualname is not dead.
 - A symbol referenced by local name is not dead.
-- A symbol referenced only by qualified name downgrades confidence to `medium`.
+- A symbol referenced only by qualified-name suffix (without canonical module
+  match) downgrades confidence to `medium`.
 - `--fail-dead-code` gate counts only high-confidence dead-code items.
 
 Refs:
@@ -49,7 +55,7 @@ Refs:
 - Output dead-code items are deterministically sorted by
   `(filepath, start_line, end_line, qualname, kind)`.
 - Test-path suppression is applied both on fresh extraction and cached-metrics
-  load.
+  load for both `referenced_names` and `referenced_qualnames`.
 
 Refs:
 
@@ -62,8 +68,10 @@ Refs:
 | Condition                                          | Behavior                               |
 |----------------------------------------------------|----------------------------------------|
 | Dynamic method pattern (dunder/visitor/setup hook) | Candidate skipped as non-actionable    |
+| Protocol or stub-like declaration surface           | Candidate skipped as non-actionable    |
 | Definition appears only in tests                   | Candidate skipped                      |
 | Symbol used only from tests                        | Remains actionable dead-code candidate |
+| Symbol used through import alias / module alias    | Matched via canonical qualname usage   |
 | `--fail-dead-code` with high-confidence dead items | Gating failure, exit `3`               |
 
 ## Determinism / canonicalization
@@ -80,8 +88,11 @@ Refs:
 ## Locked by tests
 
 - `tests/test_extractor.py::test_dead_code_marks_symbol_dead_when_referenced_only_by_tests`
+- `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_import_aliases`
+- `tests/test_extractor.py::test_collect_dead_candidates_skips_protocol_and_stub_like_symbols`
 - `tests/test_pipeline_metrics.py::test_load_cached_metrics_ignores_referenced_names_from_test_files`
 - `tests/test_metrics_modules.py::test_find_unused_filters_non_actionable_and_preserves_ordering`
+- `tests/test_metrics_modules.py::test_find_unused_respects_referenced_qualnames`
 
 ## Non-guarantees
 

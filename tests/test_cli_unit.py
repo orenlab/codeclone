@@ -133,29 +133,51 @@ def test_cli_help_text_consistency(
         cli.main()
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    assert "Default:" in out
-    assert "<root>/.cache/codeclone/cache.json" in out
-    assert "Legacy alias for --cache-path" in out
-    assert "--max-baseline-size-mb MB" in out
-    assert "--max-cache-size-mb MB" in out
-    assert "--debug" in out
-    assert "CI preset: --fail-on-new --no-color --quiet." in out
-    assert "total clone groups (function +" in out
-    assert "block) exceed this number" in out
-    assert "Exit codes" in out
-    assert "0 - success" in out
-    assert "2 - contract error" in out
-    assert "baseline missing/untrusted" in out
-    assert "invalid output extensions" in out
-    assert "3 - gating failure" in out
-    assert "new clones detected" in out
-    assert "threshold exceeded" in out
-    assert "5 - internal error" in out
-    assert "please report" in out
-    assert f"Repository: {REPOSITORY_URL}" in out
-    assert f"Issues: {ISSUES_URL}" in out
-    assert f"Docs: {DOCS_URL}" in out
+    expected_parts = (
+        "usage: codeclone ",
+        "[--version]",
+        "[-h]",
+        "Structural code quality analysis for Python.",
+        "Target:",
+        "Analysis:",
+        "Baselines and CI:",
+        "Quality gates:",
+        "Analysis stages:",
+        "Reporting:",
+        "Output and UI:",
+        "General:",
+        "--fail-complexity [CC_MAX]",
+        "--fail-coupling [CBO_MAX]",
+        "--fail-cohesion [LCOM4_MAX]",
+        "--fail-health [SCORE_MIN]",
+        "If enabled without a value, uses 20.",
+        "If enabled without a value, uses 10.",
+        "If enabled without a value, uses 4.",
+        "If enabled without a value, uses 60.",
+        "<root>/.cache/codeclone/cache.json",
+        "Legacy alias for --cache-path",
+        "--max-baseline-size-mb MB",
+        "--max-cache-size-mb MB",
+        "--debug",
+        "Equivalent to: --fail-on-new --no-color --quiet.",
+        "Exit codes:",
+        "0  Success.",
+        "2  Contract error:",
+        "3  Gating failure:",
+        "5  Internal error:",
+        f"Repository: {REPOSITORY_URL}",
+        f"Issues:     {ISSUES_URL}",
+        f"Docs:       {DOCS_URL}",
+    )
+    for expected in expected_parts:
+        assert expected in out
     assert "\x1b[" not in out
+
+
+def test_cli_plain_console_status_context() -> None:
+    plain = cli._make_plain_console()
+    with plain.status("noop"):
+        pass
 
 
 def test_cli_internal_error_marker(
@@ -243,7 +265,15 @@ def test_make_console_caps_width_to_layout_limit(
             self.width = 200 if width is None else width
             created.append(self)
 
-    monkeypatch.setattr(cli, "Console", _DummyConsole)
+    monkeypatch.setattr(
+        cli,
+        "_make_rich_console",
+        lambda *, no_color, width: _DummyConsole(
+            theme=object(),
+            no_color=no_color,
+            width=width,
+        ),
+    )
     console = cli._make_console(no_color=True)
     assert len(created) == 1
     assert isinstance(console, _DummyConsole)
@@ -499,6 +529,7 @@ def _stub_analysis_result(
         project_metrics=project_metrics,
         metrics_payload=None,
         suggestions=(),
+        segment_groups_raw_digest="",
     )
 
 

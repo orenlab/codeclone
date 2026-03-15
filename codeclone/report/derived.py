@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 from ..models import ReportLocation, SourceKind, StructuralFindingOccurrence
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping, Sequence
 
 __all__ = [
     "SOURCE_KIND_ORDER",

@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import ast
 import hashlib
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from .normalize import AstNormalizer, NormalizationConfig
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def _normalized_stmt_dump(stmt: ast.stmt, normalizer: AstNormalizer) -> str:

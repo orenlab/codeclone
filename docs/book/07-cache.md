@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define cache schema v2.1, integrity verification, and fail-open behavior.
+Define cache schema v2.2, integrity verification, and fail-open behavior.
 
 ## Public surface
 
@@ -13,16 +13,25 @@ Define cache schema v2.1, integrity verification, and fail-open behavior.
 
 ## Data model
 
-On-disk schema (`v == "2.1"`):
+On-disk schema (`v == "2.2"`):
 
 - Top-level: `v`, `payload`, `sig`
-- `payload` keys: `py`, `fp`, `ap`, `files`
+- `payload` keys: `py`, `fp`, `ap`, `files`, optional `sr`
 - `ap` (`analysis_profile`) keys: `min_loc`, `min_stmt`
 - `files` map stores compact per-file entries:
     - `st`: `[mtime_ns, size]`
     - `ss`: `[lines, functions, methods, classes]` (source stats snapshot)
-    - optional analysis sections (`u`/`b`/`s` and metrics-related sections)
+    - `u` (function units): compact row layout with structural facts:
+      `[qualname,start,end,loc,stmt_count,fingerprint,loc_bucket,cc,nesting,risk,raw_hash,entry_guard_count,entry_guard_terminal_profile,entry_guard_has_side_effect_before,terminal_kind,try_finally_profile,side_effect_order_profile]`
+    - optional analysis sections (`b`/`s` and metrics-related sections)
+    - `rn`: referenced local names (non-test files only)
+    - `rq`: referenced canonical qualnames (non-test files only)
 - file keys are wire relpaths when `root` is configured
+- optional `sr` (`segment report projection`) stores precomputed segment-report
+  merge/suppression output:
+    - `d`: digest of raw segment groups
+    - `s`: suppressed segment groups count
+    - `g`: grouped merged segment items (wire rows)
 - per-file `dc` (`dead_candidates`) rows do not repeat filepath; path is implied by
   the containing file entry
 
@@ -55,6 +64,7 @@ Refs:
 
 - Cache save writes canonical JSON and atomically replaces target file.
 - Empty sections (`u`, `b`, `s`) are omitted from written wire entries.
+- `rn`/`rq` are serialized as sorted unique arrays and omitted when empty.
 - `ss` is written when source stats are available and is required for full cache-hit
   accounting in discovery stage.
 - Legacy secret file `.cache_secret` is never used for trust; warning only.
@@ -92,8 +102,12 @@ Refs:
 
 - Cache signatures are computed over canonical JSON payload.
 - Wire file paths and row arrays are sorted before write.
+- `rn`/`rq` are deterministically normalized to sorted unique arrays.
 - Current schema decodes only the canonical row shapes that current runtime writes;
-  older cache schemas are ignored and rebuilt.
+  for `u` rows, decoder accepts legacy 11-column layout and canonical 17-column
+  layout (missing structural columns default to neutral values).
+- `sr` is additive and optional; invalid/missing projection never invalidates the
+  cache and simply falls back to runtime recomputation.
 
 Refs:
 
@@ -110,6 +124,7 @@ Refs:
 - `tests/test_cache.py::test_cache_too_large_warns`
 - `tests/test_cli_inprocess.py::test_cli_reports_cache_too_large_respects_max_size_flag`
 - `tests/test_cli_inprocess.py::test_cli_cache_analysis_profile_compatibility`
+- `tests/test_pipeline_metrics.py::test_load_cached_metrics_ignores_referenced_names_from_test_files`
 
 ## Non-guarantees
 

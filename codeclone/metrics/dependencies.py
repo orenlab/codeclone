@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING
 
 from ..models import DepGraph, ModuleDep
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 DepAdjacency = dict[str, set[str]]
 

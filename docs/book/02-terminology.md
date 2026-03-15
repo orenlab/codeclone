@@ -16,6 +16,12 @@ Define terms exactly as used by code and tests.
 - **block_hash**: ordered sequence of normalized statement hashes in a fixed window.
 - **segment_hash**: hash of ordered segment window.
 - **segment_sig**: hash of sorted segment window (candidate grouping signature).
+- **stable structure facts**: per-function deterministic structure profile fields
+  (`entry_guard_*`, `terminal_kind`, `try_finally_profile`,
+  `side_effect_order_profile`) reused by report families.
+- **cohort structural findings**: report-only structural families derived from
+  existing function-clone groups (`clone_guard_exit_divergence`,
+  `clone_cohort_drift`).
 - **python_tag**: runtime compatibility tag like `cp313`.
 - **schema_version**:
     - baseline schema (`meta.schema_version`) for baseline compatibility.

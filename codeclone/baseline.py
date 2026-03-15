@@ -9,11 +9,10 @@ import json
 import os
 import re
 import sys
-from collections.abc import Mapping
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from . import __version__
 from ._schema_validation import validate_top_level_structure
@@ -22,6 +21,9 @@ from .contracts import (
     BASELINE_SCHEMA_VERSION,
 )
 from .errors import BaselineValidationError
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 # Any: baseline JSON parsing/serialization boundary. Values are validated
 # and narrowed before entering compatibility/integrity checks.

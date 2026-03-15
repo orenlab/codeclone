@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterable
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from ..cfg_model import CFG
 from ..contracts import COMPLEXITY_RISK_LOW_MAX, COMPLEXITY_RISK_MEDIUM_MAX
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from ..cfg_model import CFG
 
 ControlNode = (
     ast.If

@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .errors import ValidationError
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 DEFAULT_EXCLUDES = (
     ".git",

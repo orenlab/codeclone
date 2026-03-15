@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import NoReturn, cast
+from typing import NoReturn
 
 from . import ui_messages as ui
 from .contracts import (
@@ -16,6 +16,13 @@ from .contracts import (
     ExitCode,
     cli_help_epilog,
 )
+
+DEFAULT_ROOT = "."
+DEFAULT_MIN_LOC = 15
+DEFAULT_MIN_STMT = 6
+DEFAULT_PROCESSES = 4
+DEFAULT_MAX_CACHE_SIZE_MB = 50
+DEFAULT_MAX_BASELINE_SIZE_MB = 5
 
 DEFAULT_BASELINE_PATH = "codeclone.baseline.json"
 DEFAULT_HTML_REPORT_PATH = ".cache/codeclone/report.html"
@@ -34,294 +41,319 @@ class _ArgumentParser(argparse.ArgumentParser):
         )
 
 
-class _HelpFormatter(
-    argparse.RawTextHelpFormatter, argparse.ArgumentDefaultsHelpFormatter
-):
-    def _get_help_string(self, action: argparse.Action) -> str:
-        if action.dest == "cache_path":
-            return action.help or ""
-        return cast(str, super()._get_help_string(action))
+class _HelpFormatter(argparse.RawTextHelpFormatter):
+    """Product-oriented help formatter extension point."""
 
 
-def build_parser(version: str) -> argparse.ArgumentParser:
+def _add_optional_path_argument(
+    group: argparse._ArgumentGroup,
+    *,
+    flag: str,
+    dest: str,
+    help_text: str,
+    default: str | None = None,
+    const: str | None = None,
+    metavar: str = "FILE",
+) -> None:
+    group.add_argument(
+        flag,
+        dest=dest,
+        nargs="?",
+        metavar=metavar,
+        default=default,
+        const=const,
+        help=help_text,
+    )
+
+
+def _add_bool_optional_argument(
+    group: argparse._ArgumentGroup,
+    *,
+    flag: str,
+    help_text: str,
+    default: bool = False,
+) -> None:
+    group.add_argument(
+        flag,
+        action=argparse.BooleanOptionalAction,
+        default=default,
+        help=help_text,
+    )
+
+
+def build_parser(version: str) -> _ArgumentParser:
     ap = _ArgumentParser(
         prog="codeclone",
         description="Structural code quality analysis for Python.",
+        add_help=False,
         formatter_class=_HelpFormatter,
         epilog=cli_help_epilog(),
     )
-    ap.add_argument(
-        "--version",
-        action="version",
-        version=ui.version_output(version),
-        help=ui.HELP_VERSION,
-    )
 
-    core_group = ap.add_argument_group("Target")
-    core_group.add_argument(
+    target_group = ap.add_argument_group("Target")
+    target_group.add_argument(
         "root",
         nargs="?",
-        default=".",
+        default=DEFAULT_ROOT,
         help=ui.HELP_ROOT,
     )
 
-    tune_group = ap.add_argument_group("Analysis Tuning")
-    tune_group.add_argument(
+    analysis_group = ap.add_argument_group("Analysis")
+    analysis_group.add_argument(
         "--min-loc",
         type=int,
-        default=15,
+        default=DEFAULT_MIN_LOC,
         help=ui.HELP_MIN_LOC,
     )
-    tune_group.add_argument(
+    analysis_group.add_argument(
         "--min-stmt",
         type=int,
-        default=6,
+        default=DEFAULT_MIN_STMT,
         help=ui.HELP_MIN_STMT,
     )
-    tune_group.add_argument(
+    analysis_group.add_argument(
         "--processes",
         type=int,
-        default=4,
+        default=DEFAULT_PROCESSES,
         help=ui.HELP_PROCESSES,
     )
-    tune_group.add_argument(
-        "--cache-path",
+    _add_optional_path_argument(
+        analysis_group,
+        flag="--cache-path",
         dest="cache_path",
-        nargs="?",
-        metavar="FILE",
         default=None,
         const=None,
-        help=ui.HELP_CACHE_PATH,
+        help_text=ui.HELP_CACHE_PATH,
     )
-    tune_group.add_argument(
-        "--cache-dir",
+    _add_optional_path_argument(
+        analysis_group,
+        flag="--cache-dir",
         dest="cache_path",
-        nargs="?",
-        metavar="FILE",
         default=None,
         const=None,
-        help=ui.HELP_CACHE_DIR_LEGACY,
+        help_text=ui.HELP_CACHE_DIR_LEGACY,
     )
-    tune_group.add_argument(
+    analysis_group.add_argument(
         "--max-cache-size-mb",
         type=int,
-        default=50,
+        default=DEFAULT_MAX_CACHE_SIZE_MB,
         metavar="MB",
         help=ui.HELP_MAX_CACHE_SIZE_MB,
     )
 
-    ci_group = ap.add_argument_group("Baseline & CI/CD")
-    ci_group.add_argument(
-        "--baseline",
-        nargs="?",
+    baselines_ci_group = ap.add_argument_group("Baselines and CI")
+    _add_optional_path_argument(
+        baselines_ci_group,
+        flag="--baseline",
+        dest="baseline",
         default=DEFAULT_BASELINE_PATH,
         const=DEFAULT_BASELINE_PATH,
-        help=ui.HELP_BASELINE,
+        help_text=ui.HELP_BASELINE,
     )
-    ci_group.add_argument(
+    baselines_ci_group.add_argument(
         "--max-baseline-size-mb",
         type=int,
-        default=5,
+        default=DEFAULT_MAX_BASELINE_SIZE_MB,
         metavar="MB",
         help=ui.HELP_MAX_BASELINE_SIZE_MB,
     )
-    ci_group.add_argument(
-        "--update-baseline",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_UPDATE_BASELINE,
+    _add_bool_optional_argument(
+        baselines_ci_group,
+        flag="--update-baseline",
+        help_text=ui.HELP_UPDATE_BASELINE,
     )
-    ci_group.add_argument(
-        "--fail-on-new",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_FAIL_ON_NEW,
+    _add_optional_path_argument(
+        baselines_ci_group,
+        flag="--metrics-baseline",
+        dest="metrics_baseline",
+        default=DEFAULT_BASELINE_PATH,
+        const=DEFAULT_BASELINE_PATH,
+        help_text=ui.HELP_METRICS_BASELINE,
     )
-    ci_group.add_argument(
+    _add_bool_optional_argument(
+        baselines_ci_group,
+        flag="--update-metrics-baseline",
+        help_text=ui.HELP_UPDATE_METRICS_BASELINE,
+    )
+    _add_bool_optional_argument(
+        baselines_ci_group,
+        flag="--ci",
+        help_text=ui.HELP_CI,
+    )
+
+    quality_group = ap.add_argument_group("Quality gates")
+    _add_bool_optional_argument(
+        quality_group,
+        flag="--fail-on-new",
+        help_text=ui.HELP_FAIL_ON_NEW,
+    )
+    _add_bool_optional_argument(
+        quality_group,
+        flag="--fail-on-new-metrics",
+        help_text=ui.HELP_FAIL_ON_NEW_METRICS,
+    )
+    quality_group.add_argument(
         "--fail-threshold",
         type=int,
         default=-1,
         metavar="MAX_CLONES",
         help=ui.HELP_FAIL_THRESHOLD,
     )
-    ci_group.add_argument(
-        "--ci",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_CI,
-    )
-    ci_group.add_argument(
+    quality_group.add_argument(
         "--fail-complexity",
         type=int,
+        nargs="?",
+        const=DEFAULT_COMPLEXITY_THRESHOLD,
         default=-1,
         metavar="CC_MAX",
-        help=(
-            f"{ui.HELP_FAIL_COMPLEXITY} "
-            f"Default when set without value intent: {DEFAULT_COMPLEXITY_THRESHOLD}."
-        ),
+        help=ui.HELP_FAIL_COMPLEXITY,
     )
-    ci_group.add_argument(
+    quality_group.add_argument(
         "--fail-coupling",
         type=int,
+        nargs="?",
+        const=DEFAULT_COUPLING_THRESHOLD,
         default=-1,
         metavar="CBO_MAX",
-        help=(
-            f"{ui.HELP_FAIL_COUPLING} "
-            f"Default when set without value intent: {DEFAULT_COUPLING_THRESHOLD}."
-        ),
+        help=ui.HELP_FAIL_COUPLING,
     )
-    ci_group.add_argument(
+    quality_group.add_argument(
         "--fail-cohesion",
         type=int,
+        nargs="?",
+        const=DEFAULT_COHESION_THRESHOLD,
         default=-1,
         metavar="LCOM4_MAX",
-        help=(
-            f"{ui.HELP_FAIL_COHESION} "
-            f"Default when set without value intent: {DEFAULT_COHESION_THRESHOLD}."
-        ),
+        help=ui.HELP_FAIL_COHESION,
     )
-    ci_group.add_argument(
-        "--fail-cycles",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_FAIL_CYCLES,
+    _add_bool_optional_argument(
+        quality_group,
+        flag="--fail-cycles",
+        help_text=ui.HELP_FAIL_CYCLES,
     )
-    ci_group.add_argument(
-        "--fail-dead-code",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_FAIL_DEAD_CODE,
+    _add_bool_optional_argument(
+        quality_group,
+        flag="--fail-dead-code",
+        help_text=ui.HELP_FAIL_DEAD_CODE,
     )
-    ci_group.add_argument(
+    quality_group.add_argument(
         "--fail-health",
         type=int,
+        nargs="?",
+        const=DEFAULT_HEALTH_THRESHOLD,
         default=-1,
         metavar="SCORE_MIN",
-        help=(
-            f"{ui.HELP_FAIL_HEALTH} "
-            f"Default when set without value intent: {DEFAULT_HEALTH_THRESHOLD}."
-        ),
-    )
-    ci_group.add_argument(
-        "--fail-on-new-metrics",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_FAIL_ON_NEW_METRICS,
-    )
-    ci_group.add_argument(
-        "--update-metrics-baseline",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_UPDATE_METRICS_BASELINE,
-    )
-    ci_group.add_argument(
-        "--metrics-baseline",
-        nargs="?",
-        default=DEFAULT_BASELINE_PATH,
-        const=DEFAULT_BASELINE_PATH,
-        help=ui.HELP_METRICS_BASELINE,
-    )
-    ci_group.add_argument(
-        "--skip-metrics",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_SKIP_METRICS,
-    )
-    ci_group.add_argument(
-        "--skip-dead-code",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_SKIP_DEAD_CODE,
-    )
-    ci_group.add_argument(
-        "--skip-dependencies",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_SKIP_DEPENDENCIES,
+        help=ui.HELP_FAIL_HEALTH,
     )
 
-    out_group = ap.add_argument_group("Reporting")
-    out_group.add_argument(
-        "--html",
+    stages_group = ap.add_argument_group("Analysis stages")
+    _add_bool_optional_argument(
+        stages_group,
+        flag="--skip-metrics",
+        help_text=ui.HELP_SKIP_METRICS,
+    )
+    _add_bool_optional_argument(
+        stages_group,
+        flag="--skip-dead-code",
+        help_text=ui.HELP_SKIP_DEAD_CODE,
+    )
+    _add_bool_optional_argument(
+        stages_group,
+        flag="--skip-dependencies",
+        help_text=ui.HELP_SKIP_DEPENDENCIES,
+    )
+
+    reporting_group = ap.add_argument_group("Reporting")
+    _add_optional_path_argument(
+        reporting_group,
+        flag="--html",
         dest="html_out",
-        nargs="?",
-        metavar="FILE",
         const=DEFAULT_HTML_REPORT_PATH,
-        help=ui.HELP_HTML,
+        help_text=ui.HELP_HTML,
     )
-    out_group.add_argument(
-        "--json",
+    _add_optional_path_argument(
+        reporting_group,
+        flag="--json",
         dest="json_out",
-        nargs="?",
-        metavar="FILE",
         const=DEFAULT_JSON_REPORT_PATH,
-        help=ui.HELP_JSON,
+        help_text=ui.HELP_JSON,
     )
-    out_group.add_argument(
-        "--md",
+    _add_optional_path_argument(
+        reporting_group,
+        flag="--md",
         dest="md_out",
-        nargs="?",
-        metavar="FILE",
         const=DEFAULT_MARKDOWN_REPORT_PATH,
-        help=ui.HELP_MD,
+        help_text=ui.HELP_MD,
     )
-    out_group.add_argument(
-        "--sarif",
+    _add_optional_path_argument(
+        reporting_group,
+        flag="--sarif",
         dest="sarif_out",
-        nargs="?",
-        metavar="FILE",
         const=DEFAULT_SARIF_REPORT_PATH,
-        help=ui.HELP_SARIF,
+        help_text=ui.HELP_SARIF,
     )
-    out_group.add_argument(
-        "--text",
+    _add_optional_path_argument(
+        reporting_group,
+        flag="--text",
         dest="text_out",
-        nargs="?",
-        metavar="FILE",
         const=DEFAULT_TEXT_REPORT_PATH,
-        help=ui.HELP_TEXT,
+        help_text=ui.HELP_TEXT,
     )
-    out_group.add_argument(
+
+    ui_group = ap.add_argument_group("Output and UI")
+    ui_group.add_argument(
         "--no-progress",
         dest="no_progress",
         action="store_true",
         help=ui.HELP_NO_PROGRESS,
     )
-    out_group.add_argument(
+    ui_group.add_argument(
         "--progress",
         dest="no_progress",
         action="store_false",
         help=ui.HELP_PROGRESS,
     )
-    out_group.add_argument(
+    ui_group.add_argument(
         "--no-color",
         dest="no_color",
         action="store_true",
         help=ui.HELP_NO_COLOR,
     )
-    out_group.add_argument(
+    ui_group.add_argument(
         "--color",
         dest="no_color",
         action="store_false",
         help=ui.HELP_COLOR,
     )
-    out_group.set_defaults(no_progress=False, no_color=False)
-    out_group.add_argument(
-        "--quiet",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_QUIET,
+    ui_group.set_defaults(no_progress=False, no_color=False)
+    _add_bool_optional_argument(
+        ui_group,
+        flag="--quiet",
+        help_text=ui.HELP_QUIET,
     )
-    out_group.add_argument(
-        "--verbose",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_VERBOSE,
+    _add_bool_optional_argument(
+        ui_group,
+        flag="--verbose",
+        help_text=ui.HELP_VERBOSE,
     )
-    out_group.add_argument(
-        "--debug",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=ui.HELP_DEBUG,
+    _add_bool_optional_argument(
+        ui_group,
+        flag="--debug",
+        help_text=ui.HELP_DEBUG,
     )
+
+    general_group = ap.add_argument_group("General")
+    general_group.add_argument(
+        "-h",
+        "--help",
+        action="help",
+        help="Show this help message and exit.",
+    )
+    general_group.add_argument(
+        "--version",
+        action="version",
+        version=ui.version_output(version),
+        help=ui.HELP_VERSION,
+    )
+
     return ap

@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
-from .types import GroupItem, GroupItemLike, GroupItemsLike
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from .types import GroupItem, GroupItemLike, GroupItemsLike
 
 
 def coerce_positive_int(value: object) -> int | None:

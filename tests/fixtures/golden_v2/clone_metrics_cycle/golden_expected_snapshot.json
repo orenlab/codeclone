@@ -1,4 +1,9 @@
 {
+  "cohort_structural_findings": {
+    "count": 0,
+    "keys": [],
+    "kinds": []
+  },
   "files": {
     "classes": 2,
     "count": 3,
@@ -46,5 +51,23 @@
     "high_risk_classes": [],
     "high_risk_functions": [],
     "low_cohesion_classes": []
+  },
+  "stable_structure": {
+    "guard_terminal_profiles": [
+      "none",
+      "return_expr"
+    ],
+    "guarded_functions": 2,
+    "side_effect_order_profiles": [
+      "effect_only",
+      "guard_then_effect"
+    ],
+    "terminal_kinds": [
+      "assign",
+      "return_expr"
+    ],
+    "try_finally_profiles": [
+      "none"
+    ]
   }
 }

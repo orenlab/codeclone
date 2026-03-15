@@ -8,9 +8,11 @@ import pytest
 
 import codeclone.cli as cli
 import codeclone.pipeline as pipeline
+from codeclone._cli_gating import policy_context
 from codeclone.cache import (
     Cache,
     CacheEntry,
+    SegmentReportProjection,
     _as_file_stat_dict,
     _as_risk_literal,
     _decode_wire_file_entry,
@@ -19,10 +21,13 @@ from codeclone.cache import (
     _decode_wire_structural_occurrence,
     _decode_wire_structural_signature,
     _decode_wire_unit,
+    _encode_wire_file_entry,
     _has_cache_entry_container_shape,
     _is_dead_candidate_dict,
+    build_segment_report_projection,
 )
 from codeclone.errors import CacheError
+from codeclone.grouping import build_segment_groups
 from codeclone.models import (
     BlockUnit,
     ClassMetrics,
@@ -156,6 +161,47 @@ def test_cache_decode_wire_file_entry_with_invalid_structural() -> None:
     assert _decode_wire_file_entry(wire_entry, "a.py") is None
 
 
+def test_cache_decode_wire_file_entry_with_invalid_referenced_qualnames() -> None:
+    wire_entry = {
+        "st": [1, 2],
+        "u": [],
+        "b": [],
+        "s": [],
+        "cm": [],
+        "md": [],
+        "dc": [],
+        "rn": [],
+        "rq": "invalid",
+        "in": [],
+        "cn": [],
+        "cc": [],
+    }
+    assert _decode_wire_file_entry(wire_entry, "a.py") is None
+
+
+def test_cache_decode_wire_unit_extended_invalid_shape() -> None:
+    row = [
+        "pkg:a",
+        1,
+        2,
+        10,
+        3,
+        "fp",
+        "1-19",
+        1,
+        0,
+        "low",
+        "raw",
+        1,
+        "return_only",
+        0,
+        123,  # invalid terminal_kind -> must be str
+        "none",
+        "none",
+    ]
+    assert _decode_wire_unit(row, "a.py") is None
+
+
 def test_cache_get_file_entry_canonicalization_paths(tmp_path: Path) -> None:
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
     filepath = str((tmp_path / "a.py").resolve())
@@ -213,6 +259,7 @@ def test_cache_get_file_entry_canonicalization_paths(tmp_path: Path) -> None:
         "module_deps": [],
         "dead_candidates": [],
         "referenced_names": [],
+        "referenced_qualnames": [],
         "import_names": [],
         "class_names": [],
         "structural_findings": [
@@ -265,6 +312,252 @@ def test_cache_get_file_entry_canonicalization_paths(tmp_path: Path) -> None:
         [BlockUnit("bh", filepath, "q", 1, 2, 2)],
         [SegmentUnit("sh", "ss", filepath, "q", 1, 2, 2)],
         file_metrics=file_metrics,
+    )
+
+
+def test_cache_encode_wire_file_entry_includes_rq() -> None:
+    entry = cast(
+        CacheEntry,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": [],
+            "class_metrics": [],
+            "module_deps": [],
+            "dead_candidates": [],
+            "referenced_names": [],
+            "referenced_qualnames": ["pkg:b", "pkg:a", "pkg:a"],
+            "import_names": [],
+            "class_names": [],
+        },
+    )
+    wire = _encode_wire_file_entry(entry)
+    assert wire.get("rq") == ["pkg:a", "pkg:b"]
+
+
+def test_cache_segment_report_projection_roundtrip(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.json"
+    root = tmp_path.resolve()
+    cache = Cache(cache_path, root=root)
+
+    segment_file = str((tmp_path / "pkg" / "a.py").resolve())
+    cache.segment_report_projection = build_segment_report_projection(
+        digest="digest-1",
+        suppressed=3,
+        groups={
+            "seg-group": [
+                {
+                    "segment_hash": "h1",
+                    "segment_sig": "s1",
+                    "filepath": segment_file,
+                    "qualname": "pkg.a:f",
+                    "start_line": 10,
+                    "end_line": 20,
+                    "size": 11,
+                }
+            ]
+        },
+    )
+    cache.save()
+
+    loaded = Cache(cache_path, root=root)
+    loaded.load()
+    projection = loaded.segment_report_projection
+    assert projection is not None
+    assert projection["digest"] == "digest-1"
+    assert projection["suppressed"] == 3
+    item = projection["groups"]["seg-group"][0]
+    assert item["filepath"] == segment_file
+    assert item["qualname"] == "pkg.a:f"
+    assert item["segment_hash"] == "h1"
+
+
+def test_cache_segment_report_projection_filters_invalid_items(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json", root=tmp_path.resolve())
+    cache.segment_report_projection = build_segment_report_projection(
+        digest="d",
+        suppressed=1,
+        groups={
+            "invalid_only": [
+                {
+                    "segment_hash": "h",
+                    "segment_sig": "s",
+                    "filepath": "a.py",
+                    "qualname": "q",
+                    "start_line": "x",  # invalid int
+                    "end_line": 2,
+                    "size": 2,
+                }
+            ],
+            "valid": [
+                {
+                    "segment_hash": "h2",
+                    "segment_sig": "s2",
+                    "filepath": "a.py",
+                    "qualname": "q",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "size": 2,
+                }
+            ],
+        },
+    )
+    projection = cache.segment_report_projection
+    assert projection is not None
+    assert "invalid_only" not in projection["groups"]
+    assert "valid" in projection["groups"]
+
+
+def test_cache_decode_segment_projection_invalid_shapes(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json", root=tmp_path.resolve())
+    assert (
+        cache._decode_segment_report_projection({"d": "x", "s": 0, "g": "bad"}) is None
+    )
+    assert (
+        cache._decode_segment_report_projection({"d": "x", "s": 0, "g": [["k"]]})
+        is None
+    )
+    assert (
+        cache._decode_segment_report_projection({"d": "x", "s": 0, "g": [[1, []]]})
+        is None
+    )
+    assert (
+        cache._decode_segment_report_projection(
+            {"d": "x", "s": 0, "g": [["k", ["bad-item"]]]}
+        )
+        is None
+    )
+    assert (
+        cache._decode_segment_report_projection(
+            {
+                "d": "x",
+                "s": 0,
+                "g": [["k", [["a.py", "q", 1, 2, 3, "h", None]]]],
+            }
+        )
+        is None
+    )
+
+
+def test_pipeline_analyze_uses_cached_segment_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seg_item_a = {
+        "segment_hash": "seg-hash",
+        "segment_sig": "seg-sig",
+        "filepath": "/tmp/a.py",
+        "qualname": "pkg.a:f",
+        "start_line": 10,
+        "end_line": 15,
+        "size": 6,
+    }
+    seg_item_b = {
+        "segment_hash": "seg-hash",
+        "segment_sig": "seg-sig",
+        "filepath": "/tmp/a.py",
+        "qualname": "pkg.a:f",
+        "start_line": 20,
+        "end_line": 25,
+        "size": 6,
+    }
+    raw_groups = build_segment_groups((seg_item_a, seg_item_b))
+    digest = pipeline._segment_groups_digest(raw_groups)
+    cached_projection = {
+        "digest": digest,
+        "suppressed": 7,
+        "groups": {
+            "seg-hash|pkg.a:f": [
+                {
+                    "segment_hash": "seg-hash",
+                    "segment_sig": "seg-sig",
+                    "filepath": "/tmp/a.py",
+                    "qualname": "pkg.a:f",
+                    "start_line": 10,
+                    "end_line": 25,
+                    "size": 16,
+                }
+            ]
+        },
+    }
+
+    def _must_not_run(
+        _segment_groups: object,
+    ) -> tuple[dict[str, list[dict[str, object]]], int]:
+        raise AssertionError("prepare_segment_report_groups must not be called")
+
+    monkeypatch.setattr(pipeline, "prepare_segment_report_groups", _must_not_run)
+
+    boot = pipeline.BootstrapResult(
+        root=Path("."),
+        config=NormalizationConfig(),
+        args=Namespace(
+            skip_metrics=True,
+            skip_dependencies=False,
+            skip_dead_code=False,
+            min_loc=1,
+            min_stmt=1,
+            processes=1,
+        ),
+        output_paths=pipeline.OutputPaths(),
+        cache_path=Path("cache.json"),
+    )
+    discovery = pipeline.DiscoveryResult(
+        files_found=0,
+        cache_hits=0,
+        files_skipped=0,
+        all_file_paths=(),
+        cached_units=(),
+        cached_blocks=(),
+        cached_segments=(),
+        cached_class_metrics=(),
+        cached_module_deps=(),
+        cached_dead_candidates=(),
+        cached_referenced_names=frozenset(),
+        files_to_process=(),
+        skipped_warnings=(),
+        cached_segment_report_projection=cast(
+            "SegmentReportProjection",
+            cached_projection,
+        ),
+    )
+    processing = pipeline.ProcessingResult(
+        units=(),
+        blocks=(),
+        segments=(seg_item_a, seg_item_b),
+        class_metrics=(),
+        module_deps=(),
+        dead_candidates=(),
+        referenced_names=frozenset(),
+        files_analyzed=0,
+        files_skipped=0,
+        analyzed_lines=0,
+        analyzed_functions=0,
+        analyzed_methods=0,
+        analyzed_classes=0,
+        failed_files=(),
+        source_read_failures=(),
+    )
+
+    result = pipeline.analyze(boot=boot, discovery=discovery, processing=processing)
+    assert result.suppressed_segment_groups == 7
+    assert result.segment_groups == cached_projection["groups"]
+    assert result.segment_groups_raw_digest == digest
+
+
+def test_pipeline_coerce_segment_projection_invalid_shapes() -> None:
+    assert pipeline._coerce_segment_report_projection("bad") is None
+    assert (
+        pipeline._coerce_segment_report_projection(
+            {"digest": 1, "suppressed": 0, "groups": {}}
+        )
+        is None
+    )
+    assert (
+        pipeline._coerce_segment_report_projection(
+            {"digest": "d", "suppressed": 0, "groups": {"k": "bad"}}
+        )
+        is None
     )
 
 
@@ -323,6 +616,7 @@ def test_pipeline_discover_uses_cached_metrics_branch(
             }
         ],
         "referenced_names": ["used_name"],
+        "referenced_qualnames": [],
         "import_names": [],
         "class_names": [],
         "source_stats": {"lines": 2, "functions": 1, "methods": 0, "classes": 0},
@@ -366,8 +660,44 @@ def test_pipeline_discover_missing_source_stats_forces_reprocess(
         "module_deps": [],
         "dead_candidates": [],
         "referenced_names": ["used_name"],
+        "referenced_qualnames": [],
         "import_names": [],
         "class_names": [],
+    }
+
+    class _FakeCache:
+        def get_file_entry(self, _path: str) -> dict[str, object]:
+            return cached_entry
+
+    boot = pipeline.BootstrapResult(
+        root=tmp_path,
+        config=NormalizationConfig(),
+        args=Namespace(skip_metrics=False, min_loc=1, min_stmt=1, processes=1),
+        output_paths=pipeline.OutputPaths(),
+        cache_path=tmp_path / "cache.json",
+    )
+    monkeypatch.setattr(pipeline, "iter_py_files", lambda _root: [filepath])
+    monkeypatch.setattr(pipeline, "file_stat_signature", lambda _path: stat)
+
+    discovered = pipeline.discover(boot=boot, cache=cast(Cache, _FakeCache()))
+    assert discovered.cache_hits == 0
+    assert discovered.files_to_process == (filepath,)
+
+
+def test_pipeline_discover_cached_without_metrics_forces_reprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "a.py"
+    source.write_text("def f():\n    return 1\n", "utf-8")
+    filepath = str(source)
+    stat = {"mtime_ns": 1, "size": 1}
+    cached_entry: dict[str, object] = {
+        "stat": stat,
+        "units": [],
+        "blocks": [],
+        "segments": [],
+        "source_stats": {"lines": 2, "functions": 1, "methods": 0, "classes": 0},
+        # intentionally no metrics keys -> _cache_entry_has_metrics == False
     }
 
     class _FakeCache:
@@ -460,7 +790,7 @@ def test_cli_metric_reason_parser_and_policy_context() -> None:
         fail_on_new=True,
         fail_threshold=5,
     )
-    metrics_policy = cli._policy_context(args=args, gate_kind="metrics")
+    metrics_policy = policy_context(args=args, gate_kind="metrics")
     assert "fail-on-new-metrics" in metrics_policy
     assert "fail-complexity=10" in metrics_policy
     assert "fail-coupling=9" in metrics_policy
@@ -468,12 +798,13 @@ def test_cli_metric_reason_parser_and_policy_context() -> None:
     assert "fail-cycles" in metrics_policy
     assert "fail-dead-code" in metrics_policy
     assert "fail-health=80" in metrics_policy
-    assert cli._policy_context(args=args, gate_kind="new-clones") == "fail-on-new"
-    assert cli._policy_context(args=args, gate_kind="threshold") == "fail-threshold=5"
+    assert policy_context(args=args, gate_kind="new-clones") == "fail-on-new"
+    assert policy_context(args=args, gate_kind="threshold") == "fail-threshold=5"
+    assert policy_context(args=args, gate_kind="unknown") == "custom"
     args.fail_on_new = False
     args.fail_threshold = -1
-    assert cli._policy_context(args=args, gate_kind="new-clones") == "custom"
-    assert cli._policy_context(args=args, gate_kind="threshold") == "custom"
+    assert policy_context(args=args, gate_kind="new-clones") == "custom"
+    assert policy_context(args=args, gate_kind="threshold") == "custom"
 
 
 def test_cli_run_analysis_stages_handles_cache_save_error(
@@ -545,6 +876,7 @@ def test_cli_run_analysis_stages_handles_cache_save_error(
             project_metrics=None,
             metrics_payload=None,
             suggestions=(),
+            segment_groups_raw_digest="",
             structural_findings=(),
         ),
     )

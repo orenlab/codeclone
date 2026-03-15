@@ -30,6 +30,9 @@ Stages:
 5. Report-layer post-processing:
     - merge block windows to maximal regions
     - merge/suppress segment report groups
+6. Structural report findings:
+    - duplicated branch families from per-function AST structure facts
+    - clone cohort drift families built from existing function groups (no rescan)
 
 Refs:
 
@@ -43,7 +46,9 @@ Refs:
 - Detection core (`extractor`, `normalize`, `cfg`, `blocks`) computes clone candidates.
 - Report-layer transformations do not change function/block grouping keys used for baseline diff.
 - Segment groups are report-only and do not participate in baseline diff/gating.
-- Dead-code liveness references from test paths are excluded at extraction/cache-load boundaries.
+- Structural findings are report-only and do not participate in baseline diff/gating.
+- Dead-code liveness references from test paths are excluded at extraction/cache-load boundaries for both
+  local-name references and canonical qualname references.
 
 Refs:
 
@@ -92,6 +97,7 @@ Refs:
 - `tests/test_cli_inprocess.py::test_cli_unreadable_source_fails_in_ci_with_contract_error`
 - `tests/test_extractor.py::test_parse_limits_triggers_timeout`
 - `tests/test_extractor.py::test_dead_code_marks_symbol_dead_when_referenced_only_by_tests`
+- `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_import_aliases`
 - `tests/test_pipeline_metrics.py::test_load_cached_metrics_ignores_referenced_names_from_test_files`
 
 ## Non-guarantees

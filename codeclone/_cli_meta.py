@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from .baseline import Baseline, current_python_tag
-from .metrics_baseline import MetricsBaseline
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from .metrics_baseline import MetricsBaseline
 
 
 def _current_python_version() -> str:

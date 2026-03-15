@@ -7,6 +7,7 @@ import ast
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .explain_contract import (
     BLOCK_HINT_ASSERT_ONLY,
@@ -17,7 +18,9 @@ from .explain_contract import (
     resolve_group_compare_note,
     resolve_group_display_name,
 )
-from .types import GroupItemsLike, GroupMapLike
+
+if TYPE_CHECKING:
+    from .types import GroupItemsLike, GroupMapLike
 
 
 @dataclass(frozen=True, slots=True)

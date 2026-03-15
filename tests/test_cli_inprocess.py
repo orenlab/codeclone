@@ -13,6 +13,7 @@ import pytest
 import codeclone.baseline as baseline
 import codeclone.pipeline as pipeline
 from codeclone import __version__, cli
+from codeclone._cli_gating import parse_metric_reason_entry
 from codeclone.cache import Cache, file_stat_signature
 from codeclone.contracts import (
     BASELINE_FINGERPRINT_VERSION,
@@ -145,6 +146,25 @@ class _DummyProgress:
     def advance(self, _task: int) -> None:
         _ = self._last_task
         return None
+
+
+class _DummyColumn:
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+
+def _patch_dummy_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "_rich_progress_symbols",
+        lambda: (
+            _DummyProgress,
+            _DummyColumn,
+            _DummyColumn,
+            _DummyColumn,
+            _DummyColumn,
+        ),
+    )
 
 
 def _patch_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -877,7 +897,7 @@ def test_cli_main_progress_path(
 ) -> None:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
-    monkeypatch.setattr(cli, "Progress", _DummyProgress)
+    _patch_dummy_progress(monkeypatch)
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(tmp_path)])
 
@@ -3352,7 +3372,7 @@ def test_cli_worker_failed_progress_sequential(
         ) -> Literal[False]:
             return False
 
-    monkeypatch.setattr(cli, "Progress", _DummyProgress)
+    _patch_dummy_progress(monkeypatch)
     monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailExec)
     monkeypatch.setattr(pipeline, "process_file", _boom)
     with pytest.raises(SystemExit) as exc:
@@ -3632,7 +3652,7 @@ def test_cli_batch_result_none_progress(
     for idx in range(pipeline._parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
-    monkeypatch.setattr(cli, "Progress", _DummyProgress)
+    _patch_dummy_progress(monkeypatch)
     _patch_fixed_executor(monkeypatch, _FixedFuture(value=None))
     _run_main(monkeypatch, [str(tmp_path), "--processes", "2"])
     out = capsys.readouterr().out
@@ -3661,7 +3681,7 @@ def test_cli_failed_batch_item_progress(
     for idx in range(pipeline._parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
-    monkeypatch.setattr(cli, "Progress", _DummyProgress)
+    _patch_dummy_progress(monkeypatch)
     _patch_fixed_executor(monkeypatch, _FixedFuture(error=RuntimeError("boom")))
     _run_main(monkeypatch, [str(tmp_path), "--processes", "2"])
     out = capsys.readouterr().out
@@ -3781,3 +3801,30 @@ def fn(x):
     cache_payload = json.loads(cache_path.read_text("utf-8"))
     files_after = cache_payload["payload"]["files"]
     assert any("sf" in entry for entry in files_after.values())
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        (
+            "New high-risk functions vs metrics baseline: 3.",
+            ("new_high_risk_functions", "3"),
+        ),
+        (
+            "Dependency cycles detected: 2 cycle(s).",
+            ("dependency_cycles", "2"),
+        ),
+        (
+            "Complexity threshold exceeded: max=31, threshold=20.",
+            ("complexity_max", "31 (threshold=20)"),
+        ),
+        (
+            "something else.",
+            ("detail", "something else"),
+        ),
+    ],
+)
+def test_parse_metric_reason_entry_contract(
+    reason: str, expected: tuple[str, str]
+) -> None:
+    assert parse_metric_reason_entry(reason) == expected

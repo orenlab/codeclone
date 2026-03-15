@@ -93,6 +93,10 @@ def _structural_kind_label(kind: object) -> str:
     kind_text = str(kind).strip()
     if kind_text == "duplicated_branches":
         return "Duplicated branches"
+    if kind_text == "clone_guard_exit_divergence":
+        return "Clone guard/exit divergence"
+    if kind_text == "clone_cohort_drift":
+        return "Clone cohort drift"
     return kind_text or "(none)"
 
 
@@ -194,14 +198,34 @@ def _append_structural_findings(lines: list[str], groups: Sequence[object]) -> N
             f"spread={_spread_text(_as_mapping(group.get('spread')))} "
             f"scope={_scope_text(_as_mapping(group.get('source_scope')))}"
         )
-        lines.append(
-            "signature: "
-            f"stmt_shape={format_meta_text_value(stable.get('stmt_shape'))} "
-            f"terminal_kind={format_meta_text_value(stable.get('terminal_kind'))} "
-            f"has_loop={format_meta_text_value(control_flow.get('has_loop'))} "
-            f"has_try={format_meta_text_value(control_flow.get('has_try'))} "
-            f"nested_if={format_meta_text_value(control_flow.get('nested_if'))}"
-        )
+        stable_family = str(stable.get("family", "")).strip()
+        if stable_family == "clone_guard_exit_divergence":
+            lines.append(
+                "signature: "
+                f"cohort_id={format_meta_text_value(stable.get('cohort_id'))} "
+                f"majority_guard_count="
+                f"{format_meta_text_value(stable.get('majority_guard_count'))} "
+                f"majority_terminal_kind="
+                f"{format_meta_text_value(stable.get('majority_terminal_kind'))}"
+            )
+        elif stable_family == "clone_cohort_drift":
+            majority_profile = _as_mapping(stable.get("majority_profile"))
+            lines.append(
+                "signature: "
+                f"cohort_id={format_meta_text_value(stable.get('cohort_id'))} "
+                f"drift_fields={format_meta_text_value(stable.get('drift_fields'))} "
+                f"majority_terminal_kind="
+                f"{format_meta_text_value(majority_profile.get('terminal_kind'))}"
+            )
+        else:
+            lines.append(
+                "signature: "
+                f"stmt_shape={format_meta_text_value(stable.get('stmt_shape'))} "
+                f"terminal_kind={format_meta_text_value(stable.get('terminal_kind'))} "
+                f"has_loop={format_meta_text_value(control_flow.get('has_loop'))} "
+                f"has_try={format_meta_text_value(control_flow.get('has_try'))} "
+                f"nested_if={format_meta_text_value(control_flow.get('nested_if'))}"
+            )
         facts = _as_mapping(group.get("facts"))
         if facts:
             lines.append(

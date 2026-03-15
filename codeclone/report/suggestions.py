@@ -3,8 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from ..models import (
     ClassMetrics,
@@ -31,6 +30,9 @@ from .derived import (
     representative_locations,
     source_kind_breakdown,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 Severity = Literal["critical", "warning", "info"]
 Effort = Literal["easy", "moderate", "hard"]
@@ -524,6 +526,17 @@ def _dependency_suggestions(project_metrics: ProjectMetrics) -> list[Suggestion]
 
 
 def _structural_summary(group: StructuralFindingGroup) -> tuple[str, str]:
+    if group.finding_kind == "clone_guard_exit_divergence":
+        return (
+            "Clone guard/exit divergence",
+            "clone cohort members differ in entry guards or early-exit behavior",
+        )
+    if group.finding_kind == "clone_cohort_drift":
+        return (
+            "Clone cohort drift",
+            "clone cohort members drift from majority terminal/guard/try profile",
+        )
+
     terminal = str(group.signature.get("terminal", "")).strip()
     stmt_seq = str(group.signature.get("stmt_seq", "")).strip()
     raises = str(group.signature.get("raises", "")).strip()
@@ -540,6 +553,17 @@ def _structural_summary(group: StructuralFindingGroup) -> tuple[str, str]:
 
 
 def _structural_steps(group: StructuralFindingGroup) -> tuple[str, ...]:
+    if group.finding_kind == "clone_guard_exit_divergence":
+        return (
+            "Compare divergent clone members against the majority guard/exit profile.",
+            "If divergence is accidental, align guard exits across the cohort.",
+        )
+    if group.finding_kind == "clone_cohort_drift":
+        return (
+            "Review whether cohort drift is intentional for this clone family.",
+            "If not intentional, reconcile terminal/guard/try profiles across members.",
+        )
+
     terminal = str(group.signature.get("terminal", "")).strip()
     if terminal == "raise":
         return (
@@ -576,6 +600,11 @@ def _structural_suggestions(
         source_kind, breakdown = _source_context(locations, scan_root=scan_root)
         count = len(locations)
         severity: Severity = "warning" if count >= 4 or spread_functions > 1 else "info"
+        if group.finding_kind in {
+            "clone_guard_exit_divergence",
+            "clone_cohort_drift",
+        }:
+            severity = "warning"
         title, summary = _structural_summary(group)
         location_label = format_group_location_label(
             representative,
@@ -600,7 +629,12 @@ def _structural_suggestions(
                 fact_count=count,
                 spread_files=spread_files,
                 spread_functions=spread_functions,
-                confidence="medium",
+                confidence=(
+                    "high"
+                    if group.finding_kind
+                    in {"clone_guard_exit_divergence", "clone_cohort_drift"}
+                    else "medium"
+                ),
                 source_kind=source_kind,
                 source_breakdown=breakdown,
                 representative_locations=representative,

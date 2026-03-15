@@ -3,13 +3,17 @@
 
 from __future__ import annotations
 
-import ast
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from .blockhash import stmt_hashes
 from .fingerprint import sha1
 from .models import BlockUnit, SegmentUnit
-from .normalize import NormalizationConfig
+
+if TYPE_CHECKING:
+    import ast
+    from collections.abc import Sequence
+
+    from .normalize import NormalizationConfig
 
 __all__ = ["BlockUnit", "SegmentUnit", "extract_blocks", "extract_segments"]
 

@@ -28,10 +28,13 @@ def find_unused(
     *,
     definitions: tuple[DeadCandidate, ...],
     referenced_names: frozenset[str],
+    referenced_qualnames: frozenset[str] = frozenset(),
 ) -> tuple[DeadItem, ...]:
     items: list[DeadItem] = []
     for symbol in definitions:
         if _is_non_actionable_candidate(symbol):
+            continue
+        if symbol.qualname in referenced_qualnames:
             continue
         if symbol.local_name in referenced_names:
             continue

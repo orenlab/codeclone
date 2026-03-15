@@ -848,7 +848,7 @@ def test_overview_handles_non_mapping_metric_summaries() -> None:
             "health": {"score": 75, "grade": "C", "dimensions": {"quality": "bad"}},
         },
     )
-    assert overview["top_risks"] == ["1 structural branch finding in production code"]
+    assert overview["top_risks"] == ["1 structural finding in production code"]
     health = cast(dict[str, object], overview["health"])
     assert health["strongest_dimension"] is None
     assert health["weakest_dimension"] is None

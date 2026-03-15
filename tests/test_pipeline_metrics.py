@@ -123,6 +123,7 @@ def test_compute_project_metrics_respects_skip_flags() -> None:
             ),
         ),
         referenced_names=frozenset(),
+        referenced_qualnames=frozenset(),
         files_found=1,
         files_analyzed_or_cached=1,
         function_clone_groups=0,
@@ -144,16 +145,18 @@ def test_load_cached_metrics_ignores_referenced_names_from_test_files() -> None:
         "segments": [],
         "referenced_names": ["orphan", "helper"],
     }
-    _, _, _, test_names = _load_cached_metrics(
+    _, _, _, test_names, test_qualnames = _load_cached_metrics(
         entry,
         filepath="pkg/tests/test_mod.py",
     )
-    _, _, _, regular_names = _load_cached_metrics(
+    _, _, _, regular_names, regular_qualnames = _load_cached_metrics(
         entry,
         filepath="pkg/mod.py",
     )
     assert test_names == frozenset()
+    assert test_qualnames == frozenset()
     assert regular_names == frozenset({"helper", "orphan"})
+    assert regular_qualnames == frozenset()
 
 
 def test_load_cached_metrics_preserves_coupled_classes() -> None:
@@ -178,7 +181,7 @@ def test_load_cached_metrics_preserves_coupled_classes() -> None:
             }
         ],
     }
-    class_metrics, _, _, _ = _load_cached_metrics(entry, filepath="pkg/mod.py")
+    class_metrics, _, _, _, _ = _load_cached_metrics(entry, filepath="pkg/mod.py")
     assert len(class_metrics) == 1
     assert class_metrics[0].coupled_classes == ("TypeA", "TypeB")
 

@@ -4,12 +4,11 @@
 from __future__ import annotations
 
 import os
-from argparse import Namespace
-from collections.abc import Callable, Collection, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from .cache import (
     Cache,
@@ -18,6 +17,7 @@ from .cache import (
     DeadCandidateDict,
     FileStat,
     ModuleDepDict,
+    SegmentReportProjection,
     SourceStatsDict,
     StructuralFindingGroupDict,
     file_stat_signature,
@@ -59,6 +59,11 @@ from .report import (
 from .report.json_contract import build_report_document
 from .report.suggestions import generate_suggestions
 from .scanner import iter_py_files, module_name_from_path
+from .structural_findings import build_clone_cohort_structural_findings
+
+if TYPE_CHECKING:
+    from argparse import Namespace
+    from collections.abc import Callable, Collection, Mapping, Sequence
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
 DEFAULT_BATCH_SIZE = 100
@@ -99,7 +104,9 @@ class DiscoveryResult:
     cached_referenced_names: frozenset[str]
     files_to_process: tuple[str, ...]
     skipped_warnings: tuple[str, ...]
+    cached_referenced_qualnames: frozenset[str] = frozenset()
     cached_structural_findings: tuple[StructuralFindingGroup, ...] = ()
+    cached_segment_report_projection: SegmentReportProjection | None = None
     cached_lines: int = 0
     cached_functions: int = 0
     cached_methods: int = 0
@@ -141,6 +148,7 @@ class ProcessingResult:
     analyzed_classes: int
     failed_files: tuple[str, ...]
     source_read_failures: tuple[str, ...]
+    referenced_qualnames: frozenset[str] = frozenset()
     structural_findings: tuple[StructuralFindingGroup, ...] = ()
 
 
@@ -159,6 +167,7 @@ class AnalysisResult:
     project_metrics: ProjectMetrics | None
     metrics_payload: dict[str, object] | None
     suggestions: tuple[Suggestion, ...]
+    segment_groups_raw_digest: str
     structural_findings: tuple[StructuralFindingGroup, ...] = ()
 
 
@@ -220,6 +229,60 @@ def _group_item_sort_key(item: GroupItemLike) -> tuple[str, int, int, str]:
     )
 
 
+def _segment_projection_item_sort_key(item: GroupItemLike) -> tuple[str, str, int, int]:
+    return (
+        _as_str(item.get("filepath")),
+        _as_str(item.get("qualname")),
+        _as_int(item.get("start_line")),
+        _as_int(item.get("end_line")),
+    )
+
+
+def _segment_groups_digest(segment_groups: GroupMap) -> str:
+    normalized_rows: list[
+        tuple[str, tuple[tuple[str, str, int, int, int, str, str], ...]]
+    ] = []
+    for group_key in sorted(segment_groups):
+        items = sorted(segment_groups[group_key], key=_segment_projection_item_sort_key)
+        normalized_items: list[tuple[str, str, int, int, int, str, str]] = [
+            (
+                _as_str(item.get("filepath")),
+                _as_str(item.get("qualname")),
+                _as_int(item.get("start_line")),
+                _as_int(item.get("end_line")),
+                _as_int(item.get("size")),
+                _as_str(item.get("segment_hash")),
+                _as_str(item.get("segment_sig")),
+            )
+            for item in items
+        ]
+        normalized_rows.append((group_key, tuple(normalized_items)))
+    payload = repr(tuple(normalized_rows)).encode("utf-8")
+    return sha256(payload).hexdigest()
+
+
+def _coerce_segment_report_projection(
+    value: object,
+) -> SegmentReportProjection | None:
+    if not isinstance(value, dict):
+        return None
+    digest = value.get("digest")
+    suppressed = value.get("suppressed")
+    groups = value.get("groups")
+    if (
+        not isinstance(digest, str)
+        or not isinstance(suppressed, int)
+        or not isinstance(groups, dict)
+    ):
+        return None
+    if not all(
+        isinstance(group_key, str) and isinstance(items, list)
+        for group_key, items in groups.items()
+    ):
+        return None
+    return cast("SegmentReportProjection", value)
+
+
 def _module_dep_sort_key(dep: ModuleDep) -> tuple[str, str, str, int]:
     return dep.source, dep.target, dep.import_type, dep.line
 
@@ -246,6 +309,12 @@ def _unit_to_group_item(unit: Unit) -> GroupItem:
         "nesting_depth": unit.nesting_depth,
         "risk": unit.risk,
         "raw_hash": unit.raw_hash,
+        "entry_guard_count": unit.entry_guard_count,
+        "entry_guard_terminal_profile": unit.entry_guard_terminal_profile,
+        "entry_guard_has_side_effect_before": (unit.entry_guard_has_side_effect_before),
+        "terminal_kind": unit.terminal_kind,
+        "try_finally_profile": unit.try_finally_profile,
+        "side_effect_order_profile": unit.side_effect_order_profile,
     }
 
 
@@ -303,10 +372,11 @@ def _new_discovery_buffers() -> tuple[
     list[ModuleDep],
     list[DeadCandidate],
     set[str],
+    set[str],
     list[str],
     list[str],
 ]:
-    return [], [], [], [], [], [], set(), [], []
+    return [], [], [], [], [], [], set(), set(), [], []
 
 
 def _decode_cached_structural_finding_group(
@@ -354,12 +424,16 @@ def bootstrap(
 
 
 def _cache_entry_has_metrics(entry: CacheEntry) -> bool:
-    return (
-        bool(entry.get("class_metrics"))
-        or bool(entry.get("module_deps"))
-        or bool(entry.get("dead_candidates"))
-        or bool(entry.get("referenced_names"))
+    metric_keys = (
+        "class_metrics",
+        "module_deps",
+        "dead_candidates",
+        "referenced_names",
+        "referenced_qualnames",
+        "import_names",
+        "class_names",
     )
+    return all(key in entry and isinstance(entry.get(key), list) for key in metric_keys)
 
 
 def _cache_entry_has_structural_findings(entry: CacheEntry) -> bool:
@@ -397,6 +471,7 @@ def _load_cached_metrics(
     tuple[ModuleDep, ...],
     tuple[DeadCandidate, ...],
     frozenset[str],
+    frozenset[str],
 ]:
     class_metrics_rows: list[ClassMetricsDict] = entry.get("class_metrics", [])
     class_metrics = tuple(
@@ -409,8 +484,14 @@ def _load_cached_metrics(
             lcom4=row["lcom4"],
             method_count=row["method_count"],
             instance_var_count=row["instance_var_count"],
-            risk_coupling=cast(Literal["low", "medium", "high"], row["risk_coupling"]),
-            risk_cohesion=cast(Literal["low", "medium", "high"], row["risk_cohesion"]),
+            risk_coupling=cast(
+                "Literal['low', 'medium', 'high']",
+                row["risk_coupling"],
+            ),
+            risk_cohesion=cast(
+                "Literal['low', 'medium', 'high']",
+                row["risk_cohesion"],
+            ),
             coupled_classes=_as_sorted_str_tuple(row.get("coupled_classes", [])),
         )
         for row in class_metrics_rows
@@ -422,7 +503,7 @@ def _load_cached_metrics(
         ModuleDep(
             source=row["source"],
             target=row["target"],
-            import_type=cast(Literal["import", "from_import"], row["import_type"]),
+            import_type=cast("Literal['import', 'from_import']", row["import_type"]),
             line=row["line"],
         )
         for row in module_dep_rows
@@ -438,7 +519,7 @@ def _load_cached_metrics(
             start_line=row["start_line"],
             end_line=row["end_line"],
             kind=cast(
-                Literal["function", "class", "method", "import"],
+                "Literal['function', 'class', 'method', 'import']",
                 row["kind"],
             ),
         )
@@ -451,7 +532,18 @@ def _load_cached_metrics(
         if is_test_filepath(filepath)
         else frozenset(entry.get("referenced_names", []))
     )
-    return class_metrics, module_deps, dead_candidates, referenced_names
+    referenced_qualnames = (
+        frozenset()
+        if is_test_filepath(filepath)
+        else frozenset(entry.get("referenced_qualnames", []))
+    )
+    return (
+        class_metrics,
+        module_deps,
+        dead_candidates,
+        referenced_names,
+        referenced_qualnames,
+    )
 
 
 def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
@@ -459,6 +551,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     cache_hits = 0
     files_skipped = 0
     collect_structural_findings = _should_collect_structural_findings(boot.output_paths)
+    cached_segment_projection = _coerce_segment_report_projection(
+        getattr(cache, "segment_report_projection", None)
+    )
 
     (
         cached_units,
@@ -468,6 +563,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         cached_module_deps,
         cached_dead_candidates,
         cached_referenced_names,
+        cached_referenced_qualnames,
         files_to_process,
         skipped_warnings,
     ) = _new_discovery_buffers()
@@ -509,18 +605,23 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
             cached_functions += functions
             cached_methods += methods
             cached_classes += classes
-            cached_units.extend(dict(item) for item in cached["units"])
-            cached_blocks.extend(dict(item) for item in cached["blocks"])
-            cached_segments.extend(dict(item) for item in cached["segments"])
+            cached_units.extend(cast("list[GroupItem]", cached["units"]))
+            cached_blocks.extend(cast("list[GroupItem]", cached["blocks"]))
+            cached_segments.extend(cast("list[GroupItem]", cached["segments"]))
 
             if not boot.args.skip_metrics:
-                class_metrics, module_deps, dead_candidates, referenced_names = (
-                    _load_cached_metrics(cached, filepath=filepath)
-                )
+                (
+                    class_metrics,
+                    module_deps,
+                    dead_candidates,
+                    referenced_names,
+                    referenced_qualnames,
+                ) = _load_cached_metrics(cached, filepath=filepath)
                 cached_class_metrics.extend(class_metrics)
                 cached_module_deps.extend(module_deps)
                 cached_dead_candidates.extend(dead_candidates)
                 cached_referenced_names.update(referenced_names)
+                cached_referenced_qualnames.update(referenced_qualnames)
             if collect_structural_findings:
                 cached_sf.extend(
                     _decode_cached_structural_finding_group(group_dict, filepath)
@@ -534,7 +635,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         files_found=files_found,
         cache_hits=cache_hits,
         files_skipped=files_skipped,
-        all_file_paths=tuple(sorted(all_file_paths)),
+        all_file_paths=tuple(all_file_paths),
         cached_units=tuple(sorted(cached_units, key=_group_item_sort_key)),
         cached_blocks=tuple(sorted(cached_blocks, key=_group_item_sort_key)),
         cached_segments=tuple(sorted(cached_segments, key=_group_item_sort_key)),
@@ -546,9 +647,11 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
             sorted(cached_dead_candidates, key=_dead_candidate_sort_key)
         ),
         cached_referenced_names=frozenset(cached_referenced_names),
+        cached_referenced_qualnames=frozenset(cached_referenced_qualnames),
         files_to_process=tuple(files_to_process),
         skipped_warnings=tuple(sorted(skipped_warnings)),
         cached_structural_findings=tuple(cached_sf),
+        cached_segment_report_projection=cached_segment_projection,
         cached_lines=cached_lines,
         cached_functions=cached_functions,
         cached_methods=cached_methods,
@@ -653,6 +756,28 @@ def process(
     on_parallel_fallback: Callable[[Exception], None] | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> ProcessingResult:
+    files_to_process = discovery.files_to_process
+    if not files_to_process:
+        return ProcessingResult(
+            units=discovery.cached_units,
+            blocks=discovery.cached_blocks,
+            segments=discovery.cached_segments,
+            class_metrics=discovery.cached_class_metrics,
+            module_deps=discovery.cached_module_deps,
+            dead_candidates=discovery.cached_dead_candidates,
+            referenced_names=discovery.cached_referenced_names,
+            referenced_qualnames=discovery.cached_referenced_qualnames,
+            files_analyzed=0,
+            files_skipped=discovery.files_skipped,
+            analyzed_lines=0,
+            analyzed_functions=0,
+            analyzed_methods=0,
+            analyzed_classes=0,
+            failed_files=(),
+            source_read_failures=(),
+            structural_findings=discovery.cached_structural_findings,
+        )
+
     all_units: list[GroupItem] = list(discovery.cached_units)
     all_blocks: list[GroupItem] = list(discovery.cached_blocks)
     all_segments: list[GroupItem] = list(discovery.cached_segments)
@@ -661,6 +786,7 @@ def process(
     all_module_deps: list[ModuleDep] = list(discovery.cached_module_deps)
     all_dead_candidates: list[DeadCandidate] = list(discovery.cached_dead_candidates)
     all_referenced_names: set[str] = set(discovery.cached_referenced_names)
+    all_referenced_qualnames: set[str] = set(discovery.cached_referenced_qualnames)
 
     files_analyzed = 0
     files_skipped = discovery.files_skipped
@@ -745,6 +871,9 @@ def process(
                 all_module_deps.extend(result.file_metrics.module_deps)
                 all_dead_candidates.extend(result.file_metrics.dead_candidates)
                 all_referenced_names.update(result.file_metrics.referenced_names)
+                all_referenced_qualnames.update(
+                    result.file_metrics.referenced_qualnames
+                )
             return
 
         files_skipped += 1
@@ -768,46 +897,44 @@ def process(
             if on_advance is not None:
                 on_advance()
 
-    files_to_process = discovery.files_to_process
-    if files_to_process:
-        if _should_use_parallel(len(files_to_process), processes):
-            try:
-                with ProcessPoolExecutor(max_workers=processes) as executor:
-                    for idx in range(0, len(files_to_process), batch_size):
-                        batch = files_to_process[idx : idx + batch_size]
-                        futures = [
-                            executor.submit(
-                                process_file,
-                                filepath,
-                                root_str,
-                                boot.config,
-                                min_loc,
-                                min_stmt,
-                                collect_structural_findings,
-                            )
-                            for filepath in batch
-                        ]
-                        future_to_path = {
-                            id(future): filepath
-                            for future, filepath in zip(futures, batch, strict=True)
-                        }
-                        for future in as_completed(futures):
-                            filepath = future_to_path[id(future)]
-                            try:
-                                _accept_result(future.result())
-                            except Exception as exc:  # pragma: no cover - worker crash
-                                files_skipped += 1
-                                failed_files.append(f"{filepath}: {exc}")
-                                if on_worker_error is not None:
-                                    on_worker_error(str(exc))
-                            if on_advance is not None:
-                                on_advance()
-            except (OSError, RuntimeError, PermissionError) as exc:
-                if on_parallel_fallback is not None:
-                    on_parallel_fallback(exc)
-                _run_sequential(files_to_process)
-        else:
+    if _should_use_parallel(len(files_to_process), processes):
+        try:
+            with ProcessPoolExecutor(max_workers=processes) as executor:
+                for idx in range(0, len(files_to_process), batch_size):
+                    batch = files_to_process[idx : idx + batch_size]
+                    futures = [
+                        executor.submit(
+                            process_file,
+                            filepath,
+                            root_str,
+                            boot.config,
+                            min_loc,
+                            min_stmt,
+                            collect_structural_findings,
+                        )
+                        for filepath in batch
+                    ]
+                    future_to_path = {
+                        id(future): filepath
+                        for future, filepath in zip(futures, batch, strict=True)
+                    }
+                    for future in as_completed(futures):
+                        filepath = future_to_path[id(future)]
+                        try:
+                            _accept_result(future.result())
+                        except Exception as exc:  # pragma: no cover - worker crash
+                            files_skipped += 1
+                            failed_files.append(f"{filepath}: {exc}")
+                            if on_worker_error is not None:
+                                on_worker_error(str(exc))
+                        if on_advance is not None:
+                            on_advance()
+        except (OSError, RuntimeError, PermissionError) as exc:
+            if on_parallel_fallback is not None:
+                on_parallel_fallback(exc)
             _run_sequential(files_to_process)
+    else:
+        _run_sequential(files_to_process)
 
     return ProcessingResult(
         units=tuple(sorted(all_units, key=_group_item_sort_key)),
@@ -819,6 +946,7 @@ def process(
             sorted(all_dead_candidates, key=_dead_candidate_sort_key)
         ),
         referenced_names=frozenset(all_referenced_names),
+        referenced_qualnames=frozenset(all_referenced_qualnames),
         files_analyzed=files_analyzed,
         files_skipped=files_skipped,
         analyzed_lines=analyzed_lines,
@@ -848,6 +976,7 @@ def compute_project_metrics(
     module_deps: Sequence[ModuleDep],
     dead_candidates: Sequence[DeadCandidate],
     referenced_names: frozenset[str],
+    referenced_qualnames: frozenset[str],
     files_found: int,
     files_analyzed_or_cached: int,
     function_clone_groups: int,
@@ -926,6 +1055,7 @@ def compute_project_metrics(
         dead_items = find_unused(
             definitions=tuple(dead_candidates),
             referenced_names=referenced_names,
+            referenced_qualnames=referenced_qualnames,
         )
 
     health = compute_health(
@@ -1137,9 +1267,33 @@ def analyze(
     func_groups = build_groups(processing.units)
     block_groups = build_block_groups(processing.blocks)
     segment_groups_raw = build_segment_groups(processing.segments)
-    segment_groups, suppressed_segment_groups = prepare_segment_report_groups(
-        segment_groups_raw
-    )
+    segment_groups_raw_digest = _segment_groups_digest(segment_groups_raw)
+    cached_projection = discovery.cached_segment_report_projection
+    if (
+        cached_projection is not None
+        and cached_projection.get("digest") == segment_groups_raw_digest
+    ):
+        projection_groups = cached_projection.get("groups", {})
+        segment_groups = {
+            group_key: [
+                {
+                    "segment_hash": str(item["segment_hash"]),
+                    "segment_sig": str(item["segment_sig"]),
+                    "filepath": str(item["filepath"]),
+                    "qualname": str(item["qualname"]),
+                    "start_line": int(item["start_line"]),
+                    "end_line": int(item["end_line"]),
+                    "size": int(item["size"]),
+                }
+                for item in projection_groups[group_key]
+            ]
+            for group_key in sorted(projection_groups)
+        }
+        suppressed_segment_groups = int(cached_projection.get("suppressed", 0))
+    else:
+        segment_groups, suppressed_segment_groups = prepare_segment_report_groups(
+            segment_groups_raw
+        )
 
     block_groups_report = prepare_block_report_groups(block_groups)
     block_group_facts = build_block_group_facts(block_groups_report)
@@ -1152,6 +1306,15 @@ def analyze(
     project_metrics: ProjectMetrics | None = None
     metrics_payload: dict[str, object] | None = None
     suggestions: tuple[Suggestion, ...] = ()
+    cohort_structural_findings: tuple[StructuralFindingGroup, ...] = ()
+    if _should_collect_structural_findings(boot.output_paths):
+        cohort_structural_findings = build_clone_cohort_structural_findings(
+            func_groups=func_groups,
+        )
+    combined_structural_findings = (
+        *processing.structural_findings,
+        *cohort_structural_findings,
+    )
 
     if not boot.args.skip_metrics:
         project_metrics, _, _ = compute_project_metrics(
@@ -1160,6 +1323,7 @@ def analyze(
             module_deps=processing.module_deps,
             dead_candidates=processing.dead_candidates,
             referenced_names=processing.referenced_names,
+            referenced_qualnames=processing.referenced_qualnames,
             files_found=discovery.files_found,
             files_analyzed_or_cached=files_analyzed_or_cached,
             function_clone_groups=func_clones_count,
@@ -1175,7 +1339,7 @@ def analyze(
             block_groups=block_groups_report,
             segment_groups=segment_groups,
             block_group_facts=block_group_facts,
-            structural_findings=processing.structural_findings,
+            structural_findings=combined_structural_findings,
             scan_root=str(boot.root),
         )
         metrics_payload = build_metrics_report_payload(
@@ -1198,7 +1362,8 @@ def analyze(
         project_metrics=project_metrics,
         metrics_payload=metrics_payload,
         suggestions=suggestions,
-        structural_findings=processing.structural_findings,
+        segment_groups_raw_digest=segment_groups_raw_digest,
+        structural_findings=combined_structural_findings,
     )
 
 

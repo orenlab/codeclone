@@ -6,11 +6,14 @@ from __future__ import annotations
 import json
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from ..contracts import DOCS_URL, REPOSITORY_URL
-from ..models import StructuralFindingGroup, Suggestion
 from .json_contract import build_report_document
-from .types import GroupMapLike
+
+if TYPE_CHECKING:
+    from ..models import StructuralFindingGroup, Suggestion
+    from .types import GroupMapLike
 
 SARIF_VERSION = "2.1.0"
 SARIF_PROFILE_VERSION = "1.0"
@@ -135,6 +138,32 @@ def _rule_spec(group: Mapping[str, object]) -> _RuleSpec:
             "medium",
         )
     if family == "structural":
+        if kind == "clone_guard_exit_divergence":
+            return _RuleSpec(
+                "CSTRUCT002",
+                "Clone guard/exit divergence",
+                (
+                    "Members of the same function-clone cohort diverged in "
+                    "entry guards or early-exit behavior."
+                ),
+                "warning",
+                "structural",
+                "clone_guard_exit_divergence",
+                "high",
+            )
+        if kind == "clone_cohort_drift":
+            return _RuleSpec(
+                "CSTRUCT003",
+                "Clone cohort drift",
+                (
+                    "Members of the same function-clone cohort drifted from "
+                    "the majority terminal/guard/try profile."
+                ),
+                "warning",
+                "structural",
+                "clone_cohort_drift",
+                "high",
+            )
         return _RuleSpec(
             "CSTRUCT001",
             "Duplicated branches",
@@ -244,6 +273,21 @@ def _result_message(group: Mapping[str, object]) -> str:
         )
     if family == "structural":
         signature = _as_mapping(_as_mapping(group.get("signature")).get("stable"))
+        signature_family = _text(signature.get("family"))
+        if signature_family == "clone_guard_exit_divergence":
+            cohort_id = _text(signature.get("cohort_id"))
+            return (
+                "Clone guard/exit divergence"
+                f" ({count} divergent members) in cohort {cohort_id or 'unknown'}."
+            )
+        if signature_family == "clone_cohort_drift":
+            drift_fields = _as_sequence(signature.get("drift_fields"))
+            drift_label = ",".join(_text(item) for item in drift_fields) or "profile"
+            cohort_id = _text(signature.get("cohort_id"))
+            return (
+                f"Clone cohort drift ({drift_label}), {count} divergent members in "
+                f"cohort {cohort_id or 'unknown'}."
+            )
         stmt_shape = _text(signature.get("stmt_shape"))
         if qualname:
             return (
@@ -341,13 +385,37 @@ def _result_properties(group: Mapping[str, object]) -> dict[str, object]:
         )
     elif family == "structural":
         signature = _as_mapping(_as_mapping(group.get("signature")).get("stable"))
-        props.update(
-            {
-                "occurrenceCount": _as_int(group.get("count")),
-                "statementShape": _text(signature.get("stmt_shape")),
-                "terminalKind": _text(signature.get("terminal_kind")),
-            }
-        )
+        signature_family = _text(signature.get("family"))
+        props["occurrenceCount"] = _as_int(group.get("count"))
+        if signature_family == "clone_guard_exit_divergence":
+            props.update(
+                {
+                    "cohortId": _text(signature.get("cohort_id")),
+                    "majorityGuardCount": _as_int(
+                        signature.get("majority_guard_count"),
+                    ),
+                    "majorityTerminalKind": _text(
+                        signature.get("majority_terminal_kind"),
+                    ),
+                }
+            )
+        elif signature_family == "clone_cohort_drift":
+            props.update(
+                {
+                    "cohortId": _text(signature.get("cohort_id")),
+                    "driftFields": [
+                        _text(field)
+                        for field in _as_sequence(signature.get("drift_fields"))
+                    ],
+                }
+            )
+        else:
+            props.update(
+                {
+                    "statementShape": _text(signature.get("stmt_shape")),
+                    "terminalKind": _text(signature.get("terminal_kind")),
+                }
+            )
     elif family == "design":
         for key in (
             "lcom4",

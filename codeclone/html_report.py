@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Collection, Mapping, Sequence
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from . import __version__
 from ._html_escape import _escape_attr, _escape_html, _meta_display
@@ -17,7 +17,6 @@ from ._html_snippets import (
     _try_pygments,
 )
 from .contracts import DOCS_URL, ISSUES_URL, REPORT_SCHEMA_VERSION, REPOSITORY_URL
-from .models import GroupItemLike, GroupMapLike, StructuralFindingGroup, Suggestion
 from .report.derived import (
     combine_source_kinds,
     group_spread,
@@ -29,6 +28,9 @@ from .report.overview import build_report_overview
 from .report.suggestions import classify_clone_type
 from .structural_findings import normalize_structural_findings
 from .templates import FONT_CSS_URL, REPORT_TEMPLATE
+
+if TYPE_CHECKING:
+    from .models import GroupItemLike, GroupMapLike, StructuralFindingGroup, Suggestion
 
 __all__ = [
     "_FileCache",

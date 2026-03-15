@@ -96,15 +96,17 @@ generators with strict hash confirmation.
 
 ## 7. Clone Detection
 
-Two clone types are detected:
+Clone groups are detected at three granularities:
 
-### Function clones (Type-2)
+### Function clone groups
 
-- Entire function CFGs are identical.
+- Grouped by `fingerprint|loc_bucket`.
+- Report typing is deterministic (`Type-1`..`Type-4`) in report layer.
 
-### Block clones (Type-3-lite)
+### Block clone groups
 
-- Repeated structural statement blocks inside larger functions.
+- Repeated structural statement windows across functions.
+- Report typing is `Type-4` with explainability facts from core.
 
 Noise filters applied:
 
@@ -115,7 +117,7 @@ Noise filters applied:
 
 ---
 
-### Segment clones (internal)
+### Segment clones (internal/report-only)
 
 - Detected only **inside the same function**.
 - Used for internal copy‑paste discovery and report explainability.
@@ -123,6 +125,17 @@ Noise filters applied:
 - Report UX merges overlapping segment windows and suppresses boilerplate‑only groups.
 - A segment group is reported only if it has at least **2** unique statement types
   or contains a control‑flow statement.
+
+---
+
+### Structural findings (report-only)
+
+- `duplicated_branches`: repeated branch-body signatures.
+- `clone_guard_exit_divergence`: guard/terminal divergence inside one function-clone cohort.
+- `clone_cohort_drift`: drift from majority terminal/guard/try/side-effect profile.
+
+These findings are rendered in reports only and do not change baseline diff or CI
+gating decisions.
 
 ---
 

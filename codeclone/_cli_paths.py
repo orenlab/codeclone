@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from .contracts import ExitCode
 from .ui_messages import fmt_contract_error
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class _Printer(Protocol):

@@ -413,6 +413,23 @@ def test_dead_code_test_filepath_helpers() -> None:
     assert found and found[0].qualname == "pkg.mod:Service.method"
 
 
+def test_find_unused_respects_referenced_qualnames() -> None:
+    candidate = DeadCandidate(
+        qualname="pkg.mod:wrapped",
+        local_name="wrapped",
+        filepath="pkg/mod.py",
+        start_line=1,
+        end_line=3,
+        kind="function",
+    )
+    found = find_unused(
+        definitions=(candidate,),
+        referenced_names=frozenset(),
+        referenced_qualnames=frozenset({"pkg.mod:wrapped"}),
+    )
+    assert found == ()
+
+
 def test_build_import_graph_cycle_depth_and_chain_helpers() -> None:
     deps = (
         ModuleDep(source="a", target="b", import_type="import", line=1),

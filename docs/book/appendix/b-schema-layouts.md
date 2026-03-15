@@ -25,11 +25,11 @@ Compact structural layouts for baseline/cache/report contracts in `2.0.0b1`.
 }
 ```
 
-## Cache schema (`2.1`)
+## Cache schema (`2.2`)
 
 ```json
 {
-  "v": "2.1",
+  "v": "2.2",
   "payload": {
     "py": "cp313",
     "fp": "1",
@@ -38,13 +38,18 @@ Compact structural layouts for baseline/cache/report contracts in `2.0.0b1`.
       "codeclone/cache.py": {
         "st": [1730000000000000000, 2048],
         "ss": [450, 12, 3, 1],
-        "u": [["qualname", 1, 2, 2, 1, "fp", "0-19", 1, 0, "low", "raw_hash"]],
+        "u": [[
+          "qualname", 1, 2, 2, 1, "fp", "0-19", 1, 0, "low", "raw_hash",
+          0, "none", 0, "fallthrough", "none", "none"
+        ]],
         "b": [["qualname", 10, 14, 5, "block_hash"]],
         "s": [["qualname", 10, 14, 5, "segment_hash", "segment_sig"]],
         "cm": [["qualname", 1, 30, 3, 2, 4, 2, "low", "low"]],
+        "cc": [["qualname", ["pkg.a", "pkg.b"]]],
         "md": [["pkg.a", "pkg.b", "import", 10]],
         "dc": [["pkg.a:unused_fn", "unused_fn", 20, 24, "function"]],
         "rn": ["used_name"],
+        "rq": ["pkg.dep:used_name"],
         "in": ["pkg.dep"],
         "cn": ["ClassName"],
         "sf": [["duplicated_branches", "key", [["stmt_seq", "Expr,Return"]], [["pkg.a:f", 10, 12]]]]
@@ -61,6 +66,9 @@ Notes:
 - Optional sections are omitted when empty.
 - `ss` stores per-file source stats and is required for full cache-hit accounting
   in discovery.
+- `rn`/`rq` are optional and decode to empty arrays when absent.
+- `u` row decoder accepts both legacy 11-column rows and canonical 17-column rows
+  (legacy rows map new structural fields to neutral defaults).
 
 ## Report schema (`2.1`)
 
@@ -87,7 +95,13 @@ Notes:
     "summary": { "...": "..." },
     "groups": {
       "clones": { "functions": [], "blocks": [], "segments": [] },
-      "structural": { "groups": [] },
+      "structural": {
+        "groups": [
+          { "kind": "duplicated_branches", "...": "..." },
+          { "kind": "clone_guard_exit_divergence", "...": "..." },
+          { "kind": "clone_cohort_drift", "...": "..." }
+        ]
+      },
       "dead_code": { "groups": [] },
       "design": { "groups": [] }
     }

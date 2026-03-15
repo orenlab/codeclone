@@ -13,14 +13,18 @@ from __future__ import annotations
 
 import ast
 import sys
-from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from hashlib import sha1
+from typing import TYPE_CHECKING
 
-from .models import StructuralFindingGroup, StructuralFindingOccurrence
+from .models import GroupItemLike, StructuralFindingGroup, StructuralFindingOccurrence
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 __all__ = [
+    "build_clone_cohort_structural_findings",
     "is_reportable_structural_signature",
     "normalize_structural_finding_group",
     "normalize_structural_findings",
@@ -28,6 +32,8 @@ __all__ = [
 ]
 
 _FINDING_KIND_BRANCHES = "duplicated_branches"
+_FINDING_KIND_CLONE_GUARD_EXIT_DIVERGENCE = "clone_guard_exit_divergence"
+_FINDING_KIND_CLONE_COHORT_DRIFT = "clone_cohort_drift"
 _TRIVIAL_STMT_TYPES = frozenset(
     {
         "AnnAssign",
@@ -54,6 +60,12 @@ class _BranchWalkStats:
 class FunctionStructureFacts:
     nesting_depth: int
     structural_findings: tuple[StructuralFindingGroup, ...]
+    entry_guard_count: int
+    entry_guard_terminal_profile: str
+    entry_guard_has_side_effect_before: bool
+    terminal_kind: str
+    try_finally_profile: str
+    side_effect_order_profile: str
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +146,21 @@ def is_reportable_structural_signature(signature: Mapping[str, str]) -> bool:
     return "Return" in stmt_names or "Raise" in stmt_names
 
 
+def _kind_requires_branch_signature(finding_kind: str) -> bool:
+    return finding_kind == _FINDING_KIND_BRANCHES
+
+
+def _kind_min_occurrence_count(finding_kind: str) -> int:
+    if finding_kind == _FINDING_KIND_BRANCHES:
+        return 2
+    if finding_kind in {
+        _FINDING_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
+        _FINDING_KIND_CLONE_COHORT_DRIFT,
+    }:
+        return 1
+    return 2
+
+
 def _normalize_occurrences(
     items: Sequence[StructuralFindingOccurrence],
 ) -> tuple[StructuralFindingOccurrence, ...]:
@@ -166,10 +193,12 @@ def normalize_structural_finding_group(
     group: StructuralFindingGroup,
 ) -> StructuralFindingGroup | None:
     """Normalize one structural finding group for stable report/cache output."""
-    if not is_reportable_structural_signature(group.signature):
+    if _kind_requires_branch_signature(
+        group.finding_kind
+    ) and not is_reportable_structural_signature(group.signature):
         return None
     normalized_items = _normalize_occurrences(group.items)
-    if len(normalized_items) < 2:
+    if len(normalized_items) < _kind_min_occurrence_count(group.finding_kind):
         return None
     return StructuralFindingGroup(
         finding_kind=group.finding_kind,
@@ -197,11 +226,8 @@ def _summarize_branch(body: list[ast.stmt]) -> dict[str, str] | None:
     if not body or all(isinstance(stmt, ast.Pass) for stmt in body):
         return None
 
-    call_count = 0
-    raise_count = 0
-    has_nested_if = False
-    has_loop = False
-    has_try = False
+    call_count = raise_count = 0
+    has_nested_if, has_loop, has_try = False, False, False
     try_star = getattr(ast, "TryStar", None)
     for node in ast.walk(ast.Module(body=body, type_ignores=[])):
         if isinstance(node, ast.Call):
@@ -307,11 +333,103 @@ def _collect_match_branch_bodies(
     return results
 
 
+def _is_ignorable_entry_statement(statement: ast.stmt) -> bool:
+    if isinstance(statement, ast.Pass):
+        return True
+    if isinstance(statement, ast.Expr):
+        value = statement.value
+        return isinstance(value, ast.Constant) and isinstance(value.value, str)
+    return False
+
+
+def _expr_has_side_effect(expr: ast.AST) -> bool:
+    return any(
+        isinstance(node, (ast.Call, ast.Await, ast.Yield, ast.YieldFrom))
+        for node in ast.walk(expr)
+    )
+
+
+def _statement_has_side_effect(statement: ast.stmt) -> bool:
+    if isinstance(
+        statement,
+        (
+            ast.Assign,
+            ast.AnnAssign,
+            ast.AugAssign,
+            ast.Delete,
+            ast.Import,
+            ast.ImportFrom,
+            ast.With,
+            ast.AsyncWith,
+            ast.Raise,
+            ast.Yield,
+            ast.Return,
+            ast.Break,
+            ast.Continue,
+        ),
+    ):
+        return True
+    if isinstance(statement, ast.Expr):
+        return _expr_has_side_effect(statement.value)
+    return False
+
+
+def _is_guard_exit_if(statement: ast.stmt) -> tuple[bool, str]:
+    if not isinstance(statement, ast.If):
+        return False, "none"
+    if statement.orelse:
+        return False, "none"
+    terminal = _terminal_kind(statement.body)
+    if terminal.startswith("return") or terminal == "raise":
+        return True, terminal
+    return False, "none"
+
+
+def _entry_guard_facts(
+    statements: Sequence[ast.stmt],
+) -> tuple[int, tuple[str, ...], bool]:
+    guard_terminals: list[str] = []
+    side_effect_before_first_guard = False
+    seen_guard = False
+
+    for statement in statements:
+        if _is_ignorable_entry_statement(statement):
+            continue
+        is_guard, terminal = _is_guard_exit_if(statement)
+        if is_guard:
+            seen_guard = True
+            guard_terminals.append(terminal)
+            continue
+        if seen_guard:
+            break
+        if _statement_has_side_effect(statement):
+            side_effect_before_first_guard = True
+
+    return (
+        len(guard_terminals),
+        tuple(guard_terminals),
+        side_effect_before_first_guard if guard_terminals else False,
+    )
+
+
+def _guard_profile_text(
+    *,
+    count: int,
+    terminal_profile: str,
+) -> str:
+    if count <= 0:
+        return "none"
+    return f"{count}x:{terminal_profile}"
+
+
 class _FunctionStructureScanner:
     __slots__ = (
         "_collect_findings",
         "_filepath",
+        "_has_finally",
         "_has_match",
+        "_has_side_effect_any",
+        "_has_try",
         "_match_type",
         "_qualname",
         "_sig_to_branches",
@@ -332,6 +450,9 @@ class _FunctionStructureScanner:
             defaultdict(list)
         )
         self.max_depth = 0
+        self._has_try = False
+        self._has_finally = False
+        self._has_side_effect_any = False
         self._match_type = getattr(ast, "Match", None)
         self._has_match = self._match_type is not None and sys.version_info >= (3, 10)
 
@@ -339,10 +460,40 @@ class _FunctionStructureScanner:
         self,
         node: ast.FunctionDef | ast.AsyncFunctionDef,
     ) -> FunctionStructureFacts:
-        self._visit_statements(list(node.body), depth=0)
+        statements = list(node.body)
+        self._visit_statements(statements, depth=0)
+        guard_count, guard_terminals, side_effect_before_first_guard = (
+            _entry_guard_facts(statements)
+        )
+        guard_terminal_profile = (
+            ",".join(guard_terminals) if guard_terminals else "none"
+        )
+        terminal_kind = _terminal_kind(statements)
+        try_finally_profile = (
+            "try_finally"
+            if self._has_finally
+            else ("try_no_finally" if self._has_try else "none")
+        )
+        if guard_count > 0:
+            side_effect_order_profile = (
+                "effect_before_guard"
+                if side_effect_before_first_guard
+                else "guard_then_effect"
+            )
+        elif self._has_side_effect_any:
+            side_effect_order_profile = "effect_only"
+        else:
+            side_effect_order_profile = "none"
+
         return FunctionStructureFacts(
             nesting_depth=self.max_depth,
             structural_findings=tuple(self._build_groups()),
+            entry_guard_count=guard_count,
+            entry_guard_terminal_profile=guard_terminal_profile,
+            entry_guard_has_side_effect_before=side_effect_before_first_guard,
+            terminal_kind=terminal_kind,
+            try_finally_profile=try_finally_profile,
+            side_effect_order_profile=side_effect_order_profile,
         )
 
     def _visit_statements(
@@ -372,6 +523,9 @@ class _FunctionStructureScanner:
         depth: int,
         suppress_if_chain_head: bool,
     ) -> None:
+        if _statement_has_side_effect(statement):
+            self._has_side_effect_any = True
+
         if isinstance(statement, ast.If):
             next_depth = depth + 1
             self.max_depth = max(self.max_depth, next_depth)
@@ -408,6 +562,10 @@ class _FunctionStructureScanner:
             (ast.For, ast.While, ast.AsyncFor, ast.Try, ast.With, ast.AsyncWith),
         ):
             next_depth = depth + 1
+            if isinstance(statement, ast.Try):
+                self._has_try = True
+                if statement.finalbody:
+                    self._has_finally = True
             self.max_depth = max(self.max_depth, next_depth)
             for nested in self._iter_nested_statement_lists(statement):
                 self._visit_statements(nested, depth=next_depth)
@@ -507,3 +665,371 @@ def scan_function_structure(
         collect_findings=collect_findings,
     )
     return scanner.scan(node)
+
+
+@dataclass(frozen=True, slots=True)
+class _CloneCohortMember:
+    file_path: str
+    qualname: str
+    start: int
+    end: int
+    entry_guard_count: int
+    entry_guard_terminal_profile: str
+    entry_guard_has_side_effect_before: bool
+    terminal_kind: str
+    try_finally_profile: str
+    side_effect_order_profile: str
+
+    @property
+    def guard_exit_profile(self) -> str:
+        return _guard_profile_text(
+            count=self.entry_guard_count,
+            terminal_profile=self.entry_guard_terminal_profile,
+        )
+
+
+def _as_item_str(value: object, default: str = "") -> str:
+    return value if isinstance(value, str) else default
+
+
+def _as_item_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _as_item_bool(value: object, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes"}:
+            return True
+        if normalized in {"0", "false", "no"}:
+            return False
+    return default
+
+
+def _group_item_sort_key(item: GroupItemLike) -> tuple[str, str, int, int]:
+    return (
+        _as_item_str(item.get("filepath")),
+        _as_item_str(item.get("qualname")),
+        _as_item_int(item.get("start_line")),
+        _as_item_int(item.get("end_line")),
+    )
+
+
+def _clone_member_sort_key(
+    member: _CloneCohortMember,
+) -> tuple[str, str, int, int]:
+    return (
+        member.file_path,
+        member.qualname,
+        member.start,
+        member.end,
+    )
+
+
+def _clone_member_from_item(item: GroupItemLike) -> _CloneCohortMember | None:
+    file_path = _as_item_str(item.get("filepath")).strip()
+    qualname = _as_item_str(item.get("qualname")).strip()
+    start = _as_item_int(item.get("start_line"))
+    end = _as_item_int(item.get("end_line"))
+    if not file_path or not qualname or start <= 0 or end <= 0:
+        return None
+    terminal_kind = _as_item_str(item.get("terminal_kind"), "fallthrough").strip()
+    try_finally_profile = _as_item_str(item.get("try_finally_profile"), "none").strip()
+    side_effect_order_profile = _as_item_str(
+        item.get("side_effect_order_profile"),
+        "none",
+    ).strip()
+    entry_guard_terminal_profile = _as_item_str(
+        item.get("entry_guard_terminal_profile"),
+        "none",
+    ).strip()
+    return _CloneCohortMember(
+        file_path=file_path,
+        qualname=qualname,
+        start=start,
+        end=end,
+        entry_guard_count=max(0, _as_item_int(item.get("entry_guard_count"))),
+        entry_guard_terminal_profile=(
+            entry_guard_terminal_profile if entry_guard_terminal_profile else "none"
+        ),
+        entry_guard_has_side_effect_before=_as_item_bool(
+            item.get("entry_guard_has_side_effect_before"),
+            default=False,
+        ),
+        terminal_kind=terminal_kind if terminal_kind else "fallthrough",
+        try_finally_profile=try_finally_profile if try_finally_profile else "none",
+        side_effect_order_profile=(
+            side_effect_order_profile if side_effect_order_profile else "none"
+        ),
+    )
+
+
+def _majority_str(values: Sequence[str], *, default: str) -> str:
+    if not values:
+        return default
+    counts = Counter(values)
+    top = max(counts.values())
+    winners = sorted(value for value, count in counts.items() if count == top)
+    return winners[0] if winners else default
+
+
+def _majority_int(values: Sequence[int], *, default: int) -> int:
+    if not values:
+        return default
+    counts = Counter(values)
+    top = max(counts.values())
+    winners = sorted(value for value, count in counts.items() if count == top)
+    return winners[0] if winners else default
+
+
+def _majority_bool(values: Sequence[bool], *, default: bool) -> bool:
+    if not values:
+        return default
+    counts = Counter(values)
+    top = max(counts.values())
+    winners = sorted(value for value, count in counts.items() if count == top)
+    return winners[0] if winners else default
+
+
+def _cohort_finding_key(kind: str, cohort_id: str) -> str:
+    return sha1(f"{kind}|cohort={cohort_id}".encode()).hexdigest()
+
+
+def _cohort_group_items(
+    *,
+    finding_kind: str,
+    finding_key: str,
+    signature: dict[str, str],
+    members: Sequence[_CloneCohortMember],
+) -> tuple[StructuralFindingOccurrence, ...]:
+    return tuple(
+        StructuralFindingOccurrence(
+            finding_kind=finding_kind,
+            finding_key=finding_key,
+            file_path=member.file_path,
+            qualname=member.qualname,
+            start=member.start,
+            end=member.end,
+            signature=signature,
+        )
+        for member in sorted(members, key=_clone_member_sort_key)
+    )
+
+
+def _clone_guard_exit_divergence(
+    cohort_id: str,
+    members: Sequence[_CloneCohortMember],
+) -> StructuralFindingGroup | None:
+    if len(members) < 3:
+        return None
+    guard_counts = [member.entry_guard_count for member in members]
+    if not any(count > 0 for count in guard_counts):
+        return None
+
+    guard_terminal_profiles = [
+        member.entry_guard_terminal_profile for member in members
+    ]
+    terminal_kinds = [member.terminal_kind for member in members]
+    side_effect_before_guard_values = [
+        member.entry_guard_has_side_effect_before
+        for member in members
+        if member.entry_guard_count > 0
+    ]
+
+    unique_guard_counts = sorted({str(value) for value in guard_counts})
+    unique_guard_terminals = sorted(set(guard_terminal_profiles))
+    unique_terminal_kinds = sorted(set(terminal_kinds))
+    unique_side_effect_before_guard = sorted(
+        {"1" if value else "0" for value in side_effect_before_guard_values}
+    )
+    if (
+        len(unique_guard_counts) <= 1
+        and len(unique_guard_terminals) <= 1
+        and len(unique_terminal_kinds) <= 1
+        and len(unique_side_effect_before_guard) <= 1
+    ):
+        return None
+
+    majority_guard_count = _majority_int(guard_counts, default=0)
+    majority_guard_terminal_profile = _majority_str(
+        guard_terminal_profiles,
+        default="none",
+    )
+    majority_terminal_kind = _majority_str(terminal_kinds, default="fallthrough")
+    majority_side_effect_before_guard = _majority_bool(
+        side_effect_before_guard_values,
+        default=False,
+    )
+
+    divergent_members = [
+        member
+        for member in members
+        if (
+            member.entry_guard_count != majority_guard_count
+            or member.entry_guard_terminal_profile != majority_guard_terminal_profile
+            or member.terminal_kind != majority_terminal_kind
+            or (
+                member.entry_guard_count > 0
+                and member.entry_guard_has_side_effect_before
+                != majority_side_effect_before_guard
+            )
+        )
+    ]
+    if not divergent_members:
+        return None
+
+    finding_key = _cohort_finding_key(
+        _FINDING_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
+        cohort_id,
+    )
+    signature = {
+        "cohort_id": cohort_id,
+        "cohort_arity": str(len(members)),
+        "divergent_members": str(len(divergent_members)),
+        "majority_guard_count": str(majority_guard_count),
+        "majority_guard_terminal_profile": majority_guard_terminal_profile,
+        "majority_terminal_kind": majority_terminal_kind,
+        "majority_side_effect_before_guard": (
+            "1" if majority_side_effect_before_guard else "0"
+        ),
+        "guard_count_values": ",".join(unique_guard_counts)
+        if unique_guard_counts
+        else "0",
+        "guard_terminal_values": (
+            ",".join(unique_guard_terminals) if unique_guard_terminals else "none"
+        ),
+        "terminal_values": (
+            ",".join(unique_terminal_kinds) if unique_terminal_kinds else "fallthrough"
+        ),
+        "side_effect_before_guard_values": (
+            ",".join(unique_side_effect_before_guard)
+            if unique_side_effect_before_guard
+            else "0"
+        ),
+    }
+    return StructuralFindingGroup(
+        finding_kind=_FINDING_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
+        finding_key=finding_key,
+        signature=signature,
+        items=_cohort_group_items(
+            finding_kind=_FINDING_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
+            finding_key=finding_key,
+            signature=signature,
+            members=divergent_members,
+        ),
+    )
+
+
+def _clone_cohort_drift(
+    cohort_id: str,
+    members: Sequence[_CloneCohortMember],
+) -> StructuralFindingGroup | None:
+    if len(members) < 3:
+        return None
+
+    value_space: dict[str, list[str]] = {
+        "terminal_kind": [member.terminal_kind for member in members],
+        "guard_exit_profile": [member.guard_exit_profile for member in members],
+        "try_finally_profile": [member.try_finally_profile for member in members],
+        "side_effect_order_profile": [
+            member.side_effect_order_profile for member in members
+        ],
+    }
+    drift_fields = sorted(
+        field for field, values in value_space.items() if len(set(values)) > 1
+    )
+    if not drift_fields:
+        return None
+
+    majority_profile = {
+        field: _majority_str(values, default="none")
+        for field, values in value_space.items()
+    }
+    divergent_members = [
+        member
+        for member in members
+        if any(
+            _member_profile_value(member, field) != majority_profile[field]
+            for field in drift_fields
+        )
+    ]
+    if not divergent_members:
+        return None
+
+    finding_key = _cohort_finding_key(_FINDING_KIND_CLONE_COHORT_DRIFT, cohort_id)
+    signature = {
+        "cohort_id": cohort_id,
+        "cohort_arity": str(len(members)),
+        "divergent_members": str(len(divergent_members)),
+        "drift_fields": ",".join(drift_fields),
+        "majority_terminal_kind": majority_profile["terminal_kind"],
+        "majority_guard_exit_profile": majority_profile["guard_exit_profile"],
+        "majority_try_finally_profile": majority_profile["try_finally_profile"],
+        "majority_side_effect_order_profile": majority_profile[
+            "side_effect_order_profile"
+        ],
+    }
+    return StructuralFindingGroup(
+        finding_kind=_FINDING_KIND_CLONE_COHORT_DRIFT,
+        finding_key=finding_key,
+        signature=signature,
+        items=_cohort_group_items(
+            finding_kind=_FINDING_KIND_CLONE_COHORT_DRIFT,
+            finding_key=finding_key,
+            signature=signature,
+            members=divergent_members,
+        ),
+    )
+
+
+def _member_profile_value(member: _CloneCohortMember, field: str) -> str:
+    if field == "terminal_kind":
+        return member.terminal_kind
+    if field == "guard_exit_profile":
+        return member.guard_exit_profile
+    if field == "try_finally_profile":
+        return member.try_finally_profile
+    if field == "side_effect_order_profile":
+        return member.side_effect_order_profile
+    return ""
+
+
+def build_clone_cohort_structural_findings(
+    *,
+    func_groups: Mapping[str, Sequence[GroupItemLike]],
+) -> tuple[StructuralFindingGroup, ...]:
+    groups: list[StructuralFindingGroup] = []
+    for cohort_id in sorted(func_groups):
+        rows = func_groups[cohort_id]
+        if len(rows) < 3:
+            continue
+        members = [
+            member
+            for member in (_clone_member_from_item(row) for row in rows)
+            if member is not None
+        ]
+        if len(members) < 3:
+            continue
+
+        guard_exit_group = _clone_guard_exit_divergence(cohort_id, members)
+        if guard_exit_group is not None:
+            groups.append(guard_exit_group)
+
+        cohort_drift_group = _clone_cohort_drift(cohort_id, members)
+        if cohort_drift_group is not None:
+            groups.append(cohort_drift_group)
+
+    return normalize_structural_findings(groups)

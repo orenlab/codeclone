@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
+from typing import TYPE_CHECKING
 
-from ..models import StructuralFindingGroup, Suggestion
 from ._formatting import format_spread_text
 from .json_contract import build_report_document
-from .types import GroupMapLike
+
+if TYPE_CHECKING:
+    from ..models import StructuralFindingGroup, Suggestion
+    from .types import GroupMapLike
 
 MARKDOWN_SCHEMA_VERSION = "1.0"
 _MAX_FINDING_LOCATIONS = 5

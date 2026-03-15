@@ -10,8 +10,10 @@ import sys
 
 import pytest
 
-from codeclone.models import StructuralFindingGroup
+import codeclone.structural_findings as sf
+from codeclone.models import StructuralFindingGroup, StructuralFindingOccurrence
 from codeclone.structural_findings import (
+    build_clone_cohort_structural_findings,
     scan_function_structure,
 )
 
@@ -469,3 +471,354 @@ def fn(x):
 """
     groups = _findings(source)
     assert groups == []
+
+
+def test_scan_function_structure_collects_stable_guard_facts() -> None:
+    source = """
+def fn(x):
+    if not x:
+        return 0
+    if x < 0:
+        raise ValueError("x")
+    try:
+        y = x + 1
+    finally:
+        y = x
+    return y
+"""
+    facts = scan_function_structure(
+        _parse_fn(source),
+        "mod.py",
+        "pkg.mod:fn",
+        collect_findings=True,
+    )
+    assert facts.entry_guard_count == 2
+    assert facts.entry_guard_terminal_profile == "return_const,raise"
+    assert facts.entry_guard_has_side_effect_before is False
+    assert facts.terminal_kind == "return_name"
+    assert facts.try_finally_profile == "try_finally"
+    assert facts.side_effect_order_profile == "guard_then_effect"
+
+
+def test_build_clone_cohort_structural_findings_emits_new_families() -> None:
+    func_groups = {
+        "fp-a|20-49": [
+            {
+                "filepath": "pkg/a.py",
+                "qualname": "pkg.a:f1",
+                "start_line": 10,
+                "end_line": 40,
+                "entry_guard_count": 2,
+                "entry_guard_terminal_profile": "return_const,raise",
+                "entry_guard_has_side_effect_before": False,
+                "terminal_kind": "return_const",
+                "try_finally_profile": "none",
+                "side_effect_order_profile": "guard_then_effect",
+            },
+            {
+                "filepath": "pkg/b.py",
+                "qualname": "pkg.b:f1",
+                "start_line": 11,
+                "end_line": 41,
+                "entry_guard_count": 2,
+                "entry_guard_terminal_profile": "return_const,raise",
+                "entry_guard_has_side_effect_before": False,
+                "terminal_kind": "return_const",
+                "try_finally_profile": "none",
+                "side_effect_order_profile": "guard_then_effect",
+            },
+            {
+                "filepath": "pkg/c.py",
+                "qualname": "pkg.c:f1",
+                "start_line": 12,
+                "end_line": 42,
+                "entry_guard_count": 2,
+                "entry_guard_terminal_profile": "return_const,raise",
+                "entry_guard_has_side_effect_before": False,
+                "terminal_kind": "return_const",
+                "try_finally_profile": "none",
+                "side_effect_order_profile": "guard_then_effect",
+            },
+            {
+                "filepath": "pkg/d.py",
+                "qualname": "pkg.d:f1",
+                "start_line": 13,
+                "end_line": 43,
+                "entry_guard_count": 1,
+                "entry_guard_terminal_profile": "raise",
+                "entry_guard_has_side_effect_before": True,
+                "terminal_kind": "raise",
+                "try_finally_profile": "try_no_finally",
+                "side_effect_order_profile": "effect_before_guard",
+            },
+        ]
+    }
+    groups = build_clone_cohort_structural_findings(func_groups=func_groups)
+    kinds = {group.finding_kind for group in groups}
+    assert "clone_guard_exit_divergence" in kinds
+    assert "clone_cohort_drift" in kinds
+
+
+def test_build_clone_cohort_structural_findings_skips_uniform_groups() -> None:
+    func_groups = {
+        "fp-a|20-49": [
+            {
+                "filepath": "pkg/a.py",
+                "qualname": "pkg.a:f1",
+                "start_line": 10,
+                "end_line": 40,
+                "entry_guard_count": 2,
+                "entry_guard_terminal_profile": "return_const,raise",
+                "entry_guard_has_side_effect_before": False,
+                "terminal_kind": "return_const",
+                "try_finally_profile": "none",
+                "side_effect_order_profile": "guard_then_effect",
+            },
+            {
+                "filepath": "pkg/b.py",
+                "qualname": "pkg.b:f1",
+                "start_line": 11,
+                "end_line": 41,
+                "entry_guard_count": 2,
+                "entry_guard_terminal_profile": "return_const,raise",
+                "entry_guard_has_side_effect_before": False,
+                "terminal_kind": "return_const",
+                "try_finally_profile": "none",
+                "side_effect_order_profile": "guard_then_effect",
+            },
+            {
+                "filepath": "pkg/c.py",
+                "qualname": "pkg.c:f1",
+                "start_line": 12,
+                "end_line": 42,
+                "entry_guard_count": 2,
+                "entry_guard_terminal_profile": "return_const,raise",
+                "entry_guard_has_side_effect_before": False,
+                "terminal_kind": "return_const",
+                "try_finally_profile": "none",
+                "side_effect_order_profile": "guard_then_effect",
+            },
+        ]
+    }
+    groups = build_clone_cohort_structural_findings(func_groups=func_groups)
+    assert groups == ()
+
+
+def test_private_helper_fallbacks_and_defaults_are_deterministic() -> None:
+    assert sf._terminal_kind([]) == "fallthrough"
+    assert sf._stmt_names_from_signature({"stmt_seq": ""}) == ()
+    assert sf.is_reportable_structural_signature({}) is False
+    assert (
+        sf.is_reportable_structural_signature(
+            {"stmt_seq": "Lambda,Assign", "terminal": "assign"},
+        )
+        is True
+    )
+    assert sf._kind_min_occurrence_count("unknown_kind") == 2
+    assert sf._summarize_branch([]) is None
+    assert sf._guard_profile_text(count=0, terminal_profile="raise") == "none"
+
+    if_node = ast.parse("if x:\n    value = 1\n").body[0]
+    is_guard, terminal = sf._is_guard_exit_if(if_node)
+    assert is_guard is False
+    assert terminal == "none"
+
+    signature = {
+        "stmt_seq": "Expr",
+        "terminal": "expr",
+        "calls": "0",
+        "raises": "0",
+        "nested_if": "0",
+        "has_loop": "0",
+        "has_try": "0",
+    }
+    occurrence = StructuralFindingOccurrence(
+        finding_kind="unknown_kind",
+        finding_key="unknown-key",
+        file_path="a.py",
+        qualname="mod:fn",
+        start=1,
+        end=2,
+        signature=signature,
+    )
+    group = StructuralFindingGroup(
+        finding_kind="unknown_kind",
+        finding_key="unknown-key",
+        signature=signature,
+        items=(occurrence,),
+    )
+    assert sf.normalize_structural_finding_group(group) is None
+
+
+def test_private_member_decoding_and_majority_defaults() -> None:
+    assert sf._as_item_int(True) == 1
+    assert sf._as_item_int("bad-int") == 0
+    assert sf._as_item_bool(1) is True
+    assert sf._as_item_bool("yes") is True
+    assert sf._as_item_bool("no") is False
+    assert sf._clone_member_from_item({}) is None
+    assert sf._majority_str([], default="fallback") == "fallback"
+    assert sf._majority_int([], default=7) == 7
+    assert sf._majority_bool([], default=True) is True
+
+    member = sf._CloneCohortMember(
+        file_path="pkg/a.py",
+        qualname="pkg.a:f",
+        start=1,
+        end=2,
+        entry_guard_count=0,
+        entry_guard_terminal_profile="none",
+        entry_guard_has_side_effect_before=False,
+        terminal_kind="return_const",
+        try_finally_profile="none",
+        side_effect_order_profile="none",
+    )
+    assert sf._member_profile_value(member, "unknown-field") == ""
+
+
+def test_clone_cohort_builders_cover_early_exit_paths() -> None:
+    base_member = sf._CloneCohortMember(
+        file_path="pkg/a.py",
+        qualname="pkg.a:f",
+        start=1,
+        end=2,
+        entry_guard_count=1,
+        entry_guard_terminal_profile="return_const",
+        entry_guard_has_side_effect_before=False,
+        terminal_kind="return_const",
+        try_finally_profile="none",
+        side_effect_order_profile="guard_then_effect",
+    )
+    no_guard_member = sf._CloneCohortMember(
+        file_path="pkg/b.py",
+        qualname="pkg.b:f",
+        start=2,
+        end=3,
+        entry_guard_count=0,
+        entry_guard_terminal_profile="none",
+        entry_guard_has_side_effect_before=False,
+        terminal_kind="return_const",
+        try_finally_profile="none",
+        side_effect_order_profile="effect_only",
+    )
+
+    assert sf._clone_guard_exit_divergence("c1", (base_member, base_member)) is None
+    assert (
+        sf._clone_guard_exit_divergence(
+            "c2",
+            (no_guard_member, no_guard_member, no_guard_member),
+        )
+        is None
+    )
+    assert (
+        sf._clone_guard_exit_divergence(
+            "c3",
+            (base_member, base_member, base_member),
+        )
+        is None
+    )
+
+    assert sf._clone_cohort_drift("c4", (base_member, base_member)) is None
+    assert sf._clone_cohort_drift("c5", (base_member, base_member, base_member)) is None
+
+
+def test_scanner_private_paths_cover_collection_and_normalization_branches() -> None:
+    scanner = sf._FunctionStructureScanner(
+        filepath="pkg/mod.py",
+        qualname="pkg.mod:f",
+        collect_findings=True,
+    )
+    reportable_signature = {
+        "stmt_seq": "Assign,Return",
+        "terminal": "return_name",
+        "calls": "0",
+        "raises": "0",
+        "nested_if": "0",
+        "has_loop": "0",
+        "has_try": "0",
+    }
+    trivial_signature = {
+        "stmt_seq": "Expr",
+        "terminal": "expr",
+        "calls": "0",
+        "raises": "0",
+        "nested_if": "0",
+        "has_loop": "0",
+        "has_try": "0",
+    }
+    scanner._sig_to_branches["single"] = [(reportable_signature, 10, 11)]
+    scanner._sig_to_branches["trivial"] = [
+        (trivial_signature, 12, 12),
+        (trivial_signature, 13, 13),
+    ]
+    assert scanner._build_groups() == []
+
+    if_chain = ast.parse(
+        "if x:\n    a = 1\nelif y:\n    b = 2\nelse:\n    pass\n",
+    ).body[0]
+    assert isinstance(if_chain, ast.If)
+    bodies = sf._collect_if_branch_bodies(if_chain)
+    assert len(bodies) == 2
+
+    match_stmt = ast.parse(
+        "match x:\n    case 1:\n        pass\n    case 2:\n        value = 2\n",
+    ).body[0]
+    match_bodies = sf._collect_match_branch_bodies(match_stmt)
+    assert len(match_bodies) == 1
+
+    iter_scanner = sf._FunctionStructureScanner(
+        filepath="pkg/mod.py",
+        qualname="pkg.mod:f",
+        collect_findings=False,
+    )
+    for_stmt = ast.parse("for i in xs:\n    pass\nelse:\n    pass\n").body[0]
+    with_stmt = ast.parse("with cm:\n    pass\n").body[0]
+    try_stmt = ast.parse(
+        "try:\n"
+        "    pass\n"
+        "except Exception:\n"
+        "    pass\n"
+        "else:\n"
+        "    pass\n"
+        "finally:\n"
+        "    pass\n",
+    ).body[0]
+    assign_stmt = ast.parse("value = 1\n").body[0]
+    assert len(iter_scanner._iter_nested_statement_lists(for_stmt)) == 2
+    assert len(iter_scanner._iter_nested_statement_lists(with_stmt)) == 1
+    assert len(iter_scanner._iter_nested_statement_lists(try_stmt)) == 4
+    assert iter_scanner._iter_nested_statement_lists(assign_stmt) == ()
+
+
+def test_scan_function_structure_visits_nested_bodies_and_match_without_findings() -> (
+    None
+):
+    class_body_source = """
+def fn():
+    class Inner:
+        value = 1
+    return 1
+"""
+    class_facts = scan_function_structure(
+        _parse_fn(class_body_source),
+        "mod.py",
+        "pkg.mod:fn",
+        collect_findings=False,
+    )
+    assert class_facts.terminal_kind == "return_const"
+
+    match_source = """
+def fn(x):
+    match x:
+        case 1:
+            return 1
+        case _:
+            return 2
+"""
+    match_facts = scan_function_structure(
+        _parse_fn(match_source),
+        "mod.py",
+        "pkg.mod:fn",
+        collect_findings=False,
+    )
+    assert match_facts.structural_findings == ()

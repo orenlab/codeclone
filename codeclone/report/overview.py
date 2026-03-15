@@ -5,8 +5,10 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
-from ..models import Suggestion
+if TYPE_CHECKING:
+    from ..models import Suggestion
 
 __all__ = ["build_report_overview", "serialize_suggestion_card"]
 
@@ -130,9 +132,7 @@ def _top_risks(
     )
     if production_structural > 0:
         noun = "finding" if production_structural == 1 else "findings"
-        risks.append(
-            f"{production_structural} structural branch {noun} in production code"
-        )
+        risks.append(f"{production_structural} structural {noun} in production code")
     test_clone_groups = sum(
         1
         for suggestion in suggestions

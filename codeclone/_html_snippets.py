@@ -7,10 +7,12 @@ import html
 import importlib
 from dataclasses import dataclass
 from functools import lru_cache
-from types import ModuleType
-from typing import NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from .errors import FileProcessingError
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 
 @dataclass(slots=True)
@@ -64,7 +66,7 @@ class _FileCache:
         currsize: int
 
     def cache_info(self) -> _CacheInfo:
-        return cast(_FileCache._CacheInfo, self._get_file_lines_impl.cache_info())
+        return cast("_FileCache._CacheInfo", self._get_file_lines_impl.cache_info())
 
 
 _PYGMENTS_IMPORTER_ID: int | None = None

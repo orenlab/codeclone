@@ -25,6 +25,7 @@ all with baseline-aware governance that separates **known** technical debt from 
 ## Features
 
 - **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
+- **Structural findings** — duplicated branch families, clone guard/exit divergence and clone-cohort drift (report-only)
 - **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, dead code, health
   score
 - **Baseline governance** — known debt stays accepted; CI blocks only new clones and metric regressions
@@ -147,6 +148,11 @@ Contract errors (`2`) take precedence over gating failures (`3`).
 | Text     | `--text`  | `.cache/codeclone/report.txt`   |
 
 All report formats are rendered from one canonical JSON report document.
+Structural findings include:
+
+- `duplicated_branches`
+- `clone_guard_exit_divergence`
+- `clone_cohort_drift`
 
 <details>
 <summary>JSON report shape (v2.1)</summary>
@@ -259,7 +265,7 @@ Architecture: [`docs/architecture.md`](docs/architecture.md) · CFG semantics: [
 | Docker benchmark contract  | [`docs/book/18-benchmarking.md`](docs/book/18-benchmarking.md)                           |
 | Determinism                | [`docs/book/12-determinism.md`](docs/book/12-determinism.md)                             |
 
-## * Benchmarking
+##  * Benchmarking
 
 <details>
 <summary>Reproducible Docker Benchmark</summary>

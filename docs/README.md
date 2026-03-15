@@ -17,7 +17,7 @@ This directory has two documentation layers.
 - Config and defaults: [`docs/book/04-config-and-defaults.md`](book/04-config-and-defaults.md)
 - Core pipeline and invariants: [`docs/book/05-core-pipeline.md`](book/05-core-pipeline.md)
 - Baseline contract (schema v2.0): [`docs/book/06-baseline.md`](book/06-baseline.md)
-- Cache contract (schema v2.1): [`docs/book/07-cache.md`](book/07-cache.md)
+- Cache contract (schema v2.2): [`docs/book/07-cache.md`](book/07-cache.md)
 - Report contract (schema v2.1): [`docs/book/08-report.md`](book/08-report.md)
 
 ## Interfaces

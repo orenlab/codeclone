@@ -6,10 +6,13 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..extractor import _QualnameCollector
 from .merge import coerce_positive_int, merge_overlapping_items
-from .types import GroupItem, GroupItemLike, GroupItemsLike, GroupMap, GroupMapLike
+
+if TYPE_CHECKING:
+    from .types import GroupItem, GroupItemLike, GroupItemsLike, GroupMap, GroupMapLike
 
 SEGMENT_MIN_UNIQUE_STMT_TYPES = 2
 

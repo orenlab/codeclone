@@ -32,7 +32,7 @@ The following matrix is treated as executable contract:
 | Contract                                   | Tests                                                                                                         |
 |--------------------------------------------|---------------------------------------------------------------------------------------------------------------|
 | Baseline schema/integrity/compat gates     | `tests/test_baseline.py`                                                                                      |
-| Cache fail-open + status mapping           | `tests/test_cache.py`, `tests/test_cli_inprocess.py::test_cli_reports_cache_too_large_respects_max_size_flag` |
+| Cache v2.2 fail-open + status mapping      | `tests/test_cache.py`, `tests/test_cli_inprocess.py::test_cli_reports_cache_too_large_respects_max_size_flag` |
 | Exit code categories and markers           | `tests/test_cli_unit.py`, `tests/test_cli_inprocess.py`                                                       |
 | Report schema v2.1 canonical/derived/integrity + JSON/TXT/MD/SARIF projections | `tests/test_report.py`, `tests/test_report_contract_coverage.py`, `tests/test_report_branch_invariants.py` |
 | HTML render-only explainability + escaping | `tests/test_html_report.py`                                                                                   |
@@ -44,7 +44,8 @@ The following matrix is treated as executable contract:
 - Golden detector fixture is canonicalized to one Python tag.
 - Untrusted baseline behavior must be tested for both normal and gating modes.
 - V2 golden fixtures lock dead-code/test-path semantics, metrics/dependency aggregates,
-  and CLI+`pyproject.toml` contract behavior.
+  stable per-function structural fact surfaces (`stable_structure` /
+  `cohort_structural_findings`), and CLI+`pyproject.toml` contract behavior.
 
 Refs:
 
@@ -77,6 +78,9 @@ Refs:
 - `tests/test_detector_golden.py::test_detector_output_matches_golden_fixture`
 - `tests/test_golden_v2.py::test_golden_v2_analysis_contracts`
 - `tests/test_golden_v2.py::test_golden_v2_cli_pyproject_contract`
+- `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_import_aliases`
+- `tests/test_extractor.py::test_collect_dead_candidates_skips_protocol_and_stub_like_symbols`
+- `tests/test_metrics_modules.py::test_find_unused_respects_referenced_qualnames`
 
 ## Non-guarantees
 

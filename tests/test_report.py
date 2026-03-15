@@ -2092,6 +2092,65 @@ def _make_sf_group() -> StructuralFindingGroup:
     )
 
 
+def _make_guard_divergence_group() -> StructuralFindingGroup:
+    sig = {
+        "cohort_id": "fp-a|20-49",
+        "cohort_arity": "4",
+        "divergent_members": "1",
+        "majority_guard_count": "2",
+        "majority_guard_terminal_profile": "return_const,raise",
+        "majority_terminal_kind": "return_const",
+        "majority_side_effect_before_guard": "0",
+        "guard_count_values": "1,2",
+        "guard_terminal_values": "raise,return_const,raise",
+        "terminal_values": "raise,return_const",
+        "side_effect_before_guard_values": "0,1",
+    }
+    occ = StructuralFindingOccurrence(
+        finding_kind="clone_guard_exit_divergence",
+        finding_key="guard-div",
+        file_path="/proj/b.py",
+        qualname="mod:drift_fn",
+        start=40,
+        end=60,
+        signature=sig,
+    )
+    return StructuralFindingGroup(
+        finding_kind="clone_guard_exit_divergence",
+        finding_key="guard-div",
+        signature=sig,
+        items=(occ,),
+    )
+
+
+def _make_cohort_drift_group() -> StructuralFindingGroup:
+    sig = {
+        "cohort_id": "fp-a|20-49",
+        "cohort_arity": "4",
+        "divergent_members": "1",
+        "drift_fields": "terminal_kind,guard_exit_profile",
+        "majority_terminal_kind": "return_const",
+        "majority_guard_exit_profile": "2x:return_const,raise",
+        "majority_try_finally_profile": "none",
+        "majority_side_effect_order_profile": "guard_then_effect",
+    }
+    occ = StructuralFindingOccurrence(
+        finding_kind="clone_cohort_drift",
+        finding_key="cohort-drift",
+        file_path="/proj/c.py",
+        qualname="mod:drift_fn",
+        start=70,
+        end=90,
+        signature=sig,
+    )
+    return StructuralFindingGroup(
+        finding_kind="clone_cohort_drift",
+        finding_key="cohort-drift",
+        signature=sig,
+        items=(occ,),
+    )
+
+
 def test_json_includes_structural_findings_when_non_empty() -> None:
     group = _make_sf_group()
     report_str = to_json_report(
@@ -2113,6 +2172,82 @@ def test_json_includes_structural_findings_when_non_empty() -> None:
         "start_line": 5,
         "end_line": 6,
     }
+
+
+def test_json_includes_clone_guard_exit_divergence_structural_group() -> None:
+    group = _make_guard_divergence_group()
+    payload = json.loads(
+        to_json_report(
+            func_groups={},
+            block_groups={},
+            segment_groups={},
+            structural_findings=[group],
+        )
+    )
+    finding = _structural_groups(payload)[0]
+    assert finding["kind"] == "clone_guard_exit_divergence"
+    assert finding["count"] == 1
+    assert finding["confidence"] == "high"
+    signature = cast(dict[str, object], finding["signature"])
+    stable = cast(dict[str, object], signature["stable"])
+    assert stable["family"] == "clone_guard_exit_divergence"
+    facts = cast(dict[str, object], finding["facts"])
+    assert facts["cohort_id"] == "fp-a|20-49"
+    assert facts["divergent_members"] == 1
+
+
+def test_json_includes_clone_cohort_drift_structural_group() -> None:
+    group = _make_cohort_drift_group()
+    payload = json.loads(
+        to_json_report(
+            func_groups={},
+            block_groups={},
+            segment_groups={},
+            structural_findings=[group],
+        )
+    )
+    finding = _structural_groups(payload)[0]
+    assert finding["kind"] == "clone_cohort_drift"
+    signature = cast(dict[str, object], finding["signature"])
+    stable = cast(dict[str, object], signature["stable"])
+    assert stable["family"] == "clone_cohort_drift"
+    assert stable["drift_fields"] == ["guard_exit_profile", "terminal_kind"]
+
+
+def test_text_and_sarif_renderers_cover_new_structural_kinds() -> None:
+    payload = json.loads(
+        to_json_report(
+            func_groups={},
+            block_groups={},
+            segment_groups={},
+            structural_findings=[
+                _make_guard_divergence_group(),
+                _make_cohort_drift_group(),
+            ],
+        )
+    )
+    text = render_text_report_document(payload)
+    assert "Clone guard/exit divergence" in text
+    assert "Clone cohort drift" in text
+    assert "majority_guard_count" in text
+    assert "drift_fields" in text
+
+    sarif = json.loads(
+        to_sarif_report(
+            report_document=payload,
+            meta={},
+            func_groups={},
+            block_groups={},
+            segment_groups={},
+        )
+    )
+    run = sarif["runs"][0]
+    rule_ids = {rule["id"] for rule in run["tool"]["driver"]["rules"]}
+    assert "CSTRUCT002" in rule_ids
+    assert "CSTRUCT003" in rule_ids
+    messages = [result["message"]["text"] for result in run["results"]]
+    assert any("guard/exit divergence" in message for message in messages)
+    assert any("cohort drift" in message for message in messages)
 
 
 def test_json_structural_findings_deduplicates_occurrences() -> None:

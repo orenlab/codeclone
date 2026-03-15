@@ -545,6 +545,65 @@ def used():
     assert file_metrics.class_metrics == ()
 
 
+def test_extract_collects_referenced_qualnames_for_import_aliases() -> None:
+    src = """
+from pkg.runtime import run as _run_impl
+import pkg.helpers as helpers
+
+def wrapper():
+    value = _run_impl()
+    return helpers.decorate(value)
+"""
+    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+        source=src,
+        filepath="pkg/cli.py",
+        module_name="pkg.cli",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    assert "pkg.runtime:run" in file_metrics.referenced_qualnames
+    assert "pkg.helpers:decorate" in file_metrics.referenced_qualnames
+
+
+def test_collect_dead_candidates_skips_protocol_and_stub_like_symbols() -> None:
+    src = """
+from abc import abstractmethod
+from typing import Protocol, overload
+
+class _Reader(Protocol):
+    def read(self) -> str: ...
+
+class _Base:
+    @abstractmethod
+    def parse(self) -> str:
+        raise NotImplementedError
+
+@overload
+def parse_value(value: int) -> str: ...
+
+def parse_value(value: object) -> str:
+    return str(value)
+"""
+    tree = ast.parse(src)
+    collector = extractor._QualnameCollector()
+    collector.visit(tree)
+    protocol_symbol_aliases, protocol_module_aliases = (
+        extractor._collect_protocol_aliases(tree)
+    )
+    dead = extractor._collect_dead_candidates(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        collector=collector,
+        protocol_symbol_aliases=protocol_symbol_aliases,
+        protocol_module_aliases=protocol_module_aliases,
+    )
+    qualnames = {item.qualname for item in dead}
+    assert "pkg.mod:_Reader.read" not in qualnames
+    assert "pkg.mod:_Base.parse" not in qualnames
+    assert "pkg.mod:parse_value" in qualnames
+
+
 def test_extract_syntax_error() -> None:
     with pytest.raises(ParseError):
         extract_units_from_source(

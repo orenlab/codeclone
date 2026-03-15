@@ -22,6 +22,12 @@ class Unit:
     nesting_depth: int = 0
     risk: Literal["low", "medium", "high"] = "low"
     raw_hash: str = ""
+    entry_guard_count: int = 0
+    entry_guard_terminal_profile: str = "none"
+    entry_guard_has_side_effect_before: bool = False
+    terminal_kind: str = "fallthrough"
+    try_finally_profile: str = "none"
+    side_effect_order_profile: str = "none"
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +121,7 @@ class FileMetrics:
     referenced_names: frozenset[str]
     import_names: frozenset[str]
     class_names: frozenset[str]
+    referenced_qualnames: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +244,12 @@ class FunctionGroupItem(FunctionGroupItemBase, total=False):
     nesting_depth: int
     risk: Literal["low", "medium", "high"]
     raw_hash: str
+    entry_guard_count: int
+    entry_guard_terminal_profile: str
+    entry_guard_has_side_effect_before: bool
+    terminal_kind: str
+    try_finally_profile: str
+    side_effect_order_profile: str
 
 
 class BlockGroupItem(TypedDict):

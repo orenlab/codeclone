@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from codeclone._html_snippets import _FileCache
 from codeclone.models import StructuralFindingGroup, StructuralFindingOccurrence
 from codeclone.report.explain_contract import (
     BLOCK_HINT_ASSERT_ONLY,
@@ -9,6 +10,7 @@ from codeclone.report.findings import (
     _dedupe_items,
     _finding_matters_html,
     _finding_scope_text,
+    _finding_why_template_html,
     _occurrences_table_html,
 )
 from codeclone.report.markdown import (
@@ -114,6 +116,18 @@ def test_structural_summary_and_steps_cover_all_terminal_paths() -> None:
         signature={},
         items=(_occurrence(qualname="pkg:a", start=10, end=11),) * 2,
     )
+    guard_div_group = StructuralFindingGroup(
+        finding_kind="clone_guard_exit_divergence",
+        finding_key="guard-div",
+        signature={"cohort_id": "fp|20-49"},
+        items=(_occurrence(qualname="pkg:a", start=12, end=13),),
+    )
+    drift_group = StructuralFindingGroup(
+        finding_kind="clone_cohort_drift",
+        finding_key="cohort-drift",
+        signature={"cohort_id": "fp|20-49"},
+        items=(_occurrence(qualname="pkg:a", start=14, end=15),),
+    )
 
     assert _structural_summary(raise_group)[1] == (
         "same repeated guard/validation branch"
@@ -124,12 +138,20 @@ def test_structural_summary_and_steps_cover_all_terminal_paths() -> None:
         "same repeated branch shape (Assign,Expr)"
     )
     assert _structural_summary(fallback_group)[1] == "same repeated branch shape"
+    assert _structural_summary(guard_div_group)[0] == "Clone guard/exit divergence"
+    assert _structural_summary(drift_group)[0] == "Clone cohort drift"
 
     assert _structural_steps(raise_group)[0].startswith(
         "Factor the repeated validation/guard path"
     )
     assert _structural_steps(return_group)[0].startswith(
         "Consolidate the repeated return-path logic"
+    )
+    assert _structural_steps(guard_div_group)[0].startswith(
+        "Compare divergent clone members"
+    )
+    assert _structural_steps(drift_group)[0].startswith(
+        "Review whether cohort drift is intentional"
     )
 
 
@@ -201,6 +223,54 @@ def test_finding_matters_message_depends_on_scope_and_terminal() -> None:
         ),
         local_items,
     )
+
+
+def test_structural_why_template_covers_new_kind_reasoning_paths() -> None:
+    guard_group = StructuralFindingGroup(
+        finding_kind="clone_guard_exit_divergence",
+        finding_key="guard-div",
+        signature={
+            "cohort_id": "fp-a|20-49",
+            "majority_guard_count": "2",
+        },
+        items=(
+            _occurrence(qualname="pkg.mod:a", start=10, end=12),
+            _occurrence(qualname="pkg.mod:b", start=20, end=22),
+        ),
+    )
+    drift_group = StructuralFindingGroup(
+        finding_kind="clone_cohort_drift",
+        finding_key="cohort-drift",
+        signature={
+            "cohort_id": "fp-a|20-49",
+            "cohort_arity": "4",
+            "drift_fields": "terminal_kind,guard_exit_profile",
+        },
+        items=(
+            _occurrence(qualname="pkg.mod:c", start=30, end=33),
+            _occurrence(qualname="pkg.mod:d", start=40, end=43),
+        ),
+    )
+
+    guard_html = _finding_why_template_html(
+        guard_group,
+        guard_group.items,
+        file_cache=_FileCache(),
+        context_lines=1,
+        max_snippet_lines=20,
+    )
+    drift_html = _finding_why_template_html(
+        drift_group,
+        drift_group.items,
+        file_cache=_FileCache(),
+        context_lines=1,
+        max_snippet_lines=20,
+    )
+
+    assert "clone cohort members with guard/exit divergence" in guard_html
+    assert "majority guard count" in guard_html
+    assert "cohort members that drift from majority profile" in drift_html
+    assert "Drift fields" in drift_html
 
 
 def test_markdown_helpers_cover_non_numeric_and_missing_fact_paths() -> None:

@@ -18,6 +18,7 @@ from codeclone.models import ClassMetrics, DeadCandidate, ModuleDep
 from codeclone.normalize import NormalizationConfig
 from codeclone.pipeline import compute_project_metrics
 from codeclone.scanner import iter_py_files, module_name_from_path
+from codeclone.structural_findings import build_clone_cohort_structural_findings
 
 _GOLDEN_V2_ROOT = Path("tests/fixtures/golden_v2").resolve()
 
@@ -76,6 +77,7 @@ def _collect_analysis_snapshot(project_root: Path) -> dict[str, object]:
     module_deps: list[ModuleDep] = []
     dead_candidates: list[DeadCandidate] = []
     referenced_names: set[str] = set()
+    referenced_qualnames: set[str] = set()
 
     files = tuple(iter_py_files(str(project_root)))
     lines_total = 0
@@ -109,6 +111,7 @@ def _collect_analysis_snapshot(project_root: Path) -> dict[str, object]:
         module_deps.extend(file_metrics.module_deps)
         dead_candidates.extend(file_metrics.dead_candidates)
         referenced_names.update(file_metrics.referenced_names)
+        referenced_qualnames.update(file_metrics.referenced_qualnames)
 
         lines_total += source_stats.lines
         functions_total += source_stats.functions
@@ -118,6 +121,9 @@ def _collect_analysis_snapshot(project_root: Path) -> dict[str, object]:
     function_groups = build_groups(units)
     block_groups = build_block_groups(blocks)
     segment_groups = build_segment_groups(segments)
+    cohort_structural_groups = build_clone_cohort_structural_findings(
+        func_groups=function_groups,
+    )
 
     project_metrics, dep_graph, dead_items = compute_project_metrics(
         units=tuple(units),
@@ -125,6 +131,7 @@ def _collect_analysis_snapshot(project_root: Path) -> dict[str, object]:
         module_deps=tuple(module_deps),
         dead_candidates=tuple(dead_candidates),
         referenced_names=frozenset(referenced_names),
+        referenced_qualnames=frozenset(referenced_qualnames),
         files_found=len(files),
         files_analyzed_or_cached=len(files),
         function_clone_groups=len(function_groups),
@@ -132,6 +139,13 @@ def _collect_analysis_snapshot(project_root: Path) -> dict[str, object]:
         skip_dependencies=False,
         skip_dead_code=False,
     )
+    guarded_functions = 0
+    for unit in units:
+        guard_count = unit.get("entry_guard_count", 0)
+        if isinstance(guard_count, bool):
+            guard_count = int(guard_count)
+        if isinstance(guard_count, int) and guard_count > 0:
+            guarded_functions += 1
 
     return {
         "meta": {"python_tag": current_python_tag()},
@@ -146,6 +160,36 @@ def _collect_analysis_snapshot(project_root: Path) -> dict[str, object]:
             "function_keys": sorted(function_groups.keys()),
             "block_keys": sorted(block_groups.keys()),
             "segment_keys": sorted(segment_groups.keys()),
+        },
+        "stable_structure": {
+            "terminal_kinds": sorted({str(unit["terminal_kind"]) for unit in units}),
+            "guard_terminal_profiles": sorted(
+                {str(unit["entry_guard_terminal_profile"]) for unit in units},
+            ),
+            "try_finally_profiles": sorted(
+                {str(unit["try_finally_profile"]) for unit in units},
+            ),
+            "side_effect_order_profiles": sorted(
+                {str(unit["side_effect_order_profile"]) for unit in units},
+            ),
+            "guarded_functions": guarded_functions,
+        },
+        "cohort_structural_findings": {
+            "count": len(cohort_structural_groups),
+            "kinds": [
+                group.finding_kind
+                for group in sorted(
+                    cohort_structural_groups,
+                    key=lambda group: (group.finding_kind, group.finding_key),
+                )
+            ],
+            "keys": [
+                group.finding_key
+                for group in sorted(
+                    cohort_structural_groups,
+                    key=lambda group: (group.finding_kind, group.finding_key),
+                )
+            ],
         },
         "metrics": {
             "complexity_max": project_metrics.complexity_max,
@@ -250,6 +294,7 @@ def _collect_cli_snapshot(
     meta = payload["meta"]
     findings = payload["findings"]
     clone_groups = findings["groups"]["clones"]
+    structural_groups = findings["groups"]["structural"]["groups"]
     return {
         "meta": {"python_tag": current_python_tag()},
         "report_schema_version": payload["report_schema_version"],
@@ -262,6 +307,8 @@ def _collect_cli_snapshot(
         "function_group_ids": [group["id"] for group in clone_groups["functions"]],
         "block_group_ids": [group["id"] for group in clone_groups["blocks"]],
         "segment_group_ids": [group["id"] for group in clone_groups["segments"]],
+        "structural_group_ids": [group["id"] for group in structural_groups],
+        "structural_group_kinds": [group["kind"] for group in structural_groups],
     }
 
 

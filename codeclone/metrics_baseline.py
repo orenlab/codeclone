@@ -7,11 +7,10 @@ import hashlib
 import hmac
 import json
 import os
-from collections.abc import Mapping
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Final, Literal, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from . import __version__
 from ._schema_validation import validate_top_level_structure
@@ -19,6 +18,9 @@ from .baseline import current_python_tag
 from .contracts import BASELINE_SCHEMA_VERSION, METRICS_BASELINE_SCHEMA_VERSION
 from .errors import BaselineValidationError
 from .models import MetricsDiff, MetricsSnapshot, ProjectMetrics
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 METRICS_BASELINE_GENERATOR: Final = "codeclone"
 MAX_METRICS_BASELINE_SIZE_BYTES: Final = 5 * 1024 * 1024
@@ -271,7 +273,7 @@ class MetricsBaseline:
             generator_version=self.generator_version or __version__,
             created_at=self.created_at or _now_utc_z(),
         )
-        payload_meta = cast(Mapping[str, Any], payload["meta"])
+        payload_meta = cast("Mapping[str, Any]", payload["meta"])
         payload_metrics_hash = _require_str(
             payload_meta,
             "payload_sha256",
@@ -743,7 +745,7 @@ def _parse_snapshot(
             sorted(set(_require_str_list(payload, "dead_code_items", path=path)))
         ),
         health_score=_require_int(payload, "health_score", path=path),
-        health_grade=cast(Literal["A", "B", "C", "D", "F"], grade),
+        health_grade=cast("Literal['A', 'B', 'C', 'D', 'F']", grade),
     )
 
 

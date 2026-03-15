@@ -6,11 +6,13 @@ from __future__ import annotations
 import ast
 import copy
 from ast import AST
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from .meta_markers import CFG_META_PREFIX
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,9 +90,9 @@ class AstNormalizer(ast.NodeTransformer):
 
     def visit_Call(self, node: ast.Call) -> ast.Call:
         node.func = self._visit_call_target(node.func)
-        node.args = [cast(ast.expr, self.visit(arg)) for arg in node.args]
+        node.args = [cast("ast.expr", self.visit(arg)) for arg in node.args]
         for kw in node.keywords:
-            kw.value = cast(ast.expr, self.visit(kw.value))
+            kw.value = cast("ast.expr", self.visit(kw.value))
         return node
 
     def _visit_call_target(self, node: ast.expr) -> ast.expr:
@@ -102,9 +104,9 @@ class AstNormalizer(ast.NodeTransformer):
             if isinstance(value, (ast.Name, ast.Attribute)):
                 node.value = self._visit_call_target(value)
             else:
-                node.value = cast(ast.expr, self.visit(value))
+                node.value = cast("ast.expr", self.visit(value))
             return node
-        return cast(ast.expr, self.visit(node))
+        return cast("ast.expr", self.visit(node))
 
     def visit_AugAssign(self, node: ast.AugAssign) -> AST:
         # Normalize x += 1 to x = x + 1

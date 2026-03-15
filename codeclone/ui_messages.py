@@ -20,60 +20,103 @@ MARKER_INTERNAL_ERROR = "[error]INTERNAL ERROR:[/error]"
 REPORT_BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN = "Assert pattern block"
 
 HELP_VERSION = "Print the CodeClone version and exit."
-HELP_ROOT = "Project root directory to scan."
-HELP_MIN_LOC = "Minimum Lines of Code (LOC) to consider."
-HELP_MIN_STMT = "Minimum AST statements to consider."
-HELP_PROCESSES = "Number of parallel worker processes."
-HELP_CACHE_PATH = "Path to the cache file. Default: <root>/.cache/codeclone/cache.json."
-HELP_CACHE_DIR_LEGACY = "Legacy alias for --cache-path."
-HELP_MAX_BASELINE_SIZE_MB = "Maximum baseline file size in MB."
-HELP_MAX_CACHE_SIZE_MB = "Maximum cache file size in MB."
-HELP_BASELINE = "Path to baseline file (omit value to use default path)."
-HELP_UPDATE_BASELINE = "Overwrite the baseline file with current results."
-HELP_FAIL_ON_NEW = "Exit with error if NEW clones (not in baseline) are detected."
+HELP_ROOT = "Project root directory to scan.\nDefaults to the current directory."
+HELP_MIN_LOC = "Minimum Lines of Code (LOC) required for clone analysis.\nDefault: 15."
+HELP_MIN_STMT = "Minimum AST statement count required for clone analysis.\nDefault: 6."
+HELP_PROCESSES = "Number of parallel worker processes.\nDefault: 4."
+HELP_CACHE_PATH = (
+    "Path to the cache file.\n"
+    "If FILE is omitted, uses <root>/.cache/codeclone/cache.json."
+)
+HELP_CACHE_DIR_LEGACY = (
+    "Legacy alias for --cache-path.\nPrefer --cache-path in new configurations."
+)
+HELP_MAX_BASELINE_SIZE_MB = "Maximum allowed baseline size in MB.\nDefault: 5."
+HELP_MAX_CACHE_SIZE_MB = "Maximum cache file size in MB.\nDefault: 50."
+HELP_BASELINE = (
+    "Path to the clone baseline.\n"
+    f"If FILE is omitted, uses {Path('codeclone.baseline.json')}."
+)
+HELP_UPDATE_BASELINE = (
+    "Overwrite the clone baseline with current results.\nDisabled by default."
+)
+HELP_FAIL_ON_NEW = (
+    "Exit with code 3 if NEW clone findings not present in the baseline\nare detected."
+)
 HELP_FAIL_THRESHOLD = (
-    "Exit with error if total clone groups (function + block) exceed this number."
+    "Exit with code 3 if the total number of function + block clone groups\n"
+    "exceeds this value.\n"
+    "Disabled unless set."
 )
-HELP_FAIL_COMPLEXITY = "Exit with error if any function has CC above this threshold."
-HELP_FAIL_COUPLING = "Exit with error if any class has CBO above this threshold."
-HELP_FAIL_COHESION = "Exit with error if any class has LCOM4 above this threshold."
-HELP_FAIL_CYCLES = "Exit with error if circular module dependencies are detected."
-HELP_FAIL_DEAD_CODE = "Exit with error if high-confidence dead code is detected."
-HELP_FAIL_HEALTH = "Exit with error if health score is below this threshold."
+HELP_FAIL_COMPLEXITY = (
+    "Exit with code 3 if any function exceeds the cyclomatic complexity\n"
+    "threshold.\n"
+    "If enabled without a value, uses 20."
+)
+HELP_FAIL_COUPLING = (
+    "Exit with code 3 if any class exceeds the coupling threshold.\n"
+    "If enabled without a value, uses 10."
+)
+HELP_FAIL_COHESION = (
+    "Exit with code 3 if any class exceeds the cohesion threshold.\n"
+    "If enabled without a value, uses 4."
+)
+HELP_FAIL_CYCLES = "Exit with code 3 if circular module dependencies are detected."
+HELP_FAIL_DEAD_CODE = "Exit with code 3 if high-confidence dead code is detected."
+HELP_FAIL_HEALTH = (
+    "Exit with code 3 if the overall health score falls below the threshold.\n"
+    "If enabled without a value, uses 60."
+)
 HELP_FAIL_ON_NEW_METRICS = (
-    "Exit with error if new metric violations appear vs metrics baseline."
+    "Exit with code 3 if new metrics violations appear relative to the\n"
+    "metrics baseline."
 )
-HELP_CI = "CI preset: --fail-on-new --no-color --quiet."
-HELP_UPDATE_METRICS_BASELINE = "Overwrite metrics baseline with current metrics."
+HELP_CI = (
+    "Enable CI preset.\n"
+    "Equivalent to: --fail-on-new --no-color --quiet.\n"
+    "When a trusted metrics baseline is available, CI mode also enables\n"
+    "metrics regression gating."
+)
+HELP_UPDATE_METRICS_BASELINE = (
+    "Overwrite the metrics baseline with current metrics.\nDisabled by default."
+)
 HELP_METRICS_BASELINE = (
-    "Path to metrics baseline file (omit value to use default path)."
+    "Path to the metrics baseline.\n"
+    f"If FILE is omitted, uses {Path('codeclone.baseline.json')}."
 )
-HELP_SKIP_METRICS = "Skip full metrics analysis (clone-only mode)."
-HELP_SKIP_DEAD_CODE = "Skip dead code detection stage."
-HELP_SKIP_DEPENDENCIES = "Skip dependency graph analysis stage."
+HELP_SKIP_METRICS = "Skip full metrics analysis and run in clone-only mode."
+HELP_SKIP_DEAD_CODE = "Skip dead code detection."
+HELP_SKIP_DEPENDENCIES = "Skip dependency graph analysis."
 HELP_HTML = (
-    "Generate HTML report (optional FILE, default: .cache/codeclone/report.html)."
+    "Generate an HTML report.\n"
+    "If FILE is omitted, writes to .cache/codeclone/report.html."
 )
 HELP_JSON = (
-    "Generate JSON report (optional FILE, default: .cache/codeclone/report.json)."
+    "Generate the canonical JSON report.\n"
+    "If FILE is omitted, writes to .cache/codeclone/report.json."
 )
 HELP_MD = (
-    "Generate Markdown report (optional FILE, default: .cache/codeclone/report.md)."
+    "Generate a Markdown report.\n"
+    "If FILE is omitted, writes to .cache/codeclone/report.md."
 )
 HELP_SARIF = (
-    "Generate SARIF 2.1.0 report "
-    "(optional FILE, default: .cache/codeclone/report.sarif)."
+    "Generate a SARIF 2.1.0 report.\n"
+    "If FILE is omitted, writes to .cache/codeclone/report.sarif."
 )
 HELP_TEXT = (
-    "Generate text report (optional FILE, default: .cache/codeclone/report.txt)."
+    "Generate a plain-text report.\n"
+    "If FILE is omitted, writes to .cache/codeclone/report.txt."
 )
-HELP_NO_PROGRESS = "Disable the progress bar (recommended for CI logs)."
-HELP_PROGRESS = "Enable progress bar output."
-HELP_NO_COLOR = "Disable ANSI colors in output."
-HELP_COLOR = "Enable ANSI colors in output."
-HELP_QUIET = "Minimize output (still shows warnings and errors)."
-HELP_VERBOSE = "Print detailed hash identifiers for new clones."
-HELP_DEBUG = "Print debug details (traceback and environment) on internal errors."
+HELP_NO_PROGRESS = "Disable progress output.\nRecommended for CI logs."
+HELP_PROGRESS = "Force-enable progress output."
+HELP_NO_COLOR = "Disable ANSI colors."
+HELP_COLOR = "Force-enable ANSI colors."
+HELP_QUIET = "Reduce output to warnings, errors, and essential summaries."
+HELP_VERBOSE = "Include detailed identifiers for NEW clone findings."
+HELP_DEBUG = (
+    "Print debug details for internal errors, including traceback and\n"
+    "environment information."
+)
 
 SUMMARY_TITLE = "Summary"
 METRICS_TITLE = "Metrics"

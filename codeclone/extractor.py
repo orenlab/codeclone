@@ -7,10 +7,9 @@ import ast
 import math
 import os
 import signal
-from collections.abc import Iterator
 from contextlib import contextmanager
 from hashlib import sha1 as _sha1
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from .blockhash import stmt_hashes
 from .blocks import extract_blocks, extract_segments
@@ -43,6 +42,9 @@ from .normalize import (
 )
 from .paths import is_test_filepath
 from .structural_findings import scan_function_structure
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 __all__ = [
     "Unit",
@@ -340,18 +342,159 @@ def _collect_module_facts(
     return frozenset(import_names), deps_sorted, frozenset(referenced)
 
 
+def _dotted_expr_name(expr: ast.expr) -> str | None:
+    if isinstance(expr, ast.Name):
+        return expr.id
+    if isinstance(expr, ast.Attribute):
+        prefix = _dotted_expr_name(expr.value)
+        if prefix is None:
+            return None
+        return f"{prefix}.{expr.attr}"
+    return None
+
+
+def _collect_protocol_aliases(tree: ast.AST) -> tuple[frozenset[str], frozenset[str]]:
+    protocol_symbol_aliases = {"Protocol"}
+    protocol_module_aliases = {"typing", "typing_extensions"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module not in {"typing", "typing_extensions"}:
+                continue
+            for alias in node.names:
+                if alias.name == "Protocol":
+                    protocol_symbol_aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in {"typing", "typing_extensions"}:
+                    protocol_module_aliases.add(alias.asname or alias.name)
+    return frozenset(protocol_symbol_aliases), frozenset(protocol_module_aliases)
+
+
+def _is_protocol_class(
+    class_node: ast.ClassDef,
+    *,
+    protocol_symbol_aliases: frozenset[str],
+    protocol_module_aliases: frozenset[str],
+) -> bool:
+    for base in class_node.bases:
+        base_name = _dotted_expr_name(base)
+        if base_name is None:
+            continue
+        if base_name in protocol_symbol_aliases:
+            return True
+        if "." in base_name and base_name.rsplit(".", 1)[-1] == "Protocol":
+            module_alias = base_name.rsplit(".", 1)[0]
+            if module_alias in protocol_module_aliases:
+                return True
+    return False
+
+
+def _is_non_runtime_candidate(node: FunctionNode) -> bool:
+    for decorator in node.decorator_list:
+        name = _dotted_expr_name(decorator)
+        if name is None:
+            continue
+        terminal = name.rsplit(".", 1)[-1]
+        if terminal in {"overload", "abstractmethod"}:
+            return True
+    return False
+
+
+def _collect_referenced_qualnames(
+    *,
+    tree: ast.AST,
+    module_name: str,
+    collector: _QualnameCollector,
+    collect_referenced_names: bool,
+) -> frozenset[str]:
+    if not collect_referenced_names:
+        return frozenset()
+
+    imported_symbol_bindings: dict[str, set[str]] = {}
+    imported_module_aliases: dict[str, str] = {}
+    top_level_class_by_name = {
+        class_qualname: class_qualname
+        for class_qualname, _class_node in collector.class_nodes
+        if "." not in class_qualname
+    }
+    local_method_qualnames = frozenset(
+        f"{module_name}:{local_name}"
+        for local_name, _node in collector.units
+        if "." in local_name
+    )
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            target_module = _resolve_import_target(module_name, node)
+            if not target_module:
+                continue
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                alias_name = alias.asname or alias.name
+                imported_symbol_bindings.setdefault(alias_name, set()).add(
+                    f"{target_module}:{alias.name}"
+                )
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                alias_name = alias.asname or alias.name.split(".", 1)[0]
+                imported_module_aliases[alias_name] = alias.name
+
+    resolved: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            for qualname in imported_symbol_bindings.get(node.id, ()):
+                resolved.add(qualname)
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+            base = node.value
+            if isinstance(base, ast.Name):
+                imported_module = imported_module_aliases.get(base.id)
+                if imported_module is not None:
+                    resolved.add(f"{imported_module}:{node.attr}")
+                    continue
+                class_qualname = top_level_class_by_name.get(base.id)
+                if class_qualname is not None:
+                    local_method_qualname = (
+                        f"{module_name}:{class_qualname}.{node.attr}"
+                    )
+                    if local_method_qualname in local_method_qualnames:
+                        resolved.add(local_method_qualname)
+
+    return frozenset(resolved)
+
+
 def _collect_dead_candidates(
     *,
     filepath: str,
     module_name: str,
     collector: _QualnameCollector,
+    protocol_symbol_aliases: frozenset[str] = frozenset({"Protocol"}),
+    protocol_module_aliases: frozenset[str] = frozenset(
+        {"typing", "typing_extensions"}
+    ),
 ) -> tuple[DeadCandidate, ...]:
+    protocol_class_qualnames = {
+        class_qualname
+        for class_qualname, class_node in collector.class_nodes
+        if _is_protocol_class(
+            class_node,
+            protocol_symbol_aliases=protocol_symbol_aliases,
+            protocol_module_aliases=protocol_module_aliases,
+        )
+    }
+
     candidates: list[DeadCandidate] = []
     for local_name, node in collector.units:
         start = int(getattr(node, "lineno", 0))
         end = int(getattr(node, "end_lineno", 0))
         if start <= 0 or end <= 0:
             continue
+        if _is_non_runtime_candidate(node):
+            continue
+        if "." in local_name:
+            owner_qualname = local_name.rsplit(".", 1)[0]
+            if owner_qualname in protocol_class_qualnames:
+                continue
         kind: Literal["method", "function"] = (
             "method" if "." in local_name else "function"
         )
@@ -433,6 +576,13 @@ def extract_units_and_stats_from_source(
         module_name=module_name,
         collect_referenced_names=not is_test_file,
     )
+    referenced_qualnames = _collect_referenced_qualnames(
+        tree=tree,
+        module_name=module_name,
+        collector=collector,
+        collect_referenced_names=not is_test_file,
+    )
+    protocol_symbol_aliases, protocol_module_aliases = _collect_protocol_aliases(tree)
     class_names = frozenset(class_node.name for _, class_node in collector.class_nodes)
     module_import_names = set(import_names)
     module_class_names = set(class_names)
@@ -483,6 +633,16 @@ def extract_units_and_stats_from_source(
                 nesting_depth=depth,
                 risk=risk,
                 raw_hash=raw_hash,
+                entry_guard_count=structure_facts.entry_guard_count,
+                entry_guard_terminal_profile=(
+                    structure_facts.entry_guard_terminal_profile
+                ),
+                entry_guard_has_side_effect_before=(
+                    structure_facts.entry_guard_has_side_effect_before
+                ),
+                terminal_kind=structure_facts.terminal_kind,
+                try_finally_profile=structure_facts.try_finally_profile,
+                side_effect_order_profile=structure_facts.side_effect_order_profile,
             )
         )
 
@@ -559,6 +719,8 @@ def extract_units_and_stats_from_source(
         filepath=filepath,
         module_name=module_name,
         collector=collector,
+        protocol_symbol_aliases=protocol_symbol_aliases,
+        protocol_module_aliases=protocol_module_aliases,
     )
 
     sorted_class_metrics = tuple(
@@ -590,6 +752,7 @@ def extract_units_and_stats_from_source(
             referenced_names=referenced_names,
             import_names=import_names,
             class_names=class_names,
+            referenced_qualnames=referenced_qualnames,
         ),
         structural_findings,
     )

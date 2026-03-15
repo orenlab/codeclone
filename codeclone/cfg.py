@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from .cfg_model import CFG, Block
 from .meta_markers import CFG_META_PREFIX
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 __all__ = ["CFG", "CFGBuilder"]
 
@@ -100,9 +102,9 @@ class CFGBuilder:
                 self._visit_for(stmt)  # Structure is identical to For
 
             case ast.Try():
-                self._visit_try(cast(_TryLike, stmt))
+                self._visit_try(cast("_TryLike", stmt))
             case _ if TryStar is not None and isinstance(stmt, TryStar):
-                self._visit_try(cast(_TryLike, cast(object, stmt)))
+                self._visit_try(cast("_TryLike", cast("object", stmt)))
 
             case ast.With() | ast.AsyncWith():
                 self._visit_with(stmt)

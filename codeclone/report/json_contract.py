@@ -7,16 +7,9 @@ import json
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from hashlib import sha256
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from ..contracts import REPORT_SCHEMA_VERSION
-from ..models import (
-    GroupItemLike,
-    GroupMapLike,
-    SourceKind,
-    StructuralFindingGroup,
-    Suggestion,
-)
 from ..structural_findings import normalize_structural_findings
 from .derived import (
     combine_source_kinds,
@@ -26,6 +19,15 @@ from .derived import (
     report_location_from_structural_occurrence,
 )
 from .suggestions import classify_clone_type
+
+if TYPE_CHECKING:
+    from ..models import (
+        GroupItemLike,
+        GroupMapLike,
+        SourceKind,
+        StructuralFindingGroup,
+        Suggestion,
+    )
 
 __all__ = [
     "build_report_document",
@@ -999,15 +1001,72 @@ def _build_clone_groups(
 
 def _structural_group_assessment(
     *,
+    finding_kind: str,
     count: int,
     spread_functions: int,
 ) -> tuple[str, float]:
+    if finding_kind in {"clone_guard_exit_divergence", "clone_cohort_drift"}:
+        severity = "warning"
+        if count >= 3 or spread_functions > 1:
+            severity = "critical"
+        return severity, _priority(severity, "moderate")
     severity = "warning" if count >= 4 or spread_functions > 1 else "info"
     return severity, _priority(severity, "moderate")
 
 
-def _build_structural_signature(signature: Mapping[str, str]) -> dict[str, object]:
+def _csv_values(value: object) -> list[str]:
+    raw = str(value).strip()
+    if not raw:
+        return []
+    return sorted({part.strip() for part in raw.split(",") if part.strip()})
+
+
+def _build_structural_signature(
+    finding_kind: str,
+    signature: Mapping[str, str],
+) -> dict[str, object]:
     debug = {str(key): str(signature[key]) for key in sorted(signature)}
+    if finding_kind == "clone_guard_exit_divergence":
+        return {
+            "version": "1",
+            "stable": {
+                "family": "clone_guard_exit_divergence",
+                "cohort_id": str(signature.get("cohort_id", "")),
+                "majority_guard_count": _as_int(signature.get("majority_guard_count")),
+                "majority_guard_terminal_profile": str(
+                    signature.get("majority_guard_terminal_profile", "none")
+                ),
+                "majority_terminal_kind": str(
+                    signature.get("majority_terminal_kind", "fallthrough")
+                ),
+                "majority_side_effect_before_guard": (
+                    str(signature.get("majority_side_effect_before_guard", "0")) == "1"
+                ),
+            },
+            "debug": debug,
+        }
+    if finding_kind == "clone_cohort_drift":
+        return {
+            "version": "1",
+            "stable": {
+                "family": "clone_cohort_drift",
+                "cohort_id": str(signature.get("cohort_id", "")),
+                "drift_fields": _csv_values(signature.get("drift_fields")),
+                "majority_profile": {
+                    "terminal_kind": str(signature.get("majority_terminal_kind", "")),
+                    "guard_exit_profile": str(
+                        signature.get("majority_guard_exit_profile", "")
+                    ),
+                    "try_finally_profile": str(
+                        signature.get("majority_try_finally_profile", "")
+                    ),
+                    "side_effect_order_profile": str(
+                        signature.get("majority_side_effect_order_profile", "")
+                    ),
+                },
+            },
+            "debug": debug,
+        }
     return {
         "version": "1",
         "stable": {
@@ -1021,6 +1080,65 @@ def _build_structural_signature(signature: Mapping[str, str]) -> dict[str, objec
             },
         },
         "debug": debug,
+    }
+
+
+def _build_structural_facts(
+    finding_kind: str,
+    signature: Mapping[str, str],
+    *,
+    count: int,
+) -> dict[str, object]:
+    if finding_kind == "clone_guard_exit_divergence":
+        return {
+            "cohort_id": str(signature.get("cohort_id", "")),
+            "cohort_arity": _as_int(signature.get("cohort_arity")),
+            "divergent_members": _as_int(signature.get("divergent_members"), count),
+            "majority_entry_guard_count": _as_int(
+                signature.get("majority_guard_count"),
+            ),
+            "majority_guard_terminal_profile": str(
+                signature.get("majority_guard_terminal_profile", "none")
+            ),
+            "majority_terminal_kind": str(
+                signature.get("majority_terminal_kind", "fallthrough")
+            ),
+            "majority_side_effect_before_guard": (
+                str(signature.get("majority_side_effect_before_guard", "0")) == "1"
+            ),
+            "guard_count_values": _csv_values(signature.get("guard_count_values")),
+            "guard_terminal_values": _csv_values(
+                signature.get("guard_terminal_values"),
+            ),
+            "terminal_values": _csv_values(signature.get("terminal_values")),
+            "side_effect_before_guard_values": _csv_values(
+                signature.get("side_effect_before_guard_values"),
+            ),
+        }
+    if finding_kind == "clone_cohort_drift":
+        return {
+            "cohort_id": str(signature.get("cohort_id", "")),
+            "cohort_arity": _as_int(signature.get("cohort_arity")),
+            "divergent_members": _as_int(signature.get("divergent_members"), count),
+            "drift_fields": _csv_values(signature.get("drift_fields")),
+            "stable_majority_profile": {
+                "terminal_kind": str(signature.get("majority_terminal_kind", "")),
+                "guard_exit_profile": str(
+                    signature.get("majority_guard_exit_profile", "")
+                ),
+                "try_finally_profile": str(
+                    signature.get("majority_try_finally_profile", "")
+                ),
+                "side_effect_order_profile": str(
+                    signature.get("majority_side_effect_order_profile", "")
+                ),
+            },
+        }
+    return {
+        "occurrence_count": count,
+        "non_overlapping": True,
+        "call_bucket": _as_int(signature.get("calls", "0")),
+        "raise_bucket": _as_int(signature.get("raises", "0")),
     }
 
 
@@ -1041,6 +1159,7 @@ def _build_structural_groups(
         )
         spread_files, spread_functions = group_spread(locations)
         severity, priority = _structural_group_assessment(
+            finding_kind=group.finding_kind,
             count=len(group.items),
             spread_functions=spread_functions,
         )
@@ -1051,7 +1170,12 @@ def _build_structural_groups(
                 "category": group.finding_kind,
                 "kind": group.finding_kind,
                 "severity": severity,
-                "confidence": "medium",
+                "confidence": (
+                    "high"
+                    if group.finding_kind
+                    in {"clone_guard_exit_divergence", "clone_cohort_drift"}
+                    else "medium"
+                ),
                 "priority": priority,
                 "count": len(group.items),
                 "source_scope": source_scope,
@@ -1059,7 +1183,10 @@ def _build_structural_groups(
                     "files": spread_files,
                     "functions": spread_functions,
                 },
-                "signature": _build_structural_signature(group.signature),
+                "signature": _build_structural_signature(
+                    group.finding_kind,
+                    group.signature,
+                ),
                 "items": sorted(
                     [
                         {
@@ -1075,12 +1202,11 @@ def _build_structural_groups(
                     ],
                     key=_item_sort_key,
                 ),
-                "facts": {
-                    "occurrence_count": len(group.items),
-                    "non_overlapping": True,
-                    "call_bucket": _as_int(group.signature.get("calls", "0")),
-                    "raise_bucket": _as_int(group.signature.get("raises", "0")),
-                },
+                "facts": _build_structural_facts(
+                    group.finding_kind,
+                    group.signature,
+                    count=len(group.items),
+                ),
             }
         )
     out.sort(key=lambda group: (-_as_int(group.get("count")), str(group["id"])))
@@ -1540,11 +1666,10 @@ def _top_risks(
     ]
     if production_structural:
         label = (
-            "1 structural branch finding in production code"
+            "1 structural finding in production code"
             if len(production_structural) == 1
             else (
-                f"{len(production_structural)} structural branch findings "
-                "in production code"
+                f"{len(production_structural)} structural findings in production code"
             )
         )
         risks.append(

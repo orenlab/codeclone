@@ -9,7 +9,7 @@ from typing import Final
 BASELINE_SCHEMA_VERSION: Final = "2.0"
 BASELINE_FINGERPRINT_VERSION: Final = "1"
 
-CACHE_VERSION: Final = "2.1"
+CACHE_VERSION: Final = "2.2"
 REPORT_SCHEMA_VERSION: Final = "2.1"
 METRICS_BASELINE_SCHEMA_VERSION: Final = "1.0"
 
@@ -46,39 +46,21 @@ REPOSITORY_URL: Final = "https://github.com/orenlab/codeclone"
 ISSUES_URL: Final = "https://github.com/orenlab/codeclone/issues"
 DOCS_URL: Final = "https://github.com/orenlab/codeclone/tree/main/docs"
 
-EXIT_CODE_DESCRIPTIONS: Final[tuple[tuple[ExitCode, str], ...]] = (
-    (ExitCode.SUCCESS, "success"),
-    (
-        ExitCode.CONTRACT_ERROR,
-        (
-            "contract error (baseline missing/untrusted, invalid output "
-            "extensions, incompatible versions, unreadable source files in CI/gating)"
-        ),
-    ),
-    (
-        ExitCode.GATING_FAILURE,
-        (
-            "gating failure (new clones detected, threshold exceeded, "
-            "or metrics quality gates failed)"
-        ),
-    ),
-    (
-        ExitCode.INTERNAL_ERROR,
-        "internal error (unexpected exception; please report)",
-    ),
-)
-
 
 def cli_help_epilog() -> str:
-    lines = ["Exit codes"]
-    for code, description in EXIT_CODE_DESCRIPTIONS:
-        lines.append(f"  - {int(code)} - {description}")
-    lines.extend(
+    return "\n".join(
         [
+            "Exit codes:",
+            "  0  Success.",
+            "  2  Contract error: untrusted or invalid baseline, invalid output",
+            "     configuration, incompatible versions, or unreadable sources in",
+            "     CI/gating mode.",
+            "  3  Gating failure: new clones, threshold violations, or metrics",
+            "     quality gate failures.",
+            "  5  Internal error: unexpected exception.",
             "",
             f"Repository: {REPOSITORY_URL}",
-            f"Issues: {ISSUES_URL}",
-            f"Docs: {DOCS_URL}",
+            f"Issues:     {ISSUES_URL}",
+            f"Docs:       {DOCS_URL}",
         ]
     )
-    return "\n".join(lines)

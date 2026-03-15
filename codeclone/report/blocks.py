@@ -3,8 +3,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .merge import coerce_positive_int, merge_overlapping_items
-from .types import GroupItem, GroupItemLike, GroupItemsLike, GroupMap, GroupMapLike
+
+if TYPE_CHECKING:
+    from .types import GroupItem, GroupItemLike, GroupItemsLike, GroupMap, GroupMapLike
 
 
 def block_item_sort_key(item: GroupItemLike) -> tuple[str, str, int, int]:

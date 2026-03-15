@@ -39,6 +39,12 @@ Finding families:
 - `findings.groups.dead_code.groups`
 - `findings.groups.design.groups`
 
+Structural finding kinds currently emitted by core/report pipeline:
+
+- `duplicated_branches`
+- `clone_guard_exit_divergence`
+- `clone_cohort_drift`
+
 Per-group common axes (family-specific fields may extend):
 
 - identity: `id`, `family`, `category`, `kind`
@@ -57,6 +63,8 @@ Per-group common axes (family-specific fields may extend):
 - Canonical `meta.scan_root` is normalized to `"."`; absolute runtime paths are
   exposed under `meta.runtime.*_absolute`.
 - `clone_type` and `novelty` are group-level properties inside clone groups.
+- Cohort-drift structural families are report-only and must not affect baseline diff
+  or CI gating decisions.
 
 ## Invariants (MUST)
 
@@ -94,6 +102,8 @@ Refs:
 - `tests/test_report_contract_coverage.py::test_report_document_rich_invariants_and_renderers`
 - `tests/test_report_contract_coverage.py::test_markdown_and_sarif_reuse_prebuilt_report_document`
 - `tests/test_report_branch_invariants.py::test_overview_and_sarif_branch_invariants`
+- `tests/test_report.py::test_json_includes_clone_guard_exit_divergence_structural_group`
+- `tests/test_report.py::test_json_includes_clone_cohort_drift_structural_group`
 
 ## Non-guarantees
 

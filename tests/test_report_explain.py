@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 import codeclone.report.explain as explain_mod
@@ -235,3 +236,53 @@ def test_explain_as_int_variants() -> None:
     assert explain_mod._as_int("7") == 7
     assert explain_mod._as_int("bad") == 0
     assert explain_mod._as_int(1.5) == 0
+
+
+def test_parsed_file_tree_cache_and_empty_statement_index_paths(tmp_path: Path) -> None:
+    module = tmp_path / "empty_module.py"
+    module.write_text("", "utf-8")
+
+    ast_cache: dict[str, ast.AST | None] = {}
+    first = explain_mod.parsed_file_tree(str(module), ast_cache=ast_cache)
+    second = explain_mod.parsed_file_tree(str(module), ast_cache=ast_cache)
+    assert first is second
+
+    stmt_index_cache: dict[str, explain_mod._StatementIndex | None] = {}
+    range_cache: dict[tuple[str, int, int], tuple[int, int, int]] = {}
+    total, assert_like, consecutive = explain_mod.assert_range_stats(
+        filepath=str(module),
+        start_line=1,
+        end_line=10,
+        ast_cache=ast_cache,
+        stmt_index_cache=stmt_index_cache,
+        range_cache=range_cache,
+    )
+    assert (total, assert_like, consecutive) == (0, 0, 0)
+
+
+def test_assert_range_stats_skips_records_outside_requested_end_line(
+    tmp_path: Path,
+) -> None:
+    module = tmp_path / "multiline_stmt.py"
+    module.write_text(
+        "def f() -> int:\n"
+        "    value = (\n"
+        "        1 +\n"
+        "        2\n"
+        "    )\n"
+        "    return value\n",
+        "utf-8",
+    )
+    ast_cache: dict[str, ast.AST | None] = {}
+    stmt_index_cache: dict[str, explain_mod._StatementIndex | None] = {}
+    range_cache: dict[tuple[str, int, int], tuple[int, int, int]] = {}
+
+    total, assert_like, consecutive = explain_mod.assert_range_stats(
+        filepath=str(module),
+        start_line=2,
+        end_line=2,
+        ast_cache=ast_cache,
+        stmt_index_cache=stmt_index_cache,
+        range_cache=range_cache,
+    )
+    assert (total, assert_like, consecutive) == (0, 0, 0)
