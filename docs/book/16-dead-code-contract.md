@@ -35,6 +35,8 @@ Refs:
 - Methods are filtered as non-actionable when dynamic/runtime dispatch is
   expected:
   dunder methods, `visit_*`, setup/teardown hooks.
+- Module-level PEP 562 hooks are filtered as non-actionable:
+  `__getattr__`, `__dir__`.
 - Candidate extraction excludes non-runtime declaration surfaces:
   methods on `Protocol` classes, and callables decorated with
   `@overload` / `@abstractmethod`.
@@ -68,6 +70,7 @@ Refs:
 | Condition                                          | Behavior                               |
 |----------------------------------------------------|----------------------------------------|
 | Dynamic method pattern (dunder/visitor/setup hook) | Candidate skipped as non-actionable    |
+| Module PEP 562 hook (`__getattr__`/`__dir__`)     | Candidate skipped as non-actionable    |
 | Protocol or stub-like declaration surface           | Candidate skipped as non-actionable    |
 | Definition appears only in tests                   | Candidate skipped                      |
 | Symbol used only from tests                        | Remains actionable dead-code candidate |
@@ -88,11 +91,13 @@ Refs:
 ## Locked by tests
 
 - `tests/test_extractor.py::test_dead_code_marks_symbol_dead_when_referenced_only_by_tests`
+- `tests/test_extractor.py::test_dead_code_skips_module_pep562_hooks`
 - `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_import_aliases`
 - `tests/test_extractor.py::test_collect_dead_candidates_skips_protocol_and_stub_like_symbols`
 - `tests/test_pipeline_metrics.py::test_load_cached_metrics_ignores_referenced_names_from_test_files`
 - `tests/test_metrics_modules.py::test_find_unused_filters_non_actionable_and_preserves_ordering`
 - `tests/test_metrics_modules.py::test_find_unused_respects_referenced_qualnames`
+- `tests/test_metrics_modules.py::test_find_unused_keeps_non_pep562_module_dunders_actionable`
 
 ## Non-guarantees
 

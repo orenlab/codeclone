@@ -493,6 +493,33 @@ def test_orphan_usage():
     assert dead and dead[0].qualname == "pkg.mod:orphan"
 
 
+def test_dead_code_skips_module_pep562_hooks() -> None:
+    src = """
+def __getattr__(name: str):
+    raise AttributeError(name)
+
+def __dir__():
+    return ["demo"]
+
+def orphan():
+    return 1
+"""
+    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+        source=src,
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    dead = find_unused(
+        definitions=file_metrics.dead_candidates,
+        referenced_names=file_metrics.referenced_names,
+        referenced_qualnames=file_metrics.referenced_qualnames,
+    )
+    assert tuple(item.qualname for item in dead) == ("pkg.mod:orphan",)
+
+
 def test_collect_dead_candidates_and_extract_skip_classes_without_lineno(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

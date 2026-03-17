@@ -10,6 +10,7 @@ from ..paths import is_test_filepath
 
 _TEST_NAME_PREFIXES = ("test_", "pytest_")
 _DYNAMIC_METHOD_PREFIXES = ("visit_",)
+_MODULE_RUNTIME_HOOK_NAMES = {"__getattr__", "__dir__"}
 _DYNAMIC_HOOK_NAMES = {
     "setup",
     "teardown",
@@ -74,6 +75,10 @@ def _is_non_actionable_candidate(symbol: DeadCandidate) -> bool:
     if symbol.local_name.startswith(_TEST_NAME_PREFIXES):
         return True
     if is_test_filepath(symbol.filepath):
+        return True
+
+    # Module-level dynamic hooks (PEP 562) are invoked by import/runtime lookup.
+    if symbol.kind == "function" and symbol.local_name in _MODULE_RUNTIME_HOOK_NAMES:
         return True
 
     # Magic methods and visitor callbacks are invoked by runtime dispatch.

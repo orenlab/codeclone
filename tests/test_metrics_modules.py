@@ -364,6 +364,22 @@ def test_find_unused_filters_non_actionable_and_preserves_ordering() -> None:
             end_line=8,
             kind="method",
         ),
+        DeadCandidate(
+            qualname="pkg.mod:__getattr__",
+            local_name="__getattr__",
+            filepath="pkg/mod.py",
+            start_line=9,
+            end_line=9,
+            kind="function",
+        ),
+        DeadCandidate(
+            qualname="pkg.mod:__dir__",
+            local_name="__dir__",
+            filepath="pkg/mod.py",
+            start_line=10,
+            end_line=10,
+            kind="function",
+        ),
     )
     found = find_unused(
         definitions=definitions,
@@ -428,6 +444,28 @@ def test_find_unused_respects_referenced_qualnames() -> None:
         referenced_qualnames=frozenset({"pkg.mod:wrapped"}),
     )
     assert found == ()
+
+
+def test_find_unused_keeps_non_pep562_module_dunders_actionable() -> None:
+    candidate = DeadCandidate(
+        qualname="pkg.mod:__custom__",
+        local_name="__custom__",
+        filepath="pkg/mod.py",
+        start_line=1,
+        end_line=2,
+        kind="function",
+    )
+    found = find_unused(definitions=(candidate,), referenced_names=frozenset())
+    assert found == (
+        DeadItem(
+            qualname="pkg.mod:__custom__",
+            filepath="pkg/mod.py",
+            start_line=1,
+            end_line=2,
+            kind="function",
+            confidence="high",
+        ),
+    )
 
 
 def test_build_import_graph_cycle_depth_and_chain_helpers() -> None:

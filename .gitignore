@@ -36,3 +36,4 @@ htmlcov/
 /.claude/
 /docs/SPEC-2.0.0.md
 /.uv-cache/
+/package-lock.json
