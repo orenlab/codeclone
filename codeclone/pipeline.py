@@ -25,7 +25,13 @@ from .cache import (
 from .contracts import ExitCode
 from .extractor import extract_units_and_stats_from_source
 from .grouping import build_block_groups, build_groups, build_segment_groups
-from .metrics import HealthInputs, build_dep_graph, compute_health, find_unused
+from .metrics import (
+    HealthInputs,
+    build_dep_graph,
+    compute_health,
+    find_suppressed_unused,
+    find_unused,
+)
 from .models import (
     BlockUnit,
     ClassMetrics,
@@ -60,6 +66,7 @@ from .report.json_contract import build_report_document
 from .report.suggestions import generate_suggestions
 from .scanner import iter_py_files, module_name_from_path
 from .structural_findings import build_clone_cohort_structural_findings
+from .suppressions import DEAD_CODE_RULE_ID
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -69,6 +76,7 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 DEFAULT_BATCH_SIZE = 100
 PARALLEL_MIN_FILES_PER_WORKER = 8
 PARALLEL_MIN_FILES_FLOOR = 16
+_INLINE_NOQA_SUPPRESSION_SOURCE = "inline_noqa"
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +176,7 @@ class AnalysisResult:
     metrics_payload: dict[str, object] | None
     suggestions: tuple[Suggestion, ...]
     segment_groups_raw_digest: str
+    suppressed_dead_code_items: int = 0
     structural_findings: tuple[StructuralFindingGroup, ...] = ()
 
 
@@ -1135,6 +1144,7 @@ def build_metrics_report_payload(
     project_metrics: ProjectMetrics,
     units: Sequence[GroupItemLike],
     class_metrics: Sequence[ClassMetrics],
+    suppressed_dead_code: Sequence[DeadItem] = (),
 ) -> dict[str, object]:
     sorted_units = sorted(
         units,
@@ -1187,6 +1197,31 @@ def build_metrics_report_payload(
         }
         for metric in classes_sorted
     ]
+    active_dead_items = tuple(project_metrics.dead_code)
+    suppressed_dead_items = tuple(suppressed_dead_code)
+
+    def _serialize_dead_item(
+        item: DeadItem,
+        *,
+        suppressed: bool = False,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "qualname": item.qualname,
+            "filepath": item.filepath,
+            "start_line": item.start_line,
+            "end_line": item.end_line,
+            "kind": item.kind,
+            "confidence": item.confidence,
+        }
+        if suppressed:
+            payload["suppressed_by"] = [
+                {
+                    "rule": DEAD_CODE_RULE_ID,
+                    "source": _INLINE_NOQA_SUPPRESSION_SOURCE,
+                }
+            ]
+        return payload
+
     return {
         "complexity": {
             "functions": complexity_rows,
@@ -1234,25 +1269,20 @@ def build_metrics_report_payload(
             ],
         },
         "dead_code": {
-            "items": [
-                {
-                    "qualname": item.qualname,
-                    "filepath": item.filepath,
-                    "start_line": item.start_line,
-                    "end_line": item.end_line,
-                    "kind": item.kind,
-                    "confidence": item.confidence,
-                }
-                for item in project_metrics.dead_code
+            "items": [_serialize_dead_item(item) for item in active_dead_items],
+            "suppressed_items": [
+                _serialize_dead_item(item, suppressed=True)
+                for item in suppressed_dead_items
             ],
             "summary": {
-                "total": len(project_metrics.dead_code),
+                "total": len(active_dead_items),
                 "critical": sum(
-                    1 for item in project_metrics.dead_code if item.confidence == "high"
+                    1 for item in active_dead_items if item.confidence == "high"
                 ),
                 "high_confidence": sum(
-                    1 for item in project_metrics.dead_code if item.confidence == "high"
+                    1 for item in active_dead_items if item.confidence == "high"
                 ),
+                "suppressed": len(suppressed_dead_items),
             },
         },
         "health": {
@@ -1311,6 +1341,7 @@ def analyze(
     project_metrics: ProjectMetrics | None = None
     metrics_payload: dict[str, object] | None = None
     suggestions: tuple[Suggestion, ...] = ()
+    suppressed_dead_items: tuple[DeadItem, ...] = ()
     cohort_structural_findings: tuple[StructuralFindingGroup, ...] = ()
     if _should_collect_structural_findings(boot.output_paths):
         cohort_structural_findings = build_clone_cohort_structural_findings(
@@ -1336,6 +1367,12 @@ def analyze(
             skip_dependencies=boot.args.skip_dependencies,
             skip_dead_code=boot.args.skip_dead_code,
         )
+        if not boot.args.skip_dead_code:
+            suppressed_dead_items = find_suppressed_unused(
+                definitions=tuple(processing.dead_candidates),
+                referenced_names=processing.referenced_names,
+                referenced_qualnames=processing.referenced_qualnames,
+            )
         suggestions = compute_suggestions(
             project_metrics=project_metrics,
             units=processing.units,
@@ -1351,6 +1388,7 @@ def analyze(
             project_metrics=project_metrics,
             units=processing.units,
             class_metrics=processing.class_metrics,
+            suppressed_dead_code=suppressed_dead_items,
         )
 
     return AnalysisResult(
@@ -1368,6 +1406,7 @@ def analyze(
         metrics_payload=metrics_payload,
         suggestions=suggestions,
         segment_groups_raw_digest=segment_groups_raw_digest,
+        suppressed_dead_code_items=len(suppressed_dead_items),
         structural_findings=combined_structural_findings,
     )
 

@@ -20,6 +20,7 @@ from codeclone.pipeline import (
     _module_dep_sort_key,
     _module_names_from_units,
     _should_use_parallel,
+    build_metrics_report_payload,
     compute_project_metrics,
     metric_gate_reasons,
 )
@@ -135,6 +136,40 @@ def test_compute_project_metrics_respects_skip_flags() -> None:
     assert dead_items == ()
     assert project_metrics.dependency_modules == 0
     assert project_metrics.dead_code == ()
+
+
+def test_build_metrics_report_payload_includes_suppressed_dead_code_items() -> None:
+    payload = build_metrics_report_payload(
+        project_metrics=_project_metrics(dead_confidence="high"),
+        units=(),
+        class_metrics=(),
+        suppressed_dead_code=(
+            DeadItem(
+                qualname="pkg.mod:suppressed_dead",
+                filepath="pkg/mod.py",
+                start_line=10,
+                end_line=12,
+                kind="function",
+                confidence="high",
+            ),
+        ),
+    )
+    dead_code = payload["dead_code"]
+    assert isinstance(dead_code, dict)
+    summary = dead_code["summary"]
+    assert summary == {"total": 1, "critical": 1, "high_confidence": 1, "suppressed": 1}
+    suppressed_items = dead_code["suppressed_items"]
+    assert suppressed_items == [
+        {
+            "qualname": "pkg.mod:suppressed_dead",
+            "filepath": "pkg/mod.py",
+            "start_line": 10,
+            "end_line": 12,
+            "kind": "function",
+            "confidence": "high",
+            "suppressed_by": [{"rule": "dead-code", "source": "inline_noqa"}],
+        }
+    ]
 
 
 def test_load_cached_metrics_ignores_referenced_names_from_test_files() -> None:

@@ -6,7 +6,7 @@ from __future__ import annotations
 from .cohesion import cohesion_risk, compute_lcom4
 from .complexity import cyclomatic_complexity, nesting_depth, risk_level
 from .coupling import compute_cbo, coupling_risk
-from .dead_code import find_unused
+from .dead_code import find_suppressed_unused, find_unused
 from .dependencies import (
     build_dep_graph,
     build_import_graph,
@@ -27,6 +27,7 @@ __all__ = [
     "coupling_risk",
     "cyclomatic_complexity",
     "find_cycles",
+    "find_suppressed_unused",
     "find_unused",
     "longest_chains",
     "max_depth",

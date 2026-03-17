@@ -1142,7 +1142,56 @@ def test_report_json_dead_code_summary_uses_high_confidence_key() -> None:
         )
     )
     summary = payload["metrics"]["families"]["dead_code"]["summary"]
-    assert summary == {"total": 1, "high_confidence": 1}
+    assert summary == {"total": 1, "high_confidence": 1, "suppressed": 0}
+
+
+def test_report_json_dead_code_suppressed_items_are_reported_separately() -> None:
+    payload = json.loads(
+        to_json_report(
+            {},
+            {},
+            {},
+            {"codeclone_version": "1.4.0", "scan_root": "/root"},
+            metrics={
+                "dead_code": {
+                    "items": [],
+                    "suppressed_items": [
+                        {
+                            "qualname": "pkg.mod:runtime_hook",
+                            "filepath": "/root/pkg/mod.py",
+                            "start_line": 40,
+                            "end_line": 41,
+                            "kind": "function",
+                            "confidence": "high",
+                            "suppressed_by": [
+                                {"rule": "dead-code", "source": "inline_noqa"},
+                                {"rule": "dead-code", "source": "inline_noqa"},
+                            ],
+                        }
+                    ],
+                    "summary": {"suppressed": 1},
+                }
+            },
+        )
+    )
+    dead_code = payload["metrics"]["families"]["dead_code"]
+    assert dead_code["summary"] == {"total": 0, "high_confidence": 0, "suppressed": 1}
+    suppressed_items = dead_code["suppressed_items"]
+    assert suppressed_items == [
+        {
+            "qualname": "pkg.mod:runtime_hook",
+            "relative_path": "pkg/mod.py",
+            "start_line": 40,
+            "end_line": 41,
+            "kind": "function",
+            "confidence": "high",
+            "suppressed_by": [{"rule": "dead-code", "source": "inline_noqa"}],
+            "suppression_rule": "dead-code",
+            "suppression_source": "inline_noqa",
+        }
+    ]
+    assert payload["findings"]["groups"]["dead_code"]["groups"] == []
+    assert payload["findings"]["summary"]["suppressed"] == {"dead_code": 1}
 
 
 def test_report_json_integrity_ignores_runtime_report_timestamp() -> None:
@@ -2048,6 +2097,48 @@ def test_report_serialize_helpers_and_text_metrics_section() -> None:
     )
     assert "METRICS SUMMARY" in text_report
     assert "health: score=90" in text_report
+
+
+def test_text_and_markdown_report_include_suppressed_dead_code_sections() -> None:
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/root"},
+        metrics={
+            "dead_code": {
+                "items": [],
+                "suppressed_items": [
+                    {
+                        "qualname": "pkg.mod:runtime_hook",
+                        "filepath": "/root/pkg/mod.py",
+                        "start_line": 5,
+                        "end_line": 6,
+                        "kind": "function",
+                        "confidence": "high",
+                        "suppressed_by": [
+                            {"rule": "dead-code", "source": "inline_noqa"}
+                        ],
+                    }
+                ],
+                "summary": {"suppressed": 1},
+            }
+        },
+    )
+    text = render_text_report_document(payload)
+    assert "dead_code: total=0 high_confidence=0 suppressed=1" in text
+    assert "SUPPRESSED DEAD CODE (items=1)" in text
+    assert "suppressed_by=dead-code@inline_noqa" in text
+
+    markdown = to_markdown_report(
+        report_document=payload,
+        meta={},
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    assert '<a id="dead-code-suppressed"></a>' in markdown
+    assert "suppression_rule=dead-code" in markdown
 
 
 # ---------------------------------------------------------------------------

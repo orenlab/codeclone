@@ -283,6 +283,50 @@ def _append_single_item_findings(
         lines.pop()
 
 
+def _suppression_bindings_text(item: Mapping[str, object]) -> str:
+    bindings = [
+        _as_mapping(binding)
+        for binding in _as_sequence(item.get("suppressed_by"))
+        if isinstance(binding, Mapping)
+    ]
+    if bindings:
+        parts = []
+        for binding in bindings:
+            rule = str(binding.get("rule", "")).strip() or "unknown"
+            source = str(binding.get("source", "")).strip() or "unknown"
+            parts.append(f"{rule}@{source}")
+        return ",".join(parts)
+    rule = str(item.get("suppression_rule", "")).strip()
+    source = str(item.get("suppression_source", "")).strip()
+    if rule or source:
+        return f"{rule or 'unknown'}@{source or 'unknown'}"
+    return "(none)"
+
+
+def _append_suppressed_dead_code_items(
+    lines: list[str],
+    *,
+    items: Sequence[object],
+) -> None:
+    suppressed_items = [_as_mapping(item) for item in items]
+    lines.append(f"SUPPRESSED DEAD CODE (items={len(suppressed_items)})")
+    if not suppressed_items:
+        lines.append("(none)")
+        return
+    for idx, item in enumerate(suppressed_items, start=1):
+        lines.append(f"=== Suppressed dead-code item #{idx} ===")
+        lines.append(
+            "kind="
+            f"{format_meta_text_value(item.get('kind'))} "
+            f"confidence={format_meta_text_value(item.get('confidence'))} "
+            f"suppressed_by={_suppression_bindings_text(item)}"
+        )
+        lines.append(_location_line(item))
+        lines.append("")
+    if lines[-1] == "":
+        lines.pop()
+
+
 def _flatten_findings(findings: Mapping[str, object]) -> list[Mapping[str, object]]:
     groups = _as_mapping(findings.get("groups"))
     clone_groups = _as_mapping(groups.get("clones"))
@@ -435,8 +479,10 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
     findings_severity = _as_mapping(findings_summary.get("severity"))
     findings_impact_scope = _as_mapping(findings_summary.get("impact_scope"))
     findings_clones = _as_mapping(findings_summary.get("clones"))
+    findings_suppressed = _as_mapping(findings_summary.get("suppressed"))
     metrics_payload = _as_mapping(payload.get("metrics"))
     metrics_summary = _as_mapping(metrics_payload.get("summary"))
+    metrics_families = _as_mapping(metrics_payload.get("families"))
     derived = _as_mapping(payload.get("derived"))
     overview = _as_mapping(derived.get("overview"))
     hotlists = _as_mapping(derived.get("hotlists"))
@@ -550,6 +596,11 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
                 findings_clones,
                 ("functions", "blocks", "segments", "new", "known"),
             ),
+            "Suppressed: "
+            + _format_key_values(
+                findings_suppressed,
+                ("dead_code",),
+            ),
             "",
             "METRICS SUMMARY",
         ]
@@ -571,7 +622,7 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         elif family_name == "dependencies":
             keys = ("modules", "edges", "cycles", "max_depth")
         elif family_name == "dead_code":
-            keys = ("total", "high_confidence")
+            keys = ("total", "high_confidence", "suppressed")
         else:
             keys = ("score", "grade")
         lines.append(f"{family_name}: {_format_key_values(family_summary, keys)}")
@@ -643,6 +694,12 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
             _as_mapping(findings_groups.get("dead_code")).get("groups")
         ),
         fact_keys=("kind", "confidence"),
+    )
+    lines.append("")
+    dead_code_family = _as_mapping(metrics_families.get("dead_code"))
+    _append_suppressed_dead_code_items(
+        lines,
+        items=_as_sequence(dead_code_family.get("suppressed_items")),
     )
     lines.append("")
     _append_single_item_findings(

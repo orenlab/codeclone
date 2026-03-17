@@ -561,6 +561,80 @@ def test_pipeline_coerce_segment_projection_invalid_shapes() -> None:
     )
 
 
+def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
+    boot = pipeline.BootstrapResult(
+        root=Path("."),
+        config=NormalizationConfig(),
+        args=Namespace(
+            skip_metrics=False,
+            skip_dependencies=True,
+            skip_dead_code=False,
+            min_loc=1,
+            min_stmt=1,
+            processes=1,
+        ),
+        output_paths=pipeline.OutputPaths(),
+        cache_path=Path("cache.json"),
+    )
+    discovery = pipeline.DiscoveryResult(
+        files_found=1,
+        cache_hits=0,
+        files_skipped=0,
+        all_file_paths=("pkg/mod.py",),
+        cached_units=(),
+        cached_blocks=(),
+        cached_segments=(),
+        cached_class_metrics=(),
+        cached_module_deps=(),
+        cached_dead_candidates=(),
+        cached_referenced_names=frozenset(),
+        files_to_process=(),
+        skipped_warnings=(),
+    )
+    processing = pipeline.ProcessingResult(
+        units=(),
+        blocks=(),
+        segments=(),
+        class_metrics=(),
+        module_deps=(),
+        dead_candidates=(
+            DeadCandidate(
+                qualname="pkg.mod:runtime_hook",
+                local_name="runtime_hook",
+                filepath="pkg/mod.py",
+                start_line=10,
+                end_line=11,
+                kind="function",
+                suppressed_rules=("dead-code",),
+            ),
+        ),
+        referenced_names=frozenset(),
+        files_analyzed=1,
+        files_skipped=0,
+        analyzed_lines=1,
+        analyzed_functions=1,
+        analyzed_methods=0,
+        analyzed_classes=0,
+        failed_files=(),
+        source_read_failures=(),
+    )
+
+    result = pipeline.analyze(boot=boot, discovery=discovery, processing=processing)
+    assert result.project_metrics is not None
+    assert result.project_metrics.dead_code == ()
+    assert result.suppressed_dead_code_items == 1
+    assert result.metrics_payload is not None
+    dead_summary = cast(dict[str, object], result.metrics_payload["dead_code"])[
+        "summary"
+    ]
+    assert dead_summary == {
+        "total": 0,
+        "critical": 0,
+        "high_confidence": 0,
+        "suppressed": 1,
+    }
+
+
 def test_pipeline_decode_cached_structural_group() -> None:
     decoded = pipeline._decode_cached_structural_finding_group(
         {

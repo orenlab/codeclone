@@ -50,6 +50,11 @@ Refs:
 - A symbol referenced only by qualified-name suffix (without canonical module
   match) downgrades confidence to `medium`.
 - `--fail-dead-code` gate counts only high-confidence dead-code items.
+- Suppressed dead-code candidates are excluded from active dead-code findings
+  and from health-score dead-code penalties.
+- Suppressed dead-code candidates are surfaced separately in report metrics
+  (`dead_code.summary.suppressed`, `dead_code.suppressed_items`) and in the
+  HTML dead-code split view (`Active` / `Suppressed`).
 
 Refs:
 

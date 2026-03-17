@@ -1075,6 +1075,7 @@ def _main_impl() -> None:
                 dead_code_count=len(pm.dead_code),
                 health_total=pm.health.total,
                 health_grade=pm.health.grade,
+                suppressed_dead_code_count=analysis_result.suppressed_dead_code_items,
             ),
         )
 

@@ -112,7 +112,7 @@ def _top_risks(
     if isinstance(dead_code_map, Mapping):
         summary = dead_code_map.get("summary")
         if isinstance(summary, Mapping):
-            high_conf = int(summary.get("critical", 0))
+            high_conf = int(summary.get("high_confidence", summary.get("critical", 0)))
             if high_conf > 0:
                 noun = "item" if high_conf == 1 else "items"
                 risks.append(f"{high_conf} dead code {noun}")

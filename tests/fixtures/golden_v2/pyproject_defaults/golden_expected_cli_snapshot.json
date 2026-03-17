@@ -32,6 +32,9 @@
       "segments": 0,
       "new": 1,
       "known": 0
+    },
+    "suppressed": {
+      "dead_code": 0
     }
   },
   "function_group_ids": [

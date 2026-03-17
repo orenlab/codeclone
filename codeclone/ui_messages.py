@@ -466,10 +466,13 @@ def fmt_metrics_cycles(count: int) -> str:
     return f"  {'Cycles':<{_L}}[bold red]{count} detected[/bold red]"
 
 
-def fmt_metrics_dead_code(count: int) -> str:
+def fmt_metrics_dead_code(count: int, *, suppressed: int = 0) -> str:
+    suppressed_suffix = (
+        f" [dim]({suppressed} suppressed)[/dim]" if suppressed > 0 else ""
+    )
     if count == 0:
-        return f"  {'Dead code':<{_L}}[green]\u2714 clean[/green]"
-    return f"  {'Dead code':<{_L}}[bold red]{count} found[/bold red]"
+        return f"  {'Dead code':<{_L}}[green]\u2714 clean[/green]{suppressed_suffix}"
+    return f"  {'Dead code':<{_L}}[bold red]{count} found[/bold red]{suppressed_suffix}"
 
 
 def fmt_pipeline_done(elapsed: float) -> str:

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Literal
 
 from ..models import DeadCandidate, DeadItem
@@ -71,6 +72,26 @@ def find_unused(
         )
     )
     return items_sorted
+
+
+def find_suppressed_unused(
+    *,
+    definitions: tuple[DeadCandidate, ...],
+    referenced_names: frozenset[str],
+    referenced_qualnames: frozenset[str] = frozenset(),
+) -> tuple[DeadItem, ...]:
+    suppressed_definitions = tuple(
+        replace(symbol, suppressed_rules=())
+        for symbol in definitions
+        if DEAD_CODE_RULE_ID in symbol.suppressed_rules
+    )
+    if not suppressed_definitions:
+        return ()
+    return find_unused(
+        definitions=suppressed_definitions,
+        referenced_names=referenced_names,
+        referenced_qualnames=referenced_qualnames,
+    )
 
 
 def _is_non_actionable_candidate(symbol: DeadCandidate) -> bool:

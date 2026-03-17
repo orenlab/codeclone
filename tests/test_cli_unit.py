@@ -351,6 +351,13 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
     assert "[bold yellow]3[/bold yellow] seg" in clones
 
     assert "5 detected" in ui.fmt_metrics_cycles(5)
+    dead_with_suppressed = ui.fmt_metrics_dead_code(447, suppressed=9)
+    assert "447 found" in dead_with_suppressed
+    assert "(9 suppressed)" in dead_with_suppressed
+    assert "✔ clean" in ui.fmt_metrics_dead_code(0, suppressed=0)
+    clean_with_suppressed = ui.fmt_metrics_dead_code(0, suppressed=9)
+    assert "✔ clean" in clean_with_suppressed
+    assert "(9 suppressed)" in clean_with_suppressed
 
 
 def test_configure_metrics_mode_rejects_skip_metrics_with_metrics_flags(

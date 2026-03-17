@@ -26,6 +26,7 @@ Summary metrics:
 - structural counters: analyzed lines/functions/methods/classes
 - function/block/segment groups
 - suppressed segment groups
+- dead-code active/suppressed status in metrics line
 - new vs baseline
 
 Refs:

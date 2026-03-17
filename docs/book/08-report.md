@@ -38,6 +38,7 @@ Finding families:
 - `findings.groups.structural.groups`
 - `findings.groups.dead_code.groups`
 - `findings.groups.design.groups`
+- `findings.summary.suppressed.dead_code` (suppressed counter, non-active findings)
 
 Structural finding kinds currently emitted by core/report pipeline:
 
@@ -65,6 +66,9 @@ Per-group common axes (family-specific fields may extend):
 - `clone_type` and `novelty` are group-level properties inside clone groups.
 - Cohort-drift structural families are report-only and must not affect baseline diff
   or CI gating decisions.
+- Dead-code suppressed candidates are carried only under metrics
+  (`metrics.families.dead_code.suppressed_items`) and never promoted to
+  active `findings.groups.dead_code`.
 
 ## Invariants (MUST)
 

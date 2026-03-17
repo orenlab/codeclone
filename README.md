@@ -90,6 +90,7 @@ Use local declaration-level suppressions when a finding is accepted by design
 def handle_exception(exc: Exception) -> None:
     ...
 
+
 class Middleware:  # noqa: codeclone[dead-code]
     ...
 ```
@@ -100,6 +101,10 @@ Rules:
 - supports previous-line and end-of-line forms on declaration lines
 - requires explicit rule list: `codeclone[...]`
 - does not provide file-level/global ignores
+- suppressed dead-code candidates are excluded from active findings/health and
+  reported separately in JSON/TXT/Markdown/HTML
+- CLI metrics line shows suppression context, for example:
+  `Dead code   ✔ clean (9 suppressed)`
 
 ### Pre-commit
 
@@ -289,7 +294,7 @@ Architecture: [`docs/architecture.md`](docs/architecture.md) · CFG semantics: [
 | Docker benchmark contract  | [`docs/book/18-benchmarking.md`](docs/book/18-benchmarking.md)                           |
 | Determinism                | [`docs/book/12-determinism.md`](docs/book/12-determinism.md)                             |
 
-##   * Benchmarking
+##    * Benchmarking
 
 <details>
 <summary>Reproducible Docker Benchmark</summary>

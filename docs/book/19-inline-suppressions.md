@@ -37,6 +37,8 @@ Refs:
 - Suppression is target-scoped:
   class-level suppression does not implicitly suppress unrelated methods.
 - Dead-code suppression is applied in final liveness filtering by rule id.
+- Suppressed dead-code candidates are reported separately (not as active
+  findings) with deterministic suppression metadata in report metrics.
 
 ## Invariants (MUST)
 
@@ -62,6 +64,8 @@ Refs:
 - Binding is deterministic by declaration line and target identity.
 - Candidate-level `suppressed_rules` are canonicalized and sorted in cache
   payloads.
+- Report-level suppressed dead-code payloads are deterministically sorted and
+  do not alter active finding IDs/order.
 
 Refs:
 
@@ -80,6 +84,7 @@ Refs:
 - `tests/test_extractor.py::test_dead_code_applies_noqa_suppression_per_declaration`
 - `tests/test_extractor.py::test_dead_code_noqa_binding_is_scoped_to_target_symbol`
 - `tests/test_metrics_modules.py::test_find_unused_applies_inline_noqa_dead_code_suppression`
+- `tests/test_metrics_modules.py::test_find_suppressed_unused_returns_actionable_suppressed_candidates`
 
 ## Non-guarantees
 

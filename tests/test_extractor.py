@@ -428,6 +428,110 @@ def test_collect_module_facts_edge_branches() -> None:
     assert lambda_referenced_names == frozenset({"x"})
 
 
+def test_collect_module_facts_without_referenced_name_collection() -> None:
+    tree = ast.parse(
+        """
+import os as operating_system
+from .pkg import utils
+from .... import parent
+""".strip()
+    )
+    import_names, deps, referenced_names = extractor._collect_module_facts(
+        tree=tree,
+        module_name="root.mod.sub",
+        collect_referenced_names=False,
+    )
+    assert import_names == frozenset({"operating_system", "root"})
+    assert deps == (
+        ModuleDep(
+            source="root.mod.sub",
+            target="os",
+            import_type="import",
+            line=1,
+        ),
+        ModuleDep(
+            source="root.mod.sub",
+            target="root.mod.pkg",
+            import_type="from_import",
+            line=2,
+        ),
+    )
+    assert referenced_names == frozenset()
+
+
+def test_dotted_expr_protocol_detection_and_runtime_candidate_edges() -> None:
+    dotted_expr = ast.parse("pkg.helpers.decorate", mode="eval").body
+    assert extractor._dotted_expr_name(dotted_expr) == "pkg.helpers.decorate"
+    assert extractor._dotted_expr_name(ast.parse("custom()", mode="eval").body) is None
+
+    tree = ast.parse(
+        """
+import typing_extensions as te
+
+class A(te.Protocol):
+    pass
+
+class B(te.Protocol[int]):
+    pass
+""".strip()
+    )
+    protocol_symbol_aliases, protocol_module_aliases = (
+        extractor._collect_protocol_aliases(tree)
+    )
+    assert "te" in protocol_module_aliases
+    classes = [node for node in tree.body if isinstance(node, ast.ClassDef)]
+    class_a, class_b = classes
+    assert extractor._is_protocol_class(
+        class_a,
+        protocol_symbol_aliases=protocol_symbol_aliases,
+        protocol_module_aliases=protocol_module_aliases,
+    )
+    assert not extractor._is_protocol_class(
+        class_b,
+        protocol_symbol_aliases=protocol_symbol_aliases,
+        protocol_module_aliases=protocol_module_aliases,
+    )
+
+    runtime_candidate = ast.parse(
+        """
+@trace()
+@custom
+@overload
+def f(x):
+    return x
+""".strip()
+    ).body[0]
+    assert isinstance(runtime_candidate, ast.FunctionDef)
+    assert extractor._is_non_runtime_candidate(runtime_candidate)
+
+
+def test_collect_referenced_qualnames_edge_cases() -> None:
+    src = """
+from .... import hidden
+from pkg.runtime import *
+import pkg.helpers as helpers
+
+class Service:
+    def hook(self) -> int:
+        return 1
+
+value = helpers.tools.decorate(1)
+handler = Service.hook
+"""
+    tree = ast.parse(src)
+    collector = extractor._QualnameCollector()
+    collector.visit(tree)
+    referenced = extractor._collect_referenced_qualnames(
+        tree=tree,
+        module_name="pkg.mod",
+        collector=collector,
+        collect_referenced_names=True,
+    )
+    assert "pkg.mod:Service.hook" in referenced
+    assert "pkg.helpers:tools" in referenced
+    assert "pkg.helpers:decorate" not in referenced
+
+
 def test_extract_stats_drops_referenced_names_for_test_filepaths() -> None:
     src = """
 from pkg.mod import live

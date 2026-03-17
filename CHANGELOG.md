@@ -124,6 +124,10 @@ ahead of the final `2.0.0` release.
     - suppression is target-scoped (does not cascade to unrelated symbols)
 - Added deterministic suppression parser/binder (`codeclone/suppressions.py`) and integrated suppression metadata into
   dead-code candidate processing and cache payloads (backward-compatible decode for legacy cache rows).
+- Surfaced suppressed dead-code candidates across reports/UI without schema-version bump:
+    - `dead_code.summary.suppressed` and `dead_code.suppressed_items` in report metrics
+    - dead-code panel split in HTML (`Active` / `Suppressed`) under one `Dead Code` tab
+    - CLI metrics line context, e.g. `Dead code   ✔ clean (9 suppressed)`
 - Refactored `scanner.iter_py_files` into deterministic helpers without semantic changes, reducing method complexity and
   keeping metrics-gate parity with the baseline.
 

@@ -4744,21 +4744,35 @@ section[data-section="segments"] .group {
   }
 
   function initCloneSubTabs() {
-    const navBtns = Array.from($$$$('[data-clone-tab]'));
-    const panels = Array.from($$$$('[data-clone-panel]'));
-    if (!navBtns.length) return;
+    const allNavButtons = Array.from($$$$('[data-clone-tab][data-subtab-group]'));
+    if (!allNavButtons.length) return;
 
-    navBtns.forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        const tabId = btn.getAttribute('data-clone-tab');
-        navBtns.forEach(function (b) {
-          b.classList.toggle('active', b === btn);
-        });
-        panels.forEach(function (p) {
-          p.classList.toggle(
-            'active',
-            p.getAttribute('data-clone-panel') === tabId
-          );
+    const groupIds = Array.from(
+      new Set(
+        allNavButtons
+          .map((btn) => btn.getAttribute('data-subtab-group') || '')
+          .filter((value) => value)
+      )
+    );
+
+    groupIds.forEach(function (groupId) {
+      const groupSelector = '[data-subtab-group="' + groupId + '"]';
+      const navBtns = Array.from($$$$('[data-clone-tab]' + groupSelector));
+      const panels = Array.from($$$$('[data-clone-panel]' + groupSelector));
+      if (!navBtns.length) return;
+
+      navBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const tabId = btn.getAttribute('data-clone-tab');
+          navBtns.forEach(function (b) {
+            b.classList.toggle('active', b === btn);
+          });
+          panels.forEach(function (p) {
+            p.classList.toggle(
+              'active',
+              p.getAttribute('data-clone-panel') === tabId
+            );
+          });
         });
       });
     });

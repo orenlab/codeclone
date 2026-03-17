@@ -14,6 +14,7 @@ from codeclone.metrics import (
     coupling_risk,
     cyclomatic_complexity,
     find_cycles,
+    find_suppressed_unused,
     find_unused,
     longest_chains,
     max_depth,
@@ -467,6 +468,32 @@ def test_find_unused_applies_inline_noqa_dead_code_suppression() -> None:
     )
     found = find_unused(definitions=(candidate,), referenced_names=frozenset())
     assert found == ()
+
+
+def test_find_suppressed_unused_returns_actionable_suppressed_candidates() -> None:
+    candidate = DeadCandidate(
+        qualname="pkg.mod:runtime_callback",
+        local_name="runtime_callback",
+        filepath="pkg/mod.py",
+        start_line=1,
+        end_line=2,
+        kind="function",
+        suppressed_rules=("dead-code",),
+    )
+    found = find_suppressed_unused(
+        definitions=(candidate,),
+        referenced_names=frozenset(),
+    )
+    assert found == (
+        DeadItem(
+            qualname="pkg.mod:runtime_callback",
+            filepath="pkg/mod.py",
+            start_line=1,
+            end_line=2,
+            kind="function",
+            confidence="high",
+        ),
+    )
 
 
 def test_find_unused_keeps_non_pep562_module_dunders_actionable() -> None:

@@ -22,6 +22,7 @@ class MetricsSnapshot:
     dead_code_count: int
     health_total: int
     health_grade: str
+    suppressed_dead_code_count: int = 0
 
 
 class _Printer(Protocol):
@@ -142,4 +143,9 @@ def _print_metrics(
             ui.fmt_metrics_cohesion(metrics.cohesion_avg, metrics.cohesion_max)
         )
         console.print(ui.fmt_metrics_cycles(metrics.cycles_count))
-        console.print(ui.fmt_metrics_dead_code(metrics.dead_code_count))
+        console.print(
+            ui.fmt_metrics_dead_code(
+                metrics.dead_code_count,
+                suppressed=metrics.suppressed_dead_code_count,
+            )
+        )

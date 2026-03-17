@@ -35,6 +35,7 @@ _ANCHORS: tuple[tuple[str, str, int], ...] = (
     ("cohesion", "Cohesion", 3),
     ("dependencies", "Dependencies", 3),
     ("dead-code-metrics", "Dead Code", 3),
+    ("dead-code-suppressed", "Suppressed Dead Code", 3),
     ("integrity", "Integrity", 2),
 )
 
@@ -462,7 +463,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         (
             "dead-code-metrics",
             "Dead Code",
-            ("total", "high_confidence"),
+            ("total", "high_confidence", "suppressed"),
             ("kind", "confidence"),
         ),
     ):
@@ -480,7 +481,15 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             key_order=item_keys,
         )
 
+    dead_code_family_payload = _as_mapping(metrics_families.get("dead_code"))
     _append_anchor(lines, *_ANCHORS[17])
+    _append_metric_items(
+        lines,
+        items=_as_sequence(dead_code_family_payload.get("suppressed_items")),
+        key_order=("kind", "confidence", "suppression_rule", "suppression_source"),
+    )
+
+    _append_anchor(lines, *_ANCHORS[18])
     _append_kv_bullets(
         lines,
         (

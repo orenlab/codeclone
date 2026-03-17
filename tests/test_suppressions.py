@@ -57,6 +57,26 @@ def c() -> int:  # noqa: CODECLONE[dead-code]
     )
 
 
+def test_extract_noqa_directives_ignores_empty_invalid_and_unknown_tokens() -> None:
+    source = """
+def a() -> int:  # noqa: codeclone[dead-code, , invalid!, unknown-rule]
+    return 1
+
+def b() -> int:  # noqa: codeclone[unknown-rule]
+    return 2
+""".strip()
+    directives = extract_noqa_directives(source)
+    assert directives == (
+        NoqaDirective(line=1, binding="inline", rules=("dead-code",)),
+    )
+
+
+def test_extract_noqa_directives_returns_empty_on_tokenize_error() -> None:
+    # Unclosed triple quote triggers tokenize.TokenError and must be ignored safely.
+    source = '"""\n# noqa: codeclone[dead-code]\n'
+    assert extract_noqa_directives(source) == ()
+
+
 def test_bind_suppressions_applies_only_to_adjacent_declaration_line() -> None:
     source = """
 # noqa: codeclone[dead-code]

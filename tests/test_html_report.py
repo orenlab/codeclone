@@ -1213,7 +1213,21 @@ def _metrics_payload(
     dep_max_depth: object,
     dead_total: object,
     dead_critical: object,
+    dead_suppressed: object = 0,
 ) -> dict[str, object]:
+    suppressed_items: list[dict[str, object]] = []
+    if isinstance(dead_suppressed, int) and dead_suppressed > 0:
+        suppressed_items = [
+            {
+                "qualname": "pkg.mod:suppressed_unused",
+                "filepath": "/outside/project/pkg/mod.py",
+                "start_line": 70,
+                "end_line": 71,
+                "kind": "function",
+                "confidence": "high",
+                "suppressed_by": [{"rule": "dead-code", "source": "inline_noqa"}],
+            }
+        ]
     return {
         "complexity": {
             "functions": [
@@ -1319,7 +1333,12 @@ def _metrics_payload(
                     "confidence": "high",
                 }
             ],
-            "summary": {"total": dead_total, "critical": dead_critical},
+            "suppressed_items": suppressed_items,
+            "summary": {
+                "total": dead_total,
+                "critical": dead_critical,
+                "suppressed": dead_suppressed,
+            },
         },
         "health": {
             "score": health_score,
@@ -1377,7 +1396,7 @@ def test_html_report_metrics_risk_branches() -> None:
     assert "insight-risk" in html
     assert 'stroke="var(--error)"' in html
     assert "Cycles: 1; max dependency depth: 4." in html
-    assert "5 candidates total; 2 high-confidence items." in html
+    assert "5 candidates total; 2 high-confidence items; 0 suppressed." in html
     assert 'Dead Code<span class="tab-count">2</span>' in html
 
 
@@ -1401,7 +1420,9 @@ def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
         ),
     )
     assert "metrics were skipped for this run" not in html
-    assert "clone groups; 2 dead-code items; 0 dependency cycles." in html
+    assert (
+        "clone groups; 2 dead-code items (0 suppressed); 0 dependency cycles." in html
+    )
     assert "High Complexity" in html
     assert "avg 2.5" in html
 
@@ -1426,7 +1447,7 @@ def test_html_report_metrics_bad_health_score_and_dead_code_ok_tone() -> None:
         ),
     )
     assert "Health 0/100 (n/a);" in html
-    assert "0 candidates total; 0 high-confidence items." in html
+    assert "0 candidates total; 0 high-confidence items; 0 suppressed." in html
     assert "insight-ok" in html
 
 
@@ -1461,6 +1482,35 @@ def test_html_report_metrics_bool_health_score_and_long_dependency_labels() -> N
         metrics=payload,
     )
     assert "really_l..e_target" in html
+
+
+def test_html_report_renders_dead_code_split_with_suppressed_layer() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=_metrics_payload(
+            health_score=90,
+            health_grade="A",
+            complexity_max=1,
+            complexity_high_risk=0,
+            coupling_high_risk=0,
+            cohesion_low=0,
+            dep_cycles=[],
+            dep_max_depth=0,
+            dead_total=0,
+            dead_critical=0,
+            dead_suppressed=9,
+        ),
+    )
+    assert "0 candidates total; 0 high-confidence items; 9 suppressed." in html
+    assert 'data-subtab-group="dead-code"' in html
+    assert 'data-clone-tab="active" data-subtab-group="dead-code"' in html
+    assert 'data-clone-tab="suppressed" data-subtab-group="dead-code"' in html
+    assert 'Suppressed <span class="tab-count">9</span>' in html
+    assert "inline_noqa" in html
+    assert "dead-code" in html
 
 
 def test_html_report_metrics_object_health_score_uses_float_fallback() -> None:

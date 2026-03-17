@@ -338,6 +338,11 @@ def _collect_paths_from_metrics(metrics: Mapping[str, object]) -> set[str]:
         filepath = _optional_str(item_map.get("filepath"))
         if filepath is not None:
             paths.add(filepath)
+    for item in _as_sequence(dead_code.get("suppressed_items")):
+        item_map = _as_mapping(item)
+        filepath = _optional_str(item_map.get("filepath"))
+        if filepath is not None:
+            paths.add(filepath)
     return paths
 
 
@@ -520,6 +525,29 @@ def _normalize_metrics_families(
     longest_chains = _normalize_nested_string_rows(dependencies.get("longest_chains"))
 
     dead_code = _as_mapping(metrics_map.get("dead_code"))
+
+    def _normalize_suppressed_by(
+        raw_bindings: object,
+    ) -> list[dict[str, str]]:
+        normalized_bindings = sorted(
+            {
+                (
+                    str(binding_map.get("rule", "")).strip(),
+                    str(binding_map.get("source", "")).strip(),
+                )
+                for binding in _as_sequence(raw_bindings)
+                for binding_map in (_as_mapping(binding),)
+                if str(binding_map.get("rule", "")).strip()
+            },
+            key=lambda item: (item[0], item[1]),
+        )
+        if not normalized_bindings:
+            return []
+        return [
+            {"rule": rule, "source": source or "inline_noqa"}
+            for rule, source in normalized_bindings
+        ]
+
     dead_items = sorted(
         (
             {
@@ -545,6 +573,47 @@ def _normalize_metrics_families(
             item["kind"],
         ),
     )
+    dead_suppressed_items = sorted(
+        (
+            {
+                "qualname": str(item_map.get("qualname", "")),
+                "relative_path": _contract_path(
+                    item_map.get("filepath", ""),
+                    scan_root=scan_root,
+                )[0]
+                or "",
+                "start_line": _as_int(item_map.get("start_line")),
+                "end_line": _as_int(item_map.get("end_line")),
+                "kind": str(item_map.get("kind", "")),
+                "confidence": str(item_map.get("confidence", "medium")),
+                "suppressed_by": _normalize_suppressed_by(
+                    item_map.get("suppressed_by")
+                ),
+            }
+            for item in _as_sequence(dead_code.get("suppressed_items"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: (
+            item["relative_path"],
+            item["start_line"],
+            item["end_line"],
+            item["qualname"],
+            item["kind"],
+            item["confidence"],
+            tuple(
+                (
+                    str(_as_mapping(binding).get("rule", "")),
+                    str(_as_mapping(binding).get("source", "")),
+                )
+                for binding in _as_sequence(item.get("suppressed_by"))
+            ),
+        ),
+    )
+    for item in dead_suppressed_items:
+        suppressed_by = _as_sequence(item.get("suppressed_by"))
+        first_binding = _as_mapping(suppressed_by[0]) if suppressed_by else {}
+        item["suppression_rule"] = str(first_binding.get("rule", ""))
+        item["suppression_source"] = str(first_binding.get("source", ""))
 
     health = _as_mapping(metrics_map.get("health"))
     health_dimensions = {
@@ -614,8 +683,11 @@ def _normalize_metrics_families(
                         "high_confidence", dead_code_summary.get("critical")
                     )
                 ),
+                "suppressed": len(dead_suppressed_items)
+                or _as_int(dead_code_summary.get("suppressed")),
             },
             "items": dead_items,
+            "suppressed_items": dead_suppressed_items,
             "items_truncated": False,
         },
         "health": {
@@ -1484,6 +1556,7 @@ def _findings_summary(
     structural_groups: Sequence[Mapping[str, object]],
     dead_code_groups: Sequence[Mapping[str, object]],
     design_groups: Sequence[Mapping[str, object]],
+    dead_code_suppressed: int = 0,
 ) -> dict[str, object]:
     flat_groups = [
         *clone_functions,
@@ -1525,6 +1598,9 @@ def _findings_summary(
             "known": sum(
                 1 for group in clone_groups if str(group.get("novelty", "")) == "known"
             ),
+        },
+        "suppressed": {
+            "dead_code": max(0, dead_code_suppressed),
         },
     }
 
@@ -1920,6 +1996,16 @@ def _build_findings_payload(
         metrics_payload,
         scan_root=scan_root,
     )
+    dead_code_family = _as_mapping(
+        _as_mapping(metrics_payload.get("families")).get("dead_code")
+    )
+    dead_code_summary = _as_mapping(dead_code_family.get("summary"))
+    dead_code_suppressed = _as_int(
+        dead_code_summary.get(
+            "suppressed",
+            len(_as_sequence(dead_code_family.get("suppressed_items"))),
+        )
+    )
     design_groups = _build_design_groups(
         metrics_payload,
         scan_root=scan_root,
@@ -1932,6 +2018,7 @@ def _build_findings_payload(
             structural_groups=structural_groups,
             dead_code_groups=dead_code_groups,
             design_groups=design_groups,
+            dead_code_suppressed=dead_code_suppressed,
         ),
         "groups": {
             "clones": {

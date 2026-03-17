@@ -826,6 +826,51 @@ def build_html_report(
     def _tab_badge(value: int) -> str:
         return f'<span class="tab-count">{value}</span>'
 
+    def _render_split_tabs(
+        *,
+        group_id: str,
+        tabs: Sequence[tuple[str, str, int, str]],
+        emit_clone_counters: bool = False,
+    ) -> str:
+        if not tabs:
+            return ""
+
+        nav_parts = [
+            '<nav class="clone-nav" role="tablist" '
+            f'data-subtab-group="{_escape_attr(group_id)}">'
+        ]
+        for tab_index, (tab_id, tab_label, tab_count, _) in enumerate(tabs):
+            active_cls = " active" if tab_index == 0 else ""
+            badge = (
+                f'<span class="tab-count" data-clone-tab-count="{tab_id}" '
+                f'data-total-groups="{tab_count}">{tab_count}</span>'
+                if emit_clone_counters
+                else f'<span class="tab-count">{tab_count}</span>'
+            )
+            nav_parts.append(
+                f'<button class="clone-nav-btn{active_cls}" '
+                f'data-clone-tab="{tab_id}" '
+                f'data-subtab-group="{_escape_attr(group_id)}" '
+                'type="button">'
+                f"{_escape_html(tab_label)} "
+                f"{badge}"
+                "</button>"
+            )
+        nav_parts.append("</nav>")
+        nav_html = "".join(nav_parts)
+
+        panel_parts: list[str] = []
+        for tab_index, (tab_id, _, _, panel_html) in enumerate(tabs):
+            active_cls = " active" if tab_index == 0 else ""
+            panel_parts.append(
+                f'<div class="clone-panel{active_cls}" '
+                f'data-clone-panel="{tab_id}" '
+                f'data-subtab-group="{_escape_attr(group_id)}">'
+                f"{panel_html}"
+                "</div>"
+            )
+        return f"{nav_html}{''.join(panel_parts)}"
+
     def _build_clone_sections() -> tuple[
         str,
         str,
@@ -936,32 +981,15 @@ def build_html_report(
             )
 
         if clone_sub_tabs:
-            nav_parts = ['<nav class="clone-nav" role="tablist">']
-            for tab_index, (tab_id, tab_label, tab_count, _) in enumerate(
-                clone_sub_tabs
-            ):
-                active_cls = " active" if tab_index == 0 else ""
-                nav_parts.append(
-                    f'<button class="clone-nav-btn{active_cls}" '
-                    f'data-clone-tab="{tab_id}" type="button">'
-                    f"{_escape_html(tab_label)} "
-                    f'<span class="tab-count" data-clone-tab-count="{tab_id}" '
-                    f'data-total-groups="{tab_count}">{tab_count}</span>'
-                    f"</button>"
-                )
-            nav_parts.append("</nav>")
-            clone_nav_html = "".join(nav_parts)
-
-            panel_parts: list[str] = []
-            for tab_index, (tab_id, _, _, panel_html) in enumerate(clone_sub_tabs):
-                active_cls = " active" if tab_index == 0 else ""
-                panel_parts.append(
-                    f'<div class="clone-panel{active_cls}" '
-                    f'data-clone-panel="{tab_id}">{panel_html}</div>'
-                )
-            clone_panels_html = "".join(panel_parts)
             clones_panel_html_local = (
-                f"{global_novelty_html_local}{clone_nav_html}{clone_panels_html}"
+                f"{global_novelty_html_local}"
+                f"{
+                    _render_split_tabs(
+                        group_id='clones',
+                        tabs=clone_sub_tabs,
+                        emit_clone_counters=True,
+                    )
+                }"
             )
         else:
             clones_panel_html_local = empty_state_html_local
@@ -1318,19 +1346,35 @@ def build_html_report(
     ]
 
     dead_items_data = _as_sequence(dead_code_map.get("items"))
-    dead_rows = [
-        (
+    dead_suppressed_items_data = _as_sequence(dead_code_map.get("suppressed_items"))
+
+    def _dead_item_row(
+        item: Mapping[str, object],
+    ) -> tuple[str, str, str, str, str]:
+        return (
             _bare_qualname(
-                str(_as_mapping(item).get("qualname", "")),
-                str(_as_mapping(item).get("filepath", "")),
+                str(item.get("qualname", "")),
+                str(item.get("filepath", "")),
             ),
-            str(_as_mapping(item).get("filepath", "")),
-            str(_as_mapping(item).get("start_line", "")),
-            str(_as_mapping(item).get("kind", "")),
-            str(_as_mapping(item).get("confidence", "")),
+            str(item.get("filepath", "")),
+            str(item.get("start_line", "")),
+            str(item.get("kind", "")),
+            str(item.get("confidence", "")),
         )
-        for item in dead_items_data[:200]
-    ]
+
+    dead_rows = [_dead_item_row(_as_mapping(item)) for item in dead_items_data[:200]]
+    dead_suppressed_rows: list[tuple[str, str, str, str, str, str, str]] = []
+    for item in dead_suppressed_items_data[:200]:
+        item_map = _as_mapping(item)
+        suppressed_by = _as_sequence(item_map.get("suppressed_by"))
+        first_binding = _as_mapping(suppressed_by[0]) if suppressed_by else {}
+        dead_suppressed_rows.append(
+            (
+                *_dead_item_row(item_map),
+                str(first_binding.get("rule", "")),
+                str(first_binding.get("source", "")),
+            )
+        )
     dead_high_confidence_items = sum(
         1
         for item in dead_items_data
@@ -1393,6 +1437,9 @@ def build_html_report(
     dead_summary_high_confidence = _as_int(
         dead_code_summary.get("high_confidence", dead_code_summary.get("critical"))
     )
+    dead_suppressed_total = _as_int(
+        dead_code_summary.get("suppressed", len(dead_suppressed_rows))
+    )
     dead_high_confidence = dead_summary_high_confidence
     if dead_total > 0 and dead_high_confidence == 0 and dead_high_confidence_items > 0:
         dead_high_confidence = min(dead_total, dead_high_confidence_items)
@@ -1409,7 +1456,7 @@ def build_html_report(
             answer = (
                 f"Health {health_score:.0f}/100 ({health_grade}); "
                 f"{clone_groups_total} clone groups; "
-                f"{dead_total} dead-code items; "
+                f"{dead_total} dead-code items ({dead_suppressed_total} suppressed); "
                 f"{dependency_cycle_count} dependency cycles."
             )
             if health_score >= 80.0:
@@ -1422,7 +1469,7 @@ def build_html_report(
         if metrics_available:
             answer = (
                 f"{clone_groups_total} clone groups; "
-                f"{dead_total} dead-code items; "
+                f"{dead_total} dead-code items ({dead_suppressed_total} suppressed); "
                 f"{dependency_cycle_count} dependency cycles."
             )
             return answer, "info"
@@ -2156,7 +2203,8 @@ def build_html_report(
             return "Metrics are skipped for this run.", "info"
         answer = (
             f"{dead_total} candidates total; "
-            f"{dead_high_confidence} high-confidence items."
+            f"{dead_high_confidence} high-confidence items; "
+            f"{dead_suppressed_total} suppressed."
         )
         if dead_high_confidence > 0:
             return answer, "risk"
@@ -2166,14 +2214,31 @@ def build_html_report(
 
     dead_code_answer, dead_code_tone = _dead_code_answer_and_tone()
 
+    dead_code_active_panel = _render_rows_table(
+        headers=("Name", "File", "Line", "Kind", "Confidence"),
+        rows=dead_rows,
+        empty_message="No dead code detected.",
+    )
+    dead_code_suppressed_panel = _render_rows_table(
+        headers=("Name", "File", "Line", "Kind", "Confidence", "Rule", "Source"),
+        rows=dead_suppressed_rows,
+        empty_message="No suppressed dead-code candidates.",
+    )
     dead_code_panel = _insight_block(
         question="Do we have actionable unused code?",
         answer=dead_code_answer,
         tone=dead_code_tone,
-    ) + _render_rows_table(
-        headers=("Name", "File", "Line", "Kind", "Confidence"),
-        rows=dead_rows,
-        empty_message="No dead code detected.",
+    ) + _render_split_tabs(
+        group_id="dead-code",
+        tabs=(
+            ("active", "Active", dead_total, dead_code_active_panel),
+            (
+                "suppressed",
+                "Suppressed",
+                dead_suppressed_total,
+                dead_code_suppressed_panel,
+            ),
+        ),
     )
 
     def _suggestion_locations_html(suggestion: Suggestion) -> str:
