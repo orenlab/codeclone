@@ -92,13 +92,17 @@ class ModuleDepDict(TypedDict):
     line: int
 
 
-class DeadCandidateDict(TypedDict):
+class DeadCandidateDictBase(TypedDict):
     qualname: str
     local_name: str
     filepath: str
     start_line: int
     end_line: int
     kind: str
+
+
+class DeadCandidateDict(DeadCandidateDictBase, total=False):
+    suppressed_rules: list[str]
 
 
 class StructuralFindingOccurrenceDict(TypedDict):
@@ -1041,7 +1045,7 @@ def _dead_candidate_dict_from_model(
     candidate: DeadCandidate,
     filepath: str,
 ) -> DeadCandidateDict:
-    return DeadCandidateDict(
+    result = DeadCandidateDict(
         qualname=candidate.qualname,
         local_name=candidate.local_name,
         filepath=filepath,
@@ -1049,6 +1053,9 @@ def _dead_candidate_dict_from_model(
         end_line=candidate.end_line,
         kind=candidate.kind,
     )
+    if candidate.suppressed_rules:
+        result["suppressed_rules"] = sorted(set(candidate.suppressed_rules))
+    return result
 
 
 def _structural_occurrence_dict_from_model(
@@ -1203,14 +1210,32 @@ def _canonicalize_cache_entry(entry: CacheEntry) -> CacheEntry:
             item["line"],
         ),
     )
+    dead_candidates_normalized: list[DeadCandidateDict] = []
+    for candidate in entry["dead_candidates"]:
+        suppressed_rules = candidate.get("suppressed_rules", [])
+        normalized_candidate = DeadCandidateDict(
+            qualname=candidate["qualname"],
+            local_name=candidate["local_name"],
+            filepath=candidate["filepath"],
+            start_line=candidate["start_line"],
+            end_line=candidate["end_line"],
+            kind=candidate["kind"],
+        )
+        if _is_string_list(suppressed_rules):
+            normalized_rules = sorted(set(suppressed_rules))
+            if normalized_rules:
+                normalized_candidate["suppressed_rules"] = normalized_rules
+        dead_candidates_normalized.append(normalized_candidate)
+
     dead_candidates_sorted = sorted(
-        entry["dead_candidates"],
+        dead_candidates_normalized,
         key=lambda item: (
             item["start_line"],
             item["end_line"],
             item["qualname"],
             item["local_name"],
             item["kind"],
+            tuple(item.get("suppressed_rules", [])),
         ),
     )
 
@@ -1803,13 +1828,19 @@ def _decode_wire_dead_candidate(
     filepath: str,
 ) -> DeadCandidateDict | None:
     row = _as_list(value)
-    if row is None or len(row) != 5:
+    if row is None or len(row) not in {5, 6}:
         return None
     qualname = _as_str(row[0])
     local_name = _as_str(row[1])
     start_line = _as_int(row[2])
     end_line = _as_int(row[3])
     kind = _as_str(row[4])
+    suppressed_rules: list[str] | None = []
+    if len(row) == 6:
+        raw_rules = _as_list(row[5])
+        if raw_rules is None or not all(isinstance(rule, str) for rule in raw_rules):
+            return None
+        suppressed_rules = sorted({str(rule) for rule in raw_rules if str(rule)})
     if (
         qualname is None
         or local_name is None
@@ -1818,7 +1849,7 @@ def _decode_wire_dead_candidate(
         or kind is None
     ):
         return None
-    return DeadCandidateDict(
+    decoded = DeadCandidateDict(
         qualname=qualname,
         local_name=local_name,
         filepath=filepath,
@@ -1826,6 +1857,9 @@ def _decode_wire_dead_candidate(
         end_line=end_line,
         kind=kind,
     )
+    if suppressed_rules:
+        decoded["suppressed_rules"] = suppressed_rules
+    return decoded
 
 
 def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
@@ -1980,16 +2014,22 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
     if dead_candidates:
         # Dead candidates are stored inside a per-file cache entry, so the
         # filepath is implicit and does not need to be repeated in every row.
-        wire["dc"] = [
-            [
+        encoded_dead_candidates: list[list[object]] = []
+        for candidate in dead_candidates:
+            encoded = [
                 candidate["qualname"],
                 candidate["local_name"],
                 candidate["start_line"],
                 candidate["end_line"],
                 candidate["kind"],
             ]
-            for candidate in dead_candidates
-        ]
+            suppressed_rules = candidate.get("suppressed_rules", [])
+            if _is_string_list(suppressed_rules):
+                normalized_rules = sorted(set(suppressed_rules))
+                if normalized_rules:
+                    encoded.append(normalized_rules)
+            encoded_dead_candidates.append(encoded)
+        wire["dc"] = encoded_dead_candidates
 
     if entry["referenced_names"]:
         wire["rn"] = sorted(set(entry["referenced_names"]))
@@ -2135,11 +2175,16 @@ def _is_module_dep_dict(value: object) -> bool:
 def _is_dead_candidate_dict(value: object) -> bool:
     if not isinstance(value, dict):
         return False
-    return _has_typed_fields(
+    if not _has_typed_fields(
         value,
         string_keys=("qualname", "local_name", "filepath", "kind"),
         int_keys=("start_line", "end_line"),
-    )
+    ):
+        return False
+    suppressed_rules = value.get("suppressed_rules")
+    if suppressed_rules is None:
+        return True
+    return _is_string_list(suppressed_rules)
 
 
 def _is_string_list(value: object) -> bool:

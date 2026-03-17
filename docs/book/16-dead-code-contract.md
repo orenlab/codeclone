@@ -8,6 +8,7 @@ Define dead-code liveness rules, canonical symbol-usage boundaries, and gating s
 
 - Dead-code detection core: `codeclone/metrics/dead_code.py:find_unused`
 - Test-path classifier: `codeclone/paths.py:is_test_filepath`
+- Inline suppression parser/binder: `codeclone/suppressions.py`
 - Extraction of referenced names/candidates:
   `codeclone/extractor.py:extract_units_and_stats_from_source`
 - Cache load boundary for referenced names:
@@ -37,6 +38,10 @@ Refs:
   dunder methods, `visit_*`, setup/teardown hooks.
 - Module-level PEP 562 hooks are filtered as non-actionable:
   `__getattr__`, `__dir__`.
+- Declaration-level inline suppression is supported with:
+  `# noqa: codeclone[dead-code]` (leading or inline comment form).
+- Suppression is declaration-scoped (`def`, `async def`, `class`) and does not
+  implicitly propagate to unrelated declaration targets.
 - Candidate extraction excludes non-runtime declaration surfaces:
   methods on `Protocol` classes, and callables decorated with
   `@overload` / `@abstractmethod`.
@@ -71,6 +76,7 @@ Refs:
 |----------------------------------------------------|----------------------------------------|
 | Dynamic method pattern (dunder/visitor/setup hook) | Candidate skipped as non-actionable    |
 | Module PEP 562 hook (`__getattr__`/`__dir__`)     | Candidate skipped as non-actionable    |
+| Malformed/unknown `codeclone[...]` rule selector   | Ignored safely                         |
 | Protocol or stub-like declaration surface           | Candidate skipped as non-actionable    |
 | Definition appears only in tests                   | Candidate skipped                      |
 | Symbol used only from tests                        | Remains actionable dead-code candidate |
@@ -92,12 +98,17 @@ Refs:
 
 - `tests/test_extractor.py::test_dead_code_marks_symbol_dead_when_referenced_only_by_tests`
 - `tests/test_extractor.py::test_dead_code_skips_module_pep562_hooks`
+- `tests/test_extractor.py::test_dead_code_applies_noqa_suppression_per_declaration`
+- `tests/test_extractor.py::test_dead_code_noqa_binding_is_scoped_to_target_symbol`
 - `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_import_aliases`
 - `tests/test_extractor.py::test_collect_dead_candidates_skips_protocol_and_stub_like_symbols`
 - `tests/test_pipeline_metrics.py::test_load_cached_metrics_ignores_referenced_names_from_test_files`
 - `tests/test_metrics_modules.py::test_find_unused_filters_non_actionable_and_preserves_ordering`
 - `tests/test_metrics_modules.py::test_find_unused_respects_referenced_qualnames`
 - `tests/test_metrics_modules.py::test_find_unused_keeps_non_pep562_module_dunders_actionable`
+- `tests/test_metrics_modules.py::test_find_unused_applies_inline_noqa_dead_code_suppression`
+- `tests/test_suppressions.py::test_extract_noqa_directives_supports_inline_and_leading_forms`
+- `tests/test_suppressions.py::test_bind_suppressions_applies_only_to_adjacent_declaration_line`
 
 ## Non-guarantees
 

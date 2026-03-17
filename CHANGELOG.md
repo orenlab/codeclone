@@ -118,6 +118,12 @@ ahead of the final `2.0.0` release.
   production symbols used only in tests are still reported as dead-code candidates.
 - Dead-code liveness now uses exact canonical qualname references (including import-alias and module-alias usage)
   before fallback local-name checks, reducing false positives on re-export and alias wiring.
+- Added declaration-scoped inline suppressions for accepted dead-code findings:
+    - `# noqa: codeclone[dead-code]` on `def`, `async def`, or `class`
+    - supports both previous-line and end-of-line forms on declaration lines
+    - suppression is target-scoped (does not cascade to unrelated symbols)
+- Added deterministic suppression parser/binder (`codeclone/suppressions.py`) and integrated suppression metadata into
+  dead-code candidate processing and cache payloads (backward-compatible decode for legacy cache rows).
 - Refactored `scanner.iter_py_files` into deterministic helpers without semantic changes, reducing method complexity and
   keeping metrics-gate parity with the baseline.
 

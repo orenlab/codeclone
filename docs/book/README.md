@@ -43,6 +43,8 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 - [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
 - [16-dead-code-contract.md](16-dead-code-contract.md)
 - [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)
+- [18-benchmarking.md](18-benchmarking.md)
+- [19-inline-suppressions.md](19-inline-suppressions.md)
 
 ### Appendix
 

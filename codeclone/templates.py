@@ -2573,6 +2573,11 @@ html[data-theme="dark"] .prov-badge.amber { background: rgba(251,191,36,0.15); c
   line-height: 1.6;
 }
 
+.muted {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
 .inline-check {
   display: inline-flex;
   align-items: center;
@@ -2926,6 +2931,98 @@ html[data-theme="dark"] .prov-badge.amber { background: rgba(251,191,36,0.15); c
   font-weight: 600;
 }
 
+/* ---- Structural Findings ---- */
+.sf-group {
+  margin-bottom: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-1);
+  overflow: hidden;
+  transition: border-color var(--transition-base);
+}
+
+.sf-group:last-child {
+  margin-bottom: 0;
+}
+
+.sf-group:hover {
+  border-color: color-mix(in oklab, var(--accent-primary) 25%, var(--border-default) 75%);
+}
+
+.sf-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  flex-wrap: wrap;
+  background: color-mix(in oklab, var(--surface-1) 80%, var(--surface-0) 20%);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sf-group-body {
+  padding: 0;
+}
+
+.sf-group-body .table-wrap {
+  border-radius: 0;
+  border: none;
+  border-top: none;
+}
+
+.sf-group-body .table {
+  border-radius: 0;
+}
+
+.sf-occ-count {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.sf-kind-meta {
+  font-weight: 400;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* ---- Suggestions toolbar (two-row layout) ---- */
+.suggestions-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  margin-bottom: 14px;
+  box-shadow: var(--elevation-1);
+}
+
+.suggestions-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.suggestions-toolbar-row--secondary {
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.suggestions-count-label {
+  margin-left: auto;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* ---- Executive Summary 2-col grid ---- */
+.overview-summary-grid--2col {
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+}
+
 /* Pygments token styles */
 ${pyg_dark}
 ${pyg_light}
@@ -3063,6 +3160,29 @@ ${pyg_light}
 
   .cmd-search {
     font-size: 1.35rem;
+  }
+
+  .suggestions-toolbar-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .suggestions-toolbar-row--secondary {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .suggestions-count-label {
+    margin-left: 0;
+  }
+
+  .overview-summary-grid--2col {
+    grid-template-columns: 1fr;
+  }
+
+  .sf-group-head {
+    padding: 10px 12px;
+    gap: 6px;
   }
 }
 

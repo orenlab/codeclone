@@ -42,9 +42,18 @@ from .normalize import (
 )
 from .paths import is_test_filepath
 from .structural_findings import scan_function_structure
+from .suppressions import (
+    DeclarationTarget,
+    bind_suppressions_to_declarations,
+    build_suppression_index,
+    extract_noqa_directives,
+    suppression_target_key,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
+
+    from .suppressions import SuppressionTargetKey
 
 __all__ = [
     "Unit",
@@ -472,6 +481,8 @@ def _collect_dead_candidates(
     protocol_module_aliases: frozenset[str] = frozenset(
         {"typing", "typing_extensions"}
     ),
+    suppression_rules_by_target: Mapping[SuppressionTargetKey, tuple[str, ...]]
+    | None = None,
 ) -> tuple[DeadCandidate, ...]:
     protocol_class_qualnames = {
         class_qualname
@@ -484,6 +495,9 @@ def _collect_dead_candidates(
     }
 
     candidates: list[DeadCandidate] = []
+    suppression_index = (
+        suppression_rules_by_target if suppression_rules_by_target is not None else {}
+    )
     for local_name, node in collector.units:
         start = int(getattr(node, "lineno", 0))
         end = int(getattr(node, "end_lineno", 0))
@@ -506,6 +520,16 @@ def _collect_dead_candidates(
                 start_line=start,
                 end_line=end,
                 kind=kind,
+                suppressed_rules=suppression_index.get(
+                    suppression_target_key(
+                        filepath=filepath,
+                        qualname=f"{module_name}:{local_name}",
+                        start_line=start,
+                        end_line=end,
+                        kind=kind,
+                    ),
+                    (),
+                ),
             )
         )
 
@@ -522,6 +546,16 @@ def _collect_dead_candidates(
                 start_line=start,
                 end_line=end,
                 kind="class",
+                suppressed_rules=suppression_index.get(
+                    suppression_target_key(
+                        filepath=filepath,
+                        qualname=f"{module_name}:{class_qualname}",
+                        start_line=start,
+                        end_line=end,
+                        kind="class",
+                    ),
+                    (),
+                ),
             )
         )
 
@@ -533,6 +567,61 @@ def _collect_dead_candidates(
                 item.start_line,
                 item.end_line,
                 item.qualname,
+            ),
+        )
+    )
+
+
+def _collect_declaration_targets(
+    *,
+    filepath: str,
+    module_name: str,
+    collector: _QualnameCollector,
+) -> tuple[DeclarationTarget, ...]:
+    declarations: list[DeclarationTarget] = []
+
+    for local_name, node in collector.units:
+        start = int(getattr(node, "lineno", 0))
+        end = int(getattr(node, "end_lineno", 0))
+        if start <= 0 or end <= 0:
+            continue
+        kind: Literal["function", "method"] = (
+            "method" if "." in local_name else "function"
+        )
+        declarations.append(
+            DeclarationTarget(
+                filepath=filepath,
+                qualname=f"{module_name}:{local_name}",
+                start_line=start,
+                end_line=end,
+                kind=kind,
+            )
+        )
+
+    for class_qualname, class_node in collector.class_nodes:
+        start = int(getattr(class_node, "lineno", 0))
+        end = int(getattr(class_node, "end_lineno", 0))
+        if start <= 0 or end <= 0:
+            continue
+        declarations.append(
+            DeclarationTarget(
+                filepath=filepath,
+                qualname=f"{module_name}:{class_qualname}",
+                start_line=start,
+                end_line=end,
+                kind="class",
+            )
+        )
+
+    return tuple(
+        sorted(
+            declarations,
+            key=lambda item: (
+                item.filepath,
+                item.start_line,
+                item.end_line,
+                item.qualname,
+                item.kind,
             ),
         )
     )
@@ -582,6 +671,17 @@ def extract_units_and_stats_from_source(
         collector=collector,
         collect_referenced_names=not is_test_file,
     )
+    noqa_directives = extract_noqa_directives(source)
+    declaration_targets = _collect_declaration_targets(
+        filepath=filepath,
+        module_name=module_name,
+        collector=collector,
+    )
+    suppression_bindings = bind_suppressions_to_declarations(
+        directives=noqa_directives,
+        declarations=declaration_targets,
+    )
+    suppression_index = build_suppression_index(suppression_bindings)
     protocol_symbol_aliases, protocol_module_aliases = _collect_protocol_aliases(tree)
     class_names = frozenset(class_node.name for _, class_node in collector.class_nodes)
     module_import_names = set(import_names)
@@ -721,6 +821,7 @@ def extract_units_and_stats_from_source(
         collector=collector,
         protocol_symbol_aliases=protocol_symbol_aliases,
         protocol_module_aliases=protocol_module_aliases,
+        suppression_rules_by_target=suppression_index,
     )
 
     sorted_class_metrics = tuple(

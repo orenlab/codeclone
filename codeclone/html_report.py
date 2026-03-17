@@ -1674,56 +1674,48 @@ def build_html_report(
             + "</div></section>"
         )
 
-    health_overview = _as_mapping(overview_data.get("health"))
+    def _top_risk_label(item: object) -> str:
+        """Extract a human-readable label from a top-risk item."""
+        m = _as_mapping(item)
+        if m:
+            label = str(m.get("label", "")).strip()
+            if label:
+                return label
+            family = str(m.get("family", "")).strip().replace("_", " ")
+            count = _as_int(m.get("count"))
+            scope = str(m.get("scope", "")).strip()
+            if family and count:
+                return f"{count} {family}" + (f" ({scope})" if scope else "")
+            return family or str(item)
+        raw = str(item).strip()
+        # Drop raw Python repr dicts that slipped through
+        if raw.startswith("{") and raw.endswith("}"):
+            return ""
+        return raw
+
     top_risks = [
-        str(item).strip()
+        label
         for item in _as_sequence(overview_data.get("top_risks"))
-        if str(item).strip()
+        if (label := _top_risk_label(item))
     ]
-    strongest_dimension = str(
-        health_overview.get("strongest_dimension", "n/a")
-    ).replace("_", " ")
-    weakest_dimension = str(health_overview.get("weakest_dimension", "n/a")).replace(
-        "_", " "
+    # Executive Summary: Top risks + Source breakdown only.
+    # "Families" and "Health snapshot" are intentionally omitted here —
+    # they duplicate the KPI cards and health gauge already shown above.
+    _top_risks_body = (
+        _overview_summary_list_html(tuple(top_risks))
+        if top_risks
+        else '<div class="overview-summary-value muted">No risks detected.</div>'
     )
-    family_counts = _as_mapping(overview_data.get("families"))
     executive_summary = (
         '<section class="overview-cluster">'
         + _overview_cluster_header(
             "Executive Summary",
             "Project-wide context derived from the full scanned root.",
         )
-        + '<div class="overview-summary-grid">'
-        + _overview_summary_item_html(
-            label="Families",
-            body_html=_overview_summary_list_html(
-                (
-                    f"{_as_int(family_counts.get('clone_groups'))} clone groups",
-                    (
-                        f"{_as_int(family_counts.get('structural_findings'))} "
-                        "structural findings"
-                    ),
-                    f"{_as_int(family_counts.get('dead_code'))} dead code items",
-                    f"{_as_int(family_counts.get('metric_hotspots'))} metric hotspots",
-                )
-            ),
-        )
+        + '<div class="overview-summary-grid overview-summary-grid--2col">'
         + _overview_summary_item_html(
             label="Top risks",
-            body_html=_overview_summary_list_html(tuple(top_risks)),
-        )
-        + _overview_summary_item_html(
-            label="Health snapshot",
-            body_html=_overview_summary_list_html(
-                (
-                    "Score "
-                    f"{_escape_html(str(health_overview.get('score', 'n/a')))}"
-                    " / grade "
-                    f"{_escape_html(str(health_overview.get('grade', 'n/a')))}",
-                    f"Strongest dimension: {strongest_dimension}",
-                    f"Weakest dimension: {weakest_dimension}",
-                )
-            ),
+            body_html=_top_risks_body,
         )
         + _overview_summary_item_html(
             label="Source breakdown",
@@ -2288,7 +2280,6 @@ def build_html_report(
             '<div class="suggestion-section-title">Facts</div>'
             '<dl class="suggestion-fact-list">'
             f"<div><dt>Finding</dt><dd>{facts_title}</dd></div>"
-            f"<div><dt>Summary</dt><dd>{facts_summary}</dd></div>"
             f"<div><dt>Spread</dt><dd>{_escape_html(facts_spread)}</dd></div>"
             f"<div><dt>Source breakdown</dt><dd>{facts_source}</dd></div>"
             f"<div><dt>Representative scope</dt><dd>{facts_location}</dd></div>"
@@ -2351,8 +2342,9 @@ def build_html_report(
         )
         return (
             suggestions_intro
-            + '<div class="toolbar" role="toolbar" aria-label="Suggestion filters">'
-            '<div class="toolbar-left">'
+            + '<div class="toolbar suggestions-toolbar" role="toolbar" '
+            'aria-label="Suggestion filters">'
+            '<div class="suggestions-toolbar-row">'
             '<label class="muted" for="suggestions-severity">Severity:</label>'
             '<select class="select" id="suggestions-severity" '
             "data-suggestions-severity>"
@@ -2381,6 +2373,12 @@ def build_html_report(
             '<option value="structural">structural</option>'
             '<option value="metrics">metrics</option>'
             "</select>"
+            '<label class="inline-check">'
+            '<input type="checkbox" data-suggestions-actionable />'
+            "<span>Only actionable</span>"
+            "</label>"
+            "</div>"
+            '<div class="suggestions-toolbar-row suggestions-toolbar-row--secondary">'
             '<label class="muted" for="suggestions-source-kind">Context:</label>'
             '<select class="select" id="suggestions-source-kind" '
             "data-suggestions-source-kind>"
@@ -2397,13 +2395,7 @@ def build_html_report(
             '<option value="high">high</option>'
             '<option value="low">low</option>'
             "</select>"
-            '<label class="inline-check">'
-            '<input type="checkbox" data-suggestions-actionable />'
-            "<span>Only actionable</span>"
-            "</label>"
-            "</div>"
-            '<div class="toolbar-right">'
-            '<span class="page-meta" data-suggestions-count>'
+            '<span class="suggestions-count-label" data-suggestions-count>'
             f"{len(suggestions_rows)} shown"
             "</span>"
             "</div>"

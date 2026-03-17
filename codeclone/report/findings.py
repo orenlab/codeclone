@@ -51,11 +51,11 @@ def _sort_key_group(g: StructuralFindingGroup) -> tuple[str, int, str]:
     unique_count = len(
         {(item.file_path, item.qualname, item.start, item.end) for item in g.items}
     )
-    return (g.finding_kind, -unique_count, g.finding_key)
+    return g.finding_kind, -unique_count, g.finding_key
 
 
 def _sort_key_item(o: StructuralFindingOccurrence) -> tuple[str, str, int, int]:
-    return (o.file_path, o.qualname, o.start, o.end)
+    return o.file_path, o.qualname, o.start, o.end
 
 
 def _dedupe_items(
@@ -220,13 +220,13 @@ def _finding_reason_list_html(
         )
     if group.finding_kind == "clone_cohort_drift":
         reasons = [
-            (f"{len(items)} clone members diverge from the cohort majority profile."),
-            (f"Drift fields: `{group.signature.get('drift_fields', 'n/a')}`."),
+            f"{len(items)} clone members diverge from the cohort majority profile.",
+            f"Drift fields: `{group.signature.get('drift_fields', 'n/a')}`.",
             (
                 f"Cohort id: `{group.signature.get('cohort_id', 'unknown')}` with "
                 f"arity `{group.signature.get('cohort_arity', 'n/a')}`."
             ),
-            ("Majority profile is compared deterministically with lexical tie-breaks."),
+            "Majority profile is compared deterministically with lexical tie-breaks.",
             "This is a report-only finding and does not affect clone gating.",
         ]
         return (
@@ -520,19 +520,15 @@ def build_structural_findings_html_panel(
             occ_word = "occurrence" if count == 1 else "occurrences"
             func_word = "function" if spread["functions"] == 1 else "functions"
             file_word = "file" if spread["files"] == 1 else "files"
-            _hdr_style = (
-                "display:flex;align-items:center;gap:.5rem;"
-                "margin-bottom:.5rem;flex-wrap:wrap"
-            )
             actionable = "true" if count >= 4 or spread_functions > 1 else "false"
             group_rows.append(
-                '<div style="margin-bottom:1.25rem" '
+                '<div class="sf-group" '
                 'data-sf-group="true" '
                 f'data-source-kind="{_escape_attr(source_kind)}" '
                 f'data-spread-bucket="{_escape_attr(spread_bucket)}" '
                 f'data-actionable="{actionable}">'
-                f'<div style="{_hdr_style}">'
-                f'<span style="font-weight:600;white-space:nowrap">'
+                '<div class="sf-group-head">'
+                f'<span class="sf-occ-count">'
                 f"{count} non-overlapping {occ_word}</span>"
                 f'<button class="btn ghost" type="button" '
                 f'data-finding-why-btn="{_escape_attr(why_template_id)}" '
@@ -543,7 +539,7 @@ def build_structural_findings_html_panel(
                 "</span>"
                 f"{chips_html}"
                 "</div>"
-                f"{table_html}"
+                f'<div class="sf-group-body">{table_html}</div>'
                 "</div>"
             )
 
@@ -551,7 +547,7 @@ def build_structural_findings_html_panel(
         sections.append(
             f'<h3 class="subsection-title">'
             f"{_escape_html(label)}"
-            f' &nbsp;<small style="{_meta_style}">'
+            f' &nbsp;<small class="sf-kind-meta">'
             f"{len(kind_groups)} groups &middot; {total} occurrences</small>"
             "</h3>" + "".join(group_rows)
         )

@@ -522,6 +522,7 @@ def _load_cached_metrics(
                 "Literal['function', 'class', 'method', 'import']",
                 row["kind"],
             ),
+            suppressed_rules=tuple(sorted(set(row.get("suppressed_rules", [])))),
         )
         for row in dead_rows
         if row.get("qualname") and row.get("local_name") and row.get("filepath")
@@ -605,9 +606,13 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
             cached_functions += functions
             cached_methods += methods
             cached_classes += classes
-            cached_units.extend(cast("list[GroupItem]", cached["units"]))
-            cached_blocks.extend(cast("list[GroupItem]", cached["blocks"]))
-            cached_segments.extend(cast("list[GroupItem]", cached["segments"]))
+            cached_units.extend(cast("list[GroupItem]", cast(object, cached["units"])))
+            cached_blocks.extend(
+                cast("list[GroupItem]", cast(object, cached["blocks"]))
+            )
+            cached_segments.extend(
+                cast("list[GroupItem]", cast(object, cached["segments"]))
+            )
 
             if not boot.args.skip_metrics:
                 (

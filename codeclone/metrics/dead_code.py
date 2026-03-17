@@ -7,6 +7,7 @@ from typing import Literal
 
 from ..models import DeadCandidate, DeadItem
 from ..paths import is_test_filepath
+from ..suppressions import DEAD_CODE_RULE_ID
 
 _TEST_NAME_PREFIXES = ("test_", "pytest_")
 _DYNAMIC_METHOD_PREFIXES = ("visit_",)
@@ -33,6 +34,8 @@ def find_unused(
 ) -> tuple[DeadItem, ...]:
     items: list[DeadItem] = []
     for symbol in definitions:
+        if DEAD_CODE_RULE_ID in symbol.suppressed_rules:
+            continue
         if _is_non_actionable_candidate(symbol):
             continue
         if symbol.qualname in referenced_qualnames:

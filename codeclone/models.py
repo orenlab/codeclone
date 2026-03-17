@@ -111,6 +111,7 @@ class DeadCandidate:
     start_line: int
     end_line: int
     kind: Literal["function", "class", "method", "import"]
+    suppressed_rules: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)

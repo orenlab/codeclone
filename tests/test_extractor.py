@@ -520,6 +520,57 @@ def orphan():
     assert tuple(item.qualname for item in dead) == ("pkg.mod:orphan",)
 
 
+def test_dead_code_applies_noqa_suppression_per_declaration() -> None:
+    src = """
+# noqa: codeclone[dead-code]
+def runtime_hook():
+    return 1
+
+def orphan():
+    return 2
+"""
+    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+        source=src,
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    dead = find_unused(
+        definitions=file_metrics.dead_candidates,
+        referenced_names=file_metrics.referenced_names,
+        referenced_qualnames=file_metrics.referenced_qualnames,
+    )
+    assert tuple(item.qualname for item in dead) == ("pkg.mod:orphan",)
+
+
+def test_dead_code_noqa_binding_is_scoped_to_target_symbol() -> None:
+    src = """
+class Service:  # noqa: codeclone[dead-code]
+    # noqa: codeclone[dead-code]
+    def hook(self):
+        return 1
+
+    def alive(self):
+        return 2
+"""
+    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+        source=src,
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    dead = find_unused(
+        definitions=file_metrics.dead_candidates,
+        referenced_names=file_metrics.referenced_names,
+        referenced_qualnames=file_metrics.referenced_qualnames,
+    )
+    assert tuple(item.qualname for item in dead) == ("pkg.mod:Service.alive",)
+
+
 def test_collect_dead_candidates_and_extract_skip_classes_without_lineno(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

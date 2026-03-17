@@ -380,6 +380,15 @@ def test_find_unused_filters_non_actionable_and_preserves_ordering() -> None:
             end_line=10,
             kind="function",
         ),
+        DeadCandidate(
+            qualname="pkg.mod:suppressed",
+            local_name="suppressed",
+            filepath="pkg/mod.py",
+            start_line=11,
+            end_line=12,
+            kind="function",
+            suppressed_rules=("dead-code",),
+        ),
     )
     found = find_unused(
         definitions=definitions,
@@ -443,6 +452,20 @@ def test_find_unused_respects_referenced_qualnames() -> None:
         referenced_names=frozenset(),
         referenced_qualnames=frozenset({"pkg.mod:wrapped"}),
     )
+    assert found == ()
+
+
+def test_find_unused_applies_inline_noqa_dead_code_suppression() -> None:
+    candidate = DeadCandidate(
+        qualname="pkg.mod:runtime_callback",
+        local_name="runtime_callback",
+        filepath="pkg/mod.py",
+        start_line=1,
+        end_line=2,
+        kind="function",
+        suppressed_rules=("dead-code",),
+    )
+    found = find_unused(definitions=(candidate,), referenced_names=frozenset())
     assert found == ()
 
 

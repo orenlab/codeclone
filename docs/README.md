@@ -38,6 +38,7 @@ This directory has two documentation layers.
 - Dead-code contract and test-boundary policy: [`docs/book/16-dead-code-contract.md`](book/16-dead-code-contract.md)
 - Suggestions and clone typing contract: [`docs/book/17-suggestions-and-clone-typing.md`](book/17-suggestions-and-clone-typing.md)
 - Reproducible Docker benchmarking: [`docs/book/18-benchmarking.md`](book/18-benchmarking.md)
+- Inline suppressions contract: [`docs/book/19-inline-suppressions.md`](book/19-inline-suppressions.md)
 
 ## Deep Dives
 

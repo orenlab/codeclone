@@ -92,6 +92,7 @@ Refs:
   [04-config-and-defaults.md](04-config-and-defaults.md) ->
   [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md) ->
   [16-dead-code-contract.md](16-dead-code-contract.md) ->
+  [19-inline-suppressions.md](19-inline-suppressions.md) ->
   [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)
 - Determinism and compatibility path:
   [12-determinism.md](12-determinism.md) ->

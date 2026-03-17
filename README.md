@@ -80,6 +80,27 @@ codeclone . --fail-cycles --fail-dead-code
 codeclone . --fail-on-new-metrics
 ```
 
+### Inline Suppressions For Known FP
+
+Use local declaration-level suppressions when a finding is accepted by design
+(for example runtime callbacks invoked by a framework):
+
+```python
+# noqa: codeclone[dead-code]
+def handle_exception(exc: Exception) -> None:
+    ...
+
+class Middleware:  # noqa: codeclone[dead-code]
+    ...
+```
+
+Rules:
+
+- supports `def`, `async def`, and `class`
+- supports previous-line and end-of-line forms on declaration lines
+- requires explicit rule list: `codeclone[...]`
+- does not provide file-level/global ignores
+
 ### Pre-commit
 
 ```yaml
@@ -153,6 +174,9 @@ Structural findings include:
 - `duplicated_branches`
 - `clone_guard_exit_divergence`
 - `clone_cohort_drift`
+
+Dead-code detection is intentionally deterministic and static. Dynamic/runtime false positives are resolved
+via explicit inline suppressions, not via broad heuristics or implicit framework-specific guesses.
 
 <details>
 <summary>JSON report shape (v2.1)</summary>
@@ -265,7 +289,7 @@ Architecture: [`docs/architecture.md`](docs/architecture.md) · CFG semantics: [
 | Docker benchmark contract  | [`docs/book/18-benchmarking.md`](docs/book/18-benchmarking.md)                           |
 | Determinism                | [`docs/book/12-determinism.md`](docs/book/12-determinism.md)                             |
 
-##  * Benchmarking
+##   * Benchmarking
 
 <details>
 <summary>Reproducible Docker Benchmark</summary>

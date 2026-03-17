@@ -186,6 +186,29 @@ def test_load_cached_metrics_preserves_coupled_classes() -> None:
     assert class_metrics[0].coupled_classes == ("TypeA", "TypeB")
 
 
+def test_load_cached_metrics_preserves_dead_candidate_suppressions() -> None:
+    entry: CacheEntry = {
+        "stat": {"mtime_ns": 1, "size": 1},
+        "units": [],
+        "blocks": [],
+        "segments": [],
+        "dead_candidates": [
+            {
+                "qualname": "pkg.mod:runtime_hook",
+                "local_name": "runtime_hook",
+                "filepath": "pkg/mod.py",
+                "start_line": 10,
+                "end_line": 11,
+                "kind": "function",
+                "suppressed_rules": ["dead-code", "dead-code"],
+            }
+        ],
+    }
+    _, _, dead_candidates, _, _ = _load_cached_metrics(entry, filepath="pkg/mod.py")
+    assert len(dead_candidates) == 1
+    assert dead_candidates[0].suppressed_rules == ("dead-code",)
+
+
 def test_metric_gate_reasons_collects_all_enabled_reasons() -> None:
     reasons = metric_gate_reasons(
         project_metrics=_project_metrics(dead_confidence="high"),

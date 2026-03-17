@@ -1220,6 +1220,12 @@ def test_decode_wire_metrics_items_and_deps_roundtrip_shape() -> None:
         )
         is None
     )
+    dead_candidate_with_suppression = cache_mod._decode_wire_dead_candidate(
+        ["pkg.mod:unused", "unused", 1, 2, "function", ["dead-code", "dead-code"]],
+        "fallback.py",
+    )
+    assert dead_candidate_with_suppression is not None
+    assert dead_candidate_with_suppression["suppressed_rules"] == ["dead-code"]
 
 
 def test_encode_wire_file_entry_includes_optional_metrics_sections() -> None:
@@ -1284,6 +1290,33 @@ def test_encode_wire_file_entry_compacts_dead_candidate_filepaths() -> None:
     }
     wire = cache_mod._encode_wire_file_entry(entry)
     assert wire["dc"] == [["pkg.mod:unused", "unused", 3, 4, "function"]]
+
+
+def test_encode_wire_file_entry_encodes_dead_candidate_suppressions() -> None:
+    entry: cache_mod.CacheEntry = {
+        "stat": {"mtime_ns": 1, "size": 2},
+        "units": [],
+        "blocks": [],
+        "segments": [],
+        "class_metrics": [],
+        "module_deps": [],
+        "dead_candidates": [
+            {
+                "qualname": "pkg.mod:unused",
+                "local_name": "unused",
+                "filepath": "/repo/pkg/mod.py",
+                "start_line": 3,
+                "end_line": 4,
+                "kind": "function",
+                "suppressed_rules": ["dead-code", "dead-code"],
+            }
+        ],
+        "referenced_names": [],
+        "import_names": [],
+        "class_names": [],
+    }
+    wire = cache_mod._encode_wire_file_entry(entry)
+    assert wire["dc"] == [["pkg.mod:unused", "unused", 3, 4, "function", ["dead-code"]]]
 
 
 def test_encode_wire_file_entry_skips_empty_or_invalid_coupled_classes() -> None:
@@ -1409,6 +1442,34 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
     assert cache_mod._is_class_metrics_dict([]) is False
     assert cache_mod._is_module_dep_dict([]) is False
     assert cache_mod._is_dead_candidate_dict([]) is False
+    assert (
+        cache_mod._is_dead_candidate_dict(
+            {
+                "qualname": "pkg.mod:unused",
+                "local_name": "unused",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 2,
+                "kind": "function",
+                "suppressed_rules": ["dead-code"],
+            }
+        )
+        is True
+    )
+    assert (
+        cache_mod._is_dead_candidate_dict(
+            {
+                "qualname": "pkg.mod:unused",
+                "local_name": "unused",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 2,
+                "kind": "function",
+                "suppressed_rules": [1],
+            }
+        )
+        is False
+    )
     assert (
         cache_mod._is_class_metrics_dict(
             {
