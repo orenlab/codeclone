@@ -378,20 +378,24 @@ _L = 12  # label column width (after 2-space indent)
 
 def _v(n: int, style: str = "") -> str:
     """Format value: dim if zero, styled otherwise."""
-    if n == 0:
-        return f"[dim]{n}[/dim]"
-    if style:
-        return f"[{style}]{n}[/{style}]"
-    return str(n)
+    match (n == 0, bool(style)):
+        case (True, _):
+            return f"[dim]{n}[/dim]"
+        case (False, True):
+            return f"[{style}]{n}[/{style}]"
+        case _:
+            return str(n)
 
 
 def _vn(n: int, style: str = "") -> str:
     """Format value with comma separator: dim if zero, styled otherwise."""
-    if n == 0:
-        return f"[dim]{n:,}[/dim]"
-    if style:
-        return f"[{style}]{n:,}[/{style}]"
-    return f"{n:,}"
+    match (n == 0, bool(style)):
+        case (True, _):
+            return f"[dim]{n:,}[/dim]"
+        case (False, True):
+            return f"[{style}]{n:,}[/{style}]"
+        case _:
+            return f"{n:,}"
 
 
 def fmt_summary_files(*, found: int, analyzed: int, cached: int, skipped: int) -> str:
@@ -461,18 +465,27 @@ def fmt_metrics_cohesion(avg: float, max_val: int) -> str:
 
 
 def fmt_metrics_cycles(count: int) -> str:
-    if count == 0:
-        return f"  {'Cycles':<{_L}}[green]\u2714 clean[/green]"
-    return f"  {'Cycles':<{_L}}[bold red]{count} detected[/bold red]"
+    match count:
+        case 0:
+            return f"  {'Cycles':<{_L}}[green]\u2714 clean[/green]"
+        case _:
+            return f"  {'Cycles':<{_L}}[bold red]{count} detected[/bold red]"
 
 
 def fmt_metrics_dead_code(count: int, *, suppressed: int = 0) -> str:
     suppressed_suffix = (
         f" [dim]({suppressed} suppressed)[/dim]" if suppressed > 0 else ""
     )
-    if count == 0:
-        return f"  {'Dead code':<{_L}}[green]\u2714 clean[/green]{suppressed_suffix}"
-    return f"  {'Dead code':<{_L}}[bold red]{count} found[/bold red]{suppressed_suffix}"
+    match count:
+        case 0:
+            return (
+                f"  {'Dead code':<{_L}}[green]\u2714 clean[/green]{suppressed_suffix}"
+            )
+        case _:
+            return (
+                f"  {'Dead code':<{_L}}[bold red]{count} found[/bold red]"
+                f"{suppressed_suffix}"
+            )
 
 
 def fmt_pipeline_done(elapsed: float) -> str:

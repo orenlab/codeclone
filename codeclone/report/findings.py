@@ -191,49 +191,55 @@ def _finding_reason_list_html(
     items: Sequence[StructuralFindingOccurrence],
 ) -> str:
     spread = _spread(items)
-    if group.finding_kind == "clone_guard_exit_divergence":
-        reasons = [
-            (
-                f"{len(items)} divergent clone members were detected after "
-                "stable sorting and deduplication."
-            ),
-            (
-                "Members were compared by entry-guard count/profile, terminal "
-                "kind, and side-effect-before-guard marker."
-            ),
-            (
-                f"Cohort id: `{group.signature.get('cohort_id', 'unknown')}`; "
-                "majority guard count: "
-                f"`{group.signature.get('majority_guard_count', '0')}`."
-            ),
-            (
-                f"Spread includes {spread['functions']} "
-                f"{'function' if spread['functions'] == 1 else 'functions'} in "
-                f"{spread['files']} {'file' if spread['files'] == 1 else 'files'}."
-            ),
-            "This is a report-only finding and does not affect clone gating.",
-        ]
-        return (
-            '<ul class="finding-why-list">'
-            + "".join(f"<li>{_escape_html(reason)}</li>" for reason in reasons)
-            + "</ul>"
-        )
-    if group.finding_kind == "clone_cohort_drift":
-        reasons = [
-            f"{len(items)} clone members diverge from the cohort majority profile.",
-            f"Drift fields: `{group.signature.get('drift_fields', 'n/a')}`.",
-            (
-                f"Cohort id: `{group.signature.get('cohort_id', 'unknown')}` with "
-                f"arity `{group.signature.get('cohort_arity', 'n/a')}`."
-            ),
-            "Majority profile is compared deterministically with lexical tie-breaks.",
-            "This is a report-only finding and does not affect clone gating.",
-        ]
-        return (
-            '<ul class="finding-why-list">'
-            + "".join(f"<li>{_escape_html(reason)}</li>" for reason in reasons)
-            + "</ul>"
-        )
+    match group.finding_kind:
+        case "clone_guard_exit_divergence":
+            reasons = [
+                (
+                    f"{len(items)} divergent clone members were detected after "
+                    "stable sorting and deduplication."
+                ),
+                (
+                    "Members were compared by entry-guard count/profile, terminal "
+                    "kind, and side-effect-before-guard marker."
+                ),
+                (
+                    f"Cohort id: `{group.signature.get('cohort_id', 'unknown')}`; "
+                    "majority guard count: "
+                    f"`{group.signature.get('majority_guard_count', '0')}`."
+                ),
+                (
+                    f"Spread includes {spread['functions']} "
+                    f"{'function' if spread['functions'] == 1 else 'functions'} in "
+                    f"{spread['files']} {'file' if spread['files'] == 1 else 'files'}."
+                ),
+                "This is a report-only finding and does not affect clone gating.",
+            ]
+            return (
+                '<ul class="finding-why-list">'
+                + "".join(f"<li>{_escape_html(reason)}</li>" for reason in reasons)
+                + "</ul>"
+            )
+        case "clone_cohort_drift":
+            reasons = [
+                f"{len(items)} clone members diverge from the cohort majority profile.",
+                f"Drift fields: `{group.signature.get('drift_fields', 'n/a')}`.",
+                (
+                    f"Cohort id: `{group.signature.get('cohort_id', 'unknown')}` with "
+                    f"arity `{group.signature.get('cohort_arity', 'n/a')}`."
+                ),
+                (
+                    "Majority profile is compared deterministically with lexical "
+                    "tie-breaks."
+                ),
+                "This is a report-only finding and does not affect clone gating.",
+            ]
+            return (
+                '<ul class="finding-why-list">'
+                + "".join(f"<li>{_escape_html(reason)}</li>" for reason in reasons)
+                + "</ul>"
+            )
+        case _:
+            pass
 
     stmt_seq = group.signature.get("stmt_seq", "n/a")
     terminal = group.signature.get("terminal", "n/a")
@@ -273,20 +279,23 @@ def _finding_matters_html(
 ) -> str:
     spread = _spread(items)
     count = len(items)
-    if group.finding_kind == "clone_guard_exit_divergence":
-        message = (
-            "Members of one function-clone cohort diverged in guard/exit behavior. "
-            "This often points to a partial fix where one path was updated and "
-            "other siblings were left unchanged."
-        )
-        return f'<p class="finding-why-text">{_escape_html(message)}</p>'
-    if group.finding_kind == "clone_cohort_drift":
-        message = (
-            "Members of one function-clone cohort drifted from a stable majority "
-            "profile (terminal, guard, try/finally, side-effect order). Review "
-            "whether divergence is intentional."
-        )
-        return f'<p class="finding-why-text">{_escape_html(message)}</p>'
+    match group.finding_kind:
+        case "clone_guard_exit_divergence":
+            message = (
+                "Members of one function-clone cohort diverged in guard/exit behavior. "
+                "This often points to a partial fix where one path was updated and "
+                "other siblings were left unchanged."
+            )
+            return f'<p class="finding-why-text">{_escape_html(message)}</p>'
+        case "clone_cohort_drift":
+            message = (
+                "Members of one function-clone cohort drifted from a stable majority "
+                "profile (terminal, guard, try/finally, side-effect order). Review "
+                "whether divergence is intentional."
+            )
+            return f'<p class="finding-why-text">{_escape_html(message)}</p>'
+        case _:
+            pass
 
     terminal = str(group.signature.get("terminal", "")).strip()
     stmt_seq = str(group.signature.get("stmt_seq", "")).strip()
@@ -365,20 +374,31 @@ def _finding_why_template_html(
         )
         for idx, item in enumerate(preview_items)
     )
-    showing_note = (
-        f"Showing the first {len(preview_items)} matching branches from "
-        f"{len(items)} total occurrences."
-    )
-    if group.finding_kind != "duplicated_branches":
-        showing_note = (
-            f"Showing the first {len(preview_items)} cohort members from "
-            f"{len(items)} divergent occurrences."
-        )
-    reported_subject = "structurally matching branch bodies"
-    if group.finding_kind == "clone_guard_exit_divergence":
-        reported_subject = "clone cohort members with guard/exit divergence"
-    elif group.finding_kind == "clone_cohort_drift":
-        reported_subject = "clone cohort members that drift from majority profile"
+    match group.finding_kind:
+        case "duplicated_branches":
+            showing_note = (
+                f"Showing the first {len(preview_items)} matching branches from "
+                f"{len(items)} total occurrences."
+            )
+            reported_subject = "structurally matching branch bodies"
+        case "clone_guard_exit_divergence":
+            showing_note = (
+                f"Showing the first {len(preview_items)} cohort members from "
+                f"{len(items)} divergent occurrences."
+            )
+            reported_subject = "clone cohort members with guard/exit divergence"
+        case "clone_cohort_drift":
+            showing_note = (
+                f"Showing the first {len(preview_items)} cohort members from "
+                f"{len(items)} divergent occurrences."
+            )
+            reported_subject = "clone cohort members that drift from majority profile"
+        case _:
+            showing_note = (
+                f"Showing the first {len(preview_items)} matching branches from "
+                f"{len(items)} total occurrences."
+            )
+            reported_subject = "structurally matching branch bodies"
     return (
         '<div class="metrics-section">'
         '<div class="metrics-section-title">Why This Matters</div>'

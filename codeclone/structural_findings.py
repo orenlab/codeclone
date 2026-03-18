@@ -103,11 +103,13 @@ def _terminal_kind(body: list[ast.stmt]) -> str:
 
 def _bucket_calls(call_count: int) -> str:
     """Bucketed count of ast.Call nodes inside a branch body."""
-    if call_count == 0:
-        return "0"
-    if call_count == 1:
-        return "1"
-    return "2+"
+    match call_count:
+        case 0:
+            return "0"
+        case 1:
+            return "1"
+        case _:
+            return "2+"
 
 
 def _stmt_names_from_signature(signature: Mapping[str, str]) -> tuple[str, ...]:
@@ -151,14 +153,14 @@ def _kind_requires_branch_signature(finding_kind: str) -> bool:
 
 
 def _kind_min_occurrence_count(finding_kind: str) -> int:
-    if finding_kind == _FINDING_KIND_BRANCHES:
-        return 2
-    if finding_kind in {
-        _FINDING_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
-        _FINDING_KIND_CLONE_COHORT_DRIFT,
-    }:
-        return 1
-    return 2
+    match finding_kind:
+        case kind if kind in {
+            _FINDING_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
+            _FINDING_KIND_CLONE_COHORT_DRIFT,
+        }:
+            return 1
+        case _:
+            return 2
 
 
 def _normalize_occurrences(
@@ -712,10 +714,13 @@ def _as_item_bool(value: object, default: bool = False) -> bool:
         return value != 0
     if isinstance(value, str):
         normalized = value.strip().lower()
-        if normalized in {"1", "true", "yes"}:
-            return True
-        if normalized in {"0", "false", "no"}:
-            return False
+        match normalized:
+            case "1" | "true" | "yes":
+                return True
+            case "0" | "false" | "no":
+                return False
+            case _:
+                pass
     return default
 
 
@@ -996,15 +1001,17 @@ def _clone_cohort_drift(
 
 
 def _member_profile_value(member: _CloneCohortMember, field: str) -> str:
-    if field == "terminal_kind":
-        return member.terminal_kind
-    if field == "guard_exit_profile":
-        return member.guard_exit_profile
-    if field == "try_finally_profile":
-        return member.try_finally_profile
-    if field == "side_effect_order_profile":
-        return member.side_effect_order_profile
-    return ""
+    match field:
+        case "terminal_kind":
+            return member.terminal_kind
+        case "guard_exit_profile":
+            return member.guard_exit_profile
+        case "try_finally_profile":
+            return member.try_finally_profile
+        case "side_effect_order_profile":
+            return member.side_effect_order_profile
+        case _:
+            return ""
 
 
 def build_clone_cohort_structural_findings(

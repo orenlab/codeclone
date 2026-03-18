@@ -277,8 +277,8 @@ Architecture is layered, but grounded in current code (not aspirational diagrams
   analysis → report artifacts → gating.
 - **Core analysis** (`codeclone/extractor.py`, `codeclone/cfg.py`, `codeclone/normalize.py`, `codeclone/blocks.py`,
   `codeclone/grouping.py`, `codeclone/scanner.py`) produces normalized structural facts and clone candidates.
-- **Domain/contracts layer** (`codeclone/models.py`, `codeclone/contracts.py`, `codeclone/errors.py`) defines typed
-  entities and stable enums/constants used across layers.
+- **Domain/contracts layer** (`codeclone/models.py`, `codeclone/contracts.py`, `codeclone/errors.py`,
+  `codeclone/domain/*.py`) defines typed entities and stable enums/constants used across layers.
 - **Persistence contracts** (`codeclone/baseline.py`, `codeclone/cache.py`, `codeclone/metrics_baseline.py`) store
   trusted comparison state and optimization state.
 - **Canonical report + projections** (`codeclone/report/json_contract.py`, `codeclone/report/*.py`) converts analysis
@@ -324,6 +324,8 @@ Use this map to route changes to the right owner module.
   text/markdown/sarif/derived/findings/suggestions); avoid injecting new analysis heuristics here.
 - `codeclone/html_report.py` — HTML presentation layer from report/meta payload; no hidden analysis decisions.
 - `codeclone/models.py` — shared typed models crossing modules; keep model changes contract-aware.
+- `codeclone/domain/*.py` — centralized domain taxonomies/IDs (families, categories, source scopes, risk/severity
+  levels); use these constants in pipeline/report/UI instead of scattering raw literals.
 - `tests/` — executable specification: architecture rules, contracts, goldens, invariants, regressions.
 
 ## 14) Dependency direction

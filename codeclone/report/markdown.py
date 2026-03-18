@@ -6,6 +6,8 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING
 
+from .. import _coerce
+from ..domain.findings import FAMILY_CLONE, FAMILY_DEAD_CODE, FAMILY_STRUCTURAL
 from ._formatting import format_spread_text
 from .json_contract import build_report_document
 
@@ -39,43 +41,10 @@ _ANCHORS: tuple[tuple[str, str, int], ...] = (
     ("integrity", "Integrity", 2),
 )
 
-
-def _as_int(value: object) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
-
-
-def _as_float(value: object) -> float:
-    if isinstance(value, bool):
-        return float(int(value))
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return 0.0
-    return 0.0
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    if isinstance(value, Mapping):
-        return value
-    return {}
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
+_as_int = _coerce.as_int
+_as_float = _coerce.as_float
+_as_mapping = _coerce.as_mapping
+_as_sequence = _coerce.as_sequence
 
 
 def _text(value: object) -> str:
@@ -136,12 +105,12 @@ def _finding_heading(group: Mapping[str, object]) -> str:
     family = str(group.get("family", "")).strip()
     category = str(group.get("category", "")).strip()
     clone_type = str(group.get("clone_type", "")).strip()
-    if family == "clone":
+    if family == FAMILY_CLONE:
         suffix = f" ({clone_type})" if clone_type else ""
         return f"{category.title()} clone group{suffix}"
-    if family == "structural":
+    if family == FAMILY_STRUCTURAL:
         return f"Structural finding: {category}"
-    if family == "dead_code":
+    if family == FAMILY_DEAD_CODE:
         return f"Dead code: {category}"
     return f"Design finding: {category}"
 

@@ -6,20 +6,13 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 
+from .. import _coerce
+from ..domain.source_scope import IMPACT_SCOPE_NON_RUNTIME, SOURCE_KIND_OTHER
 from ._formatting import format_spread_text
 
-
-def _as_int(value: object) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
+_as_int = _coerce.as_int
+_as_mapping = _coerce.as_mapping
+_as_sequence = _coerce.as_sequence
 
 
 def render_json_report_document(payload: Mapping[str, object]) -> str:
@@ -47,18 +40,6 @@ def format_meta_text_value(value: object) -> str:
     return text if text else "(none)"
 
 
-def _as_mapping(value: object) -> Mapping[str, object]:
-    if isinstance(value, Mapping):
-        return value
-    return {}
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
-
-
 def _format_key_values(
     mapping: Mapping[str, object],
     keys: Sequence[str],
@@ -84,20 +65,24 @@ def _spread_text(spread: Mapping[str, object]) -> str:
 
 
 def _scope_text(source_scope: Mapping[str, object]) -> str:
-    dominant = str(source_scope.get("dominant_kind", "")).strip() or "other"
-    impact = str(source_scope.get("impact_scope", "")).strip() or "non_runtime"
+    dominant = str(source_scope.get("dominant_kind", "")).strip() or SOURCE_KIND_OTHER
+    impact = (
+        str(source_scope.get("impact_scope", "")).strip() or IMPACT_SCOPE_NON_RUNTIME
+    )
     return f"{dominant}/{impact}"
 
 
 def _structural_kind_label(kind: object) -> str:
     kind_text = str(kind).strip()
-    if kind_text == "duplicated_branches":
-        return "Duplicated branches"
-    if kind_text == "clone_guard_exit_divergence":
-        return "Clone guard/exit divergence"
-    if kind_text == "clone_cohort_drift":
-        return "Clone cohort drift"
-    return kind_text or "(none)"
+    match kind_text:
+        case "duplicated_branches":
+            return "Duplicated branches"
+        case "clone_guard_exit_divergence":
+            return "Clone guard/exit divergence"
+        case "clone_cohort_drift":
+            return "Clone cohort drift"
+        case _:
+            return kind_text or "(none)"
 
 
 def _location_line(
@@ -199,33 +184,36 @@ def _append_structural_findings(lines: list[str], groups: Sequence[object]) -> N
             f"scope={_scope_text(_as_mapping(group.get('source_scope')))}"
         )
         stable_family = str(stable.get("family", "")).strip()
-        if stable_family == "clone_guard_exit_divergence":
-            lines.append(
-                "signature: "
-                f"cohort_id={format_meta_text_value(stable.get('cohort_id'))} "
-                f"majority_guard_count="
-                f"{format_meta_text_value(stable.get('majority_guard_count'))} "
-                f"majority_terminal_kind="
-                f"{format_meta_text_value(stable.get('majority_terminal_kind'))}"
-            )
-        elif stable_family == "clone_cohort_drift":
-            majority_profile = _as_mapping(stable.get("majority_profile"))
-            lines.append(
-                "signature: "
-                f"cohort_id={format_meta_text_value(stable.get('cohort_id'))} "
-                f"drift_fields={format_meta_text_value(stable.get('drift_fields'))} "
-                f"majority_terminal_kind="
-                f"{format_meta_text_value(majority_profile.get('terminal_kind'))}"
-            )
-        else:
-            lines.append(
-                "signature: "
-                f"stmt_shape={format_meta_text_value(stable.get('stmt_shape'))} "
-                f"terminal_kind={format_meta_text_value(stable.get('terminal_kind'))} "
-                f"has_loop={format_meta_text_value(control_flow.get('has_loop'))} "
-                f"has_try={format_meta_text_value(control_flow.get('has_try'))} "
-                f"nested_if={format_meta_text_value(control_flow.get('nested_if'))}"
-            )
+        match stable_family:
+            case "clone_guard_exit_divergence":
+                lines.append(
+                    "signature: "
+                    f"cohort_id={format_meta_text_value(stable.get('cohort_id'))} "
+                    f"majority_guard_count="
+                    f"{format_meta_text_value(stable.get('majority_guard_count'))} "
+                    f"majority_terminal_kind="
+                    f"{format_meta_text_value(stable.get('majority_terminal_kind'))}"
+                )
+            case "clone_cohort_drift":
+                majority_profile = _as_mapping(stable.get("majority_profile"))
+                lines.append(
+                    "signature: "
+                    f"cohort_id={format_meta_text_value(stable.get('cohort_id'))} "
+                    f"drift_fields="
+                    f"{format_meta_text_value(stable.get('drift_fields'))} "
+                    f"majority_terminal_kind="
+                    f"{format_meta_text_value(majority_profile.get('terminal_kind'))}"
+                )
+            case _:
+                lines.append(
+                    "signature: "
+                    f"stmt_shape={format_meta_text_value(stable.get('stmt_shape'))} "
+                    f"terminal_kind="
+                    f"{format_meta_text_value(stable.get('terminal_kind'))} "
+                    f"has_loop={format_meta_text_value(control_flow.get('has_loop'))} "
+                    f"has_try={format_meta_text_value(control_flow.get('has_try'))} "
+                    f"nested_if={format_meta_text_value(control_flow.get('nested_if'))}"
+                )
         facts = _as_mapping(group.get("facts"))
         if facts:
             lines.append(
@@ -615,16 +603,17 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
     ):
         family_summary = _as_mapping(metrics_summary.get(family_name))
         keys: Sequence[str]
-        if family_name in {"complexity", "coupling"}:
-            keys = ("total", "average", "max", "high_risk")
-        elif family_name == "cohesion":
-            keys = ("total", "average", "max", "low_cohesion")
-        elif family_name == "dependencies":
-            keys = ("modules", "edges", "cycles", "max_depth")
-        elif family_name == "dead_code":
-            keys = ("total", "high_confidence", "suppressed")
-        else:
-            keys = ("score", "grade")
+        match family_name:
+            case "complexity" | "coupling":
+                keys = ("total", "average", "max", "high_risk")
+            case "cohesion":
+                keys = ("total", "average", "max", "low_cohesion")
+            case "dependencies":
+                keys = ("modules", "edges", "cycles", "max_depth")
+            case "dead_code":
+                keys = ("total", "high_confidence", "suppressed")
+            case _:
+                keys = ("score", "grade")
         lines.append(f"{family_name}: {_format_key_values(family_summary, keys)}")
 
     lines.append("")

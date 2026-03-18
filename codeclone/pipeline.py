@@ -10,6 +10,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
+from . import _coerce
 from .cache import (
     Cache,
     CacheEntry,
@@ -23,6 +24,8 @@ from .cache import (
     file_stat_signature,
 )
 from .contracts import ExitCode
+from .domain.findings import CATEGORY_COHESION, CATEGORY_COMPLEXITY, CATEGORY_COUPLING
+from .domain.quality import CONFIDENCE_HIGH, RISK_HIGH, RISK_LOW
 from .extractor import extract_units_and_stats_from_source
 from .grouping import build_block_groups, build_groups, build_segment_groups
 from .metrics import (
@@ -206,21 +209,8 @@ class MetricGateConfig:
     fail_on_new_metrics: bool
 
 
-def _as_int(value: object, default: int = 0) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return default
-    return default
-
-
-def _as_str(value: object, default: str = "") -> str:
-    return value if isinstance(value, str) else default
+_as_int = _coerce.as_int
+_as_str = _coerce.as_str
 
 
 def _as_sorted_str_tuple(value: object) -> tuple[str, ...]:
@@ -1011,7 +1001,7 @@ def compute_project_metrics(
             {
                 _as_str(row.get("qualname"))
                 for row in unit_rows
-                if _as_str(row.get("risk")) == "high"
+                if _as_str(row.get("risk")) == RISK_HIGH
             }
         )
     )
@@ -1029,7 +1019,7 @@ def compute_project_metrics(
             {
                 metric.qualname
                 for metric in classes_sorted
-                if metric.risk_coupling == "high"
+                if metric.risk_coupling == RISK_HIGH
             }
         )
     )
@@ -1046,7 +1036,7 @@ def compute_project_metrics(
             {
                 metric.qualname
                 for metric in classes_sorted
-                if metric.risk_cohesion == "high"
+                if metric.risk_cohesion == RISK_HIGH
             }
         )
     )
@@ -1163,7 +1153,7 @@ def build_metrics_report_payload(
             "end_line": _as_int(item.get("end_line")),
             "cyclomatic_complexity": _as_int(item.get("cyclomatic_complexity"), 1),
             "nesting_depth": _as_int(item.get("nesting_depth")),
-            "risk": _as_str(item.get("risk"), "low"),
+            "risk": _as_str(item.get("risk"), RISK_LOW),
         }
         for item in sorted_units
     ]
@@ -1223,7 +1213,7 @@ def build_metrics_report_payload(
         return payload
 
     return {
-        "complexity": {
+        CATEGORY_COMPLEXITY: {
             "functions": complexity_rows,
             "summary": {
                 "total": len(complexity_rows),
@@ -1232,7 +1222,7 @@ def build_metrics_report_payload(
                 "high_risk": len(project_metrics.high_risk_functions),
             },
         },
-        "coupling": {
+        CATEGORY_COUPLING: {
             "classes": coupling_rows,
             "summary": {
                 "total": len(coupling_rows),
@@ -1241,7 +1231,7 @@ def build_metrics_report_payload(
                 "high_risk": len(project_metrics.high_risk_classes),
             },
         },
-        "cohesion": {
+        CATEGORY_COHESION: {
             "classes": cohesion_rows,
             "summary": {
                 "total": len(cohesion_rows),
@@ -1277,10 +1267,14 @@ def build_metrics_report_payload(
             "summary": {
                 "total": len(active_dead_items),
                 "critical": sum(
-                    1 for item in active_dead_items if item.confidence == "high"
+                    1
+                    for item in active_dead_items
+                    if item.confidence == CONFIDENCE_HIGH
                 ),
                 "high_confidence": sum(
-                    1 for item in active_dead_items if item.confidence == "high"
+                    1
+                    for item in active_dead_items
+                    if item.confidence == CONFIDENCE_HIGH
                 ),
                 "suppressed": len(suppressed_dead_items),
             },

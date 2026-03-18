@@ -102,18 +102,18 @@ def _is_non_actionable_candidate(symbol: DeadCandidate) -> bool:
         return True
 
     # Module-level dynamic hooks (PEP 562) are invoked by import/runtime lookup.
-    if symbol.kind == "function" and symbol.local_name in _MODULE_RUNTIME_HOOK_NAMES:
-        return True
-
-    # Magic methods and visitor callbacks are invoked by runtime dispatch.
-    if symbol.kind == "method":
-        if _is_dunder(symbol.local_name):
-            return True
-        if symbol.local_name.startswith(_DYNAMIC_METHOD_PREFIXES):
-            return True
-        if symbol.local_name in _DYNAMIC_HOOK_NAMES:
-            return True
-    return False
+    match symbol.kind:
+        case "function":
+            return symbol.local_name in _MODULE_RUNTIME_HOOK_NAMES
+        # Magic methods and visitor callbacks are invoked by runtime dispatch.
+        case "method":
+            return (
+                _is_dunder(symbol.local_name)
+                or symbol.local_name.startswith(_DYNAMIC_METHOD_PREFIXES)
+                or symbol.local_name in _DYNAMIC_HOOK_NAMES
+            )
+        case _:
+            return False
 
 
 def _is_dunder(name: str) -> bool:

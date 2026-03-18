@@ -8,6 +8,18 @@ from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Literal
 
 from . import __version__
+from ._coerce import (
+    as_float as _as_float,
+)
+from ._coerce import (
+    as_int as _as_int,
+)
+from ._coerce import (
+    as_mapping as _as_mapping,
+)
+from ._coerce import (
+    as_sequence as _as_sequence,
+)
 from ._html_escape import _escape_attr, _escape_html, _meta_display
 from ._html_snippets import (
     _FileCache,
@@ -17,6 +29,24 @@ from ._html_snippets import (
     _try_pygments,
 )
 from .contracts import DOCS_URL, ISSUES_URL, REPORT_SCHEMA_VERSION, REPOSITORY_URL
+from .domain.quality import (
+    EFFORT_EASY,
+    EFFORT_HARD,
+    EFFORT_MODERATE,
+    RISK_HIGH,
+    RISK_LOW,
+    RISK_MEDIUM,
+    SEVERITY_CRITICAL,
+    SEVERITY_INFO,
+    SEVERITY_WARNING,
+)
+from .domain.source_scope import (
+    SOURCE_KIND_FIXTURES,
+    SOURCE_KIND_MIXED,
+    SOURCE_KIND_OTHER,
+    SOURCE_KIND_PRODUCTION,
+    SOURCE_KIND_TESTS,
+)
 from .report.derived import (
     combine_source_kinds,
     group_spread,
@@ -48,44 +78,6 @@ __all__ = [
 
 def _group_sort_key(items: Collection[GroupItemLike]) -> tuple[int]:
     return (-len(items),)
-
-
-def _as_int(value: object) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
-
-
-def _as_float(value: object) -> float:
-    if isinstance(value, bool):
-        return float(int(value))
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return 0.0
-    return 0.0
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    if isinstance(value, Mapping):
-        return value
-    return {}
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
 
 
 def build_html_report(
@@ -195,18 +187,22 @@ def build_html_report(
                 return bare
         return qualname
 
-    _EFFORT_MAP = {"easy": "success", "moderate": "warning", "hard": "error"}
+    _EFFORT_MAP = {
+        EFFORT_EASY: "success",
+        EFFORT_MODERATE: "warning",
+        EFFORT_HARD: "error",
+    }
     _Tone = Literal["ok", "warn", "risk", "info"]
 
     def _risk_badge_html(risk_text: str) -> str:
         """Render risk/severity/confidence/effort as a styled badge."""
         r = risk_text.strip().lower()
-        if r in ("low", "high", "medium"):
+        if r in (RISK_LOW, RISK_HIGH, RISK_MEDIUM):
             return (
                 f'<span class="risk-badge risk-{_escape_attr(r)}">'
                 f"{_escape_html(r)}</span>"
             )
-        if r in ("critical", "warning", "info"):
+        if r in (SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO):
             return (
                 f'<span class="severity-badge severity-{_escape_attr(r)}">'
                 f"{_escape_html(r)}</span>"
@@ -221,15 +217,15 @@ def build_html_report(
 
     def _source_kind_label(source_kind: str) -> str:
         return {
-            "production": "Production",
-            "tests": "Tests",
-            "fixtures": "Fixtures",
-            "mixed": "Mixed",
-            "other": "Other",
+            SOURCE_KIND_PRODUCTION: "Production",
+            SOURCE_KIND_TESTS: "Tests",
+            SOURCE_KIND_FIXTURES: "Fixtures",
+            SOURCE_KIND_MIXED: "Mixed",
+            SOURCE_KIND_OTHER: "Other",
         }.get(source_kind, source_kind.title() or "Other")
 
     def _source_kind_badge_html(source_kind: str) -> str:
-        normalized = source_kind.strip().lower() or "other"
+        normalized = source_kind.strip().lower() or SOURCE_KIND_OTHER
         return (
             f'<span class="source-kind-badge source-kind-{_escape_attr(normalized)}">'
             f"{_escape_html(_source_kind_label(normalized))}</span>"

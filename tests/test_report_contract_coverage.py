@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from codeclone import _coerce
 from codeclone.models import (
     ReportLocation,
     StructuralFindingGroup,
@@ -14,8 +15,6 @@ from codeclone.models import (
 from codeclone.report import derived as derived_mod
 from codeclone.report import overview as overview_mod
 from codeclone.report.json_contract import (
-    _as_float,
-    _as_int,
     _build_design_groups,
     _clone_group_assessment,
     _combined_impact_scope,
@@ -33,32 +32,8 @@ from codeclone.report.json_contract import (
     build_report_document,
 )
 from codeclone.report.markdown import (
-    _as_float as _md_as_float,
-)
-from codeclone.report.markdown import (
-    _as_int as _md_as_int,
-)
-from codeclone.report.markdown import (
-    _as_mapping as _md_as_mapping,
-)
-from codeclone.report.markdown import (
-    _as_sequence as _md_as_sequence,
-)
-from codeclone.report.markdown import (
     render_markdown_report_document,
     to_markdown_report,
-)
-from codeclone.report.sarif import (
-    _as_float as _sarif_as_float,
-)
-from codeclone.report.sarif import (
-    _as_int as _sarif_as_int,
-)
-from codeclone.report.sarif import (
-    _as_mapping as _sarif_as_mapping,
-)
-from codeclone.report.sarif import (
-    _as_sequence as _sarif_as_sequence,
 )
 from codeclone.report.sarif import (
     _location_entry as _sarif_location_entry,
@@ -509,10 +484,10 @@ def test_markdown_and_sarif_reuse_prebuilt_report_document() -> None:
 
 
 def test_json_contract_private_helpers_cover_edge_cases(tmp_path: Path) -> None:
-    assert _as_int(True) == 1
-    assert _as_int("x", 9) == 9
-    assert _as_float(True) == 1.0
-    assert _as_float("x", 1.5) == 1.5
+    assert _coerce.as_int(True) == 1
+    assert _coerce.as_int("x", 9) == 9
+    assert _coerce.as_float(True) == 1.0
+    assert _coerce.as_float("x", 1.5) == 1.5
     assert _parse_ratio_percent("") is None
     assert _parse_ratio_percent("25%") == 0.25
     assert _parse_ratio_percent("2") == 0.02
@@ -597,13 +572,13 @@ def test_json_contract_private_helpers_cover_edge_cases(tmp_path: Path) -> None:
     assert design_groups == []
 
 
-def test_markdown_helper_numeric_branches() -> None:
-    assert _md_as_int(True) == 1
-    assert _md_as_int("bad") == 0
-    assert _md_as_float(True) == 1.0
-    assert _md_as_float("bad") == 0.0
-    assert _md_as_mapping("bad") == {}
-    assert _md_as_sequence("bad") == ()
+def test_coerce_helper_numeric_branches() -> None:
+    assert _coerce.as_int(True) == 1
+    assert _coerce.as_int("bad") == 0
+    assert _coerce.as_float(True) == 1.0
+    assert _coerce.as_float("bad") == 0.0
+    assert _coerce.as_mapping("bad") == {}
+    assert _coerce.as_sequence("bad") == ()
 
 
 def test_count_file_lines_aggregates_paths(tmp_path: Path) -> None:
@@ -923,13 +898,13 @@ def test_suggestion_finding_id_block_clone_branch() -> None:
 
 
 def test_sarif_private_helper_branches() -> None:
-    assert _sarif_as_int(True) == 1
-    assert _sarif_as_int("bad") == 0
-    assert _sarif_as_float(True) == 1.0
-    assert _sarif_as_float("bad") == 0.0
-    assert _sarif_as_float(object()) == 0.0
-    assert _sarif_as_mapping("bad") == {}
-    assert _sarif_as_sequence("bad") == ()
+    assert _coerce.as_int(True) == 1
+    assert _coerce.as_int("bad") == 0
+    assert _coerce.as_float(True) == 1.0
+    assert _coerce.as_float("bad") == 0.0
+    assert _coerce.as_float(object()) == 0.0
+    assert _coerce.as_mapping("bad") == {}
+    assert _coerce.as_sequence("bad") == ()
     assert _sarif_text(None) == ""
 
     dead_class = _sarif_rule_spec({"family": "dead_code", "category": "class"})

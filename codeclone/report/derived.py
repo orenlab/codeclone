@@ -6,6 +6,17 @@ from __future__ import annotations
 from collections import Counter
 from typing import TYPE_CHECKING
 
+from .. import _coerce
+from ..domain.source_scope import (
+    SOURCE_KIND_FIXTURES,
+    SOURCE_KIND_MIXED,
+    SOURCE_KIND_OTHER,
+    SOURCE_KIND_PRODUCTION,
+    SOURCE_KIND_TESTS,
+)
+from ..domain.source_scope import (
+    SOURCE_KIND_ORDER as _SOURCE_KIND_ORDER,
+)
 from ..models import ReportLocation, SourceKind, StructuralFindingOccurrence
 
 if TYPE_CHECKING:
@@ -26,12 +37,14 @@ __all__ = [
 ]
 
 SOURCE_KIND_ORDER: dict[SourceKind, int] = {
-    "production": 0,
-    "tests": 1,
-    "fixtures": 2,
-    "mixed": 3,
-    "other": 4,
+    SOURCE_KIND_PRODUCTION: _SOURCE_KIND_ORDER[SOURCE_KIND_PRODUCTION],
+    SOURCE_KIND_TESTS: _SOURCE_KIND_ORDER[SOURCE_KIND_TESTS],
+    SOURCE_KIND_FIXTURES: _SOURCE_KIND_ORDER[SOURCE_KIND_FIXTURES],
+    SOURCE_KIND_MIXED: _SOURCE_KIND_ORDER[SOURCE_KIND_MIXED],
+    SOURCE_KIND_OTHER: _SOURCE_KIND_ORDER[SOURCE_KIND_OTHER],
 }
+
+_as_int = _coerce.as_int
 
 
 def _normalize_path(value: str) -> str:
@@ -57,14 +70,14 @@ def classify_source_kind(filepath: str, *, scan_root: str = "") -> SourceKind:
     rel = relative_report_path(filepath, scan_root=scan_root)
     parts = [part for part in rel.lower().split("/") if part and part != "."]
     if not parts:
-        return "other"
+        return SOURCE_KIND_OTHER
     for idx, part in enumerate(parts):
-        if part != "tests":
+        if part != SOURCE_KIND_TESTS:
             continue
-        if idx + 1 < len(parts) and parts[idx + 1] == "fixtures":
-            return "fixtures"
-        return "tests"
-    return "production"
+        if idx + 1 < len(parts) and parts[idx + 1] == SOURCE_KIND_FIXTURES:
+            return SOURCE_KIND_FIXTURES
+        return SOURCE_KIND_TESTS
+    return SOURCE_KIND_PRODUCTION
 
 
 def source_kind_breakdown(
@@ -87,18 +100,18 @@ def combine_source_kinds(
 ) -> SourceKind:
     normalized = tuple(str(kind).strip().lower() for kind in kinds if str(kind).strip())
     if not normalized:
-        return "other"
+        return SOURCE_KIND_OTHER
     allowed: tuple[SourceKind, ...] = (
-        "production",
-        "tests",
-        "fixtures",
-        "mixed",
-        "other",
+        SOURCE_KIND_PRODUCTION,
+        SOURCE_KIND_TESTS,
+        SOURCE_KIND_FIXTURES,
+        SOURCE_KIND_MIXED,
+        SOURCE_KIND_OTHER,
     )
     unique = tuple(kind for kind in allowed if kind in set(normalized))
     if len(unique) == 1:
         return unique[0]
-    return "mixed"
+    return SOURCE_KIND_MIXED
 
 
 def report_location_from_group_item(
@@ -107,8 +120,8 @@ def report_location_from_group_item(
     scan_root: str = "",
 ) -> ReportLocation:
     filepath = str(item.get("filepath", ""))
-    start_line = _coerce_int(item.get("start_line"))
-    end_line = _coerce_int(item.get("end_line"))
+    start_line = _as_int(item.get("start_line"))
+    end_line = _as_int(item.get("end_line"))
     qualname = str(item.get("qualname", ""))
     return ReportLocation(
         filepath=filepath,
@@ -133,19 +146,6 @@ def report_location_from_structural_occurrence(
         qualname=item.qualname,
         source_kind=classify_source_kind(item.file_path, scan_root=scan_root),
     )
-
-
-def _coerce_int(value: object) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
 
 
 def _location_key(location: ReportLocation) -> tuple[str, int, int, str]:

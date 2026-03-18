@@ -946,13 +946,15 @@ def _as_list(value: object) -> list[object] | None:
 
 
 def _as_risk_literal(value: object) -> Literal["low", "medium", "high"] | None:
-    if value == "low":
-        return "low"
-    if value == "medium":
-        return "medium"
-    if value == "high":
-        return "high"
-    return None
+    match value:
+        case "low":
+            return "low"
+        case "medium":
+            return "medium"
+        case "high":
+            return "high"
+        case _:
+            return None
 
 
 def _new_optional_metrics_payload() -> tuple[

@@ -8,6 +8,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .. import _coerce
 from ..contracts import DOCS_URL, REPOSITORY_URL
 from .json_contract import build_report_document
 
@@ -31,42 +32,10 @@ class _RuleSpec:
     precision: str
 
 
-def _as_int(value: object) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
-
-
-def _as_float(value: object) -> float:
-    if isinstance(value, bool):
-        return float(int(value))
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return 0.0
-    return 0.0
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    if isinstance(value, Mapping):
-        return value
-    return {}
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
+_as_int = _coerce.as_int
+_as_float = _coerce.as_float
+_as_mapping = _coerce.as_mapping
+_as_sequence = _coerce.as_sequence
 
 
 def _text(value: object) -> str:
@@ -76,11 +45,13 @@ def _text(value: object) -> str:
 
 
 def _severity_to_level(severity: str) -> str:
-    if severity == "critical":
-        return "error"
-    if severity == "warning":
-        return "warning"
-    return "note"
+    match severity:
+        case "critical":
+            return "error"
+        case "warning":
+            return "warning"
+        case _:
+            return "note"
 
 
 def _flatten_findings(payload: Mapping[str, object]) -> list[Mapping[str, object]]:
@@ -104,157 +75,171 @@ def _rule_spec(group: Mapping[str, object]) -> _RuleSpec:
     family = _text(group.get("family"))
     category = _text(group.get("category"))
     kind = _text(group.get("kind"))
-    if family == "clone":
-        if category == "function":
-            return _RuleSpec(
-                "CCLONE001",
-                "Function clone group",
-                "Multiple functions share the same normalized function body.",
-                "warning",
-                "clone",
-                "clone_group",
-                "high",
-            )
-        if category == "block":
-            return _RuleSpec(
-                "CCLONE002",
-                "Block clone group",
-                (
-                    "Repeated normalized statement blocks were detected "
-                    "across occurrences."
-                ),
-                "warning",
-                "clone",
-                "clone_group",
-                "high",
-            )
-        return _RuleSpec(
-            "CCLONE003",
-            "Segment clone group",
-            "Repeated normalized statement segments were detected across occurrences.",
-            "note",
-            "clone",
-            "clone_group",
-            "medium",
-        )
-    if family == "structural":
-        if kind == "clone_guard_exit_divergence":
-            return _RuleSpec(
-                "CSTRUCT002",
-                "Clone guard/exit divergence",
-                (
-                    "Members of the same function-clone cohort diverged in "
-                    "entry guards or early-exit behavior."
-                ),
-                "warning",
-                "structural",
-                "clone_guard_exit_divergence",
-                "high",
-            )
-        if kind == "clone_cohort_drift":
-            return _RuleSpec(
-                "CSTRUCT003",
-                "Clone cohort drift",
-                (
-                    "Members of the same function-clone cohort drifted from "
-                    "the majority terminal/guard/try profile."
-                ),
-                "warning",
-                "structural",
-                "clone_cohort_drift",
-                "high",
-            )
-        return _RuleSpec(
-            "CSTRUCT001",
-            "Duplicated branches",
-            (
-                "Repeated branch families with matching structural signatures "
-                "were detected."
-            ),
-            "warning",
-            "structural",
-            kind or "duplicated_branches",
-            "medium",
-        )
-    if family == "dead_code":
-        if category == "function":
-            return _RuleSpec(
-                "CDEAD001",
-                "Unused function",
-                "Function appears to be unused with high confidence.",
-                "warning",
-                "dead_code",
-                "unused_symbol",
-                "high",
-            )
-        if category == "class":
-            return _RuleSpec(
-                "CDEAD002",
-                "Unused class",
-                "Class appears to be unused with high confidence.",
-                "warning",
-                "dead_code",
-                "unused_symbol",
-                "high",
-            )
-        if category == "method":
-            return _RuleSpec(
-                "CDEAD003",
-                "Unused method",
-                "Method appears to be unused with high confidence.",
-                "warning",
-                "dead_code",
-                "unused_symbol",
-                "high",
-            )
-        return _RuleSpec(
-            "CDEAD004",
-            "Unused symbol",
-            "Symbol appears to be unused with reported confidence.",
-            "warning",
-            "dead_code",
-            "unused_symbol",
-            "medium",
-        )
-    if category == "cohesion":
-        return _RuleSpec(
-            "CDESIGN001",
-            "Low cohesion class",
-            "Class cohesion is low according to LCOM4 hotspot thresholds.",
-            "warning",
-            "design",
-            kind or "class_hotspot",
-            "high",
-        )
-    if category == "complexity":
-        return _RuleSpec(
-            "CDESIGN002",
-            "Complexity hotspot",
-            "Function exceeds the project complexity hotspot threshold.",
-            "warning",
-            "design",
-            kind or "function_hotspot",
-            "high",
-        )
-    if category == "coupling":
-        return _RuleSpec(
-            "CDESIGN003",
-            "Coupling hotspot",
-            "Class exceeds the project coupling hotspot threshold.",
-            "warning",
-            "design",
-            kind or "class_hotspot",
-            "high",
-        )
-    return _RuleSpec(
-        "CDESIGN004",
-        "Dependency cycle",
-        "A dependency cycle was detected between project modules.",
-        "error",
-        "design",
-        kind or "cycle",
-        "high",
-    )
+    match family:
+        case "clone":
+            match category:
+                case "function":
+                    return _RuleSpec(
+                        "CCLONE001",
+                        "Function clone group",
+                        "Multiple functions share the same normalized function body.",
+                        "warning",
+                        "clone",
+                        "clone_group",
+                        "high",
+                    )
+                case "block":
+                    return _RuleSpec(
+                        "CCLONE002",
+                        "Block clone group",
+                        (
+                            "Repeated normalized statement blocks were detected "
+                            "across occurrences."
+                        ),
+                        "warning",
+                        "clone",
+                        "clone_group",
+                        "high",
+                    )
+                case _:
+                    return _RuleSpec(
+                        "CCLONE003",
+                        "Segment clone group",
+                        (
+                            "Repeated normalized statement segments were detected "
+                            "across occurrences."
+                        ),
+                        "note",
+                        "clone",
+                        "clone_group",
+                        "medium",
+                    )
+        case "structural":
+            match kind:
+                case "clone_guard_exit_divergence":
+                    return _RuleSpec(
+                        "CSTRUCT002",
+                        "Clone guard/exit divergence",
+                        (
+                            "Members of the same function-clone cohort diverged in "
+                            "entry guards or early-exit behavior."
+                        ),
+                        "warning",
+                        "structural",
+                        "clone_guard_exit_divergence",
+                        "high",
+                    )
+                case "clone_cohort_drift":
+                    return _RuleSpec(
+                        "CSTRUCT003",
+                        "Clone cohort drift",
+                        (
+                            "Members of the same function-clone cohort drifted from "
+                            "the majority terminal/guard/try profile."
+                        ),
+                        "warning",
+                        "structural",
+                        "clone_cohort_drift",
+                        "high",
+                    )
+                case _:
+                    return _RuleSpec(
+                        "CSTRUCT001",
+                        "Duplicated branches",
+                        (
+                            "Repeated branch families with matching structural "
+                            "signatures "
+                            "were detected."
+                        ),
+                        "warning",
+                        "structural",
+                        kind or "duplicated_branches",
+                        "medium",
+                    )
+        case "dead_code":
+            match category:
+                case "function":
+                    return _RuleSpec(
+                        "CDEAD001",
+                        "Unused function",
+                        "Function appears to be unused with high confidence.",
+                        "warning",
+                        "dead_code",
+                        "unused_symbol",
+                        "high",
+                    )
+                case "class":
+                    return _RuleSpec(
+                        "CDEAD002",
+                        "Unused class",
+                        "Class appears to be unused with high confidence.",
+                        "warning",
+                        "dead_code",
+                        "unused_symbol",
+                        "high",
+                    )
+                case "method":
+                    return _RuleSpec(
+                        "CDEAD003",
+                        "Unused method",
+                        "Method appears to be unused with high confidence.",
+                        "warning",
+                        "dead_code",
+                        "unused_symbol",
+                        "high",
+                    )
+                case _:
+                    return _RuleSpec(
+                        "CDEAD004",
+                        "Unused symbol",
+                        "Symbol appears to be unused with reported confidence.",
+                        "warning",
+                        "dead_code",
+                        "unused_symbol",
+                        "medium",
+                    )
+        case _:
+            match category:
+                case "cohesion":
+                    return _RuleSpec(
+                        "CDESIGN001",
+                        "Low cohesion class",
+                        "Class cohesion is low according to LCOM4 hotspot thresholds.",
+                        "warning",
+                        "design",
+                        kind or "class_hotspot",
+                        "high",
+                    )
+                case "complexity":
+                    return _RuleSpec(
+                        "CDESIGN002",
+                        "Complexity hotspot",
+                        "Function exceeds the project complexity hotspot threshold.",
+                        "warning",
+                        "design",
+                        kind or "function_hotspot",
+                        "high",
+                    )
+                case "coupling":
+                    return _RuleSpec(
+                        "CDESIGN003",
+                        "Coupling hotspot",
+                        "Class exceeds the project coupling hotspot threshold.",
+                        "warning",
+                        "design",
+                        kind or "class_hotspot",
+                        "high",
+                    )
+                case _:
+                    return _RuleSpec(
+                        "CDESIGN004",
+                        "Dependency cycle",
+                        "A dependency cycle was detected between project modules.",
+                        "error",
+                        "design",
+                        kind or "cycle",
+                        "high",
+                    )
 
 
 def _result_message(group: Mapping[str, object]) -> str:
@@ -265,51 +250,71 @@ def _result_message(group: Mapping[str, object]) -> str:
     items = [_as_mapping(item) for item in _as_sequence(group.get("items"))]
     first_item = items[0] if items else {}
     qualname = _text(first_item.get("qualname"))
-    if family == "clone":
-        clone_type = _text(group.get("clone_type"))
-        return (
-            f"{category.title()} clone group ({clone_type}), {count} occurrences "
-            f"across {_as_int(spread.get('files'))} files."
-        )
-    if family == "structural":
-        signature = _as_mapping(_as_mapping(group.get("signature")).get("stable"))
-        signature_family = _text(signature.get("family"))
-        if signature_family == "clone_guard_exit_divergence":
-            cohort_id = _text(signature.get("cohort_id"))
+    match family:
+        case "clone":
+            clone_type = _text(group.get("clone_type"))
             return (
-                "Clone guard/exit divergence"
-                f" ({count} divergent members) in cohort {cohort_id or 'unknown'}."
+                f"{category.title()} clone group ({clone_type}), {count} occurrences "
+                f"across {_as_int(spread.get('files'))} files."
             )
-        if signature_family == "clone_cohort_drift":
-            drift_fields = _as_sequence(signature.get("drift_fields"))
-            drift_label = ",".join(_text(item) for item in drift_fields) or "profile"
-            cohort_id = _text(signature.get("cohort_id"))
-            return (
-                f"Clone cohort drift ({drift_label}), {count} divergent members in "
-                f"cohort {cohort_id or 'unknown'}."
-            )
-        stmt_shape = _text(signature.get("stmt_shape"))
-        if qualname:
-            return (
-                f"Repeated branch family ({stmt_shape}), {count} occurrences in "
-                f"{qualname}."
-            )
-        return f"Repeated branch family ({stmt_shape}), {count} occurrences."
-    if family == "dead_code":
-        confidence = _text(group.get("confidence")) or "reported"
-        target = qualname or _text(first_item.get("relative_path"))
-        return f"Unused {category} with {confidence} confidence: {target}"
-    if category == "cohesion":
-        lcom4 = _as_int(_as_mapping(group.get("facts")).get("lcom4"))
-        return f"Low cohesion class (LCOM4={lcom4}): {qualname}"
-    if category == "complexity":
-        cc = _as_int(_as_mapping(group.get("facts")).get("cyclomatic_complexity"))
-        return f"High complexity function (CC={cc}): {qualname}"
-    if category == "coupling":
-        cbo = _as_int(_as_mapping(group.get("facts")).get("cbo"))
-        return f"High coupling class (CBO={cbo}): {qualname}"
-    modules = [_text(item.get("module")) for item in items if _text(item.get("module"))]
-    return f"Dependency cycle ({len(modules)} modules): {' -> '.join(modules)}"
+        case "structural":
+            signature = _as_mapping(_as_mapping(group.get("signature")).get("stable"))
+            signature_family = _text(signature.get("family"))
+            match signature_family:
+                case "clone_guard_exit_divergence":
+                    cohort_id = _text(signature.get("cohort_id"))
+                    return (
+                        "Clone guard/exit divergence"
+                        f" ({count} divergent members) in cohort "
+                        f"{cohort_id or 'unknown'}."
+                    )
+                case "clone_cohort_drift":
+                    drift_fields = _as_sequence(signature.get("drift_fields"))
+                    drift_label = (
+                        ",".join(_text(item) for item in drift_fields) or "profile"
+                    )
+                    cohort_id = _text(signature.get("cohort_id"))
+                    return (
+                        f"Clone cohort drift ({drift_label}), "
+                        f"{count} divergent members "
+                        f"in cohort {cohort_id or 'unknown'}."
+                    )
+                case _:
+                    stmt_shape = _text(signature.get("stmt_shape"))
+                    if qualname:
+                        return (
+                            f"Repeated branch family ({stmt_shape}), {count} "
+                            f"occurrences in {qualname}."
+                        )
+                    return (
+                        f"Repeated branch family ({stmt_shape}), {count} occurrences."
+                    )
+        case "dead_code":
+            confidence = _text(group.get("confidence")) or "reported"
+            target = qualname or _text(first_item.get("relative_path"))
+            return f"Unused {category} with {confidence} confidence: {target}"
+        case _:
+            facts = _as_mapping(group.get("facts"))
+            match category:
+                case "cohesion":
+                    lcom4 = _as_int(facts.get("lcom4"))
+                    return f"Low cohesion class (LCOM4={lcom4}): {qualname}"
+                case "complexity":
+                    cc = _as_int(facts.get("cyclomatic_complexity"))
+                    return f"High complexity function (CC={cc}): {qualname}"
+                case "coupling":
+                    cbo = _as_int(facts.get("cbo"))
+                    return f"High coupling class (CBO={cbo}): {qualname}"
+                case _:
+                    modules = [
+                        _text(item.get("module"))
+                        for item in items
+                        if _text(item.get("module"))
+                    ]
+                    return (
+                        f"Dependency cycle ({len(modules)} modules): "
+                        f"{' -> '.join(modules)}"
+                    )
 
 
 def _logical_locations(item: Mapping[str, object]) -> list[dict[str, object]]:
@@ -374,62 +379,66 @@ def _result_properties(group: Mapping[str, object]) -> dict[str, object]:
     props = _generic_properties(group)
     family = _text(group.get("family"))
     facts = _as_mapping(group.get("facts"))
-    if family == "clone":
-        props.update(
-            {
-                "novelty": _text(group.get("novelty")),
-                "cloneKind": _text(group.get("clone_kind")),
-                "cloneType": _text(group.get("clone_type")),
-                "groupArity": _as_int(group.get("count")),
-            }
-        )
-    elif family == "structural":
-        signature = _as_mapping(_as_mapping(group.get("signature")).get("stable"))
-        signature_family = _text(signature.get("family"))
-        props["occurrenceCount"] = _as_int(group.get("count"))
-        if signature_family == "clone_guard_exit_divergence":
+    match family:
+        case "clone":
             props.update(
                 {
-                    "cohortId": _text(signature.get("cohort_id")),
-                    "majorityGuardCount": _as_int(
-                        signature.get("majority_guard_count"),
-                    ),
-                    "majorityTerminalKind": _text(
-                        signature.get("majority_terminal_kind"),
-                    ),
+                    "novelty": _text(group.get("novelty")),
+                    "cloneKind": _text(group.get("clone_kind")),
+                    "cloneType": _text(group.get("clone_type")),
+                    "groupArity": _as_int(group.get("count")),
                 }
             )
-        elif signature_family == "clone_cohort_drift":
-            props.update(
-                {
-                    "cohortId": _text(signature.get("cohort_id")),
-                    "driftFields": [
-                        _text(field)
-                        for field in _as_sequence(signature.get("drift_fields"))
-                    ],
-                }
-            )
-        else:
-            props.update(
-                {
-                    "statementShape": _text(signature.get("stmt_shape")),
-                    "terminalKind": _text(signature.get("terminal_kind")),
-                }
-            )
-    elif family == "design":
-        for key in (
-            "lcom4",
-            "method_count",
-            "instance_var_count",
-            "cbo",
-            "cyclomatic_complexity",
-            "nesting_depth",
-            "cycle_length",
-        ):
-            if key in facts:
-                props[key] = facts[key]
-    elif family == "dead_code":
-        props["confidence"] = _text(group.get("confidence"))
+        case "structural":
+            signature = _as_mapping(_as_mapping(group.get("signature")).get("stable"))
+            signature_family = _text(signature.get("family"))
+            props["occurrenceCount"] = _as_int(group.get("count"))
+            match signature_family:
+                case "clone_guard_exit_divergence":
+                    props.update(
+                        {
+                            "cohortId": _text(signature.get("cohort_id")),
+                            "majorityGuardCount": _as_int(
+                                signature.get("majority_guard_count"),
+                            ),
+                            "majorityTerminalKind": _text(
+                                signature.get("majority_terminal_kind"),
+                            ),
+                        }
+                    )
+                case "clone_cohort_drift":
+                    props.update(
+                        {
+                            "cohortId": _text(signature.get("cohort_id")),
+                            "driftFields": [
+                                _text(field)
+                                for field in _as_sequence(signature.get("drift_fields"))
+                            ],
+                        }
+                    )
+                case _:
+                    props.update(
+                        {
+                            "statementShape": _text(signature.get("stmt_shape")),
+                            "terminalKind": _text(signature.get("terminal_kind")),
+                        }
+                    )
+        case "design":
+            for key in (
+                "lcom4",
+                "method_count",
+                "instance_var_count",
+                "cbo",
+                "cyclomatic_complexity",
+                "nesting_depth",
+                "cycle_length",
+            ):
+                if key in facts:
+                    props[key] = facts[key]
+        case "dead_code":
+            props["confidence"] = _text(group.get("confidence"))
+        case _:
+            pass
     return props
 
 

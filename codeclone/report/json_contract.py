@@ -9,7 +9,49 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from hashlib import sha256
 from typing import TYPE_CHECKING, Literal
 
+from .. import _coerce
 from ..contracts import REPORT_SCHEMA_VERSION
+from ..domain.findings import (
+    CATEGORY_COHESION,
+    CATEGORY_COMPLEXITY,
+    CATEGORY_COUPLING,
+    CATEGORY_DEAD_CODE,
+    CATEGORY_DEPENDENCY,
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
+    CLONE_KIND_SEGMENT,
+    CLONE_NOVELTY_KNOWN,
+    CLONE_NOVELTY_NEW,
+    FAMILY_CLONE,
+    FAMILY_CLONES,
+    FAMILY_DEAD_CODE,
+    FAMILY_DESIGN,
+    FAMILY_STRUCTURAL,
+)
+from ..domain.quality import (
+    CONFIDENCE_HIGH,
+    CONFIDENCE_MEDIUM,
+    EFFORT_EASY,
+    EFFORT_HARD,
+    EFFORT_MODERATE,
+    EFFORT_WEIGHT,
+    RISK_LOW,
+    SEVERITY_CRITICAL,
+    SEVERITY_INFO,
+    SEVERITY_ORDER,
+    SEVERITY_RANK,
+    SEVERITY_WARNING,
+)
+from ..domain.source_scope import (
+    IMPACT_SCOPE_MIXED,
+    IMPACT_SCOPE_NON_RUNTIME,
+    IMPACT_SCOPE_RUNTIME,
+    SOURCE_KIND_FIXTURES,
+    SOURCE_KIND_MIXED,
+    SOURCE_KIND_OTHER,
+    SOURCE_KIND_PRODUCTION,
+    SOURCE_KIND_TESTS,
+)
 from ..structural_findings import normalize_structural_findings
 from .derived import (
     combine_source_kinds,
@@ -37,53 +79,17 @@ __all__ = [
     "structural_group_id",
 ]
 
-_SOURCE_BREAKDOWN_KEYS: tuple[SourceKind, ...] = (
-    "production",
-    "tests",
-    "fixtures",
-    "other",
+_as_int = _coerce.as_int
+_as_float = _coerce.as_float
+_as_mapping = _coerce.as_mapping
+_as_sequence = _coerce.as_sequence
+
+_SOURCE_BREAKDOWN_KEYS_TYPED: tuple[SourceKind, ...] = (
+    SOURCE_KIND_PRODUCTION,
+    SOURCE_KIND_TESTS,
+    SOURCE_KIND_FIXTURES,
+    SOURCE_KIND_OTHER,
 )
-_SEVERITY_RANK = {"critical": 3, "warning": 2, "info": 1}
-_SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
-_EFFORT_RANK = {"easy": 1, "moderate": 2, "hard": 3}
-
-
-def _as_int(value: object, default: int = 0) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return default
-    return default
-
-
-def _as_float(value: object, default: float = 0.0) -> float:
-    if isinstance(value, bool):
-        return float(int(value))
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return default
-    return default
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    if isinstance(value, Mapping):
-        return value
-    return {}
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
 
 
 def _optional_str(value: object) -> str | None:
@@ -135,8 +141,8 @@ def _priority(
     severity: str,
     effort: str,
 ) -> float:
-    severity_rank = _SEVERITY_RANK.get(severity, 1)
-    effort_rank = _EFFORT_RANK.get(effort, 1)
+    severity_rank = SEVERITY_RANK.get(severity, 1)
+    effort_rank = EFFORT_WEIGHT.get(effort, 1)
     return float(severity_rank) / float(effort_rank)
 
 
@@ -163,10 +169,10 @@ def _clone_novelty(
     new_keys: Collection[str] | None,
 ) -> str:
     if not baseline_trusted:
-        return "new"
+        return CLONE_NOVELTY_NEW
     if new_keys is None:
-        return "new"
-    return "new" if group_key in new_keys else "known"
+        return CLONE_NOVELTY_NEW
+    return CLONE_NOVELTY_NEW if group_key in new_keys else CLONE_NOVELTY_KNOWN
 
 
 def _item_sort_key(item: Mapping[str, object]) -> tuple[str, int, int, str]:
@@ -212,31 +218,24 @@ def _normalize_block_machine_facts(
     display_facts: dict[str, str] = {}
     for key in sorted(block_facts):
         value = str(block_facts[key])
-        if key == "group_arity":
-            facts[key] = _as_int(value)
-            continue
-        if key in {"block_size", "consecutive_asserts", "instance_peer_count"}:
-            facts[key] = _as_int(value)
-            continue
-        if key == "merged_regions":
-            facts[key] = _parse_bool_text(value)
-            continue
-        if key == "assert_ratio":
-            ratio = _parse_ratio_percent(value)
-            if ratio is not None:
-                facts[key] = ratio
-            display_facts[key] = value
-            continue
-        if key in {
-            "match_rule",
-            "pattern",
-            "signature_kind",
-            "hint",
-            "hint_confidence",
-        }:
-            facts[key] = value
-            continue
-        display_facts[key] = value
+        match key:
+            case "group_arity":
+                facts[key] = _as_int(value)
+            case "block_size" | "consecutive_asserts" | "instance_peer_count":
+                facts[key] = _as_int(value)
+            case "merged_regions":
+                facts[key] = _parse_bool_text(value)
+            case "assert_ratio":
+                ratio = _parse_ratio_percent(value)
+                if ratio is not None:
+                    facts[key] = ratio
+                display_facts[key] = value
+            case (
+                "match_rule" | "pattern" | "signature_kind" | "hint" | "hint_confidence"
+            ):
+                facts[key] = value
+            case _:
+                display_facts[key] = value
     return facts, display_facts
 
 
@@ -252,23 +251,30 @@ def _source_scope_from_filepaths(
             scan_root=scan_root,
         )
         counts[location.source_kind] += 1
-    breakdown = {kind: counts[kind] for kind in _SOURCE_BREAKDOWN_KEYS}
-    present = tuple(kind for kind in _SOURCE_BREAKDOWN_KEYS if breakdown[kind] > 0)
+    breakdown = {kind: counts[kind] for kind in _SOURCE_BREAKDOWN_KEYS_TYPED}
+    present = tuple(
+        kind for kind in _SOURCE_BREAKDOWN_KEYS_TYPED if breakdown[kind] > 0
+    )
     dominant_kind = (
         present[0]
         if len(present) == 1
         else combine_source_kinds(present)
         if present
-        else "other"
+        else SOURCE_KIND_OTHER
     )
-    production_count = breakdown["production"]
-    non_runtime_count = breakdown["tests"] + breakdown["fixtures"] + breakdown["other"]
-    if production_count > 0 and non_runtime_count == 0:
-        impact_scope = "runtime"
-    elif production_count == 0:
-        impact_scope = "non_runtime"
-    else:
-        impact_scope = "mixed"
+    production_count = breakdown[SOURCE_KIND_PRODUCTION]
+    non_runtime_count = (
+        breakdown[SOURCE_KIND_TESTS]
+        + breakdown[SOURCE_KIND_FIXTURES]
+        + breakdown[SOURCE_KIND_OTHER]
+    )
+    match (production_count > 0, non_runtime_count == 0, production_count == 0):
+        case (True, True, _):
+            impact_scope = IMPACT_SCOPE_RUNTIME
+        case (_, _, True):
+            impact_scope = IMPACT_SCOPE_NON_RUNTIME
+        case _:
+            impact_scope = IMPACT_SCOPE_MIXED
     return {
         "dominant_kind": dominant_kind,
         "breakdown": breakdown,
@@ -282,34 +288,42 @@ def _source_scope_from_locations(
     counts: Counter[SourceKind] = Counter()
     for location in locations:
         source_kind_text = (
-            str(location.get("source_kind", "other")).strip().lower() or "other"
+            str(location.get("source_kind", SOURCE_KIND_OTHER)).strip().lower()
+            or SOURCE_KIND_OTHER
         )
-        if source_kind_text == "production":
-            source_kind: SourceKind = "production"
-        elif source_kind_text == "tests":
-            source_kind = "tests"
-        elif source_kind_text == "fixtures":
-            source_kind = "fixtures"
+        if source_kind_text == SOURCE_KIND_PRODUCTION:
+            source_kind: SourceKind = SOURCE_KIND_PRODUCTION
+        elif source_kind_text == SOURCE_KIND_TESTS:
+            source_kind = SOURCE_KIND_TESTS
+        elif source_kind_text == SOURCE_KIND_FIXTURES:
+            source_kind = SOURCE_KIND_FIXTURES
         else:
-            source_kind = "other"
+            source_kind = SOURCE_KIND_OTHER
         counts[source_kind] += 1
-    breakdown = {kind: counts[kind] for kind in _SOURCE_BREAKDOWN_KEYS}
-    present = tuple(kind for kind in _SOURCE_BREAKDOWN_KEYS if breakdown[kind] > 0)
+    breakdown = {kind: counts[kind] for kind in _SOURCE_BREAKDOWN_KEYS_TYPED}
+    present = tuple(
+        kind for kind in _SOURCE_BREAKDOWN_KEYS_TYPED if breakdown[kind] > 0
+    )
     dominant_kind = (
         present[0]
         if len(present) == 1
         else combine_source_kinds(present)
         if present
-        else "other"
+        else SOURCE_KIND_OTHER
     )
-    production_count = breakdown["production"]
-    non_runtime_count = breakdown["tests"] + breakdown["fixtures"] + breakdown["other"]
-    if production_count > 0 and non_runtime_count == 0:
-        impact_scope = "runtime"
-    elif production_count == 0:
-        impact_scope = "non_runtime"
-    else:
-        impact_scope = "mixed"
+    production_count = breakdown[SOURCE_KIND_PRODUCTION]
+    non_runtime_count = (
+        breakdown[SOURCE_KIND_TESTS]
+        + breakdown[SOURCE_KIND_FIXTURES]
+        + breakdown[SOURCE_KIND_OTHER]
+    )
+    match (production_count > 0, non_runtime_count == 0, production_count == 0):
+        case (True, True, _):
+            impact_scope = IMPACT_SCOPE_RUNTIME
+        case (_, _, True):
+            impact_scope = IMPACT_SCOPE_NON_RUNTIME
+        case _:
+            impact_scope = IMPACT_SCOPE_MIXED
     return {
         "dominant_kind": dominant_kind,
         "breakdown": breakdown,
@@ -319,20 +333,20 @@ def _source_scope_from_locations(
 
 def _collect_paths_from_metrics(metrics: Mapping[str, object]) -> set[str]:
     paths: set[str] = set()
-    complexity = _as_mapping(metrics.get("complexity"))
+    complexity = _as_mapping(metrics.get(CATEGORY_COMPLEXITY))
     for item in _as_sequence(complexity.get("functions")):
         item_map = _as_mapping(item)
         filepath = _optional_str(item_map.get("filepath"))
         if filepath is not None:
             paths.add(filepath)
-    for family_name in ("coupling", "cohesion"):
+    for family_name in (CATEGORY_COUPLING, CATEGORY_COHESION):
         family = _as_mapping(metrics.get(family_name))
         for item in _as_sequence(family.get("classes")):
             item_map = _as_mapping(item)
             filepath = _optional_str(item_map.get("filepath"))
             if filepath is not None:
                 paths.add(filepath)
-    dead_code = _as_mapping(metrics.get("dead_code"))
+    dead_code = _as_mapping(metrics.get(FAMILY_DEAD_CODE))
     for item in _as_sequence(dead_code.get("items")):
         item_map = _as_mapping(item)
         filepath = _optional_str(item_map.get("filepath"))
@@ -411,7 +425,7 @@ def _normalize_metrics_families(
     scan_root: str,
 ) -> dict[str, object]:
     metrics_map = _as_mapping(metrics)
-    complexity = _as_mapping(metrics_map.get("complexity"))
+    complexity = _as_mapping(metrics_map.get(CATEGORY_COMPLEXITY))
     complexity_items = sorted(
         (
             {
@@ -428,7 +442,7 @@ def _normalize_metrics_families(
                     1,
                 ),
                 "nesting_depth": _as_int(item_map.get("nesting_depth")),
-                "risk": str(item_map.get("risk", "low")),
+                "risk": str(item_map.get("risk", RISK_LOW)),
             }
             for item in _as_sequence(complexity.get("functions"))
             for item_map in (_as_mapping(item),)
@@ -441,7 +455,7 @@ def _normalize_metrics_families(
         ),
     )
 
-    coupling = _as_mapping(metrics_map.get("coupling"))
+    coupling = _as_mapping(metrics_map.get(CATEGORY_COUPLING))
     coupling_items = sorted(
         (
             {
@@ -454,7 +468,7 @@ def _normalize_metrics_families(
                 "start_line": _as_int(item_map.get("start_line")),
                 "end_line": _as_int(item_map.get("end_line")),
                 "cbo": _as_int(item_map.get("cbo")),
-                "risk": str(item_map.get("risk", "low")),
+                "risk": str(item_map.get("risk", RISK_LOW)),
                 "coupled_classes": sorted(
                     {
                         str(name)
@@ -474,7 +488,7 @@ def _normalize_metrics_families(
         ),
     )
 
-    cohesion = _as_mapping(metrics_map.get("cohesion"))
+    cohesion = _as_mapping(metrics_map.get(CATEGORY_COHESION))
     cohesion_items = sorted(
         (
             {
@@ -487,7 +501,7 @@ def _normalize_metrics_families(
                 "start_line": _as_int(item_map.get("start_line")),
                 "end_line": _as_int(item_map.get("end_line")),
                 "lcom4": _as_int(item_map.get("lcom4")),
-                "risk": str(item_map.get("risk", "low")),
+                "risk": str(item_map.get("risk", RISK_LOW)),
                 "method_count": _as_int(item_map.get("method_count")),
                 "instance_var_count": _as_int(item_map.get("instance_var_count")),
             }
@@ -524,7 +538,7 @@ def _normalize_metrics_families(
     dependency_cycles = _normalize_nested_string_rows(dependencies.get("cycles"))
     longest_chains = _normalize_nested_string_rows(dependencies.get("longest_chains"))
 
-    dead_code = _as_mapping(metrics_map.get("dead_code"))
+    dead_code = _as_mapping(metrics_map.get(FAMILY_DEAD_CODE))
 
     def _normalize_suppressed_by(
         raw_bindings: object,
@@ -560,7 +574,7 @@ def _normalize_metrics_families(
                 "start_line": _as_int(item_map.get("start_line")),
                 "end_line": _as_int(item_map.get("end_line")),
                 "kind": str(item_map.get("kind", "")),
-                "confidence": str(item_map.get("confidence", "medium")),
+                "confidence": str(item_map.get("confidence", CONFIDENCE_MEDIUM)),
             }
             for item in _as_sequence(dead_code.get("items"))
             for item_map in (_as_mapping(item),)
@@ -585,7 +599,7 @@ def _normalize_metrics_families(
                 "start_line": _as_int(item_map.get("start_line")),
                 "end_line": _as_int(item_map.get("end_line")),
                 "kind": str(item_map.get("kind", "")),
-                "confidence": str(item_map.get("confidence", "medium")),
+                "confidence": str(item_map.get("confidence", CONFIDENCE_MEDIUM)),
                 "suppressed_by": _normalize_suppressed_by(
                     item_map.get("suppressed_by")
                 ),
@@ -628,11 +642,12 @@ def _normalize_metrics_families(
     dead_high_confidence = sum(
         1
         for item in dead_items
-        if str(_as_mapping(item).get("confidence", "")).strip().lower() == "high"
+        if str(_as_mapping(item).get("confidence", "")).strip().lower()
+        == CONFIDENCE_HIGH
     )
 
     normalized: dict[str, object] = {
-        "complexity": {
+        CATEGORY_COMPLEXITY: {
             "summary": {
                 "total": len(complexity_items),
                 "average": round(_as_float(complexity_summary.get("average")), 2),
@@ -642,7 +657,7 @@ def _normalize_metrics_families(
             "items": complexity_items,
             "items_truncated": False,
         },
-        "coupling": {
+        CATEGORY_COUPLING: {
             "summary": {
                 "total": len(coupling_items),
                 "average": round(_as_float(coupling_summary.get("average")), 2),
@@ -652,7 +667,7 @@ def _normalize_metrics_families(
             "items": coupling_items,
             "items_truncated": False,
         },
-        "cohesion": {
+        CATEGORY_COHESION: {
             "summary": {
                 "total": len(cohesion_items),
                 "average": round(_as_float(cohesion_summary.get("average")), 2),
@@ -674,7 +689,7 @@ def _normalize_metrics_families(
             "longest_chains": longest_chains,
             "items_truncated": False,
         },
-        "dead_code": {
+        FAMILY_DEAD_CODE: {
             "summary": {
                 "total": len(dead_items),
                 "high_confidence": dead_high_confidence
@@ -726,9 +741,11 @@ def _derive_inventory_code_counts(
     cached_files: int,
 ) -> dict[str, object]:
     complexity = _as_mapping(
-        _as_mapping(metrics_payload.get("families")).get("complexity")
+        _as_mapping(metrics_payload.get("families")).get(CATEGORY_COMPLEXITY)
     )
-    cohesion = _as_mapping(_as_mapping(metrics_payload.get("families")).get("cohesion"))
+    cohesion = _as_mapping(
+        _as_mapping(metrics_payload.get("families")).get(CATEGORY_COHESION)
+    )
     complexity_items = _as_sequence(complexity.get("items"))
     cohesion_items = _as_sequence(cohesion.get("items"))
 
@@ -907,12 +924,13 @@ def _clone_group_assessment(
     count: int,
     clone_type: str,
 ) -> tuple[str, float]:
-    if count >= 4:
-        severity = "critical"
-    elif clone_type in {"Type-1", "Type-2"}:
-        severity = "warning"
-    else:
-        severity = "info"
+    match (count >= 4, clone_type in {"Type-1", "Type-2"}):
+        case (True, _):
+            severity = SEVERITY_CRITICAL
+        case (False, True):
+            severity = SEVERITY_WARNING
+        case _:
+            severity = SEVERITY_INFO
     effort = "easy" if clone_type in {"Type-1", "Type-2"} else "moderate"
     return severity, _priority(severity, effort)
 
@@ -929,23 +947,26 @@ def _build_clone_group_facts(
         "group_arity": len(items),
     }
     display_facts: dict[str, str] = {}
-    if kind == "function":
-        loc_buckets = sorted(
-            {
-                str(item.get("loc_bucket", ""))
-                for item in items
-                if str(item.get("loc_bucket", "")).strip()
-            }
-        )
-        base["loc_buckets"] = loc_buckets
-    if kind == "block" and group_key in block_facts:
-        typed_facts, block_display_facts = _normalize_block_machine_facts(
-            group_key=group_key,
-            group_arity=len(items),
-            block_facts=block_facts[group_key],
-        )
-        base.update(typed_facts)
-        display_facts.update(block_display_facts)
+    match kind:
+        case "function":
+            loc_buckets = sorted(
+                {
+                    str(item.get("loc_bucket", ""))
+                    for item in items
+                    if str(item.get("loc_bucket", "")).strip()
+                }
+            )
+            base["loc_buckets"] = loc_buckets
+        case "block" if group_key in block_facts:
+            typed_facts, block_display_facts = _normalize_block_machine_facts(
+                group_key=group_key,
+                group_arity=len(items),
+                block_facts=block_facts[group_key],
+            )
+            base.update(typed_facts)
+            display_facts.update(block_display_facts)
+        case _:
+            pass
     return base, display_facts
 
 
@@ -964,29 +985,32 @@ def _clone_item_payload(
         "start_line": _as_int(item.get("start_line", 0)),
         "end_line": _as_int(item.get("end_line", 0)),
     }
-    if kind == "function":
-        payload.update(
-            {
-                "loc": _as_int(item.get("loc", 0)),
-                "stmt_count": _as_int(item.get("stmt_count", 0)),
-                "fingerprint": str(item.get("fingerprint", "")),
-                "loc_bucket": str(item.get("loc_bucket", "")),
-                "cyclomatic_complexity": _as_int(item.get("cyclomatic_complexity", 1)),
-                "nesting_depth": _as_int(item.get("nesting_depth", 0)),
-                "risk": str(item.get("risk", "low")),
-                "raw_hash": str(item.get("raw_hash", "")),
-            }
-        )
-    elif kind == "block":
-        payload["size"] = _as_int(item.get("size", 0))
-    else:
-        payload.update(
-            {
-                "size": _as_int(item.get("size", 0)),
-                "segment_hash": str(item.get("segment_hash", "")),
-                "segment_sig": str(item.get("segment_sig", "")),
-            }
-        )
+    match kind:
+        case "function":
+            payload.update(
+                {
+                    "loc": _as_int(item.get("loc", 0)),
+                    "stmt_count": _as_int(item.get("stmt_count", 0)),
+                    "fingerprint": str(item.get("fingerprint", "")),
+                    "loc_bucket": str(item.get("loc_bucket", "")),
+                    "cyclomatic_complexity": _as_int(
+                        item.get("cyclomatic_complexity", 1)
+                    ),
+                    "nesting_depth": _as_int(item.get("nesting_depth", 0)),
+                    "risk": str(item.get("risk", RISK_LOW)),
+                    "raw_hash": str(item.get("raw_hash", "")),
+                }
+            )
+        case "block":
+            payload["size"] = _as_int(item.get("size", 0))
+        case _:
+            payload.update(
+                {
+                    "size": _as_int(item.get("size", 0)),
+                    "segment_hash": str(item.get("segment_hash", "")),
+                    "segment_sig": str(item.get("segment_sig", "")),
+                }
+            )
     return payload
 
 
@@ -1045,11 +1069,11 @@ def _build_clone_groups(
         encoded_groups.append(
             {
                 "id": clone_group_id(kind, group_key),
-                "family": "clone",
+                "family": FAMILY_CLONE,
                 "category": kind,
                 "kind": "clone_group",
                 "severity": severity,
-                "confidence": "high",
+                "confidence": CONFIDENCE_HIGH,
                 "priority": priority,
                 "clone_kind": kind,
                 "clone_type": clone_type,
@@ -1077,13 +1101,19 @@ def _structural_group_assessment(
     count: int,
     spread_functions: int,
 ) -> tuple[str, float]:
-    if finding_kind in {"clone_guard_exit_divergence", "clone_cohort_drift"}:
-        severity = "warning"
-        if count >= 3 or spread_functions > 1:
-            severity = "critical"
-        return severity, _priority(severity, "moderate")
-    severity = "warning" if count >= 4 or spread_functions > 1 else "info"
-    return severity, _priority(severity, "moderate")
+    match finding_kind:
+        case "clone_guard_exit_divergence" | "clone_cohort_drift":
+            severity = SEVERITY_WARNING
+            if count >= 3 or spread_functions > 1:
+                severity = SEVERITY_CRITICAL
+            return severity, _priority(severity, "moderate")
+        case _:
+            severity = (
+                SEVERITY_WARNING
+                if count >= 4 or spread_functions > 1
+                else SEVERITY_INFO
+            )
+            return severity, _priority(severity, "moderate")
 
 
 def _csv_values(value: object) -> list[str]:
@@ -1098,13 +1128,85 @@ def _build_structural_signature(
     signature: Mapping[str, str],
 ) -> dict[str, object]:
     debug = {str(key): str(signature[key]) for key in sorted(signature)}
-    if finding_kind == "clone_guard_exit_divergence":
-        return {
-            "version": "1",
-            "stable": {
-                "family": "clone_guard_exit_divergence",
+    match finding_kind:
+        case "clone_guard_exit_divergence":
+            return {
+                "version": "1",
+                "stable": {
+                    "family": "clone_guard_exit_divergence",
+                    "cohort_id": str(signature.get("cohort_id", "")),
+                    "majority_guard_count": _as_int(
+                        signature.get("majority_guard_count")
+                    ),
+                    "majority_guard_terminal_profile": str(
+                        signature.get("majority_guard_terminal_profile", "none")
+                    ),
+                    "majority_terminal_kind": str(
+                        signature.get("majority_terminal_kind", "fallthrough")
+                    ),
+                    "majority_side_effect_before_guard": (
+                        str(signature.get("majority_side_effect_before_guard", "0"))
+                        == "1"
+                    ),
+                },
+                "debug": debug,
+            }
+        case "clone_cohort_drift":
+            return {
+                "version": "1",
+                "stable": {
+                    "family": "clone_cohort_drift",
+                    "cohort_id": str(signature.get("cohort_id", "")),
+                    "drift_fields": _csv_values(signature.get("drift_fields")),
+                    "majority_profile": {
+                        "terminal_kind": str(
+                            signature.get("majority_terminal_kind", "")
+                        ),
+                        "guard_exit_profile": str(
+                            signature.get("majority_guard_exit_profile", "")
+                        ),
+                        "try_finally_profile": str(
+                            signature.get("majority_try_finally_profile", "")
+                        ),
+                        "side_effect_order_profile": str(
+                            signature.get("majority_side_effect_order_profile", "")
+                        ),
+                    },
+                },
+                "debug": debug,
+            }
+        case _:
+            return {
+                "version": "1",
+                "stable": {
+                    "family": "duplicated_branches",
+                    "stmt_shape": str(signature.get("stmt_seq", "")),
+                    "terminal_kind": str(signature.get("terminal", "")),
+                    "control_flow": {
+                        "has_loop": str(signature.get("has_loop", "0")) == "1",
+                        "has_try": str(signature.get("has_try", "0")) == "1",
+                        "nested_if": str(signature.get("nested_if", "0")) == "1",
+                    },
+                },
+                "debug": debug,
+            }
+
+
+def _build_structural_facts(
+    finding_kind: str,
+    signature: Mapping[str, str],
+    *,
+    count: int,
+) -> dict[str, object]:
+    match finding_kind:
+        case "clone_guard_exit_divergence":
+            return {
                 "cohort_id": str(signature.get("cohort_id", "")),
-                "majority_guard_count": _as_int(signature.get("majority_guard_count")),
+                "cohort_arity": _as_int(signature.get("cohort_arity")),
+                "divergent_members": _as_int(signature.get("divergent_members"), count),
+                "majority_entry_guard_count": _as_int(
+                    signature.get("majority_guard_count"),
+                ),
                 "majority_guard_terminal_profile": str(
                     signature.get("majority_guard_terminal_profile", "none")
                 ),
@@ -1114,17 +1216,22 @@ def _build_structural_signature(
                 "majority_side_effect_before_guard": (
                     str(signature.get("majority_side_effect_before_guard", "0")) == "1"
                 ),
-            },
-            "debug": debug,
-        }
-    if finding_kind == "clone_cohort_drift":
-        return {
-            "version": "1",
-            "stable": {
-                "family": "clone_cohort_drift",
+                "guard_count_values": _csv_values(signature.get("guard_count_values")),
+                "guard_terminal_values": _csv_values(
+                    signature.get("guard_terminal_values"),
+                ),
+                "terminal_values": _csv_values(signature.get("terminal_values")),
+                "side_effect_before_guard_values": _csv_values(
+                    signature.get("side_effect_before_guard_values"),
+                ),
+            }
+        case "clone_cohort_drift":
+            return {
                 "cohort_id": str(signature.get("cohort_id", "")),
+                "cohort_arity": _as_int(signature.get("cohort_arity")),
+                "divergent_members": _as_int(signature.get("divergent_members"), count),
                 "drift_fields": _csv_values(signature.get("drift_fields")),
-                "majority_profile": {
+                "stable_majority_profile": {
                     "terminal_kind": str(signature.get("majority_terminal_kind", "")),
                     "guard_exit_profile": str(
                         signature.get("majority_guard_exit_profile", "")
@@ -1136,82 +1243,14 @@ def _build_structural_signature(
                         signature.get("majority_side_effect_order_profile", "")
                     ),
                 },
-            },
-            "debug": debug,
-        }
-    return {
-        "version": "1",
-        "stable": {
-            "family": "duplicated_branches",
-            "stmt_shape": str(signature.get("stmt_seq", "")),
-            "terminal_kind": str(signature.get("terminal", "")),
-            "control_flow": {
-                "has_loop": str(signature.get("has_loop", "0")) == "1",
-                "has_try": str(signature.get("has_try", "0")) == "1",
-                "nested_if": str(signature.get("nested_if", "0")) == "1",
-            },
-        },
-        "debug": debug,
-    }
-
-
-def _build_structural_facts(
-    finding_kind: str,
-    signature: Mapping[str, str],
-    *,
-    count: int,
-) -> dict[str, object]:
-    if finding_kind == "clone_guard_exit_divergence":
-        return {
-            "cohort_id": str(signature.get("cohort_id", "")),
-            "cohort_arity": _as_int(signature.get("cohort_arity")),
-            "divergent_members": _as_int(signature.get("divergent_members"), count),
-            "majority_entry_guard_count": _as_int(
-                signature.get("majority_guard_count"),
-            ),
-            "majority_guard_terminal_profile": str(
-                signature.get("majority_guard_terminal_profile", "none")
-            ),
-            "majority_terminal_kind": str(
-                signature.get("majority_terminal_kind", "fallthrough")
-            ),
-            "majority_side_effect_before_guard": (
-                str(signature.get("majority_side_effect_before_guard", "0")) == "1"
-            ),
-            "guard_count_values": _csv_values(signature.get("guard_count_values")),
-            "guard_terminal_values": _csv_values(
-                signature.get("guard_terminal_values"),
-            ),
-            "terminal_values": _csv_values(signature.get("terminal_values")),
-            "side_effect_before_guard_values": _csv_values(
-                signature.get("side_effect_before_guard_values"),
-            ),
-        }
-    if finding_kind == "clone_cohort_drift":
-        return {
-            "cohort_id": str(signature.get("cohort_id", "")),
-            "cohort_arity": _as_int(signature.get("cohort_arity")),
-            "divergent_members": _as_int(signature.get("divergent_members"), count),
-            "drift_fields": _csv_values(signature.get("drift_fields")),
-            "stable_majority_profile": {
-                "terminal_kind": str(signature.get("majority_terminal_kind", "")),
-                "guard_exit_profile": str(
-                    signature.get("majority_guard_exit_profile", "")
-                ),
-                "try_finally_profile": str(
-                    signature.get("majority_try_finally_profile", "")
-                ),
-                "side_effect_order_profile": str(
-                    signature.get("majority_side_effect_order_profile", "")
-                ),
-            },
-        }
-    return {
-        "occurrence_count": count,
-        "non_overlapping": True,
-        "call_bucket": _as_int(signature.get("calls", "0")),
-        "raise_bucket": _as_int(signature.get("raises", "0")),
-    }
+            }
+        case _:
+            return {
+                "occurrence_count": count,
+                "non_overlapping": True,
+                "call_bucket": _as_int(signature.get("calls", "0")),
+                "raise_bucket": _as_int(signature.get("raises", "0")),
+            }
 
 
 def _build_structural_groups(
@@ -1238,15 +1277,15 @@ def _build_structural_groups(
         out.append(
             {
                 "id": structural_group_id(group.finding_kind, group.finding_key),
-                "family": "structural",
+                "family": FAMILY_STRUCTURAL,
                 "category": group.finding_kind,
                 "kind": group.finding_kind,
                 "severity": severity,
                 "confidence": (
-                    "high"
+                    CONFIDENCE_HIGH
                     if group.finding_kind
                     in {"clone_guard_exit_divergence", "clone_cohort_drift"}
-                    else "medium"
+                    else CONFIDENCE_MEDIUM
                 ),
                 "priority": priority,
                 "count": len(group.items),
@@ -1308,23 +1347,23 @@ def _build_dead_code_groups(
     scan_root: str,
 ) -> list[dict[str, object]]:
     families = _as_mapping(metrics_payload.get("families"))
-    dead_code = _as_mapping(families.get("dead_code"))
+    dead_code = _as_mapping(families.get(FAMILY_DEAD_CODE))
     groups: list[dict[str, object]] = []
     for item in _as_sequence(dead_code.get("items")):
         item_map = _as_mapping(item)
         qualname = str(item_map.get("qualname", ""))
         filepath = str(item_map.get("relative_path", ""))
-        confidence = str(item_map.get("confidence", "medium"))
-        severity = "warning" if confidence == "high" else "info"
+        confidence = str(item_map.get("confidence", CONFIDENCE_MEDIUM))
+        severity = SEVERITY_WARNING if confidence == CONFIDENCE_HIGH else SEVERITY_INFO
         groups.append(
             {
                 "id": dead_code_group_id(qualname),
-                "family": "dead_code",
+                "family": FAMILY_DEAD_CODE,
                 "category": str(item_map.get("kind", "unknown")),
                 "kind": "unused_symbol",
                 "severity": severity,
                 "confidence": confidence,
-                "priority": _priority(severity, "easy"),
+                "priority": _priority(severity, EFFORT_EASY),
                 "count": 1,
                 "source_scope": _single_location_source_scope(
                     filepath,
@@ -1360,7 +1399,7 @@ def _build_design_groups(
     families = _as_mapping(metrics_payload.get("families"))
     groups: list[dict[str, object]] = []
 
-    complexity = _as_mapping(families.get("complexity"))
+    complexity = _as_mapping(families.get(CATEGORY_COMPLEXITY))
     for item in _as_sequence(complexity.get("items")):
         item_map = _as_mapping(item)
         cc = _as_int(item_map.get("cyclomatic_complexity"), 1)
@@ -1368,16 +1407,16 @@ def _build_design_groups(
             continue
         qualname = str(item_map.get("qualname", ""))
         filepath = str(item_map.get("relative_path", ""))
-        severity = "critical" if cc > 40 else "warning"
+        severity = SEVERITY_CRITICAL if cc > 40 else SEVERITY_WARNING
         groups.append(
             {
-                "id": design_group_id("complexity", qualname),
-                "family": "design",
-                "category": "complexity",
+                "id": design_group_id(CATEGORY_COMPLEXITY, qualname),
+                "family": FAMILY_DESIGN,
+                "category": CATEGORY_COMPLEXITY,
                 "kind": "function_hotspot",
                 "severity": severity,
-                "confidence": "high",
-                "priority": _priority(severity, "moderate"),
+                "confidence": CONFIDENCE_HIGH,
+                "priority": _priority(severity, EFFORT_MODERATE),
                 "count": 1,
                 "source_scope": _single_location_source_scope(
                     filepath,
@@ -1395,7 +1434,7 @@ def _build_design_groups(
                         "end_line": _as_int(item_map.get("end_line")),
                         "cyclomatic_complexity": cc,
                         "nesting_depth": _as_int(item_map.get("nesting_depth")),
-                        "risk": str(item_map.get("risk", "low")),
+                        "risk": str(item_map.get("risk", RISK_LOW)),
                     }
                 ],
                 "facts": {
@@ -1405,7 +1444,7 @@ def _build_design_groups(
             }
         )
 
-    coupling = _as_mapping(families.get("coupling"))
+    coupling = _as_mapping(families.get(CATEGORY_COUPLING))
     for item in _as_sequence(coupling.get("items")):
         item_map = _as_mapping(item)
         cbo = _as_int(item_map.get("cbo"))
@@ -1415,13 +1454,13 @@ def _build_design_groups(
         filepath = str(item_map.get("relative_path", ""))
         groups.append(
             {
-                "id": design_group_id("coupling", qualname),
-                "family": "design",
-                "category": "coupling",
+                "id": design_group_id(CATEGORY_COUPLING, qualname),
+                "family": FAMILY_DESIGN,
+                "category": CATEGORY_COUPLING,
                 "kind": "class_hotspot",
-                "severity": "warning",
-                "confidence": "high",
-                "priority": _priority("warning", "moderate"),
+                "severity": SEVERITY_WARNING,
+                "confidence": CONFIDENCE_HIGH,
+                "priority": _priority(SEVERITY_WARNING, EFFORT_MODERATE),
                 "count": 1,
                 "source_scope": _single_location_source_scope(
                     filepath,
@@ -1438,7 +1477,7 @@ def _build_design_groups(
                         "start_line": _as_int(item_map.get("start_line")),
                         "end_line": _as_int(item_map.get("end_line")),
                         "cbo": cbo,
-                        "risk": str(item_map.get("risk", "low")),
+                        "risk": str(item_map.get("risk", RISK_LOW)),
                         "coupled_classes": list(
                             _as_sequence(item_map.get("coupled_classes"))
                         ),
@@ -1453,7 +1492,7 @@ def _build_design_groups(
             }
         )
 
-    cohesion = _as_mapping(families.get("cohesion"))
+    cohesion = _as_mapping(families.get(CATEGORY_COHESION))
     for item in _as_sequence(cohesion.get("items")):
         item_map = _as_mapping(item)
         lcom4 = _as_int(item_map.get("lcom4"))
@@ -1463,13 +1502,13 @@ def _build_design_groups(
         filepath = str(item_map.get("relative_path", ""))
         groups.append(
             {
-                "id": design_group_id("cohesion", qualname),
-                "family": "design",
-                "category": "cohesion",
+                "id": design_group_id(CATEGORY_COHESION, qualname),
+                "family": FAMILY_DESIGN,
+                "category": CATEGORY_COHESION,
                 "kind": "class_hotspot",
-                "severity": "warning",
-                "confidence": "high",
-                "priority": _priority("warning", "moderate"),
+                "severity": SEVERITY_WARNING,
+                "confidence": CONFIDENCE_HIGH,
+                "priority": _priority(SEVERITY_WARNING, EFFORT_MODERATE),
                 "count": 1,
                 "source_scope": _single_location_source_scope(
                     filepath,
@@ -1486,7 +1525,7 @@ def _build_design_groups(
                         "start_line": _as_int(item_map.get("start_line")),
                         "end_line": _as_int(item_map.get("end_line")),
                         "lcom4": lcom4,
-                        "risk": str(item_map.get("risk", "low")),
+                        "risk": str(item_map.get("risk", RISK_LOW)),
                         "method_count": _as_int(item_map.get("method_count")),
                         "instance_var_count": _as_int(
                             item_map.get("instance_var_count")
@@ -1513,13 +1552,13 @@ def _build_design_groups(
         )
         groups.append(
             {
-                "id": design_group_id("dependency", cycle_key),
-                "family": "design",
-                "category": "dependency",
+                "id": design_group_id(CATEGORY_DEPENDENCY, cycle_key),
+                "family": FAMILY_DESIGN,
+                "category": CATEGORY_DEPENDENCY,
                 "kind": "cycle",
-                "severity": "critical",
-                "confidence": "high",
-                "priority": _priority("critical", "hard"),
+                "severity": SEVERITY_CRITICAL,
+                "confidence": CONFIDENCE_HIGH,
+                "priority": _priority(SEVERITY_CRITICAL, EFFORT_HARD),
                 "count": len(modules),
                 "source_scope": source_scope,
                 "spread": {"files": len(modules), "functions": 0},
@@ -1566,14 +1605,23 @@ def _findings_summary(
         *dead_code_groups,
         *design_groups,
     ]
-    severity_counts = dict.fromkeys(("critical", "warning", "info"), 0)
-    source_scope_counts = dict.fromkeys(("runtime", "non_runtime", "mixed"), 0)
+    severity_counts = dict.fromkeys(
+        (SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO),
+        0,
+    )
+    source_scope_counts = dict.fromkeys(
+        (IMPACT_SCOPE_RUNTIME, IMPACT_SCOPE_NON_RUNTIME, IMPACT_SCOPE_MIXED),
+        0,
+    )
     for group in flat_groups:
-        severity = str(group.get("severity", "info"))
+        severity = str(group.get("severity", SEVERITY_INFO))
         if severity in severity_counts:
             severity_counts[severity] += 1
         impact_scope = str(
-            _as_mapping(group.get("source_scope")).get("impact_scope", "non_runtime")
+            _as_mapping(group.get("source_scope")).get(
+                "impact_scope",
+                IMPACT_SCOPE_NON_RUNTIME,
+            )
         )
         if impact_scope in source_scope_counts:
             source_scope_counts[impact_scope] += 1
@@ -1581,9 +1629,9 @@ def _findings_summary(
     return {
         "total": len(flat_groups),
         "families": {
-            "clones": len(clone_groups),
-            "structural": len(structural_groups),
-            "dead_code": len(dead_code_groups),
+            FAMILY_CLONES: len(clone_groups),
+            FAMILY_STRUCTURAL: len(structural_groups),
+            FAMILY_DEAD_CODE: len(dead_code_groups),
             "design": len(design_groups),
         },
         "severity": severity_counts,
@@ -1592,15 +1640,19 @@ def _findings_summary(
             "functions": len(clone_functions),
             "blocks": len(clone_blocks),
             "segments": len(clone_segments),
-            "new": sum(
-                1 for group in clone_groups if str(group.get("novelty", "")) == "new"
+            CLONE_NOVELTY_NEW: sum(
+                1
+                for group in clone_groups
+                if str(group.get("novelty", "")) == CLONE_NOVELTY_NEW
             ),
-            "known": sum(
-                1 for group in clone_groups if str(group.get("novelty", "")) == "known"
+            CLONE_NOVELTY_KNOWN: sum(
+                1
+                for group in clone_groups
+                if str(group.get("novelty", "")) == CLONE_NOVELTY_KNOWN
             ),
         },
         "suppressed": {
-            "dead_code": max(0, dead_code_suppressed),
+            FAMILY_DEAD_CODE: max(0, dead_code_suppressed),
         },
     }
 
@@ -1612,7 +1664,7 @@ def _sort_flat_finding_ids(
         groups,
         key=lambda group: (
             -_as_float(group.get("priority")),
-            _SEVERITY_ORDER.get(str(group.get("severity", "info")), 9),
+            SEVERITY_ORDER.get(str(group.get("severity", SEVERITY_INFO)), 9),
             -_as_int(_as_mapping(group.get("spread")).get("files")),
             -_as_int(_as_mapping(group.get("spread")).get("functions")),
             -_as_int(group.get("count")),
@@ -1666,14 +1718,19 @@ def _health_snapshot(metrics_payload: Mapping[str, object]) -> dict[str, object]
 
 def _combined_impact_scope(groups: Sequence[Mapping[str, object]]) -> str:
     impact_scopes = {
-        str(_as_mapping(group.get("source_scope")).get("impact_scope", "non_runtime"))
+        str(
+            _as_mapping(group.get("source_scope")).get(
+                "impact_scope",
+                IMPACT_SCOPE_NON_RUNTIME,
+            )
+        )
         for group in groups
     }
     if not impact_scopes:
-        return "non_runtime"
+        return IMPACT_SCOPE_NON_RUNTIME
     if len(impact_scopes) == 1:
         return next(iter(impact_scopes))
-    return "mixed"
+    return IMPACT_SCOPE_MIXED
 
 
 def _top_risks(
@@ -1694,9 +1751,9 @@ def _top_risks(
         risks.append(
             {
                 "kind": "family_summary",
-                "family": "dead_code",
+                "family": FAMILY_DEAD_CODE,
                 "count": len(dead_code_groups),
-                "scope": "mixed"
+                "scope": IMPACT_SCOPE_MIXED
                 if len(
                     {
                         _as_mapping(group.get("source_scope")).get("impact_scope")
@@ -1707,7 +1764,7 @@ def _top_risks(
                 else str(
                     _as_mapping(dead_code_groups[0].get("source_scope")).get(
                         "impact_scope",
-                        "non_runtime",
+                        IMPACT_SCOPE_NON_RUNTIME,
                     )
                 ),
                 "label": label,
@@ -1715,7 +1772,9 @@ def _top_risks(
         )
 
     low_cohesion = [
-        group for group in design_groups if str(group.get("category", "")) == "cohesion"
+        group
+        for group in design_groups
+        if str(group.get("category", "")) == CATEGORY_COHESION
     ]
     if low_cohesion:
         label = (
@@ -1726,8 +1785,8 @@ def _top_risks(
         risks.append(
             {
                 "kind": "family_summary",
-                "family": "design",
-                "category": "cohesion",
+                "family": FAMILY_DESIGN,
+                "category": CATEGORY_COHESION,
                 "count": len(low_cohesion),
                 "scope": _combined_impact_scope(low_cohesion),
                 "label": label,
@@ -1738,7 +1797,7 @@ def _top_risks(
         group
         for group in structural_groups
         if str(_as_mapping(group.get("source_scope")).get("impact_scope"))
-        in {"runtime", "mixed"}
+        in {IMPACT_SCOPE_RUNTIME, IMPACT_SCOPE_MIXED}
     ]
     if production_structural:
         label = (
@@ -1751,9 +1810,9 @@ def _top_risks(
         risks.append(
             {
                 "kind": "family_summary",
-                "family": "structural",
+                "family": FAMILY_STRUCTURAL,
                 "count": len(production_structural),
-                "scope": "production",
+                "scope": SOURCE_KIND_PRODUCTION,
                 "label": label,
             }
         )
@@ -1761,9 +1820,10 @@ def _top_risks(
     fixture_test_clones = [
         group
         for group in clone_groups
-        if _as_mapping(group.get("source_scope")).get("impact_scope") == "non_runtime"
+        if _as_mapping(group.get("source_scope")).get("impact_scope")
+        == IMPACT_SCOPE_NON_RUNTIME
         and _as_mapping(group.get("source_scope")).get("dominant_kind")
-        in {"tests", "fixtures"}
+        in {SOURCE_KIND_TESTS, SOURCE_KIND_FIXTURES}
     ]
     if fixture_test_clones:
         label = (
@@ -1774,9 +1834,9 @@ def _top_risks(
         risks.append(
             {
                 "kind": "family_summary",
-                "family": "clone",
+                "family": FAMILY_CLONE,
                 "count": len(fixture_test_clones),
-                "scope": "non_runtime",
+                "scope": IMPACT_SCOPE_NON_RUNTIME,
                 "label": label,
             }
         )
@@ -1790,16 +1850,18 @@ def _build_derived_overview(
     metrics_payload: Mapping[str, object],
 ) -> tuple[dict[str, object], dict[str, object]]:
     groups = _as_mapping(findings.get("groups"))
-    clones = _as_mapping(groups.get("clones"))
+    clones = _as_mapping(groups.get(FAMILY_CLONES))
     clone_groups = [
         *_as_sequence(clones.get("functions")),
         *_as_sequence(clones.get("blocks")),
         *_as_sequence(clones.get("segments")),
     ]
     structural_groups = _as_sequence(
-        _as_mapping(groups.get("structural")).get("groups")
+        _as_mapping(groups.get(FAMILY_STRUCTURAL)).get("groups")
     )
-    dead_code_groups = _as_sequence(_as_mapping(groups.get("dead_code")).get("groups"))
+    dead_code_groups = _as_sequence(
+        _as_mapping(groups.get(FAMILY_DEAD_CODE)).get("groups")
+    )
     design_groups = _as_sequence(_as_mapping(groups.get("design")).get("groups"))
     flat_groups = [
         *clone_groups,
@@ -1811,7 +1873,7 @@ def _build_derived_overview(
         str(
             _as_mapping(_as_mapping(group).get("source_scope")).get(
                 "dominant_kind",
-                "other",
+                SOURCE_KIND_OTHER,
             )
         )
         for group in flat_groups
@@ -1827,7 +1889,13 @@ def _build_derived_overview(
         ),
         "source_scope_breakdown": {
             key: dominant_kind_counts[key]
-            for key in ("production", "tests", "fixtures", "mixed", "other")
+            for key in (
+                SOURCE_KIND_PRODUCTION,
+                SOURCE_KIND_TESTS,
+                SOURCE_KIND_FIXTURES,
+                SOURCE_KIND_MIXED,
+                SOURCE_KIND_OTHER,
+            )
             if dominant_kind_counts[key] > 0
         },
         "health_snapshot": _health_snapshot(metrics_payload),
@@ -1837,7 +1905,7 @@ def _build_derived_overview(
             [
                 group
                 for group in map(_as_mapping, flat_groups)
-                if str(group.get("severity")) != "info"
+                if str(group.get("severity")) != SEVERITY_INFO
             ]
         )[:5],
         "highest_spread_ids": _sort_highest_spread_ids(
@@ -1848,7 +1916,7 @@ def _build_derived_overview(
                 group
                 for group in map(_as_mapping, flat_groups)
                 if str(_as_mapping(group.get("source_scope")).get("impact_scope"))
-                in {"runtime", "mixed"}
+                in {IMPACT_SCOPE_RUNTIME, IMPACT_SCOPE_MIXED}
             ]
         )[:5],
         "test_fixture_hotspot_ids": _sort_flat_finding_ids(
@@ -1856,9 +1924,9 @@ def _build_derived_overview(
                 group
                 for group in map(_as_mapping, flat_groups)
                 if str(_as_mapping(group.get("source_scope")).get("impact_scope"))
-                == "non_runtime"
+                == IMPACT_SCOPE_NON_RUNTIME
                 and str(_as_mapping(group.get("source_scope")).get("dominant_kind"))
-                in {"tests", "fixtures"}
+                in {SOURCE_KIND_TESTS, SOURCE_KIND_FIXTURES}
             ]
         )[:5],
     }
@@ -1900,20 +1968,25 @@ def _representative_location_rows(
 
 
 def _suggestion_finding_id(suggestion: Suggestion) -> str:
-    if suggestion.finding_family == "clones":
+    if suggestion.finding_family == FAMILY_CLONES:
         if suggestion.fact_kind.startswith("Function"):
-            return clone_group_id("function", suggestion.subject_key)
+            return clone_group_id(CLONE_KIND_FUNCTION, suggestion.subject_key)
         if suggestion.fact_kind.startswith("Block"):
-            return clone_group_id("block", suggestion.subject_key)
-        return clone_group_id("segment", suggestion.subject_key)
-    if suggestion.finding_family == "structural":
+            return clone_group_id(CLONE_KIND_BLOCK, suggestion.subject_key)
+        return clone_group_id(CLONE_KIND_SEGMENT, suggestion.subject_key)
+    if suggestion.finding_family == FAMILY_STRUCTURAL:
         return structural_group_id(
             suggestion.finding_kind or "duplicated_branches",
             suggestion.subject_key,
         )
-    if suggestion.category == "dead_code":
+    if suggestion.category == CATEGORY_DEAD_CODE:
         return dead_code_group_id(suggestion.subject_key)
-    if suggestion.category in {"complexity", "coupling", "cohesion", "dependency"}:
+    if suggestion.category in {
+        CATEGORY_COMPLEXITY,
+        CATEGORY_COUPLING,
+        CATEGORY_COHESION,
+        CATEGORY_DEPENDENCY,
+    }:
         return design_group_id(suggestion.category, suggestion.subject_key)
     return design_group_id(
         suggestion.category,
@@ -1928,7 +2001,7 @@ def _build_derived_suggestions(
     suggestion_rows.sort(
         key=lambda suggestion: (
             -suggestion.priority,
-            _SEVERITY_ORDER.get(suggestion.severity, 9),
+            SEVERITY_ORDER.get(suggestion.severity, 9),
             suggestion.title,
             _suggestion_finding_id(suggestion),
         )
@@ -1966,7 +2039,7 @@ def _build_findings_payload(
 ) -> dict[str, object]:
     clone_functions = _build_clone_groups(
         groups=func_groups,
-        kind="function",
+        kind=CLONE_KIND_FUNCTION,
         baseline_trusted=baseline_trusted,
         new_keys=new_function_group_keys,
         block_facts=block_facts,
@@ -1974,7 +2047,7 @@ def _build_findings_payload(
     )
     clone_blocks = _build_clone_groups(
         groups=block_groups,
-        kind="block",
+        kind=CLONE_KIND_BLOCK,
         baseline_trusted=baseline_trusted,
         new_keys=new_block_group_keys,
         block_facts=block_facts,
@@ -1982,7 +2055,7 @@ def _build_findings_payload(
     )
     clone_segments = _build_clone_groups(
         groups=segment_groups,
-        kind="segment",
+        kind=CLONE_KIND_SEGMENT,
         baseline_trusted=baseline_trusted,
         new_keys=new_segment_group_keys,
         block_facts={},
@@ -1997,7 +2070,7 @@ def _build_findings_payload(
         scan_root=scan_root,
     )
     dead_code_family = _as_mapping(
-        _as_mapping(metrics_payload.get("families")).get("dead_code")
+        _as_mapping(metrics_payload.get("families")).get(FAMILY_DEAD_CODE)
     )
     dead_code_summary = _as_mapping(dead_code_family.get("summary"))
     dead_code_suppressed = _as_int(
@@ -2021,15 +2094,15 @@ def _build_findings_payload(
             dead_code_suppressed=dead_code_suppressed,
         ),
         "groups": {
-            "clones": {
+            FAMILY_CLONES: {
                 "functions": clone_functions,
                 "blocks": clone_blocks,
                 "segments": clone_segments,
             },
-            "structural": {
+            FAMILY_STRUCTURAL: {
                 "groups": structural_groups,
             },
-            "dead_code": {
+            FAMILY_DEAD_CODE: {
                 "groups": dead_code_groups,
             },
             "design": {

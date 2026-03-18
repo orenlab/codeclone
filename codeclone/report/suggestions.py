@@ -5,6 +5,34 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from .. import _coerce
+from ..domain.findings import (
+    CATEGORY_CLONE,
+    CATEGORY_COHESION,
+    CATEGORY_COMPLEXITY,
+    CATEGORY_COUPLING,
+    CATEGORY_DEAD_CODE,
+    CATEGORY_DEPENDENCY,
+    CATEGORY_STRUCTURAL,
+    CLONE_KIND_BLOCK,
+    CLONE_KIND_FUNCTION,
+    CLONE_KIND_SEGMENT,
+    FAMILY_CLONES,
+    FAMILY_METRICS,
+    FAMILY_STRUCTURAL,
+)
+from ..domain.quality import (
+    CONFIDENCE_HIGH,
+    CONFIDENCE_MEDIUM,
+    EFFORT_EASY,
+    EFFORT_HARD,
+    EFFORT_MODERATE,
+    EFFORT_WEIGHT,
+    SEVERITY_CRITICAL,
+    SEVERITY_INFO,
+    SEVERITY_RANK,
+    SEVERITY_WARNING,
+)
 from ..models import (
     ClassMetrics,
     GroupItemLike,
@@ -47,29 +75,12 @@ SuggestionCategory = Literal[
     "dependency",
 ]
 
-_SEVERITY_WEIGHT: dict[Severity, int] = {"critical": 3, "warning": 2, "info": 1}
-_EFFORT_WEIGHT: dict[Effort, int] = {"easy": 1, "moderate": 2, "hard": 3}
-
-
-def _as_int(value: object, default: int = 0) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return default
-    return default
-
-
-def _as_str(value: object, default: str = "") -> str:
-    return value if isinstance(value, str) else default
+_as_int = _coerce.as_int
+_as_str = _coerce.as_str
 
 
 def _priority(severity: Severity, effort: Effort) -> float:
-    return float(_SEVERITY_WEIGHT[severity]) / float(_EFFORT_WEIGHT[effort])
+    return float(SEVERITY_RANK[severity]) / float(EFFORT_WEIGHT[effort])
 
 
 def classify_clone_type(
@@ -77,7 +88,7 @@ def classify_clone_type(
     items: Sequence[GroupItemLike],
     kind: Literal["function", "block", "segment"],
 ) -> CloneType:
-    if kind in {"block", "segment"}:
+    if kind in {CLONE_KIND_BLOCK, CLONE_KIND_SEGMENT}:
         return "Type-4"
 
     raw_hashes = sorted(
@@ -118,9 +129,9 @@ def _source_context(
 
 def _clone_fact_kind(kind: Literal["function", "block", "segment"]) -> str:
     return {
-        "function": "Function clone group",
-        "block": "Block clone group",
-        "segment": "Segment clone group",
+        CLONE_KIND_FUNCTION: "Function clone group",
+        CLONE_KIND_BLOCK: "Block clone group",
+        CLONE_KIND_SEGMENT: "Segment clone group",
     }[kind]
 
 
@@ -130,15 +141,17 @@ def _clone_summary(
     clone_type: CloneType,
     facts: Mapping[str, str],
 ) -> str:
-    if kind == "function":
-        if clone_type == "Type-1":
-            return "same exact function body"
-        if clone_type == "Type-2":
-            return "same parameterized function body"
-        if clone_type == "Type-3":
-            return "same structural function body with small identifier changes"
-        return "same structural function body"
-    if kind == "block":
+    if kind == CLONE_KIND_FUNCTION:
+        match clone_type:
+            case "Type-1":
+                return "same exact function body"
+            case "Type-2":
+                return "same parameterized function body"
+            case "Type-3":
+                return "same structural function body with small identifier changes"
+            case _:
+                return "same structural function body"
+    if kind == CLONE_KIND_BLOCK:
         hint = str(facts.get("hint", "")).strip()
         pattern = str(facts.get("pattern", "")).strip()
         if hint == BLOCK_HINT_ASSERT_ONLY:
@@ -156,27 +169,27 @@ def _clone_steps(
     facts: Mapping[str, str],
 ) -> tuple[str, ...]:
     hint = str(facts.get("hint", "")).strip()
-    if kind == "function" and clone_type == "Type-1":
+    if kind == CLONE_KIND_FUNCTION and clone_type == "Type-1":
         return (
             "Keep one canonical implementation and remove the exact duplicates.",
             "Route the remaining call sites to the shared implementation.",
         )
-    if kind == "function" and clone_type == "Type-2":
+    if kind == CLONE_KIND_FUNCTION and clone_type == "Type-2":
         return (
             "Extract a shared implementation with explicit parameters.",
             "Replace identifier-only variations with arguments.",
         )
-    if kind == "block" and hint == BLOCK_HINT_ASSERT_ONLY:
+    if kind == CLONE_KIND_BLOCK and hint == BLOCK_HINT_ASSERT_ONLY:
         return (
             "Collapse the repeated assertion template into a helper or loop.",
             "Keep the asserted values as data instead of copy-pasted statements.",
         )
-    if kind == "block":
+    if kind == CLONE_KIND_BLOCK:
         return (
             "Extract the repeated statement sequence into a helper.",
             "Keep setup data close to the call site and move shared logic out.",
         )
-    if kind == "segment":
+    if kind == CLONE_KIND_SEGMENT:
         return (
             "Review whether the repeated segment should become shared utility code.",
             "Keep this as a report hint only if the duplication is intentional.",
@@ -205,12 +218,14 @@ def _clone_suggestion(
     count = len(items)
     severity: Severity
     if count >= 4:
-        severity = "critical"
+        severity = SEVERITY_CRITICAL
     elif clone_type in {"Type-1", "Type-2"}:
-        severity = "warning"
+        severity = SEVERITY_WARNING
     else:
-        severity = "info"
-    effort: Effort = "easy" if clone_type in {"Type-1", "Type-2"} else "moderate"
+        severity = SEVERITY_INFO
+    effort: Effort = (
+        EFFORT_EASY if clone_type in {"Type-1", "Type-2"} else EFFORT_MODERATE
+    )
     summary = _clone_summary(kind=kind, clone_type=clone_type, facts=facts)
     location_label = format_group_location_label(
         representative,
@@ -220,13 +235,13 @@ def _clone_suggestion(
     )
     return Suggestion(
         severity=severity,
-        category="clone",
+        category=CATEGORY_CLONE,
         title=f"{_clone_fact_kind(kind)} ({clone_type})",
         location=location_label,
         steps=_clone_steps(kind=kind, clone_type=clone_type, facts=facts),
         effort=effort,
         priority=_priority(severity, effort),
-        finding_family="clones",
+        finding_family=FAMILY_CLONES,
         finding_kind=kind,
         subject_key=group_key,
         fact_kind=_clone_fact_kind(kind),
@@ -235,7 +250,7 @@ def _clone_suggestion(
         spread_files=spread_files,
         spread_functions=spread_functions,
         clone_type=clone_type,
-        confidence="high",
+        confidence=CONFIDENCE_HIGH,
         source_kind=source_kind,
         source_breakdown=breakdown,
         representative_locations=representative,
@@ -257,7 +272,7 @@ def _clone_suggestions(
             _clone_suggestion(
                 group_key=group_key,
                 items=items,
-                kind="function",
+                kind=CLONE_KIND_FUNCTION,
                 facts={},
                 scan_root=scan_root,
             )
@@ -267,7 +282,7 @@ def _clone_suggestions(
             _clone_suggestion(
                 group_key=group_key,
                 items=items,
-                kind="block",
+                kind=CLONE_KIND_BLOCK,
                 facts=block_group_facts.get(group_key, {}),
                 scan_root=scan_root,
             )
@@ -277,7 +292,7 @@ def _clone_suggestions(
             _clone_suggestion(
                 group_key=group_key,
                 items=items,
-                kind="segment",
+                kind=CLONE_KIND_SEGMENT,
                 facts={},
                 scan_root=scan_root,
             )
@@ -329,7 +344,7 @@ def _single_location_suggestion(
         steps=steps,
         effort=effort,
         priority=_priority(severity, effort),
-        finding_family="metrics",
+        finding_family=FAMILY_METRICS,
         finding_kind=finding_kind,
         subject_key=subject_key,
         fact_kind=fact_kind,
@@ -363,19 +378,19 @@ def _complexity_suggestions(
         cc = _as_int(unit.get("cyclomatic_complexity"), 1)
         if cc <= 20:
             continue
-        severity: Severity = "critical" if cc > 40 else "warning"
+        severity: Severity = SEVERITY_CRITICAL if cc > 40 else SEVERITY_WARNING
         nesting = _as_int(unit.get("nesting_depth"))
         qualname = _as_str(unit.get("qualname"))
         suggestions.append(
             _single_location_suggestion(
                 severity=severity,
-                category="complexity",
+                category=CATEGORY_COMPLEXITY,
                 title="Reduce function complexity",
                 steps=(
                     "Split the function into smaller deterministic stages.",
                     "Extract helper functions for nested branches.",
                 ),
-                effort="moderate",
+                effort=EFFORT_MODERATE,
                 fact_kind="Function complexity hotspot",
                 fact_summary=f"cyclomatic_complexity={cc}, nesting_depth={nesting}",
                 filepath=_as_str(unit.get("filepath")),
@@ -384,7 +399,7 @@ def _complexity_suggestions(
                 qualname=qualname,
                 subject_key=qualname,
                 finding_kind="function_hotspot",
-                confidence="high",
+                confidence=CONFIDENCE_HIGH,
                 scan_root=scan_root,
             )
         )
@@ -404,14 +419,14 @@ def _coupling_and_cohesion_suggestions(
         if metric.cbo > 10:
             suggestions.append(
                 _single_location_suggestion(
-                    severity="warning",
-                    category="coupling",
+                    severity=SEVERITY_WARNING,
+                    category=CATEGORY_COUPLING,
                     title="Reduce class coupling",
                     steps=(
                         "Reduce external dependencies of this class.",
                         "Move unrelated responsibilities to collaborator classes.",
                     ),
-                    effort="moderate",
+                    effort=EFFORT_MODERATE,
                     fact_kind="Class coupling hotspot",
                     fact_summary=f"cbo={metric.cbo}",
                     filepath=metric.filepath,
@@ -420,21 +435,21 @@ def _coupling_and_cohesion_suggestions(
                     qualname=metric.qualname,
                     subject_key=metric.qualname,
                     finding_kind="class_hotspot",
-                    confidence="high",
+                    confidence=CONFIDENCE_HIGH,
                     scan_root=scan_root,
                 )
             )
         if metric.lcom4 > 3:
             suggestions.append(
                 _single_location_suggestion(
-                    severity="warning",
-                    category="cohesion",
+                    severity=SEVERITY_WARNING,
+                    category=CATEGORY_COHESION,
                     title="Split low-cohesion class",
                     steps=(
                         "Split class by responsibility boundaries.",
                         "Group methods by shared state and extract subcomponents.",
                     ),
-                    effort="moderate",
+                    effort=EFFORT_MODERATE,
                     fact_kind="Low cohesion class",
                     fact_summary=f"lcom4={metric.lcom4}",
                     filepath=metric.filepath,
@@ -443,7 +458,7 @@ def _coupling_and_cohesion_suggestions(
                     qualname=metric.qualname,
                     subject_key=metric.qualname,
                     finding_kind="class_hotspot",
-                    confidence="high",
+                    confidence=CONFIDENCE_HIGH,
                     scan_root=scan_root,
                 )
             )
@@ -457,18 +472,18 @@ def _dead_code_suggestions(
 ) -> list[Suggestion]:
     suggestions: list[Suggestion] = []
     for item in project_metrics.dead_code:
-        if item.confidence != "high":
+        if item.confidence != CONFIDENCE_HIGH:
             continue
         suggestions.append(
             _single_location_suggestion(
-                severity="warning",
-                category="dead_code",
+                severity=SEVERITY_WARNING,
+                category=CATEGORY_DEAD_CODE,
                 title="Remove or explicitly keep unused code",
                 steps=(
                     "Remove or deprecate the unused symbol.",
                     "If intentionally reserved, add explicit keep marker and test.",
                 ),
-                effort="easy",
+                effort=EFFORT_EASY,
                 fact_kind="Dead code item",
                 fact_summary=f"{item.kind} with {item.confidence} confidence",
                 filepath=item.filepath,
@@ -477,7 +492,7 @@ def _dead_code_suggestions(
                 qualname=item.qualname,
                 subject_key=item.qualname,
                 finding_kind="unused_symbol",
-                confidence="high",
+                confidence=CONFIDENCE_HIGH,
                 scan_root=scan_root,
             )
         )
@@ -498,17 +513,17 @@ def _dependency_suggestions(project_metrics: ProjectMetrics) -> list[Suggestion]
         source_kind = _module_source_kind(list(cycle))
         suggestions.append(
             Suggestion(
-                severity="critical",
-                category="dependency",
+                severity=SEVERITY_CRITICAL,
+                category=CATEGORY_DEPENDENCY,
                 title="Break circular dependency",
                 location=location,
                 steps=(
                     "Break the cycle by extracting a shared abstraction.",
                     "Invert one dependency edge through an interface or protocol.",
                 ),
-                effort="hard",
-                priority=_priority("critical", "hard"),
-                finding_family="metrics",
+                effort=EFFORT_HARD,
+                priority=_priority(SEVERITY_CRITICAL, EFFORT_HARD),
+                finding_family=FAMILY_METRICS,
                 finding_kind="cycle",
                 subject_key=location,
                 fact_kind="Dependency cycle",
@@ -516,7 +531,7 @@ def _dependency_suggestions(project_metrics: ProjectMetrics) -> list[Suggestion]
                 fact_count=len(cycle),
                 spread_files=len(cycle),
                 spread_functions=0,
-                confidence="high",
+                confidence=CONFIDENCE_HIGH,
                 source_kind=source_kind,
                 source_breakdown=((source_kind, len(cycle)),),
                 location_label=location,
@@ -526,62 +541,84 @@ def _dependency_suggestions(project_metrics: ProjectMetrics) -> list[Suggestion]
 
 
 def _structural_summary(group: StructuralFindingGroup) -> tuple[str, str]:
-    if group.finding_kind == "clone_guard_exit_divergence":
-        return (
-            "Clone guard/exit divergence",
-            "clone cohort members differ in entry guards or early-exit behavior",
-        )
-    if group.finding_kind == "clone_cohort_drift":
-        return (
-            "Clone cohort drift",
-            "clone cohort members drift from majority terminal/guard/try profile",
-        )
+    match group.finding_kind:
+        case "clone_guard_exit_divergence":
+            return (
+                "Clone guard/exit divergence",
+                "clone cohort members differ in entry guards or early-exit behavior",
+            )
+        case "clone_cohort_drift":
+            return (
+                "Clone cohort drift",
+                "clone cohort members drift from majority terminal/guard/try profile",
+            )
+        case _:
+            pass
 
     terminal = str(group.signature.get("terminal", "")).strip()
     stmt_seq = str(group.signature.get("stmt_seq", "")).strip()
     raises = str(group.signature.get("raises", "")).strip()
     has_loop = str(group.signature.get("has_loop", "")).strip()
-    if terminal == "raise" or raises not in {"", "0"}:
-        return "Repeated branch family", "same repeated guard/validation branch"
-    if terminal == "return":
-        return "Repeated branch family", "same repeated return branch"
-    if has_loop == "1":
-        return "Repeated branch family", "same repeated loop branch"
-    if stmt_seq:
-        return "Repeated branch family", f"same repeated branch shape ({stmt_seq})"
-    return "Repeated branch family", "same repeated branch shape"
+    raise_like = terminal == "raise" or raises not in {"", "0"}
+    match (raise_like, terminal, has_loop):
+        case (True, _, _):
+            return "Repeated branch family", "same repeated guard/validation branch"
+        case (False, "return", _):
+            return "Repeated branch family", "same repeated return branch"
+        case (False, _, "1"):
+            return "Repeated branch family", "same repeated loop branch"
+        case _:
+            if stmt_seq:
+                return "Repeated branch family", (
+                    f"same repeated branch shape ({stmt_seq})"
+                )
+            return "Repeated branch family", "same repeated branch shape"
 
 
 def _structural_steps(group: StructuralFindingGroup) -> tuple[str, ...]:
-    if group.finding_kind == "clone_guard_exit_divergence":
-        return (
-            "Compare divergent clone members against the majority guard/exit profile.",
-            "If divergence is accidental, align guard exits across the cohort.",
-        )
-    if group.finding_kind == "clone_cohort_drift":
-        return (
-            "Review whether cohort drift is intentional for this clone family.",
-            "If not intentional, reconcile terminal/guard/try profiles across members.",
-        )
+    match group.finding_kind:
+        case "clone_guard_exit_divergence":
+            return (
+                (
+                    "Compare divergent clone members against the majority "
+                    "guard/exit profile."
+                ),
+                "If divergence is accidental, align guard exits across the cohort.",
+            )
+        case "clone_cohort_drift":
+            return (
+                "Review whether cohort drift is intentional for this clone family.",
+                (
+                    "If not intentional, reconcile terminal/guard/try profiles "
+                    "across members."
+                ),
+            )
+        case _:
+            pass
 
     terminal = str(group.signature.get("terminal", "")).strip()
-    if terminal == "raise":
-        return (
-            "Factor the repeated validation/guard path into a shared helper.",
-            (
-                "Keep the branch-specific inputs at the call site and share "
-                "the exit policy."
-            ),
-        )
-    if terminal == "return":
-        return (
-            "Consolidate the repeated return-path logic into a shared helper.",
-            "Keep the branch predicate local and share the emitted behavior.",
-        )
-    return (
-        "Review whether the repeated branch family should become a helper.",
-        "Keep this as a report-only hint if the local duplication is intentional.",
-    )
+    match terminal:
+        case "raise":
+            return (
+                "Factor the repeated validation/guard path into a shared helper.",
+                (
+                    "Keep the branch-specific inputs at the call site and share "
+                    "the exit policy."
+                ),
+            )
+        case "return":
+            return (
+                "Consolidate the repeated return-path logic into a shared helper.",
+                "Keep the branch predicate local and share the emitted behavior.",
+            )
+        case _:
+            return (
+                "Review whether the repeated branch family should become a helper.",
+                (
+                    "Keep this as a report-only hint if the local duplication is "
+                    "intentional."
+                ),
+            )
 
 
 def _structural_suggestions(
@@ -599,12 +636,14 @@ def _structural_suggestions(
         spread_files, spread_functions = group_spread(locations)
         source_kind, breakdown = _source_context(locations, scan_root=scan_root)
         count = len(locations)
-        severity: Severity = "warning" if count >= 4 or spread_functions > 1 else "info"
+        severity: Severity = (
+            SEVERITY_WARNING if count >= 4 or spread_functions > 1 else SEVERITY_INFO
+        )
         if group.finding_kind in {
             "clone_guard_exit_divergence",
             "clone_cohort_drift",
         }:
-            severity = "warning"
+            severity = SEVERITY_WARNING
         title, summary = _structural_summary(group)
         location_label = format_group_location_label(
             representative,
@@ -615,13 +654,13 @@ def _structural_suggestions(
         suggestions.append(
             Suggestion(
                 severity=severity,
-                category="structural",
+                category=CATEGORY_STRUCTURAL,
                 title=title,
                 location=location_label,
                 steps=_structural_steps(group),
-                effort="moderate",
-                priority=_priority(severity, "moderate"),
-                finding_family="structural",
+                effort=EFFORT_MODERATE,
+                priority=_priority(severity, EFFORT_MODERATE),
+                finding_family=FAMILY_STRUCTURAL,
                 finding_kind=group.finding_kind,
                 subject_key=group.finding_key,
                 fact_kind="Structural finding",
@@ -630,10 +669,10 @@ def _structural_suggestions(
                 spread_files=spread_files,
                 spread_functions=spread_functions,
                 confidence=(
-                    "high"
+                    CONFIDENCE_HIGH
                     if group.finding_kind
                     in {"clone_guard_exit_divergence", "clone_cohort_drift"}
-                    else "medium"
+                    else CONFIDENCE_MEDIUM
                 ),
                 source_kind=source_kind,
                 source_breakdown=breakdown,

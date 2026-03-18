@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .. import _coerce
 from .explain_contract import (
     BLOCK_HINT_ASSERT_ONLY,
     BLOCK_HINT_ASSERT_ONLY_LABEL,
@@ -40,17 +41,7 @@ def signature_parts(group_key: str) -> list[str]:
     return [part for part in group_key.split("|") if part]
 
 
-def _as_int(value: object) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
+_as_int = _coerce.as_int
 
 
 def parsed_file_tree(
