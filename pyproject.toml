@@ -77,7 +77,7 @@ dev = [
 codeclone = "codeclone.cli:main"
 
 [tool.setuptools]
-packages = ["codeclone", "codeclone.metrics", "codeclone.report"]
+packages = ["codeclone", "codeclone.metrics", "codeclone.report", "codeclone.domain"]
 license-files = ["LICENSE"]
 
 [tool.setuptools.package-data]

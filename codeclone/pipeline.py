@@ -310,7 +310,7 @@ def _unit_to_group_item(unit: Unit) -> GroupItem:
         "raw_hash": unit.raw_hash,
         "entry_guard_count": unit.entry_guard_count,
         "entry_guard_terminal_profile": unit.entry_guard_terminal_profile,
-        "entry_guard_has_side_effect_before": (unit.entry_guard_has_side_effect_before),
+        "entry_guard_has_side_effect_before": unit.entry_guard_has_side_effect_before,
         "terminal_kind": unit.terminal_kind,
         "try_finally_profile": unit.try_finally_profile,
         "side_effect_order_profile": unit.side_effect_order_profile,

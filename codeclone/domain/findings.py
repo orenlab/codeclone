@@ -9,6 +9,10 @@ CLONE_KIND_FUNCTION: Final = "function"
 CLONE_KIND_BLOCK: Final = "block"
 CLONE_KIND_SEGMENT: Final = "segment"
 
+SYMBOL_KIND_CLASS: Final = "class"
+SYMBOL_KIND_METHOD: Final = "method"
+SYMBOL_KIND_IMPORT: Final = "import"
+
 CLONE_NOVELTY_NEW: Final = "new"
 CLONE_NOVELTY_KNOWN: Final = "known"
 
@@ -26,6 +30,16 @@ CATEGORY_COUPLING: Final = "coupling"
 CATEGORY_COHESION: Final = "cohesion"
 CATEGORY_DEAD_CODE: Final = "dead_code"
 CATEGORY_DEPENDENCY: Final = "dependency"
+
+FINDING_KIND_CLONE_GROUP: Final = "clone_group"
+FINDING_KIND_UNUSED_SYMBOL: Final = "unused_symbol"
+FINDING_KIND_CLASS_HOTSPOT: Final = "class_hotspot"
+FINDING_KIND_FUNCTION_HOTSPOT: Final = "function_hotspot"
+FINDING_KIND_CYCLE: Final = "cycle"
+
+STRUCTURAL_KIND_DUPLICATED_BRANCHES: Final = "duplicated_branches"
+STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE: Final = "clone_guard_exit_divergence"
+STRUCTURAL_KIND_CLONE_COHORT_DRIFT: Final = "clone_cohort_drift"
 
 __all__ = [
     "CATEGORY_CLONE",
@@ -46,4 +60,15 @@ __all__ = [
     "FAMILY_DESIGN",
     "FAMILY_METRICS",
     "FAMILY_STRUCTURAL",
+    "FINDING_KIND_CLASS_HOTSPOT",
+    "FINDING_KIND_CLONE_GROUP",
+    "FINDING_KIND_CYCLE",
+    "FINDING_KIND_FUNCTION_HOTSPOT",
+    "FINDING_KIND_UNUSED_SYMBOL",
+    "STRUCTURAL_KIND_CLONE_COHORT_DRIFT",
+    "STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE",
+    "STRUCTURAL_KIND_DUPLICATED_BRANCHES",
+    "SYMBOL_KIND_CLASS",
+    "SYMBOL_KIND_IMPORT",
+    "SYMBOL_KIND_METHOD",
 ]

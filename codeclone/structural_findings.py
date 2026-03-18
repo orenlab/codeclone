@@ -18,6 +18,11 @@ from dataclasses import dataclass
 from hashlib import sha1
 from typing import TYPE_CHECKING
 
+from .domain.findings import (
+    STRUCTURAL_KIND_CLONE_COHORT_DRIFT,
+    STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
+    STRUCTURAL_KIND_DUPLICATED_BRANCHES,
+)
 from .models import GroupItemLike, StructuralFindingGroup, StructuralFindingOccurrence
 
 if TYPE_CHECKING:
@@ -31,9 +36,9 @@ __all__ = [
     "scan_function_structure",
 ]
 
-_FINDING_KIND_BRANCHES = "duplicated_branches"
-_FINDING_KIND_CLONE_GUARD_EXIT_DIVERGENCE = "clone_guard_exit_divergence"
-_FINDING_KIND_CLONE_COHORT_DRIFT = "clone_cohort_drift"
+_FINDING_KIND_BRANCHES = STRUCTURAL_KIND_DUPLICATED_BRANCHES
+_FINDING_KIND_CLONE_GUARD_EXIT_DIVERGENCE = STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE
+_FINDING_KIND_CLONE_COHORT_DRIFT = STRUCTURAL_KIND_CLONE_COHORT_DRIFT
 _TRIVIAL_STMT_TYPES = frozenset(
     {
         "AnnAssign",

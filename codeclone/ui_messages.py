@@ -11,6 +11,13 @@ from pathlib import Path
 
 from . import __version__
 from .contracts import ISSUES_URL
+from .domain.quality import (
+    HEALTH_GRADE_A,
+    HEALTH_GRADE_B,
+    HEALTH_GRADE_C,
+    HEALTH_GRADE_D,
+    HEALTH_GRADE_F,
+)
 
 BANNER_SUBTITLE = "Structural code analysis"
 
@@ -366,11 +373,11 @@ def fmt_summary_compact_metrics(
 
 
 _HEALTH_GRADE_STYLE: dict[str, str] = {
-    "A": "bold green",
-    "B": "green",
-    "C": "yellow",
-    "D": "bold red",
-    "F": "bold red",
+    HEALTH_GRADE_A: "bold green",
+    HEALTH_GRADE_B: "green",
+    HEALTH_GRADE_C: "yellow",
+    HEALTH_GRADE_D: "bold red",
+    HEALTH_GRADE_F: "bold red",
 }
 
 _L = 12  # label column width (after 2-space indent)

@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Literal
 
+from ..domain.findings import CLONE_KIND_FUNCTION, SYMBOL_KIND_METHOD
+from ..domain.quality import CONFIDENCE_HIGH, CONFIDENCE_MEDIUM
 from ..models import DeadCandidate, DeadItem
 from ..paths import is_test_filepath
 from ..suppressions import DEAD_CODE_RULE_ID
@@ -44,9 +46,9 @@ def find_unused(
         if symbol.local_name in referenced_names:
             continue
 
-        confidence: Literal["high", "medium"] = "high"
+        confidence: Literal["high", "medium"] = CONFIDENCE_HIGH
         if symbol.qualname.split(":", 1)[-1] in referenced_names:
-            confidence = "medium"
+            confidence = CONFIDENCE_MEDIUM
 
         items.append(
             DeadItem(
@@ -102,18 +104,16 @@ def _is_non_actionable_candidate(symbol: DeadCandidate) -> bool:
         return True
 
     # Module-level dynamic hooks (PEP 562) are invoked by import/runtime lookup.
-    match symbol.kind:
-        case "function":
-            return symbol.local_name in _MODULE_RUNTIME_HOOK_NAMES
-        # Magic methods and visitor callbacks are invoked by runtime dispatch.
-        case "method":
-            return (
-                _is_dunder(symbol.local_name)
-                or symbol.local_name.startswith(_DYNAMIC_METHOD_PREFIXES)
-                or symbol.local_name in _DYNAMIC_HOOK_NAMES
-            )
-        case _:
-            return False
+    if symbol.kind == CLONE_KIND_FUNCTION:
+        return symbol.local_name in _MODULE_RUNTIME_HOOK_NAMES
+    # Magic methods and visitor callbacks are invoked by runtime dispatch.
+    if symbol.kind == SYMBOL_KIND_METHOD:
+        return (
+            _is_dunder(symbol.local_name)
+            or symbol.local_name.startswith(_DYNAMIC_METHOD_PREFIXES)
+            or symbol.local_name in _DYNAMIC_HOOK_NAMES
+        )
+    return False
 
 
 def _is_dunder(name: str) -> bool:

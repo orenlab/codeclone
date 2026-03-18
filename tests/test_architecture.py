@@ -92,6 +92,18 @@ def test_architecture_layer_violations() -> None:
                 "codeclone.html_report",
             ),
         ),
+        (
+            "codeclone.domain.",
+            (
+                "codeclone.cli",
+                "codeclone.pipeline",
+                "codeclone.report",
+                "codeclone.html_report",
+                "codeclone.ui_messages",
+                "codeclone.baseline",
+                "codeclone.cache",
+            ),
+        ),
     )
 
     for module_name, path in _iter_codeclone_modules(root):
@@ -121,5 +133,17 @@ def test_architecture_layer_violations() -> None:
                 violations.append(
                     f"codeclone.models imports unexpected local module: {import_name}"
                 )
+
+        if (
+            module_name.startswith("codeclone.domain.")
+            and module_name != "codeclone.domain.__init__"
+        ):
+            violations.extend(
+                [
+                    "codeclone.domain submodule imports unexpected local module: "
+                    f"{module_name} -> {import_name}"
+                    for import_name in imports
+                ]
+            )
 
     assert violations == []
