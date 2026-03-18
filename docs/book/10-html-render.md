@@ -35,6 +35,8 @@ Refs:
 - HTML must not recompute detection semantics; it renders facts from core/report layers.
 - Explainability hints shown in UI are sourced from `build_block_group_facts` data.
 - Provenance panel mirrors report metadata contract.
+- Dead-code UI is a single top-level `Dead Code` tab with deterministic split
+  sub-tabs: `Active` and `Suppressed`.
 
 Refs:
 
@@ -47,6 +49,8 @@ Refs:
 - All user/content fields are escaped for text/attributes before insertion.
 - Missing file snippets render explicit fallback blocks.
 - Novelty controls reflect baseline trust split note and per-group novelty flags.
+- Suppressed dead-code rows are rendered only from report dead-code suppression
+  payloads and do not become active dead-code findings in UI tables.
 
 Refs:
 

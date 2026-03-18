@@ -1,7 +1,10 @@
 # AGENTS.md — CodeClone (AI Agent Playbook)
 
-This document is the **source of truth** for how AI agents should work in this repository.
+This document is the **source of truth** for agent operating rules in this repository.
 It is optimized for **determinism**, **CI stability**, and **reproducible changes**.
+
+For architecture, module ownership, and runtime behavior, the **current repository code is the source of truth**.
+If AGENTS.md and code diverge, follow code and update AGENTS.md accordingly.
 
 > Repository goal: maximize **honesty**, **reproducibility**, **determinism**, and **precision** for real‑world CI
 > usage.
@@ -65,9 +68,7 @@ Key artifacts:
 Run these locally before proposing changes:
 
 ```bash
-uv run ruff check .
-uv run mypy .
-uv run pytest -q
+uv run pre-commit run --all-files
 ```
 
 If you touched baseline/cache/report contracts, also run the repo’s audit runner (or the scenario script if present).
@@ -266,9 +267,160 @@ Before cutting a release:
 
 ---
 
-## 12) Where to put new code
+## 12) Repository architecture
 
-## 13) Python language + typing rules (3.10 → 3.14)
+Architecture is layered, but grounded in current code (not aspirational diagrams):
+
+- **CLI / orchestration surface** (`codeclone/cli.py`, `codeclone/_cli_*.py`) parses args, resolves runtime mode,
+  coordinates pipeline calls, and prints UX.
+- **Pipeline orchestrator** (`codeclone/pipeline.py`) owns end-to-end flow: bootstrap → discovery → processing →
+  analysis → report artifacts → gating.
+- **Core analysis** (`codeclone/extractor.py`, `codeclone/cfg.py`, `codeclone/normalize.py`, `codeclone/blocks.py`,
+  `codeclone/grouping.py`, `codeclone/scanner.py`) produces normalized structural facts and clone candidates.
+- **Domain/contracts layer** (`codeclone/models.py`, `codeclone/contracts.py`, `codeclone/errors.py`) defines typed
+  entities and stable enums/constants used across layers.
+- **Persistence contracts** (`codeclone/baseline.py`, `codeclone/cache.py`, `codeclone/metrics_baseline.py`) store
+  trusted comparison state and optimization state.
+- **Canonical report + projections** (`codeclone/report/json_contract.py`, `codeclone/report/*.py`) converts analysis
+  facts to deterministic, contract-shaped outputs.
+- **HTML/UI rendering** (`codeclone/html_report.py`, `codeclone/_html_*.py`, `codeclone/templates.py`) renders views
+  from report/meta facts.
+- **Tests-as-spec** (`tests/`) lock behavior, contracts, determinism, and architecture boundaries.
+
+Non-negotiable interpretation:
+
+- Core produces facts; renderers present facts.
+- Baseline/cache are persistence contracts, not analysis truth.
+- UI/report must not invent gating semantics.
+
+## 13) Module map
+
+Use this map to route changes to the right owner module.
+
+- `codeclone/cli.py` — public CLI entry and control-flow coordinator; add orchestration and top-level UX here; do not
+  move core analysis logic here.
+- `codeclone/_cli_*.py` — CLI support slices (args, config, runtime, summary, reports, baselines, gating); keep them
+  thin and reusable; do not encode domain semantics that belong to pipeline/core/contracts.
+- `codeclone/pipeline.py` — canonical orchestration and data plumbing between scanner/extractor/metrics/report/gating;
+  change integration flow here; do not move HTML-only presentation logic here.
+- `codeclone/extractor.py` — AST extraction, CFG fingerprint input preparation, symbol/declaration collection, and
+  per-file metrics inputs; change parsing/extraction semantics here; do not couple this module to CLI/report
+  rendering/baseline logic.
+- `codeclone/grouping.py` / `codeclone/blocks.py` / `codeclone/blockhash.py` — clone grouping and block/segment
+  mechanics; change grouping behavior here; do not mix in CLI/report UX concerns.
+- `codeclone/metrics/` — metric computations and dead-code/dependency/health logic; change metric math and thresholds
+  here; do not make metrics depend on renderer/UI concerns.
+- `codeclone/structural_findings.py` — structural finding extraction/normalization policy; keep it report-layer factual
+  and deterministic.
+- `codeclone/suppressions.py` — inline `# noqa: codeclone[...]` parse/bind/index logic; keep it declaration-scoped and
+  deterministic.
+- `codeclone/baseline.py` — baseline schema/trust/integrity/compatibility contract; all baseline format changes go here
+  with explicit contract process.
+- `codeclone/cache.py` — cache schema/integrity/profile compatibility and serialization; cache remains
+  optimization-only.
+- `codeclone/report/json_contract.py` — canonical report schema builder/integrity payload; any JSON contract shape
+  change belongs here.
+- `codeclone/report/*.py` (other modules) — deterministic projections/format transforms (
+  text/markdown/sarif/derived/findings/suggestions); avoid injecting new analysis heuristics here.
+- `codeclone/html_report.py` — HTML presentation layer from report/meta payload; no hidden analysis decisions.
+- `codeclone/models.py` — shared typed models crossing modules; keep model changes contract-aware.
+- `tests/` — executable specification: architecture rules, contracts, goldens, invariants, regressions.
+
+## 14) Dependency direction
+
+Dependency direction is enforceable and partially test-guarded (`tests/test_architecture.py`):
+
+- `codeclone.report.*` must not import `codeclone.cli`, `codeclone.html_report`, or `codeclone.ui_messages`.
+- `codeclone.extractor` must not import `codeclone.report`, `codeclone.cli`, or `codeclone.baseline`.
+- `codeclone.grouping` must not import `codeclone.cli`, `codeclone.baseline`, or `codeclone.html_report`.
+- `codeclone.baseline` and `codeclone.cache` must not import `codeclone.cli`, `codeclone.ui_messages`, or
+  `codeclone.html_report`.
+- `codeclone.models` may import only `codeclone.contracts` and `codeclone.errors` from local modules.
+
+Operational rules:
+
+- Core/domain code must not depend on HTML/UI.
+- Renderers depend on canonical report payload/model; canonical report code must not depend on renderer/UI.
+- Metrics/report layers must not recompute or invent core facts in UI.
+- CLI helper modules (`_cli_*`) must orchestrate/format, not own domain semantics.
+- Persistence semantics (baseline/cache trust/integrity) must stay in persistence/domain modules, not in render/UI
+  layers.
+
+## 15) Suppression policy
+
+Inline suppressions are explicit local policy, not analysis truth.
+
+- Supported syntax is `# noqa: codeclone[rule-id,...]` via `codeclone/suppressions.py`.
+- Binding scope is declaration-only (`def`, `async def`, `class`) using:
+    - leading comment on the line immediately before declaration
+    - inline comment on declaration line
+- Binding is target-specific (`filepath`, `qualname`, declaration span, kind). No file-wide/global implicit scope.
+- Unknown/malformed directives are ignored safely; analysis must not fail because of suppression syntax issues.
+- Current active semantic effect is dead-code suppression (`dead-code`) through `extractor.py` →
+  `DeadCandidate.suppressed_rules` → `metrics/dead_code.py`.
+- Suppressed dead-code findings are excluded from active dead-code findings and health impact, but remain observable in
+  report surfaces where implemented (JSON summary/details, text/markdown/html, CLI counters).
+- Suppressions must not silently alter unrelated finding families.
+
+Prefer explicit inline suppressions for runtime/dynamic false positives instead of broad framework heuristics.
+
+## 16) Change routing
+
+If you change a contract-sensitive zone, route docs/tests/approval deliberately.
+
+| Change zone                                                                                      | Must update docs                                                                                                                                                   | Must update tests                                                                                                                                      | Explicit approval required when                                                      | Contract-change trigger                                                            |
+|--------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
+| Baseline schema/trust/integrity (`codeclone/baseline.py`)                                        | `docs/book/06-baseline.md`, `docs/book/14-compatibility-and-versioning.md`, `docs/book/appendix/b-schema-layouts.md`, `CHANGELOG.md`                               | `tests/test_baseline.py`, CI/CLI behavior tests (`tests/test_cli_inprocess.py`, `tests/test_cli_unit.py`)                                              | schema/trust semantics, compatibility windows, payload integrity logic change        | baseline key layout/status semantics/compat rules change                           |
+| Cache schema/profile/integrity (`codeclone/cache.py`)                                            | `docs/book/07-cache.md`, `docs/book/appendix/b-schema-layouts.md`, `CHANGELOG.md`                                                                                  | `tests/test_cache.py`, pipeline/CLI cache integration tests                                                                                            | cache schema/status/profile compatibility semantics change                           | cache payload/version/status semantics change                                      |
+| Canonical report JSON shape (`codeclone/report/json_contract.py`, report projections)            | `docs/book/08-report.md` (+ `docs/book/10-html-render.md` if rendering contract impacted), `CHANGELOG.md`                                                          | `tests/test_report.py`, `tests/test_report_contract_coverage.py`, `tests/test_report_branch_invariants.py`, relevant report-format tests               | finding/meta/summary schema changes                                                  | stable JSON fields/meaning/order guarantees change                                 |
+| CLI flags/help/exit behavior (`codeclone/cli.py`, `_cli_*`, `contracts.py`)                      | `docs/book/09-cli.md`, `docs/book/03-contracts-exit-codes.md`, `README.md`, `CHANGELOG.md`                                                                         | `tests/test_cli_unit.py`, `tests/test_cli_inprocess.py`, `tests/test_cli_smoke.py`                                                                     | exit-code semantics, script-facing behavior, flag contracts change                   | user-visible CLI contract changes                                                  |
+| Fingerprint-adjacent analysis (`extractor/cfg/normalize/grouping`)                               | `docs/book/05-core-pipeline.md`, `docs/cfg.md`, `docs/book/14-compatibility-and-versioning.md`, `CHANGELOG.md`                                                     | `tests/test_fingerprint.py`, `tests/test_extractor.py`, `tests/test_cfg.py`, golden tests (`tests/test_detector_golden.py`, `tests/test_golden_v2.py`) | always (see Section 1.6)                                                             | clone identity / NEW-vs-KNOWN / fingerprint inputs change                          |
+| Suppression semantics/reporting (`suppressions`, extractor dead-code wiring, report/UI counters) | `docs/book/19-inline-suppressions.md`, `docs/book/16-dead-code-contract.md`, `docs/book/08-report.md`, and interface docs if surfaced (`09-cli`, `10-html-render`) | `tests/test_suppressions.py`, `tests/test_extractor.py`, `tests/test_metrics_modules.py`, `tests/test_pipeline_metrics.py`, report/html/cli tests      | declaration scope semantics, rule effect, or contract-visible counters/fields change | suppression changes alter active finding output or contract-visible report payload |
+
+Golden rule: do not “fix” failures by snapshot refresh unless the underlying contract change is intentional, documented,
+and approved.
+
+## 17) Testing taxonomy
+
+Treat tests as specification with explicit intent:
+
+- **Unit tests** — module-level behavior and edge conditions (e.g., `tests/test_cfg.py`, `tests/test_normalize.py`,
+  `tests/test_metrics_modules.py`, `tests/test_suppressions.py`).
+- **Contract tests** — baseline/cache/report/CLI public semantics (e.g., `tests/test_baseline.py`,
+  `tests/test_cache.py`, `tests/test_report_contract_coverage.py`, `tests/test_cli_unit.py`).
+- **Golden tests** — snapshot sentinels for stable outputs (`tests/test_detector_golden.py`, `tests/test_golden_v2.py`).
+- **Determinism/invariant tests** — ordering, branch-path invariants, and canonical stability (e.g.,
+  `tests/test_report_branch_invariants.py`, `tests/test_core_branch_coverage.py`).
+- **Scenario/regression tests** — multi-step integration and process-level behavior (e.g.,
+  `tests/test_cli_inprocess.py`, `tests/test_pipeline_process.py`, `tests/test_cli_smoke.py`).
+
+Policy:
+
+- Expand the closest taxonomy bucket when changing behavior.
+- If a change touches a public surface, include/adjust contract tests, not only unit tests.
+- Goldens validate intended contract shifts; they are not a substitute for reasoning or routing.
+
+## 18) Public vs internal surfaces
+
+### Public / contract-sensitive surfaces
+
+- CLI flags, defaults, exit codes, and stable script-facing messages.
+- Baseline schema/trust semantics/integrity compatibility (`2.0` baseline contract family).
+- Cache schema/status/profile compatibility/integrity (`CACHE_VERSION` contract family).
+- Canonical report JSON schema/payload semantics (`REPORT_SCHEMA_VERSION` contract family).
+- Documented finding families/kinds/ids and suppression-facing report fields.
+- Metrics baseline schema/compatibility where used by CI/gating.
+- Benchmark schema/outputs if consumed as a reproducible contract surface.
+
+### Internal implementation surfaces
+
+- Local helpers and formatting utilities (`_html_*`, many private `_as_*` normalizers, local transformers).
+- Internal orchestration decomposition inside `_cli_*` modules.
+- Private utility refactors that do not change public payloads, exit semantics, ordering, or trust rules.
+
+If classification is ambiguous, treat it as contract-sensitive and add tests/docs before merging.
+
+## 19) Python language + typing rules (3.10 → 3.14)
 
 These rules are **repo policy**. If you need to violate one, you must explain why in the PR.
 
@@ -330,8 +482,6 @@ Use modern syntax when it stays compatible with 3.10+:
 Prefer these rules:
 
 - **Domain / contracts / enums** live near the domain owner (baseline statuses in baseline domain).
-- **Core logic** should not depend on HTML.
-- **Render** depends on report model, never the other way around.
 - If a module becomes a “god module”, split by:
     - model (types)
     - io/serialization
@@ -342,7 +492,7 @@ Avoid deep package hierarchies unless they clearly reduce coupling.
 
 ---
 
-## 14) Minimal checklist for PRs (agents)
+## 20) Minimal checklist for PRs (agents)
 
 - [ ] Change is deterministic.
 - [ ] Contracts preserved or versioned.

@@ -44,6 +44,10 @@ Refs:
 - Internal errors use `fmt_internal_error` with optional debug details.
 - Runtime footer uses explicit wording: `Pipeline done in <seconds>s`.
   This metric is CLI pipeline time and does not include external launcher/startup overhead (for example `uv run`).
+- Dead-code metric line is stateful and deterministic:
+    - `N found (M suppressed)` when active dead-code items exist
+    - `✔ clean` when both active and suppressed are zero
+    - `✔ clean (M suppressed)` when active is zero but suppressed > 0
 
 Refs:
 

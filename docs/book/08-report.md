@@ -108,6 +108,7 @@ Refs:
 - `tests/test_report_branch_invariants.py::test_overview_and_sarif_branch_invariants`
 - `tests/test_report.py::test_json_includes_clone_guard_exit_divergence_structural_group`
 - `tests/test_report.py::test_json_includes_clone_cohort_drift_structural_group`
+- `tests/test_report.py::test_report_json_dead_code_suppressed_items_are_reported_separately`
 
 ## Non-guarantees
 

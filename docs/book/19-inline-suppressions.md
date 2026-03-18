@@ -9,6 +9,8 @@ source comments, without introducing broad/project-wide ignores.
 
 - Noqa parser and binder: `codeclone/suppressions.py`
 - Dead-code final filter: `codeclone/metrics/dead_code.py:find_unused`
+- Suppressed dead-code projection helper:
+  `codeclone/metrics/dead_code.py:find_suppressed_unused`
 - Dead-code candidate extraction: `codeclone/extractor.py:_collect_dead_candidates`
 
 ## Data model
@@ -29,8 +31,8 @@ Refs:
 
 - Canonical syntax: `# noqa: codeclone[<rule-id>]`
 - Supported placements:
-  - previous line before declaration (`leading`)
-  - end-of-line comment on declaration line (`inline`)
+    - previous line before declaration (`leading`)
+    - end-of-line comment on declaration line (`inline`)
 - Current supported dead-code rule id: `dead-code`.
 - Rule list supports comma-separated values and deduplicates deterministically.
 - Suppression applies only to declaration targets (`def`, `async def`, `class`).
@@ -49,13 +51,13 @@ Refs:
 
 ## Failure modes
 
-| Condition                                          | Behavior                                          |
-|----------------------------------------------------|---------------------------------------------------|
-| malformed `# noqa` payload                         | ignored silently                                  |
-| unknown `codeclone[...]` rule id                   | ignored silently                                  |
-| suppression on non-declaration line                | ignored silently                                  |
-| duplicate rule ids in one directive                | deduplicated deterministically                    |
-| suppression rule mismatch (`dead-code` vs others)  | does not suppress dead-code finding               |
+| Condition                                         | Behavior                            |
+|---------------------------------------------------|-------------------------------------|
+| malformed `# noqa` payload                        | ignored silently                    |
+| unknown `codeclone[...]` rule id                  | ignored silently                    |
+| suppression on non-declaration line               | ignored silently                    |
+| duplicate rule ids in one directive               | deduplicated deterministically      |
+| suppression rule mismatch (`dead-code` vs others) | does not suppress dead-code finding |
 
 ## Determinism / canonicalization
 
@@ -85,6 +87,8 @@ Refs:
 - `tests/test_extractor.py::test_dead_code_noqa_binding_is_scoped_to_target_symbol`
 - `tests/test_metrics_modules.py::test_find_unused_applies_inline_noqa_dead_code_suppression`
 - `tests/test_metrics_modules.py::test_find_suppressed_unused_returns_actionable_suppressed_candidates`
+- `tests/test_report.py::test_report_json_dead_code_suppressed_items_are_reported_separately`
+- `tests/test_html_report.py::test_html_report_renders_dead_code_split_with_suppressed_layer`
 
 ## Non-guarantees
 

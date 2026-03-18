@@ -80,32 +80,6 @@ codeclone . --fail-cycles --fail-dead-code
 codeclone . --fail-on-new-metrics
 ```
 
-### Inline Suppressions For Known FP
-
-Use local declaration-level suppressions when a finding is accepted by design
-(for example runtime callbacks invoked by a framework):
-
-```python
-# noqa: codeclone[dead-code]
-def handle_exception(exc: Exception) -> None:
-    ...
-
-
-class Middleware:  # noqa: codeclone[dead-code]
-    ...
-```
-
-Rules:
-
-- supports `def`, `async def`, and `class`
-- supports previous-line and end-of-line forms on declaration lines
-- requires explicit rule list: `codeclone[...]`
-- does not provide file-level/global ignores
-- suppressed dead-code candidates are excluded from active findings/health and
-  reported separately in JSON/TXT/Markdown/HTML
-- CLI metrics line shows suppression context, for example:
-  `Dead code   ✔ clean (9 suppressed)`
-
 ### Pre-commit
 
 ```yaml
@@ -180,8 +154,23 @@ Structural findings include:
 - `clone_guard_exit_divergence`
 - `clone_cohort_drift`
 
-Dead-code detection is intentionally deterministic and static. Dynamic/runtime false positives are resolved
-via explicit inline suppressions, not via broad heuristics or implicit framework-specific guesses.
+### Inline Suppressions
+
+CodeClone keeps dead-code detection deterministic and static by default. When a symbol is intentionally
+invoked through runtime dynamics (for example framework callbacks, plugin loading, or reflection), suppress
+the known false positive explicitly at the declaration site:
+
+```python
+# noqa: codeclone[dead-code]
+def handle_exception(exc: Exception) -> None:
+    ...
+
+
+class Middleware:  # noqa: codeclone[dead-code]
+    ...
+```
+
+Dynamic/runtime false positives are resolved via explicit inline suppressions, not via broad heuristics.
 
 <details>
 <summary>JSON report shape (v2.1)</summary>
@@ -263,7 +252,8 @@ via explicit inline suppressions, not via broad heuristics or implicit framework
 }
 ```
 
-Canonical contract: [`docs/book/08-report.md`](docs/book/08-report.md)
+Canonical contract: [`docs/book/08-report.md`](docs/book/08-report.md) and [
+`docs/book/16-dead-code-contract.md`](docs/book/16-dead-code-contract.md)
 
 </details>
 
@@ -314,7 +304,7 @@ CPUSET=0 CPUS=1.0 MEMORY=2g RUNS=16 WARMUPS=4 \
 ```
 
 Performance claims are backed by the reproducible benchmark workflow documented
-in [docs/book/18-benchmarking.md](docs/book/18-benchmarking.md)￼
+in [docs/book/18-benchmarking.md](docs/book/18-benchmarking.md)
 
 </details>
 

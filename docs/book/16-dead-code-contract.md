@@ -19,8 +19,8 @@ Define dead-code liveness rules, canonical symbol-usage boundaries, and gating s
 - Candidate model: `DeadCandidate`
 - Output model: `DeadItem` (`confidence=high|medium`)
 - Global liveness input:
-  - `referenced_names: frozenset[str]`
-  - `referenced_qualnames: frozenset[str]`
+    - `referenced_names: frozenset[str]`
+    - `referenced_qualnames: frozenset[str]`
 
 Refs:
 
@@ -80,9 +80,9 @@ Refs:
 | Condition                                          | Behavior                               |
 |----------------------------------------------------|----------------------------------------|
 | Dynamic method pattern (dunder/visitor/setup hook) | Candidate skipped as non-actionable    |
-| Module PEP 562 hook (`__getattr__`/`__dir__`)     | Candidate skipped as non-actionable    |
+| Module PEP 562 hook (`__getattr__`/`__dir__`)      | Candidate skipped as non-actionable    |
 | Malformed/unknown `codeclone[...]` rule selector   | Ignored safely                         |
-| Protocol or stub-like declaration surface           | Candidate skipped as non-actionable    |
+| Protocol or stub-like declaration surface          | Candidate skipped as non-actionable    |
 | Definition appears only in tests                   | Candidate skipped                      |
 | Symbol used only from tests                        | Remains actionable dead-code candidate |
 | Symbol used through import alias / module alias    | Matched via canonical qualname usage   |
@@ -112,6 +112,9 @@ Refs:
 - `tests/test_metrics_modules.py::test_find_unused_respects_referenced_qualnames`
 - `tests/test_metrics_modules.py::test_find_unused_keeps_non_pep562_module_dunders_actionable`
 - `tests/test_metrics_modules.py::test_find_unused_applies_inline_noqa_dead_code_suppression`
+- `tests/test_metrics_modules.py::test_find_suppressed_unused_returns_actionable_suppressed_candidates`
+- `tests/test_report.py::test_report_json_dead_code_suppressed_items_are_reported_separately`
+- `tests/test_html_report.py::test_html_report_renders_dead_code_split_with_suppressed_layer`
 - `tests/test_suppressions.py::test_extract_noqa_directives_supports_inline_and_leading_forms`
 - `tests/test_suppressions.py::test_bind_suppressions_applies_only_to_adjacent_declaration_line`
 

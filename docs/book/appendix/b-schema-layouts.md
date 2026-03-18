@@ -81,34 +81,97 @@ Notes:
     "scan_root": ".",
     "analysis_mode": "full",
     "report_mode": "full",
-    "baseline": { "...": "..." },
-    "cache": { "...": "..." },
-    "metrics_baseline": { "...": "..." },
-    "runtime": { "report_generated_at_utc": "2026-03-11T08:36:32Z" }
+    "baseline": {
+      "...": "..."
+    },
+    "cache": {
+      "...": "..."
+    },
+    "metrics_baseline": {
+      "...": "..."
+    },
+    "runtime": {
+      "report_generated_at_utc": "2026-03-11T08:36:32Z"
+    }
   },
   "inventory": {
-    "files": { "...": "..." },
-    "code": { "...": "..." },
-    "file_registry": { "encoding": "relative_path", "items": [] }
+    "files": {
+      "...": "..."
+    },
+    "code": {
+      "...": "..."
+    },
+    "file_registry": {
+      "encoding": "relative_path",
+      "items": []
+    }
   },
   "findings": {
-    "summary": { "...": "..." },
+    "summary": {
+      "...": "...",
+      "suppressed": {
+        "dead_code": 0
+      }
+    },
     "groups": {
-      "clones": { "functions": [], "blocks": [], "segments": [] },
+      "clones": {
+        "functions": [],
+        "blocks": [],
+        "segments": []
+      },
       "structural": {
         "groups": [
-          { "kind": "duplicated_branches", "...": "..." },
-          { "kind": "clone_guard_exit_divergence", "...": "..." },
-          { "kind": "clone_cohort_drift", "...": "..." }
+          {
+            "kind": "duplicated_branches",
+            "...": "..."
+          },
+          {
+            "kind": "clone_guard_exit_divergence",
+            "...": "..."
+          },
+          {
+            "kind": "clone_cohort_drift",
+            "...": "..."
+          }
         ]
       },
-      "dead_code": { "groups": [] },
-      "design": { "groups": [] }
+      "dead_code": {
+        "groups": []
+      },
+      "design": {
+        "groups": []
+      }
     }
   },
   "metrics": {
-    "summary": { "...": "..." },
-    "families": { "complexity": {}, "coupling": {}, "cohesion": {}, "dependencies": {}, "dead_code": {}, "health": {} }
+    "summary": {
+      "...": "...",
+      "dead_code": {
+        "total": 0,
+        "high_confidence": 0,
+        "suppressed": 1
+      }
+    },
+    "families": {
+      "complexity": {},
+      "coupling": {},
+      "cohesion": {},
+      "dependencies": {},
+      "dead_code": {
+        "summary": {
+          "total": 0,
+          "high_confidence": 0,
+          "suppressed": 1
+        },
+        "items": [],
+        "suppressed_items": [
+          {
+            "...": "..."
+          }
+        ]
+      },
+      "health": {}
+    }
   },
   "derived": {
     "suggestions": [],
@@ -119,7 +182,13 @@ Notes:
     "canonicalization": {
       "version": "1",
       "scope": "canonical_only",
-      "sections": ["report_schema_version", "meta", "inventory", "findings", "metrics"]
+      "sections": [
+        "report_schema_version",
+        "meta",
+        "inventory",
+        "findings",
+        "metrics"
+      ]
     },
     "digest": {
       "verified": true,
