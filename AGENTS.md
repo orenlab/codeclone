@@ -312,7 +312,7 @@ Use this map to route changes to the right owner module.
   here; do not make metrics depend on renderer/UI concerns.
 - `codeclone/structural_findings.py` — structural finding extraction/normalization policy; keep it report-layer factual
   and deterministic.
-- `codeclone/suppressions.py` — inline `# noqa: codeclone[...]` parse/bind/index logic; keep it declaration-scoped and
+- `codeclone/suppressions.py` — inline `# codeclone: ignore[...]` parse/bind/index logic; keep it declaration-scoped and
   deterministic.
 - `codeclone/baseline.py` — baseline schema/trust/integrity/compatibility contract; all baseline format changes go here
   with explicit contract process.
@@ -352,7 +352,7 @@ Operational rules:
 
 Inline suppressions are explicit local policy, not analysis truth.
 
-- Supported syntax is `# noqa: codeclone[rule-id,...]` via `codeclone/suppressions.py`.
+- Supported syntax is `# codeclone: ignore[rule-id,...]` via `codeclone/suppressions.py`.
 - Binding scope is declaration-only (`def`, `async def`, `class`) using:
     - leading comment on the line immediately before declaration
     - inline comment on declaration line

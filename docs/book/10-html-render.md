@@ -7,6 +7,7 @@ Document HTML rendering as a pure view layer over report data/facts.
 ## Public surface
 
 - Main renderer: `codeclone/html_report.py:build_html_report`
+- HTML assembly package: `codeclone/_html_report/*`
 - Escaping helpers: `codeclone/_html_escape.py`
 - Snippet/highlight helpers: `codeclone/_html_snippets.py`
 - Static template: `codeclone/templates.py:REPORT_TEMPLATE`
@@ -41,8 +42,8 @@ Refs:
 Refs:
 
 - `codeclone/report/explain.py:build_block_group_facts`
-- `codeclone/html_report.py:_render_group_explanation`
-- `codeclone/html_report.py:_build_report_meta_panel`
+- `codeclone/_html_report/_sections/_clones.py:_render_group_explanation`
+- `codeclone/_html_report/_sections/_meta.py:render_meta_panel`
 
 ## Invariants (MUST)
 
@@ -56,7 +57,7 @@ Refs:
 
 - `codeclone/_html_escape.py:_escape_attr`
 - `codeclone/_html_snippets.py:_render_code_block`
-- `codeclone/html_report.py:global_novelty_html`
+- `codeclone/_html_report/_sections/_clones.py:render_clones_panel`
 
 ## Failure modes
 
@@ -78,8 +79,8 @@ Refs:
 
 Refs:
 
-- `codeclone/html_report.py:build_html_report`
-- `codeclone/html_report.py:general_meta_rows`
+- `codeclone/_html_report/_assemble.py:build_html_report`
+- `codeclone/_html_report/_sections/_meta.py:render_meta_panel`
 
 ## Locked by tests
 

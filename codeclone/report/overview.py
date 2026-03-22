@@ -7,6 +7,19 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
+from ..domain.findings import (
+    CATEGORY_DEAD_CODE,
+    FAMILY_CLONES,
+    FAMILY_METRICS,
+    FAMILY_STRUCTURAL,
+)
+from ..domain.source_scope import (
+    SOURCE_KIND_FIXTURES,
+    SOURCE_KIND_PRODUCTION,
+    SOURCE_KIND_TESTS,
+)
+from ..domain.source_scope import SOURCE_KIND_ORDER as _SOURCE_KIND_ORDER
+
 if TYPE_CHECKING:
     from ..models import Suggestion
 
@@ -58,7 +71,9 @@ def _source_counts(
     suggestions: Sequence[Suggestion],
 ) -> dict[str, int]:
     counts: Counter[str] = Counter(suggestion.source_kind for suggestion in suggestions)
-    ordered_kinds = ("production", "tests", "fixtures", "mixed", "other")
+    ordered_kinds = tuple(
+        sorted(_SOURCE_KIND_ORDER, key=lambda kind: _SOURCE_KIND_ORDER[kind])
+    )
     return {kind: counts[kind] for kind in ordered_kinds if counts[kind] > 0} | {
         kind: counts[kind]
         for kind in sorted(counts)
@@ -127,8 +142,8 @@ def _top_risks(
     production_structural = sum(
         1
         for suggestion in suggestions
-        if suggestion.finding_family == "structural"
-        and suggestion.source_kind == "production"
+        if suggestion.finding_family == FAMILY_STRUCTURAL
+        and suggestion.source_kind == SOURCE_KIND_PRODUCTION
     )
     if production_structural > 0:
         noun = "finding" if production_structural == 1 else "findings"
@@ -136,8 +151,8 @@ def _top_risks(
     test_clone_groups = sum(
         1
         for suggestion in suggestions
-        if suggestion.finding_family == "clones"
-        and suggestion.source_kind in {"tests", "fixtures"}
+        if suggestion.finding_family == FAMILY_CLONES
+        and suggestion.source_kind in {SOURCE_KIND_TESTS, SOURCE_KIND_FIXTURES}
     )
     if test_clone_groups > 0:
         noun = "group" if test_clone_groups == 1 else "groups"
@@ -154,7 +169,8 @@ def build_report_overview(
     metrics_suggestions = tuple(
         suggestion
         for suggestion in suggestions
-        if suggestion.finding_family == "metrics" and suggestion.category != "dead_code"
+        if suggestion.finding_family == FAMILY_METRICS
+        and suggestion.category != CATEGORY_DEAD_CODE
     )
     actionable = tuple(
         suggestion for suggestion in suggestions if suggestion.severity != "info"
@@ -165,7 +181,7 @@ def build_report_overview(
             (
                 suggestion
                 for suggestion in suggestions
-                if suggestion.source_kind == "production"
+                if suggestion.source_kind == SOURCE_KIND_PRODUCTION
             ),
             key=_card_key,
         )
@@ -175,7 +191,7 @@ def build_report_overview(
             (
                 suggestion
                 for suggestion in suggestions
-                if suggestion.source_kind in {"tests", "fixtures"}
+                if suggestion.source_kind in {SOURCE_KIND_TESTS, SOURCE_KIND_FIXTURES}
             ),
             key=_card_key,
         )
@@ -183,15 +199,19 @@ def build_report_overview(
     return {
         "families": {
             "clone_groups": sum(
-                1 for suggestion in suggestions if suggestion.finding_family == "clones"
+                1
+                for suggestion in suggestions
+                if suggestion.finding_family == FAMILY_CLONES
             ),
             "structural_findings": sum(
                 1
                 for suggestion in suggestions
-                if suggestion.finding_family == "structural"
+                if suggestion.finding_family == FAMILY_STRUCTURAL
             ),
             "dead_code": sum(
-                1 for suggestion in suggestions if suggestion.category == "dead_code"
+                1
+                for suggestion in suggestions
+                if suggestion.category == CATEGORY_DEAD_CODE
             ),
             "metric_hotspots": len(metrics_suggestions),
         },

@@ -624,9 +624,9 @@ def orphan():
     assert tuple(item.qualname for item in dead) == ("pkg.mod:orphan",)
 
 
-def test_dead_code_applies_noqa_suppression_per_declaration() -> None:
+def test_dead_code_applies_inline_suppression_per_declaration() -> None:
     src = """
-# noqa: codeclone[dead-code]
+# codeclone: ignore[dead-code]
 def runtime_hook():
     return 1
 
@@ -649,10 +649,10 @@ def orphan():
     assert tuple(item.qualname for item in dead) == ("pkg.mod:orphan",)
 
 
-def test_dead_code_noqa_binding_is_scoped_to_target_symbol() -> None:
+def test_dead_code_suppression_binding_is_scoped_to_target_symbol() -> None:
     src = """
-class Service:  # noqa: codeclone[dead-code]
-    # noqa: codeclone[dead-code]
+class Service:  # codeclone: ignore[dead-code]
+    # codeclone: ignore[dead-code]
     def hook(self):
         return 1
 

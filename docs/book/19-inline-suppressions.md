@@ -7,7 +7,7 @@ source comments, without introducing broad/project-wide ignores.
 
 ## Public surface
 
-- Noqa parser and binder: `codeclone/suppressions.py`
+- Suppression directive parser and binder: `codeclone/suppressions.py`
 - Dead-code final filter: `codeclone/metrics/dead_code.py:find_unused`
 - Suppressed dead-code projection helper:
   `codeclone/metrics/dead_code.py:find_suppressed_unused`
@@ -15,21 +15,21 @@ source comments, without introducing broad/project-wide ignores.
 
 ## Data model
 
-- Directive model: `NoqaDirective` (`line`, `binding`, `rules`)
+- Directive model: `SuppressionDirective` (`line`, `binding`, `rules`)
 - Declaration target model: `DeclarationTarget`
 - Bound suppression model: `SuppressionBinding`
 - Candidate storage: `DeadCandidate.suppressed_rules`
 
 Refs:
 
-- `codeclone/suppressions.py:NoqaDirective`
+- `codeclone/suppressions.py:SuppressionDirective`
 - `codeclone/suppressions.py:DeclarationTarget`
 - `codeclone/suppressions.py:SuppressionBinding`
 - `codeclone/models.py:DeadCandidate`
 
 ## Contracts
 
-- Canonical syntax: `# noqa: codeclone[<rule-id>]`
+- Canonical syntax: `# codeclone: ignore[<rule-id>]`
 - Supported placements:
     - previous line before declaration (`leading`)
     - end-of-line comment on declaration line (`inline`)
@@ -44,7 +44,7 @@ Refs:
 
 ## Invariants (MUST)
 
-- If no `# noqa: codeclone[...]` exists, behavior remains unchanged.
+- If no `# codeclone: ignore[...]` exists, behavior remains unchanged.
 - Suppression matching never jumps across non-adjacent lines.
 - Unknown/malformed suppressions never fail analysis.
 - Suppression handling remains deterministic under identical inputs.
@@ -53,7 +53,7 @@ Refs:
 
 | Condition                                         | Behavior                            |
 |---------------------------------------------------|-------------------------------------|
-| malformed `# noqa` payload                        | ignored silently                    |
+| malformed `# codeclone: ignore[...]` payload      | ignored silently                    |
 | unknown `codeclone[...]` rule id                  | ignored silently                    |
 | suppression on non-declaration line               | ignored silently                    |
 | duplicate rule ids in one directive               | deduplicated deterministically      |
@@ -71,21 +71,21 @@ Refs:
 
 Refs:
 
-- `codeclone/suppressions.py:extract_noqa_directives`
+- `codeclone/suppressions.py:extract_suppression_directives`
 - `codeclone/suppressions.py:bind_suppressions_to_declarations`
 - `codeclone/cache.py:_canonicalize_cache_entry`
 
 ## Locked by tests
 
-- `tests/test_suppressions.py::test_extract_noqa_directives_supports_inline_and_leading_forms`
-- `tests/test_suppressions.py::test_extract_noqa_directives_ignores_unknown_and_malformed_safely`
+- `tests/test_suppressions.py::test_extract_suppression_directives_supports_inline_and_leading_forms`
+- `tests/test_suppressions.py::test_extract_suppression_directives_ignores_unknown_and_malformed_safely`
 - `tests/test_suppressions.py::test_bind_suppressions_applies_only_to_adjacent_declaration_line`
 - `tests/test_suppressions.py::test_bind_suppressions_does_not_propagate_class_inline_to_method`
 - `tests/test_suppressions.py::test_bind_suppressions_applies_to_method_target`
 - `tests/test_suppressions.py::test_build_suppression_index_deduplicates_rules_stably`
-- `tests/test_extractor.py::test_dead_code_applies_noqa_suppression_per_declaration`
-- `tests/test_extractor.py::test_dead_code_noqa_binding_is_scoped_to_target_symbol`
-- `tests/test_metrics_modules.py::test_find_unused_applies_inline_noqa_dead_code_suppression`
+- `tests/test_extractor.py::test_dead_code_applies_inline_suppression_per_declaration`
+- `tests/test_extractor.py::test_dead_code_suppression_binding_is_scoped_to_target_symbol`
+- `tests/test_metrics_modules.py::test_find_unused_applies_inline_dead_code_suppression`
 - `tests/test_metrics_modules.py::test_find_suppressed_unused_returns_actionable_suppressed_candidates`
 - `tests/test_report.py::test_report_json_dead_code_suppressed_items_are_reported_separately`
 - `tests/test_html_report.py::test_html_report_renders_dead_code_split_with_suppressed_layer`

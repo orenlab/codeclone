@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .._html_badges import _source_kind_badge_html, _tab_empty
 from .._html_escape import _escape_attr, _escape_html
 from .._html_snippets import _FileCache, _render_code_block
 from ..domain.findings import (
@@ -18,14 +19,8 @@ from ..domain.findings import (
     STRUCTURAL_KIND_DUPLICATED_BRANCHES,
 )
 from ..domain.quality import RISK_HIGH, RISK_LOW
-from ..domain.source_scope import (
-    SOURCE_KIND_FIXTURES,
-    SOURCE_KIND_MIXED,
-    SOURCE_KIND_OTHER,
-    SOURCE_KIND_PRODUCTION,
-    SOURCE_KIND_TESTS,
-)
 from ..structural_findings import normalize_structural_findings
+from ._source_kinds import SOURCE_KIND_FILTER_VALUES
 from .derived import (
     combine_source_kinds,
     group_spread,
@@ -86,15 +81,6 @@ def _dedupe_items(
 # HTML panel rendering
 # ---------------------------------------------------------------------------
 
-_EMPTY_SVG = (
-    '<svg class="tab-empty-icon" viewBox="0 0 24 24" fill="none" '
-    'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" '
-    'stroke-linejoin="round">'
-    '<circle cx="12" cy="12" r="10"/>'
-    '<polyline points="16 9 10.5 15 8 12.5"/>'
-    "</svg>"
-)
-
 
 def _signature_chips_html(sig: dict[str, str]) -> str:
     """Render signature key=value pairs as category-badge chips."""
@@ -104,24 +90,6 @@ def _signature_chips_html(sig: dict[str, str]) -> str:
             f'<span class="category-badge">{_escape_html(k)}={_escape_html(v)}</span>'
         )
     return " ".join(chips)
-
-
-def _source_kind_label(source_kind: str) -> str:
-    return {
-        SOURCE_KIND_PRODUCTION: "Production",
-        SOURCE_KIND_TESTS: "Tests",
-        SOURCE_KIND_FIXTURES: "Fixtures",
-        SOURCE_KIND_MIXED: "Mixed",
-        SOURCE_KIND_OTHER: "Other",
-    }.get(source_kind, source_kind.title() or "Other")
-
-
-def _source_kind_badge_html(source_kind: str) -> str:
-    normalized = source_kind.strip().lower() or SOURCE_KIND_OTHER
-    return (
-        f'<span class="source-kind-badge source-kind-{_escape_attr(normalized)}">'
-        f"{_escape_html(_source_kind_label(normalized))}</span>"
-    )
 
 
 def _occurrences_table_html(
@@ -192,7 +160,7 @@ def _short_path(file_path: str) -> str:
 def _finding_scope_text(items: Sequence[StructuralFindingOccurrence]) -> str:
     spread = _spread(items)
     if spread["functions"] == 1:
-        return f"inside `{items[0].qualname}`"
+        return f"inside {items[0].qualname}"
     return (
         f"across {spread['functions']} functions in {spread['files']} "
         f"{'file' if spread['files'] == 1 else 'files'}"
@@ -215,9 +183,9 @@ def _finding_reason_list_html(
                 "kind, and side-effect-before-guard marker."
             ),
             (
-                f"Cohort id: `{group.signature.get('cohort_id', 'unknown')}`; "
+                f"Cohort id: {group.signature.get('cohort_id', 'unknown')}; "
                 "majority guard count: "
-                f"`{group.signature.get('majority_guard_count', '0')}`."
+                f"{group.signature.get('majority_guard_count', '0')}."
             ),
             (
                 f"Spread includes {spread['functions']} "
@@ -234,10 +202,10 @@ def _finding_reason_list_html(
     if group.finding_kind == STRUCTURAL_KIND_CLONE_COHORT_DRIFT:
         reasons = [
             f"{len(items)} clone members diverge from the cohort majority profile.",
-            f"Drift fields: `{group.signature.get('drift_fields', 'n/a')}`.",
+            f"Drift fields: {group.signature.get('drift_fields', 'n/a')}.",
             (
-                f"Cohort id: `{group.signature.get('cohort_id', 'unknown')}` with "
-                f"arity `{group.signature.get('cohort_arity', 'n/a')}`."
+                f"Cohort id: {group.signature.get('cohort_id', 'unknown')} with "
+                f"arity {group.signature.get('cohort_arity', 'n/a')}."
             ),
             ("Majority profile is compared deterministically with lexical tie-breaks."),
             "This is a report-only finding and does not affect clone gating.",
@@ -262,7 +230,7 @@ def _finding_reason_list_html(
         ),
         (
             f"The detector grouped them by structural signature: "
-            f"`stmt_seq={stmt_seq}` and `terminal={terminal}`."
+            f"stmt_seq={stmt_seq} and terminal={terminal}."
         ),
         (
             "Call/raise buckets and nested control-flow flags must also match "
@@ -438,15 +406,7 @@ def build_structural_findings_html_panel(
     """Build HTML content for the Structural Findings tab panel."""
     normalized_groups = normalize_structural_findings(groups)
     if not normalized_groups:
-        return (
-            '<div class="tab-empty">'
-            f"{_EMPTY_SVG}"
-            '<div class="tab-empty-title">No structural findings detected.</div>'
-            '<div class="tab-empty-desc">'
-            "Nothing to report - keep up the good work."
-            "</div>"
-            "</div>"
-        )
+        return _tab_empty("No structural findings detected.")
 
     intro = (
         '<div class="insight-banner insight-info">'
@@ -467,16 +427,16 @@ def build_structural_findings_html_panel(
         by_kind.setdefault(g.finding_kind, []).append(g)
 
     resolved_file_cache = file_cache if file_cache is not None else _FileCache()
+    source_kind_options = "".join(
+        f'<option value="{kind}">{kind}</option>' for kind in SOURCE_KIND_FILTER_VALUES
+    )
     sections: list[str] = [
         '<div class="toolbar" role="toolbar" aria-label="Structural finding filters">'
         '<div class="toolbar-left">'
         '<label class="muted" for="sf-source-kind">Context:</label>'
         '<select class="select" id="sf-source-kind" data-sf-source-kind>'
         '<option value="all">all</option>'
-        f'<option value="{SOURCE_KIND_PRODUCTION}">{SOURCE_KIND_PRODUCTION}</option>'
-        f'<option value="{SOURCE_KIND_TESTS}">{SOURCE_KIND_TESTS}</option>'
-        f'<option value="{SOURCE_KIND_FIXTURES}">{SOURCE_KIND_FIXTURES}</option>'
-        f'<option value="{SOURCE_KIND_MIXED}">{SOURCE_KIND_MIXED}</option>'
+        f"{source_kind_options}"
         "</select>"
         '<label class="muted" for="sf-spread">Spread:</label>'
         '<select class="select" id="sf-spread" data-sf-spread>'

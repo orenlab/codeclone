@@ -39,7 +39,7 @@ Refs:
 - Module-level PEP 562 hooks are filtered as non-actionable:
   `__getattr__`, `__dir__`.
 - Declaration-level inline suppression is supported with:
-  `# noqa: codeclone[dead-code]` (leading or inline comment form).
+  `# codeclone: ignore[dead-code]` (leading or inline comment form).
 - Suppression is declaration-scoped (`def`, `async def`, `class`) and does not
   implicitly propagate to unrelated declaration targets.
 - Candidate extraction excludes non-runtime declaration surfaces:
@@ -103,19 +103,19 @@ Refs:
 
 - `tests/test_extractor.py::test_dead_code_marks_symbol_dead_when_referenced_only_by_tests`
 - `tests/test_extractor.py::test_dead_code_skips_module_pep562_hooks`
-- `tests/test_extractor.py::test_dead_code_applies_noqa_suppression_per_declaration`
-- `tests/test_extractor.py::test_dead_code_noqa_binding_is_scoped_to_target_symbol`
+- `tests/test_extractor.py::test_dead_code_applies_inline_suppression_per_declaration`
+- `tests/test_extractor.py::test_dead_code_suppression_binding_is_scoped_to_target_symbol`
 - `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_import_aliases`
 - `tests/test_extractor.py::test_collect_dead_candidates_skips_protocol_and_stub_like_symbols`
 - `tests/test_pipeline_metrics.py::test_load_cached_metrics_ignores_referenced_names_from_test_files`
 - `tests/test_metrics_modules.py::test_find_unused_filters_non_actionable_and_preserves_ordering`
 - `tests/test_metrics_modules.py::test_find_unused_respects_referenced_qualnames`
 - `tests/test_metrics_modules.py::test_find_unused_keeps_non_pep562_module_dunders_actionable`
-- `tests/test_metrics_modules.py::test_find_unused_applies_inline_noqa_dead_code_suppression`
+- `tests/test_metrics_modules.py::test_find_unused_applies_inline_dead_code_suppression`
 - `tests/test_metrics_modules.py::test_find_suppressed_unused_returns_actionable_suppressed_candidates`
 - `tests/test_report.py::test_report_json_dead_code_suppressed_items_are_reported_separately`
 - `tests/test_html_report.py::test_html_report_renders_dead_code_split_with_suppressed_layer`
-- `tests/test_suppressions.py::test_extract_noqa_directives_supports_inline_and_leading_forms`
+- `tests/test_suppressions.py::test_extract_suppression_directives_supports_inline_and_leading_forms`
 - `tests/test_suppressions.py::test_bind_suppressions_applies_only_to_adjacent_declaration_line`
 
 ## Non-guarantees

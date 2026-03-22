@@ -53,6 +53,7 @@ from ..domain.source_scope import (
     SOURCE_KIND_TESTS,
 )
 from ..structural_findings import normalize_structural_findings
+from ..suppressions import INLINE_CODECLONE_SUPPRESSION_SOURCE
 from .derived import (
     combine_source_kinds,
     group_spread,
@@ -558,7 +559,10 @@ def _normalize_metrics_families(
         if not normalized_bindings:
             return []
         return [
-            {"rule": rule, "source": source or "inline_noqa"}
+            {
+                "rule": rule,
+                "source": source or INLINE_CODECLONE_SUPPRESSION_SOURCE,
+            }
             for rule, source in normalized_bindings
         ]
 

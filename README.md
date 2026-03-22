@@ -161,12 +161,12 @@ invoked through runtime dynamics (for example framework callbacks, plugin loadin
 the known false positive explicitly at the declaration site:
 
 ```python
-# noqa: codeclone[dead-code]
+# codeclone: ignore[dead-code]
 def handle_exception(exc: Exception) -> None:
     ...
 
 
-class Middleware:  # noqa: codeclone[dead-code]
+class Middleware:  # codeclone: ignore[dead-code]
     ...
 ```
 

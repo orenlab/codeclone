@@ -1164,8 +1164,8 @@ def test_report_json_dead_code_suppressed_items_are_reported_separately() -> Non
                             "kind": "function",
                             "confidence": "high",
                             "suppressed_by": [
-                                {"rule": "dead-code", "source": "inline_noqa"},
-                                {"rule": "dead-code", "source": "inline_noqa"},
+                                {"rule": "dead-code", "source": "inline_codeclone"},
+                                {"rule": "dead-code", "source": "inline_codeclone"},
                             ],
                         }
                     ],
@@ -1185,9 +1185,9 @@ def test_report_json_dead_code_suppressed_items_are_reported_separately() -> Non
             "end_line": 41,
             "kind": "function",
             "confidence": "high",
-            "suppressed_by": [{"rule": "dead-code", "source": "inline_noqa"}],
+            "suppressed_by": [{"rule": "dead-code", "source": "inline_codeclone"}],
             "suppression_rule": "dead-code",
-            "suppression_source": "inline_noqa",
+            "suppression_source": "inline_codeclone",
         }
     ]
     assert payload["findings"]["groups"]["dead_code"]["groups"] == []
@@ -2117,7 +2117,7 @@ def test_text_and_markdown_report_include_suppressed_dead_code_sections() -> Non
                         "kind": "function",
                         "confidence": "high",
                         "suppressed_by": [
-                            {"rule": "dead-code", "source": "inline_noqa"}
+                            {"rule": "dead-code", "source": "inline_codeclone"}
                         ],
                     }
                 ],
@@ -2128,7 +2128,7 @@ def test_text_and_markdown_report_include_suppressed_dead_code_sections() -> Non
     text = render_text_report_document(payload)
     assert "dead_code: total=0 high_confidence=0 suppressed=1" in text
     assert "SUPPRESSED DEAD CODE (items=1)" in text
-    assert "suppressed_by=dead-code@inline_noqa" in text
+    assert "suppressed_by=dead-code@inline_codeclone" in text
 
     markdown = to_markdown_report(
         report_document=payload,

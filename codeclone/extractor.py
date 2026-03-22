@@ -46,7 +46,7 @@ from .suppressions import (
     DeclarationTarget,
     bind_suppressions_to_declarations,
     build_suppression_index,
-    extract_noqa_directives,
+    extract_suppression_directives,
     suppression_target_key,
 )
 
@@ -671,14 +671,14 @@ def extract_units_and_stats_from_source(
         collector=collector,
         collect_referenced_names=not is_test_file,
     )
-    noqa_directives = extract_noqa_directives(source)
+    suppression_directives = extract_suppression_directives(source)
     declaration_targets = _collect_declaration_targets(
         filepath=filepath,
         module_name=module_name,
         collector=collector,
     )
     suppression_bindings = bind_suppressions_to_declarations(
-        directives=noqa_directives,
+        directives=suppression_directives,
         declarations=declaration_targets,
     )
     suppression_index = build_suppression_index(suppression_bindings)

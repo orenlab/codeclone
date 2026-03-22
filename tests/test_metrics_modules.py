@@ -456,7 +456,7 @@ def test_find_unused_respects_referenced_qualnames() -> None:
     assert found == ()
 
 
-def test_find_unused_applies_inline_noqa_dead_code_suppression() -> None:
+def test_find_unused_applies_inline_dead_code_suppression() -> None:
     candidate = DeadCandidate(
         qualname="pkg.mod:runtime_callback",
         local_name="runtime_callback",

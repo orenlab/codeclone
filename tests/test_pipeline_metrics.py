@@ -167,7 +167,7 @@ def test_build_metrics_report_payload_includes_suppressed_dead_code_items() -> N
             "end_line": 12,
             "kind": "function",
             "confidence": "high",
-            "suppressed_by": [{"rule": "dead-code", "source": "inline_noqa"}],
+            "suppressed_by": [{"rule": "dead-code", "source": "inline_codeclone"}],
         }
     ]
 

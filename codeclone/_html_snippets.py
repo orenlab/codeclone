@@ -140,32 +140,6 @@ def _pygments_css(style_name: str) -> str:
         return ""
 
 
-def _prefix_css(css: str, prefix: str) -> str:
-    """
-    Prefix every selector block with `prefix `.
-    Safe enough for pygments CSS which is mostly selector blocks and comments.
-    """
-    out_lines: list[str] = []
-    for line in css.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            out_lines.append(line)
-            continue
-        if stripped.startswith(("/*", "*", "*/")):
-            out_lines.append(line)
-            continue
-        if "{" in line:
-            before, after = line.split("{", 1)
-            sel = before.strip()
-            if sel:
-                out_lines.append(f"{prefix} {sel} {{ {after}".rstrip())
-            else:
-                out_lines.append(line)
-        else:
-            out_lines.append(line)
-    return "\n".join(out_lines)
-
-
 def _render_code_block(
     *,
     filepath: str,

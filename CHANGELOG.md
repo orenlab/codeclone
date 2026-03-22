@@ -119,7 +119,7 @@ ahead of the final `2.0.0` release.
 - Dead-code liveness now uses exact canonical qualname references (including import-alias and module-alias usage)
   before fallback local-name checks, reducing false positives on re-export and alias wiring.
 - Added declaration-scoped inline suppressions for accepted dead-code findings:
-    - `# noqa: codeclone[dead-code]` on `def`, `async def`, or `class`
+    - `# codeclone: ignore[dead-code]` on `def`, `async def`, or `class`
     - supports both previous-line and end-of-line forms on declaration lines
     - suppression is target-scoped (does not cascade to unrelated symbols)
 - Added deterministic suppression parser/binder (`codeclone/suppressions.py`) and integrated suppression metadata into

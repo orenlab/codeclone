@@ -21,35 +21,38 @@ SUPPORTED_RULE_IDS: Final[frozenset[str]] = frozenset(
     }
 )
 
-NoqaBindingKind = Literal["inline", "leading"]
+DirectiveBindingKind = Literal["inline", "leading"]
 DeclarationKind = Literal["function", "method", "class"]
-SuppressionSource = Literal["inline_noqa"]
+SuppressionSource = Literal["inline_codeclone"]
+INLINE_CODECLONE_SUPPRESSION_SOURCE: Final[SuppressionSource] = "inline_codeclone"
 SuppressionTargetKey = tuple[str, str, int, int, DeclarationKind]
 
-_NOQA_CODECLONE_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^\s*#\s*noqa\s*:\s*codeclone\s*\[(?P<rules>[^\]]+)\]\s*$"
+_SUPPRESSION_DIRECTIVE_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^\s*#\s*codeclone\s*:\s*ignore\s*\[(?P<rules>[^\]]+)\]\s*$"
 )
 _RULE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 __all__ = [
     "DEAD_CODE_RULE_ID",
+    "INLINE_CODECLONE_SUPPRESSION_SOURCE",
     "SUPPORTED_RULE_IDS",
     "DeclarationKind",
     "DeclarationTarget",
-    "NoqaDirective",
+    "DirectiveBindingKind",
     "SuppressionBinding",
+    "SuppressionDirective",
     "SuppressionTargetKey",
     "bind_suppressions_to_declarations",
     "build_suppression_index",
-    "extract_noqa_directives",
+    "extract_suppression_directives",
     "suppression_target_key",
 ]
 
 
 @dataclass(frozen=True, slots=True)
-class NoqaDirective:
+class SuppressionDirective:
     line: int
-    binding: NoqaBindingKind
+    binding: DirectiveBindingKind
     rules: tuple[str, ...]
 
 
@@ -70,7 +73,7 @@ class SuppressionBinding:
     end_line: int
     kind: DeclarationKind
     rules: tuple[str, ...]
-    source: SuppressionSource = "inline_noqa"
+    source: SuppressionSource = "inline_codeclone"
 
 
 def _merge_rules(
@@ -107,20 +110,20 @@ def _parse_rule_ids(
     return parsed
 
 
-def extract_noqa_directives(
+def extract_suppression_directives(
     source: str,
     *,
     supported_rules: frozenset[str] = SUPPORTED_RULE_IDS,
-) -> tuple[NoqaDirective, ...]:
+) -> tuple[SuppressionDirective, ...]:
     lines = source.splitlines()
-    directives: list[NoqaDirective] = []
+    directives: list[SuppressionDirective] = []
 
     try:
         tokens = tokenize.generate_tokens(io.StringIO(source).readline)
         for token in tokens:
             if token.type != tokenize.COMMENT:
                 continue
-            match = _NOQA_CODECLONE_PATTERN.fullmatch(token.string)
+            match = _SUPPRESSION_DIRECTIVE_PATTERN.fullmatch(token.string)
             if match is None:
                 continue
             parsed_rules = _parse_rule_ids(
@@ -133,11 +136,11 @@ def extract_noqa_directives(
             line_no = token.start[0]
             col_no = token.start[1]
             line_text = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
-            binding: NoqaBindingKind = (
+            binding: DirectiveBindingKind = (
                 "inline" if line_text[:col_no].strip() else "leading"
             )
             directives.append(
-                NoqaDirective(
+                SuppressionDirective(
                     line=line_no,
                     binding=binding,
                     rules=parsed_rules,
@@ -156,7 +159,7 @@ def extract_noqa_directives(
 
 def bind_suppressions_to_declarations(
     *,
-    directives: Sequence[NoqaDirective],
+    directives: Sequence[SuppressionDirective],
     declarations: Sequence[DeclarationTarget],
 ) -> tuple[SuppressionBinding, ...]:
     leading_rules_by_line: dict[int, tuple[str, ...]] = {}

@@ -69,7 +69,7 @@ from .report.json_contract import build_report_document
 from .report.suggestions import generate_suggestions
 from .scanner import iter_py_files, module_name_from_path
 from .structural_findings import build_clone_cohort_structural_findings
-from .suppressions import DEAD_CODE_RULE_ID
+from .suppressions import DEAD_CODE_RULE_ID, INLINE_CODECLONE_SUPPRESSION_SOURCE
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -79,7 +79,6 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 DEFAULT_BATCH_SIZE = 100
 PARALLEL_MIN_FILES_PER_WORKER = 8
 PARALLEL_MIN_FILES_FLOOR = 16
-_INLINE_NOQA_SUPPRESSION_SOURCE = "inline_noqa"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1207,7 +1206,7 @@ def build_metrics_report_payload(
             payload["suppressed_by"] = [
                 {
                     "rule": DEAD_CODE_RULE_ID,
-                    "source": _INLINE_NOQA_SUPPRESSION_SOURCE,
+                    "source": INLINE_CODECLONE_SUPPRESSION_SOURCE,
                 }
             ]
         return payload

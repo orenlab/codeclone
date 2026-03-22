@@ -10,7 +10,6 @@ from codeclone.contracts import CACHE_VERSION, DOCS_URL, ISSUES_URL, REPOSITORY_
 from codeclone.errors import FileProcessingError
 from codeclone.html_report import (
     _FileCache,
-    _prefix_css,
     _pygments_css,
     _render_code_block,
     _try_pygments,
@@ -990,20 +989,6 @@ def test_render_code_block_truncate(tmp_path: Path) -> None:
     assert "Truncate" in html
 
 
-def test_prefix_css() -> None:
-    css = "/* c */\n\n.a{color:red}\nplain\n.b { color: blue; }\n"
-    prefixed = _prefix_css(css, ".wrap")
-    assert ".wrap .a" in prefixed
-    assert ".wrap .b" in prefixed
-    assert "/* c */" in prefixed
-
-
-def test_prefix_css_empty_selector_passthrough() -> None:
-    css = "   { color: red; }\n"
-    prefixed = _prefix_css(css, ".wrap")
-    assert "{ color: red; }" in prefixed
-
-
 def test_pygments_css() -> None:
     css = _pygments_css("default")
     assert ".codebox" in css or css == ""
@@ -1225,7 +1210,7 @@ def _metrics_payload(
                 "end_line": 71,
                 "kind": "function",
                 "confidence": "high",
-                "suppressed_by": [{"rule": "dead-code", "source": "inline_noqa"}],
+                "suppressed_by": [{"rule": "dead-code", "source": "inline_codeclone"}],
             }
         ]
     return {
@@ -1509,7 +1494,7 @@ def test_html_report_renders_dead_code_split_with_suppressed_layer() -> None:
     assert 'data-clone-tab="active" data-subtab-group="dead-code"' in html
     assert 'data-clone-tab="suppressed" data-subtab-group="dead-code"' in html
     assert 'Suppressed <span class="tab-count">9</span>' in html
-    assert "inline_noqa" in html
+    assert "inline_codeclone" in html
     assert "dead-code" in html
 
 

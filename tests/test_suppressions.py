@@ -2,37 +2,37 @@ from __future__ import annotations
 
 from codeclone.suppressions import (
     DeclarationTarget,
-    NoqaDirective,
     SuppressionBinding,
+    SuppressionDirective,
     bind_suppressions_to_declarations,
     build_suppression_index,
-    extract_noqa_directives,
+    extract_suppression_directives,
     suppression_target_key,
 )
 
 
-def test_extract_noqa_directives_supports_inline_and_leading_forms() -> None:
+def test_extract_suppression_directives_supports_inline_and_leading_forms() -> None:
     source = """
-# noqa: codeclone[dead-code]
+# codeclone: ignore[dead-code]
 def a() -> int:
     return 1
 
-def b() -> int:  # noqa: codeclone[dead-code]
+def b() -> int:  # codeclone: ignore[dead-code]
     return 2
 
-class C:  # noqa: codeclone[dead-code]
+class C:  # codeclone: ignore[dead-code]
     pass
 
-# noqa:   codeclone [ dead-code , clone-cohort-drift ]
+# codeclone:   ignore [ dead-code , clone-cohort-drift ]
 async def d() -> int:
     return 3
 """.strip()
-    directives = extract_noqa_directives(source)
+    directives = extract_suppression_directives(source)
     assert directives == (
-        NoqaDirective(line=1, binding="leading", rules=("dead-code",)),
-        NoqaDirective(line=5, binding="inline", rules=("dead-code",)),
-        NoqaDirective(line=8, binding="inline", rules=("dead-code",)),
-        NoqaDirective(
+        SuppressionDirective(line=1, binding="leading", rules=("dead-code",)),
+        SuppressionDirective(line=5, binding="inline", rules=("dead-code",)),
+        SuppressionDirective(line=8, binding="inline", rules=("dead-code",)),
+        SuppressionDirective(
             line=11,
             binding="leading",
             rules=("dead-code", "clone-cohort-drift"),
@@ -40,55 +40,58 @@ async def d() -> int:
     )
 
 
-def test_extract_noqa_directives_ignores_unknown_and_malformed_safely() -> None:
+def test_extract_suppression_directives_ignores_unknown_and_malformed_safely() -> None:
     source = """
-def a() -> int:  # noqa: codeclone[dead-code, dead-code, unknown-rule]
+def a() -> int:  # codeclone: ignore[dead-code, dead-code, unknown-rule]
     return 1
 
-def b() -> int:  # noqa: codeclone
+def b() -> int:  # codeclone: ignore
     return 2
 
-def c() -> int:  # noqa: CODECLONE[dead-code]
+def c() -> int:  # codeclone: IGNORE[dead-code]
     return 3
+
+def d() -> int:  # codeclone ignore[dead-code]
+    return 4
 """.strip()
-    directives = extract_noqa_directives(source)
+    directives = extract_suppression_directives(source)
     assert directives == (
-        NoqaDirective(line=1, binding="inline", rules=("dead-code",)),
+        SuppressionDirective(line=1, binding="inline", rules=("dead-code",)),
     )
 
 
-def test_extract_noqa_directives_ignores_empty_invalid_and_unknown_tokens() -> None:
+def test_extract_suppression_directives_ignores_invalid_rule_tokens() -> None:
     source = """
-def a() -> int:  # noqa: codeclone[dead-code, , invalid!, unknown-rule]
+def a() -> int:  # codeclone: ignore[dead-code, , invalid!, unknown-rule]
     return 1
 
-def b() -> int:  # noqa: codeclone[unknown-rule]
+def b() -> int:  # codeclone: ignore[unknown-rule]
     return 2
 """.strip()
-    directives = extract_noqa_directives(source)
+    directives = extract_suppression_directives(source)
     assert directives == (
-        NoqaDirective(line=1, binding="inline", rules=("dead-code",)),
+        SuppressionDirective(line=1, binding="inline", rules=("dead-code",)),
     )
 
 
-def test_extract_noqa_directives_returns_empty_on_tokenize_error() -> None:
+def test_extract_suppression_directives_returns_empty_on_tokenize_error() -> None:
     # Unclosed triple quote triggers tokenize.TokenError and must be ignored safely.
-    source = '"""\n# noqa: codeclone[dead-code]\n'
-    assert extract_noqa_directives(source) == ()
+    source = '"""\n# codeclone: ignore[dead-code]\n'
+    assert extract_suppression_directives(source) == ()
 
 
 def test_bind_suppressions_applies_only_to_adjacent_declaration_line() -> None:
     source = """
-# noqa: codeclone[dead-code]
+# codeclone: ignore[dead-code]
 def kept() -> int:
     return 1
 
-# noqa: codeclone[dead-code]
+# codeclone: ignore[dead-code]
 
 def not_bound() -> int:
     return 2
 """.strip()
-    directives = extract_noqa_directives(source)
+    directives = extract_suppression_directives(source)
     declarations = (
         DeclarationTarget(
             filepath="pkg/mod.py",
@@ -123,11 +126,11 @@ def not_bound() -> int:
 
 def test_bind_suppressions_does_not_propagate_class_inline_to_method() -> None:
     source = """
-class Demo:  # noqa: codeclone[dead-code]
+class Demo:  # codeclone: ignore[dead-code]
     def method(self) -> int:
         return 1
 """.strip()
-    directives = extract_noqa_directives(source)
+    directives = extract_suppression_directives(source)
     declarations = (
         DeclarationTarget(
             filepath="pkg/mod.py",
@@ -163,11 +166,11 @@ class Demo:  # noqa: codeclone[dead-code]
 def test_bind_suppressions_applies_to_method_target() -> None:
     source = """
 class Demo:
-    # noqa: codeclone[dead-code]
+    # codeclone: ignore[dead-code]
     def method(self) -> int:
         return 1
 """.strip()
-    directives = extract_noqa_directives(source)
+    directives = extract_suppression_directives(source)
     declarations = (
         DeclarationTarget(
             filepath="pkg/mod.py",
