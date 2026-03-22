@@ -63,6 +63,7 @@ class DeclarationTarget:
     start_line: int
     end_line: int
     kind: DeclarationKind
+    declaration_end_line: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,9 +177,10 @@ def bind_suppressions_to_declarations(
 
     bindings: list[SuppressionBinding] = []
     for target in declarations:
+        inline_binding_line = target.declaration_end_line or target.start_line
         bound_rules = _merge_rules(
             leading_rules_by_line.get(target.start_line - 1, ()),
-            inline_rules_by_line.get(target.start_line, ()),
+            inline_rules_by_line.get(inline_binding_line, ()),
         )
         if not bound_rules:
             continue

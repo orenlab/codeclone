@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import ast
+import io
 import math
 import os
 import signal
+import tokenize
 from contextlib import contextmanager
 from hashlib import sha1 as _sha1
 from typing import TYPE_CHECKING, Literal
@@ -150,6 +152,98 @@ def _parse_with_limits(source: str, timeout_s: int) -> ast.AST:
 def _stmt_count(node: ast.AST) -> int:
     body = getattr(node, "body", None)
     return len(body) if isinstance(body, list) else 0
+
+
+def _source_tokens(source: str) -> tuple[tokenize.TokenInfo, ...]:
+    try:
+        return tuple(tokenize.generate_tokens(io.StringIO(source).readline))
+    except tokenize.TokenError:
+        return ()
+
+
+def _declaration_token_name(node: ast.AST) -> str:
+    if isinstance(node, ast.ClassDef):
+        return "class"
+    if isinstance(node, ast.AsyncFunctionDef):
+        return "async"
+    return "def"
+
+
+def _declaration_token_index(
+    *,
+    source_tokens: tuple[tokenize.TokenInfo, ...],
+    start_line: int,
+    start_col: int,
+    declaration_token: str,
+) -> int | None:
+    for idx, token in enumerate(source_tokens):
+        if token.start != (start_line, start_col):
+            continue
+        if token.type == tokenize.NAME and token.string == declaration_token:
+            return idx
+    return None
+
+
+def _scan_declaration_colon_line(
+    *,
+    source_tokens: tuple[tokenize.TokenInfo, ...],
+    start_index: int,
+) -> int | None:
+    nesting = 0
+    for token in source_tokens[start_index + 1 :]:
+        if token.type == tokenize.OP:
+            if token.string in "([{":
+                nesting += 1
+                continue
+            if token.string in ")]}":
+                if nesting > 0:
+                    nesting -= 1
+                continue
+            if token.string == ":" and nesting == 0:
+                return token.start[0]
+        if token.type == tokenize.NEWLINE and nesting == 0:
+            return None
+    return None
+
+
+def _fallback_declaration_end_line(node: ast.AST, *, start_line: int) -> int:
+    body = getattr(node, "body", None)
+    if not isinstance(body, list) or not body:
+        return start_line
+
+    first_body_line = int(getattr(body[0], "lineno", 0))
+    if first_body_line <= 0 or first_body_line == start_line:
+        return start_line
+    return max(start_line, first_body_line - 1)
+
+
+def _declaration_end_line(
+    node: ast.AST,
+    *,
+    source_tokens: tuple[tokenize.TokenInfo, ...],
+) -> int:
+    start_line = int(getattr(node, "lineno", 0))
+    start_col = int(getattr(node, "col_offset", 0))
+    if start_line <= 0:
+        return 0
+
+    declaration_token = _declaration_token_name(node)
+    start_index = _declaration_token_index(
+        source_tokens=source_tokens,
+        start_line=start_line,
+        start_col=start_col,
+        declaration_token=declaration_token,
+    )
+    if start_index is None:
+        return _fallback_declaration_end_line(node, start_line=start_line)
+
+    colon_line = _scan_declaration_colon_line(
+        source_tokens=source_tokens,
+        start_index=start_index,
+    )
+    if colon_line is not None:
+        return colon_line
+    return _fallback_declaration_end_line(node, start_line=start_line)
 
 
 class _QualnameCollector(ast.NodeVisitor):
@@ -577,6 +671,7 @@ def _collect_declaration_targets(
     filepath: str,
     module_name: str,
     collector: _QualnameCollector,
+    source_tokens: tuple[tokenize.TokenInfo, ...],
 ) -> tuple[DeclarationTarget, ...]:
     declarations: list[DeclarationTarget] = []
 
@@ -585,6 +680,10 @@ def _collect_declaration_targets(
         end = int(getattr(node, "end_lineno", 0))
         if start <= 0 or end <= 0:
             continue
+        declaration_end_line = _declaration_end_line(
+            node,
+            source_tokens=source_tokens,
+        )
         kind: Literal["function", "method"] = (
             "method" if "." in local_name else "function"
         )
@@ -595,6 +694,7 @@ def _collect_declaration_targets(
                 start_line=start,
                 end_line=end,
                 kind=kind,
+                declaration_end_line=declaration_end_line,
             )
         )
 
@@ -603,6 +703,10 @@ def _collect_declaration_targets(
         end = int(getattr(class_node, "end_lineno", 0))
         if start <= 0 or end <= 0:
             continue
+        declaration_end_line = _declaration_end_line(
+            class_node,
+            source_tokens=source_tokens,
+        )
         declarations.append(
             DeclarationTarget(
                 filepath=filepath,
@@ -610,6 +714,7 @@ def _collect_declaration_targets(
                 start_line=start,
                 end_line=end,
                 kind="class",
+                declaration_end_line=declaration_end_line,
             )
         )
 
@@ -657,6 +762,7 @@ def extract_units_and_stats_from_source(
     collector = _QualnameCollector()
     collector.visit(tree)
     source_lines = source.splitlines()
+    source_tokens = _source_tokens(source)
     source_line_count = len(source_lines)
 
     is_test_file = is_test_filepath(filepath)
@@ -676,6 +782,7 @@ def extract_units_and_stats_from_source(
         filepath=filepath,
         module_name=module_name,
         collector=collector,
+        source_tokens=source_tokens,
     )
     suppression_bindings = bind_suppressions_to_declarations(
         directives=suppression_directives,

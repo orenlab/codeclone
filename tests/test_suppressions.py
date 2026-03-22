@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from codeclone.suppressions import (
     DeclarationTarget,
     SuppressionBinding,
@@ -198,6 +200,99 @@ class Demo:
             start_line=3,
             end_line=4,
             kind="method",
+            rules=("dead-code",),
+        ),
+    )
+
+
+def test_bind_suppressions_supports_inline_on_multiline_declaration_end_line() -> None:
+    source = """
+@decorator
+def keep(
+    arg: int,
+) -> int:  # codeclone: ignore[dead-code]
+    return arg
+""".strip()
+    directives = extract_suppression_directives(source)
+    declarations = (
+        DeclarationTarget(
+            filepath="pkg/mod.py",
+            qualname="pkg.mod:keep",
+            start_line=2,
+            end_line=5,
+            kind="function",
+            declaration_end_line=4,
+        ),
+    )
+    bindings = bind_suppressions_to_declarations(
+        directives=directives,
+        declarations=declarations,
+    )
+    assert bindings == (
+        SuppressionBinding(
+            filepath="pkg/mod.py",
+            qualname="pkg.mod:keep",
+            start_line=2,
+            end_line=5,
+            kind="function",
+            rules=("dead-code",),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "declaration"),
+    [
+        (
+            """
+async def keep_async(
+    arg: int,
+) -> int:  # codeclone: ignore[dead-code]
+    return arg
+""".strip(),
+            DeclarationTarget(
+                filepath="pkg/mod.py",
+                qualname="pkg.mod:keep_async",
+                start_line=1,
+                end_line=4,
+                kind="function",
+                declaration_end_line=3,
+            ),
+        ),
+        (
+            """
+class Demo(
+    Base,
+):  # codeclone: ignore[dead-code]
+    pass
+""".strip(),
+            DeclarationTarget(
+                filepath="pkg/mod.py",
+                qualname="pkg.mod:Demo",
+                start_line=1,
+                end_line=4,
+                kind="class",
+                declaration_end_line=3,
+            ),
+        ),
+    ],
+)
+def test_bind_suppressions_supports_multiline_inline_for_supported_targets(
+    source: str,
+    declaration: DeclarationTarget,
+) -> None:
+    directives = extract_suppression_directives(source)
+    bindings = bind_suppressions_to_declarations(
+        directives=directives,
+        declarations=(declaration,),
+    )
+    assert bindings == (
+        SuppressionBinding(
+            filepath=declaration.filepath,
+            qualname=declaration.qualname,
+            start_line=declaration.start_line,
+            end_line=declaration.end_line,
+            kind=declaration.kind,
             rules=("dead-code",),
         ),
     )

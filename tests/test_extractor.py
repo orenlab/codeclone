@@ -66,6 +66,57 @@ def foo():
     assert segments == []
 
 
+def test_source_tokens_returns_empty_on_tokenize_error() -> None:
+    assert extractor._source_tokens('"""') == ()
+
+
+def test_declaration_token_index_returns_none_when_start_token_is_missing() -> None:
+    tokens = extractor._source_tokens("value = 1\n")
+    assert (
+        extractor._declaration_token_index(
+            source_tokens=tokens,
+            start_line=1,
+            start_col=0,
+            declaration_token="def",
+        )
+        is None
+    )
+
+
+def test_scan_declaration_colon_line_returns_none_when_header_is_incomplete() -> None:
+    tokens = extractor._source_tokens("def broken\n")
+    assert (
+        extractor._scan_declaration_colon_line(
+            source_tokens=tokens,
+            start_index=0,
+        )
+        is None
+    )
+
+
+def test_declaration_end_line_falls_back_without_tokens() -> None:
+    node = ast.parse(
+        """
+class Demo:
+    pass
+"""
+    ).body[0]
+    assert isinstance(node, ast.ClassDef)
+    assert extractor._declaration_end_line(node, source_tokens=()) == 2
+
+
+def test_declaration_end_line_returns_zero_for_invalid_start_line() -> None:
+    node = ast.parse(
+        """
+def broken():
+    return 1
+"""
+    ).body[0]
+    assert isinstance(node, ast.FunctionDef)
+    node.lineno = 0
+    assert extractor._declaration_end_line(node, source_tokens=()) == 0
+
+
 def test_init_function_is_ignored_for_blocks() -> None:
     src = """
 class A:
@@ -673,6 +724,36 @@ class Service:  # codeclone: ignore[dead-code]
         referenced_qualnames=file_metrics.referenced_qualnames,
     )
     assert tuple(item.qualname for item in dead) == ("pkg.mod:Service.alive",)
+
+
+def test_dead_code_binds_inline_suppression_on_multiline_decorated_method() -> None:
+    src = """
+class Settings:  # codeclone: ignore[dead-code]
+    @validator("field")
+    @classmethod
+    def validate_config_version(
+        cls,
+        value: str | None,
+    ) -> str | None:  # codeclone: ignore[dead-code]
+        return value
+
+    def orphan(self) -> int:
+        return 1
+"""
+    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+        source=src,
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    dead = find_unused(
+        definitions=file_metrics.dead_candidates,
+        referenced_names=file_metrics.referenced_names,
+        referenced_qualnames=file_metrics.referenced_qualnames,
+    )
+    assert tuple(item.qualname for item in dead) == ("pkg.mod:Settings.orphan",)
 
 
 def test_collect_dead_candidates_and_extract_skip_classes_without_lineno(

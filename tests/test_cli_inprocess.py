@@ -3803,6 +3803,71 @@ def fn(x):
     assert any("sf" in entry for entry in files_after.values())
 
 
+def test_cli_dead_code_suppression_is_stable_between_plain_and_json_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_python_module(
+        tmp_path,
+        "models.py",
+        """\
+class Settings:  # codeclone: ignore[dead-code]
+    @validator("field")
+    @classmethod
+    def validate_config_version(
+        cls,
+        value: str | None,
+    ) -> str | None:  # codeclone: ignore[dead-code]
+        return value
+""",
+    )
+    json_out = tmp_path / "report.json"
+    cache_path = tmp_path / "cache.json"
+
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--cache-path",
+            str(cache_path),
+            "--fail-dead-code",
+            "--no-progress",
+        ],
+    )
+
+    cache_payload = json.loads(cache_path.read_text("utf-8"))
+    files_before = cache_payload["payload"]["files"]
+    assert all("sf" not in entry for entry in files_before.values())
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--cache-path",
+            str(cache_path),
+            "--fail-dead-code",
+            "--json",
+            str(json_out),
+            "--no-progress",
+        ],
+    )
+    payload = json.loads(json_out.read_text("utf-8"))
+    dead_code = payload["metrics"]["families"]["dead_code"]
+    assert dead_code["summary"] == {"total": 0, "high_confidence": 0, "suppressed": 2}
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--cache-path",
+            str(cache_path),
+            "--fail-dead-code",
+            "--no-progress",
+        ],
+    )
+
+
 @pytest.mark.parametrize(
     ("reason", "expected"),
     [
