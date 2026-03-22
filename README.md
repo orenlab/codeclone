@@ -40,7 +40,9 @@ pip install codeclone        # or: uv tool install codeclone
 
 codeclone .                  # analyze current directory
 codeclone . --html           # generate HTML report
+codeclone . --html --open-html-report   # generate and open HTML report
 codeclone . --json --md --sarif --text   # generate machine-readable reports
+codeclone . --html --json --timestamped-report-paths   # keep timestamped report snapshots
 codeclone . --ci             # CI mode (--fail-on-new --no-color --quiet)
 ```
 
@@ -148,7 +150,11 @@ Contract errors (`2`) take precedence over gating failures (`3`).
 | Text     | `--text`  | `.cache/codeclone/report.txt`   |
 
 All report formats are rendered from one canonical JSON report document.
-Structural findings include:
+
+- `--open-html-report` opens the generated HTML report in the default browser and requires `--html`.
+- `--timestamped-report-paths` appends a UTC timestamp to default report filenames for bare report flags such as
+  `--html` or `--json`. Explicit report paths are not rewritten.
+  Structural findings include:
 
 - `duplicated_branches`
 - `clone_guard_exit_divergence`
@@ -284,7 +290,7 @@ Architecture: [`docs/architecture.md`](docs/architecture.md) · CFG semantics: [
 | Docker benchmark contract  | [`docs/book/18-benchmarking.md`](docs/book/18-benchmarking.md)                           |
 | Determinism                | [`docs/book/12-determinism.md`](docs/book/12-determinism.md)                             |
 
-##    * Benchmarking
+##     * Benchmarking
 
 <details>
 <summary>Reproducible Docker Benchmark</summary>

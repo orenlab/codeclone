@@ -299,8 +299,18 @@ def build_parser(version: str) -> _ArgumentParser:
         const=DEFAULT_TEXT_REPORT_PATH,
         help_text=ui.HELP_TEXT,
     )
+    _add_bool_optional_argument(
+        reporting_group,
+        flag="--timestamped-report-paths",
+        help_text=ui.HELP_TIMESTAMPED_REPORT_PATHS,
+    )
 
     ui_group = ap.add_argument_group("Output and UI")
+    _add_bool_optional_argument(
+        ui_group,
+        flag="--open-html-report",
+        help_text=ui.HELP_OPEN_HTML_REPORT,
+    )
     ui_group.add_argument(
         "--no-progress",
         dest="no_progress",

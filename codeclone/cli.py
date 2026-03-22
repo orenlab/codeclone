@@ -8,7 +8,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from . import __version__
 from . import ui_messages as ui
@@ -304,6 +304,7 @@ class _PrinterLike(Protocol):
 
 
 LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
+ReportPathOrigin = Literal["default", "explicit"]
 
 
 def _rich_progress_symbols() -> tuple[
@@ -382,7 +383,65 @@ def _is_debug_enabled(
     return debug_from_flag or debug_from_env
 
 
-def _resolve_output_paths(args: Namespace) -> OutputPaths:
+def _report_path_origins(argv: Sequence[str]) -> dict[str, ReportPathOrigin | None]:
+    origins: dict[str, ReportPathOrigin | None] = {
+        "html": None,
+        "json": None,
+        "md": None,
+        "sarif": None,
+        "text": None,
+    }
+    flag_to_field = {
+        "--html": "html",
+        "--json": "json",
+        "--md": "md",
+        "--sarif": "sarif",
+        "--text": "text",
+    }
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token == "--":
+            break
+        if "=" in token:
+            flag, _value = token.split("=", maxsplit=1)
+            field_name = flag_to_field.get(flag)
+            if field_name is not None:
+                origins[field_name] = "explicit"
+            index += 1
+            continue
+        field_name = flag_to_field.get(token)
+        if field_name is None:
+            index += 1
+            continue
+        next_token = argv[index + 1] if index + 1 < len(argv) else None
+        if next_token is None or next_token.startswith("-"):
+            origins[field_name] = "default"
+            index += 1
+            continue
+        origins[field_name] = "explicit"
+        index += 2
+    return origins
+
+
+def _report_path_timestamp_slug(report_generated_at_utc: str) -> str:
+    return report_generated_at_utc.replace("-", "").replace(":", "")
+
+
+def _timestamped_report_path(path: Path, *, report_generated_at_utc: str) -> Path:
+    suffix = path.suffix
+    stem = path.name[: -len(suffix)] if suffix else path.name
+    return path.with_name(
+        f"{stem}-{_report_path_timestamp_slug(report_generated_at_utc)}{suffix}"
+    )
+
+
+def _resolve_output_paths(
+    args: Namespace,
+    *,
+    report_path_origins: Mapping[str, ReportPathOrigin | None],
+    report_generated_at_utc: str,
+) -> OutputPaths:
     printer = cast("_PrinterLike", console)
     resolved: dict[str, Path | None] = {
         "html": None,
@@ -403,7 +462,7 @@ def _resolve_output_paths(args: Namespace) -> OutputPaths:
         raw_value = getattr(args, arg_name, None)
         if not raw_value:
             continue
-        resolved[field_name] = _validate_output_path(
+        path = _validate_output_path(
             raw_value,
             expected_suffix=expected_suffix,
             label=label,
@@ -411,6 +470,15 @@ def _resolve_output_paths(args: Namespace) -> OutputPaths:
             invalid_message=ui.fmt_invalid_output_extension,
             invalid_path_message=ui.fmt_invalid_output_path,
         )
+        if (
+            args.timestamped_report_paths
+            and report_path_origins.get(field_name) == "default"
+        ):
+            path = _timestamped_report_path(
+                path,
+                report_generated_at_utc=report_generated_at_utc,
+            )
+        resolved[field_name] = path
 
     return OutputPaths(
         html=resolved["html"],
@@ -419,6 +487,26 @@ def _resolve_output_paths(args: Namespace) -> OutputPaths:
         md=resolved["md"],
         sarif=resolved["sarif"],
     )
+
+
+def _validate_report_ui_flags(*, args: Namespace, output_paths: OutputPaths) -> None:
+    if args.open_html_report and output_paths.html is None:
+        console.print(ui.fmt_contract_error(ui.ERR_OPEN_HTML_REPORT_REQUIRES_HTML))
+        sys.exit(ExitCode.CONTRACT_ERROR)
+
+    if args.timestamped_report_paths and not any(
+        (
+            output_paths.html,
+            output_paths.json,
+            output_paths.md,
+            output_paths.sarif,
+            output_paths.text,
+        )
+    ):
+        console.print(
+            ui.fmt_contract_error(ui.ERR_TIMESTAMPED_REPORT_PATHS_REQUIRES_REPORT)
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
 
 
 def _resolve_cache_path(*, root_path: Path, args: Namespace, from_args: bool) -> Path:
@@ -629,12 +717,14 @@ def _write_report_outputs(
     args: Namespace,
     output_paths: OutputPaths,
     report_artifacts: ReportArtifacts,
+    open_html_report: bool = False,
 ) -> str | None:
     return _write_report_outputs_impl(
         args=cast("_QuietArgsLike", cast(object, args)),
         output_paths=output_paths,
         report_artifacts=report_artifacts,
         console=cast("_PrinterLike", console),
+        open_html_report=open_html_report,
     )
 
 
@@ -757,7 +847,7 @@ def _main_impl() -> None:
     global console
 
     run_started_at = time.monotonic()
-    from ._cli_meta import _build_report_meta
+    from ._cli_meta import _build_report_meta, _current_report_timestamp_utc
 
     ap = build_parser(__version__)
 
@@ -771,10 +861,13 @@ def _main_impl() -> None:
         OutputPaths,
         Path,
         dict[str, object] | None,
+        str,
     ]:
         global console
         raw_argv = tuple(sys.argv[1:])
         explicit_cli_dests = collect_explicit_cli_dests(ap, argv=raw_argv)
+        report_path_origins = _report_path_origins(raw_argv)
+        report_generated_at_utc = _current_report_timestamp_utc()
         cache_path_from_args = any(
             arg in {"--cache-dir", "--cache-path"}
             or arg.startswith(("--cache-dir=", "--cache-path="))
@@ -896,7 +989,12 @@ def _main_impl() -> None:
         if not args.quiet:
             print_banner(root=root_path)
 
-        output_paths = _resolve_output_paths(args)
+        output_paths = _resolve_output_paths(
+            args,
+            report_path_origins=report_path_origins,
+            report_generated_at_utc=report_generated_at_utc,
+        )
+        _validate_report_ui_flags(args=args, output_paths=output_paths)
         cache_path = _resolve_cache_path(
             root_path=root_path,
             args=args,
@@ -912,6 +1010,7 @@ def _main_impl() -> None:
             output_paths,
             cache_path,
             shared_baseline_payload,
+            report_generated_at_utc,
         )
 
     (
@@ -924,6 +1023,7 @@ def _main_impl() -> None:
         output_paths,
         cache_path,
         shared_baseline_payload,
+        report_generated_at_utc,
     ) = _prepare_run_inputs()
 
     cache = Cache(
@@ -1020,6 +1120,7 @@ def _main_impl() -> None:
         ),
         analysis_mode=("clones_only" if args.skip_metrics else "full"),
         metrics_computed=_metrics_computed(args),
+        report_generated_at_utc=report_generated_at_utc,
     )
 
     baseline_for_diff = (
@@ -1096,6 +1197,7 @@ def _main_impl() -> None:
         args=args,
         output_paths=output_paths,
         report_artifacts=report_artifacts,
+        open_html_report=args.open_html_report,
     )
 
     _enforce_gating(

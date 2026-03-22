@@ -39,6 +39,9 @@ Refs:
 - Help output includes canonical exit-code section and project links.
 - Reporting flag UX uses explicit pairs (`--no-progress`/`--progress`,
   `--no-color`/`--color`) and avoids generated double-negation aliases.
+- `--open-html-report` is a local UX action layered on top of `--html`; it does not implicitly enable HTML output.
+- `--timestamped-report-paths` only rewrites default report paths requested via bare report flags; explicit FILE values
+  stay unchanged.
 - Contract errors are prefixed by `CONTRACT ERROR:`.
 - Gating failures are prefixed by `GATING FAILURE:`.
 - Internal errors use `fmt_internal_error` with optional debug details.
@@ -60,6 +63,9 @@ Refs:
 - Report writes (`--html/--json/--md/--sarif/--text`) are path-validated and write failures are contract errors.
 - Bare reporting flags write to default deterministic paths under
   `.cache/codeclone/`.
+- `--open-html-report` requires `--html`; invalid combination is a contract error.
+- `--timestamped-report-paths` requires at least one requested report output; invalid combination is a contract error.
+- Browser-open failure after a successful HTML write is warning-only and does not change the process exit code.
 - Baseline update write failure is contract error.
 - In gating mode, unreadable source files are contract errors with higher priority than clone gating failure.
 
@@ -70,15 +76,17 @@ Refs:
 
 ## Failure modes
 
-| Condition                       | User-facing category | Exit |
-|---------------------------------|----------------------|------|
-| Invalid CLI flag                | contract             | 2    |
-| Invalid output extension/path   | contract             | 2    |
-| Baseline untrusted in CI/gating | contract             | 2    |
-| Unreadable source in CI/gating  | contract             | 2    |
-| New clones with `--fail-on-new` | gating               | 3    |
-| Threshold exceeded              | gating               | 3    |
-| Unexpected exception            | internal             | 5    |
+| Condition                                    | User-facing category | Exit |
+|----------------------------------------------|----------------------|------|
+| Invalid CLI flag                             | contract             | 2    |
+| Invalid output extension/path                | contract             | 2    |
+| `--open-html-report` without `--html`        | contract             | 2    |
+| `--timestamped-report-paths` without reports | contract             | 2    |
+| Baseline untrusted in CI/gating              | contract             | 2    |
+| Unreadable source in CI/gating               | contract             | 2    |
+| New clones with `--fail-on-new`              | gating               | 3    |
+| Threshold exceeded                           | gating               | 3    |
+| Unexpected exception                         | internal             | 5    |
 
 ## Determinism / canonicalization
 

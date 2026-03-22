@@ -114,6 +114,13 @@ HELP_TEXT = (
     "Generate a plain-text report.\n"
     "If FILE is omitted, writes to .cache/codeclone/report.txt."
 )
+HELP_OPEN_HTML_REPORT = (
+    "Open the generated HTML report in the default browser.\nRequires --html."
+)
+HELP_TIMESTAMPED_REPORT_PATHS = (
+    "Append a UTC timestamp to default report filenames.\n"
+    "Applies only to report flags passed without FILE."
+)
 HELP_NO_PROGRESS = "Disable progress output.\nRecommended for CI logs."
 HELP_PROGRESS = "Force-enable progress output."
 HELP_NO_COLOR = "Disable ANSI colors."
@@ -176,6 +183,9 @@ WARN_PARALLEL_FALLBACK = (
 )
 WARN_FAILED_FILES_HEADER = "\n[warning]{count} files failed to process:[/warning]"
 WARN_CACHE_SAVE_FAILED = "[warning]Failed to save cache: {error}[/warning]"
+WARN_HTML_REPORT_OPEN_FAILED = (
+    "[warning]Failed to open HTML report in browser: {path} ({error}).[/warning]"
+)
 
 ERR_INVALID_OUTPUT_EXT = (
     "[error]Invalid {label} output extension: {path} "
@@ -193,6 +203,13 @@ ERR_BASELINE_WRITE_FAILED = (
 )
 ERR_REPORT_WRITE_FAILED = (
     "[error]Failed to write {label} report: {path} ({error}).[/error]"
+)
+ERR_OPEN_HTML_REPORT_REQUIRES_HTML = (
+    "[error]--open-html-report requires --html.[/error]"
+)
+ERR_TIMESTAMPED_REPORT_PATHS_REQUIRES_REPORT = (
+    "[error]--timestamped-report-paths requires at least one report output "
+    "flag.[/error]"
 )
 ERR_UNREADABLE_SOURCE_IN_GATING = (
     "One or more source files could not be read in CI/gating mode.\n"
@@ -278,6 +295,10 @@ def fmt_baseline_write_failed(*, path: Path, error: object) -> str:
 
 def fmt_report_write_failed(*, label: str, path: Path, error: object) -> str:
     return ERR_REPORT_WRITE_FAILED.format(label=label, path=path, error=error)
+
+
+def fmt_html_report_open_failed(*, path: Path, error: object) -> str:
+    return WARN_HTML_REPORT_OPEN_FAILED.format(path=path, error=error)
 
 
 def fmt_unreadable_source_in_gating(*, count: int) -> str:

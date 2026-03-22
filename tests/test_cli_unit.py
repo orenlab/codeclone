@@ -158,6 +158,8 @@ def test_cli_help_text_consistency(
         "Legacy alias for --cache-path",
         "--max-baseline-size-mb MB",
         "--max-cache-size-mb MB",
+        "--timestamped-report-paths",
+        "--open-html-report",
         "--debug",
         "Equivalent to: --fail-on-new --no-color --quiet.",
         "Exit codes:",
@@ -172,6 +174,33 @@ def test_cli_help_text_consistency(
     for expected in expected_parts:
         assert expected in out
     assert "\x1b[" not in out
+
+
+def test_report_path_origins_distinguish_bare_and_explicit_flags() -> None:
+    assert cli._report_path_origins(
+        (
+            "--html",
+            "--json",
+            "out.json",
+            "--md=out.md",
+            "--sarif",
+            "--text",
+        )
+    ) == {
+        "html": "default",
+        "json": "explicit",
+        "md": "explicit",
+        "sarif": "default",
+        "text": "default",
+    }
+
+
+def test_timestamped_report_path_appends_utc_slug() -> None:
+    path = Path("/tmp/report.html")
+    assert cli._timestamped_report_path(
+        path,
+        report_generated_at_utc="2026-03-22T21:30:45Z",
+    ) == Path("/tmp/report-20260322T213045Z.html")
 
 
 def test_cli_plain_console_status_context() -> None:

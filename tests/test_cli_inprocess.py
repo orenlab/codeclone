@@ -10,6 +10,8 @@ from typing import Literal
 
 import pytest
 
+import codeclone._cli_meta as cli_meta
+import codeclone._cli_reports as cli_reports
 import codeclone.baseline as baseline
 import codeclone.pipeline as pipeline
 from codeclone import __version__, cli
@@ -1006,6 +1008,155 @@ def test_cli_main_outputs(
     for label in ("HTML", "JSON", "Markdown", "SARIF", "Text"):
         assert label in out
     assert out.index("Summary") < out.index("report saved:")
+
+
+def test_cli_open_html_report_opens_written_html(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_python_module(tmp_path, "a.py")
+    html_out = tmp_path / "out.html"
+    opened: list[Path] = []
+
+    def _open(*, path: Path) -> None:
+        opened.append(path)
+
+    monkeypatch.setattr(cli_reports, "_open_html_report_in_browser", _open)
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--html",
+            str(html_out),
+            "--open-html-report",
+            "--no-progress",
+        ],
+    )
+    assert html_out.exists()
+    assert opened == [html_out.resolve()]
+
+
+def test_cli_open_html_report_requires_html_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_python_module(tmp_path, "a.py")
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--open-html-report",
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "--open-html-report requires --html" in out
+
+
+def test_cli_open_html_report_failure_warns_without_failing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_python_module(tmp_path, "a.py")
+    html_out = tmp_path / "out.html"
+
+    def _boom(*, path: Path) -> None:
+        raise OSError(f"cannot open {path.name}")
+
+    monkeypatch.setattr(cli_reports, "_open_html_report_in_browser", _boom)
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--html",
+            str(html_out),
+            "--open-html-report",
+            "--no-progress",
+        ],
+    )
+    assert html_out.exists()
+    out = capsys.readouterr().out
+    assert "Failed to open HTML report in browser" in out
+    assert "cannot open out.html" in out
+
+
+def test_cli_timestamped_report_paths_apply_to_bare_report_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_python_module(tmp_path, "a.py")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        cli_meta,
+        "_current_report_timestamp_utc",
+        lambda: "2026-03-22T21:31:45Z",
+    )
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--html",
+            "--json",
+            "--text",
+            "--timestamped-report-paths",
+            "--no-progress",
+        ],
+    )
+    cache_dir = tmp_path / ".cache" / "codeclone"
+    assert (cache_dir / "report-20260322T213145Z.html").exists()
+    assert (cache_dir / "report-20260322T213145Z.json").exists()
+    assert (cache_dir / "report-20260322T213145Z.txt").exists()
+    assert not (cache_dir / "report.html").exists()
+    assert not (cache_dir / "report.json").exists()
+    assert not (cache_dir / "report.txt").exists()
+
+
+def test_cli_timestamped_report_paths_do_not_rewrite_explicit_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_python_module(tmp_path, "a.py")
+    html_out = tmp_path / "custom.html"
+    monkeypatch.setattr(
+        cli_meta,
+        "_current_report_timestamp_utc",
+        lambda: "2026-03-22T21:31:45Z",
+    )
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--html",
+            str(html_out),
+            "--timestamped-report-paths",
+            "--no-progress",
+        ],
+    )
+    assert html_out.exists()
+    assert not (tmp_path / "custom-20260322T213145Z.html").exists()
+
+
+def test_cli_timestamped_report_paths_require_requested_report_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_python_module(tmp_path, "a.py")
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            [
+                str(tmp_path),
+                "--timestamped-report-paths",
+            ],
+        )
+    assert exc.value.code == 2
+    out = capsys.readouterr().out
+    assert "--timestamped-report-paths requires at least one report output flag" in out
 
 
 def test_cli_reports_include_audit_metadata_ok(

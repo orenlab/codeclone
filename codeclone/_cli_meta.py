@@ -91,6 +91,7 @@ def _build_report_meta(
     health_grade: str | None,
     analysis_mode: str,
     metrics_computed: tuple[str, ...],
+    report_generated_at_utc: str,
 ) -> ReportMeta:
     project_name = scan_root.name or str(scan_root)
     return {
@@ -132,5 +133,5 @@ def _build_report_meta(
         "health_grade": health_grade,
         "analysis_mode": analysis_mode,
         "metrics_computed": list(metrics_computed),
-        "report_generated_at_utc": _current_report_timestamp_utc(),
+        "report_generated_at_utc": report_generated_at_utc,
     }

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import webbrowser
 from pathlib import Path
 from typing import Protocol
 
@@ -74,12 +75,18 @@ def _write_report_output(
         sys.exit(ExitCode.CONTRACT_ERROR)
 
 
+def _open_html_report_in_browser(*, path: Path) -> None:
+    if not webbrowser.open_new_tab(path.as_uri()):
+        raise OSError("no browser handler available")
+
+
 def write_report_outputs(
     *,
     args: _QuietArgs,
     output_paths: _OutputPaths,
     report_artifacts: _ReportArtifacts,
     console: _PrinterLike,
+    open_html_report: bool = False,
 ) -> str | None:
     html_report_path: str | None = None
     saved_reports: list[tuple[str, Path]] = []
@@ -144,5 +151,13 @@ def write_report_outputs(
             except ValueError:
                 display = path
             console.print(f"  [bold]{label} report saved:[/bold] [dim]{display}[/dim]")
+
+    if open_html_report and output_paths.html is not None:
+        try:
+            _open_html_report_in_browser(path=output_paths.html)
+        except Exception as exc:
+            console.print(
+                ui.fmt_html_report_open_failed(path=output_paths.html, error=exc)
+            )
 
     return html_report_path

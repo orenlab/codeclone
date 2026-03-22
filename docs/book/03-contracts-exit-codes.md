@@ -12,12 +12,12 @@ Define stable process exit semantics and category boundaries.
 
 ## Data model
 
-| Exit code | Category       | Meaning                                                                                   |
-|-----------|----------------|-------------------------------------------------------------------------------------------|
-| 0         | success        | Run completed without gating failures                                                     |
-| 2         | contract error | Input/contract violation (baseline trust, output path/ext, unreadable source in gating)   |
-| 3         | gating failure | Analysis succeeded but policy failed (`--fail-on-new`, `--fail-threshold`, metrics gates) |
-| 5         | internal error | Unexpected exception escaped `_main_impl`                                                 |
+| Exit code | Category       | Meaning                                                                                                                |
+|-----------|----------------|------------------------------------------------------------------------------------------------------------------------|
+| 0         | success        | Run completed without gating failures                                                                                  |
+| 2         | contract error | Input/contract violation (baseline trust, output path/ext, invalid CLI flag combinations, unreadable source in gating) |
+| 3         | gating failure | Analysis succeeded but policy failed (`--fail-on-new`, `--fail-threshold`, metrics gates)                              |
+| 5         | internal error | Unexpected exception escaped `_main_impl`                                                                              |
 
 Refs:
 
@@ -49,14 +49,16 @@ Refs:
 
 ## Failure modes
 
-| Condition                             | Marker         | Exit |
-|---------------------------------------|----------------|------|
-| Invalid output extension              | CONTRACT ERROR | 2    |
-| Untrusted baseline in CI/gating       | CONTRACT ERROR | 2    |
-| Unreadable source in CI/gating        | CONTRACT ERROR | 2    |
-| New clones with `--fail-on-new`       | GATING FAILURE | 3    |
-| Threshold exceeded                    | GATING FAILURE | 3    |
-| Unexpected exception in main pipeline | INTERNAL ERROR | 5    |
+| Condition                                    | Marker         | Exit |
+|----------------------------------------------|----------------|------|
+| Invalid output extension                     | CONTRACT ERROR | 2    |
+| `--open-html-report` without `--html`        | CONTRACT ERROR | 2    |
+| `--timestamped-report-paths` without reports | CONTRACT ERROR | 2    |
+| Untrusted baseline in CI/gating              | CONTRACT ERROR | 2    |
+| Unreadable source in CI/gating               | CONTRACT ERROR | 2    |
+| New clones with `--fail-on-new`              | GATING FAILURE | 3    |
+| Threshold exceeded                           | GATING FAILURE | 3    |
+| Unexpected exception in main pipeline        | INTERNAL ERROR | 5    |
 
 ## Determinism / canonicalization
 

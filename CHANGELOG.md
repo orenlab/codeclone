@@ -75,6 +75,9 @@ ahead of the final `2.0.0` release.
     - `--md` → `.cache/codeclone/report.md`
     - `--sarif` → `.cache/codeclone/report.sarif`
     - `--text` → `.cache/codeclone/report.txt`
+- Added local report UX helpers:
+    - `--open-html-report` opens the generated HTML report after a successful write
+    - `--timestamped-report-paths` appends a UTC timestamp to default report filenames requested via bare report flags
 - Added optional-value path flags for default-path intent:
     - `--baseline`
     - `--metrics-baseline`
