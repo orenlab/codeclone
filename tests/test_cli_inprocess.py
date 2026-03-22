@@ -1081,7 +1081,7 @@ def test_cli_open_html_report_failure_warns_without_failing(
     assert html_out.exists()
     out = capsys.readouterr().out
     assert "Failed to open HTML report in browser" in out
-    assert "cannot open out.html" in out
+    assert re.search(r"cannot\s+open out\.html", out) is not None
 
 
 def test_cli_timestamped_report_paths_apply_to_bare_report_flags(
