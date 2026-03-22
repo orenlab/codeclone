@@ -245,6 +245,108 @@ def keep(
     [
         (
             """
+@decorator
+def keep(  # codeclone: ignore[dead-code]
+    arg: int,
+) -> int:
+    return arg
+""".strip(),
+            DeclarationTarget(
+                filepath="pkg/mod.py",
+                qualname="pkg.mod:keep",
+                start_line=2,
+                end_line=5,
+                kind="function",
+                declaration_end_line=4,
+            ),
+        ),
+        (
+            """
+async def keep_async(  # codeclone: ignore[dead-code]
+    arg: int,
+) -> int:
+    return arg
+""".strip(),
+            DeclarationTarget(
+                filepath="pkg/mod.py",
+                qualname="pkg.mod:keep_async",
+                start_line=1,
+                end_line=4,
+                kind="function",
+                declaration_end_line=3,
+            ),
+        ),
+        (
+            """
+class Demo(  # codeclone: ignore[dead-code]
+    Base,
+):
+    pass
+""".strip(),
+            DeclarationTarget(
+                filepath="pkg/mod.py",
+                qualname="pkg.mod:Demo",
+                start_line=1,
+                end_line=4,
+                kind="class",
+                declaration_end_line=3,
+            ),
+        ),
+    ],
+)
+def test_bind_suppressions_supports_inline_on_multiline_declaration_start_line(
+    source: str,
+    declaration: DeclarationTarget,
+) -> None:
+    directives = extract_suppression_directives(source)
+    bindings = bind_suppressions_to_declarations(
+        directives=directives,
+        declarations=(declaration,),
+    )
+    assert bindings == (
+        SuppressionBinding(
+            filepath=declaration.filepath,
+            qualname=declaration.qualname,
+            start_line=declaration.start_line,
+            end_line=declaration.end_line,
+            kind=declaration.kind,
+            rules=("dead-code",),
+        ),
+    )
+
+
+def test_bind_suppressions_ignores_inline_comment_on_middle_signature_line() -> None:
+    source = """
+def keep(
+    arg: int,  # codeclone: ignore[dead-code]
+) -> int:
+    return arg
+""".strip()
+    directives = extract_suppression_directives(source)
+    declarations = (
+        DeclarationTarget(
+            filepath="pkg/mod.py",
+            qualname="pkg.mod:keep",
+            start_line=1,
+            end_line=4,
+            kind="function",
+            declaration_end_line=3,
+        ),
+    )
+    assert (
+        bind_suppressions_to_declarations(
+            directives=directives,
+            declarations=declarations,
+        )
+        == ()
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "declaration"),
+    [
+        (
+            """
 async def keep_async(
     arg: int,
 ) -> int:  # codeclone: ignore[dead-code]

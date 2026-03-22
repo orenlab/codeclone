@@ -3803,14 +3803,11 @@ def fn(x):
     assert any("sf" in entry for entry in files_after.values())
 
 
-def test_cli_dead_code_suppression_is_stable_between_plain_and_json_runs(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _write_python_module(
-        tmp_path,
-        "models.py",
-        """\
+@pytest.mark.parametrize(
+    ("source", "suppressed_count"),
+    [
+        (
+            """\
 class Settings:  # codeclone: ignore[dead-code]
     @validator("field")
     @classmethod
@@ -3820,6 +3817,41 @@ class Settings:  # codeclone: ignore[dead-code]
     ) -> str | None:  # codeclone: ignore[dead-code]
         return value
 """,
+            2,
+        ),
+        (
+            """\
+class Settings:  # codeclone: ignore[dead-code]
+    @field_validator("trusted_proxy_ips", "additional_telegram_ip_ranges")
+    @classmethod
+    def validate_trusted_proxy_ips(  # codeclone: ignore[dead-code]
+        cls,
+        value: list[str] | None,
+    ) -> list[str] | None:
+        return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_config_if_needed(  # codeclone: ignore[dead-code]
+        cls,
+        values: dict[str, object],
+    ) -> dict[str, object]:
+        return values
+""",
+            3,
+        ),
+    ],
+)
+def test_cli_dead_code_suppression_is_stable_between_plain_and_json_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    suppressed_count: int,
+) -> None:
+    _write_python_module(
+        tmp_path,
+        "models.py",
+        source,
     )
     json_out = tmp_path / "report.json"
     cache_path = tmp_path / "cache.json"
@@ -3854,7 +3886,11 @@ class Settings:  # codeclone: ignore[dead-code]
     )
     payload = json.loads(json_out.read_text("utf-8"))
     dead_code = payload["metrics"]["families"]["dead_code"]
-    assert dead_code["summary"] == {"total": 0, "high_confidence": 0, "suppressed": 2}
+    assert dead_code["summary"] == {
+        "total": 0,
+        "high_confidence": 0,
+        "suppressed": suppressed_count,
+    }
 
     _run_main(
         monkeypatch,

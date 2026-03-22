@@ -158,6 +158,24 @@ def extract_suppression_directives(
     )
 
 
+def _declaration_inline_lines(target: DeclarationTarget) -> tuple[int, ...]:
+    end_line = target.declaration_end_line or target.start_line
+    if end_line <= 0 or end_line == target.start_line:
+        return (target.start_line,)
+    return (target.start_line, end_line)
+
+
+def _bound_inline_rules(
+    *,
+    target: DeclarationTarget,
+    inline_rules_by_line: Mapping[int, tuple[str, ...]],
+) -> tuple[str, ...]:
+    rules: tuple[str, ...] = ()
+    for line_no in _declaration_inline_lines(target):
+        rules = _merge_rules(rules, inline_rules_by_line.get(line_no, ()))
+    return rules
+
+
 def bind_suppressions_to_declarations(
     *,
     directives: Sequence[SuppressionDirective],
@@ -177,10 +195,12 @@ def bind_suppressions_to_declarations(
 
     bindings: list[SuppressionBinding] = []
     for target in declarations:
-        inline_binding_line = target.declaration_end_line or target.start_line
         bound_rules = _merge_rules(
             leading_rules_by_line.get(target.start_line - 1, ()),
-            inline_rules_by_line.get(inline_binding_line, ()),
+            _bound_inline_rules(
+                target=target,
+                inline_rules_by_line=inline_rules_by_line,
+            ),
         )
         if not bound_rules:
             continue

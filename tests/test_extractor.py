@@ -756,6 +756,44 @@ class Settings:  # codeclone: ignore[dead-code]
     assert tuple(item.qualname for item in dead) == ("pkg.mod:Settings.orphan",)
 
 
+def test_dead_code_binds_inline_suppression_on_multiline_header_start_line() -> None:
+    src = """
+class Settings:  # codeclone: ignore[dead-code]
+    @field_validator("trusted_proxy_ips", "additional_telegram_ip_ranges")
+    @classmethod
+    def validate_trusted_proxy_ips(  # codeclone: ignore[dead-code]
+        cls,
+        value: list[str] | None,
+    ) -> list[str] | None:
+        return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_config_if_needed(  # codeclone: ignore[dead-code]
+        cls,
+        values: dict[str, object],
+    ) -> dict[str, object]:
+        return values
+
+    def orphan(self) -> int:
+        return 1
+"""
+    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+        source=src,
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    dead = find_unused(
+        definitions=file_metrics.dead_candidates,
+        referenced_names=file_metrics.referenced_names,
+        referenced_qualnames=file_metrics.referenced_qualnames,
+    )
+    assert tuple(item.qualname for item in dead) == ("pkg.mod:Settings.orphan",)
+
+
 def test_collect_dead_candidates_and_extract_skip_classes_without_lineno(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
