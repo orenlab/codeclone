@@ -35,20 +35,6 @@ def insight_block(*, question: str, answer: str, tone: Tone = "info") -> str:
     )
 
 
-def summary_chip_row(parts: Sequence[str], *, css_class: str) -> str:
-    cleaned = [str(p).strip() for p in parts if str(p).strip()]
-    if not cleaned:
-        return ""
-    return (
-        f'<div class="{css_class}">'
-        + "".join(
-            f'<span class="group-explain-item">{_escape_html(p)}</span>'
-            for p in cleaned
-        )
-        + "</div>"
-    )
-
-
 def overview_cluster_header(title: str, subtitle: str | None = None) -> str:
     sub = (
         f'<p class="overview-cluster-copy">{_escape_html(subtitle)}</p>'
@@ -102,29 +88,30 @@ def overview_row_html(card: Mapping[str, object]) -> str:
     category = str(card.get("category", ""))
     title = str(card.get("title", ""))
     summary_text = str(card.get("summary", ""))
-    confidence_text = str(card.get("confidence", ""))
     location_text = str(card.get("location", ""))
-    count = _as_int(card.get("count"))
     spread = _as_mapping(card.get("spread"))
     spread_files = _as_int(spread.get("files"))
     spread_functions = _as_int(spread.get("functions"))
     clone_type = str(card.get("clone_type", "")).strip()
-    context_parts = [
+
+    # Compact context line: severity · source · category [· clone_type]
+    ctx_parts = [
         severity,
         source_kind_label(source_kind),
         category.replace("_", " "),
     ]
     if clone_type:
-        context_parts.append(clone_type)
-    context_text = " · ".join(p for p in context_parts if p)
-    stats = summary_chip_row(
-        (
-            f"count={count}",
-            f"spread={spread_functions} fn / {spread_files} files",
-            f"confidence={confidence_text}",
-        ),
-        css_class="overview-row-stats",
-    )
+        ctx_parts.append(clone_type)
+    context_text = " \u00b7 ".join(p for p in ctx_parts if p)
+
+    # Compact metadata: spread + location on one line
+    meta_parts: list[str] = []
+    if spread_files or spread_functions:
+        meta_parts.append(f"{spread_functions} fn / {spread_files} files")
+    if location_text:
+        meta_parts.append(location_text)
+    meta_text = " \u00b7 ".join(meta_parts)
+
     return (
         '<article class="overview-row" '
         f'data-severity="{_escape_attr(severity)}" '
@@ -135,8 +122,7 @@ def overview_row_html(card: Mapping[str, object]) -> str:
         "</div>"
         '<div class="overview-row-side">'
         f'<div class="overview-row-context">{_escape_html(context_text)}</div>'
-        f"{stats}"
-        f'<div class="overview-row-location">{_escape_html(location_text)}</div>'
+        f'<div class="overview-row-meta">{_escape_html(meta_text)}</div>'
         "</div>"
         "</article>"
     )

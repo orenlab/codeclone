@@ -15,7 +15,13 @@ from ..report.overview import build_report_overview
 
 if TYPE_CHECKING:
     from .._html_snippets import _FileCache
-    from ..models import GroupItemLike, GroupMapLike, StructuralFindingGroup, Suggestion
+    from ..models import (
+        GroupItemLike,
+        GroupMapLike,
+        MetricsDiff,
+        StructuralFindingGroup,
+        Suggestion,
+    )
 
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
@@ -67,6 +73,9 @@ class ReportContext:
     report_document: Mapping[str, object]
     derived_map: Mapping[str, object]
     integrity_map: Mapping[str, object]
+
+    # -- baseline diff --
+    metrics_diff: MetricsDiff | None
 
     # -- rendering config --
     file_cache: _FileCache
@@ -152,6 +161,7 @@ def build_context(
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
     report_document: Mapping[str, object] | None = None,
+    metrics_diff: MetricsDiff | None = None,
     file_cache: _FileCache,
     context_lines: int = 3,
     max_snippet_lines: int = 220,
@@ -269,6 +279,7 @@ def build_context(
         report_document=report_document_map,
         derived_map=derived_map,
         integrity_map=integrity_map,
+        metrics_diff=metrics_diff,
         file_cache=file_cache,
         context_lines=context_lines,
         max_snippet_lines=max_snippet_lines,

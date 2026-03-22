@@ -31,7 +31,9 @@ _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
 
 
-def _health_gauge_html(score: float, grade: str) -> str:
+def _health_gauge_html(
+    score: float, grade: str, *, health_delta: int | None = None
+) -> str:
     """Render an SVG ring gauge for health score."""
     if score < 0:
         return _stat_card(
@@ -48,6 +50,17 @@ def _health_gauge_html(score: float, grade: str) -> str:
         color = "var(--warning)"
     else:
         color = "var(--error)"
+
+    delta_html = ""
+    if health_delta is not None and health_delta != 0:
+        if health_delta > 0:
+            cls = "health-ring-delta--up"
+            sign = "+"
+        else:
+            cls = "health-ring-delta--down"
+            sign = ""
+        delta_html = f'<div class="health-ring-delta {cls}">{sign}{health_delta}</div>'
+
     return (
         '<div class="meta-item overview-health-card">'
         '<div class="overview-health-inner">'
@@ -62,6 +75,7 @@ def _health_gauge_html(score: float, grade: str) -> str:
         '<div class="health-ring-label">'
         f'<div class="health-ring-score">{score:.0f}</div>'
         f'<div class="health-ring-grade">Grade {_escape_html(grade)}</div>'
+        f"{delta_html}"
         "</div></div></div></div>"
     )
 
@@ -138,6 +152,14 @@ def render_overview_panel(ctx: ReportContext) -> str:
 
     overview_answer, overview_tone = _answer_and_tone()
 
+    # -- MetricsDiff deltas --
+    md = ctx.metrics_diff
+    _new_complexity = len(md.new_high_risk_functions) if md else None
+    _new_coupling = len(md.new_high_coupling_classes) if md else None
+    _new_dead = len(md.new_dead_code) if md else None
+    _new_cycles = len(md.new_cycles) if md else None
+    _health_delta = md.health_delta if md else None
+
     # KPI cards
     kpis = [
         _stat_card(
@@ -158,6 +180,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
                 f"max {complexity_summary.get('max', 'n/a')}"
             ),
             tip="Functions with cyclomatic complexity above threshold",
+            delta_new=_new_complexity,
         ),
         _stat_card(
             "High Coupling",
@@ -167,6 +190,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
                 f"max {coupling_summary.get('max', 'n/a')}"
             ),
             tip="Classes with high coupling between objects (CBO)",
+            delta_new=_new_coupling,
         ),
         _stat_card(
             "Low Cohesion",
@@ -182,12 +206,14 @@ def render_overview_panel(ctx: ReportContext) -> str:
             dependency_cycle_count,
             detail=f"max depth {dependency_max_depth}",
             tip="Circular dependencies between project modules",
+            delta_new=_new_cycles,
         ),
         _stat_card(
             "Dead Code",
             dead_total,
             detail=f"{dead_high_conf} high-confidence",
             tip="Potentially unused functions, classes, or imports",
+            delta_new=_new_dead,
         ),
     ]
 
@@ -219,7 +245,9 @@ def render_overview_panel(ctx: ReportContext) -> str:
         + "</div></section>"
     )
 
-    health_gauge = _health_gauge_html(health_score, health_grade)
+    health_gauge = _health_gauge_html(
+        health_score, health_grade, health_delta=_health_delta
+    )
 
     return (
         insight_block(

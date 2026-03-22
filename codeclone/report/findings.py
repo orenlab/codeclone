@@ -20,7 +20,7 @@ from ..domain.findings import (
 )
 from ..domain.quality import RISK_HIGH, RISK_LOW
 from ..structural_findings import normalize_structural_findings
-from ._source_kinds import SOURCE_KIND_FILTER_VALUES
+from ._source_kinds import SOURCE_KIND_FILTER_VALUES, source_kind_label
 from .derived import (
     combine_source_kinds,
     group_spread,
@@ -123,29 +123,28 @@ def _occurrences_table_html(
             )
         return "".join(rows)
 
+    colgroup = (
+        "<colgroup>"
+        '<col style="width:35%">'
+        '<col style="width:55%">'
+        '<col style="width:10%">'
+        "</colgroup>"
+    )
+    thead = "<thead><tr><th>File</th><th>Location</th><th>Lines</th></tr></thead>"
+
     hidden_details = ""
     if hidden_items:
         hidden_details = (
             '<details class="finding-occurrences-more">'
             f"<summary>Show {len(hidden_items)} more occurrences</summary>"
-            '<div class="table-wrap"><table class="table">'
-            '<colgroup><col><col><col style="width:80px"></colgroup>'
-            "<thead><tr><th>File</th><th>Location</th><th>Lines</th></tr></thead>"
+            f'<div class="table-wrap"><table class="table sf-table">'
+            f"{colgroup}{thead}"
             f"<tbody>{_rows_for(hidden_items)}</tbody>"
             "</table></div></details>"
         )
     return (
-        '<div class="table-wrap"><table class="table">'
-        "<colgroup>"
-        "<col>"
-        "<col>"
-        '<col style="width:80px">'
-        "</colgroup>"
-        "<thead><tr>"
-        "<th>File</th>"
-        "<th>Location</th>"
-        "<th>Lines</th>"
-        "</tr></thead>"
+        f'<div class="table-wrap"><table class="table sf-table">'
+        f"{colgroup}{thead}"
         f"<tbody>{_rows_for(visible_items)}</tbody>"
         "</table></div>"
         f"{hidden_details}"
@@ -394,6 +393,78 @@ def _finding_why_template_html(
     )
 
 
+def _render_finding_card(
+    g: StructuralFindingGroup,
+    *,
+    scan_root: str,
+    file_cache: _FileCache,
+    context_lines: int,
+    max_snippet_lines: int,
+    why_templates: list[str],
+) -> tuple[str, str]:
+    """Render a single finding group as a compact card. Returns (html, source_kind)."""
+    deduped_items = _dedupe_items(g.items)
+    spread = _spread(deduped_items)
+    chips_html = _signature_chips_html(g.signature)
+    report_locations = tuple(
+        report_location_from_structural_occurrence(item, scan_root=scan_root)
+        for item in deduped_items
+    )
+    source_kind = combine_source_kinds(
+        location.source_kind for location in report_locations
+    )
+    spread_files, spread_functions = group_spread(report_locations)
+    spread_bucket = RISK_HIGH if spread_files > 1 or spread_functions > 1 else RISK_LOW
+    table_html = _occurrences_table_html(
+        deduped_items, scan_root=scan_root, already_deduped=True
+    )
+    count = len(deduped_items)
+
+    why_template_id = f"finding-why-template-{g.finding_key}"
+    why_template_html = _finding_why_template_html(
+        g,
+        deduped_items,
+        file_cache=file_cache,
+        context_lines=context_lines,
+        max_snippet_lines=max_snippet_lines,
+    )
+    why_templates.append(
+        f'<template id="{_escape_attr(why_template_id)}">{why_template_html}</template>'
+    )
+
+    func_word = "function" if spread["functions"] == 1 else "functions"
+    file_word = "file" if spread["files"] == 1 else "files"
+    kind_label = _KIND_LABEL.get(g.finding_kind, g.finding_kind)
+
+    return (
+        f'<article class="sf-card"'
+        f' data-sf-group="true"'
+        f' data-source-kind="{_escape_attr(source_kind)}"'
+        f' data-spread-bucket="{_escape_attr(spread_bucket)}">'
+        # -- header --
+        '<div class="sf-head">'
+        f'<span class="sf-title">{_escape_html(kind_label)}</span>'
+        '<span class="sf-meta">'
+        f'<span class="suggestion-meta-badge">'
+        f"{spread['functions']} {func_word} \u00b7 {spread['files']} {file_word}</span>"
+        f'<button class="btn ghost" type="button" '
+        f'data-finding-why-btn="{_escape_attr(why_template_id)}" '
+        'aria-haspopup="dialog">Why?</button>'
+        "</span></div>"
+        # -- body: signature chips --
+        '<div class="sf-body">'
+        f'<div class="sf-scope">{chips_html}</div>'
+        "</div>"
+        # -- expandable occurrences --
+        '<details class="sf-details">'
+        f"<summary>Occurrences ({count})</summary>"
+        f'<div class="sf-details-body">{table_html}</div>'
+        "</details>"
+        "</article>",
+        source_kind,
+    )
+
+
 def build_structural_findings_html_panel(
     groups: Sequence[StructuralFindingGroup],
     files: list[str],
@@ -404,6 +475,8 @@ def build_structural_findings_html_panel(
     max_snippet_lines: int = 220,
 ) -> str:
     """Build HTML content for the Structural Findings tab panel."""
+    from .._html_report._tabs import render_split_tabs
+
     normalized_groups = normalize_structural_findings(groups)
     if not normalized_groups:
         return _tab_empty("No structural findings detected.")
@@ -413,132 +486,54 @@ def build_structural_findings_html_panel(
         '<div class="insight-question">What are structural findings?</div>'
         '<div class="insight-answer">Repeated non-overlapping branch-body shapes '
         "detected inside individual functions. These are local, report-only "
-        "refactoring hints and do not affect clone detection or CI verdicts. "
-        "Spread shows how many unique functions and files each finding reaches. "
-        "Context badges mark whether the finding comes from production, tests, "
-        "fixtures, or a mixed slice.</div>"
+        "refactoring hints and do not affect clone detection or CI verdicts.</div>"
         "</div>"
     )
-    findings_file_count = len({item for item in files if item})
-
-    # Group by finding_kind for subsection headers
-    by_kind: dict[str, list[StructuralFindingGroup]] = {}
-    for g in sorted(normalized_groups, key=_sort_key_group):
-        by_kind.setdefault(g.finding_kind, []).append(g)
 
     resolved_file_cache = file_cache if file_cache is not None else _FileCache()
-    source_kind_options = "".join(
-        f'<option value="{kind}">{kind}</option>' for kind in SOURCE_KIND_FILTER_VALUES
-    )
-    sections: list[str] = [
-        '<div class="toolbar" role="toolbar" aria-label="Structural finding filters">'
-        '<div class="toolbar-left">'
-        '<label class="muted" for="sf-source-kind">Context:</label>'
-        '<select class="select" id="sf-source-kind" data-sf-source-kind>'
-        '<option value="all">all</option>'
-        f"{source_kind_options}"
-        "</select>"
-        '<label class="muted" for="sf-spread">Spread:</label>'
-        '<select class="select" id="sf-spread" data-sf-spread>'
-        '<option value="all">all</option>'
-        f'<option value="{RISK_HIGH}">{RISK_HIGH}</option>'
-        f'<option value="{RISK_LOW}">{RISK_LOW}</option>'
-        "</select>"
-        '<label class="inline-check">'
-        '<input type="checkbox" data-sf-actionable />'
-        "<span>Only actionable</span>"
-        "</label>"
-        "</div>"
-        '<div class="toolbar-right">'
-        '<span class="page-meta" data-sf-count>'
-        f"{len(normalized_groups)} shown"
-        "</span>"
-        "</div>"
-        "</div>"
-    ]
     why_templates: list[str] = []
-    for kind in sorted(by_kind):
-        label = _KIND_LABEL.get(kind, kind)
-        kind_groups = by_kind[kind]
-        total = sum(len(_dedupe_items(g.items)) for g in kind_groups)
 
-        group_rows: list[str] = []
-        for g in kind_groups:
-            deduped_items = _dedupe_items(g.items)
-            spread = _spread(deduped_items)
-            chips_html = _signature_chips_html(g.signature)
-            report_locations = tuple(
-                report_location_from_structural_occurrence(
-                    item,
-                    scan_root=scan_root,
-                )
-                for item in deduped_items
-            )
-            source_kind = combine_source_kinds(
-                location.source_kind for location in report_locations
-            )
-            spread_files, spread_functions = group_spread(report_locations)
-            spread_bucket = (
-                RISK_HIGH if spread_files > 1 or spread_functions > 1 else RISK_LOW
-            )
-            table_html = _occurrences_table_html(
-                deduped_items,
-                scan_root=scan_root,
-                already_deduped=True,
-            )
-            count = len(deduped_items)
-            why_template_id = f"finding-why-template-{g.finding_key}"
-            why_template_html = _finding_why_template_html(
-                g,
-                deduped_items,
-                file_cache=resolved_file_cache,
-                context_lines=context_lines,
-                max_snippet_lines=max_snippet_lines,
-            )
-            why_templates.append(
-                f'<template id="{_escape_attr(why_template_id)}">'
-                f"{why_template_html}"
-                "</template>"
-            )
-            occ_word = "occurrence" if count == 1 else "occurrences"
-            func_word = "function" if spread["functions"] == 1 else "functions"
-            file_word = "file" if spread["files"] == 1 else "files"
-            actionable = "true" if count >= 4 or spread_functions > 1 else "false"
-            group_rows.append(
-                '<div class="sf-group" '
-                'data-sf-group="true" '
-                f'data-source-kind="{_escape_attr(source_kind)}" '
-                f'data-spread-bucket="{_escape_attr(spread_bucket)}" '
-                f'data-actionable="{actionable}">'
-                '<div class="sf-group-head">'
-                f'<span class="sf-occ-count">'
-                f"{count} non-overlapping {occ_word}</span>"
-                f'<button class="btn ghost" type="button" '
-                f'data-finding-why-btn="{_escape_attr(why_template_id)}" '
-                'aria-haspopup="dialog">Why?</button>'
-                f"{_source_kind_badge_html(source_kind)}"
-                f'<span class="category-badge">scope='
-                f"{spread['functions']} {func_word} · {spread['files']} {file_word}"
-                "</span>"
-                f"{chips_html}"
-                "</div>"
-                f'<div class="sf-group-body">{table_html}</div>'
-                "</div>"
-            )
-
-        _meta_style = "font-weight:normal;color:var(--text-secondary)"
-        sections.append(
-            f'<h3 class="subsection-title">'
-            f"{_escape_html(label)}"
-            f' &nbsp;<small class="sf-kind-meta">'
-            f"{len(kind_groups)} groups &middot; {total} occurrences</small>"
-            "</h3>" + "".join(group_rows)
+    # Render all cards and bucket by source_kind
+    by_source: dict[str, list[str]] = {}
+    for g in sorted(normalized_groups, key=_sort_key_group):
+        card_html, source_kind = _render_finding_card(
+            g,
+            scan_root=scan_root,
+            file_cache=resolved_file_cache,
+            context_lines=context_lines,
+            max_snippet_lines=max_snippet_lines,
+            why_templates=why_templates,
         )
+        by_source.setdefault(source_kind, []).append(card_html)
 
-    summary = (
-        '<div class="section-subtext">'
-        f"{len(normalized_groups)} findings across "
-        f"{findings_file_count} files with structural motifs."
-        "</div>"
+    # Build sub-tabs: "All" + per source_kind
+    all_cards = []
+    for cards in by_source.values():
+        all_cards.extend(cards)
+
+    sub_tabs: list[tuple[str, str, int, str]] = [
+        (
+            "all",
+            "All",
+            len(all_cards),
+            f'<div class="sf-list">{"".join(all_cards)}</div>',
+        ),
+    ]
+    # Stable order matching SOURCE_KIND_FILTER_VALUES
+    for kind in SOURCE_KIND_FILTER_VALUES:
+        cards = by_source.get(kind, [])
+        if cards:
+            sub_tabs.append(
+                (
+                    kind,
+                    source_kind_label(kind),
+                    len(cards),
+                    f'<div class="sf-list">{"".join(cards)}</div>',
+                )
+            )
+
+    return (
+        intro
+        + render_split_tabs(group_id="findings", tabs=sub_tabs)
+        + "".join(why_templates)
     )
-    return intro + summary + "".join(sections) + "".join(why_templates)

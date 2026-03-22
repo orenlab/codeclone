@@ -579,7 +579,8 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
             '<div class="global-novelty-head">'
             "<h2>Duplicate Scope</h2>"
             '<div class="novelty-tabs" role="tablist" aria-label="Baseline split filter">'
-            '<button class="btn novelty-tab" type="button" data-global-novelty="new">'
+            '<button class="btn novelty-tab" type="button" data-global-novelty="new" '
+            f'data-novelty-state="{"good" if total_new == 0 else "bad"}">'
             f'New duplicates <span class="novelty-count">{total_new}</span></button>'
             '<button class="btn novelty-tab" type="button" data-global-novelty="known">'
             f'Known duplicates <span class="novelty-count">{total_known}</span></button>'

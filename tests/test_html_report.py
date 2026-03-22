@@ -403,7 +403,7 @@ def test_html_report_structural_findings_tab_uses_normalized_groups() -> None:
     assert 'data-tab="structural-findings"' in html
     assert ">1</span>" in html
     assert "Repeated non-overlapping branch-body shapes" in html
-    assert "scope=1 function" in html
+    assert "1 function" in html
     assert "stmt_seq=Expr,For" in html
     assert "stmt_seq=Expr</span>" not in html
 
@@ -1907,4 +1907,4 @@ def test_html_report_overview_includes_hotspot_sections_without_quick_views() ->
     assert "Test/Fixture Hotspots" in html
     assert "Most Actionable" not in html
     assert 'data-quick-view="' not in html
-    assert 'class="suggestion-card-context"' in html
+    assert 'class="suggestion-context"' in html

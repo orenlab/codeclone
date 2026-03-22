@@ -2566,5 +2566,5 @@ def test_html_panel_explains_local_non_overlapping_structural_findings() -> None
     html = build_structural_findings_html_panel([group], ["/proj/a.py"])
     assert "Repeated non-overlapping branch-body shapes" in html
     assert "local, report-only refactoring hints" in html
-    assert "2 non-overlapping occurrences" in html
-    assert "scope=1 function" in html
+    assert "Occurrences (2)" in html
+    assert "All occurrences belong to 1 function in 1 file." in html

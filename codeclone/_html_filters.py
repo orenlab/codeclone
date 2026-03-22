@@ -44,7 +44,7 @@ def _render_select(
     parts = [
         f'<select class="select" id="{_escape_attr(element_id)}" '
         f"{data_attr}>"
-        f'<option value="all">{_escape_html(all_label)}</option>',
+        f'<option value="">{_escape_html(all_label)}</option>',
     ]
     for value, display in options:
         sel = " selected" if selected == value else ""

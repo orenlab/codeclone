@@ -261,6 +261,7 @@ def report(
     new_func: set[str],
     new_block: set[str],
     html_builder: Callable[..., str] | None = None,
+    metrics_diff: MetricsDiff | None = None,
 ) -> ReportArtifacts:
     return cast(
         "ReportArtifacts",
@@ -273,6 +274,7 @@ def report(
             new_func=new_func,
             new_block=new_block,
             html_builder=html_builder,
+            metrics_diff=metrics_diff,
         ),
     )
 
@@ -1088,6 +1090,7 @@ def _main_impl() -> None:
         new_func=new_func,
         new_block=new_block,
         html_builder=build_html_report,
+        metrics_diff=metrics_diff,
     )
     html_report_path = _write_report_outputs(
         args=args,

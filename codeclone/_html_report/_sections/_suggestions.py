@@ -27,7 +27,7 @@ from ...domain.findings import (
 )
 from ...domain.quality import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING
 from ...report._source_kinds import SOURCE_KIND_FILTER_VALUES, source_kind_label
-from .._components import insight_block, summary_chip_row
+from .._components import insight_block
 
 if TYPE_CHECKING:
     from ...models import Suggestion
@@ -54,107 +54,101 @@ def _format_source_breakdown(
     return " \u00b7 ".join(f"{source_kind_label(k)} {c}" for k, c in rows if c > 0)
 
 
-def _suggestion_locations_html(suggestion: Suggestion, ctx: ReportContext) -> str:
-    if not suggestion.representative_locations:
-        return '<div class="suggestion-empty">No representative locations.</div>'
-    count = len(suggestion.representative_locations)
-    items_html = "".join(
-        "<li>"
-        f'<span class="suggestion-location-path">'
-        f"{_escape_html(loc.relative_path)}:{loc.start_line}-{loc.end_line}</span>"
-        f'<span class="suggestion-location-qualname">'
-        f"{_escape_html(ctx.bare_qualname(loc.qualname, loc.filepath))}</span>"
-        "</li>"
-        for loc in suggestion.representative_locations
-    )
-    return (
-        '<details class="suggestion-disclosure suggestion-location-details">'
-        "<summary><span>Example locations</span>"
-        f'<span class="suggestion-disclosure-count">{count}</span></summary>'
-        f'<ul class="suggestion-location-list">{items_html}</ul>'
-        "</details>"
-    )
-
-
 def _render_card(s: Suggestion, ctx: ReportContext) -> str:
     actionable = "true" if s.severity != "info" else "false"
     spread_bucket = "high" if s.spread_files > 1 or s.spread_functions > 1 else "low"
     breakdown_text = _format_source_breakdown(s.source_breakdown)
-    facts_title = _escape_html(s.fact_kind or s.category)
-    facts_summary = _escape_html(s.fact_summary)
-    facts_spread = f"{s.spread_functions} functions / {s.spread_files} files"
     facts_source = _escape_html(breakdown_text or source_kind_label(s.source_kind))
     facts_location = _escape_html(s.location_label or s.location)
+
+    # Context line
     ctx_parts = [
-        s.severity,
         source_kind_label(s.source_kind),
         s.category.replace("_", " "),
     ]
     if s.clone_type:
         ctx_parts.append(s.clone_type)
     ctx_text = " \u00b7 ".join(p for p in ctx_parts if p)
-    stats = summary_chip_row(
-        (
-            f"count={s.fact_count}",
-            f"spread={s.spread_functions} fn / {s.spread_files} files",
-            f"confidence={s.confidence}",
-            f"priority={s.priority:.2f}",
-            f"effort={s.effort}",
-        ),
-        css_class="suggestion-card-stats",
-    )
-    next_step = (
-        _escape_html(s.steps[0])
-        if s.steps
-        else "No explicit refactoring steps provided."
-    )
-    steps_html = "".join(f"<li>{_escape_html(step)}</li>" for step in s.steps)
-    steps_disclosure = (
-        '<details class="suggestion-disclosure">'
-        "<summary><span>Refactoring steps</span>"
-        f'<span class="suggestion-disclosure-count">{len(s.steps)}</span></summary>'
-        f'<ol class="suggestion-steps">{steps_html}</ol>'
-        "</details>"
-        if s.steps
+
+    # Next step
+    next_step = _escape_html(s.steps[0]) if s.steps else ""
+    next_step_html = (
+        f'<div class="suggestion-action"><strong>Next step</strong>{next_step}</div>'
+        if next_step
         else ""
     )
+
+    # Locations inside details
+    locs_html = ""
+    if s.representative_locations:
+        locs_items = "".join(
+            "<li>"
+            f'<span class="suggestion-loc-path">'
+            f"{_escape_html(loc.relative_path)}:{loc.start_line}-{loc.end_line}</span>"
+            f'<span class="suggestion-loc-name">'
+            f"{_escape_html(ctx.bare_qualname(loc.qualname, loc.filepath))}</span>"
+            "</li>"
+            for loc in s.representative_locations
+        )
+        locs_html = (
+            f'<div class="suggestion-sub-title">Locations ({len(s.representative_locations)})</div>'
+            f'<ul class="suggestion-locations">{locs_items}</ul>'
+        )
+
+    # Steps inside details
+    steps_html = ""
+    if s.steps:
+        steps_items = "".join(f"<li>{_escape_html(step)}</li>" for step in s.steps)
+        steps_html = (
+            '<div class="suggestion-sub-title">Refactoring steps</div>'
+            f'<ol class="suggestion-steps">{steps_items}</ol>'
+        )
+
     return (
         f'<article class="suggestion-card"'
         f"{_build_data_attrs({'data-suggestion-card': 'true', 'data-severity': s.severity, 'data-category': s.category, 'data-family': s.finding_family, 'data-source-kind': s.source_kind, 'data-clone-type': s.clone_type, 'data-actionable': actionable, 'data-spread-bucket': spread_bucket, 'data-count': str(s.fact_count)})}"
         ">"
-        '<div class="suggestion-card-head">'
-        f'<div class="suggestion-card-title">{_escape_html(s.title)}</div>'
-        f'<div class="suggestion-card-context">{_escape_html(ctx_text)}</div>'
+        # -- header row --
+        '<div class="suggestion-head">'
+        f'<span class="suggestion-sev suggestion-sev--{_escape_html(s.severity)}">{_escape_html(s.severity)}</span>'
+        f'<span class="suggestion-title">{_escape_html(s.title)}</span>'
+        '<span class="suggestion-meta">'
+        f'<span class="suggestion-meta-badge">effort: {_escape_html(s.effort)}</span>'
+        f'<span class="suggestion-meta-badge">priority: {s.priority:.2f}</span>'
+        f'<span class="suggestion-meta-badge">{s.spread_functions} fn / {s.spread_files} files</span>'
+        "</span></div>"
+        # -- body --
+        '<div class="suggestion-body">'
+        f'<div class="suggestion-context">{_escape_html(ctx_text)}</div>'
+        f'<div class="suggestion-summary">{_escape_html(s.fact_summary)}</div>'
+        f"{next_step_html}"
         "</div>"
-        f'<div class="suggestion-card-summary">{facts_summary}</div>'
-        f"{stats}"
-        '<div class="suggestion-sections">'
-        '<section class="suggestion-section">'
-        '<div class="suggestion-section-title">Facts</div>'
-        '<dl class="suggestion-fact-list">'
-        f"<div><dt>Finding</dt><dd>{facts_title}</dd></div>"
-        f"<div><dt>Spread</dt><dd>{_escape_html(facts_spread)}</dd></div>"
-        f"<div><dt>Source breakdown</dt><dd>{facts_source}</dd></div>"
-        f"<div><dt>Representative scope</dt><dd>{facts_location}</dd></div>"
-        "</dl></section>"
-        '<section class="suggestion-section">'
-        '<div class="suggestion-section-title">Assessment</div>'
-        '<dl class="suggestion-fact-list">'
+        # -- expandable details --
+        '<details class="suggestion-details">'
+        "<summary>Details</summary>"
+        '<div class="suggestion-details-body">'
+        '<div class="suggestion-facts">'
+        '<div class="suggestion-fact-group">'
+        '<div class="suggestion-fact-group-title">Facts</div>'
+        '<dl class="suggestion-dl">'
+        f"<div><dt>Finding</dt><dd>{_escape_html(s.fact_kind or s.category)}</dd></div>"
+        f"<div><dt>Spread</dt><dd>{s.spread_functions} fn / {s.spread_files} files</dd></div>"
+        f"<div><dt>Source</dt><dd>{facts_source}</dd></div>"
+        f"<div><dt>Scope</dt><dd>{facts_location}</dd></div>"
+        "</dl></div>"
+        '<div class="suggestion-fact-group">'
+        '<div class="suggestion-fact-group-title">Assessment</div>'
+        '<dl class="suggestion-dl">'
         f"<div><dt>Severity</dt><dd>{_escape_html(s.severity)}</dd></div>"
         f"<div><dt>Confidence</dt><dd>{_escape_html(s.confidence)}</dd></div>"
-        f"<div><dt>Priority</dt><dd>{_escape_html(f'{s.priority:.2f}')}</dd></div>"
+        f"<div><dt>Priority</dt><dd>{s.priority:.2f}</dd></div>"
         f"<div><dt>Family</dt><dd>{_escape_html(s.finding_family)}</dd></div>"
-        "</dl></section>"
-        '<section class="suggestion-section">'
-        '<div class="suggestion-section-title">Suggested action</div>'
-        '<dl class="suggestion-fact-list">'
-        f"<div><dt>Effort</dt><dd>{_escape_html(s.effort)}</dd></div>"
-        f"<div><dt>Next step</dt><dd>{next_step}</dd></div>"
-        "</dl></section></div>"
-        '<div class="suggestion-disclosures">'
-        f"{_suggestion_locations_html(s, ctx)}"
-        f"{steps_disclosure}"
-        "</div></article>"
+        "</dl></div>"
+        "</div>"
+        f"{locs_html}"
+        f"{steps_html}"
+        "</div></details>"
+        "</article>"
     )
 
 
@@ -239,5 +233,5 @@ def render_suggestions_panel(ctx: ReportContext) -> str:
         )
         + f'<span class="suggestions-count-label" data-suggestions-count>{len(rows)} shown</span>'
         "</div></div>"
-        f'<div class="suggestions-grid" data-suggestions-body>{cards_html}</div>'
+        f'<div class="suggestions-list" data-suggestions-body>{cards_html}</div>'
     )

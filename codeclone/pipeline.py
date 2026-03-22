@@ -1414,6 +1414,7 @@ def report(
     new_func: Collection[str],
     new_block: Collection[str],
     html_builder: Callable[..., str] | None = None,
+    metrics_diff: object | None = None,
 ) -> ReportArtifacts:
     contents: dict[str, str | None] = {
         "html": None,
@@ -1480,6 +1481,7 @@ def report(
             suggestions=analysis.suggestions,
             structural_findings=sf,
             report_document=report_document,
+            metrics_diff=metrics_diff,
             title="CodeClone Report",
             context_lines=3,
             max_snippet_lines=220,

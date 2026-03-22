@@ -29,7 +29,7 @@ from ._sections._structural import render_structural_panel
 from ._sections._suggestions import render_suggestions_panel
 
 if TYPE_CHECKING:
-    from ..models import GroupMapLike, StructuralFindingGroup, Suggestion
+    from ..models import GroupMapLike, MetricsDiff, StructuralFindingGroup, Suggestion
 
 
 def build_html_report(
@@ -45,6 +45,7 @@ def build_html_report(
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
     report_document: Mapping[str, object] | None = None,
+    metrics_diff: MetricsDiff | None = None,
     title: str = "CodeClone Report",
     context_lines: int = 3,
     max_snippet_lines: int = 220,
@@ -67,6 +68,7 @@ def build_html_report(
         suggestions=suggestions,
         structural_findings=structural_findings,
         report_document=report_document,
+        metrics_diff=metrics_diff,
         file_cache=file_cache,
         context_lines=context_lines,
         max_snippet_lines=max_snippet_lines,
@@ -222,7 +224,7 @@ def build_html_report(
         "</div></div>"
     )
     finding_why_modal_html = (
-        '<dialog class="modal finding-why-modal" id="finding-why-modal" '
+        '<dialog class="finding-why-modal" id="finding-why-modal" '
         'aria-label="Why This Finding Was Reported">'
         '<div class="modal-head">'
         "<h2>Why This Finding Was Reported</h2>"
@@ -233,7 +235,7 @@ def build_html_report(
         "</dialog>"
     )
     help_modal_html = (
-        '<dialog class="modal help-modal" id="help-modal" '
+        '<dialog class="help-modal" id="help-modal" '
         'aria-label="Help & Support">'
         '<div class="modal-head">'
         "<h2>Help &amp; Support</h2>"

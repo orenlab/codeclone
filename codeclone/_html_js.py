@@ -258,10 +258,10 @@ _NOVELTY = """\
 
 _MODALS = """\
 (function initModals(){
-  let dlg=$('dialog.modal');
+  let dlg=$('#clone-info-modal');
   if(!dlg){
     dlg=document.createElement('dialog');
-    dlg.className='modal';
+    dlg.id='clone-info-modal';
     dlg.innerHTML='<div class="modal-head"><h2 id="modal-title">Info</h2>'
       +'<button class="modal-close" type="button" aria-label="Close">&times;</button></div>'
       +'<div class="modal-body" id="modal-body"></div>';
@@ -277,23 +277,26 @@ _MODALS = """\
     const group=btn.closest('.group');
     if(!group)return;
     const d=group.dataset;
-    const lines=[];
-    if(d.matchRule)lines.push('<b>Match rule:</b> '+d.matchRule);
-    if(d.blockSize)lines.push('<b>Block size:</b> '+d.blockSize);
-    if(d.signatureKind)lines.push('<b>Signature:</b> '+d.signatureKind);
-    if(d.mergedRegions)lines.push('<b>Merged regions:</b> '+d.mergedRegions);
-    if(d.patternLabel)lines.push('<b>Pattern:</b> '+d.patternLabel);
-    if(d.hintLabel)lines.push('<b>Hint:</b> '+d.hintLabel);
-    if(d.hintConfidence)lines.push('<b>Hint confidence:</b> '+d.hintConfidence);
-    if(d.assertRatio)lines.push('<b>Assert ratio:</b> '+d.assertRatio);
-    if(d.consecutiveAsserts)lines.push('<b>Consecutive asserts:</b> '+d.consecutiveAsserts);
-    if(d.boilerplateAsserts)lines.push('<b>Boilerplate asserts:</b> '+d.boilerplateAsserts);
-    if(d.groupArity)lines.push('<b>Group arity:</b> '+d.groupArity);
-    if(d.cloneType)lines.push('<b>Clone type:</b> '+d.cloneType);
-    if(d.sourceKind)lines.push('<b>Source kind:</b> '+d.sourceKind);
-    if(d.spreadFiles)lines.push('<b>Spread:</b> '+d.spreadFunctions+' fn / '+d.spreadFiles+' files');
+    const items=[];
+    function add(label,val){if(val)items.push('<div><dt>'+label+'</dt><dd>'+val+'</dd></div>')}
+    add('Match rule',d.matchRule);
+    add('Block size',d.blockSize);
+    add('Signature',d.signatureKind);
+    add('Merged regions',d.mergedRegions);
+    add('Pattern',d.patternLabel);
+    add('Hint',d.hintLabel);
+    add('Hint confidence',d.hintConfidence);
+    add('Assert ratio',d.assertRatio);
+    add('Consecutive asserts',d.consecutiveAsserts);
+    add('Boilerplate asserts',d.boilerplateAsserts);
+    add('Group arity',d.groupArity);
+    add('Clone type',d.cloneType);
+    add('Source kind',d.sourceKind);
+    if(d.spreadFiles)add('Spread',d.spreadFunctions+' fn / '+d.spreadFiles+' files');
     dlg.querySelector('#modal-title').textContent='Group: '+groupId;
-    dlg.querySelector('#modal-body').innerHTML=lines.join('<br>')||'No metadata available.';
+    dlg.querySelector('#modal-body').innerHTML=items.length
+      ?'<dl class="info-dl">'+items.join('')+'</dl>'
+      :'<p class="muted">No metadata available.</p>';
     dlg.showModal();
   });
 })();

@@ -5,7 +5,6 @@ from codeclone._html_report._components import (
     overview_row_html,
     overview_source_breakdown_html,
     overview_summary_list_html,
-    summary_chip_row,
 )
 from codeclone._html_report._sections._clones import (
     _derive_group_display_name,
@@ -21,7 +20,6 @@ from codeclone._html_report._tabs import render_split_tabs
 
 
 def test_summary_helpers_cover_empty_and_non_clone_context_branches() -> None:
-    assert summary_chip_row(("", "   "), css_class="chips") == ""
     assert overview_summary_list_html(("", "   ")) == (
         '<div class="overview-summary-value">none</div>'
     )
@@ -44,7 +42,7 @@ def test_summary_helpers_cover_empty_and_non_clone_context_branches() -> None:
     )
     assert "complexity" in row_html
     assert "Production" in row_html
-    assert "count=2" in row_html
+    assert "2 fn / 1 files" in row_html
     assert "clone_type" not in row_html
 
 
