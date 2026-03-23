@@ -175,8 +175,30 @@ Notes:
   },
   "derived": {
     "suggestions": [],
-    "overview": {},
-    "hotlists": {}
+    "overview": {
+      "families": {
+        "clones": 0,
+        "structural": 0,
+        "dead_code": 0,
+        "design": 0
+      },
+      "top_risks": [],
+      "source_scope_breakdown": {
+        "production": 0,
+        "tests": 0,
+        "fixtures": 0
+      },
+      "health_snapshot": {
+        "score": 100,
+        "grade": "A"
+      }
+    },
+    "hotlists": {
+      "most_actionable_ids": [],
+      "highest_spread_ids": [],
+      "production_hotspot_ids": [],
+      "test_fixture_hotspot_ids": []
+    }
   },
   "integrity": {
     "canonicalization": {

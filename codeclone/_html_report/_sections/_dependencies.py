@@ -101,9 +101,9 @@ def _layout_dep_graph(
 ) -> tuple[int, int, int, dict[str, tuple[float, float]]]:
     num_layers = max(layer_groups.keys(), default=0) + 1
     max_per_layer = max((len(members) for members in layer_groups.values()), default=1)
-    width = max(800, min(3000, max_per_layer * 120 + 200))
-    height = max(360, num_layers * 120 + 120)
-    pad_x, pad_y = 100.0, 70.0
+    width = max(600, min(1200, max_per_layer * 70 + 140))
+    height = max(260, num_layers * 80 + 80)
+    pad_x, pad_y = 60.0, 40.0
 
     positions: dict[str, tuple[float, float]] = {}
     for layer_index in range(num_layers):
@@ -216,7 +216,7 @@ def _render_dep_nodes_and_labels(
 ) -> tuple[list[str], list[str]]:
     nodes_svg: list[str] = []
     labels_svg: list[str] = []
-    rotate_labels = max_per_layer > 8
+    rotate_labels = max_per_layer > 6
 
     for node in nodes:
         x, y = positions[node]
@@ -302,16 +302,14 @@ def _render_dep_svg(
         max_per_layer=max_per_layer,
     )
 
-    label_pad = 60 if max_per_layer > 8 else 0
+    label_pad = 50 if max_per_layer > 6 else 0
     vb_y = -label_pad
     vb_h = height + label_pad
-
-    min_px_w = max(width, max_per_layer * 80)
 
     return (
         '<div class="dep-graph-wrap">'
         f'<svg viewBox="0 {vb_y} {width} {vb_h}" class="dep-graph-svg" role="img" '
-        f'style="min-width:{min_px_w}px" '
+        'preserveAspectRatio="xMidYMid meet" '
         'aria-label="Module dependency graph">'
         f"{defs}{''.join(edge_svg)}{''.join(node_svg)}{''.join(label_svg)}"
         "</svg></div>"

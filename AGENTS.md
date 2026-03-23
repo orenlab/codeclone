@@ -236,6 +236,7 @@ Agents must preserve these semantics:
 - **2** — baseline gating failure (untrusted/missing baseline when CI requires trusted baseline; invalid output
   extension, etc.)
 - **3** — analysis gating failure (e.g., `--fail-threshold` exceeded or new clones in `--ci` as designed)
+- **5** — internal error (unexpected exception escaped top-level CLI handling)
 
 If you introduce a new exit reason, document it and add tests.
 

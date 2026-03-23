@@ -251,9 +251,9 @@ def build_html_report(
         "<h3>Shortcuts</h3>"
         '<div class="help-shortcuts">'
         '<div class="help-shortcut-row"><span>Command palette</span>'
-        '<kbd data-shortcut="mod+K">mod+K</kbd></div>'
+        '<kbd data-shortcut="mod+K">\u2318K / Ctrl+K</kbd></div>'
         '<div class="help-shortcut-row"><span>Open help</span>'
-        '<kbd data-shortcut="mod+I">mod+I</kbd></div>'
+        '<kbd data-shortcut="mod+I">\u2318I / Ctrl+I</kbd></div>'
         "</div>"
         "</div>"
         '<div class="help-section">'
@@ -286,10 +286,77 @@ def build_html_report(
     )
 
     # -- CSS assembly --
-    pygments_raw = _pygments_css("monokai")
+    pygments_dark = _pygments_css("monokai")
+    pygments_light = _pygments_css("default")
+
+    def _codebox_rules(css: str) -> str:
+        """Extract only .codebox-scoped rules (drop bare pre/td/span rules)."""
+        out: list[str] = []
+        for line in css.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("/*"):
+                continue
+            if not stripped.startswith(".codebox"):
+                continue
+            out.append(stripped)
+        return "\n".join(out)
+
+    def _scope(rules: str, prefix: str) -> str:
+        """Prepend *prefix* before every `.codebox` selector."""
+        return rules.replace(".codebox", f"{prefix} .codebox")
+
     css_parts = [build_css()]
-    if pygments_raw:
-        css_parts.append(pygments_raw)
+
+    # Dark Pygments (monokai) — unscoped base, dark-first design
+    if pygments_dark:
+        css_parts.append(pygments_dark)
+
+    # Light Pygments — comprehensive theme override
+    #
+    # Problem: Pygments "default" style doesn't define rules for every
+    # token class that "monokai" does (.n, .p, .esc, .g, .l, .x, …).
+    # Those monokai rules set color:#F8F8F2 (white) which becomes
+    # invisible on a light background.
+    #
+    # Solution: a CSS reset that clears ALL span styling inside .codebox
+    # back to inherit, then the light Pygments rules re-apply colors
+    # only for tokens the light theme cares about.
+    if pygments_light:
+        light_rules = _codebox_rules(pygments_light)
+        if light_rules:
+            # Reset: clear monokai colors for tokens light theme omits.
+            # NB: color must be var(--text-primary), NOT inherit — because
+            # the parent .codebox still carries monokai's color:#F8F8F2
+            # (white) and inherit would propagate that invisible color.
+            _reset = (
+                "color:var(--text-primary);font-style:inherit;"
+                "font-weight:inherit;"
+                "background-color:transparent;border:none"
+            )
+
+            # Override .codebox itself: monokai sets color:#F8F8F2 on
+            # .codebox — light theme needs dark text for non-span content
+            _cb_override = "color:var(--text-primary);background:var(--bg-body)"
+
+            # 1) Explicit [data-theme="light"]
+            explicit_reset = (
+                f'[data-theme="light"] .codebox{{{_cb_override}}}\n'
+                f'[data-theme="light"] .codebox span{{{_reset}}}'
+            )
+            explicit_rules = _scope(light_rules, '[data-theme="light"]')
+            css_parts.append(explicit_reset)
+            css_parts.append(explicit_rules)
+
+            # 2) Auto-detect: OS prefers light + no explicit dark
+            _auto_pfx = ':root:not([data-theme="dark"])'
+            auto_reset = (
+                f"{_auto_pfx} .codebox{{{_cb_override}}}\n"
+                f"{_auto_pfx} .codebox span{{{_reset}}}"
+            )
+            auto_rules = _scope(light_rules, _auto_pfx)
+            css_parts.append(
+                f"@media (prefers-color-scheme:light){{{auto_reset}\n{auto_rules}}}"
+            )
     css_html = "\n".join(css_parts)
 
     # -- JS --

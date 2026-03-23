@@ -1409,7 +1409,8 @@ def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
         "clone groups; 2 dead-code items (0 suppressed); 0 dependency cycles." in html
     )
     assert "High Complexity" in html
-    assert "avg 2.5" in html
+    assert '<span class="kpi-micro-val">2.5</span>' in html
+    assert '<span class="kpi-micro-lbl">avg</span>' in html
 
 
 def test_html_report_metrics_bad_health_score_and_dead_code_ok_tone() -> None:
@@ -1908,3 +1909,128 @@ def test_html_report_overview_includes_hotspot_sections_without_quick_views() ->
     assert "Most Actionable" not in html
     assert 'data-quick-view="' not in html
     assert 'class="suggestion-context"' in html
+
+
+def test_html_report_overview_uses_canonical_report_overview_hotlists() -> None:
+    structural = (
+        StructuralFindingGroup(
+            finding_kind="duplicated_branches",
+            finding_key="z" * 40,
+            signature={
+                "stmt_seq": "Expr,Return",
+                "terminal": "return",
+                "raises": "0",
+                "has_loop": "0",
+            },
+            items=(
+                StructuralFindingOccurrence(
+                    finding_kind="duplicated_branches",
+                    finding_key="z" * 40,
+                    file_path="/repo/pkg/mod.py",
+                    qualname="pkg.mod:fn",
+                    start=10,
+                    end=12,
+                    signature={},
+                ),
+                StructuralFindingOccurrence(
+                    finding_kind="duplicated_branches",
+                    finding_key="z" * 40,
+                    file_path="/repo/pkg/mod.py",
+                    qualname="pkg.mod:fn",
+                    start=20,
+                    end=22,
+                    signature={},
+                ),
+            ),
+        ),
+    )
+    metrics = _metrics_payload(
+        health_score=84,
+        health_grade="B",
+        complexity_max=20,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    payload = build_report_document(
+        func_groups={
+            "g1": [
+                {
+                    "qualname": "tests.fixtures.sample:a",
+                    "filepath": "/repo/tests/fixtures/sample/a.py",
+                    "start_line": 1,
+                    "end_line": 20,
+                    "loc": 20,
+                    "stmt_count": 8,
+                    "fingerprint": "fp-a",
+                    "loc_bucket": "20-49",
+                },
+                {
+                    "qualname": "tests.fixtures.sample:b",
+                    "filepath": "/repo/tests/fixtures/sample/b.py",
+                    "start_line": 1,
+                    "end_line": 20,
+                    "loc": 20,
+                    "stmt_count": 8,
+                    "fingerprint": "fp-a",
+                    "loc_bucket": "20-49",
+                },
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics=metrics,
+        structural_findings=structural,
+    )
+
+    html = build_html_report(
+        func_groups={
+            "g1": [
+                {
+                    "qualname": "tests.fixtures.sample:a",
+                    "filepath": "/repo/tests/fixtures/sample/a.py",
+                    "start_line": 1,
+                    "end_line": 20,
+                    "loc": 20,
+                    "stmt_count": 8,
+                    "fingerprint": "fp-a",
+                    "loc_bucket": "20-49",
+                },
+                {
+                    "qualname": "tests.fixtures.sample:b",
+                    "filepath": "/repo/tests/fixtures/sample/b.py",
+                    "start_line": 1,
+                    "end_line": 20,
+                    "loc": 20,
+                    "stmt_count": 8,
+                    "fingerprint": "fp-a",
+                    "loc_bucket": "20-49",
+                },
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        report_meta=payload["meta"],
+        metrics=payload["metrics"],
+        structural_findings=structural,
+        report_document=payload,
+    )
+
+    for needle in (
+        "Executive Summary",
+        "source-kind-badge source-kind-fixtures",
+        "source-kind-badge source-kind-production",
+        'breakdown-count">1</span>',
+    ):
+        assert needle in html
+    assert '<div class="overview-summary-value">n/a</div>' not in html
+    assert "Repeated branch family" in html
+    assert "Function clone group (Type-2)" in html
+    assert "No spread-heavy findings were recorded." not in html
+    assert "No production-coded hotspots were identified." not in html
+    assert "No hotspots from tests or fixtures were identified." not in html

@@ -116,6 +116,11 @@ def extract_suppression_directives(
     *,
     supported_rules: frozenset[str] = SUPPORTED_RULE_IDS,
 ) -> tuple[SuppressionDirective, ...]:
+    # Fast-path: skip tokenization when no directive marker exists.
+    # Every valid directive contains the literal "codeclone:" — if absent,
+    # no comment can match _SUPPRESSION_DIRECTIVE_PATTERN.
+    if "codeclone:" not in source:
+        return ()
     lines = source.splitlines()
     directives: list[SuppressionDirective] = []
 

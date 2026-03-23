@@ -9,6 +9,7 @@ import pytest
 
 import codeclone.report as report_mod
 import codeclone.report.merge as merge_mod
+import codeclone.report.overview as overview_mod
 import codeclone.report.serialize as serialize_mod
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.models import (
@@ -29,6 +30,7 @@ from codeclone.report import (
 )
 from codeclone.report.findings import build_structural_findings_html_panel
 from codeclone.report.json_contract import build_report_document
+from codeclone.report.overview import materialize_report_overview
 from codeclone.report.serialize import (
     render_json_report_document,
     render_text_report_document,
@@ -1284,6 +1286,341 @@ def test_report_json_hotlists_reference_existing_finding_ids() -> None:
     hotlists = payload["derived"]["hotlists"]
     for ids in hotlists.values():
         assert set(ids).issubset(canonical_ids)
+
+
+def test_report_overview_materializes_source_breakdown_and_hotlist_cards() -> None:
+    structural = (
+        StructuralFindingGroup(
+            finding_kind="duplicated_branches",
+            finding_key="k" * 40,
+            signature={
+                "stmt_seq": "Expr,Return",
+                "terminal": "return",
+                "raises": "0",
+                "has_loop": "0",
+            },
+            items=(
+                StructuralFindingOccurrence(
+                    finding_kind="duplicated_branches",
+                    finding_key="k" * 40,
+                    file_path="/repo/pkg/mod.py",
+                    qualname="pkg.mod:fn",
+                    start=10,
+                    end=12,
+                    signature={},
+                ),
+                StructuralFindingOccurrence(
+                    finding_kind="duplicated_branches",
+                    finding_key="k" * 40,
+                    file_path="/repo/pkg/mod.py",
+                    qualname="pkg.mod:fn",
+                    start=20,
+                    end=22,
+                    signature={},
+                ),
+            ),
+        ),
+    )
+    payload = build_report_document(
+        func_groups={
+            "g1": [
+                {
+                    "qualname": "tests.fixtures.sample:a",
+                    "filepath": "/repo/tests/fixtures/sample/a.py",
+                    "start_line": 1,
+                    "end_line": 20,
+                    "loc": 20,
+                    "stmt_count": 8,
+                    "fingerprint": "fp-a",
+                    "loc_bucket": "20-49",
+                },
+                {
+                    "qualname": "tests.fixtures.sample:b",
+                    "filepath": "/repo/tests/fixtures/sample/b.py",
+                    "start_line": 1,
+                    "end_line": 20,
+                    "loc": 20,
+                    "stmt_count": 8,
+                    "fingerprint": "fp-a",
+                    "loc_bucket": "20-49",
+                },
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        structural_findings=structural,
+    )
+
+    derived = cast(Mapping[str, object], payload["derived"])
+    materialized = materialize_report_overview(
+        overview=cast(Mapping[str, object], derived["overview"]),
+        hotlists=cast(Mapping[str, object], derived["hotlists"]),
+        findings=cast(Mapping[str, object], payload["findings"]),
+    )
+
+    assert materialized["source_breakdown"] == {"production": 1, "fixtures": 1}
+    assert materialized["highest_spread"]
+    assert materialized["production_hotspots"]
+    assert materialized["test_fixture_hotspots"]
+    production_hotspots = cast(
+        Sequence[Mapping[str, object]],
+        materialized["production_hotspots"],
+    )
+    test_fixture_hotspots = cast(
+        Sequence[Mapping[str, object]],
+        materialized["test_fixture_hotspots"],
+    )
+    assert production_hotspots[0]["title"] == "Repeated branch family"
+    assert test_fixture_hotspots[0]["title"] == "Function clone group (Type-2)"
+
+
+def test_report_overview_clone_summary_variants() -> None:
+    assert (
+        overview_mod._clone_summary_from_group(
+            {"category": "function", "clone_type": "Type-1", "facts": {}}
+        )
+        == "same exact function body"
+    )
+    assert (
+        overview_mod._clone_summary_from_group(
+            {"category": "function", "clone_type": "Type-3", "facts": {}}
+        )
+        == "same structural function body with small identifier changes"
+    )
+    assert (
+        overview_mod._clone_summary_from_group(
+            {"category": "function", "clone_type": "Type-4", "facts": {}}
+        )
+        == "same structural function body"
+    )
+    assert (
+        overview_mod._clone_summary_from_group(
+            {
+                "category": "block",
+                "clone_type": "Type-4",
+                "facts": {"hint": "assert_only"},
+            }
+        )
+        == "same assertion template"
+    )
+    assert (
+        overview_mod._clone_summary_from_group(
+            {
+                "category": "block",
+                "clone_type": "Type-4",
+                "facts": {"pattern": "repeated_stmt_hash"},
+            }
+        )
+        == "same repeated setup/assert pattern"
+    )
+    assert (
+        overview_mod._clone_summary_from_group(
+            {"category": "block", "clone_type": "Type-4", "facts": {}}
+        )
+        == "same structural sequence with small value changes"
+    )
+    assert (
+        overview_mod._clone_summary_from_group(
+            {"category": "segment", "clone_type": "Type-4", "facts": {}}
+        )
+        == "same structural segment sequence"
+    )
+
+
+def test_report_overview_structural_summary_variants() -> None:
+    assert overview_mod._structural_summary_from_group(
+        {"category": "clone_guard_exit_divergence"}
+    ) == (
+        "Clone guard/exit divergence",
+        "clone cohort members differ in entry guards or early-exit behavior",
+    )
+    assert overview_mod._structural_summary_from_group(
+        {"category": "clone_cohort_drift"}
+    ) == (
+        "Clone cohort drift",
+        "clone cohort members drift from majority terminal/guard/try profile",
+    )
+    assert overview_mod._structural_summary_from_group(
+        {
+            "category": "duplicated_branches",
+            "signature": {"stable": {"terminal_kind": "raise"}, "debug": {}},
+        }
+    ) == ("Repeated branch family", "same repeated guard/validation branch")
+    assert overview_mod._structural_summary_from_group(
+        {
+            "category": "duplicated_branches",
+            "signature": {"stable": {"terminal_kind": "return"}, "debug": {}},
+        }
+    ) == ("Repeated branch family", "same repeated return branch")
+    assert overview_mod._structural_summary_from_group(
+        {
+            "category": "duplicated_branches",
+            "signature": {"debug": {"has_loop": "1"}},
+        }
+    ) == ("Repeated branch family", "same repeated loop branch")
+    assert overview_mod._structural_summary_from_group(
+        {
+            "category": "duplicated_branches",
+            "signature": {"debug": {"stmt_seq": "Expr,If"}},
+        }
+    ) == ("Repeated branch family", "same repeated branch shape (Expr,If)")
+    assert overview_mod._structural_summary_from_group(
+        {"category": "duplicated_branches", "signature": {}}
+    ) == ("Repeated branch family", "same repeated branch shape")
+
+
+def test_report_overview_location_helpers_cover_edge_cases() -> None:
+    assert overview_mod._single_item_location({"module": "pkg.alpha"}) == "pkg.alpha"
+    assert overview_mod._single_item_location({}) == "(unknown)"
+    assert (
+        overview_mod._single_item_location({"relative_path": "pkg/mod.py"})
+        == "pkg/mod.py"
+    )
+    assert (
+        overview_mod._single_item_location(
+            {"relative_path": "pkg/mod.py", "start_line": 10, "end_line": 12}
+        )
+        == "pkg/mod.py:10-12"
+    )
+    assert (
+        overview_mod._group_location_label(
+            {
+                "category": "dependency",
+                "items": [{"module": "pkg.a"}, {"module": "pkg.b"}],
+                "count": 2,
+                "spread": {"files": 2, "functions": 0},
+            }
+        )
+        == "pkg.a -> pkg.b"
+    )
+    assert (
+        overview_mod._group_location_label(
+            {
+                "category": "function",
+                "items": [
+                    {"relative_path": "pkg/mod.py", "start_line": 5, "end_line": 5}
+                ],
+                "count": 1,
+                "spread": {"files": 1, "functions": 1},
+            }
+        )
+        == "pkg/mod.py:5"
+    )
+    assert (
+        overview_mod._group_location_label(
+            {
+                "category": "function",
+                "items": [{"relative_path": "pkg/mod.py"}],
+                "count": 3,
+                "spread": {"files": 2, "functions": 3},
+            }
+        )
+        == "3 occurrences across 2 files / 3 functions"
+    )
+
+
+def test_report_overview_serialize_finding_group_card_covers_families() -> None:
+    dead_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "dead_code",
+            "category": "method",
+            "severity": "warning",
+            "confidence": "high",
+            "count": 1,
+            "source_scope": {"dominant_kind": "production"},
+            "spread": {"files": 1, "functions": 1},
+            "items": [
+                {
+                    "relative_path": "pkg/mod.py",
+                    "qualname": "pkg.mod:C.m",
+                    "start_line": 7,
+                    "end_line": 8,
+                }
+            ],
+            "facts": {},
+        }
+    )
+    assert dead_card["title"] == "Remove or explicitly keep unused code"
+    assert dead_card["summary"] == "method with high confidence"
+
+    complexity_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "design",
+            "category": "complexity",
+            "severity": "warning",
+            "confidence": "high",
+            "count": 1,
+            "source_scope": {"dominant_kind": "production"},
+            "spread": {"files": 1, "functions": 1},
+            "items": [{"relative_path": "pkg/mod.py", "start_line": 3, "end_line": 9}],
+            "facts": {"cyclomatic_complexity": 21, "nesting_depth": 4},
+        }
+    )
+    assert complexity_card["title"] == "Reduce high-complexity function"
+    assert complexity_card["summary"] == "cyclomatic_complexity=21, nesting_depth=4"
+
+    coupling_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "design",
+            "category": "coupling",
+            "severity": "warning",
+            "confidence": "high",
+            "count": 1,
+            "source_scope": {"dominant_kind": "production"},
+            "spread": {"files": 1, "functions": 1},
+            "items": [{"relative_path": "pkg/mod.py", "start_line": 3, "end_line": 9}],
+            "facts": {"cbo": 11},
+        }
+    )
+    assert coupling_card["title"] == "Split high-coupling class"
+    assert coupling_card["summary"] == "cbo=11"
+
+    cohesion_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "design",
+            "category": "cohesion",
+            "severity": "warning",
+            "confidence": "high",
+            "count": 1,
+            "source_scope": {"dominant_kind": "production"},
+            "spread": {"files": 1, "functions": 1},
+            "items": [{"relative_path": "pkg/mod.py", "start_line": 3, "end_line": 9}],
+            "facts": {"lcom4": 5},
+        }
+    )
+    assert cohesion_card["title"] == "Split low-cohesion class"
+    assert cohesion_card["summary"] == "lcom4=5"
+
+    dependency_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "design",
+            "category": "dependency",
+            "severity": "critical",
+            "confidence": "high",
+            "count": 3,
+            "source_scope": {"dominant_kind": "other"},
+            "spread": {"files": 3, "functions": 0},
+            "items": [{"module": "pkg.a"}, {"module": "pkg.b"}, {"module": "pkg.c"}],
+            "facts": {"cycle_length": 3},
+        }
+    )
+    assert dependency_card["title"] == "Break circular dependency"
+    assert dependency_card["summary"] == "3 modules participate in this cycle"
+    assert dependency_card["location"] == "pkg.a -> pkg.b -> pkg.c"
+
+
+def test_report_overview_materialize_preserves_existing_cards_and_breakdown() -> None:
+    materialized = materialize_report_overview(
+        overview={
+            "source_breakdown": {"tests": 9},
+            "highest_spread": [{"title": "preset"}],
+        },
+        hotlists={"highest_spread_ids": ["clone:function:abc"]},
+        findings={"groups": {}},
+    )
+    assert materialized["source_breakdown"] == {"tests": 9}
+    assert materialized["highest_spread"] == [{"title": "preset"}]
 
 
 def test_report_json_groups_split_trusted_baseline() -> None:

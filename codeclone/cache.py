@@ -279,6 +279,7 @@ _ValidatedItemT = TypeVar("_ValidatedItemT")
 class Cache:
     __slots__ = (
         "_canonical_runtime_paths",
+        "_dirty",
         "analysis_profile",
         "cache_schema_version",
         "data",
@@ -325,6 +326,7 @@ class Cache:
             MAX_CACHE_SIZE_BYTES if max_size_bytes is None else max_size_bytes
         )
         self.segment_report_projection: SegmentReportProjection | None = None
+        self._dirty: bool = True  # new cache is dirty until loaded from disk
 
     def _detect_legacy_secret_warning(self) -> str | None:
         secret_path = self.path.parent / LEGACY_CACHE_SECRET_FILENAME
@@ -408,6 +410,7 @@ class Cache:
             self._canonical_runtime_paths = set(parsed["files"].keys())
             self.load_status = CacheStatus.OK
             self._set_load_warning(None)
+            self._dirty = False  # freshly loaded — nothing to persist
 
         except OSError as e:
             self._ignore_cache(
@@ -571,6 +574,8 @@ class Cache:
         )
 
     def save(self) -> None:
+        if not self._dirty:
+            return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             wire_files: dict[str, object] = {}
@@ -605,6 +610,7 @@ class Cache:
                 tmp_file.flush()
                 os.fsync(tmp_file.fileno())
             os.replace(tmp_path, self.path)
+            self._dirty = False
 
             self.data["version"] = self._CACHE_VERSION
             self.data["python_tag"] = current_python_tag()
@@ -747,6 +753,20 @@ class Cache:
             "g": groups_rows,
         }
 
+    def _store_canonical_file_entry(
+        self,
+        *,
+        runtime_path: str,
+        canonical_entry: CacheEntry,
+    ) -> CacheEntry:
+        previous_entry = self.data["files"].get(runtime_path)
+        was_canonical = runtime_path in self._canonical_runtime_paths
+        self.data["files"][runtime_path] = canonical_entry
+        self._canonical_runtime_paths.add(runtime_path)
+        if not was_canonical or previous_entry != canonical_entry:
+            self._dirty = True
+        return canonical_entry
+
     def get_file_entry(self, filepath: str) -> CacheEntry | None:
         runtime_lookup_key = filepath
         entry_obj = self.data["files"].get(runtime_lookup_key)
@@ -820,9 +840,10 @@ class Cache:
         if isinstance(sf_raw, list):
             entry_to_canonicalize["structural_findings"] = sf_raw
         canonical_entry = _canonicalize_cache_entry(entry_to_canonicalize)
-        self.data["files"][runtime_lookup_key] = canonical_entry
-        self._canonical_runtime_paths.add(runtime_lookup_key)
-        return canonical_entry
+        return self._store_canonical_file_entry(
+            runtime_path=runtime_lookup_key,
+            canonical_entry=canonical_entry,
+        )
 
     def put_file_entry(
         self,
@@ -901,8 +922,10 @@ class Cache:
                 filepath=runtime_path,
             )
         canonical_entry = _canonicalize_cache_entry(entry_dict)
-        self.data["files"][runtime_path] = canonical_entry
-        self._canonical_runtime_paths.add(runtime_path)
+        self._store_canonical_file_entry(
+            runtime_path=runtime_path,
+            canonical_entry=canonical_entry,
+        )
 
 
 def file_stat_signature(path: str) -> FileStat:
@@ -1438,70 +1461,26 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
     if stat is None:
         return None
     source_stats = _decode_optional_wire_source_stats(obj=obj)
-
-    units: list[UnitDict] | None = _decode_optional_wire_items_for_filepath(
-        obj=obj,
-        key="u",
-        filepath=filepath,
-        decode_item=_decode_wire_unit,
-    )
-    if units is None:
+    file_sections = _decode_wire_file_sections(obj=obj, filepath=filepath)
+    if file_sections is None:
         return None
-    blocks: list[BlockDict] | None = _decode_optional_wire_items_for_filepath(
-        obj=obj,
-        key="b",
-        filepath=filepath,
-        decode_item=_decode_wire_block,
-    )
-    if blocks is None:
+    (
+        units,
+        blocks,
+        segments,
+        class_metrics,
+        module_deps,
+        dead_candidates,
+    ) = file_sections
+    name_sections = _decode_wire_name_sections(obj=obj)
+    if name_sections is None:
         return None
-    segments: list[SegmentDict] | None = _decode_optional_wire_items_for_filepath(
-        obj=obj,
-        key="s",
-        filepath=filepath,
-        decode_item=_decode_wire_segment,
-    )
-    if segments is None:
-        return None
-    class_metrics: list[ClassMetricsDict] | None = (
-        _decode_optional_wire_items_for_filepath(
-            obj=obj,
-            key="cm",
-            filepath=filepath,
-            decode_item=_decode_wire_class_metric,
-        )
-    )
-    if class_metrics is None:
-        return None
-    module_deps: list[ModuleDepDict] | None = _decode_optional_wire_items(
-        obj=obj,
-        key="md",
-        decode_item=_decode_wire_module_dep,
-    )
-    if module_deps is None:
-        return None
-    dead_candidates: list[DeadCandidateDict] | None = (
-        _decode_optional_wire_items_for_filepath(
-            obj=obj,
-            key="dc",
-            filepath=filepath,
-            decode_item=_decode_wire_dead_candidate,
-        )
-    )
-    if dead_candidates is None:
-        return None
-    referenced_names = _decode_optional_wire_names(obj=obj, key="rn")
-    if referenced_names is None:
-        return None
-    referenced_qualnames = _decode_optional_wire_names(obj=obj, key="rq")
-    if referenced_qualnames is None:
-        return None
-    import_names = _decode_optional_wire_names(obj=obj, key="in")
-    if import_names is None:
-        return None
-    class_names = _decode_optional_wire_names(obj=obj, key="cn")
-    if class_names is None:
-        return None
+    (
+        referenced_names,
+        referenced_qualnames,
+        import_names,
+        class_names,
+    ) = name_sections
     coupled_classes_map = _decode_optional_wire_coupled_classes(obj=obj, key="cc")
     if coupled_classes_map is None:
         return None
@@ -1537,6 +1516,98 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
             filepath=filepath,
         )
     return result
+
+
+def _decode_wire_file_sections(
+    *,
+    obj: dict[str, object],
+    filepath: str,
+) -> (
+    tuple[
+        list[UnitDict],
+        list[BlockDict],
+        list[SegmentDict],
+        list[ClassMetricsDict],
+        list[ModuleDepDict],
+        list[DeadCandidateDict],
+    ]
+    | None
+):
+    units = _decode_optional_wire_items_for_filepath(
+        obj=obj,
+        key="u",
+        filepath=filepath,
+        decode_item=_decode_wire_unit,
+    )
+    blocks = _decode_optional_wire_items_for_filepath(
+        obj=obj,
+        key="b",
+        filepath=filepath,
+        decode_item=_decode_wire_block,
+    )
+    segments = _decode_optional_wire_items_for_filepath(
+        obj=obj,
+        key="s",
+        filepath=filepath,
+        decode_item=_decode_wire_segment,
+    )
+    class_metrics = _decode_optional_wire_items_for_filepath(
+        obj=obj,
+        key="cm",
+        filepath=filepath,
+        decode_item=_decode_wire_class_metric,
+    )
+    module_deps = _decode_optional_wire_items(
+        obj=obj,
+        key="md",
+        decode_item=_decode_wire_module_dep,
+    )
+    dead_candidates = _decode_optional_wire_items_for_filepath(
+        obj=obj,
+        key="dc",
+        filepath=filepath,
+        decode_item=_decode_wire_dead_candidate,
+    )
+    if (
+        units is None
+        or blocks is None
+        or segments is None
+        or class_metrics is None
+        or module_deps is None
+        or dead_candidates is None
+    ):
+        return None
+    return (
+        units,
+        blocks,
+        segments,
+        class_metrics,
+        module_deps,
+        dead_candidates,
+    )
+
+
+def _decode_wire_name_sections(
+    *,
+    obj: dict[str, object],
+) -> tuple[list[str], list[str], list[str], list[str]] | None:
+    referenced_names = _decode_optional_wire_names(obj=obj, key="rn")
+    referenced_qualnames = _decode_optional_wire_names(obj=obj, key="rq")
+    import_names = _decode_optional_wire_names(obj=obj, key="in")
+    class_names = _decode_optional_wire_names(obj=obj, key="cn")
+    if (
+        referenced_names is None
+        or referenced_qualnames is None
+        or import_names is None
+        or class_names is None
+    ):
+        return None
+    return (
+        referenced_names,
+        referenced_qualnames,
+        import_names,
+        class_names,
+    )
 
 
 def _decode_wire_structural_findings_optional(

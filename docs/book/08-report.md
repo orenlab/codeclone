@@ -32,6 +32,21 @@ Canonical vs non-canonical split:
 - Non-canonical projection layer: `derived`
 - Integrity metadata: `integrity` (`canonicalization` + `digest`)
 
+Derived projection layer:
+
+- `derived.suggestions[*]` — actionable projection cards keyed back to canonical
+  findings via `finding_id`
+- `derived.overview` — summary-only overview facts:
+    - `families`
+    - `top_risks`
+    - `source_scope_breakdown`
+    - `health_snapshot`
+- `derived.hotlists` — deterministic lists of canonical finding IDs:
+    - `most_actionable_ids`
+    - `highest_spread_ids`
+    - `production_hotspot_ids`
+    - `test_fixture_hotspot_ids`
+
 Finding families:
 
 - `findings.groups.clones.{functions,blocks,segments}`
@@ -60,6 +75,9 @@ Per-group common axes (family-specific fields may extend):
 - Markdown and SARIF are deterministic projections from the same report document.
 - Derived layer (`suggestions`, `overview`, `hotlists`) does not replace canonical
   findings/metrics.
+- HTML overview cards are materialized from canonical findings plus
+  `derived.overview` + `derived.hotlists`; pre-expanded overview card payloads are
+  not part of the report contract.
 - `report_generated_at_utc` is carried in `meta.runtime` and reused by UI/renderers.
 - Canonical `meta.scan_root` is normalized to `"."`; absolute runtime paths are
   exposed under `meta.runtime.*_absolute`.
@@ -73,7 +91,8 @@ Per-group common axes (family-specific fields may extend):
 ## Invariants (MUST)
 
 - Stable ordering for groups/items/suggestions/hotlists.
-- `derived[*].finding_id` references existing canonical finding IDs.
+- `derived.suggestions[*].finding_id` references existing canonical finding IDs.
+- `derived.hotlists.*_ids` reference existing canonical finding IDs.
 - `integrity.digest` is computed from canonical sections only (derived excluded).
 - `source_scope.impact_scope` is explicit and deterministic (`runtime`,
   `non_runtime`, `mixed`).

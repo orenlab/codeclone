@@ -36,10 +36,12 @@ def render_meta_panel(ctx: ReportContext) -> str:
     """Build the collapsible Report Provenance panel."""
     meta = ctx.meta
     baseline_meta = ctx.baseline_meta
-    cache_meta = ctx.cache_meta
-    metrics_baseline_meta = ctx.metrics_baseline_meta
-    runtime_meta = ctx.runtime_meta
-    integrity_map = ctx.integrity_map
+    cache_meta, metrics_baseline_meta, runtime_meta, integrity_map = (
+        ctx.cache_meta,
+        ctx.metrics_baseline_meta,
+        ctx.runtime_meta,
+        ctx.integrity_map,
+    )
 
     baseline_path_value = _meta_pick(
         meta.get("baseline_path"),

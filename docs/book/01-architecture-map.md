@@ -8,7 +8,7 @@ Document current module boundaries and ownership in CodeClone v2.x.
 
 Main ownership layers:
 
-- Core detection pipeline: scanner -> extractor -> cfg/normalize -> grouping.
+- Core detection pipeline: `scanner` -> `extractor` -> `cfg/normalize` -> `grouping`.
 - Quality metrics pipeline: complexity/coupling/cohesion/dependencies/dead-code/health.
 - Contracts and persistence: baseline, metrics baseline, cache, exit semantics.
 - Report model and serialization: deterministic JSON/TXT + explainability facts.
@@ -16,18 +16,18 @@ Main ownership layers:
 
 ## Data model
 
-| Layer                 | Modules                                                                                                                                                                               | Responsibility                                                                       |
-|-----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
-| Contracts             | `codeclone/contracts.py`, `codeclone/errors.py`                                                                                                                                       | Shared schema versions, URLs, exit-code enum, typed exceptions                       |
-| Domain models         | `codeclone/models.py`, `codeclone/domain/*.py`                                                                                                                                        | Typed dataclasses/enums plus centralized finding/scope/severity taxonomies           |
-| Discovery + parsing   | `codeclone/scanner.py`, `codeclone/extractor.py`                                                                                                                                      | Enumerate files, parse AST, extract function/block/segment units                     |
-| Structural analysis   | `codeclone/cfg.py`, `codeclone/normalize.py`, `codeclone/blockhash.py`, `codeclone/fingerprint.py`, `codeclone/blocks.py`                                                             | CFG, normalization, statement hashes, block/segment windows                          |
-| Grouping              | `codeclone/grouping.py`                                                                                                                                                               | Build function/block/segment groups                                                  |
-| Metrics               | `codeclone/metrics/*`                                                                                                                                                                 | Compute complexity/coupling/cohesion/dependency/dead-code/health signals             |
-| Report core           | `codeclone/report/*`, `codeclone/_cli_meta.py`                                                                                                                                        | Merge windows, explainability facts, deterministic JSON/TXT schema + shared metadata |
-| Persistence           | `codeclone/baseline.py`, `codeclone/metrics_baseline.py`, `codeclone/cache.py`                                                                                                        | Baseline/cache trust/compat/integrity and atomic persistence                         |
-| Runtime orchestration | `codeclone/pipeline.py`, `codeclone/cli.py`, `codeclone/_cli_args.py`, `codeclone/_cli_paths.py`, `codeclone/_cli_summary.py`, `codeclone/_cli_config.py`, `codeclone/ui_messages.py` | CLI UX, stage orchestration, status handling, outputs, error markers                 |
-| Rendering             | `codeclone/html_report.py`, `codeclone/_html_escape.py`, `codeclone/_html_snippets.py`, `codeclone/templates.py`                                                                      | HTML-only view layer over report data                                                |
+| Layer                 | Modules                                                                                                                                                                                            | Responsibility                                                                       |
+|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| Contracts             | `codeclone/contracts.py`, `codeclone/errors.py`                                                                                                                                                    | Shared schema versions, URLs, exit-code enum, typed exceptions                       |
+| Domain models         | `codeclone/models.py`, `codeclone/domain/*.py`                                                                                                                                                     | Typed dataclasses/enums plus centralized finding/scope/severity taxonomies           |
+| Discovery + parsing   | `codeclone/scanner.py`, `codeclone/extractor.py`                                                                                                                                                   | Enumerate files, parse AST, extract function/block/segment units                     |
+| Structural analysis   | `codeclone/cfg.py`, `codeclone/normalize.py`, `codeclone/blockhash.py`, `codeclone/fingerprint.py`, `codeclone/blocks.py`                                                                          | CFG, normalization, statement hashes, block/segment windows                          |
+| Grouping              | `codeclone/grouping.py`                                                                                                                                                                            | Build function/block/segment groups                                                  |
+| Metrics               | `codeclone/metrics/*`                                                                                                                                                                              | Compute complexity/coupling/cohesion/dependency/dead-code/health signals             |
+| Report core           | `codeclone/report/*`, `codeclone/_cli_meta.py`                                                                                                                                                     | Merge windows, explainability facts, deterministic JSON/TXT schema + shared metadata |
+| Persistence           | `codeclone/baseline.py`, `codeclone/metrics_baseline.py`, `codeclone/cache.py`                                                                                                                     | Baseline/cache trust/compat/integrity and atomic persistence                         |
+| Runtime orchestration | `codeclone/pipeline.py`, `codeclone/cli.py`, `codeclone/_cli_args.py`, `codeclone/_cli_paths.py`, `codeclone/_cli_summary.py`, `codeclone/_cli_config.py`, `codeclone/ui_messages.py`              | CLI UX, stage orchestration, status handling, outputs, error markers                 |
+| Rendering             | `codeclone/html_report.py`, `codeclone/_html_report/*`, `codeclone/_html_badges.py`, `codeclone/_html_js.py`, `codeclone/_html_escape.py`, `codeclone/_html_snippets.py`, `codeclone/templates.py` | HTML-only view layer over report data                                                |
 
 Refs:
 

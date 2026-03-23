@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from .. import _coerce
 from ..contracts import REPORT_SCHEMA_VERSION
-from ..report.overview import build_report_overview
+from ..report.overview import build_report_overview, materialize_report_overview
 
 if TYPE_CHECKING:
     from .._html_snippets import _FileCache
@@ -243,6 +243,12 @@ def build_context(
         overview_data = build_report_overview(
             suggestions=list(suggestions_tuple),
             metrics=metrics_map,
+        )
+    else:
+        overview_data = materialize_report_overview(
+            overview=overview_data,
+            hotlists=_as_mapping(derived_map.get("hotlists")),
+            findings=_as_mapping(report_document_map.get("findings")),
         )
 
     return ReportContext(

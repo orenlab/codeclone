@@ -10,8 +10,9 @@ import os
 import signal
 import tokenize
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from hashlib import sha1 as _sha1
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from .blockhash import stmt_hashes
 from .blocks import extract_blocks, extract_segments
@@ -365,84 +366,64 @@ def _resolve_import_target(
     return ".".join(prefix)
 
 
-def _collect_module_facts(
+_PROTOCOL_MODULE_NAMES = frozenset({"typing", "typing_extensions"})
+
+
+@dataclass(slots=True)
+class _ModuleWalkState:
+    import_names: set[str] = field(default_factory=set)
+    deps: list[ModuleDep] = field(default_factory=list)
+    referenced_names: set[str] = field(default_factory=set)
+    imported_symbol_bindings: dict[str, set[str]] = field(default_factory=dict)
+    imported_module_aliases: dict[str, str] = field(default_factory=dict)
+    name_nodes: list[ast.Name] = field(default_factory=list)
+    attr_nodes: list[ast.Attribute] = field(default_factory=list)
+    protocol_symbol_aliases: set[str] = field(default_factory=lambda: {"Protocol"})
+    protocol_module_aliases: set[str] = field(
+        default_factory=lambda: set(_PROTOCOL_MODULE_NAMES)
+    )
+
+
+def _append_module_dep(
     *,
-    tree: ast.AST,
     module_name: str,
-    collect_referenced_names: bool,
-) -> tuple[frozenset[str], tuple[ModuleDep, ...], frozenset[str]]:
-    import_names: set[str] = set()
-    deps: list[ModuleDep] = []
-    referenced: set[str] = set()
-
-    if collect_referenced_names:
-        referenced_add = referenced.add
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                line = int(getattr(node, "lineno", 0))
-                for alias in node.names:
-                    alias_name = alias.asname or alias.name.split(".", 1)[0]
-                    import_names.add(alias_name)
-                    deps.append(
-                        ModuleDep(
-                            source=module_name,
-                            target=alias.name,
-                            import_type="import",
-                            line=line,
-                        )
-                    )
-            elif isinstance(node, ast.ImportFrom):
-                target = _resolve_import_target(module_name, node)
-                if target:
-                    import_names.add(target.split(".", 1)[0])
-                    deps.append(
-                        ModuleDep(
-                            source=module_name,
-                            target=target,
-                            import_type="from_import",
-                            line=int(getattr(node, "lineno", 0)),
-                        )
-                    )
-
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-                referenced_add(node.id)
-            elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
-                referenced_add(node.attr)
-    else:
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                line = int(getattr(node, "lineno", 0))
-                for alias in node.names:
-                    alias_name = alias.asname or alias.name.split(".", 1)[0]
-                    import_names.add(alias_name)
-                    deps.append(
-                        ModuleDep(
-                            source=module_name,
-                            target=alias.name,
-                            import_type="import",
-                            line=line,
-                        )
-                    )
-            elif isinstance(node, ast.ImportFrom):
-                target = _resolve_import_target(module_name, node)
-                if target:
-                    import_names.add(target.split(".", 1)[0])
-                    deps.append(
-                        ModuleDep(
-                            source=module_name,
-                            target=target,
-                            import_type="from_import",
-                            line=int(getattr(node, "lineno", 0)),
-                        )
-                    )
-
-    deps_sorted = tuple(
-        sorted(
-            deps,
-            key=lambda dep: (dep.source, dep.target, dep.import_type, dep.line),
+    target: str,
+    import_type: Literal["import", "from_import"],
+    line: int,
+    state: _ModuleWalkState,
+) -> None:
+    state.deps.append(
+        ModuleDep(
+            source=module_name,
+            target=target,
+            import_type=import_type,
+            line=line,
         )
     )
-    return frozenset(import_names), deps_sorted, frozenset(referenced)
+
+
+def _collect_import_node(
+    *,
+    node: ast.Import,
+    module_name: str,
+    state: _ModuleWalkState,
+    collect_referenced_names: bool,
+) -> None:
+    line = int(getattr(node, "lineno", 0))
+    for alias in node.names:
+        alias_name = alias.asname or alias.name.split(".", 1)[0]
+        state.import_names.add(alias_name)
+        _append_module_dep(
+            module_name=module_name,
+            target=alias.name,
+            import_type="import",
+            line=line,
+            state=state,
+        )
+        if collect_referenced_names:
+            state.imported_module_aliases[alias_name] = alias.name
+        if alias.name in _PROTOCOL_MODULE_NAMES:
+            state.protocol_module_aliases.add(alias_name)
 
 
 def _dotted_expr_name(expr: ast.expr) -> str | None:
@@ -456,21 +437,39 @@ def _dotted_expr_name(expr: ast.expr) -> str | None:
     return None
 
 
-def _collect_protocol_aliases(tree: ast.AST) -> tuple[frozenset[str], frozenset[str]]:
-    protocol_symbol_aliases = {"Protocol"}
-    protocol_module_aliases = {"typing", "typing_extensions"}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            if node.module not in {"typing", "typing_extensions"}:
-                continue
-            for alias in node.names:
-                if alias.name == "Protocol":
-                    protocol_symbol_aliases.add(alias.asname or alias.name)
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name in {"typing", "typing_extensions"}:
-                    protocol_module_aliases.add(alias.asname or alias.name)
-    return frozenset(protocol_symbol_aliases), frozenset(protocol_module_aliases)
+def _collect_import_from_node(
+    *,
+    node: ast.ImportFrom,
+    module_name: str,
+    state: _ModuleWalkState,
+    collect_referenced_names: bool,
+) -> None:
+    target = _resolve_import_target(module_name, node)
+    if target:
+        state.import_names.add(target.split(".", 1)[0])
+        _append_module_dep(
+            module_name=module_name,
+            target=target,
+            import_type="from_import",
+            line=int(getattr(node, "lineno", 0)),
+            state=state,
+        )
+
+    if node.module in _PROTOCOL_MODULE_NAMES:
+        for alias in node.names:
+            if alias.name == "Protocol":
+                state.protocol_symbol_aliases.add(alias.asname or alias.name)
+
+    if not collect_referenced_names or not target:
+        return
+
+    for alias in node.names:
+        if alias.name == "*":
+            continue
+        alias_name = alias.asname or alias.name
+        state.imported_symbol_bindings.setdefault(alias_name, set()).add(
+            f"{target}:{alias.name}"
+        )
 
 
 def _is_protocol_class(
@@ -503,18 +502,26 @@ def _is_non_runtime_candidate(node: FunctionNode) -> bool:
     return False
 
 
-def _collect_referenced_qualnames(
+def _collect_load_reference_node(
     *,
-    tree: ast.AST,
+    node: ast.AST,
+    state: _ModuleWalkState,
+) -> None:
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+        state.referenced_names.add(node.id)
+        state.name_nodes.append(node)
+        return
+    if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+        state.referenced_names.add(node.attr)
+        state.attr_nodes.append(node)
+
+
+def _resolve_referenced_qualnames(
+    *,
     module_name: str,
     collector: _QualnameCollector,
-    collect_referenced_names: bool,
+    state: _ModuleWalkState,
 ) -> frozenset[str]:
-    if not collect_referenced_names:
-        return frozenset()
-
-    imported_symbol_bindings: dict[str, set[str]] = {}
-    imported_module_aliases: dict[str, str] = {}
     top_level_class_by_name = {
         class_qualname: class_qualname
         for class_qualname, _class_node in collector.class_nodes
@@ -526,44 +533,94 @@ def _collect_referenced_qualnames(
         if "." in local_name
     )
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            target_module = _resolve_import_target(module_name, node)
-            if not target_module:
-                continue
-            for alias in node.names:
-                if alias.name == "*":
-                    continue
-                alias_name = alias.asname or alias.name
-                imported_symbol_bindings.setdefault(alias_name, set()).add(
-                    f"{target_module}:{alias.name}"
-                )
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                alias_name = alias.asname or alias.name.split(".", 1)[0]
-                imported_module_aliases[alias_name] = alias.name
-
     resolved: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-            for qualname in imported_symbol_bindings.get(node.id, ()):
-                resolved.add(qualname)
-        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
-            base = node.value
-            if isinstance(base, ast.Name):
-                imported_module = imported_module_aliases.get(base.id)
-                if imported_module is not None:
-                    resolved.add(f"{imported_module}:{node.attr}")
-                    continue
-                class_qualname = top_level_class_by_name.get(base.id)
-                if class_qualname is not None:
-                    local_method_qualname = (
-                        f"{module_name}:{class_qualname}.{node.attr}"
-                    )
-                    if local_method_qualname in local_method_qualnames:
-                        resolved.add(local_method_qualname)
+    for name_node in state.name_nodes:
+        for qualname in state.imported_symbol_bindings.get(name_node.id, ()):
+            resolved.add(qualname)
+
+    for attr_node in state.attr_nodes:
+        base = attr_node.value
+        if not isinstance(base, ast.Name):
+            continue
+        imported_module = state.imported_module_aliases.get(base.id)
+        if imported_module is not None:
+            resolved.add(f"{imported_module}:{attr_node.attr}")
+            continue
+        class_qualname = top_level_class_by_name.get(base.id)
+        if class_qualname is None:
+            continue
+        local_method_qualname = f"{module_name}:{class_qualname}.{attr_node.attr}"
+        if local_method_qualname in local_method_qualnames:
+            resolved.add(local_method_qualname)
 
     return frozenset(resolved)
+
+
+class _ModuleWalkResult(NamedTuple):
+    import_names: frozenset[str]
+    module_deps: tuple[ModuleDep, ...]
+    referenced_names: frozenset[str]
+    referenced_qualnames: frozenset[str]
+    protocol_symbol_aliases: frozenset[str]
+    protocol_module_aliases: frozenset[str]
+
+
+def _collect_module_walk_data(
+    *,
+    tree: ast.AST,
+    module_name: str,
+    collector: _QualnameCollector,
+    collect_referenced_names: bool,
+) -> _ModuleWalkResult:
+    """Single ast.walk that collects imports, deps, names, qualnames & protocol aliases.
+
+    Reduces the hot path to one tree walk plus one local qualname resolution phase.
+    """
+    state = _ModuleWalkState()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            _collect_import_node(
+                node=node,
+                module_name=module_name,
+                state=state,
+                collect_referenced_names=collect_referenced_names,
+            )
+            continue
+        if isinstance(node, ast.ImportFrom):
+            _collect_import_from_node(
+                node=node,
+                module_name=module_name,
+                state=state,
+                collect_referenced_names=collect_referenced_names,
+            )
+            continue
+        if collect_referenced_names:
+            _collect_load_reference_node(node=node, state=state)
+
+    deps_sorted = tuple(
+        sorted(
+            state.deps,
+            key=lambda dep: (dep.source, dep.target, dep.import_type, dep.line),
+        )
+    )
+    resolved = (
+        _resolve_referenced_qualnames(
+            module_name=module_name,
+            collector=collector,
+            state=state,
+        )
+        if collect_referenced_names
+        else frozenset()
+    )
+
+    return _ModuleWalkResult(
+        import_names=frozenset(state.import_names),
+        module_deps=deps_sorted,
+        referenced_names=frozenset(state.referenced_names),
+        referenced_qualnames=resolved,
+        protocol_symbol_aliases=frozenset(state.protocol_symbol_aliases),
+        protocol_module_aliases=frozenset(state.protocol_module_aliases),
+    )
 
 
 def _collect_dead_candidates(
@@ -766,17 +823,21 @@ def extract_units_and_stats_from_source(
     source_line_count = len(source_lines)
 
     is_test_file = is_test_filepath(filepath)
-    import_names, module_deps, referenced_names = _collect_module_facts(
-        tree=tree,
-        module_name=module_name,
-        collect_referenced_names=not is_test_file,
-    )
-    referenced_qualnames = _collect_referenced_qualnames(
+
+    # Single-pass AST walk replaces 3 separate functions / 4 walks.
+    _walk = _collect_module_walk_data(
         tree=tree,
         module_name=module_name,
         collector=collector,
         collect_referenced_names=not is_test_file,
     )
+    import_names = _walk.import_names
+    module_deps = _walk.module_deps
+    referenced_names = _walk.referenced_names
+    referenced_qualnames = _walk.referenced_qualnames
+    protocol_symbol_aliases = _walk.protocol_symbol_aliases
+    protocol_module_aliases = _walk.protocol_module_aliases
+
     suppression_directives = extract_suppression_directives(source)
     declaration_targets = _collect_declaration_targets(
         filepath=filepath,
@@ -789,7 +850,6 @@ def extract_units_and_stats_from_source(
         declarations=declaration_targets,
     )
     suppression_index = build_suppression_index(suppression_bindings)
-    protocol_symbol_aliases, protocol_module_aliases = _collect_protocol_aliases(tree)
     class_names = frozenset(class_node.name for _, class_node in collector.class_nodes)
     module_import_names = set(import_names)
     module_class_names = set(class_names)

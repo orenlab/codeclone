@@ -4,6 +4,7 @@ import signal
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import cast
 
 import pytest
 
@@ -411,7 +412,7 @@ def test_resolve_import_target_absolute_and_relative() -> None:
     )
 
 
-def test_collect_module_facts_imports_and_references() -> None:
+def test_collect_module_walk_data_imports_and_references() -> None:
     tree = ast.parse(
         """
 import os as operating_system
@@ -424,13 +425,16 @@ foo()
 obj.method()
 """.strip()
     )
-    import_names, deps, referenced_names = extractor._collect_module_facts(
+    collector = extractor._QualnameCollector()
+    collector.visit(tree)
+    walk = extractor._collect_module_walk_data(
         tree=tree,
         module_name="root.mod.sub",
+        collector=collector,
         collect_referenced_names=True,
     )
-    assert import_names == frozenset({"operating_system", "json", "root"})
-    assert deps == (
+    assert walk.import_names == frozenset({"operating_system", "json", "root"})
+    assert walk.module_deps == (
         ModuleDep(
             source="root.mod.sub",
             target="json",
@@ -456,30 +460,36 @@ obj.method()
             line=3,
         ),
     )
-    assert referenced_names == frozenset({"obj", "attr", "foo", "method"})
+    assert walk.referenced_names == frozenset({"obj", "attr", "foo", "method"})
 
 
-def test_collect_module_facts_edge_branches() -> None:
+def test_collect_module_walk_data_edge_branches() -> None:
     tree = ast.parse("from .... import parent")
-    import_names, deps, referenced_names = extractor._collect_module_facts(
+    collector = extractor._QualnameCollector()
+    collector.visit(tree)
+    walk = extractor._collect_module_walk_data(
         tree=tree,
         module_name="pkg.mod",
+        collector=collector,
         collect_referenced_names=True,
     )
-    assert import_names == frozenset()
-    assert deps == ()
-    assert referenced_names == frozenset()
+    assert walk.import_names == frozenset()
+    assert walk.module_deps == ()
+    assert walk.referenced_names == frozenset()
 
     lambda_call_tree = ast.parse("(lambda x: x)(1)")
-    _, _, lambda_referenced_names = extractor._collect_module_facts(
+    lambda_collector = extractor._QualnameCollector()
+    lambda_collector.visit(lambda_call_tree)
+    lambda_walk = extractor._collect_module_walk_data(
         tree=lambda_call_tree,
         module_name="pkg.mod",
+        collector=lambda_collector,
         collect_referenced_names=True,
     )
-    assert lambda_referenced_names == frozenset({"x"})
+    assert lambda_walk.referenced_names == frozenset({"x"})
 
 
-def test_collect_module_facts_without_referenced_name_collection() -> None:
+def test_collect_module_walk_data_without_referenced_name_collection() -> None:
     tree = ast.parse(
         """
 import os as operating_system
@@ -487,13 +497,16 @@ from .pkg import utils
 from .... import parent
 """.strip()
     )
-    import_names, deps, referenced_names = extractor._collect_module_facts(
+    collector = extractor._QualnameCollector()
+    collector.visit(tree)
+    walk = extractor._collect_module_walk_data(
         tree=tree,
         module_name="root.mod.sub",
+        collector=collector,
         collect_referenced_names=False,
     )
-    assert import_names == frozenset({"operating_system", "root"})
-    assert deps == (
+    assert walk.import_names == frozenset({"operating_system", "root"})
+    assert walk.module_deps == (
         ModuleDep(
             source="root.mod.sub",
             target="os",
@@ -507,7 +520,61 @@ from .... import parent
             line=2,
         ),
     )
-    assert referenced_names == frozenset()
+    assert walk.referenced_names == frozenset()
+
+
+def test_module_walk_helpers_cover_import_and_reference_branches() -> None:
+    state = extractor._ModuleWalkState()
+    import_node = cast(
+        ast.Import,
+        ast.parse("import typing_extensions as te").body[0],
+    )
+    extractor._collect_import_node(
+        node=import_node,
+        module_name="pkg.mod",
+        state=state,
+        collect_referenced_names=False,
+    )
+    assert "te" in state.import_names
+    assert "te" in state.protocol_module_aliases
+    assert state.imported_module_aliases == {}
+
+    import_from_node = cast(
+        ast.ImportFrom,
+        ast.parse("from typing import Protocol as Proto, Thing as Alias").body[0],
+    )
+    extractor._collect_import_from_node(
+        node=import_from_node,
+        module_name="pkg.mod",
+        state=state,
+        collect_referenced_names=True,
+    )
+    assert "Proto" in state.protocol_symbol_aliases
+    assert state.imported_symbol_bindings["Alias"] == {"typing:Thing"}
+
+    unresolved_import = ast.ImportFrom(
+        module=None,
+        names=[ast.alias(name="parent", asname=None)],
+        level=4,
+    )
+    extractor._collect_import_from_node(
+        node=unresolved_import,
+        module_name="pkg.mod",
+        state=state,
+        collect_referenced_names=True,
+    )
+    assert "parent" not in state.imported_symbol_bindings
+
+    name_node = cast(ast.Name, ast.parse("value", mode="eval").body)
+    attr_node = cast(ast.Attribute, ast.parse("obj.attr", mode="eval").body)
+    extractor._collect_load_reference_node(node=name_node, state=state)
+    extractor._collect_load_reference_node(node=attr_node, state=state)
+    extractor._collect_load_reference_node(
+        node=cast(ast.Constant, ast.parse("1", mode="eval").body),
+        state=state,
+    )
+    assert "value" in state.referenced_names
+    assert "attr" in state.referenced_names
 
 
 def test_dotted_expr_protocol_detection_and_runtime_candidate_edges() -> None:
@@ -526,9 +593,16 @@ class B(te.Protocol[int]):
     pass
 """.strip()
     )
-    protocol_symbol_aliases, protocol_module_aliases = (
-        extractor._collect_protocol_aliases(tree)
+    collector = extractor._QualnameCollector()
+    collector.visit(tree)
+    walk = extractor._collect_module_walk_data(
+        tree=tree,
+        module_name="pkg.mod",
+        collector=collector,
+        collect_referenced_names=True,
     )
+    protocol_symbol_aliases = walk.protocol_symbol_aliases
+    protocol_module_aliases = walk.protocol_module_aliases
     assert "te" in protocol_module_aliases
     classes = [node for node in tree.body if isinstance(node, ast.ClassDef)]
     class_a, class_b = classes
@@ -556,6 +630,55 @@ def f(x):
     assert extractor._is_non_runtime_candidate(runtime_candidate)
 
 
+def test_resolve_referenced_qualnames_covers_module_class_and_attr_branches() -> None:
+    src = """
+from pkg.runtime import handler as imported_handler
+import pkg.helpers as helpers
+
+class Service:
+    def hook(self) -> int:
+        return 1
+
+value = imported_handler()
+decorator = helpers.decorate
+method = Service.hook
+unknown = Missing.hook
+dynamic = factory().attr
+"""
+    tree = ast.parse(src)
+    collector = extractor._QualnameCollector()
+    collector.visit(tree)
+    state = extractor._ModuleWalkState()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            extractor._collect_import_node(
+                node=node,
+                module_name="pkg.mod",
+                state=state,
+                collect_referenced_names=True,
+            )
+        elif isinstance(node, ast.ImportFrom):
+            extractor._collect_import_from_node(
+                node=node,
+                module_name="pkg.mod",
+                state=state,
+                collect_referenced_names=True,
+            )
+        else:
+            extractor._collect_load_reference_node(node=node, state=state)
+
+    resolved = extractor._resolve_referenced_qualnames(
+        module_name="pkg.mod",
+        collector=collector,
+        state=state,
+    )
+    assert "pkg.runtime:handler" in resolved
+    assert "pkg.helpers:decorate" in resolved
+    assert "pkg.mod:Service.hook" in resolved
+    assert all("Missing.hook" not in qualname for qualname in resolved)
+    assert all(not qualname.endswith(":attr") for qualname in resolved)
+
+
 def test_collect_referenced_qualnames_edge_cases() -> None:
     src = """
 from .... import hidden
@@ -568,19 +691,19 @@ class Service:
 
 value = helpers.tools.decorate(1)
 handler = Service.hook
-"""
+    """
     tree = ast.parse(src)
     collector = extractor._QualnameCollector()
     collector.visit(tree)
-    referenced = extractor._collect_referenced_qualnames(
+    walk = extractor._collect_module_walk_data(
         tree=tree,
         module_name="pkg.mod",
         collector=collector,
         collect_referenced_names=True,
     )
-    assert "pkg.mod:Service.hook" in referenced
-    assert "pkg.helpers:tools" in referenced
-    assert "pkg.helpers:decorate" not in referenced
+    assert "pkg.mod:Service.hook" in walk.referenced_qualnames
+    assert "pkg.helpers:tools" in walk.referenced_qualnames
+    assert "pkg.helpers:decorate" not in walk.referenced_qualnames
 
 
 def test_extract_stats_drops_referenced_names_for_test_filepaths() -> None:
@@ -885,19 +1008,22 @@ def parse_value(value: int) -> str: ...
 
 def parse_value(value: object) -> str:
     return str(value)
-"""
+    """
     tree = ast.parse(src)
     collector = extractor._QualnameCollector()
     collector.visit(tree)
-    protocol_symbol_aliases, protocol_module_aliases = (
-        extractor._collect_protocol_aliases(tree)
+    walk = extractor._collect_module_walk_data(
+        tree=tree,
+        module_name="pkg.mod",
+        collector=collector,
+        collect_referenced_names=True,
     )
     dead = extractor._collect_dead_candidates(
         filepath="pkg/mod.py",
         module_name="pkg.mod",
         collector=collector,
-        protocol_symbol_aliases=protocol_symbol_aliases,
-        protocol_module_aliases=protocol_module_aliases,
+        protocol_symbol_aliases=walk.protocol_symbol_aliases,
+        protocol_module_aliases=walk.protocol_module_aliases,
     )
     qualnames = {item.qualname for item in dead}
     assert "pkg.mod:_Reader.read" not in qualnames

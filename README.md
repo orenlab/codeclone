@@ -154,7 +154,8 @@ All report formats are rendered from one canonical JSON report document.
 - `--open-html-report` opens the generated HTML report in the default browser and requires `--html`.
 - `--timestamped-report-paths` appends a UTC timestamp to default report filenames for bare report flags such as
   `--html` or `--json`. Explicit report paths are not rewritten.
-  Structural findings include:
+
+Structural findings include:
 
 - `duplicated_branches`
 - `clone_guard_exit_divergence`
@@ -241,8 +242,18 @@ Dynamic/runtime false positives are resolved via explicit inline suppressions, n
   },
   "derived": {
     "suggestions": [],
-    "overview": {},
-    "hotlists": {}
+    "overview": {
+      "families": {},
+      "top_risks": [],
+      "source_scope_breakdown": {},
+      "health_snapshot": {}
+    },
+    "hotlists": {
+      "most_actionable_ids": [],
+      "highest_spread_ids": [],
+      "production_hotspot_ids": [],
+      "test_fixture_hotspot_ids": []
+    }
   },
   "integrity": {
     "canonicalization": {
@@ -290,7 +301,7 @@ Architecture: [`docs/architecture.md`](docs/architecture.md) · CFG semantics: [
 | Docker benchmark contract  | [`docs/book/18-benchmarking.md`](docs/book/18-benchmarking.md)                           |
 | Determinism                | [`docs/book/12-determinism.md`](docs/book/12-determinism.md)                             |
 
-##     * Benchmarking
+## * Benchmarking
 
 <details>
 <summary>Reproducible Docker Benchmark</summary>

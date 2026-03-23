@@ -40,6 +40,8 @@ Refs:
   `__getattr__`, `__dir__`.
 - Declaration-level inline suppression is supported with:
   `# codeclone: ignore[dead-code]` (leading or inline comment form).
+- For multiline declaration headers, inline suppression may appear either on the
+  first declaration line or on the closing header line containing `:`.
 - Suppression is declaration-scoped (`def`, `async def`, `class`) and does not
   implicitly propagate to unrelated declaration targets.
 - Candidate extraction excludes non-runtime declaration surfaces:
@@ -81,7 +83,7 @@ Refs:
 |----------------------------------------------------|----------------------------------------|
 | Dynamic method pattern (dunder/visitor/setup hook) | Candidate skipped as non-actionable    |
 | Module PEP 562 hook (`__getattr__`/`__dir__`)      | Candidate skipped as non-actionable    |
-| Malformed/unknown `codeclone[...]` rule selector   | Ignored safely                         |
+| Malformed/unknown `# codeclone: ignore[...]` rule  | Ignored safely                         |
 | Protocol or stub-like declaration surface          | Candidate skipped as non-actionable    |
 | Definition appears only in tests                   | Candidate skipped                      |
 | Symbol used only from tests                        | Remains actionable dead-code candidate |

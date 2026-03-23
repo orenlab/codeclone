@@ -400,10 +400,8 @@ _META_PANEL = """\
 (function initHelpModal(){
   const dlg=$('#help-modal');
   if(!dlg)return;
-  const openers=$$('[data-help-open]');
   const closeBtn=dlg.querySelector('[data-help-close]');
   const open=()=>dlg.showModal();
-  openers.forEach(btn=>btn.addEventListener('click',open));
   if(closeBtn)closeBtn.addEventListener('click',()=>dlg.close());
   dlg.addEventListener('click',e=>{if(e.target===dlg)dlg.close()});
   document.addEventListener('keydown',e=>{
@@ -625,22 +623,7 @@ function updateCloneScopeCounters(){
 }
 """
 
-_LAZY_HIGHLIGHT = """\
-(function initLazyHighlight(){
-  if(typeof IntersectionObserver==='undefined')return;
-  const blocks=$$('.code-block[data-lang]');
-  if(!blocks.length)return;
-  const obs=new IntersectionObserver((entries)=>{
-    entries.forEach(entry=>{
-      if(entry.isIntersecting){
-        entry.target.classList.add('visible');
-        obs.unobserve(entry.target);
-      }
-    });
-  },{rootMargin:'200px'});
-  blocks.forEach(b=>obs.observe(b));
-})();
-"""
+_LAZY_HIGHLIGHT = ""
 
 
 # ---------------------------------------------------------------------------

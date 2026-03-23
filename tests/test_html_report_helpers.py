@@ -4,6 +4,7 @@ from typing import Any, cast
 from codeclone._html_report._components import (
     overview_row_html,
     overview_source_breakdown_html,
+    overview_summary_item_html,
     overview_summary_list_html,
 )
 from codeclone._html_report._sections._clones import (
@@ -40,10 +41,39 @@ def test_summary_helpers_cover_empty_and_non_clone_context_branches() -> None:
             "spread": {"files": 1, "functions": 2},
         }
     )
-    assert "complexity" in row_html
+    assert "severity-warning" in row_html
     assert "Production" in row_html
     assert "2 fn / 1 files" in row_html
     assert "clone_type" not in row_html
+
+
+def test_summary_helpers_cover_breakdown_bars_and_clone_badges() -> None:
+    breakdown_html = overview_source_breakdown_html({"production": 3, "tests": 1})
+    assert "source-kind-production" in breakdown_html
+    assert "source-kind-tests" in breakdown_html
+    assert "width:75%" in breakdown_html
+    assert "width:25%" in breakdown_html
+
+    summary_html = overview_summary_item_html(
+        label="Source Breakdown",
+        body_html="<div>body</div>",
+    )
+    assert "summary-icon--info" in summary_html
+
+    row_html = overview_row_html(
+        {
+            "severity": "critical",
+            "source_kind": "tests",
+            "title": "Function clone group (Type-2)",
+            "summary": "same parameterized function body",
+            "clone_type": "Type-2",
+            "count": 4,
+            "spread": {"files": 4, "functions": 4},
+        }
+    )
+    assert "clone-type-badge" in row_html
+    assert "4 occurrences" in row_html
+    assert "severity-critical" in row_html
 
 
 def test_clone_display_name_and_group_explanation_edge_branches() -> None:

@@ -32,7 +32,10 @@ Refs:
 - Canonical syntax: `# codeclone: ignore[<rule-id>]`
 - Supported placements:
     - previous line before declaration (`leading`)
-    - end-of-line comment on declaration line (`inline`)
+    - end-of-line comment on declaration header (`inline`)
+      - same-line single-line declaration
+      - first line of a multiline declaration header
+      - closing header line containing `:`
 - Current supported dead-code rule id: `dead-code`.
 - Rule list supports comma-separated values and deduplicates deterministically.
 - Suppression applies only to declaration targets (`def`, `async def`, `class`).
@@ -64,6 +67,8 @@ Refs:
 - Directives are parsed from lexical comment tokens, not heuristic substring
   scans.
 - Binding is deterministic by declaration line and target identity.
+- Inline binding for multiline declarations is deterministic across the
+  declaration header span only; it does not search arbitrary body lines.
 - Candidate-level `suppressed_rules` are canonicalized and sorted in cache
   payloads.
 - Report-level suppressed dead-code payloads are deterministically sorted and

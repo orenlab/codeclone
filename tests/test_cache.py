@@ -199,6 +199,61 @@ def test_get_file_entry_uses_wire_key_fallback(tmp_path: Path) -> None:
     assert cache.get_file_entry(non_canonical) is not None
 
 
+def test_get_file_entry_keeps_loaded_cache_clean_on_canonical_hit(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    loaded = Cache(cache_path)
+    loaded.load()
+    assert loaded._dirty is False
+    assert loaded.get_file_entry("x.py") is not None
+    assert loaded._dirty is False
+
+
+def test_store_canonical_file_entry_marks_dirty_only_when_entry_changes(
+    tmp_path: Path,
+) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    canonical_entry = cast(
+        Any,
+        cache_mod._canonicalize_cache_entry(
+            {
+                "stat": {"mtime_ns": 1, "size": 1},
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "class_metrics": [],
+                "module_deps": [],
+                "dead_candidates": [],
+                "referenced_names": [],
+                "referenced_qualnames": [],
+                "import_names": [],
+                "class_names": [],
+            }
+        ),
+    )
+    cache.data["files"]["x.py"] = canonical_entry
+    cache._canonical_runtime_paths.add("x.py")
+    cache._dirty = False
+
+    cache._store_canonical_file_entry(
+        runtime_path="x.py",
+        canonical_entry=canonical_entry,
+    )
+    assert cache._dirty is False
+
+    cache._canonical_runtime_paths.clear()
+    cache._store_canonical_file_entry(
+        runtime_path="x.py",
+        canonical_entry=canonical_entry,
+    )
+    assert cache._dirty is True
+
+
 def test_get_file_entry_missing_after_fallback_returns_none(tmp_path: Path) -> None:
     root = tmp_path / "project"
     root.mkdir()
@@ -261,6 +316,59 @@ def test_cache_signature_validation_ignores_json_whitespace(tmp_path: Path) -> N
     loaded.load()
     assert loaded.load_warning is None
     assert loaded.get_file_entry("x.py") is not None
+
+
+def test_decode_wire_file_and_name_section_helpers_cover_valid_and_invalid() -> None:
+    encoded = cache_mod._encode_wire_file_entry(
+        {
+            "stat": {"mtime_ns": 1, "size": 10},
+            "units": [cache_mod._unit_dict_from_model(_make_unit("x.py"), "x.py")],
+            "blocks": [cache_mod._block_dict_from_model(_make_block("x.py"), "x.py")],
+            "segments": [
+                cache_mod._segment_dict_from_model(_make_segment("x.py"), "x.py")
+            ],
+            "class_metrics": [],
+            "module_deps": [],
+            "dead_candidates": [],
+            "referenced_names": ["used"],
+            "referenced_qualnames": ["pkg.mod:used"],
+            "import_names": ["pkg"],
+            "class_names": ["Service"],
+        }
+    )
+    assert isinstance(encoded, dict)
+
+    file_sections = cache_mod._decode_wire_file_sections(obj=encoded, filepath="x.py")
+    assert file_sections is not None
+    units, blocks, segments, class_metrics, module_deps, dead_candidates = file_sections
+    assert units[0]["qualname"] == "mod:func"
+    assert blocks[0]["qualname"] == "mod:func"
+    assert segments[0]["qualname"] == "mod:func"
+    assert class_metrics == []
+    assert module_deps == []
+    assert dead_candidates == []
+
+    name_sections = cache_mod._decode_wire_name_sections(obj=encoded)
+    assert name_sections == (
+        ["used"],
+        ["pkg.mod:used"],
+        ["pkg"],
+        ["Service"],
+    )
+
+    invalid_sections = dict(encoded)
+    invalid_sections["u"] = "bad"
+    assert (
+        cache_mod._decode_wire_file_sections(
+            obj=invalid_sections,
+            filepath="x.py",
+        )
+        is None
+    )
+
+    invalid_names = dict(encoded)
+    invalid_names["rn"] = 1
+    assert cache_mod._decode_wire_name_sections(obj=invalid_names) is None
 
 
 def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:

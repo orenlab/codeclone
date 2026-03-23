@@ -9,8 +9,8 @@ from collections.abc import Mapping, Sequence
 from typing import Literal
 
 from .. import _coerce
+from .._html_badges import _quality_badge_html, _source_kind_badge_html
 from .._html_escape import _escape_attr, _escape_html
-from ..report._source_kinds import source_kind_label
 
 _as_int = _coerce.as_int
 _as_mapping = _coerce.as_mapping
@@ -60,70 +60,103 @@ def overview_summary_list_html(items: Sequence[str]) -> str:
     )
 
 
+_ICON_ALERT = (
+    '<svg class="summary-icon summary-icon--risk" width="16" height="16" '
+    'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86'
+    'a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/>'
+    '<line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+)
+
+_ICON_PIE = (
+    '<svg class="summary-icon summary-icon--info" width="16" height="16" '
+    'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M21.21 15.89A10 10 0 118 2.83"/>'
+    '<path d="M22 12A10 10 0 0012 2v10z"/></svg>'
+)
+
+_SUMMARY_ICONS: dict[str, str] = {
+    "top risks": _ICON_ALERT,
+    "source breakdown": _ICON_PIE,
+}
+
+
 def overview_summary_item_html(*, label: str, body_html: str) -> str:
+    icon = _SUMMARY_ICONS.get(label.lower(), "")
     return (
         '<article class="overview-summary-item">'
-        f'<div class="overview-summary-label">{_escape_html(label)}</div>'
+        '<div class="overview-summary-label">'
+        f"{icon}{_escape_html(label)}</div>"
         f"{body_html}"
         "</article>"
     )
 
 
 def overview_source_breakdown_html(breakdown: Mapping[str, object]) -> str:
-    rows = tuple(
-        f"{source_kind_label(str(kind))} {_as_int(count)}"
-        for kind, count in sorted(
-            breakdown.items(), key=lambda item: (str(item[0]), _as_int(item[1]))
-        )
-        if _as_int(count) > 0
+    sorted_items = sorted(
+        ((str(k), _as_int(v)) for k, v in breakdown.items()),
+        key=lambda item: -item[1],
     )
-    if rows:
-        return overview_summary_list_html(rows)
-    return '<div class="overview-summary-value">n/a</div>'
+    rows = [(kind, count) for kind, count in sorted_items if count > 0]
+    if not rows:
+        return '<div class="overview-summary-value">n/a</div>'
+
+    total = sum(c for _, c in rows)
+    parts: list[str] = []
+    for kind, count in rows:
+        pct = round(count / total * 100) if total else 0
+        parts.append(
+            '<div class="breakdown-row">'
+            f"{_source_kind_badge_html(kind)}"
+            f'<span class="breakdown-count">{count}</span>'
+            f'<span class="breakdown-bar-track">'
+            f'<span class="breakdown-bar-fill" style="width:{pct}%"></span></span>'
+            "</div>"
+        )
+    return '<div class="breakdown-list">' + "".join(parts) + "</div>"
 
 
 def overview_row_html(card: Mapping[str, object]) -> str:
     severity = str(card.get("severity", "info"))
     source_kind = str(card.get("source_kind", "other"))
-    category = str(card.get("category", ""))
     title = str(card.get("title", ""))
     summary_text = str(card.get("summary", ""))
-    location_text = str(card.get("location", ""))
     spread = _as_mapping(card.get("spread"))
     spread_files = _as_int(spread.get("files"))
     spread_functions = _as_int(spread.get("functions"))
     clone_type = str(card.get("clone_type", "")).strip()
+    count = _as_int(card.get("count"))
 
-    # Compact context line: severity · source · category [· clone_type]
-    ctx_parts = [
-        severity,
-        source_kind_label(source_kind),
-        category.replace("_", " "),
+    # Badge row: severity + source kind + clone type + spread
+    badges: list[str] = [
+        _quality_badge_html(severity),
+        _source_kind_badge_html(source_kind),
     ]
     if clone_type:
-        ctx_parts.append(clone_type)
-    context_text = " \u00b7 ".join(p for p in ctx_parts if p)
+        badges.append(
+            f'<span class="clone-type-badge">{_escape_html(clone_type)}</span>'
+        )
 
-    # Compact metadata: spread + location on one line
-    meta_parts: list[str] = []
+    spread_html = ""
     if spread_files or spread_functions:
-        meta_parts.append(f"{spread_functions} fn / {spread_files} files")
-    if location_text:
-        meta_parts.append(location_text)
-    meta_text = " \u00b7 ".join(meta_parts)
+        parts: list[str] = []
+        if count:
+            parts.append(f"{count} occurrences")
+        parts.append(f"{spread_functions} fn / {spread_files} files")
+        spread_html = (
+            '<span class="overview-row-spread">'
+            f"{_escape_html(' · '.join(parts))}</span>"
+        )
 
     return (
         '<article class="overview-row" '
         f'data-severity="{_escape_attr(severity)}" '
         f'data-source-kind="{_escape_attr(source_kind)}">'
-        '<div class="overview-row-main">'
+        '<div class="overview-row-head">' + "".join(badges) + spread_html + "</div>"
         f'<div class="overview-row-title">{_escape_html(title)}</div>'
         f'<div class="overview-row-summary">{_escape_html(summary_text)}</div>'
-        "</div>"
-        '<div class="overview-row-side">'
-        f'<div class="overview-row-context">{_escape_html(context_text)}</div>'
-        f'<div class="overview-row-meta">{_escape_html(meta_text)}</div>'
-        "</div>"
         "</article>"
     )
 

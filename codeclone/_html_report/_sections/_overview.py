@@ -160,59 +160,84 @@ def render_overview_panel(ctx: ReportContext) -> str:
     _new_cycles = len(md.new_cycles) if md else None
     _health_delta = md.health_delta if md else None
 
+    # Clone group novelty — show delta only when baseline comparison is active.
+    # MetricsDiff presence is the reliable indicator of a loaded baseline.
+    _new_clones: int | None = None
+    if md is not None:
+        _new_clones = sum(
+            1 for gk, _ in ctx.func_sorted if gk in ctx.new_func_keys
+        ) + sum(1 for gk, _ in ctx.block_sorted if gk in ctx.new_block_keys)
+
+    def _mb(*pairs: tuple[str, object]) -> str:
+        """Render micro-badges: [label value] [label value] ..."""
+        return "".join(
+            f'<span class="kpi-micro">'
+            f'<span class="kpi-micro-val">{_escape_html(str(v))}</span>'
+            f'<span class="kpi-micro-lbl">{_escape_html(label)}</span></span>'
+            for label, v in pairs
+            if v is not None and str(v) != "n/a"
+        )
+
     # KPI cards
     kpis = [
         _stat_card(
             "Clone Groups",
             ctx.clone_groups_total,
-            detail=(
-                f"{len(ctx.func_sorted)} func · "
-                f"{len(ctx.block_sorted)} block · "
-                f"{len(ctx.segment_sorted)} seg"
+            detail=_mb(
+                ("func", len(ctx.func_sorted)),
+                ("block", len(ctx.block_sorted)),
+                ("seg", len(ctx.segment_sorted)),
             ),
             tip="Detected code clone groups by detection level",
+            delta_new=_new_clones,
+            value_tone="good" if ctx.clone_groups_total == 0 else "bad",
         ),
         _stat_card(
             "High Complexity",
             complexity_high_risk,
-            detail=(
-                f"avg {complexity_summary.get('average', 'n/a')} · "
-                f"max {complexity_summary.get('max', 'n/a')}"
+            detail=_mb(
+                ("avg", complexity_summary.get("average", "n/a")),
+                ("max", complexity_summary.get("max", "n/a")),
             ),
             tip="Functions with cyclomatic complexity above threshold",
+            value_tone="good" if complexity_high_risk == 0 else "bad",
             delta_new=_new_complexity,
         ),
         _stat_card(
             "High Coupling",
             coupling_high_risk,
-            detail=(
-                f"avg {coupling_summary.get('average', 'n/a')} · "
-                f"max {coupling_summary.get('max', 'n/a')}"
+            detail=_mb(
+                ("avg", coupling_summary.get("average", "n/a")),
+                ("max", coupling_summary.get("max", "n/a")),
             ),
             tip="Classes with high coupling between objects (CBO)",
+            value_tone="good" if coupling_high_risk == 0 else "bad",
             delta_new=_new_coupling,
         ),
         _stat_card(
             "Low Cohesion",
             cohesion_low,
-            detail=(
-                f"avg {cohesion_summary.get('average', 'n/a')} · "
-                f"max {cohesion_summary.get('max', 'n/a')}"
+            detail=_mb(
+                ("avg", cohesion_summary.get("average", "n/a")),
+                ("max", cohesion_summary.get("max", "n/a")),
             ),
             tip="Classes with low internal cohesion (high LCOM4)",
+            value_tone="good" if cohesion_low == 0 else "warn",
         ),
         _stat_card(
             "Dep. Cycles",
             dependency_cycle_count,
-            detail=f"max depth {dependency_max_depth}",
+            detail=_mb(("depth", dependency_max_depth)),
             tip="Circular dependencies between project modules",
+            value_tone="good" if dependency_cycle_count == 0 else "bad",
             delta_new=_new_cycles,
         ),
         _stat_card(
             "Dead Code",
             dead_total,
-            detail=f"{dead_high_conf} high-confidence",
+            detail=_mb(("high-conf", dead_high_conf)),
             tip="Potentially unused functions, classes, or imports",
+            value_tone="good" if dead_total == 0 else "warn",
             delta_new=_new_dead,
         ),
     ]

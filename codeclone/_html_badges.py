@@ -129,6 +129,7 @@ def _stat_card(
     detail: str = "",
     tip: str = "",
     tone: str = "",
+    value_tone: str = "",
     css_class: str = "meta-item",
     glossary_tip_fn: Callable[[str], str] | None = None,
     delta_new: int | None = None,
@@ -138,6 +139,10 @@ def _stat_card(
     Always emits the same HTML structure using ``.meta-item`` /
     ``.meta-label`` / ``.meta-value`` so every stat card shares the
     exact same design code.
+
+    *value_tone* — semantic color for the main value:
+      ``"good"`` → green (metric is clean), ``"bad"`` → red (metric has issues),
+      ``""`` → default text-primary.
 
     *delta_new* — if provided and > 0, renders a ``+N new`` badge below
     the detail line.  For "bad" metrics (complexity, coupling, etc.)
@@ -151,18 +156,19 @@ def _stat_card(
 
     detail_html = ""
     if detail:
-        detail_html = f'<div class="kpi-detail">{_escape_html(detail)}</div>'
+        detail_html = f'<div class="kpi-detail">{detail}</div>'
 
     delta_html = ""
     if delta_new is not None and delta_new > 0:
         delta_html = f'<div class="kpi-delta kpi-delta--bad">+{delta_new} new</div>'
 
     tone_cls = f" dep-stat-{tone}" if tone else ""
+    value_cls = f" meta-value--{value_tone}" if value_tone else ""
 
     return (
         f'<div class="{_escape_attr(css_class)}{tone_cls}">'
         f'<div class="meta-label">{_escape_html(label)}{tip_html}</div>'
-        f'<div class="meta-value">{_escape_html(str(value))}</div>'
+        f'<div class="meta-value{value_cls}">{_escape_html(str(value))}</div>'
         f"{detail_html}"
         f"{delta_html}"
         "</div>"

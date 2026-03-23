@@ -8,6 +8,7 @@ Document HTML rendering as a pure view layer over report data/facts.
 
 - Main renderer: `codeclone/html_report.py:build_html_report`
 - HTML assembly package: `codeclone/_html_report/*`
+- Overview materialization bridge: `codeclone/report/overview.py:materialize_report_overview`
 - Escaping helpers: `codeclone/_html_escape.py`
 - Snippet/highlight helpers: `codeclone/_html_snippets.py`
 - Static template: `codeclone/templates.py:REPORT_TEMPLATE`
@@ -36,12 +37,17 @@ Refs:
 - HTML must not recompute detection semantics; it renders facts from core/report layers.
 - Explainability hints shown in UI are sourced from `build_block_group_facts` data.
 - Provenance panel mirrors report metadata contract.
+- Overview UI is a report projection:
+    - summary facts come from `derived.overview`
+    - hotlist identity comes from `derived.hotlists`
+    - rendered cards are materialized against canonical findings at HTML build time
 - Dead-code UI is a single top-level `Dead Code` tab with deterministic split
   sub-tabs: `Active` and `Suppressed`.
 
 Refs:
 
 - `codeclone/report/explain.py:build_block_group_facts`
+- `codeclone/report/overview.py:materialize_report_overview`
 - `codeclone/_html_report/_sections/_clones.py:_render_group_explanation`
 - `codeclone/_html_report/_sections/_meta.py:render_meta_panel`
 

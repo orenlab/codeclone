@@ -593,11 +593,14 @@ def _resolve_cache_status(cache: Cache) -> tuple[CacheStatus, str | None]:
 def _cache_update_segment_projection(cache: Cache, analysis: AnalysisResult) -> None:
     if not hasattr(cache, "segment_report_projection"):
         return
-    cache.segment_report_projection = build_segment_report_projection(
+    new_projection = build_segment_report_projection(
         digest=analysis.segment_groups_raw_digest,
         suppressed=analysis.suppressed_segment_groups,
         groups=analysis.segment_groups,
     )
+    if new_projection != cache.segment_report_projection:
+        cache.segment_report_projection = new_projection
+        cache._dirty = True
 
 
 def _run_analysis_stages(
