@@ -59,7 +59,8 @@ Key artifacts:
 
 - `codeclone.baseline.json` — trusted baseline snapshot (for CI comparisons)
 - `.cache/codeclone/cache.json` — analysis cache (integrity-checked)
-- `.cache/codeclone/report.html|report.json|report.txt` — reports
+- `.cache/codeclone/report.html|report.json|report.md|report.sarif|report.txt` — reports
+- `docs/`, `mkdocs.yml`, `.github/workflows/docs.yml` — published documentation site and docs build pipeline
 
 ---
 
@@ -72,6 +73,11 @@ uv run pre-commit run --all-files
 ```
 
 If you touched baseline/cache/report contracts, also run the repo’s audit runner (or the scenario script if present).
+If you touched `docs/`, `mkdocs.yml`, docs publishing workflow, or sample-report generation, also run:
+
+```bash
+uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+```
 
 ---
 
@@ -151,6 +157,8 @@ Reports come in:
 
 - HTML (`--html`)
 - JSON (`--json`)
+- Markdown (`--md`)
+- SARIF (`--sarif`)
 - Text (`--text`)
 
 ### Report invariants
@@ -284,8 +292,10 @@ Architecture is layered, but grounded in current code (not aspirational diagrams
   trusted comparison state and optimization state.
 - **Canonical report + projections** (`codeclone/report/json_contract.py`, `codeclone/report/*.py`) converts analysis
   facts to deterministic, contract-shaped outputs.
-- **HTML/UI rendering** (`codeclone/html_report.py`, `codeclone/_html_*.py`, `codeclone/templates.py`) renders views
-  from report/meta facts.
+- **HTML/UI rendering** (`codeclone/html_report.py`, `codeclone/_html_report/*`, `codeclone/_html_*.py`,
+  `codeclone/templates.py`) renders views from report/meta facts.
+- **Documentation/publishing surface** (`docs/`, `mkdocs.yml`, `.github/workflows/docs.yml`,
+  `scripts/build_docs_example_report.py`) publishes contract docs and the live sample report.
 - **Tests-as-spec** (`tests/`) lock behavior, contracts, determinism, and architecture boundaries.
 
 Non-negotiable interpretation:
@@ -323,10 +333,17 @@ Use this map to route changes to the right owner module.
   change belongs here.
 - `codeclone/report/*.py` (other modules) — deterministic projections/format transforms (
   text/markdown/sarif/derived/findings/suggestions); avoid injecting new analysis heuristics here.
-- `codeclone/html_report.py` — HTML presentation layer from report/meta payload; no hidden analysis decisions.
+- `codeclone/html_report.py` — public HTML facade/re-export surface; preserve backward-compatible imports here; do not
+  grow section/layout logic in this module.
+- `codeclone/_html_report/*` — actual HTML assembly, context shaping, tabs, sections, and overview/navigation behavior;
+  change report layout and interactive HTML UX here, not in the facade.
+- `codeclone/_html_*.py` — shared HTML badges, CSS, JS, escaping, snippets, and data-attrs; keep these as render-only
+  helpers.
 - `codeclone/models.py` — shared typed models crossing modules; keep model changes contract-aware.
 - `codeclone/domain/*.py` — centralized domain taxonomies/IDs (families, categories, source scopes, risk/severity
   levels); use these constants in pipeline/report/UI instead of scattering raw literals.
+- `docs/`, `mkdocs.yml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py` — docs-site source,
+  publication workflow, and live sample-report generation; keep published docs aligned with code contracts.
 - `tests/` — executable specification: architecture rules, contracts, goldens, invariants, regressions.
 
 ## 14) Dependency direction
@@ -356,7 +373,8 @@ Inline suppressions are explicit local policy, not analysis truth.
 - Supported syntax is `# codeclone: ignore[rule-id,...]` via `codeclone/suppressions.py`.
 - Binding scope is declaration-only (`def`, `async def`, `class`) using:
     - leading comment on the line immediately before declaration
-    - inline comment on declaration line
+    - inline comment on the declaration header start line
+    - inline comment on the declaration header closing line for multiline signatures
 - Binding is target-specific (`filepath`, `qualname`, declaration span, kind). No file-wide/global implicit scope.
 - Unknown/malformed directives are ignored safely; analysis must not fail because of suppression syntax issues.
 - Current active semantic effect is dead-code suppression (`dead-code`) through `extractor.py` →
@@ -371,14 +389,15 @@ Prefer explicit inline suppressions for runtime/dynamic false positives instead 
 
 If you change a contract-sensitive zone, route docs/tests/approval deliberately.
 
-| Change zone                                                                                      | Must update docs                                                                                                                                                   | Must update tests                                                                                                                                      | Explicit approval required when                                                      | Contract-change trigger                                                            |
-|--------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
-| Baseline schema/trust/integrity (`codeclone/baseline.py`)                                        | `docs/book/06-baseline.md`, `docs/book/14-compatibility-and-versioning.md`, `docs/book/appendix/b-schema-layouts.md`, `CHANGELOG.md`                               | `tests/test_baseline.py`, CI/CLI behavior tests (`tests/test_cli_inprocess.py`, `tests/test_cli_unit.py`)                                              | schema/trust semantics, compatibility windows, payload integrity logic change        | baseline key layout/status semantics/compat rules change                           |
-| Cache schema/profile/integrity (`codeclone/cache.py`)                                            | `docs/book/07-cache.md`, `docs/book/appendix/b-schema-layouts.md`, `CHANGELOG.md`                                                                                  | `tests/test_cache.py`, pipeline/CLI cache integration tests                                                                                            | cache schema/status/profile compatibility semantics change                           | cache payload/version/status semantics change                                      |
-| Canonical report JSON shape (`codeclone/report/json_contract.py`, report projections)            | `docs/book/08-report.md` (+ `docs/book/10-html-render.md` if rendering contract impacted), `CHANGELOG.md`                                                          | `tests/test_report.py`, `tests/test_report_contract_coverage.py`, `tests/test_report_branch_invariants.py`, relevant report-format tests               | finding/meta/summary schema changes                                                  | stable JSON fields/meaning/order guarantees change                                 |
-| CLI flags/help/exit behavior (`codeclone/cli.py`, `_cli_*`, `contracts.py`)                      | `docs/book/09-cli.md`, `docs/book/03-contracts-exit-codes.md`, `README.md`, `CHANGELOG.md`                                                                         | `tests/test_cli_unit.py`, `tests/test_cli_inprocess.py`, `tests/test_cli_smoke.py`                                                                     | exit-code semantics, script-facing behavior, flag contracts change                   | user-visible CLI contract changes                                                  |
-| Fingerprint-adjacent analysis (`extractor/cfg/normalize/grouping`)                               | `docs/book/05-core-pipeline.md`, `docs/cfg.md`, `docs/book/14-compatibility-and-versioning.md`, `CHANGELOG.md`                                                     | `tests/test_fingerprint.py`, `tests/test_extractor.py`, `tests/test_cfg.py`, golden tests (`tests/test_detector_golden.py`, `tests/test_golden_v2.py`) | always (see Section 1.6)                                                             | clone identity / NEW-vs-KNOWN / fingerprint inputs change                          |
-| Suppression semantics/reporting (`suppressions`, extractor dead-code wiring, report/UI counters) | `docs/book/19-inline-suppressions.md`, `docs/book/16-dead-code-contract.md`, `docs/book/08-report.md`, and interface docs if surfaced (`09-cli`, `10-html-render`) | `tests/test_suppressions.py`, `tests/test_extractor.py`, `tests/test_metrics_modules.py`, `tests/test_pipeline_metrics.py`, report/html/cli tests      | declaration scope semantics, rule effect, or contract-visible counters/fields change | suppression changes alter active finding output or contract-visible report payload |
+| Change zone                                                                                                                         | Must update docs                                                                                                                                                    | Must update tests                                                                                                                                      | Explicit approval required when                                                         | Contract-change trigger                                                            |
+|-------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
+| Baseline schema/trust/integrity (`codeclone/baseline.py`)                                                                           | `docs/book/06-baseline.md`, `docs/book/14-compatibility-and-versioning.md`, `docs/book/appendix/b-schema-layouts.md`, `CHANGELOG.md`                                | `tests/test_baseline.py`, CI/CLI behavior tests (`tests/test_cli_inprocess.py`, `tests/test_cli_unit.py`)                                              | schema/trust semantics, compatibility windows, payload integrity logic change           | baseline key layout/status semantics/compat rules change                           |
+| Cache schema/profile/integrity (`codeclone/cache.py`)                                                                               | `docs/book/07-cache.md`, `docs/book/appendix/b-schema-layouts.md`, `CHANGELOG.md`                                                                                   | `tests/test_cache.py`, pipeline/CLI cache integration tests                                                                                            | cache schema/status/profile compatibility semantics change                              | cache payload/version/status semantics change                                      |
+| Canonical report JSON shape (`codeclone/report/json_contract.py`, report projections)                                               | `docs/book/08-report.md` (+ `docs/book/10-html-render.md` if rendering contract impacted), `docs/sarif.md` when SARIF changes, `CHANGELOG.md`                       | `tests/test_report.py`, `tests/test_report_contract_coverage.py`, `tests/test_report_branch_invariants.py`, relevant report-format tests               | finding/meta/summary schema changes                                                     | stable JSON fields/meaning/order guarantees change                                 |
+| CLI flags/help/exit behavior (`codeclone/cli.py`, `_cli_*`, `contracts.py`)                                                         | `docs/book/09-cli.md`, `docs/book/03-contracts-exit-codes.md`, `README.md`, `CHANGELOG.md`                                                                          | `tests/test_cli_unit.py`, `tests/test_cli_inprocess.py`, `tests/test_cli_smoke.py`                                                                     | exit-code semantics, script-facing behavior, flag contracts change                      | user-visible CLI contract changes                                                  |
+| Fingerprint-adjacent analysis (`extractor/cfg/normalize/grouping`)                                                                  | `docs/book/05-core-pipeline.md`, `docs/cfg.md`, `docs/book/14-compatibility-and-versioning.md`, `CHANGELOG.md`                                                      | `tests/test_fingerprint.py`, `tests/test_extractor.py`, `tests/test_cfg.py`, golden tests (`tests/test_detector_golden.py`, `tests/test_golden_v2.py`) | always (see Section 1.6)                                                                | clone identity / NEW-vs-KNOWN / fingerprint inputs change                          |
+| Suppression semantics/reporting (`suppressions`, extractor dead-code wiring, report/UI counters)                                    | `docs/book/19-inline-suppressions.md`, `docs/book/16-dead-code-contract.md`, `docs/book/08-report.md`, and interface docs if surfaced (`09-cli`, `10-html-render`)  | `tests/test_suppressions.py`, `tests/test_extractor.py`, `tests/test_metrics_modules.py`, `tests/test_pipeline_metrics.py`, report/html/cli tests      | declaration scope semantics, rule effect, or contract-visible counters/fields change    | suppression changes alter active finding output or contract-visible report payload |
+| Docs site / sample report publication (`docs/`, `mkdocs.yml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py`) | `docs/README.md`, `docs/publishing.md`, `docs/examples/report.md`, and any contract pages surfaced by the change, `CHANGELOG.md` when user-visible behavior changes | `mkdocs build --strict`, sample-report generation smoke path, and relevant report/html tests if generated examples or embeds change                    | published docs navigation, sample-report generation, or Pages workflow semantics change | published documentation behavior or sample-report generation contract changes      |
 
 Golden rule: do not “fix” failures by snapshot refresh unless the underlying contract change is intentional, documented,
 and approved.
@@ -411,6 +430,7 @@ Policy:
 - Baseline schema/trust semantics/integrity compatibility (`2.0` baseline contract family).
 - Cache schema/status/profile compatibility/integrity (`CACHE_VERSION` contract family).
 - Canonical report JSON schema/payload semantics (`REPORT_SCHEMA_VERSION` contract family).
+- Documented report projections and their machine/user-facing semantics (HTML/Markdown/SARIF/Text).
 - Documented finding families/kinds/ids and suppression-facing report fields.
 - Metrics baseline schema/compatibility where used by CI/gating.
 - Benchmark schema/outputs if consumed as a reproducible contract surface.
