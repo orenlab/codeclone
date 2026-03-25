@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "codeclone"
 version = "2.0.0b1"
 description = "Structural code quality analysis for Python"
 readme = { file = "README.md", content-type = "text/markdown" }
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 
 authors = [
     { name = "Den Rozhnovskiy", email = "pytelemonbot@mail.ru" }
@@ -42,7 +43,6 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
     "Topic :: Software Development :: Testing",
     "Typing :: Typed",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -50,9 +50,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
-    "Topic :: Software Development :: Quality Assurance",
     "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: Software Development :: Testing",
 ]
 
 [project.urls]
@@ -85,7 +83,6 @@ packages = [
     "codeclone.metrics",
     "codeclone.report",
 ]
-license-files = ["LICENSE"]
 
 [tool.setuptools.package-data]
 codeclone = ["py.typed"]

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/codeclone-wordmark.svg" alt="CodeClone" height="60">
+  <img src="https://orenlab.github.io/codeclone/assets/codeclone-wordmark.svg" alt="CodeClone" height="60">
 </p>
 
 <p align="center">
@@ -12,8 +12,8 @@
   <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main&style=flat-square" alt="Tests"></a>
   <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml/badge.svg?style=flat-square" alt="Benchmark"></a>
   <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone.svg?style=flat-square" alt="Python"></a>
-  <img src="https://img.shields.io/badge/codeclone-78%20(B)-green" alt="codeclone 78 (B)">
-  <a href="LICENSE"><img src="https://img.shields.io/pypi/l/codeclone.svg?style=flat-square" alt="License"></a>
+  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-81%20(B)-green" alt="codeclone 81 (B)"></a>
+  <a href="https://github.com/orenlab/codeclone/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/codeclone.svg?style=flat-square" alt="License"></a>
 </p>
 
 ---
@@ -134,7 +134,7 @@ Baselines capture the current duplication state. Once committed, they become the
 - Trust is verified via `generator`, `fingerprint_version`, and `payload_sha256`
 - In `--ci` mode, an untrusted baseline is a contract error (exit 2)
 
-Full contract: [`docs/book/06-baseline.md`](docs/book/06-baseline.md)
+Full contract: [Baseline contract](https://orenlab.github.io/codeclone/book/06-baseline/)
 
 ## Exit Codes
 
@@ -280,8 +280,8 @@ Dynamic/runtime false positives are resolved via explicit inline suppressions, n
 }
 ```
 
-Canonical contract: [`docs/book/08-report.md`](docs/book/08-report.md) and [
-`docs/book/16-dead-code-contract.md`](docs/book/16-dead-code-contract.md)
+Canonical contract: [Report contract](https://orenlab.github.io/codeclone/book/08-report/) and
+[Dead-code contract](https://orenlab.github.io/codeclone/book/16-dead-code-contract/)
 
 </details>
 
@@ -295,22 +295,23 @@ Canonical contract: [`docs/book/08-report.md`](docs/book/08-report.md) and [
 6. **Metrics** — complexity, coupling, cohesion, dependencies, dead code, health
 7. **Gate** — baseline comparison, threshold checks
 
-Architecture: [`docs/architecture.md`](docs/architecture.md) · CFG semantics: [`docs/cfg.md`](docs/cfg.md)
+Architecture: [Architecture narrative](https://orenlab.github.io/codeclone/architecture/) ·
+CFG semantics: [CFG semantics](https://orenlab.github.io/codeclone/cfg/)
 
 ## Documentation
 
-| Topic                      | Link                                                                                     |
-|----------------------------|------------------------------------------------------------------------------------------|
-| Contract book (start here) | [`docs/book/00-intro.md`](docs/book/00-intro.md)                                         |
-| Exit codes                 | [`docs/book/03-contracts-exit-codes.md`](docs/book/03-contracts-exit-codes.md)           |
-| Configuration              | [`docs/book/04-config-and-defaults.md`](docs/book/04-config-and-defaults.md)             |
-| Baseline contract          | [`docs/book/06-baseline.md`](docs/book/06-baseline.md)                                   |
-| Cache contract             | [`docs/book/07-cache.md`](docs/book/07-cache.md)                                         |
-| Report contract            | [`docs/book/08-report.md`](docs/book/08-report.md)                                       |
-| Metrics & quality gates    | [`docs/book/15-metrics-and-quality-gates.md`](docs/book/15-metrics-and-quality-gates.md) |
-| Dead code                  | [`docs/book/16-dead-code-contract.md`](docs/book/16-dead-code-contract.md)               |
-| Docker benchmark contract  | [`docs/book/18-benchmarking.md`](docs/book/18-benchmarking.md)                           |
-| Determinism                | [`docs/book/12-determinism.md`](docs/book/12-determinism.md)                             |
+| Topic                      | Link                                                                                               |
+|----------------------------|----------------------------------------------------------------------------------------------------|
+| Contract book (start here) | [Contracts and guarantees](https://orenlab.github.io/codeclone/book/00-intro/)                    |
+| Exit codes                 | [Exit codes and failure policy](https://orenlab.github.io/codeclone/book/03-contracts-exit-codes/) |
+| Configuration              | [Config and defaults](https://orenlab.github.io/codeclone/book/04-config-and-defaults/)           |
+| Baseline contract          | [Baseline contract](https://orenlab.github.io/codeclone/book/06-baseline/)                        |
+| Cache contract             | [Cache contract](https://orenlab.github.io/codeclone/book/07-cache/)                              |
+| Report contract            | [Report contract](https://orenlab.github.io/codeclone/book/08-report/)                            |
+| Metrics & quality gates    | [Metrics and quality gates](https://orenlab.github.io/codeclone/book/15-metrics-and-quality-gates/) |
+| Dead code                  | [Dead-code contract](https://orenlab.github.io/codeclone/book/16-dead-code-contract/)             |
+| Docker benchmark contract  | [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmarking/)                |
+| Determinism                | [Determinism policy](https://orenlab.github.io/codeclone/book/12-determinism/)                    |
 
 ## * Benchmarking
 
@@ -332,7 +333,7 @@ CPUSET=0 CPUS=1.0 MEMORY=2g RUNS=16 WARMUPS=4 \
 ```
 
 Performance claims are backed by the reproducible benchmark workflow documented
-in [docs/book/18-benchmarking.md](docs/book/18-benchmarking.md)
+in [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmarking/)
 
 </details>
 

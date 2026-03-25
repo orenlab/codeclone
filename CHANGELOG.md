@@ -29,8 +29,9 @@ Major upgrade: CodeClone evolves from a structural clone detector into a
 ### Detection Quality
 
 - Conservative dead-code detector: skips tests, dunders, visitors, protocol stubs.
+- Module-level PEP 562 hooks (`__getattr__`, `__dir__`) are treated as non-actionable dead-code candidates.
 - Exact qualname-based liveness with import-alias resolution.
-- Inline suppressions: `# codeclone: ignore[dead-code]` on declarations.
+- Canonical inline suppression syntax: `# codeclone: ignore[dead-code]` on declarations.
 - Structural finding families: `duplicated_branches`, `clone_guard_exit_divergence`, `clone_cohort_drift`.
 
 ### Configuration and CLI
@@ -70,6 +71,13 @@ Major upgrade: CodeClone evolves from a structural clone detector into a
 
 - MkDocs site with Material theme and GitHub Pages workflow.
 - Live sample reports (HTML, JSON, SARIF).
+- PyPI-facing README now uses published docs URLs instead of repo-relative doc links.
+
+### Packaging
+
+- Package metadata stays explicitly beta (`2.0.0b1`, `Development Status :: 4 - Beta`).
+- `pyproject.toml` moved to SPDX-style `license = "MIT"` and `project.license-files`
+  for modern setuptools builds without release-time deprecation warnings.
 
 ### Stability
 
