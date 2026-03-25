@@ -98,6 +98,11 @@ Major upgrade: CodeClone evolves from a structural clone detector into a
     - replaced repeated full `ast.walk()` scans per range with a per-file
       statement index + `bisect` window lookup
 
+### Tests
+
+- Preserved existing golden/contract behavior for `1.4.x` and kept report output
+  semantics unchanged while improving runtime overhead.
+
 ### Contract Notes
 
 - No baseline/cache/report schema changes.
