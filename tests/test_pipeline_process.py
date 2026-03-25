@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import builtins
 from argparse import Namespace
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -135,6 +137,66 @@ def _build_single_file_process_case(
     src.write_text("def f():\n    return 1\n", "utf-8")
     filepath = str(src)
     return filepath, _build_boot(tmp_path, processes=1), _build_discovery((filepath,))
+
+
+def _build_report_case(
+    tmp_path: Path,
+    *,
+    json_out: bool = True,
+    md_out: bool = False,
+    sarif_out: bool = False,
+) -> tuple[
+    pipeline.BootstrapResult,
+    pipeline.DiscoveryResult,
+    pipeline.ProcessingResult,
+    pipeline.AnalysisResult,
+]:
+    boot = pipeline.BootstrapResult(
+        root=tmp_path,
+        config=NormalizationConfig(),
+        args=Namespace(),
+        output_paths=pipeline.OutputPaths(
+            json=tmp_path / "report.json" if json_out else None,
+            md=tmp_path / "report.md" if md_out else None,
+            sarif=tmp_path / "report.sarif" if sarif_out else None,
+        ),
+        cache_path=tmp_path / "cache.json",
+    )
+    discovery = _build_discovery(())
+    processing = pipeline.ProcessingResult(
+        units=(),
+        blocks=(),
+        segments=(),
+        class_metrics=(),
+        module_deps=(),
+        dead_candidates=(),
+        referenced_names=frozenset(),
+        files_analyzed=0,
+        files_skipped=0,
+        analyzed_lines=0,
+        analyzed_functions=0,
+        analyzed_methods=0,
+        analyzed_classes=0,
+        failed_files=(),
+        source_read_failures=(),
+    )
+    analysis = pipeline.AnalysisResult(
+        func_groups={},
+        block_groups={},
+        block_groups_report={},
+        segment_groups={},
+        suppressed_segment_groups=0,
+        block_group_facts={},
+        func_clones_count=0,
+        block_clones_count=0,
+        segment_clones_count=0,
+        files_analyzed_or_cached=0,
+        project_metrics=None,
+        metrics_payload=None,
+        suggestions=(),
+        segment_groups_raw_digest="",
+    )
+    return boot, discovery, processing, analysis
 
 
 def test_process_parallel_fallback_without_callback_uses_sequential(
@@ -355,3 +417,40 @@ def test_usable_cached_source_stats_respects_required_sections() -> None:
         )
         is None
     )
+
+
+def test_report_json_only_does_not_import_markdown_or_sarif(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boot, discovery, processing, analysis = _build_report_case(tmp_path, json_out=True)
+    original_import: Callable[..., object] = builtins.__import__
+
+    def _guard_import(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        if name in {"codeclone.report.markdown", "codeclone.report.sarif"}:
+            raise AssertionError(f"unexpected import: {name}")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _guard_import)
+
+    artifacts = pipeline.report(
+        boot=boot,
+        discovery=discovery,
+        processing=processing,
+        analysis=analysis,
+        report_meta={},
+        new_func=(),
+        new_block=(),
+        html_builder=None,
+        metrics_diff=None,
+    )
+
+    assert artifacts.json is not None
+    assert artifacts.md is None
+    assert artifacts.sarif is None

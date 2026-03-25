@@ -56,16 +56,11 @@ from .models import (
 )
 from .normalize import NormalizationConfig
 from .paths import is_test_filepath
-from .report import (
-    build_block_group_facts,
-    prepare_block_report_groups,
-    prepare_segment_report_groups,
-    render_json_report_document,
-    render_text_report_document,
-    to_markdown_report,
-    to_sarif_report,
-)
+from .report.blocks import prepare_block_report_groups
+from .report.explain import build_block_group_facts
 from .report.json_contract import build_report_document
+from .report.segments import prepare_segment_report_groups
+from .report.serialize import render_json_report_document, render_text_report_document
 from .report.suggestions import generate_suggestions
 from .scanner import iter_py_files, module_name_from_path
 from .structural_findings import build_clone_cohort_structural_findings
@@ -1531,6 +1526,8 @@ def report(
         contents["json"] = render_json_report_document(report_document)
 
     if boot.output_paths.md and report_document is not None:
+        from .report.markdown import to_markdown_report
+
         contents["md"] = to_markdown_report(
             report_document=report_document,
             meta=report_meta,
@@ -1548,6 +1545,8 @@ def report(
         )
 
     if boot.output_paths.sarif and report_document is not None:
+        from .report.sarif import to_sarif_report
+
         contents["sarif"] = to_sarif_report(
             report_document=report_document,
             meta=report_meta,

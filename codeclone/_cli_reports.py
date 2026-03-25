@@ -22,38 +22,14 @@ class _QuietArgs(Protocol):
     quiet: bool
 
 
-class _OutputPaths(Protocol):
-    @property
-    def html(self) -> Path | None: ...
-
-    @property
-    def json(self) -> Path | None: ...
-
-    @property
-    def md(self) -> Path | None: ...
-
-    @property
-    def sarif(self) -> Path | None: ...
-
-    @property
-    def text(self) -> Path | None: ...
+def _path_attr(obj: object, name: str) -> Path | None:
+    value = getattr(obj, name, None)
+    return value if isinstance(value, Path) else None
 
 
-class _ReportArtifacts(Protocol):
-    @property
-    def html(self) -> str | None: ...
-
-    @property
-    def json(self) -> str | None: ...
-
-    @property
-    def md(self) -> str | None: ...
-
-    @property
-    def sarif(self) -> str | None: ...
-
-    @property
-    def text(self) -> str | None: ...
+def _text_attr(obj: object, name: str) -> str | None:
+    value = getattr(obj, name, None)
+    return value if isinstance(value, str) else None
 
 
 def _write_report_output(
@@ -83,60 +59,70 @@ def _open_html_report_in_browser(*, path: Path) -> None:
 def write_report_outputs(
     *,
     args: _QuietArgs,
-    output_paths: _OutputPaths,
-    report_artifacts: _ReportArtifacts,
+    output_paths: object,
+    report_artifacts: object,
     console: _PrinterLike,
     open_html_report: bool = False,
 ) -> str | None:
     html_report_path: str | None = None
     saved_reports: list[tuple[str, Path]] = []
+    html_path = _path_attr(output_paths, "html")
+    json_path = _path_attr(output_paths, "json")
+    md_path = _path_attr(output_paths, "md")
+    sarif_path = _path_attr(output_paths, "sarif")
+    text_path = _path_attr(output_paths, "text")
+    html_report = _text_attr(report_artifacts, "html")
+    json_report = _text_attr(report_artifacts, "json")
+    md_report = _text_attr(report_artifacts, "md")
+    sarif_report = _text_attr(report_artifacts, "sarif")
+    text_report = _text_attr(report_artifacts, "text")
 
-    if output_paths.html and report_artifacts.html is not None:
-        out = output_paths.html
+    if html_path and html_report is not None:
+        out = html_path
         _write_report_output(
             out=out,
-            content=report_artifacts.html,
+            content=html_report,
             label="HTML",
             console=console,
         )
         html_report_path = str(out)
         saved_reports.append(("HTML", out))
 
-    if output_paths.json and report_artifacts.json is not None:
-        out = output_paths.json
+    if json_path and json_report is not None:
+        out = json_path
         _write_report_output(
             out=out,
-            content=report_artifacts.json,
+            content=json_report,
             label="JSON",
             console=console,
         )
         saved_reports.append(("JSON", out))
 
-    if output_paths.md and report_artifacts.md is not None:
-        out = output_paths.md
+    if md_path and md_report is not None:
+        out = md_path
         _write_report_output(
             out=out,
-            content=report_artifacts.md,
+            content=md_report,
             label="Markdown",
             console=console,
         )
         saved_reports.append(("Markdown", out))
 
-    if output_paths.sarif and report_artifacts.sarif is not None:
-        out = output_paths.sarif
+    if sarif_path and sarif_report is not None:
+        out = sarif_path
         _write_report_output(
             out=out,
-            content=report_artifacts.sarif,
+            content=sarif_report,
             label="SARIF",
             console=console,
         )
         saved_reports.append(("SARIF", out))
 
-    if output_paths.text and report_artifacts.text is not None:
-        out = output_paths.text
+    if text_path and text_report is not None:
+        out = text_path
         _write_report_output(
             out=out,
-            content=report_artifacts.text,
+            content=text_report,
             label="text",
             console=console,
         )
@@ -152,12 +138,10 @@ def write_report_outputs(
                 display = path
             console.print(f"  [bold]{label} report saved:[/bold] [dim]{display}[/dim]")
 
-    if open_html_report and output_paths.html is not None:
+    if open_html_report and html_path is not None:
         try:
-            _open_html_report_in_browser(path=output_paths.html)
+            _open_html_report_in_browser(path=html_path)
         except Exception as exc:
-            console.print(
-                ui.fmt_html_report_open_failed(path=output_paths.html, error=exc)
-            )
+            console.print(ui.fmt_html_report_open_failed(path=html_path, error=exc))
 
     return html_report_path

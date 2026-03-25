@@ -77,6 +77,7 @@ class _ParseTimeoutError(Exception):
 
 FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
 _NamedDeclarationNode = FunctionNode | ast.ClassDef
+_DeclarationTokenIndexKey = tuple[int, int, str]
 
 
 def _consumed_cpu_seconds(resource_module: object) -> float:
@@ -177,13 +178,29 @@ def _declaration_token_index(
     start_line: int,
     start_col: int,
     declaration_token: str,
+    source_token_index: Mapping[_DeclarationTokenIndexKey, int] | None = None,
 ) -> int | None:
+    if source_token_index is not None:
+        return source_token_index.get((start_line, start_col, declaration_token))
     for idx, token in enumerate(source_tokens):
         if token.start != (start_line, start_col):
             continue
         if token.type == tokenize.NAME and token.string == declaration_token:
             return idx
     return None
+
+
+def _build_declaration_token_index(
+    source_tokens: tuple[tokenize.TokenInfo, ...],
+) -> Mapping[_DeclarationTokenIndexKey, int]:
+    indexed: dict[_DeclarationTokenIndexKey, int] = {}
+    for idx, token in enumerate(source_tokens):
+        if token.type != tokenize.NAME:
+            continue
+        if token.string not in {"def", "async", "class"}:
+            continue
+        indexed[(token.start[0], token.start[1], token.string)] = idx
+    return indexed
 
 
 def _scan_declaration_colon_line(
@@ -223,6 +240,7 @@ def _declaration_end_line(
     node: ast.AST,
     *,
     source_tokens: tuple[tokenize.TokenInfo, ...],
+    source_token_index: Mapping[_DeclarationTokenIndexKey, int] | None = None,
 ) -> int:
     start_line = int(getattr(node, "lineno", 0))
     start_col = int(getattr(node, "col_offset", 0))
@@ -235,6 +253,7 @@ def _declaration_end_line(
         start_line=start_line,
         start_col=start_col,
         declaration_token=declaration_token,
+        source_token_index=source_token_index,
     )
     if start_index is None:
         return _fallback_declaration_end_line(node, start_line=start_line)
@@ -788,7 +807,9 @@ def _collect_declaration_targets(
     filepath: str,
     module_name: str,
     collector: _QualnameCollector,
-    source_tokens: tuple[tokenize.TokenInfo, ...],
+    source_tokens: tuple[tokenize.TokenInfo, ...] = (),
+    source_token_index: Mapping[_DeclarationTokenIndexKey, int] | None = None,
+    include_inline_lines: bool = False,
 ) -> tuple[DeclarationTarget, ...]:
     declarations: list[DeclarationTarget] = []
 
@@ -797,9 +818,14 @@ def _collect_declaration_targets(
         end = int(getattr(node, "end_lineno", 0))
         if start <= 0 or end <= 0:
             continue
-        declaration_end_line = _declaration_end_line(
-            node,
-            source_tokens=source_tokens,
+        declaration_end_line = (
+            _declaration_end_line(
+                node,
+                source_tokens=source_tokens,
+                source_token_index=source_token_index,
+            )
+            if include_inline_lines
+            else None
         )
         kind: Literal["function", "method"] = (
             "method" if "." in local_name else "function"
@@ -820,9 +846,14 @@ def _collect_declaration_targets(
         end = int(getattr(class_node, "end_lineno", 0))
         if start <= 0 or end <= 0:
             continue
-        declaration_end_line = _declaration_end_line(
-            class_node,
-            source_tokens=source_tokens,
+        declaration_end_line = (
+            _declaration_end_line(
+                class_node,
+                source_tokens=source_tokens,
+                source_token_index=source_token_index,
+            )
+            if include_inline_lines
+            else None
         )
         declarations.append(
             DeclarationTarget(
@@ -847,6 +878,42 @@ def _collect_declaration_targets(
             ),
         )
     )
+
+
+def _build_suppression_index_for_source(
+    *,
+    source: str,
+    filepath: str,
+    module_name: str,
+    collector: _QualnameCollector,
+) -> Mapping[SuppressionTargetKey, tuple[str, ...]]:
+    suppression_directives = extract_suppression_directives(source)
+    if not suppression_directives:
+        return {}
+
+    needs_inline_binding = any(
+        directive.binding == "inline" for directive in suppression_directives
+    )
+    source_tokens: tuple[tokenize.TokenInfo, ...] = ()
+    source_token_index: Mapping[_DeclarationTokenIndexKey, int] | None = None
+    if needs_inline_binding:
+        source_tokens = _source_tokens(source)
+        if source_tokens:
+            source_token_index = _build_declaration_token_index(source_tokens)
+
+    declaration_targets = _collect_declaration_targets(
+        filepath=filepath,
+        module_name=module_name,
+        collector=collector,
+        source_tokens=source_tokens,
+        source_token_index=source_token_index,
+        include_inline_lines=needs_inline_binding,
+    )
+    suppression_bindings = bind_suppressions_to_declarations(
+        directives=suppression_directives,
+        declarations=declaration_targets,
+    )
+    return build_suppression_index(suppression_bindings)
 
 
 # =========================
@@ -883,7 +950,6 @@ def extract_units_and_stats_from_source(
     collector = _QualnameCollector()
     collector.visit(tree)
     source_lines = source.splitlines()
-    source_tokens = _source_tokens(source)
     source_line_count = len(source_lines)
 
     is_test_file = is_test_filepath(filepath)
@@ -902,18 +968,12 @@ def extract_units_and_stats_from_source(
     protocol_symbol_aliases = _walk.protocol_symbol_aliases
     protocol_module_aliases = _walk.protocol_module_aliases
 
-    suppression_directives = extract_suppression_directives(source)
-    declaration_targets = _collect_declaration_targets(
+    suppression_index = _build_suppression_index_for_source(
+        source=source,
         filepath=filepath,
         module_name=module_name,
         collector=collector,
-        source_tokens=source_tokens,
     )
-    suppression_bindings = bind_suppressions_to_declarations(
-        directives=suppression_directives,
-        declarations=declaration_targets,
-    )
-    suppression_index = build_suppression_index(suppression_bindings)
     class_names = frozenset(class_node.name for _, class_node in collector.class_nodes)
     module_import_names = set(import_names)
     module_class_names = set(class_names)

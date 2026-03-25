@@ -2,6 +2,7 @@ import ast
 import os
 import signal
 import sys
+import tokenize
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import cast
@@ -117,6 +118,22 @@ def test_declaration_token_index_returns_none_when_start_token_is_missing() -> N
     )
 
 
+def test_declaration_token_index_uses_prebuilt_index() -> None:
+    tokens = extractor._source_tokens("async def demo():\n    return 1\n")
+    token_index = extractor._build_declaration_token_index(tokens)
+
+    assert (
+        extractor._declaration_token_index(
+            source_tokens=tokens,
+            start_line=1,
+            start_col=0,
+            declaration_token="async",
+            source_token_index=token_index,
+        )
+        == 0
+    )
+
+
 def test_scan_declaration_colon_line_returns_none_when_header_is_incomplete() -> None:
     tokens = extractor._source_tokens("def broken\n")
     assert (
@@ -170,6 +187,98 @@ class A:
         min_stmt=1,
     )
 
+    assert len(units) == 1
+    assert blocks == []
+    assert segments == []
+
+
+def test_extract_units_skips_suppression_tokenization_without_directives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        extractor,
+        "_source_tokens",
+        lambda _source: (_ for _ in ()).throw(
+            AssertionError("_source_tokens should not be called")
+        ),
+    )
+
+    units, blocks, segments = extract_units_from_source(
+        source="""
+def foo():
+    a = 1
+    return a
+""",
+        filepath="x.py",
+        module_name="mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert len(units) == 1
+    assert blocks == []
+    assert segments == []
+
+
+def test_extract_units_skips_suppression_tokenization_for_leading_only_directives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        extractor,
+        "_source_tokens",
+        lambda _source: (_ for _ in ()).throw(
+            AssertionError("_source_tokens should not be called")
+        ),
+    )
+
+    units, blocks, segments = extract_units_from_source(
+        source="""
+# codeclone: ignore[dead-code]
+def foo():
+    a = 1
+    return a
+""",
+        filepath="x.py",
+        module_name="mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert len(units) == 1
+    assert blocks == []
+    assert segments == []
+
+
+def test_extract_units_tokenizes_when_inline_suppressions_exist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    original_source_tokens = extractor._source_tokens
+
+    def _record_tokens(source: str) -> tuple[tokenize.TokenInfo, ...]:
+        nonlocal calls
+        calls += 1
+        return original_source_tokens(source)
+
+    monkeypatch.setattr(extractor, "_source_tokens", _record_tokens)
+
+    units, blocks, segments = extract_units_from_source(
+        source="""
+def foo(  # codeclone: ignore[dead-code]
+    value: int,
+) -> int:
+    return value
+""",
+        filepath="x.py",
+        module_name="mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert calls == 1
     assert len(units) == 1
     assert blocks == []
     assert segments == []
