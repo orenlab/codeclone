@@ -36,6 +36,23 @@ if TYPE_CHECKING:
 _as_int = _coerce.as_int
 
 
+def _render_fact_summary(raw: str) -> str:
+    """Render fact_summary as a styled inline chip."""
+    if not raw:
+        return ""
+    # Humanize key=value pairs: "cyclomatic_complexity=15" → "cyclomatic complexity: 15"
+    segments = [s.strip() for s in raw.split(",")]
+    parts: list[str] = []
+    for seg in segments:
+        if "=" in seg:
+            key, _, val = seg.partition("=")
+            parts.append(f"{key.strip().replace('_', ' ')}: {val.strip()}")
+        else:
+            parts.append(seg)
+    text = ", ".join(parts)
+    return f'<div class="suggestion-summary">{_escape_html(text)}</div>'
+
+
 def _format_source_breakdown(
     source_breakdown: Mapping[str, object] | Sequence[object],
 ) -> str:
@@ -61,32 +78,47 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
     facts_source = _escape_html(breakdown_text or source_kind_label(s.source_kind))
     facts_location = _escape_html(s.location_label or s.location)
 
-    # Context line
-    ctx_parts = [
-        source_kind_label(s.source_kind),
-        s.category.replace("_", " "),
-    ]
+    # Context chips — more visible than a single muted line
+    ctx_chips: list[str] = []
+    sk = source_kind_label(s.source_kind)
+    if sk:
+        ctx_chips.append(f'<span class="suggestion-chip">{_escape_html(sk)}</span>')
+    cat = s.category.replace("_", " ")
+    if cat:
+        ctx_chips.append(f'<span class="suggestion-chip">{_escape_html(cat)}</span>')
     if s.clone_type:
-        ctx_parts.append(s.clone_type)
-    ctx_text = " \u00b7 ".join(p for p in ctx_parts if p)
+        ctx_chips.append(
+            f'<span class="suggestion-chip">{_escape_html(s.clone_type)}</span>'
+        )
+    ctx_html = f'<div class="suggestion-context">{"".join(ctx_chips)}</div>'
 
-    # Next step
+    # Next step — primary actionable CTA
     next_step = _escape_html(s.steps[0]) if s.steps else ""
     next_step_html = (
-        f'<div class="suggestion-action"><strong>Next step</strong>{next_step}</div>'
+        '<div class="suggestion-action">'
+        '<svg class="suggestion-action-icon" viewBox="0 0 16 16" width="12" height="12">'
+        '<path d="M1 8h12M9 4l4 4-4 4" fill="none" stroke="currentColor" '
+        'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        f"{next_step}</div>"
         if next_step
         else ""
     )
+
+    # Effort badge — color-coded
+    effort_cls = f" suggestion-effort--{_escape_html(s.effort)}"
+
+    # Priority — clean display (drop trailing zeros)
+    priority_str = f"{s.priority:g}"
 
     # Locations inside details
     locs_html = ""
     if s.representative_locations:
         locs_items = "".join(
-            "<li>"
-            f'<span class="suggestion-loc-path">'
-            f"{_escape_html(loc.relative_path)}:{loc.start_line}-{loc.end_line}</span>"
-            f'<span class="suggestion-loc-name">'
-            f"{_escape_html(ctx.bare_qualname(loc.qualname, loc.filepath))}</span>"
+            '<li><span class="suggestion-loc-path">'
+            f"{_escape_html(loc.relative_path)}"
+            f'<span class="suggestion-loc-lines">:{loc.start_line}\u2013{loc.end_line}</span>'
+            "</span>"
+            f'<span class="suggestion-loc-name">{_escape_html(ctx.bare_qualname(loc.qualname, loc.filepath))}</span>'
             "</li>"
             for loc in s.representative_locations
         )
@@ -104,6 +136,12 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
             f'<ol class="suggestion-steps">{steps_items}</ol>'
         )
 
+    # Severity dd — colored to match header badge
+    sev_dd = (
+        f'<span class="suggestion-sev-inline suggestion-sev--{_escape_html(s.severity)}">'
+        f"{_escape_html(s.severity)}</span>"
+    )
+
     return (
         f'<article class="suggestion-card"'
         f"{_build_data_attrs({'data-suggestion-card': 'true', 'data-severity': s.severity, 'data-category': s.category, 'data-family': s.finding_family, 'data-source-kind': s.source_kind, 'data-clone-type': s.clone_type, 'data-actionable': actionable, 'data-spread-bucket': spread_bucket, 'data-count': str(s.fact_count)})}"
@@ -113,14 +151,14 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
         f'<span class="suggestion-sev suggestion-sev--{_escape_html(s.severity)}">{_escape_html(s.severity)}</span>'
         f'<span class="suggestion-title">{_escape_html(s.title)}</span>'
         '<span class="suggestion-meta">'
-        f'<span class="suggestion-meta-badge">effort: {_escape_html(s.effort)}</span>'
-        f'<span class="suggestion-meta-badge">priority: {s.priority:.2f}</span>'
+        f'<span class="suggestion-meta-badge{effort_cls}">{_escape_html(s.effort)}</span>'
+        f'<span class="suggestion-meta-badge">P{priority_str}</span>'
         f'<span class="suggestion-meta-badge">{s.spread_functions} fn / {s.spread_files} files</span>'
         "</span></div>"
         # -- body --
         '<div class="suggestion-body">'
-        f'<div class="suggestion-context">{_escape_html(ctx_text)}</div>'
-        f'<div class="suggestion-summary">{_escape_html(s.fact_summary)}</div>'
+        f"{ctx_html}"
+        f"{_render_fact_summary(s.fact_summary)}"
         f"{next_step_html}"
         "</div>"
         # -- expandable details --
@@ -139,9 +177,9 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
         '<div class="suggestion-fact-group">'
         '<div class="suggestion-fact-group-title">Assessment</div>'
         '<dl class="suggestion-dl">'
-        f"<div><dt>Severity</dt><dd>{_escape_html(s.severity)}</dd></div>"
+        f"<div><dt>Severity</dt><dd>{sev_dd}</dd></div>"
         f"<div><dt>Confidence</dt><dd>{_escape_html(s.confidence)}</dd></div>"
-        f"<div><dt>Priority</dt><dd>{s.priority:.2f}</dd></div>"
+        f"<div><dt>Priority</dt><dd>{priority_str}</dd></div>"
         f"<div><dt>Family</dt><dd>{_escape_html(s.finding_family)}</dd></div>"
         "</dl></div>"
         "</div>"

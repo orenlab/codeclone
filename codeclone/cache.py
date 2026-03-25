@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import os
+from collections.abc import Collection
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, TypeGuard, TypeVar, cast
@@ -35,6 +36,14 @@ if TYPE_CHECKING:
 
 MAX_CACHE_SIZE_BYTES = 50 * 1024 * 1024
 LEGACY_CACHE_SECRET_FILENAME = ".cache_secret"
+_DEFAULT_WIRE_UNIT_FLOW_PROFILES = (
+    0,
+    "none",
+    False,
+    "fallthrough",
+    "none",
+    "none",
+)
 
 
 class CacheStatus(str, Enum):
@@ -140,6 +149,10 @@ class CacheEntry(CacheEntryBase, total=False):
 class AnalysisProfile(TypedDict):
     min_loc: int
     min_stmt: int
+    block_min_loc: int
+    block_min_stmt: int
+    segment_min_loc: int
+    segment_min_stmt: int
 
 
 class CacheData(TypedDict):
@@ -301,8 +314,12 @@ class Cache:
         *,
         root: str | Path | None = None,
         max_size_bytes: int | None = None,
-        min_loc: int = 15,
+        min_loc: int = 10,
         min_stmt: int = 6,
+        block_min_loc: int = 20,
+        block_min_stmt: int = 8,
+        segment_min_loc: int = 20,
+        segment_min_stmt: int = 10,
     ):
         self.path = Path(path)
         self.root = _resolve_root(root)
@@ -310,6 +327,10 @@ class Cache:
         self.analysis_profile: AnalysisProfile = {
             "min_loc": min_loc,
             "min_stmt": min_stmt,
+            "block_min_loc": block_min_loc,
+            "block_min_stmt": block_min_stmt,
+            "segment_min_loc": segment_min_loc,
+            "segment_min_stmt": segment_min_stmt,
         }
         self.data: CacheData = _empty_cache_data(
             version=self._CACHE_VERSION,
@@ -367,6 +388,38 @@ class Cache:
         )
         self._canonical_runtime_paths = set()
         self.segment_report_projection = None
+
+    def _reject_cache_load(
+        self,
+        message: str,
+        *,
+        status: CacheStatus,
+        schema_version: str | None = None,
+    ) -> CacheData | None:
+        self._ignore_cache(
+            message,
+            status=status,
+            schema_version=schema_version,
+        )
+        return None
+
+    def _reject_invalid_cache_format(
+        self,
+        *,
+        schema_version: str | None = None,
+    ) -> CacheData | None:
+        return self._reject_cache_load(
+            "Cache format invalid; ignoring cache.",
+            status=CacheStatus.INVALID_TYPE,
+            schema_version=schema_version,
+        )
+
+    def _reject_version_mismatch(self, version: str) -> CacheData | None:
+        return self._reject_cache_load(
+            f"Cache version mismatch (found {version}); ignoring cache.",
+            status=CacheStatus.VERSION_MISMATCH,
+            schema_version=version,
+        )
 
     @staticmethod
     def _sign_data(data: Mapping[str, object]) -> str:
@@ -426,107 +479,66 @@ class Cache:
     def _load_and_validate(self, raw_obj: object) -> CacheData | None:
         raw = _as_str_dict(raw_obj)
         if raw is None:
-            self._ignore_cache(
-                "Cache format invalid; ignoring cache.",
-                status=CacheStatus.INVALID_TYPE,
-            )
-            return None
+            return self._reject_invalid_cache_format()
 
         # Legacy cache format: top-level {version, files, _signature}.
         legacy_version = _as_str(raw.get("version"))
         if legacy_version is not None:
-            self._ignore_cache(
-                f"Cache version mismatch (found {legacy_version}); ignoring cache.",
-                status=CacheStatus.VERSION_MISMATCH,
-                schema_version=legacy_version,
-            )
-            return None
+            return self._reject_version_mismatch(legacy_version)
 
         version = _as_str(raw.get("v"))
         if version is None:
-            self._ignore_cache(
-                "Cache format invalid; ignoring cache.",
-                status=CacheStatus.INVALID_TYPE,
-            )
-            return None
+            return self._reject_invalid_cache_format()
 
         if version != self._CACHE_VERSION:
-            self._ignore_cache(
-                f"Cache version mismatch (found {version}); ignoring cache.",
-                status=CacheStatus.VERSION_MISMATCH,
-                schema_version=version,
-            )
-            return None
+            return self._reject_version_mismatch(version)
 
         sig = _as_str(raw.get("sig"))
         payload_obj = raw.get("payload")
         payload = _as_str_dict(payload_obj)
         if sig is None or payload is None:
-            self._ignore_cache(
-                "Cache format invalid; ignoring cache.",
-                status=CacheStatus.INVALID_TYPE,
-                schema_version=version,
-            )
-            return None
+            return self._reject_invalid_cache_format(schema_version=version)
 
         expected_sig = self._sign_data(payload)
         if not hmac.compare_digest(sig, expected_sig):
-            self._ignore_cache(
+            return self._reject_cache_load(
                 "Cache signature mismatch; ignoring cache.",
                 status=CacheStatus.INTEGRITY_FAILED,
                 schema_version=version,
             )
-            return None
 
         runtime_tag = current_python_tag()
         py_tag = _as_str(payload.get("py"))
         if py_tag is None:
-            self._ignore_cache(
-                "Cache format invalid; ignoring cache.",
-                status=CacheStatus.INVALID_TYPE,
-                schema_version=version,
-            )
-            return None
+            return self._reject_invalid_cache_format(schema_version=version)
 
         if py_tag != runtime_tag:
-            self._ignore_cache(
+            return self._reject_cache_load(
                 "Cache python tag mismatch "
                 f"(found {py_tag}, expected {runtime_tag}); ignoring cache.",
                 status=CacheStatus.PYTHON_TAG_MISMATCH,
                 schema_version=version,
             )
-            return None
 
         fp_version = _as_str(payload.get("fp"))
         if fp_version is None:
-            self._ignore_cache(
-                "Cache format invalid; ignoring cache.",
-                status=CacheStatus.INVALID_TYPE,
-                schema_version=version,
-            )
-            return None
+            return self._reject_invalid_cache_format(schema_version=version)
 
         if fp_version != self.fingerprint_version:
-            self._ignore_cache(
+            return self._reject_cache_load(
                 "Cache fingerprint version mismatch "
                 f"(found {fp_version}, expected {self.fingerprint_version}); "
                 "ignoring cache.",
                 status=CacheStatus.FINGERPRINT_MISMATCH,
                 schema_version=version,
             )
-            return None
 
         analysis_profile = _as_analysis_profile(payload.get("ap"))
         if analysis_profile is None:
-            self._ignore_cache(
-                "Cache format invalid; ignoring cache.",
-                status=CacheStatus.INVALID_TYPE,
-                schema_version=version,
-            )
-            return None
+            return self._reject_invalid_cache_format(schema_version=version)
 
         if analysis_profile != self.analysis_profile:
-            self._ignore_cache(
+            return self._reject_cache_load(
                 "Cache analysis profile mismatch "
                 f"(found min_loc={analysis_profile['min_loc']}, "
                 f"min_stmt={analysis_profile['min_stmt']}; "
@@ -536,29 +548,18 @@ class Cache:
                 status=CacheStatus.ANALYSIS_PROFILE_MISMATCH,
                 schema_version=version,
             )
-            return None
 
         files_obj = payload.get("files")
         files_dict = _as_str_dict(files_obj)
         if files_dict is None:
-            self._ignore_cache(
-                "Cache format invalid; ignoring cache.",
-                status=CacheStatus.INVALID_TYPE,
-                schema_version=version,
-            )
-            return None
+            return self._reject_invalid_cache_format(schema_version=version)
 
         parsed_files: dict[str, CacheEntry] = {}
         for wire_path, file_entry_obj in files_dict.items():
             runtime_path = self._runtime_filepath_from_wire(wire_path)
             parsed_entry = self._decode_entry(file_entry_obj, runtime_path)
             if parsed_entry is None:
-                self._ignore_cache(
-                    "Cache format invalid; ignoring cache.",
-                    status=CacheStatus.INVALID_TYPE,
-                    schema_version=version,
-                )
-                return None
+                return self._reject_invalid_cache_format(schema_version=version)
             parsed_files[runtime_path] = _canonicalize_cache_entry(parsed_entry)
         self.segment_report_projection = self._decode_segment_report_projection(
             payload.get("sr")
@@ -1297,6 +1298,19 @@ def _decode_wire_qualname_span(
     return qualname, start_line, end_line
 
 
+def _decode_wire_qualname_span_size(
+    row: list[object],
+) -> tuple[str, int, int, int] | None:
+    qualname_span = _decode_wire_qualname_span(row)
+    if qualname_span is None:
+        return None
+    size = _as_int(row[3])
+    if size is None:
+        return None
+    qualname, start_line, end_line = qualname_span
+    return qualname, start_line, end_line, size
+
+
 def _as_str_dict(value: object) -> dict[str, object] | None:
     if not isinstance(value, dict):
         return None
@@ -1311,15 +1325,41 @@ def _as_analysis_profile(value: object) -> AnalysisProfile | None:
     if obj is None:
         return None
 
-    if set(obj.keys()) != {"min_loc", "min_stmt"}:
+    _REQUIRED = {
+        "min_loc",
+        "min_stmt",
+        "block_min_loc",
+        "block_min_stmt",
+        "segment_min_loc",
+        "segment_min_stmt",
+    }
+    if set(obj.keys()) < _REQUIRED:
         return None
 
     min_loc = _as_int(obj.get("min_loc"))
     min_stmt = _as_int(obj.get("min_stmt"))
-    if min_loc is None or min_stmt is None:
+    block_min_loc = _as_int(obj.get("block_min_loc"))
+    block_min_stmt = _as_int(obj.get("block_min_stmt"))
+    segment_min_loc = _as_int(obj.get("segment_min_loc"))
+    segment_min_stmt = _as_int(obj.get("segment_min_stmt"))
+    if (
+        min_loc is None
+        or min_stmt is None
+        or block_min_loc is None
+        or block_min_stmt is None
+        or segment_min_loc is None
+        or segment_min_stmt is None
+    ):
         return None
 
-    return AnalysisProfile(min_loc=min_loc, min_stmt=min_stmt)
+    return AnalysisProfile(
+        min_loc=min_loc,
+        min_stmt=min_stmt,
+        block_min_loc=block_min_loc,
+        block_min_stmt=block_min_stmt,
+        segment_min_loc=segment_min_loc,
+        segment_min_stmt=segment_min_stmt,
+    )
 
 
 def _decode_wire_stat(obj: dict[str, object]) -> FileStat | None:
@@ -1343,20 +1383,11 @@ def _decode_optional_wire_source_stats(
     row = _as_list(raw)
     if row is None or len(row) != 4:
         return None
-    lines = _as_int(row[0])
-    functions = _as_int(row[1])
-    methods = _as_int(row[2])
-    classes = _as_int(row[3])
-    if (
-        lines is None
-        or functions is None
-        or methods is None
-        or classes is None
-        or lines < 0
-        or functions < 0
-        or methods < 0
-        or classes < 0
-    ):
+    counts = _decode_wire_int_fields(row, 0, 1, 2, 3)
+    if counts is None:
+        return None
+    lines, functions, methods, classes = counts
+    if any(value < 0 for value in counts):
         return None
     return SourceStatsDict(
         lines=lines,
@@ -1629,6 +1660,145 @@ def _decode_wire_structural_findings_optional(
     return groups
 
 
+def _decode_wire_row(
+    value: object,
+    *,
+    valid_lengths: Collection[int],
+) -> list[object] | None:
+    row = _as_list(value)
+    if row is None or len(row) not in valid_lengths:
+        return None
+    return row
+
+
+def _decode_wire_named_span(
+    value: object,
+    *,
+    valid_lengths: Collection[int],
+) -> tuple[list[object], str, int, int] | None:
+    row = _decode_wire_row(value, valid_lengths=valid_lengths)
+    if row is None:
+        return None
+    span = _decode_wire_qualname_span(row)
+    if span is None:
+        return None
+    qualname, start_line, end_line = span
+    return row, qualname, start_line, end_line
+
+
+def _decode_wire_named_sized_span(
+    value: object,
+    *,
+    valid_lengths: Collection[int],
+) -> tuple[list[object], str, int, int, int] | None:
+    row = _decode_wire_row(value, valid_lengths=valid_lengths)
+    if row is None:
+        return None
+    span = _decode_wire_qualname_span_size(row)
+    if span is None:
+        return None
+    qualname, start_line, end_line, size = span
+    return row, qualname, start_line, end_line, size
+
+
+def _decode_wire_int_fields(
+    row: list[object],
+    *indexes: int,
+) -> tuple[int, ...] | None:
+    values: list[int] = []
+    for index in indexes:
+        value = _as_int(row[index])
+        if value is None:
+            return None
+        values.append(value)
+    return tuple(values)
+
+
+def _decode_wire_str_fields(
+    row: list[object],
+    *indexes: int,
+) -> tuple[str, ...] | None:
+    values: list[str] = []
+    for index in indexes:
+        value = _as_str(row[index])
+        if value is None:
+            return None
+        values.append(value)
+    return tuple(values)
+
+
+def _decode_wire_unit_core_fields(
+    row: list[object],
+) -> tuple[int, int, str, str, int, int, Literal["low", "medium", "high"], str] | None:
+    int_fields = _decode_wire_int_fields(row, 3, 4, 7, 8)
+    str_fields = _decode_wire_str_fields(row, 5, 6, 10)
+    risk = _as_risk_literal(row[9])
+    if int_fields is None or str_fields is None or risk is None:
+        return None
+    loc, stmt_count, cyclomatic_complexity, nesting_depth = int_fields
+    fingerprint, loc_bucket, raw_hash = str_fields
+    return (
+        loc,
+        stmt_count,
+        fingerprint,
+        loc_bucket,
+        cyclomatic_complexity,
+        nesting_depth,
+        risk,
+        raw_hash,
+    )
+
+
+def _decode_wire_unit_flow_profiles(
+    row: list[object],
+) -> tuple[int, str, bool, str, str, str] | None:
+    if len(row) != 17:
+        return _DEFAULT_WIRE_UNIT_FLOW_PROFILES
+
+    parsed_entry_guard_count = _as_int(row[11])
+    parsed_entry_guard_terminal_profile = _as_str(row[12])
+    parsed_entry_guard_has_side_effect_before = _as_int(row[13])
+    parsed_terminal_kind = _as_str(row[14])
+    parsed_try_finally_profile = _as_str(row[15])
+    parsed_side_effect_order_profile = _as_str(row[16])
+    if (
+        parsed_entry_guard_count is None
+        or parsed_entry_guard_terminal_profile is None
+        or parsed_entry_guard_has_side_effect_before is None
+        or parsed_terminal_kind is None
+        or parsed_try_finally_profile is None
+        or parsed_side_effect_order_profile is None
+    ):
+        return None
+    return (
+        max(0, parsed_entry_guard_count),
+        parsed_entry_guard_terminal_profile or "none",
+        parsed_entry_guard_has_side_effect_before != 0,
+        parsed_terminal_kind or "fallthrough",
+        parsed_try_finally_profile or "none",
+        parsed_side_effect_order_profile or "none",
+    )
+
+
+def _decode_wire_class_metric_fields(
+    row: list[object],
+) -> tuple[int, int, int, int, str, str] | None:
+    int_fields = _decode_wire_int_fields(row, 3, 4, 5, 6)
+    str_fields = _decode_wire_str_fields(row, 7, 8)
+    if int_fields is None or str_fields is None:
+        return None
+    cbo, lcom4, method_count, instance_var_count = int_fields
+    risk_coupling, risk_cohesion = str_fields
+    return (
+        cbo,
+        lcom4,
+        method_count,
+        instance_var_count,
+        risk_coupling,
+        risk_cohesion,
+    )
+
+
 def _decode_wire_structural_group(value: object) -> StructuralFindingGroupDict | None:
     group_row = _as_list(value)
     if group_row is None or len(group_row) != 4:
@@ -1694,64 +1864,32 @@ def _decode_wire_structural_occurrence(
 
 
 def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
-    row = _as_list(value)
-    if row is None or len(row) not in {11, 17}:
+    decoded = _decode_wire_named_span(value, valid_lengths={11, 17})
+    if decoded is None:
         return None
-
-    qualname_span = _decode_wire_qualname_span(row)
-    if qualname_span is None:
+    row, qualname, start_line, end_line = decoded
+    core_fields = _decode_wire_unit_core_fields(row)
+    flow_profiles = _decode_wire_unit_flow_profiles(row)
+    if core_fields is None or flow_profiles is None:
         return None
-    qualname, start_line, end_line = qualname_span
-    loc = _as_int(row[3])
-    stmt_count = _as_int(row[4])
-    fingerprint = _as_str(row[5])
-    loc_bucket = _as_str(row[6])
-    cyclomatic_complexity = _as_int(row[7])
-    nesting_depth = _as_int(row[8])
-    risk = _as_risk_literal(row[9])
-    raw_hash = _as_str(row[10])
-    entry_guard_count = 0
-    entry_guard_terminal_profile = "none"
-    entry_guard_has_side_effect_before = False
-    terminal_kind = "fallthrough"
-    try_finally_profile = "none"
-    side_effect_order_profile = "none"
-    if len(row) == 17:
-        parsed_entry_guard_count = _as_int(row[11])
-        parsed_entry_guard_terminal_profile = _as_str(row[12])
-        parsed_entry_guard_has_side_effect_before = _as_int(row[13])
-        parsed_terminal_kind = _as_str(row[14])
-        parsed_try_finally_profile = _as_str(row[15])
-        parsed_side_effect_order_profile = _as_str(row[16])
-        if (
-            parsed_entry_guard_count is None
-            or parsed_entry_guard_terminal_profile is None
-            or parsed_entry_guard_has_side_effect_before is None
-            or parsed_terminal_kind is None
-            or parsed_try_finally_profile is None
-            or parsed_side_effect_order_profile is None
-        ):
-            return None
-        entry_guard_count = max(0, parsed_entry_guard_count)
-        entry_guard_terminal_profile = parsed_entry_guard_terminal_profile or "none"
-        entry_guard_has_side_effect_before = (
-            parsed_entry_guard_has_side_effect_before != 0
-        )
-        terminal_kind = parsed_terminal_kind or "fallthrough"
-        try_finally_profile = parsed_try_finally_profile or "none"
-        side_effect_order_profile = parsed_side_effect_order_profile or "none"
-
-    if (
-        loc is None
-        or stmt_count is None
-        or fingerprint is None
-        or loc_bucket is None
-        or cyclomatic_complexity is None
-        or nesting_depth is None
-        or risk is None
-        or raw_hash is None
-    ):
-        return None
+    (
+        loc,
+        stmt_count,
+        fingerprint,
+        loc_bucket,
+        cyclomatic_complexity,
+        nesting_depth,
+        risk,
+        raw_hash,
+    ) = core_fields
+    (
+        entry_guard_count,
+        entry_guard_terminal_profile,
+        entry_guard_has_side_effect_before,
+        terminal_kind,
+        try_finally_profile,
+        side_effect_order_profile,
+    ) = flow_profiles
     return FunctionGroupItem(
         qualname=qualname,
         filepath=filepath,
@@ -1775,23 +1913,12 @@ def _decode_wire_unit(value: object, filepath: str) -> UnitDict | None:
 
 
 def _decode_wire_block(value: object, filepath: str) -> BlockDict | None:
-    row = _as_list(value)
-    if row is None or len(row) != 5:
+    decoded = _decode_wire_named_sized_span(value, valid_lengths={5})
+    if decoded is None:
         return None
-
-    qualname = _as_str(row[0])
-    start_line = _as_int(row[1])
-    end_line = _as_int(row[2])
-    size = _as_int(row[3])
+    row, qualname, start_line, end_line, size = decoded
     block_hash = _as_str(row[4])
-
-    if (
-        qualname is None
-        or start_line is None
-        or end_line is None
-        or size is None
-        or block_hash is None
-    ):
+    if block_hash is None:
         return None
 
     return BlockGroupItem(
@@ -1805,25 +1932,13 @@ def _decode_wire_block(value: object, filepath: str) -> BlockDict | None:
 
 
 def _decode_wire_segment(value: object, filepath: str) -> SegmentDict | None:
-    row = _as_list(value)
-    if row is None or len(row) != 6:
+    decoded = _decode_wire_named_sized_span(value, valid_lengths={6})
+    if decoded is None:
         return None
-
-    qualname = _as_str(row[0])
-    start_line = _as_int(row[1])
-    end_line = _as_int(row[2])
-    size = _as_int(row[3])
+    row, qualname, start_line, end_line, size = decoded
     segment_hash = _as_str(row[4])
     segment_sig = _as_str(row[5])
-
-    if (
-        qualname is None
-        or start_line is None
-        or end_line is None
-        or size is None
-        or segment_hash is None
-        or segment_sig is None
-    ):
+    if segment_hash is None or segment_sig is None:
         return None
 
     return SegmentGroupItem(
@@ -1841,29 +1956,16 @@ def _decode_wire_class_metric(
     value: object,
     filepath: str,
 ) -> ClassMetricsDict | None:
-    row = _as_list(value)
-    if row is None or len(row) != 9:
+    decoded = _decode_wire_named_span(value, valid_lengths={9})
+    if decoded is None:
         return None
-
-    qualname_span = _decode_wire_qualname_span(row)
-    if qualname_span is None:
+    row, qualname, start_line, end_line = decoded
+    metric_fields = _decode_wire_class_metric_fields(row)
+    if metric_fields is None:
         return None
-    qualname, start_line, end_line = qualname_span
-    cbo = _as_int(row[3])
-    lcom4 = _as_int(row[4])
-    method_count = _as_int(row[5])
-    instance_var_count = _as_int(row[6])
-    risk_coupling = _as_str(row[7])
-    risk_cohesion = _as_str(row[8])
-    if (
-        cbo is None
-        or lcom4 is None
-        or method_count is None
-        or instance_var_count is None
-        or risk_coupling is None
-        or risk_cohesion is None
-    ):
-        return None
+    cbo, lcom4, method_count, instance_var_count, risk_coupling, risk_cohesion = (
+        metric_fields
+    )
     return ClassMetricsDict(
         qualname=qualname,
         filepath=filepath,
@@ -1900,8 +2002,8 @@ def _decode_wire_dead_candidate(
     value: object,
     filepath: str,
 ) -> DeadCandidateDict | None:
-    row = _as_list(value)
-    if row is None or len(row) not in {5, 6}:
+    row = _decode_wire_row(value, valid_lengths={5, 6})
+    if row is None:
         return None
     qualname = _as_str(row[0])
     local_name = _as_str(row[1])

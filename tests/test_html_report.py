@@ -71,6 +71,68 @@ def build_html_report(
     )
 
 
+def _assert_html_contains(html: str, *needles: str) -> None:
+    for needle in needles:
+        assert needle in html
+
+
+def _coupling_metrics_payload(coupled_classes: list[str]) -> dict[str, object]:
+    payload = _metrics_payload(
+        health_score=70,
+        health_grade="B",
+        complexity_max=1,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=1,
+        dead_total=0,
+        dead_critical=0,
+    )
+    coupling = payload["coupling"]
+    assert isinstance(coupling, dict)
+    classes = coupling["classes"]
+    assert isinstance(classes, list)
+    classes[0]["coupled_classes"] = coupled_classes
+    return payload
+
+
+def _render_metrics_html(payload: dict[str, object]) -> str:
+    return build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=payload,
+    )
+
+
+def _dependency_metrics_payload(
+    *,
+    edge_list: list[dict[str, object]],
+    longest_chains: list[list[str]],
+    dep_cycles: list[list[str]],
+    dep_max_depth: int,
+) -> dict[str, object]:
+    payload = _metrics_payload(
+        health_score=70,
+        health_grade="B",
+        complexity_max=1,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=dep_cycles,
+        dep_max_depth=dep_max_depth,
+        dead_total=0,
+        dead_critical=0,
+    )
+    deps = payload["dependencies"]
+    assert isinstance(deps, dict)
+    deps["edge_list"] = edge_list
+    deps["longest_chains"] = longest_chains
+    return payload
+
+
 def _repeated_assert_block_groups(
     tmp_path: Path,
     *,
@@ -155,10 +217,7 @@ def test_html_report_generation(tmp_path: Path) -> None:
         max_snippet_lines=10,
     )
 
-    assert "Test Report" in html
-    assert "f1" in html
-    assert "f2" in html
-    assert "codebox" in html
+    _assert_html_contains(html, "Test Report", "f1", "f2", "codebox")
 
 
 def test_html_report_group_and_item_metadata_attrs(tmp_path: Path) -> None:
@@ -179,12 +238,15 @@ def test_html_report_group_and_item_metadata_attrs(tmp_path: Path) -> None:
         segment_groups={},
         title="Attrs",
     )
-    assert 'data-group-key="hash1"' in html
-    assert '<div class="group-name">hash1</div>' in html
-    assert 'data-qualname="pkg.mod:f"' in html
-    assert 'data-filepath="' in html
-    assert 'data-start-line="1"' in html
-    assert 'data-end-line="2"' in html
+    _assert_html_contains(
+        html,
+        'data-group-key="hash1"',
+        '<div class="group-name">hash1</div>',
+        'data-qualname="pkg.mod:f"',
+        'data-filepath="',
+        'data-start-line="1"',
+        'data-end-line="2"',
+    )
 
 
 def test_html_report_renders_novelty_tabs_and_group_flags(tmp_path: Path) -> None:
@@ -214,15 +276,21 @@ def test_html_report_renders_novelty_tabs_and_group_flags(tmp_path: Path) -> Non
         new_function_group_keys={"new-func"},
         report_meta={"baseline_loaded": True, "baseline_status": "ok"},
     )
-    assert "New duplicates" in html
-    assert "Known duplicates" in html
-    assert 'id="global-novelty-controls"' in html
-    assert 'data-global-novelty="new"' in html
-    assert 'data-global-novelty="known"' in html
+    _assert_html_contains(
+        html,
+        "New duplicates",
+        "Known duplicates",
+        'id="global-novelty-controls"',
+        'data-global-novelty="new"',
+        'data-global-novelty="known"',
+    )
     assert 'data-novelty-filter="functions"' not in html
-    assert 'data-group-key="new-func" data-novelty="new"' in html
-    assert 'data-group-key="known-func" data-novelty="known"' in html
-    assert "Split is based on baseline" in html
+    _assert_html_contains(
+        html,
+        'data-group-key="new-func" data-novelty="new"',
+        'data-group-key="known-func" data-novelty="known"',
+        "Split is based on baseline",
+    )
 
 
 def test_html_report_renders_untrusted_baseline_novelty_note(tmp_path: Path) -> None:
@@ -317,11 +385,14 @@ def test_html_report_exposes_scope_counter_hooks_for_clone_ui(tmp_path: Path) ->
         new_function_group_keys={"new-func"},
         report_meta={"baseline_loaded": True, "baseline_status": "ok"},
     )
-    assert "data-main-clones-count" in html
-    assert 'data-clone-tab-count="functions"' in html
-    assert 'data-clone-tab-count="blocks"' in html
-    assert 'data-total-groups="2"' in html
-    assert "updateCloneScopeCounters" in html
+    _assert_html_contains(
+        html,
+        "data-main-clones-count",
+        'data-clone-tab-count="functions"',
+        'data-clone-tab-count="blocks"',
+        'data-total-groups="2"',
+        "updateCloneScopeCounters",
+    )
 
 
 def test_html_report_structural_findings_tab_uses_normalized_groups() -> None:
@@ -400,11 +471,14 @@ def test_html_report_structural_findings_tab_uses_normalized_groups() -> None:
             ),
         ],
     )
-    assert 'data-tab="structural-findings"' in html
-    assert ">1</span>" in html
-    assert "Repeated non-overlapping branch-body shapes" in html
-    assert "1 function" in html
-    assert "stmt_seq=Expr,For" in html
+    _assert_html_contains(
+        html,
+        'data-tab="structural-findings"',
+        ">1</span>",
+        "Repeated non-overlapping branch-body shapes",
+        "1 function",
+    )
+    assert "stmt seq" in html and "Expr,For" in html
     assert "stmt_seq=Expr</span>" not in html
 
 
@@ -468,8 +542,8 @@ def test_html_report_structural_findings_why_modal_renders_examples(
     for needle in (
         'data-finding-why-btn="finding-why-template-cccc',
         'id="finding-why-modal"',
-        "Why This Finding Was Reported",
-        "Matching Branch Examples",
+        "Finding Details",
+        "Examples",
         "Example A",
         "Example B",
         "warn",
@@ -494,12 +568,15 @@ def test_html_report_block_group_includes_match_basis_and_compact_key() -> None:
         },
         segment_groups={},
     )
-    assert 'data-match-rule="normalized_sliding_window"' in html
-    assert 'data-block-size="4"' in html
-    assert 'data-signature-kind="stmt_hash_sequence"' in html
-    assert 'data-merged-regions="true"' in html
-    assert 'data-pattern="repeated_stmt_hash"' in html
-    assert f"{_REPEATED_STMT_HASH[:12]} x4" in html
+    _assert_html_contains(
+        html,
+        'data-match-rule="normalized_sliding_window"',
+        'data-block-size="4"',
+        'data-signature-kind="stmt_hash_sequence"',
+        'data-merged-regions="true"',
+        'data-pattern="repeated_stmt_hash"',
+        f"{_REPEATED_STMT_HASH[:12]} x4",
+    )
 
 
 def test_html_report_block_group_includes_assert_only_explanation(
@@ -657,29 +734,24 @@ def test_html_report_n_way_group_without_compare_note(tmp_path: Path) -> None:
     assert '<div class="group-compare-note">' not in html
 
 
-def test_html_report_command_palette_full_actions_present() -> None:
+def test_html_report_topbar_actions_present() -> None:
     html = build_html_report(func_groups={}, block_groups={}, segment_groups={})
-    assert "Export Report" in html
-    assert "Toggle Theme" in html
-    assert "Open Help" in html
-    assert "Expand All" in html
-    assert "Collapse All" in html
-    assert "window.print();" in html
-    assert "Report schema 2.1" in html
-    assert "Generated at" not in html
-    assert 'data-shortcut="mod+K"' in html
-    assert 'data-shortcut="mod+I"' in html
-    assert "key === 'i'" in html
-    assert 'id="help-modal"' in html
+    assert "Report Provenance" in html
+    assert "data-prov-open" in html
+    assert 'class="theme-toggle"' in html
+    assert 'title="Toggle theme"' in html
+    assert "Theme</button>" in html
+    assert "Export Report" not in html
+    assert "Open Help" not in html
+    assert 'id="help-modal"' not in html
 
 
-def test_html_report_help_modal_links_present() -> None:
+def test_html_report_footer_links_present() -> None:
     html = build_html_report(func_groups={}, block_groups={}, segment_groups={})
-    assert "Help & Support" in html
     assert f'href="{REPOSITORY_URL}"' in html
     assert f'href="{ISSUES_URL}"' in html
     assert f'href="{DOCS_URL}"' in html
-    assert 'rel="noopener noreferrer"' in html
+    assert 'target="_blank" rel="noopener"' in html
 
 
 def test_html_report_includes_provenance_metadata(
@@ -899,10 +971,13 @@ def test_html_report_escapes_control_chars_in_payload(tmp_path: Path) -> None:
         block_groups={},
         segment_groups={},
     )
-    assert "&lt;/div&gt;" in html
-    assert "&#96;" in html
-    assert "&#8232;" in html
-    assert "&#8233;" in html
+    _assert_html_contains(
+        html,
+        "&lt;/div&gt;",
+        "&#96;",
+        "&#8232;",
+        "&#8233;",
+    )
 
 
 def test_file_cache_reads_ranges(tmp_path: Path) -> None:
@@ -1490,13 +1565,16 @@ def test_html_report_renders_dead_code_split_with_suppressed_layer() -> None:
             dead_suppressed=9,
         ),
     )
-    assert "0 candidates total; 0 high-confidence items; 9 suppressed." in html
-    assert 'data-subtab-group="dead-code"' in html
-    assert 'data-clone-tab="active" data-subtab-group="dead-code"' in html
-    assert 'data-clone-tab="suppressed" data-subtab-group="dead-code"' in html
-    assert 'Suppressed <span class="tab-count">9</span>' in html
-    assert "inline_codeclone" in html
-    assert "dead-code" in html
+    _assert_html_contains(
+        html,
+        "0 candidates total; 0 high-confidence items; 9 suppressed.",
+        'data-subtab-group="dead-code"',
+        'data-clone-tab="active" data-subtab-group="dead-code"',
+        'data-clone-tab="suppressed" data-subtab-group="dead-code"',
+        'Suppressed <span class="tab-count">9</span>',
+        "inline_codeclone",
+        "dead-code",
+    )
 
 
 def test_html_report_metrics_object_health_score_uses_float_fallback() -> None:
@@ -1522,168 +1600,99 @@ def test_html_report_metrics_object_health_score_uses_float_fallback() -> None:
 
 
 def test_html_report_coupling_coupled_classes_inline_for_three_or_less() -> None:
-    payload = _metrics_payload(
-        health_score=70,
-        health_grade="B",
-        complexity_max=1,
-        complexity_high_risk=0,
-        coupling_high_risk=0,
-        cohesion_low=0,
-        dep_cycles=[],
-        dep_max_depth=1,
-        dead_total=0,
-        dead_critical=0,
+    html = _render_metrics_html(_coupling_metrics_payload(["Alpha", "Beta", "Gamma"]))
+    _assert_html_contains(
+        html,
+        '<span class="chain-flow">',
+        '<span class="chain-node" title="Alpha">Alpha</span>',
+        '<span class="chain-node" title="Beta">Beta</span>',
+        '<span class="chain-node" title="Gamma">Gamma</span>',
     )
-    coupling = payload["coupling"]
-    assert isinstance(coupling, dict)
-    classes = coupling["classes"]
-    assert isinstance(classes, list)
-    classes[0]["coupled_classes"] = ["Alpha", "Beta", "Gamma"]
-
-    html = build_html_report(
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-        report_meta={"scan_root": "/outside/project"},
-        metrics=payload,
-    )
-    assert '<span class="chain-flow">' in html
-    assert '<span class="chain-node" title="Alpha">Alpha</span>' in html
-    assert '<span class="chain-node" title="Beta">Beta</span>' in html
-    assert '<span class="chain-node" title="Gamma">Gamma</span>' in html
     assert "(+1 more)" not in html
 
 
 def test_html_report_coupling_coupled_classes_expands_for_more_than_three() -> None:
-    payload = _metrics_payload(
-        health_score=70,
-        health_grade="B",
-        complexity_max=1,
-        complexity_high_risk=0,
-        coupling_high_risk=0,
-        cohesion_low=0,
-        dep_cycles=[],
-        dep_max_depth=1,
-        dead_total=0,
-        dead_critical=0,
+    html = _render_metrics_html(
+        _coupling_metrics_payload(["Alpha", "Beta", "Gamma", "Delta"])
     )
-    coupling = payload["coupling"]
-    assert isinstance(coupling, dict)
-    classes = coupling["classes"]
-    assert isinstance(classes, list)
-    classes[0]["coupled_classes"] = ["Alpha", "Beta", "Gamma", "Delta"]
-
-    html = build_html_report(
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-        report_meta={"scan_root": "/outside/project"},
-        metrics=payload,
+    _assert_html_contains(
+        html,
+        '<details class="coupled-details">',
+        '<summary class="coupled-summary">',
+        '<span class="chain-node" title="Alpha">Alpha</span>',
+        '<span class="chain-node" title="Beta">Beta</span>',
+        '<span class="chain-node" title="Delta">Delta</span>',
+        '<span class="chain-node" title="Gamma">Gamma</span>',
     )
-    assert '<details class="coupled-details">' in html
-    assert '<summary class="coupled-summary">' in html
     assert "(+1 more)" in html
-    assert '<span class="chain-node" title="Alpha">Alpha</span>' in html
-    assert '<span class="chain-node" title="Beta">Beta</span>' in html
-    assert '<span class="chain-node" title="Delta">Delta</span>' in html
-    assert '<span class="chain-node" title="Gamma">Gamma</span>' in html
 
 
 def test_html_report_coupling_coupled_classes_truncates_long_labels() -> None:
-    payload = _metrics_payload(
-        health_score=70,
-        health_grade="B",
-        complexity_max=1,
-        complexity_high_risk=0,
-        coupling_high_risk=0,
-        cohesion_low=0,
-        dep_cycles=[],
-        dep_max_depth=1,
-        dead_total=0,
-        dead_critical=0,
-    )
-    coupling = payload["coupling"]
-    assert isinstance(coupling, dict)
-    classes = coupling["classes"]
-    assert isinstance(classes, list)
     long_name = "pkg.mod.VeryLongClassNameSegmentXYZ12345"
-    classes[0]["coupled_classes"] = [long_name]
-
-    html = build_html_report(
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-        report_meta={"scan_root": "/outside/project"},
-        metrics=payload,
-    )
+    html = _render_metrics_html(_coupling_metrics_payload([long_name]))
     label = "VeryLongClassNameSegmentXYZ12345"
     assert f"{label[:8]}..{label[-8:]}" in html
 
 
 def test_html_report_dependency_graph_handles_rootless_and_disconnected_nodes() -> None:
-    payload = _metrics_payload(
-        health_score=70,
-        health_grade="B",
-        complexity_max=1,
-        complexity_high_risk=0,
-        coupling_high_risk=0,
-        cohesion_low=0,
-        dep_cycles=[["pkg.c", "pkg.d"]],
-        dep_max_depth=4,
-        dead_total=0,
-        dead_critical=0,
+    html = _render_metrics_html(
+        _dependency_metrics_payload(
+            edge_list=[
+                {
+                    "source": "pkg.a",
+                    "target": "pkg.b",
+                    "import_type": "import",
+                    "line": 1,
+                },
+                {
+                    "source": "pkg.c",
+                    "target": "pkg.d",
+                    "import_type": "import",
+                    "line": 2,
+                },
+                {
+                    "source": "pkg.d",
+                    "target": "pkg.c",
+                    "import_type": "import",
+                    "line": 3,
+                },
+            ],
+            longest_chains=[["pkg.a", "pkg.b"]],
+            dep_cycles=[["pkg.c", "pkg.d"]],
+            dep_max_depth=4,
+        )
     )
-    deps = payload["dependencies"]
-    assert isinstance(deps, dict)
-    deps["edge_list"] = [
-        {"source": "pkg.a", "target": "pkg.b", "import_type": "import", "line": 1},
-        {"source": "pkg.c", "target": "pkg.d", "import_type": "import", "line": 2},
-        {"source": "pkg.d", "target": "pkg.c", "import_type": "import", "line": 3},
-    ]
-    deps["longest_chains"] = [["pkg.a", "pkg.b"]]
-
-    html = build_html_report(
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-        report_meta={"scan_root": "/outside/project"},
-        metrics=payload,
+    _assert_html_contains(
+        html,
+        'data-node="pkg.c"',
+        'data-node="pkg.d"',
+        "dep-graph-svg",
     )
-    assert 'data-node="pkg.c"' in html
-    assert 'data-node="pkg.d"' in html
-    assert "dep-graph-svg" in html
 
 
 def test_html_report_dependency_graph_rootless_fallback_seed() -> None:
-    payload = _metrics_payload(
-        health_score=70,
-        health_grade="B",
-        complexity_max=1,
-        complexity_high_risk=0,
-        coupling_high_risk=0,
-        cohesion_low=0,
-        dep_cycles=[["pkg.c", "pkg.d"]],
-        dep_max_depth=2,
-        dead_total=0,
-        dead_critical=0,
+    html = _render_metrics_html(
+        _dependency_metrics_payload(
+            edge_list=[
+                {
+                    "source": "pkg.c",
+                    "target": "pkg.d",
+                    "import_type": "import",
+                    "line": 1,
+                },
+                {
+                    "source": "pkg.d",
+                    "target": "pkg.c",
+                    "import_type": "import",
+                    "line": 2,
+                },
+            ],
+            longest_chains=[["pkg.c", "pkg.d"]],
+            dep_cycles=[["pkg.c", "pkg.d"]],
+            dep_max_depth=2,
+        )
     )
-    deps = payload["dependencies"]
-    assert isinstance(deps, dict)
-    deps["edge_list"] = [
-        {"source": "pkg.c", "target": "pkg.d", "import_type": "import", "line": 1},
-        {"source": "pkg.d", "target": "pkg.c", "import_type": "import", "line": 2},
-    ]
-    deps["longest_chains"] = [["pkg.c", "pkg.d"]]
-
-    html = build_html_report(
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-        report_meta={"scan_root": "/outside/project"},
-        metrics=payload,
-    )
-    assert 'data-node="pkg.c"' in html
-    assert 'data-node="pkg.d"' in html
+    _assert_html_contains(html, 'data-node="pkg.c"', 'data-node="pkg.d"')
 
 
 def test_html_report_provenance_badges_cover_mismatch_and_untrusted_metrics() -> None:
@@ -1725,48 +1734,32 @@ def test_html_report_provenance_handles_non_boolean_baseline_loaded() -> None:
 
 
 def test_html_report_dependency_hubs_deterministic_tie_order() -> None:
-    payload = _metrics_payload(
-        health_score=70,
-        health_grade="B",
-        complexity_max=1,
-        complexity_high_risk=0,
-        coupling_high_risk=0,
-        cohesion_low=0,
-        dep_cycles=[],
-        dep_max_depth=2,
-        dead_total=0,
-        dead_critical=0,
-    )
-    deps = payload["dependencies"]
-    assert isinstance(deps, dict)
-    deps["edge_list"] = [
-        {
-            "source": "mod.gamma",
-            "target": "mod.hub",
-            "import_type": "import",
-            "line": 1,
-        },
-        {
-            "source": "mod.alpha",
-            "target": "mod.hub",
-            "import_type": "import",
-            "line": 2,
-        },
-        {
-            "source": "mod.beta",
-            "target": "mod.hub",
-            "import_type": "import",
-            "line": 3,
-        },
-    ]
-    deps["longest_chains"] = [["mod.alpha", "mod.hub"]]
-
-    html = build_html_report(
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-        report_meta={"scan_root": "/outside/project"},
-        metrics=payload,
+    html = _render_metrics_html(
+        _dependency_metrics_payload(
+            edge_list=[
+                {
+                    "source": "mod.gamma",
+                    "target": "mod.hub",
+                    "import_type": "import",
+                    "line": 1,
+                },
+                {
+                    "source": "mod.alpha",
+                    "target": "mod.hub",
+                    "import_type": "import",
+                    "line": 2,
+                },
+                {
+                    "source": "mod.beta",
+                    "target": "mod.hub",
+                    "import_type": "import",
+                    "line": 3,
+                },
+            ],
+            longest_chains=[["mod.alpha", "mod.hub"]],
+            dep_cycles=[],
+            dep_max_depth=2,
+        )
     )
     hub_pos = html.find('dep-hub-name">hub</span><span class="dep-hub-deg">3')
     alpha_pos = html.find('dep-hub-name">alpha</span><span class="dep-hub-deg">1')
@@ -1902,10 +1895,13 @@ def test_html_report_overview_includes_hotspot_sections_without_quick_views() ->
             ),
         ),
     )
-    assert "Executive Summary" in html
-    assert "Highest Spread" in html
-    assert "Production Hotspots" in html
-    assert "Test/Fixture Hotspots" in html
+    _assert_html_contains(
+        html,
+        "Executive Summary",
+        "Issue breakdown",
+        "Source breakdown",
+        "Health Profile",
+    )
     assert "Most Actionable" not in html
     assert 'data-quick-view="' not in html
     assert 'class="suggestion-context"' in html
@@ -2023,14 +2019,14 @@ def test_html_report_overview_uses_canonical_report_overview_hotlists() -> None:
 
     for needle in (
         "Executive Summary",
+        'class="overview-kpi-cards"',
+        "Findings",
+        "Suggestions",
         "source-kind-badge source-kind-fixtures",
         "source-kind-badge source-kind-production",
         'breakdown-count">1</span>',
     ):
         assert needle in html
     assert '<div class="overview-summary-value">n/a</div>' not in html
-    assert "Repeated branch family" in html
-    assert "Function clone group (Type-2)" in html
-    assert "No spread-heavy findings were recorded." not in html
-    assert "No production-coded hotspots were identified." not in html
-    assert "No hotspots from tests or fixtures were identified." not in html
+    # Issue breakdown replaces old hotspot sections
+    assert "Issue breakdown" in html

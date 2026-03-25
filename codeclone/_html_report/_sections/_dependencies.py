@@ -334,32 +334,40 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
     dep_edge_count = _as_int(ctx.dependencies_map.get("edges"))
     dep_max_depth = _as_int(ctx.dependencies_map.get("max_depth"))
     cycle_count = len(dep_cycles)
+
+    def _mb(*pairs: tuple[str, object]) -> str:
+        return "".join(
+            f'<span class="kpi-micro">'
+            f'<span class="kpi-micro-val">{_escape_html(str(v))}</span>'
+            f'<span class="kpi-micro-lbl">{_escape_html(lbl)}</span></span>'
+            for lbl, v in pairs
+            if v is not None and str(v) != "n/a"
+        )
+
     dep_avg = (
-        f"{dep_edge_count / dep_module_count:.1f} avg/module"
-        if dep_module_count > 0
-        else ""
+        f"{dep_edge_count / dep_module_count:.1f}" if dep_module_count > 0 else "n/a"
     )
 
     cards = [
         _stat_card(
             "Modules",
             dep_module_count,
-            detail=f"{dep_edge_count} imports",
+            detail=_mb(("imports", dep_edge_count)),
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
             "Edges",
             dep_edge_count,
-            detail=dep_avg,
+            detail=_mb(("avg/module", dep_avg)),
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
             "Max depth",
             dep_max_depth,
-            detail="target: < 8",
-            tone="warn" if dep_max_depth > 8 else "ok",
+            detail=_mb(("target", "< 8")),
+            value_tone="warn" if dep_max_depth > 8 else "good",
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
         ),
@@ -367,11 +375,11 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
             "Cycles",
             cycle_count,
             detail=(
-                f"{len(cycle_node_set)} modules involved"
+                _mb(("modules", len(cycle_node_set)))
                 if cycle_count > 0
-                else "No circular imports"
+                else _mb(("status", "clean"))
             ),
-            tone="risk" if cycle_count > 0 else "ok",
+            value_tone="bad" if cycle_count > 0 else "good",
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
         ),

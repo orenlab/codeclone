@@ -51,6 +51,28 @@ def _safe_div(numerator: float, denominator: float) -> float:
     return numerator / denominator
 
 
+# Piecewise clone-density curve: mild penalty for low density,
+# steep in the structural-debt zone, brutal when it's systemic.
+_CLONE_BREAKPOINTS: tuple[tuple[float, float], ...] = (
+    (0.05, 90.0),  # ≤5% density — 1-2 accidental groups, almost no penalty
+    (0.20, 50.0),  # 5-20% — clear structural debt, steep slope
+    (0.50, 0.0),  # >20% — systemic duplication, score floors at 0
+)
+
+
+def _clone_piecewise_score(density: float) -> int:
+    """Return clone dimension score (0-100) for a given clone density."""
+    if density <= 0:
+        return 100
+    prev_d, prev_s = 0.0, 100.0
+    for bp_d, bp_s in _CLONE_BREAKPOINTS:
+        if density <= bp_d:
+            t = (density - prev_d) / (bp_d - prev_d)
+            return _clamp_score(prev_s + t * (bp_s - prev_s))
+        prev_d, prev_s = bp_d, bp_s
+    return 0
+
+
 def compute_health(inputs: HealthInputs) -> HealthScore:
     total_clone_groups = inputs.function_clone_groups + inputs.block_clone_groups
     clone_density = _safe_div(
@@ -58,7 +80,7 @@ def compute_health(inputs: HealthInputs) -> HealthScore:
         max(1, inputs.files_analyzed_or_cached),
     )
 
-    clones_score = _clamp_score(100 - clone_density * 30)
+    clones_score = _clone_piecewise_score(clone_density)
     complexity_score = _clamp_score(
         100
         - (inputs.complexity_avg * 2.5)

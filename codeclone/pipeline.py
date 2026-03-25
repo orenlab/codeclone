@@ -460,6 +460,19 @@ def _cache_entry_source_stats(entry: CacheEntry) -> tuple[int, int, int, int] | 
     return lines, functions, methods, classes
 
 
+def _usable_cached_source_stats(
+    entry: CacheEntry,
+    *,
+    skip_metrics: bool,
+    collect_structural_findings: bool,
+) -> tuple[int, int, int, int] | None:
+    if not skip_metrics and not _cache_entry_has_metrics(entry):
+        return None
+    if collect_structural_findings and not _cache_entry_has_structural_findings(entry):
+        return None
+    return _cache_entry_source_stats(entry)
+
+
 def _load_cached_metrics(
     entry: CacheEntry,
     *,
@@ -585,15 +598,11 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
 
         cached = cache.get_file_entry(filepath)
         if cached and cached.get("stat") == stat:
-            if not boot.args.skip_metrics and not _cache_entry_has_metrics(cached):
-                files_to_process.append(filepath)
-                continue
-            if collect_structural_findings and not _cache_entry_has_structural_findings(
-                cached
-            ):
-                files_to_process.append(filepath)
-                continue
-            cached_source_stats = _cache_entry_source_stats(cached)
+            cached_source_stats = _usable_cached_source_stats(
+                cached,
+                skip_metrics=boot.args.skip_metrics,
+                collect_structural_findings=collect_structural_findings,
+            )
             if cached_source_stats is None:
                 files_to_process.append(filepath)
                 continue
@@ -669,6 +678,10 @@ def process_file(
     min_loc: int,
     min_stmt: int,
     collect_structural_findings: bool = True,
+    block_min_loc: int = 20,
+    block_min_stmt: int = 8,
+    segment_min_loc: int = 20,
+    segment_min_stmt: int = 10,
 ) -> FileProcessResult:
     try:
         try:
@@ -722,6 +735,10 @@ def process_file(
                 cfg=cfg,
                 min_loc=min_loc,
                 min_stmt=min_stmt,
+                block_min_loc=block_min_loc,
+                block_min_stmt=block_min_stmt,
+                segment_min_loc=segment_min_loc,
+                segment_min_stmt=segment_min_stmt,
                 collect_structural_findings=collect_structural_findings,
             )
         )
@@ -807,6 +824,10 @@ def process(
     processes = max(1, int(boot.args.processes))
     min_loc = int(boot.args.min_loc)
     min_stmt = int(boot.args.min_stmt)
+    block_min_loc = int(boot.args.block_min_loc)
+    block_min_stmt = int(boot.args.block_min_stmt)
+    segment_min_loc = int(boot.args.segment_min_loc)
+    segment_min_stmt = int(boot.args.segment_min_stmt)
     collect_structural_findings = _should_collect_structural_findings(boot.output_paths)
 
     def _accept_result(result: FileProcessResult) -> None:
@@ -895,6 +916,10 @@ def process(
                     min_loc,
                     min_stmt,
                     collect_structural_findings,
+                    block_min_loc,
+                    block_min_stmt,
+                    segment_min_loc,
+                    segment_min_stmt,
                 )
             )
             if on_advance is not None:
@@ -914,6 +939,10 @@ def process(
                             min_loc,
                             min_stmt,
                             collect_structural_findings,
+                            block_min_loc,
+                            block_min_stmt,
+                            segment_min_loc,
+                            segment_min_stmt,
                         )
                         for filepath in batch
                     ]

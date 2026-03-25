@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -133,6 +134,47 @@ def analyze_segment_statements(statements: list[ast.stmt]) -> _SegmentAnalysis |
     )
 
 
+def _analyze_segment_item(
+    item: GroupItemLike,
+    *,
+    file_cache: dict[str, dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None],
+) -> _SegmentAnalysis | None:
+    filepath = str(item.get("filepath", ""))
+    qualname = str(item.get("qualname", ""))
+    start_line = coerce_positive_int(item.get("start_line")) or 0
+    end_line = coerce_positive_int(item.get("end_line")) or 0
+    if not filepath or not qualname or start_line <= 0 or end_line <= 0:
+        return None
+
+    if filepath not in file_cache:
+        file_cache[filepath] = collect_file_functions(filepath)
+    functions_by_qualname = file_cache[filepath]
+    if not functions_by_qualname:
+        return None
+
+    local_name = qualname.split(":", 1)[1] if ":" in qualname else qualname
+    func_node = functions_by_qualname.get(local_name)
+    if func_node is None:
+        return None
+
+    statements = segment_statements(func_node, start_line, end_line)
+    return analyze_segment_statements(statements)
+
+
+def _analyze_segment_group(
+    items: Sequence[GroupItemLike],
+    *,
+    file_cache: dict[str, dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None],
+) -> list[_SegmentAnalysis] | None:
+    analyses: list[_SegmentAnalysis] = []
+    for item in items:
+        analysis = _analyze_segment_item(item, file_cache=file_cache)
+        if analysis is None:
+            return None
+        analyses.append(analysis)
+    return analyses
+
+
 def prepare_segment_report_groups(segment_groups: GroupMapLike) -> tuple[GroupMap, int]:
     """
     Merge overlapping segment windows and suppress low-value boilerplate groups
@@ -147,38 +189,8 @@ def prepare_segment_report_groups(segment_groups: GroupMapLike) -> tuple[GroupMa
         if not merged_items:
             continue
 
-        analyses: list[_SegmentAnalysis] = []
-        unknown = False
-        for item in merged_items:
-            filepath = str(item.get("filepath", ""))
-            qualname = str(item.get("qualname", ""))
-            start_line = coerce_positive_int(item.get("start_line")) or 0
-            end_line = coerce_positive_int(item.get("end_line")) or 0
-            if not filepath or not qualname or start_line <= 0 or end_line <= 0:
-                unknown = True
-                break
-
-            if filepath not in file_cache:
-                file_cache[filepath] = collect_file_functions(filepath)
-            functions_by_qualname = file_cache[filepath]
-            if not functions_by_qualname:
-                unknown = True
-                break
-
-            local_name = qualname.split(":", 1)[1] if ":" in qualname else qualname
-            func_node = functions_by_qualname.get(local_name)
-            if func_node is None:
-                unknown = True
-                break
-
-            statements = segment_statements(func_node, start_line, end_line)
-            analysis = analyze_segment_statements(statements)
-            if analysis is None:
-                unknown = True
-                break
-            analyses.append(analysis)
-
-        if unknown:
+        analyses = _analyze_segment_group(merged_items, file_cache=file_cache)
+        if analyses is None:
             filtered[key] = merged_items
             continue
 

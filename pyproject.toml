@@ -60,13 +60,13 @@ Homepage = "https://github.com/orenlab/codeclone"
 Repository = "https://github.com/orenlab/codeclone"
 Issues = "https://github.com/orenlab/codeclone/issues"
 Changelog = "https://github.com/orenlab/codeclone/releases"
-Documentation = "https://github.com/orenlab/codeclone/tree/main/docs"
+Documentation = "https://orenlab.github.io/codeclone/"
 
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0.0",
     "pytest-cov>=7.1.0",
-    "build>=1.2.0",
+    "build>=1.4.1",
     "twine>=5.0.0",
     "mypy>=1.19.1",
     "ruff>=0.15.7",
@@ -106,6 +106,10 @@ fail_under = 99
 python_version = "3.10"
 strict = true
 warn_unused_configs = true
+warn_return_any = true
+disallow_any_generics = true
+disallow_untyped_defs = true
+no_implicit_optional = true
 files = ["codeclone", "tests"]
 
 [tool.ruff]

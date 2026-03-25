@@ -17,7 +17,10 @@ On-disk schema (`v == "2.2"`):
 
 - Top-level: `v`, `payload`, `sig`
 - `payload` keys: `py`, `fp`, `ap`, `files`, optional `sr`
-- `ap` (`analysis_profile`) keys: `min_loc`, `min_stmt`
+- `ap` (`analysis_profile`) keys:
+    - `min_loc`, `min_stmt`
+    - `block_min_loc`, `block_min_stmt`
+    - `segment_min_loc`, `segment_min_stmt`
 - `files` map stores compact per-file entries:
     - `st`: `[mtime_ns, size]`
     - `ss`: `[lines, functions, methods, classes]` (source stats snapshot)
@@ -51,7 +54,9 @@ Refs:
     - version `v == CACHE_VERSION`
     - `payload.py == current_python_tag()`
     - `payload.fp == BASELINE_FINGERPRINT_VERSION`
-    - `payload.ap == {"min_loc": <runtime>, "min_stmt": <runtime>}`
+    - `payload.ap` matches the current six-threshold analysis profile
+      (`min_loc`, `min_stmt`, `block_min_loc`, `block_min_stmt`,
+      `segment_min_loc`, `segment_min_stmt`)
     - `sig` equals deterministic hash of canonical payload
 
 Refs:

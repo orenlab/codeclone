@@ -2,189 +2,80 @@
 
 ## [2.0.0b1]
 
-CodeClone 2.0 is a major upgrade that evolves the project from a structural clone detector into a **baseline-aware**
-code-health and CI governance tool for Python.
-
-This beta focuses on the new architecture, expanded code-health analysis, contract stability, and performance validation
-ahead of the final `2.0.0` release.
-
-### Overview
-
-- New stage-based pipeline architecture with unified clone + metrics baseline flow.
-- Expanded code-health analysis: complexity, coupling, cohesion, dependencies, dead code, and health.
-- Improved HTML and CLI reporting surfaces.
-- Significant performance work for faster cold and warm runs.
-- Baseline schema `2.0`, report schema `2.1`, cache schema `2.2`; `fingerprint_version` remains `1` and legacy
-  clone-only baselines stay compatible.
+Major upgrade: CodeClone evolves from a structural clone detector into a
+**baseline-aware code-health and CI governance tool** for Python.
 
 ### Architecture
 
-- Refactored CLI orchestration into a stage-based pipeline (`codeclone/pipeline.py`) that isolates discovery,
-  processing, analysis, report writing, and gating.
-- Introduced explicit domain layers:
-    - `codeclone/models.py` — typed core models
-    - `codeclone/metrics/` — complexity, coupling, cohesion, dependencies, dead code, and health
-    - `codeclone/report/` — merge, explain, serialize, suggestions
-    - `codeclone/grouping.py` — clone grouping domain
-- Removed legacy `_report_*` shims after migrating runtime and tests to `codeclone.report.*`.
+- Stage-based pipeline (`pipeline.py`): discovery → processing → analysis → reporting → gating.
+- Domain layers: `models.py`, `metrics/`, `report/`, `grouping.py`.
+- Baseline schema `2.0`, report schema `2.1`, cache schema `2.2`; `fingerprint_version` remains `1`.
 
-### Baseline, Cache, and Report Contracts
+### Code-Health Analysis
 
-- Bumped baseline schema to `2.0` (`BASELINE_SCHEMA_VERSION`) while preserving compatibility checks for legacy `1.0`
-  clone-only payloads.
-- Added a unified baseline flow with optional top-level `metrics` stored alongside clone keys in the same baseline file.
-- Tracked embedded metrics snapshot integrity via `meta.metrics_payload_sha256`.
-- Preserved embedded metrics payload and hash when updating clone baseline content.
-- Bumped cache schema to `2.2` and report schema to `2.1`.
-- Extended cache metrics payload with canonical symbol-usage references:
-    - `referenced_qualnames` in runtime entries
-    - compact wire key `rq` in cache payload
-- Added additive cache payload key `sr` (segment report projection) to reuse merged
-  segment suppression output on warm runs without cache schema/version bump.
-- Consolidated the report contract around canonical sections:
-  `meta`, `inventory`, `findings`, `metrics`, with `derived` and `integrity` as companion layers.
-- Structural findings now deduplicate repeated occurrences and use an explicit `file_path` item layout instead of a
-  sentinel `file_i = -1`.
-- Tightened `duplicated_branches` reporting to suppress trivial single-statement boilerplate without structural mass.
+- Seven health dimensions: clones, complexity, coupling, cohesion, dead code, dependencies, coverage.
+- Piecewise clone scoring curve: mild penalty below 5% density, steep 5–20%, aggressive above 20%.
+- Dimension weights: clones 25%, complexity 20%, cohesion 15%, coupling 10%, dead code 10%, dependencies 10%, coverage
+  10%.
+- Grade bands: A ≥90, B ≥75, C ≥60, D ≥40, F <40.
 
-### Contract Stabilization Updates
+### Detection Thresholds
 
-- Added report-only structural finding families for clone cohort analysis:
-    - `clone_guard_exit_divergence`
-    - `clone_cohort_drift`
-- Added deterministic per-function stable structure facts in extraction/cache payloads and reused them for cohort
-  structural findings without extra scans.
-- Extended cache wire `u` row with stable structure columns while preserving deterministic decode defaults for legacy
-  rows.
-- Expanded `tests/fixtures/golden_v2` contracts:
-    - analysis snapshots now lock `stable_structure` and `cohort_structural_findings`
-    - CLI snapshots now lock structural group id/kind projections
-- Strengthened branch/invariant coverage for structural/report layers; coverage gate remains `>=99%`.
-- Synchronized contract docs with implemented code paths
-  (`README`, architecture, cache/report schema appendices, testing book).
-
-### Configuration and CLI UX
-
-- Added project configuration loading from `pyproject.toml` under `[tool.codeclone]` with strict key and type
-  validation.
-- Made precedence explicit: `CLI (explicit flags) > pyproject.toml > parser/runtime defaults`.
-- Added a Python 3.10-compatible TOML loading path (`tomli` fallback when `tomllib` is unavailable).
-- Added optional-value report flags with deterministic default paths when passed without a value:
-    - `--html` → `.cache/codeclone/report.html`
-    - `--json` → `.cache/codeclone/report.json`
-    - `--md` → `.cache/codeclone/report.md`
-    - `--sarif` → `.cache/codeclone/report.sarif`
-    - `--text` → `.cache/codeclone/report.txt`
-- Added local report UX helpers:
-    - `--open-html-report` opens the generated HTML report after a successful write
-    - `--timestamped-report-paths` appends a UTC timestamp to default report filenames requested via bare report flags
-- Added optional-value path flags for default-path intent:
-    - `--baseline`
-    - `--metrics-baseline`
-    - `--cache-path`
-    - `--cache-dir`
-- Replaced confusing argparse-generated double-negation aliases with explicit flag pairs:
-    - `--no-progress` / `--progress`
-    - `--no-color` / `--color`
-- Clarified the CLI runtime footer wording: `Pipeline done in X.XXs` (pipeline time only, not full process wall-clock).
-- Refreshed the terminal UI for normal and `--ci` modes:
-    - clearer run header with scan-root context
-    - structured analysis summary and quality-metrics panels
-    - explicit cache, clone, and baseline counters
-    - report path and pipeline-time footer integrated into the summary
-- Fixed `pyproject.toml` override handling for `metrics_baseline`: a configured non-default path is now respected even
-  when `--metrics-baseline` is not passed explicitly.
-
-### Report Provenance and UI
-
-- Added scan identity fields to report meta
-    - `project_name`
-    - `scan_root`
-- Rendered `Project` and `Scan root` in the HTML provenance panel.
-- Added `Project name` and `Scan root` to TXT report metadata.
-- Propagated the same fields into JSON report `meta` via the shared report metadata builder.
-- Fixed baseline provenance after `--update-baseline`: report metadata now reflects the freshly saved baseline hash
-  (`baseline_payload_sha256`) and verification state in the same run.
-- Simplified dependency SVG rendering internals by removing unreachable guard branches while preserving deterministic
-  output.
-- Made suggestions table headers consistently render glossary help badges through a single deterministic template path.
+- Lowered function-level `--min-loc` from 15 to 10 (configurable via CLI/pyproject.toml).
+- Lowered block fragment gate from loc≥40/stmt≥10 to loc≥20/stmt≥8.
+- Lowered segment fragment gate from loc≥30/stmt≥12 to loc≥20/stmt≥10.
+- All six thresholds configurable via `[tool.codeclone]` in `pyproject.toml`.
 
 ### Detection Quality
 
-- Made the dead-code detector more conservative for non-actionable runtime patterns:
-    - skips test paths and test entrypoint names
-    - skips dunder methods
-    - skips dynamic visitor methods (`visit_*`) and setup/teardown hooks
-    - skips `Protocol` methods and stub-like callables (`@overload`, `@abstractmethod`)
-- Reduced false positives without changing clone detection semantics.
-- Dead-code liveness now ignores references originating from test files, including cached test-file references, so
-  production symbols used only in tests are still reported as dead-code candidates.
-- Dead-code liveness now uses exact canonical qualname references (including import-alias and module-alias usage)
-  before fallback local-name checks, reducing false positives on re-export and alias wiring.
-- Added declaration-scoped inline suppressions for accepted dead-code findings:
-    - `# codeclone: ignore[dead-code]` on `def`, `async def`, or `class`
-    - supports both previous-line and end-of-line forms on declaration lines
-    - suppression is target-scoped (does not cascade to unrelated symbols)
-- Added deterministic suppression parser/binder (`codeclone/suppressions.py`) and integrated suppression metadata into
-  dead-code candidate processing and cache payloads (backward-compatible decode for legacy cache rows).
-- Surfaced suppressed dead-code candidates across reports/UI without schema-version bump:
-    - `dead_code.summary.suppressed` and `dead_code.suppressed_items` in report metrics
-    - dead-code panel split in HTML (`Active` / `Suppressed`) under one `Dead Code` tab
-    - CLI metrics line context, e.g. `Dead code   ✔ clean (9 suppressed)`
-- Refactored `scanner.iter_py_files` into deterministic helpers without semantic changes, reducing method complexity and
-  keeping metrics-gate parity with the baseline.
+- Conservative dead-code detector: skips tests, dunders, visitors, protocol stubs.
+- Exact qualname-based liveness with import-alias resolution.
+- Inline suppressions: `# codeclone: ignore[dead-code]` on declarations.
+- Structural finding families: `duplicated_branches`, `clone_guard_exit_divergence`, `clone_cohort_drift`.
+
+### Configuration and CLI
+
+- Config from `pyproject.toml` under `[tool.codeclone]`; precedence: CLI > pyproject.toml > defaults.
+- Optional-value report flags: `--html`, `--json`, `--md`, `--sarif`, `--text` with deterministic default paths.
+- `--open-html-report`, `--timestamped-report-paths`, `--ci` preset.
+- Explicit `--no-progress`/`--progress`, `--no-color`/`--color` flag pairs.
+
+### HTML Report
+
+- Overview: KPI grid with health gauge (baseline delta arc), Executive Summary (issue breakdown + source breakdown),
+  Health Profile radar chart.
+- KPI cards show baseline-aware tone: `✓ baselined` pill when all items are accepted debt, `+N` red badge for
+  regressions.
+- Get Badge modal: grade-only and score+grade variants, shields.io preview, Markdown/HTML embeds, copy feedback.
+- Report Provenance modal with section cards, SVG icons, boolean badges.
+- Responsive layout with dark/light theme toggle and system theme detection.
+
+### Baseline and Contracts
+
+- Unified baseline flow: clone keys + optional metrics in one file.
+- Metrics snapshot integrity via `meta.metrics_payload_sha256`.
+- Report contract: canonical `meta`/`inventory`/`findings`/`metrics` + derived `suggestions`/`overview` + `integrity`.
+- SARIF: `%SRCROOT%` anchoring, `baselineState`, rich rule metadata.
+- Cache compatibility now keys off the full six-threshold analysis profile
+  (function + block + segment thresholds), not only the top-level function gate.
 
 ### Performance
 
-- Added adaptive multiprocessing thresholds so small batches stay sequential instead of paying process-pool overhead.
-- Reduced discovery overhead by moving scanner traversal to deterministic `os.walk`-based helpers with earlier directory
-  pruning.
-- Collapsed multiple module-level AST collection passes into a unified facts pass.
-- Reused normalization work in clone and block hashing paths.
-- Added batch statement hashing for block and segment extraction.
-- Removed unnecessary `fix_missing_locations` work from canonical hashing paths where source locations are not part of
-  the fingerprint contract.
-- Removed avoidable hot-path allocations and conversions in pipeline, extractor, and cache-related runtime paths.
-- Improved warm-run responsiveness substantially while preserving deterministic behavior and output contracts.
-- Deferred HTML renderer import in CLI so non-HTML runs do not pay template/render startup cost.
-- Disabled transient status spinner contexts when `--no-progress` is active to reduce terminal I/O overhead.
-- Added a canonical cache-entry fast path for already validated runtime entries while preserving fallback validation for
-  raw or externally mutated payloads.
-- Reused a shared parsed baseline payload when clone and metrics baselines point to the same file to avoid duplicate
-  JSON reads/parses in one run.
+- Unified AST collection pass (merged 3 separate walks).
+- Suppression fast-path: skip tokenization when `codeclone:` absent.
+- Cache dirty flag: skip `save()` on warm path when nothing changed.
+- Adaptive multiprocessing, batch statement hashing, deferred HTML import.
 
-### Fixes
+### Docs and Publishing
 
-- Fixed scanner root-exclude short-circuit: only an explicitly excluded root directory is skipped; excluded segments in
-  a parent path no longer suppress valid scans, preventing silent zero-file analysis for roots like `build/project`.
-- Optimized HTML snippet rendering path:
-    - `_FileCache` now caches full file lines once per file and serves line-range slices without repeated full-file
-      scans
-    - Pygments imports are cached per importer identity to avoid repeated dynamic import overhead while preserving
-      testability
-- Optimized block explainability AST stats:
-    - added per-file statement index and range lookup via `bisect`, replacing repeated full `ast.walk()` scans per range
-- Added scanner regression coverage for roots under excluded parent directories.
-- No baseline/cache/report schema contract changes in this branch; detector identity semantics and golden compatibility
-  are preserved.
+- MkDocs site with Material theme and GitHub Pages workflow.
+- Live sample reports (HTML, JSON, SARIF).
 
-### Tests and Tooling
+### Stability
 
-- Added dedicated v2 golden suites in `tests/fixtures/golden_v2/*` and `tests/test_golden_v2.py`:
-    - analysis snapshot golden for dead-code/test-only usage contract
-    - analysis snapshot golden for clone/dependency/metrics contract
-    - CLI + `pyproject.toml` snapshot golden for config precedence/default contract
-- Fixed lint and type hygiene across the new test surface (`ruff` / `mypy`) and updated baseline snapshots so
-  `pre-commit run --all-files` passes with the CI gate enabled.
-- Added targeted branch and invariant tests for `baseline`, `cache`, `cli`, `html_report`, `extractor`,
-  `pipeline.process`, and metrics modules.
-- Coverage gate is enforced at `>=99%` with contract-focused branch/invariant tests.
-
-### Stability Notes
-
-- Exit-code contract unchanged (`0/2/3/5`).
-- Fingerprint compatibility contract unchanged (`BASELINE_FINGERPRINT_VERSION = "1"`).
-- Deterministic ordering and canonicalization contracts for baseline, cache, and report remain in force.
+- Exit codes unchanged: `0`/`2`/`3`/`5`.
+- Fingerprint contract unchanged: `BASELINE_FINGERPRINT_VERSION = "1"`.
+- Coverage gate: `>=99%`.
 
 ## [1.4.4] - 2026-03-14
 

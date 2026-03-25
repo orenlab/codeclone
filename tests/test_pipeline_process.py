@@ -7,7 +7,7 @@ from typing import Literal
 import pytest
 
 import codeclone.pipeline as pipeline
-from codeclone.cache import Cache, file_stat_signature
+from codeclone.cache import Cache, CacheEntry, SourceStatsDict, file_stat_signature
 from codeclone.normalize import NormalizationConfig
 
 
@@ -40,6 +40,10 @@ def _build_boot(tmp_path: Path, *, processes: int) -> pipeline.BootstrapResult:
             processes=processes,
             min_loc=1,
             min_stmt=1,
+            block_min_loc=20,
+            block_min_stmt=8,
+            segment_min_loc=20,
+            segment_min_stmt=10,
             skip_metrics=True,
         ),
         output_paths=pipeline.OutputPaths(html=None, json=None, text=None),
@@ -92,6 +96,10 @@ def _stub_process_file(
         min_loc: int,
         min_stmt: int,
         collect_structural_findings: bool = True,
+        block_min_loc: int = 20,
+        block_min_stmt: int = 8,
+        segment_min_loc: int = 20,
+        segment_min_stmt: int = 10,
     ) -> pipeline.FileProcessResult:
         if expected_root is not None:
             assert root == expected_root
@@ -105,9 +113,9 @@ def _stub_process_file(
     return _process_file
 
 
-def test_process_parallel_fallback_without_callback_uses_sequential(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _build_large_batch_case(
+    tmp_path: Path,
+) -> tuple[pipeline.BootstrapResult, pipeline.DiscoveryResult, Cache, list[str]]:
     filepaths: list[str] = []
     for idx in range(pipeline._parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
@@ -117,6 +125,22 @@ def test_process_parallel_fallback_without_callback_uses_sequential(
     boot = _build_boot(tmp_path, processes=2)
     discovery = _build_discovery(tuple(filepaths))
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    return boot, discovery, cache, filepaths
+
+
+def _build_single_file_process_case(
+    tmp_path: Path,
+) -> tuple[str, pipeline.BootstrapResult, pipeline.DiscoveryResult]:
+    src = tmp_path / "a.py"
+    src.write_text("def f():\n    return 1\n", "utf-8")
+    filepath = str(src)
+    return filepath, _build_boot(tmp_path, processes=1), _build_discovery((filepath,))
+
+
+def test_process_parallel_fallback_without_callback_uses_sequential(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    boot, discovery, cache, filepaths = _build_large_batch_case(tmp_path)
 
     monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailExec)
     monkeypatch.setattr(
@@ -171,15 +195,7 @@ def test_process_small_batch_skips_parallel_executor(
 def test_process_parallel_failure_large_batch_invokes_fallback_callback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    filepaths: list[str] = []
-    for idx in range(pipeline._parallel_min_files(2) + 1):
-        src = tmp_path / f"a{idx}.py"
-        src.write_text("def f():\n    return 1\n", "utf-8")
-        filepaths.append(str(src))
-
-    boot = _build_boot(tmp_path, processes=2)
-    discovery = _build_discovery(tuple(filepaths))
-    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    boot, discovery, cache, filepaths = _build_large_batch_case(tmp_path)
     callbacks: list[str] = []
 
     monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailExec)
@@ -203,12 +219,7 @@ def test_process_parallel_failure_large_batch_invokes_fallback_callback(
 def test_process_cache_put_file_entry_fallback_without_source_stats_support(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    filepath = str(src)
-
-    boot = _build_boot(tmp_path, processes=1)
-    discovery = _build_discovery((filepath,))
+    filepath, boot, discovery = _build_single_file_process_case(tmp_path)
 
     class _LegacyCache:
         def __init__(self) -> None:
@@ -254,12 +265,7 @@ def test_process_cache_put_file_entry_fallback_without_source_stats_support(
 def test_process_cache_put_file_entry_type_error_is_raised(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    filepath = str(src)
-
-    boot = _build_boot(tmp_path, processes=1)
-    discovery = _build_discovery((filepath,))
+    filepath, boot, discovery = _build_single_file_process_case(tmp_path)
 
     class _BrokenCache:
         def put_file_entry(
@@ -291,3 +297,61 @@ def test_process_cache_put_file_entry_type_error_is_raised(
             discovery=discovery,
             cache=_BrokenCache(),  # type: ignore[arg-type]
         )
+
+
+def test_usable_cached_source_stats_respects_required_sections() -> None:
+    source_stats: SourceStatsDict = {
+        "lines": 5,
+        "functions": 2,
+        "methods": 1,
+        "classes": 1,
+    }
+    base_entry: CacheEntry = {
+        "stat": {"mtime_ns": 1, "size": 1},
+        "units": [],
+        "blocks": [],
+        "segments": [],
+        "source_stats": source_stats,
+    }
+    complete_entry: CacheEntry = {
+        **base_entry,
+        "source_stats": source_stats,
+        "class_metrics": [],
+        "module_deps": [],
+        "dead_candidates": [],
+        "referenced_names": [],
+        "referenced_qualnames": [],
+        "import_names": [],
+        "class_names": [],
+        "structural_findings": [],
+    }
+    assert pipeline._usable_cached_source_stats(
+        complete_entry,
+        skip_metrics=False,
+        collect_structural_findings=True,
+    ) == (5, 2, 1, 1)
+    assert (
+        pipeline._usable_cached_source_stats(
+            base_entry,
+            skip_metrics=False,
+            collect_structural_findings=False,
+        )
+        is None
+    )
+    assert (
+        pipeline._usable_cached_source_stats(
+            {
+                **base_entry,
+                "class_metrics": [],
+                "module_deps": [],
+                "dead_candidates": [],
+                "referenced_names": [],
+                "referenced_qualnames": [],
+                "import_names": [],
+                "class_names": [],
+            },
+            skip_metrics=False,
+            collect_structural_findings=True,
+        )
+        is None
+    )

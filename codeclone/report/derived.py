@@ -28,6 +28,7 @@ __all__ = [
     "combine_source_kinds",
     "format_group_location_label",
     "format_report_location_label",
+    "format_spread_location_label",
     "group_spread",
     "relative_report_path",
     "report_location_from_group_item",
@@ -189,6 +190,21 @@ def format_report_location_label(location: ReportLocation) -> str:
     return f"{location.relative_path}:{line}"
 
 
+def format_spread_location_label(
+    total_count: int,
+    *,
+    files: int,
+    functions: int,
+) -> str:
+    count_word = "occurrence" if total_count == 1 else "occurrences"
+    file_word = "file" if files == 1 else "files"
+    function_word = "function" if functions == 1 else "functions"
+    return (
+        f"{total_count} {count_word} across "
+        f"{files} {file_word} / {functions} {function_word}"
+    )
+
+
 def format_group_location_label(
     locations: Sequence[ReportLocation],
     *,
@@ -204,10 +220,8 @@ def format_group_location_label(
     functions = (
         spread_functions if spread_functions is not None else group_spread(locations)[1]
     )
-    count_word = "occurrence" if total_count == 1 else "occurrences"
-    file_word = "file" if files == 1 else "files"
-    function_word = "function" if functions == 1 else "functions"
-    return (
-        f"{total_count} {count_word} across "
-        f"{files} {file_word} / {functions} {function_word}"
+    return format_spread_location_label(
+        total_count,
+        files=files,
+        functions=functions,
     )

@@ -73,11 +73,18 @@ Per-group common axes (family-specific fields may extend):
 
 - JSON is source of truth for report semantics.
 - Markdown and SARIF are deterministic projections from the same report document.
+- SARIF is an IDE/code-scanning-oriented projection:
+    - repo-relative result paths are anchored via `%SRCROOT%`
+    - referenced files are listed under `run.artifacts`
+    - clone results carry `baselineState` when clone novelty is known
 - Derived layer (`suggestions`, `overview`, `hotlists`) does not replace canonical
   findings/metrics.
 - HTML overview cards are materialized from canonical findings plus
   `derived.overview` + `derived.hotlists`; pre-expanded overview card payloads are
   not part of the report contract.
+- Overview hotspot/source-breakdown sections must resolve from canonical report
+  data or deterministic derived IDs; HTML must not silently substitute stale
+  placeholders such as `n/a` or empty-state cards when canonical data exists.
 - `report_generated_at_utc` is carried in `meta.runtime` and reused by UI/renderers.
 - Canonical `meta.scan_root` is normalized to `"."`; absolute runtime paths are
   exposed under `meta.runtime.*_absolute`.
@@ -91,8 +98,10 @@ Per-group common axes (family-specific fields may extend):
 ## Invariants (MUST)
 
 - Stable ordering for groups/items/suggestions/hotlists.
+- Stable ordering for SARIF rules, artifacts, and results.
 - `derived.suggestions[*].finding_id` references existing canonical finding IDs.
 - `derived.hotlists.*_ids` reference existing canonical finding IDs.
+- SARIF `artifacts[*]` and `locations[*].artifactLocation.index` stay aligned.
 - `integrity.digest` is computed from canonical sections only (derived excluded).
 - `source_scope.impact_scope` is explicit and deterministic (`runtime`,
   `non_runtime`, `mixed`).
@@ -140,3 +149,5 @@ Refs:
 - [09-cli.md](09-cli.md)
 - [10-html-render.md](10-html-render.md)
 - [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)
+- [../sarif.md](../sarif.md)
+- [../examples/report.md](../examples/report.md)

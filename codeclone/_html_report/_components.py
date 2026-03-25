@@ -5,11 +5,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Literal
 
 from .. import _coerce
-from .._html_badges import _quality_badge_html, _source_kind_badge_html
+from .._html_badges import _source_kind_badge_html
 from .._html_escape import _escape_attr, _escape_html
 
 _as_int = _coerce.as_int
@@ -49,17 +49,6 @@ def overview_cluster_header(title: str, subtitle: str | None = None) -> str:
     )
 
 
-def overview_summary_list_html(items: Sequence[str]) -> str:
-    cleaned = [str(i).strip() for i in items if str(i).strip()]
-    if not cleaned:
-        return '<div class="overview-summary-value">none</div>'
-    return (
-        '<ul class="overview-summary-list">'
-        + "".join(f"<li>{_escape_html(i)}</li>" for i in cleaned)
-        + "</ul>"
-    )
-
-
 _ICON_ALERT = (
     '<svg class="summary-icon summary-icon--risk" width="16" height="16" '
     'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
@@ -77,9 +66,30 @@ _ICON_PIE = (
     '<path d="M22 12A10 10 0 0012 2v10z"/></svg>'
 )
 
+_ICON_RADAR = (
+    '<svg class="summary-icon summary-icon--info" width="16" height="16" '
+    'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round">'
+    '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/>'
+    '<circle cx="12" cy="12" r="2"/>'
+    '<line x1="12" y1="2" x2="12" y2="6"/>'
+    '<line x1="12" y1="18" x2="12" y2="22"/></svg>'
+)
+
+_ICON_BAR = (
+    '<svg class="summary-icon summary-icon--info" width="16" height="16" '
+    'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round">'
+    '<rect x="3" y="3" width="18" height="4" rx="1"/>'
+    '<rect x="3" y="10" width="13" height="4" rx="1"/>'
+    '<rect x="3" y="17" width="8" height="4" rx="1"/></svg>'
+)
+
 _SUMMARY_ICONS: dict[str, str] = {
     "top risks": _ICON_ALERT,
     "source breakdown": _ICON_PIE,
+    "health profile": _ICON_RADAR,
+    "issue breakdown": _ICON_BAR,
 }
 
 
@@ -116,71 +126,3 @@ def overview_source_breakdown_html(breakdown: Mapping[str, object]) -> str:
             "</div>"
         )
     return '<div class="breakdown-list">' + "".join(parts) + "</div>"
-
-
-def overview_row_html(card: Mapping[str, object]) -> str:
-    severity = str(card.get("severity", "info"))
-    source_kind = str(card.get("source_kind", "other"))
-    title = str(card.get("title", ""))
-    summary_text = str(card.get("summary", ""))
-    spread = _as_mapping(card.get("spread"))
-    spread_files = _as_int(spread.get("files"))
-    spread_functions = _as_int(spread.get("functions"))
-    clone_type = str(card.get("clone_type", "")).strip()
-    count = _as_int(card.get("count"))
-
-    # Badge row: severity + source kind + clone type + spread
-    badges: list[str] = [
-        _quality_badge_html(severity),
-        _source_kind_badge_html(source_kind),
-    ]
-    if clone_type:
-        badges.append(
-            f'<span class="clone-type-badge">{_escape_html(clone_type)}</span>'
-        )
-
-    spread_html = ""
-    if spread_files or spread_functions:
-        parts: list[str] = []
-        if count:
-            parts.append(f"{count} occurrences")
-        parts.append(f"{spread_functions} fn / {spread_files} files")
-        spread_html = (
-            '<span class="overview-row-spread">'
-            f"{_escape_html(' · '.join(parts))}</span>"
-        )
-
-    return (
-        '<article class="overview-row" '
-        f'data-severity="{_escape_attr(severity)}" '
-        f'data-source-kind="{_escape_attr(source_kind)}">'
-        '<div class="overview-row-head">' + "".join(badges) + spread_html + "</div>"
-        f'<div class="overview-row-title">{_escape_html(title)}</div>'
-        f'<div class="overview-row-summary">{_escape_html(summary_text)}</div>'
-        "</article>"
-    )
-
-
-def overview_section_html(
-    *,
-    title: str,
-    subtitle: str,
-    cards: Sequence[object],
-    empty_message: str,
-) -> str:
-    typed_cards = [_as_mapping(c) for c in cards if _as_mapping(c)]
-    if not typed_cards:
-        return (
-            '<section class="overview-cluster">'
-            f"{overview_cluster_header(title, subtitle)}"
-            '<div class="overview-cluster-empty">'
-            f"{_EMPTY_ICON}"
-            f"<div>{_escape_html(empty_message)}</div></div></section>"
-        )
-    return (
-        '<section class="overview-cluster">'
-        f"{overview_cluster_header(title, subtitle)}"
-        '<div class="overview-list">'
-        + "".join(overview_row_html(c) for c in typed_cards)
-        + "</div></section>"
-    )

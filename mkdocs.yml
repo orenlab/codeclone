@@ -1,0 +1,95 @@
+site_name: CodeClone
+site_description: Structural code quality analysis for Python
+site_url: https://orenlab.github.io/codeclone/
+repo_url: https://github.com/orenlab/codeclone
+repo_name: orenlab/codeclone
+docs_dir: docs
+edit_uri: blob/main/docs/
+strict: true
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: README.md
+  - Contracts Book:
+      - Overview: book/README.md
+      - Foundations:
+          - Intro: book/00-intro.md
+          - Architecture Map: book/01-architecture-map.md
+          - Terminology: book/02-terminology.md
+      - Contract Spine:
+          - Exit Codes: book/03-contracts-exit-codes.md
+          - Config and Defaults: book/04-config-and-defaults.md
+          - Core Pipeline: book/05-core-pipeline.md
+          - Baseline: book/06-baseline.md
+          - Cache: book/07-cache.md
+          - Report: book/08-report.md
+      - Interfaces:
+          - CLI: book/09-cli.md
+          - HTML Render: book/10-html-render.md
+      - System Properties:
+          - Security Model: book/11-security-model.md
+          - Determinism: book/12-determinism.md
+          - Testing as Spec: book/13-testing-as-spec.md
+          - Compatibility and Versioning: book/14-compatibility-and-versioning.md
+      - Quality:
+          - Metrics and Gates: book/15-metrics-and-quality-gates.md
+          - Dead Code: book/16-dead-code-contract.md
+          - Suggestions and Clone Typing: book/17-suggestions-and-clone-typing.md
+          - Benchmarking: book/18-benchmarking.md
+          - Inline Suppressions: book/19-inline-suppressions.md
+      - Appendix:
+          - Status Enums: book/appendix/a-status-enums.md
+          - Schema Layouts: book/appendix/b-schema-layouts.md
+          - Error Catalog: book/appendix/c-error-catalog.md
+  - Deep Dives:
+      - Architecture Narrative: architecture.md
+      - CFG Semantics: cfg.md
+      - SARIF for IDEs: sarif.md
+      - Publishing and Docs Site: publishing.md
+  - Examples:
+      - Sample Report: examples/report.md

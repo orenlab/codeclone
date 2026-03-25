@@ -21,6 +21,13 @@ def _symlink_or_skip(
         pytest.skip("symlink creation is not available in this environment")
 
 
+def _configure_fake_tempdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    fake_temp = tmp_path / "fake_tmp"
+    fake_temp.mkdir()
+    monkeypatch.setattr(scanner, "_get_tempdir", lambda: fake_temp.resolve())
+    return fake_temp
+
+
 def test_iter_py_files_in_temp(tmp_path: Path) -> None:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
@@ -252,9 +259,7 @@ def test_sensitive_root_blocked(
 def test_sensitive_directory_blocked_via_dotdot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_temp = tmp_path / "fake_tmp"
-    fake_temp.mkdir()
-    monkeypatch.setattr(scanner, "_get_tempdir", lambda: fake_temp.resolve())
+    _configure_fake_tempdir(tmp_path, monkeypatch)
 
     base = tmp_path / "base"
     sensitive_root = tmp_path / "sensitive"
@@ -276,9 +281,7 @@ def test_sensitive_directory_blocked_via_dotdot(
 def test_symlink_to_sensitive_directory_skipped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_temp = tmp_path / "fake_tmp"
-    fake_temp.mkdir()
-    monkeypatch.setattr(scanner, "_get_tempdir", lambda: fake_temp.resolve())
+    _configure_fake_tempdir(tmp_path, monkeypatch)
 
     root = tmp_path / "root"
     sensitive_root = tmp_path / "sensitive_link_target"

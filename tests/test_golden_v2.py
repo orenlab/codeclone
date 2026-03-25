@@ -19,6 +19,7 @@ from codeclone.normalize import NormalizationConfig
 from codeclone.pipeline import compute_project_metrics
 from codeclone.scanner import iter_py_files, module_name_from_path
 from codeclone.structural_findings import build_clone_cohort_structural_findings
+from tests._assertions import snapshot_python_tag
 
 _GOLDEN_V2_ROOT = Path("tests/fixtures/golden_v2").resolve()
 
@@ -319,11 +320,7 @@ def test_golden_v2_cli_pyproject_contract(
     fixture_root = _GOLDEN_V2_ROOT / "pyproject_defaults"
     expected_path = fixture_root / "golden_expected_cli_snapshot.json"
     expected = json.loads(expected_path.read_text("utf-8"))
-
-    expected_meta = expected.get("meta", {})
-    assert isinstance(expected_meta, dict)
-    expected_python_tag = expected_meta.get("python_tag")
-    assert isinstance(expected_python_tag, str)
+    expected_python_tag = snapshot_python_tag(expected)
 
     runtime_tag = current_python_tag()
     if runtime_tag != expected_python_tag:

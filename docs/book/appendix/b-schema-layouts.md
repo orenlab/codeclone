@@ -33,7 +33,14 @@ Compact structural layouts for baseline/cache/report contracts in `2.0.0b1`.
   "payload": {
     "py": "cp313",
     "fp": "1",
-    "ap": { "min_loc": 15, "min_stmt": 6 },
+    "ap": {
+      "min_loc": 10,
+      "min_stmt": 6,
+      "block_min_loc": 20,
+      "block_min_stmt": 8,
+      "segment_min_loc": 20,
+      "segment_min_stmt": 10
+    },
     "files": {
       "codeclone/cache.py": {
         "st": [1730000000000000000, 2048],
@@ -246,19 +253,108 @@ Notes:
   "version": "2.1.0",
   "runs": [
     {
+      "originalUriBaseIds": {
+        "%SRCROOT%": {
+          "uri": "file:///repo/project/",
+          "description": {
+            "text": "The root of the scanned source tree."
+          }
+        }
+      },
       "tool": {
         "driver": {
           "name": "codeclone",
           "version": "2.0.0b1",
-          "rules": []
+          "rules": [
+            {
+              "id": "CCLONE001",
+              "name": "codeclone.function-clone-group",
+              "shortDescription": {
+                "text": "Function clone group"
+              },
+              "fullDescription": {
+                "text": "Multiple functions share the same normalized function body."
+              },
+              "help": {
+                "text": "...",
+                "markdown": "..."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "helpUri": "https://orenlab.github.io/codeclone/",
+              "properties": {
+                "category": "clone",
+                "kind": "clone_group",
+                "precision": "high",
+                "tags": [
+                  "clone",
+                  "clone_group",
+                  "high"
+                ]
+              }
+            }
+          ]
         }
       },
+      "artifacts": [
+        {
+          "location": {
+            "uri": "codeclone/report/sarif.py",
+            "uriBaseId": "%SRCROOT%"
+          }
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "workingDirectory": {
+            "uri": "file:///repo/project/"
+          }
+        }
+      ],
+      "columnKind": "utf16CodeUnits",
       "properties": {
-        "format": "sarif",
         "profileVersion": "1.0",
-        "sourceReportSchemaVersion": "2.1"
+        "reportSchemaVersion": "2.1"
       },
-      "results": []
+      "results": [
+        {
+          "ruleId": "CCLONE001",
+          "ruleIndex": 0,
+          "baselineState": "new",
+          "message": {
+            "text": "Function clone group (Type-2), 2 occurrences across 2 files."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "codeclone/report/sarif.py",
+                  "uriBaseId": "%SRCROOT%",
+                  "index": 0
+                },
+                "region": {
+                  "startLine": 1,
+                  "endLine": 10
+                }
+              },
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "codeclone.report.sarif:render_sarif_report_document"
+                }
+              ],
+              "message": {
+                "text": "Representative occurrence"
+              }
+            }
+          ],
+          "relatedLocations": [],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "0123456789abcdef:1"
+          }
+        }
+      ]
     }
   ]
 }

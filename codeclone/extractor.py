@@ -76,6 +76,7 @@ class _ParseTimeoutError(Exception):
 
 
 FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
+_NamedDeclarationNode = FunctionNode | ast.ClassDef
 
 
 def _consumed_cpu_seconds(resource_module: object) -> float:
@@ -502,6 +503,95 @@ def _is_non_runtime_candidate(node: FunctionNode) -> bool:
     return False
 
 
+def _node_line_span(node: ast.AST) -> tuple[int, int] | None:
+    start = int(getattr(node, "lineno", 0))
+    end = int(getattr(node, "end_lineno", 0))
+    if start <= 0 or end <= 0:
+        return None
+    return start, end
+
+
+def _dead_candidate_kind(local_name: str) -> Literal["function", "method"]:
+    return "method" if "." in local_name else "function"
+
+
+def _should_skip_dead_candidate(
+    local_name: str,
+    node: FunctionNode,
+    *,
+    protocol_class_qualnames: set[str],
+) -> bool:
+    if _is_non_runtime_candidate(node):
+        return True
+    if "." not in local_name:
+        return False
+    owner_qualname = local_name.rsplit(".", 1)[0]
+    return owner_qualname in protocol_class_qualnames
+
+
+def _build_dead_candidate(
+    *,
+    module_name: str,
+    local_name: str,
+    node: _NamedDeclarationNode,
+    filepath: str,
+    kind: Literal["class", "function", "method"],
+    suppression_index: Mapping[SuppressionTargetKey, tuple[str, ...]],
+    start_line: int,
+    end_line: int,
+) -> DeadCandidate:
+    qualname = f"{module_name}:{local_name}"
+    return DeadCandidate(
+        qualname=qualname,
+        local_name=node.name,
+        filepath=filepath,
+        start_line=start_line,
+        end_line=end_line,
+        kind=kind,
+        suppressed_rules=suppression_index.get(
+            suppression_target_key(
+                filepath=filepath,
+                qualname=qualname,
+                start_line=start_line,
+                end_line=end_line,
+                kind=kind,
+            ),
+            (),
+        ),
+    )
+
+
+def _dead_candidate_for_unit(
+    *,
+    module_name: str,
+    local_name: str,
+    node: FunctionNode,
+    filepath: str,
+    suppression_index: Mapping[SuppressionTargetKey, tuple[str, ...]],
+    protocol_class_qualnames: set[str],
+) -> DeadCandidate | None:
+    span = _node_line_span(node)
+    if span is None:
+        return None
+    if _should_skip_dead_candidate(
+        local_name,
+        node,
+        protocol_class_qualnames=protocol_class_qualnames,
+    ):
+        return None
+    start, end = span
+    return _build_dead_candidate(
+        module_name=module_name,
+        local_name=local_name,
+        node=node,
+        filepath=filepath,
+        kind=_dead_candidate_kind(local_name),
+        suppression_index=suppression_index,
+        start_line=start,
+        end_line=end,
+    )
+
+
 def _collect_load_reference_node(
     *,
     node: ast.AST,
@@ -650,63 +740,33 @@ def _collect_dead_candidates(
         suppression_rules_by_target if suppression_rules_by_target is not None else {}
     )
     for local_name, node in collector.units:
-        start = int(getattr(node, "lineno", 0))
-        end = int(getattr(node, "end_lineno", 0))
-        if start <= 0 or end <= 0:
-            continue
-        if _is_non_runtime_candidate(node):
-            continue
-        if "." in local_name:
-            owner_qualname = local_name.rsplit(".", 1)[0]
-            if owner_qualname in protocol_class_qualnames:
-                continue
-        kind: Literal["method", "function"] = (
-            "method" if "." in local_name else "function"
+        candidate = _dead_candidate_for_unit(
+            module_name=module_name,
+            local_name=local_name,
+            node=node,
+            filepath=filepath,
+            suppression_index=suppression_index,
+            protocol_class_qualnames=protocol_class_qualnames,
         )
-        candidates.append(
-            DeadCandidate(
-                qualname=f"{module_name}:{local_name}",
-                local_name=node.name,
-                filepath=filepath,
-                start_line=start,
-                end_line=end,
-                kind=kind,
-                suppressed_rules=suppression_index.get(
-                    suppression_target_key(
-                        filepath=filepath,
-                        qualname=f"{module_name}:{local_name}",
-                        start_line=start,
-                        end_line=end,
-                        kind=kind,
-                    ),
-                    (),
-                ),
-            )
-        )
+        if candidate is None:
+            continue
+        candidates.append(candidate)
 
     for class_qualname, class_node in collector.class_nodes:
-        start = int(getattr(class_node, "lineno", 0))
-        end = int(getattr(class_node, "end_lineno", 0))
-        if start <= 0 or end <= 0:
+        span = _node_line_span(class_node)
+        if span is None:
             continue
+        start, end = span
         candidates.append(
-            DeadCandidate(
-                qualname=f"{module_name}:{class_qualname}",
-                local_name=class_node.name,
+            _build_dead_candidate(
+                module_name=module_name,
+                local_name=class_qualname,
+                node=class_node,
                 filepath=filepath,
+                kind="class",
+                suppression_index=suppression_index,
                 start_line=start,
                 end_line=end,
-                kind="class",
-                suppressed_rules=suppression_index.get(
-                    suppression_target_key(
-                        filepath=filepath,
-                        qualname=f"{module_name}:{class_qualname}",
-                        start_line=start,
-                        end_line=end,
-                        kind="class",
-                    ),
-                    (),
-                ),
             )
         )
 
@@ -802,6 +862,10 @@ def extract_units_and_stats_from_source(
     min_loc: int,
     min_stmt: int,
     *,
+    block_min_loc: int = 20,
+    block_min_stmt: int = 8,
+    segment_min_loc: int = 20,
+    segment_min_stmt: int = 10,
     collect_structural_findings: bool = True,
 ) -> tuple[
     list[Unit],
@@ -915,9 +979,11 @@ def extract_units_and_stats_from_source(
 
         # Block-level and segment-level units share statement hashes
         needs_blocks = (
-            not local_name.endswith("__init__") and loc >= 40 and stmt_count >= 10
+            not local_name.endswith("__init__")
+            and loc >= block_min_loc
+            and stmt_count >= block_min_stmt
         )
-        needs_segments = loc >= 30 and stmt_count >= 12
+        needs_segments = loc >= segment_min_loc and stmt_count >= segment_min_stmt
 
         if needs_blocks or needs_segments:
             body = getattr(node, "body", None)

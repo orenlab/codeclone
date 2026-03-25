@@ -23,6 +23,10 @@ def extract_units_from_source(
     cfg: NormalizationConfig,
     min_loc: int,
     min_stmt: int,
+    block_min_loc: int = 20,
+    block_min_stmt: int = 8,
+    segment_min_loc: int = 20,
+    segment_min_stmt: int = 10,
 ) -> tuple[
     list[extractor.Unit],
     list[BlockUnit],
@@ -36,9 +40,38 @@ def extract_units_from_source(
             cfg=cfg,
             min_loc=min_loc,
             min_stmt=min_stmt,
+            block_min_loc=block_min_loc,
+            block_min_stmt=block_min_stmt,
+            segment_min_loc=segment_min_loc,
+            segment_min_stmt=segment_min_stmt,
         )
     )
     return units, blocks, segments
+
+
+def _parse_tree_and_collector(
+    source: str,
+) -> tuple[ast.Module, extractor._QualnameCollector]:
+    tree = ast.parse(source)
+    collector = extractor._QualnameCollector()
+    collector.visit(tree)
+    return tree, collector
+
+
+def _collect_module_walk(
+    source: str,
+    *,
+    module_name: str = "pkg.mod",
+    collect_referenced_names: bool = True,
+) -> tuple[ast.Module, extractor._QualnameCollector, extractor._ModuleWalkResult]:
+    tree, collector = _parse_tree_and_collector(source)
+    walk = extractor._collect_module_walk_data(
+        tree=tree,
+        module_name=module_name,
+        collector=collector,
+        collect_referenced_names=collect_referenced_names,
+    )
+    return tree, collector, walk
 
 
 def test_extracts_function_unit() -> None:
@@ -193,6 +226,16 @@ def test_parse_limits_no_timeout() -> None:
     assert tree is not None
 
 
+def _patch_posix_parse_limits(
+    monkeypatch: pytest.MonkeyPatch, resource_module: object
+) -> None:
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
+    monkeypatch.setitem(sys.modules, "resource", resource_module)
+
+
 def test_parse_limits_resource_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     class _DummyResource:
         RLIMIT_CPU = 0
@@ -206,11 +249,7 @@ def test_parse_limits_resource_failure(monkeypatch: pytest.MonkeyPatch) -> None:
         def setrlimit(_key: int, _val: tuple[int, int]) -> None:
             return None
 
-    monkeypatch.setattr(os, "name", "posix")
-    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
-    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+    _patch_posix_parse_limits(monkeypatch, _DummyResource)
 
     with extractor._parse_limits(1):
         tree = extractor._parse_with_limits("x = 1", 1)
@@ -234,11 +273,7 @@ def test_parse_limits_never_lowers_hard_limit(monkeypatch: pytest.MonkeyPatch) -
             # Simulate a system where changing hard limit would fail.
             assert val[1] == _DummyResource.RLIM_INFINITY
 
-    monkeypatch.setattr(os, "name", "posix")
-    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
-    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+    _patch_posix_parse_limits(monkeypatch, _DummyResource)
 
     with extractor._parse_limits(5):
         pass
@@ -279,11 +314,7 @@ def test_parse_limits_accounts_for_consumed_cpu(
         def getrusage(_who: int) -> _DummyUsage:
             return _DummyUsage()
 
-    monkeypatch.setattr(os, "name", "posix")
-    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
-    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+    _patch_posix_parse_limits(monkeypatch, _DummyResource)
 
     with extractor._parse_limits(5):
         pass
@@ -323,11 +354,7 @@ def test_parse_limits_raises_too_low_soft_limit_for_consumed_cpu(
         def getrusage(_who: int) -> _DummyUsage:
             return _DummyUsage()
 
-    monkeypatch.setattr(os, "name", "posix")
-    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
-    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+    _patch_posix_parse_limits(monkeypatch, _DummyResource)
 
     with extractor._parse_limits(5):
         pass
@@ -354,11 +381,7 @@ def test_parse_limits_uses_finite_soft_limit_branch(
         def setrlimit(_key: int, val: tuple[int, int]) -> None:
             calls.append(val)
 
-    monkeypatch.setattr(os, "name", "posix")
-    monkeypatch.setattr(signal, "getsignal", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(signal, "signal", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
-    monkeypatch.setitem(sys.modules, "resource", _DummyResource)
+    _patch_posix_parse_limits(monkeypatch, _DummyResource)
 
     with extractor._parse_limits(5):
         pass
@@ -645,9 +668,7 @@ method = Service.hook
 unknown = Missing.hook
 dynamic = factory().attr
 """
-    tree = ast.parse(src)
-    collector = extractor._QualnameCollector()
-    collector.visit(tree)
+    tree, collector = _parse_tree_and_collector(src)
     state = extractor._ModuleWalkState()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -692,15 +713,7 @@ class Service:
 value = helpers.tools.decorate(1)
 handler = Service.hook
     """
-    tree = ast.parse(src)
-    collector = extractor._QualnameCollector()
-    collector.visit(tree)
-    walk = extractor._collect_module_walk_data(
-        tree=tree,
-        module_name="pkg.mod",
-        collector=collector,
-        collect_referenced_names=True,
-    )
+    _tree, _collector, walk = _collect_module_walk(src)
     assert "pkg.mod:Service.hook" in walk.referenced_qualnames
     assert "pkg.helpers:tools" in walk.referenced_qualnames
     assert "pkg.helpers:decorate" not in walk.referenced_qualnames
@@ -1009,15 +1022,7 @@ def parse_value(value: int) -> str: ...
 def parse_value(value: object) -> str:
     return str(value)
     """
-    tree = ast.parse(src)
-    collector = extractor._QualnameCollector()
-    collector.visit(tree)
-    walk = extractor._collect_module_walk_data(
-        tree=tree,
-        module_name="pkg.mod",
-        collector=collector,
-        collect_referenced_names=True,
-    )
+    _tree, collector, walk = _collect_module_walk(src)
     dead = extractor._collect_dead_candidates(
         filepath="pkg/mod.py",
         module_name="pkg.mod",
@@ -1120,6 +1125,7 @@ def f():
 
 
 def test_extract_generates_segments_without_blocks_when_only_segment_gate_met() -> None:
+    """Function with 12 stmts in ~36 lines: passes segment gate but not block gate."""
     lines = ["def f():"]
     for i in range(12):
         lines.append(f"    x{i} = {i}")
@@ -1134,6 +1140,12 @@ def test_extract_generates_segments_without_blocks_when_only_segment_gate_met() 
         cfg=NormalizationConfig(),
         min_loc=1,
         min_stmt=1,
+        # segment gate passes (loc=37 >= 20, stmt=12 >= 10)
+        segment_min_loc=20,
+        segment_min_stmt=10,
+        # block gate fails (stmt=12 < 15)
+        block_min_loc=20,
+        block_min_stmt=15,
     )
 
     assert units
@@ -1142,6 +1154,7 @@ def test_extract_generates_segments_without_blocks_when_only_segment_gate_met() 
 
 
 def test_extract_generates_blocks_without_segments_when_only_block_gate_met() -> None:
+    """Function with 10 stmts in ~50 lines: passes block gate but not segment gate."""
     lines = ["def f():"]
     for i in range(10):
         lines.append(f"    x{i} = {i}")
@@ -1158,11 +1171,216 @@ def test_extract_generates_blocks_without_segments_when_only_block_gate_met() ->
         cfg=NormalizationConfig(),
         min_loc=1,
         min_stmt=1,
+        # block gate passes (loc=51 >= 20, stmt=10 >= 8)
+        block_min_loc=20,
+        block_min_stmt=8,
+        # segment gate fails (stmt=10 < 12)
+        segment_min_loc=20,
+        segment_min_stmt=12,
     )
 
     assert units
     assert blocks
     assert segments == []
+
+
+class TestAdmissionThresholdBoundaries:
+    """Verify function/block/segment admission gates at exact boundaries."""
+
+    @staticmethod
+    def _make_func(stmt_count: int, lines_per_stmt: int = 1) -> str:
+        """Build a function with configurable statement count and per-statement LOC."""
+        lines = ["def f():"]
+        for i in range(stmt_count):
+            lines.append(f"    x{i} = {i}")
+            # pad with blank lines to inflate LOC
+            lines.extend([""] * (lines_per_stmt - 1))
+        return "\n".join(lines)
+
+    # -- function-level: min_loc boundary --
+
+    def test_function_excluded_below_min_loc(self) -> None:
+        src = self._make_func(stmt_count=6, lines_per_stmt=1)  # 7 lines
+        units, _, _ = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=10,
+            min_stmt=1,
+        )
+        assert units == []
+
+    def test_function_included_at_min_loc(self) -> None:
+        src = self._make_func(stmt_count=6, lines_per_stmt=2)  # 13 lines
+        units, _, _ = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=10,
+            min_stmt=1,
+        )
+        assert len(units) == 1
+
+    # -- function-level: min_stmt boundary --
+
+    def test_function_excluded_below_min_stmt(self) -> None:
+        src = self._make_func(stmt_count=5, lines_per_stmt=3)  # 16 lines, 5 stmts
+        units, _, _ = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=6,
+        )
+        assert units == []
+
+    def test_function_included_at_min_stmt(self) -> None:
+        src = self._make_func(stmt_count=6, lines_per_stmt=3)  # 19 lines, 6 stmts
+        units, _, _ = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=6,
+        )
+        assert len(units) == 1
+
+    # -- block gate boundary --
+
+    def test_blocks_excluded_below_block_min_loc(self) -> None:
+        src = self._make_func(stmt_count=10, lines_per_stmt=1)  # 11 lines, 10 stmts
+        _, blocks, _ = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            block_min_loc=20,
+            block_min_stmt=8,
+        )
+        assert blocks == []
+
+    def test_blocks_included_at_block_min_loc(self) -> None:
+        src = self._make_func(stmt_count=10, lines_per_stmt=2)  # 21 lines, 10 stmts
+        _, blocks, _ = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            block_min_loc=20,
+            block_min_stmt=8,
+        )
+        assert blocks
+
+    def test_blocks_excluded_below_block_min_stmt(self) -> None:
+        src = self._make_func(stmt_count=7, lines_per_stmt=4)  # 29 lines, 7 stmts
+        _, blocks, _ = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            block_min_loc=20,
+            block_min_stmt=8,
+        )
+        assert blocks == []
+
+    def test_blocks_included_at_block_min_stmt(self) -> None:
+        src = self._make_func(stmt_count=8, lines_per_stmt=3)  # 25 lines, 8 stmts
+        _, blocks, _ = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            block_min_loc=20,
+            block_min_stmt=8,
+        )
+        assert blocks
+
+    # -- segment gate boundary --
+
+    def test_segments_excluded_below_segment_min_loc(self) -> None:
+        src = self._make_func(stmt_count=12, lines_per_stmt=1)  # 13 lines, 12 stmts
+        _, _, segments = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            segment_min_loc=20,
+            segment_min_stmt=10,
+        )
+        assert segments == []
+
+    def test_segments_included_at_segment_min_loc(self) -> None:
+        src = self._make_func(stmt_count=12, lines_per_stmt=2)  # 25 lines, 12 stmts
+        _, _, segments = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            segment_min_loc=20,
+            segment_min_stmt=10,
+        )
+        assert segments
+
+    def test_segments_excluded_below_segment_min_stmt(self) -> None:
+        src = self._make_func(stmt_count=9, lines_per_stmt=3)  # 28 lines, 9 stmts
+        _, _, segments = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            segment_min_loc=20,
+            segment_min_stmt=10,
+        )
+        assert segments == []
+
+    def test_segments_included_at_segment_min_stmt(self) -> None:
+        src = self._make_func(stmt_count=10, lines_per_stmt=3)  # 31 lines, 10 stmts
+        _, _, segments = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            segment_min_loc=20,
+            segment_min_stmt=10,
+        )
+        assert segments
+
+    # -- boilerplate still excluded --
+
+    def test_short_boilerplate_excluded_with_new_defaults(self) -> None:
+        """3-line trivial function stays out even with lowered thresholds."""
+        src = "def f():\n    x = 1\n    return x\n"
+        units, blocks, segments = extract_units_from_source(
+            source=src,
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=10,
+            min_stmt=6,
+        )
+        assert units == []
+        assert blocks == []
+        assert segments == []
 
 
 def test_extract_handles_non_list_function_body_for_hash_reuse(

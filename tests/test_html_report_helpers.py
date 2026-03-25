@@ -2,10 +2,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from codeclone._html_report._components import (
-    overview_row_html,
     overview_source_breakdown_html,
     overview_summary_item_html,
-    overview_summary_list_html,
 )
 from codeclone._html_report._sections._clones import (
     _derive_group_display_name,
@@ -16,35 +14,13 @@ from codeclone._html_report._sections._dependencies import (
     _render_dep_nodes_and_labels,
     _select_dep_nodes,
 )
-from codeclone._html_report._sections._overview import _top_risk_label
 from codeclone._html_report._tabs import render_split_tabs
 
 
 def test_summary_helpers_cover_empty_and_non_clone_context_branches() -> None:
-    assert overview_summary_list_html(("", "   ")) == (
-        '<div class="overview-summary-value">none</div>'
-    )
     assert overview_source_breakdown_html({}) == (
         '<div class="overview-summary-value">n/a</div>'
     )
-
-    row_html = overview_row_html(
-        {
-            "severity": "warning",
-            "source_kind": "production",
-            "category": "complexity",
-            "title": "Large renderer",
-            "summary": "Needs extraction",
-            "confidence": "high",
-            "location": "pkg/mod.py:10",
-            "count": 2,
-            "spread": {"files": 1, "functions": 2},
-        }
-    )
-    assert "severity-warning" in row_html
-    assert "Production" in row_html
-    assert "2 fn / 1 files" in row_html
-    assert "clone_type" not in row_html
 
 
 def test_summary_helpers_cover_breakdown_bars_and_clone_badges() -> None:
@@ -59,21 +35,6 @@ def test_summary_helpers_cover_breakdown_bars_and_clone_badges() -> None:
         body_html="<div>body</div>",
     )
     assert "summary-icon--info" in summary_html
-
-    row_html = overview_row_html(
-        {
-            "severity": "critical",
-            "source_kind": "tests",
-            "title": "Function clone group (Type-2)",
-            "summary": "same parameterized function body",
-            "clone_type": "Type-2",
-            "count": 4,
-            "spread": {"files": 4, "functions": 4},
-        }
-    )
-    assert "clone-type-badge" in row_html
-    assert "4 occurrences" in row_html
-    assert "severity-critical" in row_html
 
 
 def test_clone_display_name_and_group_explanation_edge_branches() -> None:
@@ -128,14 +89,6 @@ def test_dependency_helpers_cover_dense_and_empty_branches() -> None:
     assert len(node_svg) == 9
     assert len(label_svg) == 9
     assert "rotate(-45)" in label_svg[0]
-
-
-def test_top_risk_label_handles_structured_and_string_edge_cases() -> None:
-    assert _top_risk_label({"family": "dead_code", "count": 3, "scope": "tests"}) == (
-        "3 dead code (tests)"
-    )
-    assert _top_risk_label({"family": "complexity"}) == "complexity"
-    assert _top_risk_label("{opaque}") == ""
 
 
 def test_render_split_tabs_returns_empty_for_no_tabs() -> None:

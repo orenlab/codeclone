@@ -544,6 +544,23 @@ def test_build_dep_graph_deduplicates_edges() -> None:
     assert dep_graph.edges == (repeated,)
 
 
+def test_clone_piecewise_score_breakpoints() -> None:
+    pw = health_mod._clone_piecewise_score
+    assert pw(0.0) == 100
+    assert pw(-0.1) == 100
+    # First segment: 0 → 0.05 maps 100 → 90
+    assert pw(0.025) == 95
+    assert pw(0.05) == 90
+    # Second segment: 0.05 → 0.20 maps 90 → 50
+    assert pw(0.10) == 77  # 90 + (0.05/0.15)*(-40) ≈ 76.7 → 77
+    assert pw(0.20) == 50
+    # Third segment: 0.20 → 0.50 maps 50 → 0
+    assert pw(0.35) == 25
+    assert pw(0.50) == 0
+    # Beyond last breakpoint
+    assert pw(1.0) == 0
+
+
 def test_health_helpers_and_compute_health_boundaries() -> None:
     assert health_mod._safe_div(10, 0) == 0.0
     assert health_mod._grade(95) == "A"

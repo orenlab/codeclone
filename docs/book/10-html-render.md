@@ -37,10 +37,15 @@ Refs:
 - HTML must not recompute detection semantics; it renders facts from core/report layers.
 - Explainability hints shown in UI are sourced from `build_block_group_facts` data.
 - Provenance panel mirrors report metadata contract.
+- HTML may expose local UX affordances such as the health-grade badge dialog
+  or provenance modal, but those actions are projections over already computed
+  report/meta facts.
 - Overview UI is a report projection:
-    - summary facts come from `derived.overview`
-    - hotlist identity comes from `derived.hotlists`
-    - rendered cards are materialized against canonical findings at HTML build time
+    - KPI cards with baseline-aware tone (`✓ baselined` / `+N` regression)
+    - Health gauge with baseline delta arc (improvement/degradation)
+    - Executive Summary: issue breakdown (sorted bars) + source breakdown
+    - Health Profile: full-width radar chart of dimension scores
+    - Get Badge modal: grade-only / score+grade variants with shields.io embed
 - Dead-code UI is a single top-level `Dead Code` tab with deterministic split
   sub-tabs: `Active` and `Suppressed`.
 
@@ -99,4 +104,7 @@ Refs:
 ## Non-guarantees
 
 - CSS/visual system and interaction details may evolve without schema bump.
-- HTML command palette action set is not a baseline/cache/report contract.
+- HTML-only interaction affordances (theme toggle, provenance modal, badge
+  modal, radar chart) are not baseline/cache/report contracts.
+- Overview layout (KPI grid, executive summary, analytics) is a pure view
+  concern; only the underlying data identity and ordering are contract-sensitive.

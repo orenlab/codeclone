@@ -9,6 +9,8 @@ from codeclone.normalize import (
     NormalizationConfig,
     normalized_ast_dump_from_list,
 )
+from tests._assertions import assert_contains_all
+from tests._ast_helpers import fix_missing_single_function
 
 
 def normalized_ast_dump(node: ast.AST, cfg: NormalizationConfig) -> str:
@@ -312,10 +314,7 @@ def test_normalization_preserves_semantic_marker_names() -> None:
         ],
         decorator_list=[],
     )
-    module = ast.Module(body=[fn], type_ignores=[])
-    module = ast.fix_missing_locations(module)
-    node = module.body[0]
-    assert isinstance(node, ast.FunctionDef)
+    node = fix_missing_single_function(fn)
     cfg = NormalizationConfig()
     dump = normalized_ast_dump(node, cfg)
     assert f"{CFG_META_PREFIX}MATCH_PATTERN:MatchValue(Constant(value=1))" in dump
@@ -394,11 +393,7 @@ def f(x: int, /, y: int, *, z: int, **k: int) -> int:
     )
     node = ast.parse(src).body[0]
     dump = normalized_ast_dump(node, cfg)
-    assert "my_attr" in dump
-    assert "123" in dump
-    assert "doc" in dump
-    assert "id='x'" in dump
-    assert "id='int'" in dump
+    assert_contains_all(dump, "my_attr", "123", "doc", "id='x'", "id='int'")
 
 
 @pytest.mark.parametrize(

@@ -36,6 +36,7 @@ from ..report.explain_contract import (
     BLOCK_HINT_ASSERT_ONLY,
     BLOCK_PATTERN_REPEATED_STMT_HASH,
 )
+from .derived import format_spread_location_label
 
 if TYPE_CHECKING:
     from ..models import Suggestion
@@ -195,11 +196,10 @@ def _group_location_label(group: Mapping[str, object]) -> str:
     spread = _as_mapping(group.get("spread"))
     files = _as_int(spread.get("files"))
     functions = _as_int(spread.get("functions"))
-    count_word = "occurrence" if count == 1 else "occurrences"
-    file_word = "file" if files == 1 else "files"
-    function_word = "function" if functions == 1 else "functions"
-    return (
-        f"{count} {count_word} across {files} {file_word} / {functions} {function_word}"
+    return format_spread_location_label(
+        count,
+        files=files,
+        functions=functions,
     )
 
 
@@ -365,28 +365,42 @@ def _health_snapshot(metrics: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _metric_summary_count(
+    metrics: Mapping[str, object],
+    metric_name: str,
+    summary_key: str,
+    *,
+    fallback_key: str | None = None,
+) -> int:
+    metric_map = metrics.get(metric_name)
+    if not isinstance(metric_map, Mapping):
+        return 0
+    summary = metric_map.get("summary")
+    if not isinstance(summary, Mapping):
+        return 0
+    return int(summary.get(summary_key, summary.get(fallback_key, 0)))
+
+
 def _top_risks(
     suggestions: Sequence[Suggestion],
     *,
     metrics: Mapping[str, object],
 ) -> list[str]:
     risks: list[str] = []
-    dead_code_map = metrics.get("dead_code")
-    if isinstance(dead_code_map, Mapping):
-        summary = dead_code_map.get("summary")
-        if isinstance(summary, Mapping):
-            high_conf = int(summary.get("high_confidence", summary.get("critical", 0)))
-            if high_conf > 0:
-                noun = "item" if high_conf == 1 else "items"
-                risks.append(f"{high_conf} dead code {noun}")
-    cohesion_map = metrics.get("cohesion")
-    if isinstance(cohesion_map, Mapping):
-        summary = cohesion_map.get("summary")
-        if isinstance(summary, Mapping):
-            low = int(summary.get("low_cohesion", 0))
-            if low > 0:
-                noun = "class" if low == 1 else "classes"
-                risks.append(f"{low} low cohesion {noun}")
+    high_conf = _metric_summary_count(
+        metrics,
+        "dead_code",
+        "high_confidence",
+        fallback_key="critical",
+    )
+    if high_conf > 0:
+        noun = "item" if high_conf == 1 else "items"
+        risks.append(f"{high_conf} dead code {noun}")
+
+    low = _metric_summary_count(metrics, "cohesion", "low_cohesion")
+    if low > 0:
+        noun = "class" if low == 1 else "classes"
+        risks.append(f"{low} low cohesion {noun}")
     production_structural = sum(
         1
         for suggestion in suggestions

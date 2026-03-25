@@ -6,7 +6,7 @@ import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import pytest
 
@@ -25,6 +25,7 @@ from codeclone.contracts import (
 )
 from codeclone.errors import CacheError
 from codeclone.models import Unit
+from tests._assertions import assert_contains_all, assert_mapping_entries
 from tests._report_access import (
     report_clone_groups as _report_clone_groups,
 )
@@ -179,6 +180,32 @@ def _run_main(monkeypatch: pytest.MonkeyPatch, args: Iterable[str]) -> None:
     cli.main()
 
 
+def _run_parallel_main(monkeypatch: pytest.MonkeyPatch, args: Iterable[str]) -> None:
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, args)
+
+
+def _assert_cli_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    args: Iterable[str],
+    *,
+    expected_code: int,
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, args)
+    assert exc.value.code == expected_code
+
+
+def _assert_parallel_cli_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    args: Iterable[str],
+    *,
+    expected_code: int,
+) -> None:
+    _patch_parallel(monkeypatch)
+    _assert_cli_exit(monkeypatch, args, expected_code=expected_code)
+
+
 def _write_python_module(
     directory: Path,
     filename: str,
@@ -187,6 +214,38 @@ def _write_python_module(
     path = directory / filename
     path.write_text(source, "utf-8")
     return path
+
+
+def _write_default_source(directory: Path) -> Path:
+    return _write_python_module(directory, "a.py")
+
+
+def _write_profile_compatibility_source(directory: Path) -> Path:
+    return _write_python_module(
+        directory,
+        "a.py",
+        """
+def f1():
+    x = 1
+    return x
+
+def f2():
+    y = 1
+    return y
+""",
+    )
+
+
+def _prepare_basic_project(root: Path) -> Path:
+    root.mkdir()
+    return _write_python_module(root, "a.py")
+
+
+def _write_legacy_cache_file(base_dir: Path) -> Path:
+    legacy_path = base_dir / "legacy" / "cache.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("{}", "utf-8")
+    return legacy_path
 
 
 def _patch_fixed_executor(
@@ -310,6 +369,25 @@ def _write_baseline(
     return path
 
 
+def _write_current_python_baseline(path: Path) -> Path:
+    return _write_baseline(path, python_version=_current_py_minor())
+
+
+def _write_legacy_baseline(path: Path) -> Path:
+    path.write_text(
+        json.dumps(
+            {
+                "functions": [],
+                "blocks": [],
+                "python_version": "3.13",
+                "schema_version": BASELINE_SCHEMA_VERSION,
+            }
+        ),
+        "utf-8",
+    )
+    return path
+
+
 def _assert_baseline_failure_meta(
     *,
     tmp_path: Path,
@@ -373,6 +451,110 @@ def _assert_fail_on_new_summary(out: str, *, include_blocks: bool = True) -> Non
     assert "codeclone . --update-baseline" in out
 
 
+def _patch_baseline_diff(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    new_func: set[str],
+    new_block: set[str],
+) -> None:
+    def _diff(
+        _self: object, _f: dict[str, object], _b: dict[str, object]
+    ) -> tuple[set[str], set[str]]:
+        return new_func, new_block
+
+    monkeypatch.setattr(baseline.Baseline, "diff", _diff)
+
+
+def _open_html_report_args(project_root: Path, html_out: Path) -> list[str]:
+    return [
+        str(project_root),
+        "--html",
+        str(html_out),
+        "--open-html-report",
+        "--no-progress",
+    ]
+
+
+def _capture_cache_path_for_args(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    extra_args: Iterable[str],
+) -> Path:
+    captured: dict[str, Path] = {}
+
+    class _CacheStub:
+        def __init__(self, path: Path, **_kwargs: object) -> None:
+            captured["path"] = Path(path)
+            self.load_warning = None
+
+        def load(self) -> None:
+            return None
+
+        def get_file_entry(self, _fp: str) -> None:
+            return None
+
+        def put_file_entry(
+            self,
+            _fp: str,
+            _stat: object,
+            _units: object,
+            _blocks: object,
+            _segments: object,
+            *,
+            file_metrics: object | None = None,
+            structural_findings: object | None = None,
+        ) -> None:
+            return None
+
+        def save(self) -> None:
+            return None
+
+    monkeypatch.setattr(cli, "Cache", _CacheStub)
+    _write_default_source(tmp_path)
+    _run_parallel_main(monkeypatch, [str(tmp_path), *extra_args, "--no-progress"])
+    return captured["path"]
+
+
+def _assert_worker_failure_internal_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    no_progress: bool,
+) -> None:
+    _write_default_source(tmp_path)
+
+    def _boom(*_args: object, **_kwargs: object) -> cli.ProcessingResult:
+        raise RuntimeError("boom")
+
+    class _FailExec:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def __enter__(self) -> _FailExec:
+            raise PermissionError("nope")
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            tb: object | None,
+        ) -> Literal[False]:
+            return False
+
+    if not no_progress:
+        _patch_dummy_progress(monkeypatch)
+    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailExec)
+    monkeypatch.setattr(pipeline, "process_file", _boom)
+    args = [str(tmp_path)]
+    if no_progress:
+        args.append("--no-progress")
+    _assert_cli_exit(monkeypatch, args, expected_code=5)
+    out = capsys.readouterr().out
+    assert "INTERNAL ERROR:" in out
+
+
 _SUMMARY_METRIC_MAP: dict[str, str] = {
     "Files found": "found",
     "Files analyzed": "analyzed",
@@ -415,6 +597,65 @@ def _prepare_source_and_baseline(tmp_path: Path) -> tuple[Path, Path]:
         python_version=_current_py_minor(),
     )
     return src, baseline_path
+
+
+def _run_json_report(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    extra_args: Iterable[str],
+    expect_exit_code: int | None = None,
+) -> dict[str, object]:
+    json_out = tmp_path / "report.json"
+    _patch_parallel(monkeypatch)
+    args = [
+        str(tmp_path),
+        *extra_args,
+        "--json",
+        str(json_out),
+        "--no-progress",
+    ]
+    if expect_exit_code is None:
+        _run_main(monkeypatch, args)
+    else:
+        with pytest.raises(SystemExit) as exc:
+            _run_main(monkeypatch, args)
+        assert exc.value.code == expect_exit_code
+    payload = json.loads(json_out.read_text("utf-8"))
+    assert isinstance(payload, dict)
+    return cast(dict[str, object], payload)
+
+
+def _assert_report_baseline_meta(
+    payload: dict[str, object],
+    *,
+    status: str,
+    loaded: bool,
+    **expected: object,
+) -> dict[str, object]:
+    baseline_meta = _report_meta_baseline(payload)
+    assert baseline_meta["status"] == status
+    assert baseline_meta["loaded"] is loaded
+    for key, value in expected.items():
+        assert baseline_meta[key] == value
+    return baseline_meta
+
+
+def _assert_report_cache_meta(
+    payload: dict[str, object],
+    *,
+    used: bool,
+    status: str,
+    schema_version: object,
+) -> dict[str, object]:
+    cache_meta = _report_meta_cache(payload)
+    assert_mapping_entries(
+        cache_meta,
+        used=used,
+        status=status,
+        schema_version=schema_version,
+    )
+    return cache_meta
 
 
 def _prepare_single_source_cache(tmp_path: Path) -> tuple[Path, Path, Cache]:
@@ -476,91 +717,29 @@ def f2():
 def test_cli_default_cache_dir_uses_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    captured: dict[str, Path] = {}
-
-    class _CacheStub:
-        def __init__(self, path: Path, **_kwargs: object) -> None:
-            captured["path"] = Path(path)
-            self.load_warning = None
-
-        def load(self) -> None:
-            return None
-
-        def get_file_entry(self, _fp: str) -> None:
-            return None
-
-        def put_file_entry(
-            self,
-            _fp: str,
-            _stat: object,
-            _units: object,
-            _blocks: object,
-            _segments: object,
-            *,
-            file_metrics: object | None = None,
-            structural_findings: object | None = None,
-        ) -> None:
-            return None
-
-        def save(self) -> None:
-            return None
-
-    monkeypatch.setattr(cli, "Cache", _CacheStub)
-    _patch_parallel(monkeypatch)
-    _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
-    assert captured["path"] == tmp_path / ".cache" / "codeclone" / "cache.json"
+    assert (
+        _capture_cache_path_for_args(
+            tmp_path,
+            monkeypatch,
+            extra_args=(),
+        )
+        == tmp_path / ".cache" / "codeclone" / "cache.json"
+    )
 
 
 @pytest.mark.parametrize("flag", ["--cache-dir", "--cache-path"])
 def test_cli_cache_dir_override_respected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    captured: dict[str, Path] = {}
-
-    class _CacheStub:
-        def __init__(self, path: Path, **_kwargs: object) -> None:
-            captured["path"] = Path(path)
-            self.load_warning = None
-
-        def load(self) -> None:
-            return None
-
-        def get_file_entry(self, _fp: str) -> None:
-            return None
-
-        def put_file_entry(
-            self,
-            _fp: str,
-            _stat: object,
-            _units: object,
-            _blocks: object,
-            _segments: object,
-            *,
-            file_metrics: object | None = None,
-            structural_findings: object | None = None,
-        ) -> None:
-            return None
-
-        def save(self) -> None:
-            return None
-
     cache_path = tmp_path / "custom-cache.json"
-    monkeypatch.setattr(cli, "Cache", _CacheStub)
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
-            flag,
-            str(cache_path),
-            "--no-progress",
-        ],
+    assert (
+        _capture_cache_path_for_args(
+            tmp_path,
+            monkeypatch,
+            extra_args=(flag, str(cache_path)),
+        )
+        == cache_path
     )
-    assert captured["path"] == cache_path
 
 
 def test_cli_default_cache_dir_per_root(
@@ -632,18 +811,14 @@ def test_cli_warns_on_legacy_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = tmp_path / "proj"
-    root.mkdir()
-    (root / "a.py").write_text("def f():\n    return 1\n", "utf-8")
-    legacy_path = tmp_path / "legacy" / "cache.json"
-    legacy_path.parent.mkdir(parents=True, exist_ok=True)
-    legacy_path.write_text("{}", "utf-8")
+    _prepare_basic_project(root)
+    legacy_path = _write_legacy_cache_file(tmp_path)
     monkeypatch.setattr(cli, "LEGACY_CACHE_PATH", legacy_path)
     baseline = _write_baseline(
         root / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        python_version=_current_py_minor(),
     )
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [str(root), "--baseline", str(baseline), "--no-progress"],
     )
@@ -658,7 +833,7 @@ def test_cli_legacy_cache_resolve_failure(
 ) -> None:
     root = tmp_path / "proj"
     root.mkdir()
-    (root / "a.py").write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(root, "a.py")
 
     class _LegacyPath:
         def __init__(self, value: str) -> None:
@@ -678,10 +853,9 @@ def test_cli_legacy_cache_resolve_failure(
     )
     baseline = _write_baseline(
         root / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        python_version=_current_py_minor(),
     )
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [str(root), "--baseline", str(baseline), "--no-progress"],
     )
@@ -693,15 +867,11 @@ def test_cli_no_legacy_warning_with_cache_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = tmp_path / "proj"
-    root.mkdir()
-    (root / "a.py").write_text("def f():\n    return 1\n", "utf-8")
-    legacy_path = tmp_path / "legacy" / "cache.json"
-    legacy_path.parent.mkdir(parents=True, exist_ok=True)
-    legacy_path.write_text("{}", "utf-8")
+    _prepare_basic_project(root)
+    legacy_path = _write_legacy_cache_file(tmp_path)
     monkeypatch.setattr(cli, "LEGACY_CACHE_PATH", legacy_path)
     cache_path = tmp_path / "custom-cache.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [
             str(root),
@@ -1021,17 +1191,7 @@ def test_cli_open_html_report_opens_written_html(
         opened.append(path)
 
     monkeypatch.setattr(cli_reports, "_open_html_report_in_browser", _open)
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
-            "--html",
-            str(html_out),
-            "--open-html-report",
-            "--no-progress",
-        ],
-    )
+    _run_parallel_main(monkeypatch, _open_html_report_args(tmp_path, html_out))
     assert html_out.exists()
     assert opened == [html_out.resolve()]
 
@@ -1067,17 +1227,7 @@ def test_cli_open_html_report_failure_warns_without_failing(
         raise OSError(f"cannot open {path.name}")
 
     monkeypatch.setattr(cli_reports, "_open_html_report_in_browser", _boom)
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
-            "--html",
-            str(html_out),
-            "--open-html-report",
-            "--no-progress",
-        ],
-    )
+    _run_parallel_main(monkeypatch, _open_html_report_args(tmp_path, html_out))
     assert html_out.exists()
     out = capsys.readouterr().out
     assert "Failed to open HTML report in browser" in out
@@ -1227,29 +1377,21 @@ def test_cli_reports_include_audit_metadata_ok(
 def test_cli_reports_include_audit_metadata_missing_baseline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
-            "--baseline",
-            str(tmp_path / "missing-baseline.json"),
-            "--json",
-            str(json_out),
-            "--no-progress",
-        ],
+    _write_python_module(tmp_path, "a.py")
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(tmp_path / "missing-baseline.json")],
     )
-    payload = json.loads(json_out.read_text("utf-8"))
-    baseline_meta = _report_meta_baseline(payload)
-    assert baseline_meta["status"] == "missing"
-    assert baseline_meta["loaded"] is False
-    assert baseline_meta["fingerprint_version"] is None
-    assert baseline_meta["schema_version"] is None
-    assert baseline_meta["payload_sha256"] is None
-    assert baseline_meta["payload_sha256_verified"] is False
+    _assert_report_baseline_meta(
+        payload,
+        status="missing",
+        loaded=False,
+        fingerprint_version=None,
+        schema_version=None,
+        payload_sha256=None,
+        payload_sha256_verified=False,
+    )
 
 
 def test_cli_reports_include_audit_metadata_fingerprint_mismatch(
@@ -1257,33 +1399,25 @@ def test_cli_reports_include_audit_metadata_fingerprint_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     baseline_path = _write_baseline(
         tmp_path / "baseline.json",
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
         baseline_version="0.0.0",
     )
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
-            "--baseline",
-            str(baseline_path),
-            "--json",
-            str(json_out),
-            "--no-progress",
-        ],
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
     assert "fingerprint version mismatch" in out
-    payload = json.loads(json_out.read_text("utf-8"))
-    baseline_meta = _report_meta_baseline(payload)
-    assert baseline_meta["status"] == "mismatch_fingerprint_version"
-    assert baseline_meta["loaded"] is False
-    assert baseline_meta["fingerprint_version"] == "0.0.0"
+    _assert_report_baseline_meta(
+        payload,
+        status="mismatch_fingerprint_version",
+        loaded=False,
+        fingerprint_version="0.0.0",
+    )
 
 
 def test_cli_reports_include_audit_metadata_schema_mismatch(
@@ -1291,33 +1425,25 @@ def test_cli_reports_include_audit_metadata_schema_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     baseline_path = _write_baseline(
         tmp_path / "baseline.json",
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
         schema_version="1.1",
     )
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
-            "--baseline",
-            str(baseline_path),
-            "--json",
-            str(json_out),
-            "--no-progress",
-        ],
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
     assert "schema version is newer than supported" in out
-    payload = json.loads(json_out.read_text("utf-8"))
-    baseline_meta = _report_meta_baseline(payload)
-    assert baseline_meta["status"] == "mismatch_schema_version"
-    assert baseline_meta["loaded"] is False
-    assert baseline_meta["schema_version"] == "1.1"
+    _assert_report_baseline_meta(
+        payload,
+        status="mismatch_schema_version",
+        loaded=False,
+        schema_version="1.1",
+    )
 
 
 def test_cli_reports_include_audit_metadata_python_mismatch(
@@ -1325,35 +1451,25 @@ def test_cli_reports_include_audit_metadata_python_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     baseline_path = _write_baseline(
         tmp_path / "baseline.json",
         python_version="0.0",
     )
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--fail-on-new",
-                "--json",
-                str(json_out),
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(baseline_path), "--fail-on-new"],
+        expect_exit_code=2,
+    )
     out = capsys.readouterr().out
     assert "python tag mismatch" in out
-    payload = json.loads(json_out.read_text("utf-8"))
-    baseline_meta = _report_meta_baseline(payload)
-    assert baseline_meta["status"] == "mismatch_python_version"
-    assert baseline_meta["loaded"] is False
-    assert baseline_meta["python_tag"] == "cp00"
+    _assert_report_baseline_meta(
+        payload,
+        status="mismatch_python_version",
+        loaded=False,
+        python_tag="cp00",
+    )
 
 
 def test_cli_reports_include_audit_metadata_invalid_baseline(
@@ -1361,30 +1477,18 @@ def test_cli_reports_include_audit_metadata_invalid_baseline(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     baseline_path = tmp_path / "baseline.json"
     baseline_path.write_text("{broken json", "utf-8")
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
-            "--baseline",
-            str(baseline_path),
-            "--json",
-            str(json_out),
-            "--no-progress",
-        ],
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
     assert "Invalid baseline file" in out
     assert "Baseline is not trusted for this run and will be ignored" in out
-    payload = json.loads(json_out.read_text("utf-8"))
-    baseline_meta = _report_meta_baseline(payload)
-    assert baseline_meta["status"] == "invalid_json"
-    assert baseline_meta["loaded"] is False
+    _assert_report_baseline_meta(payload, status="invalid_json", loaded=False)
 
 
 def test_cli_reports_include_audit_metadata_legacy_baseline(
@@ -1392,8 +1496,7 @@ def test_cli_reports_include_audit_metadata_legacy_baseline(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     baseline_path = tmp_path / "baseline.json"
     baseline_path.write_text(
         json.dumps(
@@ -1406,25 +1509,14 @@ def test_cli_reports_include_audit_metadata_legacy_baseline(
         ),
         "utf-8",
     )
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
-            "--baseline",
-            str(baseline_path),
-            "--json",
-            str(json_out),
-            "--no-progress",
-        ],
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
     assert "legacy" in out
-    payload = json.loads(json_out.read_text("utf-8"))
-    baseline_meta = _report_meta_baseline(payload)
-    assert baseline_meta["status"] == "missing_fields"
-    assert baseline_meta["loaded"] is False
+    _assert_report_baseline_meta(payload, status="missing_fields", loaded=False)
 
 
 def test_cli_legacy_baseline_normal_mode_ignored_and_exit_zero(
@@ -1432,26 +1524,14 @@ def test_cli_legacy_baseline_normal_mode_ignored_and_exit_zero(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text(
+    _write_python_module(
+        tmp_path,
+        "a.py",
         "def f():\n    return 1\n\n\ndef g():\n    return 1\n",
-        "utf-8",
     )
-    baseline_path = tmp_path / "baseline.json"
-    baseline_path.write_text(
-        json.dumps(
-            {
-                "functions": [],
-                "blocks": [],
-                "python_version": "3.13",
-                "schema_version": BASELINE_SCHEMA_VERSION,
-            }
-        ),
-        "utf-8",
-    )
+    baseline_path = _write_legacy_baseline(tmp_path / "baseline.json")
 
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [
             str(tmp_path),
@@ -1466,14 +1546,14 @@ def test_cli_legacy_baseline_normal_mode_ignored_and_exit_zero(
         ],
     )
     out = capsys.readouterr().out
-    for needle in (
+    assert_contains_all(
+        out,
         "legacy (<=1.3.x)",
         "Baseline is not trusted for this run and will be ignored",
         "Comparison will proceed against an empty baseline",
         "Run: codeclone . --update-baseline",
         "New clones detected but --fail-on-new not set.",
-    ):
-        assert needle in out
+    )
 
 
 def test_cli_legacy_baseline_fail_on_new_fails_fast_exit_2(
@@ -1481,38 +1561,27 @@ def test_cli_legacy_baseline_fail_on_new_fails_fast_exit_2(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    baseline_path = tmp_path / "baseline.json"
-    baseline_path.write_text(
-        json.dumps(
-            {
-                "functions": [],
-                "blocks": [],
-                "python_version": "3.13",
-                "schema_version": BASELINE_SCHEMA_VERSION,
-            }
-        ),
-        "utf-8",
+    _write_default_source(tmp_path)
+    baseline_path = _write_legacy_baseline(tmp_path / "baseline.json")
+    _assert_parallel_cli_exit(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--fail-on-new",
+            "--no-progress",
+        ],
+        expected_code=2,
     )
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--fail-on-new",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
     out = capsys.readouterr().out
-    assert "legacy (<=1.3.x)" in out
-    assert "Invalid baseline file" in out
-    assert "CI requires a trusted baseline" in out
-    assert "Run: codeclone . --update-baseline" in out
+    assert_contains_all(
+        out,
+        "legacy (<=1.3.x)",
+        "Invalid baseline file",
+        "CI requires a trusted baseline",
+        "Run: codeclone . --update-baseline",
+    )
 
 
 def test_cli_reports_include_audit_metadata_integrity_failed(
@@ -1520,8 +1589,7 @@ def test_cli_reports_include_audit_metadata_integrity_failed(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     baseline_path = _write_baseline(
         tmp_path / "baseline.json",
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
@@ -1532,26 +1600,15 @@ def test_cli_reports_include_audit_metadata_integrity_failed(
     clones["functions"] = [f"{'a' * 40}|0-19"]
     baseline_path.write_text(json.dumps(tampered), "utf-8")
 
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
-            "--baseline",
-            str(baseline_path),
-            "--json",
-            str(json_out),
-            "--no-progress",
-        ],
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
     assert "integrity check failed" in out
     assert "Baseline is not trusted for this run and will be ignored" in out
-    payload = json.loads(json_out.read_text("utf-8"))
-    baseline_meta = _report_meta_baseline(payload)
-    assert baseline_meta["status"] == "integrity_failed"
-    assert baseline_meta["loaded"] is False
+    _assert_report_baseline_meta(payload, status="integrity_failed", loaded=False)
 
 
 def test_cli_reports_include_audit_metadata_generator_mismatch(
@@ -1559,33 +1616,21 @@ def test_cli_reports_include_audit_metadata_generator_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     baseline_path = _write_baseline(
         tmp_path / "baseline.json",
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
         generator="not-codeclone",
     )
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
-            "--baseline",
-            str(baseline_path),
-            "--json",
-            str(json_out),
-            "--no-progress",
-        ],
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
     assert "generator mismatch" in out
     assert "Baseline is not trusted for this run and will be ignored" in out
-    payload = json.loads(json_out.read_text("utf-8"))
-    baseline_meta = _report_meta_baseline(payload)
-    assert baseline_meta["status"] == "generator_mismatch"
-    assert baseline_meta["loaded"] is False
+    _assert_report_baseline_meta(payload, status="generator_mismatch", loaded=False)
 
 
 @pytest.mark.parametrize(
@@ -1629,8 +1674,7 @@ def test_cli_reports_include_audit_metadata_integrity_missing(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     baseline_path = tmp_path / "baseline.json"
     payload = _baseline_payload(
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
@@ -1639,26 +1683,15 @@ def test_cli_reports_include_audit_metadata_integrity_missing(
     assert isinstance(meta, dict)
     del meta["payload_sha256"]
     baseline_path.write_text(json.dumps(payload), "utf-8")
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
-            "--baseline",
-            str(baseline_path),
-            "--json",
-            str(json_out),
-            "--no-progress",
-        ],
+    payload_out = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
     assert "missing required fields" in out or "Invalid baseline schema" in out
     assert "Baseline is not trusted for this run and will be ignored" in out
-    payload_out = json.loads(json_out.read_text("utf-8"))
-    baseline_meta = _report_meta_baseline(payload_out)
-    assert baseline_meta["status"] == "missing_fields"
-    assert baseline_meta["loaded"] is False
+    _assert_report_baseline_meta(payload_out, status="missing_fields", loaded=False)
 
 
 def test_cli_reports_include_audit_metadata_baseline_too_large(
@@ -1666,31 +1699,22 @@ def test_cli_reports_include_audit_metadata_baseline_too_large(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     baseline_path = _write_baseline(tmp_path / "baseline.json")
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=[
             "--baseline",
             str(baseline_path),
             "--max-baseline-size-mb",
             "0",
-            "--json",
-            str(json_out),
-            "--no-progress",
         ],
     )
     out = capsys.readouterr().out
     assert "too large" in out
     assert "Baseline is not trusted for this run and will be ignored" in out
-    payload = json.loads(json_out.read_text("utf-8"))
-    baseline_meta = _report_meta_baseline(payload)
-    assert baseline_meta["status"] == "too_large"
-    assert baseline_meta["loaded"] is False
+    _assert_report_baseline_meta(payload, status="too_large", loaded=False)
 
 
 def test_cli_untrusted_baseline_ignored_for_diff(
@@ -1807,31 +1831,18 @@ def test_cli_invalid_baseline_fails_in_ci(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     baseline_path = tmp_path / "baseline.json"
     baseline_path.write_text("{broken json", "utf-8")
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--json",
-                str(json_out),
-                "--ci",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(baseline_path), "--ci"],
+        expect_exit_code=2,
+    )
     out = capsys.readouterr().out
     assert "Invalid baseline file" in out
-    payload = json.loads(json_out.read_text("utf-8"))
-    assert _report_meta_baseline(payload)["status"] == "invalid_json"
-    assert _report_meta_baseline(payload)["loaded"] is False
+    _assert_report_baseline_meta(payload, status="invalid_json", loaded=False)
 
 
 def test_cli_too_large_baseline_fails_in_ci(
@@ -1839,32 +1850,23 @@ def test_cli_too_large_baseline_fails_in_ci(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     baseline_path = _write_baseline(tmp_path / "baseline.json")
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--max-baseline-size-mb",
-                "0",
-                "--json",
-                str(json_out),
-                "--ci",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=[
+            "--baseline",
+            str(baseline_path),
+            "--max-baseline-size-mb",
+            "0",
+            "--ci",
+        ],
+        expect_exit_code=2,
+    )
     out = capsys.readouterr().out
     assert "too large" in out
-    payload = json.loads(json_out.read_text("utf-8"))
-    assert _report_meta_baseline(payload)["status"] == "too_large"
-    assert _report_meta_baseline(payload)["loaded"] is False
+    _assert_report_baseline_meta(payload, status="too_large", loaded=False)
 
 
 def test_cli_reports_cache_used_false_on_warning(
@@ -1879,32 +1881,25 @@ def test_cli_reports_cache_used_false_on_warning(
     data["sig"] = "bad"
     cache_path.write_text(json.dumps(data), "utf-8")
 
-    baseline_path = _write_baseline(
-        tmp_path / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
-    )
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
+    baseline_path = _write_current_python_baseline(tmp_path / "baseline.json")
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=[
             "--baseline",
             str(baseline_path),
             "--cache-dir",
             str(cache_path),
-            "--json",
-            str(json_out),
-            "--no-progress",
         ],
     )
     out = capsys.readouterr().out
     assert "signature" in out
-    payload = json.loads(json_out.read_text("utf-8"))
-    cache_meta = _report_meta_cache(payload)
-    assert cache_meta["used"] is False
-    assert cache_meta["status"] == "integrity_failed"
-    assert cache_meta["schema_version"] == CACHE_VERSION
+    _assert_report_cache_meta(
+        payload,
+        used=False,
+        status="integrity_failed",
+        schema_version=CACHE_VERSION,
+    )
 
 
 def test_cli_reports_cache_too_large_respects_max_size_flag(
@@ -1912,72 +1907,56 @@ def test_cli_reports_cache_too_large_respects_max_size_flag(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     cache_path = tmp_path / "cache.json"
     cache_path.write_text("{}", "utf-8")
 
-    baseline_path = _write_baseline(
-        tmp_path / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
-    )
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
+    baseline_path = _write_current_python_baseline(tmp_path / "baseline.json")
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=[
             "--baseline",
             str(baseline_path),
             "--cache-path",
             str(cache_path),
             "--max-cache-size-mb",
             "0",
-            "--json",
-            str(json_out),
-            "--no-progress",
         ],
     )
     out = capsys.readouterr().out
     assert "Cache file too large" in out
-    payload = json.loads(json_out.read_text("utf-8"))
-    cache_meta = _report_meta_cache(payload)
-    assert cache_meta["used"] is False
-    assert cache_meta["status"] == "too_large"
-    assert cache_meta["schema_version"] is None
+    _assert_report_cache_meta(
+        payload,
+        used=False,
+        status="too_large",
+        schema_version=None,
+    )
 
 
 def test_cli_reports_cache_meta_when_cache_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-    baseline_path = _write_baseline(
-        tmp_path / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
-    )
-    json_out = tmp_path / "report.json"
+    _write_default_source(tmp_path)
+    baseline_path = _write_current_python_baseline(tmp_path / "baseline.json")
     cache_path = tmp_path / "missing-cache.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
-        monkeypatch,
-        [
-            str(tmp_path),
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=[
             "--baseline",
             str(baseline_path),
             "--cache-path",
             str(cache_path),
-            "--json",
-            str(json_out),
-            "--no-progress",
         ],
     )
-    payload = json.loads(json_out.read_text("utf-8"))
-    cache_meta = _report_meta_cache(payload)
-    assert cache_meta["used"] is False
-    assert cache_meta["status"] == "missing"
-    assert cache_meta["schema_version"] is None
+    _assert_report_cache_meta(
+        payload,
+        used=False,
+        status="missing",
+        schema_version=None,
+    )
 
 
 @pytest.mark.parametrize(
@@ -1988,6 +1967,7 @@ def test_cli_reports_cache_meta_when_cache_missing(
         "second_min_stmt",
         "expected_cache_used",
         "expected_cache_status",
+        "expected_cache_schema_version",
         "expected_functions_total",
         "expected_warning",
     ),
@@ -1999,6 +1979,7 @@ def test_cli_reports_cache_meta_when_cache_missing(
             6,
             False,
             "analysis_profile_mismatch",
+            CACHE_VERSION,
             0,
             "analysis profile mismatch",
         ),
@@ -2009,10 +1990,11 @@ def test_cli_reports_cache_meta_when_cache_missing(
             1,
             False,
             "analysis_profile_mismatch",
+            CACHE_VERSION,
             1,
             "analysis profile mismatch",
         ),
-        (1, 1, 1, 1, True, "ok", 1, None),
+        (1, 1, 1, 1, True, "ok", CACHE_VERSION, 1, None),
     ],
 )
 def test_cli_cache_analysis_profile_compatibility(
@@ -2025,26 +2007,12 @@ def test_cli_cache_analysis_profile_compatibility(
     second_min_stmt: int,
     expected_cache_used: bool,
     expected_cache_status: str,
+    expected_cache_schema_version: str,
     expected_functions_total: int,
     expected_warning: str | None,
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text(
-        """
-def f1():
-    x = 1
-    return x
-
-def f2():
-    y = 1
-    return y
-""",
-        "utf-8",
-    )
-    baseline_path = _write_baseline(
-        tmp_path / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
-    )
+    _write_profile_compatibility_source(tmp_path)
+    baseline_path = _write_current_python_baseline(tmp_path / "baseline.json")
     cache_path = tmp_path / "cache.json"
     json_first = tmp_path / "report-first.json"
     json_second = tmp_path / "report-second.json"
@@ -2090,9 +2058,12 @@ def f2():
     payload = json.loads(json_second.read_text("utf-8"))
     if expected_warning is not None:
         assert expected_warning in out
-    cache_meta = _report_meta_cache(payload)
-    assert cache_meta["used"] is expected_cache_used
-    assert cache_meta["status"] == expected_cache_status
+    _assert_report_cache_meta(
+        payload,
+        used=expected_cache_used,
+        status=expected_cache_status,
+        schema_version=expected_cache_schema_version,
+    )
     assert (
         payload["findings"]["summary"]["clones"]["functions"]
         == expected_functions_total
@@ -2141,8 +2112,7 @@ def test_cli_output_path_resolve_error_contract(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     html_out = tmp_path / "report.html"
     original_resolve = Path.resolve
 
@@ -2154,9 +2124,11 @@ def test_cli_output_path_resolve_error_contract(
         return original_resolve(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _raise_resolve)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(monkeypatch, [str(tmp_path), "--html", str(html_out)])
-    assert exc.value.code == 2
+    _assert_cli_exit(
+        monkeypatch,
+        [str(tmp_path), "--html", str(html_out)],
+        expected_code=2,
+    )
     out = capsys.readouterr().out
     assert "CONTRACT ERROR:" in out
     assert "Invalid HTML output path" in out
@@ -2167,8 +2139,7 @@ def test_cli_report_write_error_is_contract_error(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     html_out = tmp_path / "report.html"
     original_write_text = Path.write_text
 
@@ -2186,12 +2157,11 @@ def test_cli_report_write_error_is_contract_error(
         )
 
     monkeypatch.setattr(Path, "write_text", _raise_write_text)
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch, [str(tmp_path), "--html", str(html_out), "--no-progress"]
-        )
-    assert exc.value.code == 2
+    _assert_parallel_cli_exit(
+        monkeypatch,
+        [str(tmp_path), "--html", str(html_out), "--no-progress"],
+        expected_code=2,
+    )
     out = capsys.readouterr().out
     assert "CONTRACT ERROR:" in out
     assert "Failed to write HTML report" in out
@@ -2202,17 +2172,15 @@ def test_cli_outputs_quiet_no_print(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     html_out = tmp_path / "out.html"
     json_out = tmp_path / "out.json"
     text_out = tmp_path / "out.txt"
     baseline = _write_baseline(
         tmp_path / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        python_version=_current_py_minor(),
     )
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [
             str(tmp_path),
@@ -2239,15 +2207,13 @@ def test_cli_update_baseline_skips_version_check(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     baseline_path = _write_baseline(
         tmp_path / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        python_version=_current_py_minor(),
         baseline_version="0.0.0",
     )
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [
             str(tmp_path),
@@ -2266,8 +2232,9 @@ def test_cli_update_baseline(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text(
+    _write_python_module(
+        tmp_path,
+        "a.py",
         """
 def f1():
     return 1
@@ -2275,11 +2242,9 @@ def f1():
 def f2():
     return 1
 """,
-        "utf-8",
     )
     baseline = tmp_path / "codeclone.baseline.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [
             str(tmp_path),
@@ -2302,12 +2267,10 @@ def test_cli_update_baseline_report_meta_uses_updated_payload_hash(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     baseline = tmp_path / "codeclone.baseline.json"
     json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [
             str(tmp_path),
@@ -2321,9 +2284,11 @@ def test_cli_update_baseline_report_meta_uses_updated_payload_hash(
     )
 
     payload = json.loads(json_out.read_text("utf-8"))
-    baseline_meta = _report_meta_baseline(payload)
-    assert baseline_meta["status"] == "ok"
-    assert baseline_meta["loaded"] is True
+    baseline_meta = _assert_report_baseline_meta(
+        payload,
+        status="ok",
+        loaded=True,
+    )
     assert isinstance(baseline_meta["payload_sha256"], str)
     assert len(baseline_meta["payload_sha256"]) == 64
     assert baseline_meta["payload_sha256_verified"] is True
@@ -2343,18 +2308,17 @@ def test_cli_update_baseline_write_error_is_contract_error(
 
     monkeypatch.setattr(baseline.Baseline, "save", _raise_save)
     _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--update-baseline",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    _assert_cli_exit(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--update-baseline",
+            "--no-progress",
+        ],
+        expected_code=2,
+    )
     out = capsys.readouterr().out
     assert "CONTRACT ERROR:" in out
     assert "Failed to write baseline file" in out
@@ -2398,11 +2362,9 @@ def test_cli_baseline_missing_warning(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     baseline = tmp_path / "missing.json"
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [
             str(tmp_path),
@@ -2421,22 +2383,20 @@ def test_cli_baseline_missing_fails_in_ci(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     baseline = tmp_path / "missing.json"
     _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline),
-                "--ci",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    _assert_cli_exit(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline),
+            "--ci",
+            "--no-progress",
+        ],
+        expected_code=2,
+    )
     out = capsys.readouterr().out
     assert "Baseline file not found" in out
     assert "CI requires a trusted baseline" in out
@@ -2483,12 +2443,10 @@ def test_cli_baseline_python_version_mismatch_warns(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     baseline = tmp_path / "baseline.json"
     _write_baseline(baseline, python_version="0.0")
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [
             str(tmp_path),
@@ -2507,27 +2465,24 @@ def test_cli_baseline_fingerprint_mismatch_fails(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     baseline_path = tmp_path / "baseline.json"
     _write_baseline(
         baseline_path,
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        python_version=_current_py_minor(),
         baseline_version="0.0.0",
     )
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--ci",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    _assert_parallel_cli_exit(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--ci",
+            "--no-progress",
+        ],
+        expected_code=2,
+    )
     out = capsys.readouterr().out
     assert "fingerprint version mismatch" in out
 
@@ -2537,8 +2492,7 @@ def test_cli_baseline_missing_fields_fails(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     baseline_path = tmp_path / "baseline.json"
     baseline_path.write_text(
         json.dumps(
@@ -2551,19 +2505,17 @@ def test_cli_baseline_missing_fields_fails(
         ),
         "utf-8",
     )
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--ci",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    _assert_parallel_cli_exit(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--ci",
+            "--no-progress",
+        ],
+        expected_code=2,
+    )
     out = capsys.readouterr().out
     assert "legacy (<=1.3.x)" in out
 
@@ -2573,33 +2525,21 @@ def test_cli_baseline_schema_version_mismatch_fails(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     baseline_path = tmp_path / "baseline.json"
     _write_baseline(
         baseline_path,
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        python_version=_current_py_minor(),
         schema_version="1.1",
     )
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--json",
-                str(json_out),
-                "--ci",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(baseline_path), "--ci"],
+        expect_exit_code=2,
+    )
     out = capsys.readouterr().out
     assert "schema version is newer than supported" in out
-    payload = json.loads(json_out.read_text("utf-8"))
     assert _report_meta_baseline(payload)["status"] == "mismatch_schema_version"
 
 
@@ -2608,34 +2548,22 @@ def test_cli_baseline_schema_and_fingerprint_mismatch_status_prefers_schema(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     baseline_path = _write_baseline(
         tmp_path / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        python_version=_current_py_minor(),
         baseline_version="0.0.0",
         schema_version="1.1",
     )
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--json",
-                str(json_out),
-                "--ci",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(baseline_path), "--ci"],
+        expect_exit_code=2,
+    )
     out = capsys.readouterr().out
     assert "schema version is newer than supported" in out
     assert "fingerprint version mismatch" not in out
-    payload = json.loads(json_out.read_text("utf-8"))
     assert _report_meta_baseline(payload)["status"] == "mismatch_schema_version"
 
 
@@ -2644,33 +2572,21 @@ def test_cli_baseline_fingerprint_and_python_mismatch_status_prefers_fingerprint
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     baseline_path = _write_baseline(
         tmp_path / "baseline.json",
         python_version="0.0",
         baseline_version="0.0.0",
     )
-    json_out = tmp_path / "report.json"
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--json",
-                str(json_out),
-                "--ci",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=["--baseline", str(baseline_path), "--ci"],
+        expect_exit_code=2,
+    )
     out = capsys.readouterr().out
     assert "fingerprint version mismatch" in out
     assert "Python version mismatch" not in out
-    payload = json.loads(json_out.read_text("utf-8"))
     assert _report_meta_baseline(payload)["status"] == "mismatch_fingerprint_version"
 
 
@@ -2679,26 +2595,22 @@ def test_cli_baseline_python_version_mismatch_fails(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     baseline = tmp_path / "baseline.json"
     _write_baseline(baseline, python_version="0.0")
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline),
-                "--fail-on-new",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 2
+    _assert_parallel_cli_exit(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline),
+            "--fail-on-new",
+            "--no-progress",
+        ],
+        expected_code=2,
+    )
     out = capsys.readouterr().out
-    assert "CONTRACT ERROR:" in out
-    assert "python tag mismatch" in out
+    assert_contains_all(out, "CONTRACT ERROR:", "python tag mismatch")
 
 
 def test_cli_negative_size_limits_fail_fast(
@@ -2877,8 +2789,7 @@ def test_cli_cache_warning(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 1}, [], [], [])
@@ -2887,8 +2798,7 @@ def test_cli_cache_warning(
     data["sig"] = "bad"
     cache_path.write_text(json.dumps(data), "utf-8")
 
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [
             str(tmp_path),
@@ -2930,8 +2840,7 @@ def test_cli_cache_save_warning_quiet(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_python_module(tmp_path, "a.py")
     baseline_path = tmp_path / "baseline.json"
     _write_baseline(
         baseline_path,
@@ -2980,12 +2889,11 @@ def test_cli_invalid_baseline_path_error_contract(
         return original_resolve(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _raise_resolve)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [str(tmp_path), "--baseline", str(baseline_path), "--no-progress"],
-        )
-    assert exc.value.code == 2
+    _assert_cli_exit(
+        monkeypatch,
+        [str(tmp_path), "--baseline", str(baseline_path), "--no-progress"],
+        expected_code=2,
+    )
     out = capsys.readouterr().out
     assert "CONTRACT ERROR:" in out
     assert "Invalid baseline path" in out
@@ -3090,8 +2998,7 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     cache_path = tmp_path / "cache.json"
     json_out = tmp_path / "report.json"
 
@@ -3101,8 +3008,7 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
         return _source_read_error_result(fp)
 
     monkeypatch.setattr(pipeline, "process_file", _source_read_error)
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [
             str(tmp_path),
@@ -3162,13 +3068,11 @@ def test_cli_reports_include_source_io_skipped_zero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
+    _write_default_source(tmp_path)
     json_out = tmp_path / "report.json"
     cache_path = tmp_path / "cache.json"
 
-    _patch_parallel(monkeypatch)
-    _run_main(
+    _run_parallel_main(
         monkeypatch,
         [
             str(tmp_path),
@@ -3502,35 +3406,12 @@ def test_cli_worker_failed_progress_sequential(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-
-    def _boom(*_args: object, **_kwargs: object) -> cli.ProcessingResult:
-        raise RuntimeError("boom")
-
-    class _FailExec:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            return None
-
-        def __enter__(self) -> _FailExec:
-            raise PermissionError("nope")
-
-        def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc: BaseException | None,
-            tb: object | None,
-        ) -> Literal[False]:
-            return False
-
-    _patch_dummy_progress(monkeypatch)
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailExec)
-    monkeypatch.setattr(pipeline, "process_file", _boom)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(monkeypatch, [str(tmp_path)])
-    assert exc.value.code == 5
-    out = capsys.readouterr().out
-    assert "INTERNAL ERROR:" in out
+    _assert_worker_failure_internal_error(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        no_progress=False,
+    )
 
 
 def test_cli_worker_failed_sequential_no_progress(
@@ -3538,34 +3419,12 @@ def test_cli_worker_failed_sequential_no_progress(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-
-    def _boom(*_args: object, **_kwargs: object) -> cli.ProcessingResult:
-        raise RuntimeError("boom")
-
-    class _FailExec:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            return None
-
-        def __enter__(self) -> _FailExec:
-            raise PermissionError("nope")
-
-        def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc: BaseException | None,
-            tb: object | None,
-        ) -> Literal[False]:
-            return False
-
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailExec)
-    monkeypatch.setattr(pipeline, "process_file", _boom)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
-    assert exc.value.code == 5
-    out = capsys.readouterr().out
-    assert "INTERNAL ERROR:" in out
+    _assert_worker_failure_internal_error(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        no_progress=True,
+    )
 
 
 def test_cli_fail_on_new_prints_groups(
@@ -3573,33 +3432,24 @@ def test_cli_fail_on_new_prints_groups(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-
-    def _diff(
-        _self: object, _f: dict[str, object], _b: dict[str, object]
-    ) -> tuple[set[str], set[str]]:
-        return {"f1"}, {"b1"}
-
-    monkeypatch.setattr(baseline.Baseline, "diff", _diff)
+    _write_default_source(tmp_path)
+    _patch_baseline_diff(monkeypatch, new_func={"f1"}, new_block={"b1"})
     baseline_path = tmp_path / "baseline.json"
     _write_baseline(
         baseline_path,
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        python_version=_current_py_minor(),
     )
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--fail-on-new",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 3
+    _assert_parallel_cli_exit(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--fail-on-new",
+            "--no-progress",
+        ],
+        expected_code=3,
+    )
     out = capsys.readouterr().out
     _assert_fail_on_new_summary(out)
 
@@ -3609,33 +3459,24 @@ def test_cli_fail_on_new_no_report_path(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f():\n    return 1\n", "utf-8")
-
-    def _diff(
-        _self: object, _f: dict[str, object], _b: dict[str, object]
-    ) -> tuple[set[str], set[str]]:
-        return {"f1"}, {"b1"}
-
-    monkeypatch.setattr(baseline.Baseline, "diff", _diff)
+    _write_default_source(tmp_path)
+    _patch_baseline_diff(monkeypatch, new_func={"f1"}, new_block={"b1"})
     baseline_path = _write_baseline(
         tmp_path / "baseline.json",
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        python_version=_current_py_minor(),
     )
     monkeypatch.chdir(tmp_path)
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--fail-on-new",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 3
+    _assert_parallel_cli_exit(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--fail-on-new",
+            "--no-progress",
+        ],
+        expected_code=3,
+    )
     out = capsys.readouterr().out
     assert "\n  report" not in out
 
@@ -3703,37 +3544,32 @@ def test_cli_fail_on_new_verbose_and_report_path(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "a.py"
-    src.write_text("def f1():\n    return 1\n\ndef f2():\n    return 1\n", "utf-8")
-
-    def _diff(
-        _self: object, _f: dict[str, object], _b: dict[str, object]
-    ) -> tuple[set[str], set[str]]:
-        return {"fhash1"}, {"bhash1"}
-
-    monkeypatch.setattr(baseline.Baseline, "diff", _diff)
+    _write_python_module(
+        tmp_path,
+        "a.py",
+        "def f1():\n    return 1\n\ndef f2():\n    return 1\n",
+    )
+    _patch_baseline_diff(monkeypatch, new_func={"fhash1"}, new_block={"bhash1"})
     baseline_path = tmp_path / "baseline.json"
     _write_baseline(
         baseline_path,
-        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+        python_version=_current_py_minor(),
     )
     html_out = tmp_path / "report.html"
-    _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--fail-on-new",
-                "--verbose",
-                "--html",
-                str(html_out),
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 3
+    _assert_parallel_cli_exit(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--fail-on-new",
+            "--verbose",
+            "--html",
+            str(html_out),
+            "--no-progress",
+        ],
+        expected_code=3,
+    )
     out = capsys.readouterr().out
     assert "report" in out
     assert str(html_out) in out or html_out.name in out
@@ -3760,22 +3596,21 @@ def test_cli_fail_on_new_default_report_path(
     )
     monkeypatch.chdir(tmp_path)
     _patch_parallel(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--baseline",
-                str(baseline_path),
-                "--fail-on-new",
-                "--min-loc",
-                "1",
-                "--min-stmt",
-                "1",
-                "--no-progress",
-            ],
-        )
-    assert exc.value.code == 3
+    _assert_cli_exit(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+            "--fail-on-new",
+            "--min-loc",
+            "1",
+            "--min-stmt",
+            "1",
+            "--no-progress",
+        ],
+        expected_code=3,
+    )
     out = capsys.readouterr().out
     assert "report" in out
     assert ".cache/codeclone/report.html" in out

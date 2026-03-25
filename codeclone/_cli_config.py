@@ -27,6 +27,10 @@ class _ConfigKeySpec:
 _CONFIG_KEY_SPECS: Final[dict[str, _ConfigKeySpec]] = {
     "min_loc": _ConfigKeySpec(int),
     "min_stmt": _ConfigKeySpec(int),
+    "block_min_loc": _ConfigKeySpec(int),
+    "block_min_stmt": _ConfigKeySpec(int),
+    "segment_min_loc": _ConfigKeySpec(int),
+    "segment_min_stmt": _ConfigKeySpec(int),
     "processes": _ConfigKeySpec(int),
     "cache_path": _ConfigKeySpec(str, allow_none=True),
     "max_cache_size_mb": _ConfigKeySpec(int),
@@ -175,28 +179,50 @@ def _validate_config_value(*, key: str, value: object) -> object:
             f"{key}: expected {spec.expected_type.__name__}"
         )
 
-    if spec.expected_type is bool:
-        if isinstance(value, bool):
-            return value
-        raise ConfigValidationError(
-            f"Invalid value type for tool.codeclone.{key}: expected bool"
+    expected_type = spec.expected_type
+    if expected_type is bool:
+        return _validated_config_instance(
+            key=key,
+            value=value,
+            expected_type=bool,
+            expected_name="bool",
         )
 
-    if spec.expected_type is int:
-        if isinstance(value, int) and not isinstance(value, bool):
-            return value
-        raise ConfigValidationError(
-            f"Invalid value type for tool.codeclone.{key}: expected int"
+    if expected_type is int:
+        return _validated_config_instance(
+            key=key,
+            value=value,
+            expected_type=int,
+            expected_name="int",
+            reject_bool=True,
         )
 
-    if spec.expected_type is str:
-        if isinstance(value, str):
-            return value
-        raise ConfigValidationError(
-            f"Invalid value type for tool.codeclone.{key}: expected str"
+    if expected_type is str:
+        return _validated_config_instance(
+            key=key,
+            value=value,
+            expected_type=str,
+            expected_name="str",
         )
 
     raise ConfigValidationError(f"Unsupported config key spec for tool.codeclone.{key}")
+
+
+def _validated_config_instance(
+    *,
+    key: str,
+    value: object,
+    expected_type: type[object],
+    expected_name: str,
+    reject_bool: bool = False,
+) -> object:
+    if isinstance(value, expected_type) and (
+        not reject_bool or not isinstance(value, bool)
+    ):
+        return value
+    raise ConfigValidationError(
+        f"Invalid value type for tool.codeclone.{key}: expected {expected_name}"
+    )
 
 
 def _load_toml(path: Path) -> object:

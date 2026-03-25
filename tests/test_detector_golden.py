@@ -11,6 +11,7 @@ from codeclone.baseline import current_python_tag
 from codeclone.normalize import NormalizationConfig
 from codeclone.report import build_block_groups, build_groups
 from codeclone.scanner import module_name_from_path
+from tests._assertions import snapshot_python_tag
 
 
 def _detect_group_keys(project_root: Path) -> tuple[list[str], list[str]]:
@@ -43,10 +44,7 @@ def test_detector_output_matches_golden_fixture() -> None:
     fixture_root = Path("tests/fixtures/golden_project").resolve()
     expected_path = fixture_root / "golden_expected_ids.json"
     expected = json.loads(expected_path.read_text("utf-8"))
-    expected_meta = expected.get("meta", {})
-    assert isinstance(expected_meta, dict)
-    expected_python_tag = expected_meta.get("python_tag")
-    assert isinstance(expected_python_tag, str)
+    expected_python_tag = snapshot_python_tag(expected)
 
     # Golden fixture is a detector snapshot for one canonical Python tag.
     # Cross-version behavior is covered by contract/invariant tests.

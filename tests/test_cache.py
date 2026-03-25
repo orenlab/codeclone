@@ -700,11 +700,7 @@ def test_cache_load_unreadable_stat_graceful_ignore(
     monkeypatch.setattr(Path, "stat", _raise_stat)
     cache = Cache(cache_path)
     cache.load()
-    assert cache.load_warning is not None
-    assert "unreadable" in cache.load_warning
-    assert cache.data["files"] == {}
-    assert cache.load_status == CacheStatus.UNREADABLE
-    assert cache.cache_schema_version is None
+    _assert_unreadable_cache_contract(cache)
 
 
 def test_cache_load_unreadable_read_graceful_ignore(
@@ -726,6 +722,10 @@ def test_cache_load_unreadable_read_graceful_ignore(
     monkeypatch.setattr(Path, "read_text", _raise_read_text)
     cache = Cache(cache_path)
     cache.load()
+    _assert_unreadable_cache_contract(cache)
+
+
+def _assert_unreadable_cache_contract(cache: Cache) -> None:
     assert cache.load_warning is not None
     assert "unreadable" in cache.load_warning
     assert cache.data["files"] == {}
@@ -1643,3 +1643,31 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
         )
         is True
     )
+
+
+def test_decode_wire_int_fields_rejects_non_int_values() -> None:
+    assert cache_mod._decode_wire_int_fields(["x", "nope"], 1) is None
+
+
+def test_decode_wire_block_rejects_missing_block_hash() -> None:
+    assert (
+        cache_mod._decode_wire_block(
+            ["pkg.mod:func", 10, 12, 4, None],
+            "pkg/mod.py",
+        )
+        is None
+    )
+
+
+def test_decode_wire_segment_rejects_missing_segment_signature() -> None:
+    assert (
+        cache_mod._decode_wire_segment(
+            ["pkg.mod:func", 10, 12, 4, "seg-hash", None],
+            "pkg/mod.py",
+        )
+        is None
+    )
+
+
+def test_decode_wire_dead_candidate_rejects_invalid_rows() -> None:
+    assert cache_mod._decode_wire_dead_candidate(object(), "pkg/mod.py") is None

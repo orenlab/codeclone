@@ -12,7 +12,7 @@
   <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main&style=flat-square" alt="Tests"></a>
   <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml/badge.svg?style=flat-square" alt="Benchmark"></a>
   <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone.svg?style=flat-square" alt="Python"></a>
-  <img src="https://img.shields.io/badge/codeclone-B-green?style=flat-square" alt="CodeClone Quality">
+  <img src="https://img.shields.io/badge/codeclone-78%20(B)-green" alt="codeclone 78 (B)">
   <a href="LICENSE"><img src="https://img.shields.io/pypi/l/codeclone.svg?style=flat-square" alt="License"></a>
 </p>
 
@@ -21,6 +21,10 @@
 CodeClone provides comprehensive structural code quality analysis for Python. It detects architectural
 duplication via normalized AST and Control Flow Graphs, computes quality metrics, and enforces CI gates —
 all with baseline-aware governance that separates **known** technical debt from **new** regressions.
+
+Docs: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/) ·
+Live sample report:
+[orenlab.github.io/codeclone/examples/report/](https://orenlab.github.io/codeclone/examples/report/)
 
 ## Features
 
@@ -99,20 +103,24 @@ repos:
 
 ## Configuration
 
-CodeClone loads project defaults from `pyproject.toml`:
+CodeClone can load project-level configuration from `pyproject.toml`:
 
 ```toml
 [tool.codeclone]
-min_loc = 20
-min_stmt = 8
+min_loc = 10
+min_stmt = 6
 baseline = "codeclone.baseline.json"
 skip_metrics = false
-quiet = true
+quiet = false
 html_out = ".cache/codeclone/report.html"
 json_out = ".cache/codeclone/report.json"
 md_out = ".cache/codeclone/report.md"
 sarif_out = ".cache/codeclone/report.sarif"
 text_out = ".cache/codeclone/report.txt"
+block_min_loc = 20
+block_min_stmt = 8
+segment_min_loc = 20
+segment_min_stmt = 10
 ```
 
 Precedence: CLI flags > `pyproject.toml` > built-in defaults.
@@ -154,6 +162,9 @@ All report formats are rendered from one canonical JSON report document.
 - `--open-html-report` opens the generated HTML report in the default browser and requires `--html`.
 - `--timestamped-report-paths` appends a UTC timestamp to default report filenames for bare report flags such as
   `--html` or `--json`. Explicit report paths are not rewritten.
+
+The published docs site also includes a live example HTML/JSON/SARIF report
+generated from the current `codeclone` repository during the docs build.
 
 Structural findings include:
 

@@ -27,8 +27,8 @@ COHESION_RISK_MEDIUM_MAX: Final = 3
 HEALTH_WEIGHTS: Final[dict[str, float]] = {
     "clones": 0.25,
     "complexity": 0.20,
-    "coupling": 0.15,
-    "cohesion": 0.10,
+    "coupling": 0.10,
+    "cohesion": 0.15,
     "dead_code": 0.10,
     "dependencies": 0.10,
     "coverage": 0.10,
@@ -44,7 +44,7 @@ class ExitCode(IntEnum):
 
 REPOSITORY_URL: Final = "https://github.com/orenlab/codeclone"
 ISSUES_URL: Final = "https://github.com/orenlab/codeclone/issues"
-DOCS_URL: Final = "https://github.com/orenlab/codeclone/tree/main/docs"
+DOCS_URL: Final = "https://orenlab.github.io/codeclone/"
 
 
 def cli_help_epilog() -> str:

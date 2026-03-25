@@ -28,7 +28,7 @@ REPORT_BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN = "Assert pattern block"
 
 HELP_VERSION = "Print the CodeClone version and exit."
 HELP_ROOT = "Project root directory to scan.\nDefaults to the current directory."
-HELP_MIN_LOC = "Minimum Lines of Code (LOC) required for clone analysis.\nDefault: 15."
+HELP_MIN_LOC = "Minimum Lines of Code (LOC) required for clone analysis.\nDefault: 10."
 HELP_MIN_STMT = "Minimum AST statement count required for clone analysis.\nDefault: 6."
 HELP_PROCESSES = "Number of parallel worker processes.\nDefault: 4."
 HELP_CACHE_PATH = (

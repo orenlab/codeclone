@@ -35,6 +35,7 @@ from codeclone.report.serialize import (
     render_json_report_document,
     render_text_report_document,
 )
+from tests._assertions import assert_contains_all, assert_mapping_entries
 from tests._report_access import (
     report_clone_groups as _clone_groups,
 )
@@ -290,10 +291,13 @@ def test_build_block_group_facts_assert_only(tmp_path: Path) -> None:
     assert group["pattern_display"] == f"{REPEATED_STMT_HASH[:12]} x4"
     assert group["hint"] == "assert_only"
     assert group["hint_label"] == "Assert-only block"
-    assert group["hint_confidence"] == "deterministic"
-    assert group["assert_ratio"] == "100%"
-    assert group["consecutive_asserts"] == "4"
-    assert group["group_display_name"] == "Assert pattern block"
+    assert_mapping_entries(
+        group,
+        hint_confidence="deterministic",
+        assert_ratio="100%",
+        consecutive_asserts="4",
+        group_display_name="Assert pattern block",
+    )
     assert group["group_arity"] == "1"
     assert group["instance_peer_count"] == "0"
 
@@ -353,6 +357,7 @@ def test_report_output_formats(
         baseline_path="/tmp/codeclone.baseline.json",
         baseline_schema_version=1,
         cache_path="/tmp/cache.json",
+        scan_root="/repo",
     )
     report_out = to_json_report(groups, groups, {}, meta)
     markdown_out = to_markdown_report(
@@ -435,7 +440,16 @@ def test_report_output_formats(
     assert run["automationDetails"]["id"] == "codeclone/full"
     assert run["properties"]["reportSchemaVersion"] == REPORT_SCHEMA_VERSION
     assert run["properties"]["reportGeneratedAtUtc"] == "2026-03-10T12:00:00Z"
+    assert run["columnKind"] == "utf16CodeUnits"
+    assert run["originalUriBaseIds"]["%SRCROOT%"]["uri"] == "file:///repo/"
+    assert run["artifacts"]
+    assert run["invocations"][0]["workingDirectory"]["uri"] == "file:///repo/"
     assert any(rule["id"] == "CCLONE001" for rule in run["tool"]["driver"]["rules"])
+    first_rule = run["tool"]["driver"]["rules"][0]
+    assert first_rule["name"].startswith("codeclone.")
+    assert "help" in first_rule
+    assert "markdown" in first_rule["help"]
+    assert first_rule["properties"]["tags"]
     assert any(
         result["fingerprints"]["codecloneFindingId"].startswith("clone:")
         for result in run["results"]
@@ -477,7 +491,7 @@ def test_report_sarif_uses_representative_and_related_locations() -> None:
     }
     sarif_payload = json.loads(
         to_sarif_report(
-            meta={"codeclone_version": "2.0.0b1"},
+            meta={"codeclone_version": "2.0.0b1", "scan_root": "/repo"},
             func_groups=groups,
             block_groups={},
             segment_groups={},
@@ -487,18 +501,28 @@ def test_report_sarif_uses_representative_and_related_locations() -> None:
     result = run["results"][0]
     assert result["ruleId"] == "CCLONE001"
     assert result["level"] == "warning"
+    assert result["baselineState"] == "new"
     assert result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == (
         "tests/fixtures/golden_project/alpha.py"
     )
+    assert (
+        result["locations"][0]["physicalLocation"]["artifactLocation"]["uriBaseId"]
+        == "%SRCROOT%"
+    )
+    assert result["locations"][0]["physicalLocation"]["artifactLocation"]["index"] == 0
     assert result["locations"][0]["logicalLocations"][0]["fullyQualifiedName"] == (
         "pkg.alpha:transform_alpha"
     )
+    assert result["locations"][0]["message"]["text"] == "Representative occurrence"
     assert (
         result["relatedLocations"][0]["physicalLocation"]["artifactLocation"]["uri"]
         == "tests/fixtures/golden_project/beta.py"
     )
+    assert result["relatedLocations"][0]["id"] == 1
+    assert result["relatedLocations"][0]["message"]["text"] == "Related occurrence #1"
     assert result["properties"]["cloneType"] == "Type-2"
     assert result["properties"]["groupArity"] == 2
+    assert "primaryLocationLineHash" in result["partialFingerprints"]
 
 
 def test_report_json_deterministic_group_order() -> None:
@@ -1790,21 +1814,24 @@ def test_to_text_report_handles_missing_meta_fields() -> None:
         block_groups={},
         segment_groups={},
     )
-    assert f"Report schema version: {REPORT_SCHEMA_VERSION}" in text_out
-    assert "CodeClone version: (none)" in text_out
-    assert "Report generated (UTC): (none)" in text_out
-    assert "Baseline status: (none)" in text_out
-    assert "Cache path: (none)" in text_out
-    assert "Cache used: false" in text_out
-    assert "INVENTORY" in text_out
-    assert "INTEGRITY" in text_out
-    assert "Note: baseline is untrusted; all groups are treated as NEW." in text_out
-    assert "FUNCTION CLONES (NEW) (groups=0)\n(none)" in text_out
-    assert "FUNCTION CLONES (KNOWN) (groups=0)\n(none)" in text_out
-    assert "BLOCK CLONES (NEW) (groups=0)\n(none)" in text_out
-    assert "BLOCK CLONES (KNOWN) (groups=0)\n(none)" in text_out
-    assert "SEGMENT CLONES (NEW) (groups=0)\n(none)" in text_out
-    assert "SEGMENT CLONES (KNOWN) (groups=0)\n(none)" in text_out
+    assert_contains_all(
+        text_out,
+        f"Report schema version: {REPORT_SCHEMA_VERSION}",
+        "CodeClone version: (none)",
+        "Report generated (UTC): (none)",
+        "Baseline status: (none)",
+        "Cache path: (none)",
+        "Cache used: false",
+        "INVENTORY",
+        "INTEGRITY",
+        "Note: baseline is untrusted; all groups are treated as NEW.",
+        "FUNCTION CLONES (NEW) (groups=0)\n(none)",
+        "FUNCTION CLONES (KNOWN) (groups=0)\n(none)",
+        "BLOCK CLONES (NEW) (groups=0)\n(none)",
+        "BLOCK CLONES (KNOWN) (groups=0)\n(none)",
+        "SEGMENT CLONES (NEW) (groups=0)\n(none)",
+        "SEGMENT CLONES (KNOWN) (groups=0)\n(none)",
+    )
 
 
 def test_to_text_report_uses_section_specific_metric_labels() -> None:
@@ -2463,9 +2490,12 @@ def test_text_and_markdown_report_include_suppressed_dead_code_sections() -> Non
         },
     )
     text = render_text_report_document(payload)
-    assert "dead_code: total=0 high_confidence=0 suppressed=1" in text
-    assert "SUPPRESSED DEAD CODE (items=1)" in text
-    assert "suppressed_by=dead-code@inline_codeclone" in text
+    assert_contains_all(
+        text,
+        "dead_code: total=0 high_confidence=0 suppressed=1",
+        "SUPPRESSED DEAD CODE (items=1)",
+        "suppressed_by=dead-code@inline_codeclone",
+    )
 
     markdown = to_markdown_report(
         report_document=payload,
@@ -2655,10 +2685,13 @@ def test_text_and_sarif_renderers_cover_new_structural_kinds() -> None:
         )
     )
     text = render_text_report_document(payload)
-    assert "Clone guard/exit divergence" in text
-    assert "Clone cohort drift" in text
-    assert "majority_guard_count" in text
-    assert "drift_fields" in text
+    assert_contains_all(
+        text,
+        "Clone guard/exit divergence",
+        "Clone cohort drift",
+        "majority_guard_count",
+        "drift_fields",
+    )
 
     sarif = json.loads(
         to_sarif_report(

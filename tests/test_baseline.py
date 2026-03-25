@@ -1049,12 +1049,15 @@ def test_baseline_save_syncs_generator_when_meta_uses_string(
     monkeypatch.setattr(baseline_mod, "_baseline_payload", _payload)
     baseline.save()
 
-    assert baseline.generator == "custom-generator"
-    assert baseline.schema_version == "2.0"
-    assert baseline.fingerprint_version == "1"
-    assert baseline.python_tag == "cp313"
-    assert baseline.created_at == "2026-03-07T12:00:00Z"
-    assert baseline.payload_sha256 == "f" * 64
+    _assert_baseline_runtime_meta(
+        baseline,
+        generator="custom-generator",
+        schema_version="2.0",
+        fingerprint_version="1",
+        python_tag="cp313",
+        created_at="2026-03-07T12:00:00Z",
+        payload_sha256="f" * 64,
+    )
 
 
 def test_baseline_save_skips_non_string_meta_updates(
@@ -1086,13 +1089,37 @@ def test_baseline_save_skips_non_string_meta_updates(
     monkeypatch.setattr(baseline_mod, "_baseline_payload", _payload)
     baseline.save()
 
-    assert baseline.generator == "keep-generator"
-    assert baseline.generator_version == "2.0.0"
-    assert baseline.schema_version == "2.0"
-    assert baseline.fingerprint_version == "1"
-    assert baseline.python_tag == "cp313"
-    assert baseline.created_at == "2026-03-07T00:00:00Z"
-    assert baseline.payload_sha256 == "e" * 64
+    _assert_baseline_runtime_meta(
+        baseline,
+        generator="keep-generator",
+        generator_version="2.0.0",
+        schema_version="2.0",
+        fingerprint_version="1",
+        python_tag="cp313",
+        created_at="2026-03-07T00:00:00Z",
+        payload_sha256="e" * 64,
+    )
+
+
+def _assert_baseline_runtime_meta(
+    baseline: Baseline,
+    *,
+    generator: str,
+    schema_version: str,
+    fingerprint_version: str,
+    python_tag: str,
+    created_at: str,
+    payload_sha256: str,
+    generator_version: str | None = None,
+) -> None:
+    assert baseline.generator == generator
+    if generator_version is not None:
+        assert baseline.generator_version == generator_version
+    assert baseline.schema_version == schema_version
+    assert baseline.fingerprint_version == fingerprint_version
+    assert baseline.python_tag == python_tag
+    assert baseline.created_at == created_at
+    assert baseline.payload_sha256 == payload_sha256
 
 
 def test_baseline_save_ignores_non_string_non_mapping_generator(

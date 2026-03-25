@@ -136,64 +136,98 @@ class CFGBuilder:
 
         self.current = after_block
 
-    def _visit_while(self, stmt: ast.While) -> None:
-        cond_block = self.cfg.create_block()
+    def _visit_loop_body(
+        self,
+        *,
+        body_block: Block,
+        continue_target: Block,
+        break_target: Block,
+        body: Iterable[ast.stmt],
+    ) -> None:
+        self._loop_stack.append(
+            _LoopContext(continue_target=continue_target, break_target=break_target)
+        )
+        self.current = body_block
+        self._visit_statements(body)
+        if not self.current.is_terminated:
+            self.current.add_successor(continue_target)
+        self._loop_stack.pop()
+
+    def _visit_loop_else(
+        self,
+        *,
+        else_block: Block | None,
+        orelse: Iterable[ast.stmt],
+        after_block: Block,
+    ) -> None:
+        if else_block is None:
+            return
+        self.current = else_block
+        self._visit_statements(orelse)
+        if not self.current.is_terminated:
+            self.current.add_successor(after_block)
+
+    def _create_loop_followup_blocks(
+        self, *, has_else: bool
+    ) -> tuple[Block, Block | None, Block]:
         body_block = self.cfg.create_block()
-        else_block = self.cfg.create_block() if stmt.orelse else None
+        else_block = self.cfg.create_block() if has_else else None
         after_block = self.cfg.create_block()
+        return body_block, else_block, after_block
 
-        self.current.add_successor(cond_block)
+    def _enter_loop_header(
+        self, *, has_else: bool
+    ) -> tuple[Block, Block, Block | None, Block]:
+        header_block = self.cfg.create_block()
+        body_block, else_block, after_block = self._create_loop_followup_blocks(
+            has_else=has_else
+        )
+        self.current.add_successor(header_block)
+        self.current = header_block
+        return header_block, body_block, else_block, after_block
 
-        self.current = cond_block
+    def _visit_while(self, stmt: ast.While) -> None:
+        cond_block, body_block, else_block, after_block = self._enter_loop_header(
+            has_else=bool(stmt.orelse)
+        )
         false_target = else_block if else_block is not None else after_block
         self._emit_condition(stmt.test, body_block, false_target)
 
-        self._loop_stack.append(
-            _LoopContext(continue_target=cond_block, break_target=after_block)
+        self._visit_loop_body(
+            body_block=body_block,
+            continue_target=cond_block,
+            break_target=after_block,
+            body=stmt.body,
         )
-        self.current = body_block
-        self._visit_statements(stmt.body)
-        if not self.current.is_terminated:
-            self.current.add_successor(cond_block)
-        self._loop_stack.pop()
-
-        if else_block is not None:
-            self.current = else_block
-            self._visit_statements(stmt.orelse)
-            if not self.current.is_terminated:
-                self.current.add_successor(after_block)
+        self._visit_loop_else(
+            else_block=else_block,
+            orelse=stmt.orelse,
+            after_block=after_block,
+        )
 
         self.current = after_block
 
     def _visit_for(self, stmt: ast.For | ast.AsyncFor) -> None:
-        iter_block = self.cfg.create_block()
-        body_block = self.cfg.create_block()
-        else_block = self.cfg.create_block() if stmt.orelse else None
-        after_block = self.cfg.create_block()
-
-        self.current.add_successor(iter_block)
-
-        self.current = iter_block
+        iter_block, body_block, else_block, after_block = self._enter_loop_header(
+            has_else=bool(stmt.orelse)
+        )
         self.current.statements.append(ast.Expr(value=stmt.iter))
         self.current.add_successor(body_block)
         self.current.add_successor(
             else_block if else_block is not None else after_block
         )
 
-        self._loop_stack.append(
-            _LoopContext(continue_target=iter_block, break_target=after_block)
+        self._visit_loop_body(
+            body_block=body_block,
+            continue_target=iter_block,
+            break_target=after_block,
+            body=stmt.body,
         )
-        self.current = body_block
-        self._visit_statements(stmt.body)
-        if not self.current.is_terminated:
-            self.current.add_successor(iter_block)
-        self._loop_stack.pop()
-
-        if else_block is not None:
-            self.current = else_block
-            self._visit_statements(stmt.orelse)
-            if not self.current.is_terminated:
-                self.current.add_successor(after_block)
+        self._visit_loop_else(
+            else_block=else_block,
+            orelse=stmt.orelse,
+            after_block=after_block,
+        )
 
         self.current = after_block
 

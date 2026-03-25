@@ -29,12 +29,20 @@ Modes:
 
 - `analysis_mode=full`: metrics computed and suggestions enabled
 - `analysis_mode=clones_only`: metrics skipped
+- Health score is a weighted blend: clones 25%, complexity 20%, cohesion 15%,
+  coupling 10%, dead code 10%, dependencies 10%, coverage 10%.
+- Clone dimension uses a piecewise density curve with breakpoints at 0.05
+  (score 90), 0.20 (score 50), 0.50 (score 0). Below 5% density the penalty
+  is mild; 5–20% is steep; above 20% is aggressive.
+- Grade bands: A ≥90, B ≥75, C ≥60, D ≥40, F <40.
 
 Refs:
 
 - `codeclone/cli.py:_metrics_flags_requested`
 - `codeclone/cli.py:_metrics_computed`
 - `codeclone/_cli_meta.py:_build_report_meta`
+- `codeclone/metrics/health.py:compute_health`
+- `codeclone/contracts.py:HEALTH_WEIGHTS`
 
 ## Contracts
 
@@ -109,8 +117,8 @@ Refs:
 ## Non-guarantees
 
 - Absolute threshold defaults are not frozen by this chapter.
-- Metrics scoring internals may evolve if exit semantics and contract statuses
-  stay stable.
+- Metrics scoring internals, per-dimension weighting, and the exact clone
+  density curve may evolve if exit semantics and contract statuses stay stable.
 
 ## See also
 

@@ -26,7 +26,7 @@ or gating configuration precedence.
 Key defaults:
 
 - `root="."`
-- `--min-loc=15`
+- `--min-loc=10`
 - `--min-stmt=6`
 - `--processes=4`
 - `--baseline=codeclone.baseline.json`
@@ -41,12 +41,19 @@ Key defaults:
     - `--sarif` -> `<root>/.cache/codeclone/report.sarif`
     - `--text` -> `<root>/.cache/codeclone/report.txt`
 
+Fragment-level admission thresholds (pyproject.toml only, advanced tuning):
+
+- `block_min_loc=20` — minimum function LOC for block-level sliding window
+- `block_min_stmt=8` — minimum function statements for block-level sliding window
+- `segment_min_loc=20` — minimum function LOC for segment-level sliding window
+- `segment_min_stmt=10` — minimum function statements for segment-level sliding window
+
 Example project-level config:
 
 ```toml
 [tool.codeclone]
-min_loc = 20
-min_stmt = 8
+min_loc = 10
+min_stmt = 6
 baseline = "codeclone.baseline.json"
 skip_metrics = true
 quiet = true
@@ -85,8 +92,9 @@ Refs:
 
 ## Invariants (MUST)
 
-- Detection thresholds (`min-loc`, `min-stmt`) affect extraction.
-- Detection thresholds (`min-loc`, `min-stmt`) are part of cache compatibility (`payload.ap`).
+- Detection thresholds (`min-loc`, `min-stmt`) affect function-level extraction.
+- Fragment thresholds (`block_min_loc/stmt`, `segment_min_loc/stmt`) affect block/segment extraction.
+- All six thresholds are part of cache compatibility (`payload.ap`).
 - Reporting flags (`--html/--json/--md/--sarif/--text`) affect output only.
 - Reporting flags accept optional path values; passing bare flag writes to
   deterministic default path under `.cache/codeclone/`.

@@ -89,6 +89,25 @@ def _is_included_python_file(
     return _is_under_root(resolved, rootp)
 
 
+def _walk_file_candidate(
+    *,
+    dirpath: str,
+    filename: str,
+    excludes_set: set[str],
+    rootp: Path,
+) -> str | None:
+    if not filename.endswith(".py"):
+        return None
+    file_path = os.path.join(dirpath, filename)
+    if os.path.islink(file_path) and not _is_included_python_file(
+        file_path=Path(file_path),
+        excludes_set=excludes_set,
+        rootp=rootp,
+    ):
+        return None
+    return file_path
+
+
 def iter_py_files(
     root: str,
     excludes: tuple[str, ...] = DEFAULT_EXCLUDES,
@@ -122,16 +141,15 @@ def iter_py_files(
     ):
         dirnames[:] = [name for name in dirnames if name not in excludes_set]
         for filename in filenames:
-            if not filename.endswith(".py"):
-                continue
-            file_path = os.path.join(dirpath, filename)
-            if os.path.islink(file_path) and not _is_included_python_file(
-                file_path=Path(file_path),
+            candidate = _walk_file_candidate(
+                dirpath=dirpath,
+                filename=filename,
                 excludes_set=excludes_set,
                 rootp=rootp,
-            ):
+            )
+            if candidate is None:
                 continue
-            candidates.append(file_path)
+            candidates.append(candidate)
             if len(candidates) > max_files:
                 raise ValidationError(
                     f"File count exceeds limit of {max_files}. "

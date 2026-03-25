@@ -324,6 +324,19 @@ def _make_console(*, no_color: bool) -> RichConsole:
     )
 
 
+def _print_verbose_clone_hashes(
+    console: _PrinterLike,
+    *,
+    label: str,
+    clone_hashes: set[str],
+) -> None:
+    if not clone_hashes:
+        return
+    console.print(f"\n    {label}:")
+    for clone_hash in sorted(clone_hashes):
+        console.print(f"      - {clone_hash}")
+
+
 def _make_plain_console() -> _PlainConsole:
     return _make_plain_console_impl()
 
@@ -812,14 +825,16 @@ def _enforce_gating(
         )
 
         if args.verbose:
-            if new_func:
-                console.print("\n    Function clone hashes:")
-                for clone_hash in sorted(new_func):
-                    console.print(f"      - {clone_hash}")
-            if new_block:
-                console.print("\n    Block clone hashes:")
-                for clone_hash in sorted(new_block):
-                    console.print(f"      - {clone_hash}")
+            _print_verbose_clone_hashes(
+                cast("_PrinterLike", console),
+                label="Function clone hashes",
+                clone_hashes=new_func,
+            )
+            _print_verbose_clone_hashes(
+                cast("_PrinterLike", console),
+                label="Block clone hashes",
+                clone_hashes=new_block,
+            )
 
         sys.exit(ExitCode.GATING_FAILURE)
 
@@ -1035,6 +1050,10 @@ def _main_impl() -> None:
         max_size_bytes=args.max_cache_size_mb * 1024 * 1024,
         min_loc=args.min_loc,
         min_stmt=args.min_stmt,
+        block_min_loc=args.block_min_loc,
+        block_min_stmt=args.block_min_stmt,
+        segment_min_loc=args.segment_min_loc,
+        segment_min_stmt=args.segment_min_stmt,
     )
     cache.load()
     if cache.load_warning:

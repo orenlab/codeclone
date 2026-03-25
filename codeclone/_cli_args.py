@@ -18,8 +18,12 @@ from .contracts import (
 )
 
 DEFAULT_ROOT = "."
-DEFAULT_MIN_LOC = 15
+DEFAULT_MIN_LOC = 10
 DEFAULT_MIN_STMT = 6
+DEFAULT_BLOCK_MIN_LOC = 20
+DEFAULT_BLOCK_MIN_STMT = 8
+DEFAULT_SEGMENT_MIN_LOC = 20
+DEFAULT_SEGMENT_MIN_STMT = 10
 DEFAULT_PROCESSES = 4
 DEFAULT_MAX_CACHE_SIZE_MB = 50
 DEFAULT_MAX_BASELINE_SIZE_MB = 5
@@ -110,6 +114,15 @@ def build_parser(version: str) -> _ArgumentParser:
         type=int,
         default=DEFAULT_MIN_STMT,
         help=ui.HELP_MIN_STMT,
+    )
+    # Block/segment thresholds are advanced tuning: configurable via
+    # pyproject.toml only (no CLI flags).  Defaults live on the namespace
+    # so apply_pyproject_config_overrides can override them.
+    ap.set_defaults(
+        block_min_loc=DEFAULT_BLOCK_MIN_LOC,
+        block_min_stmt=DEFAULT_BLOCK_MIN_STMT,
+        segment_min_loc=DEFAULT_SEGMENT_MIN_LOC,
+        segment_min_stmt=DEFAULT_SEGMENT_MIN_STMT,
     )
     analysis_group.add_argument(
         "--processes",

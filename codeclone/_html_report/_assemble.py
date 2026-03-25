@@ -197,7 +197,6 @@ def build_html_report(
         '<div class="topbar-actions">'
         f'<button class="btn btn-prov" type="button" data-prov-open>'
         f'<span class="prov-dot {prov_dot_cls}"></span>Report Provenance</button>'
-        '<button class="btn" type="button" data-export-json>Export JSON</button>'
         f'<button class="theme-toggle" type="button" title="Toggle theme">'
         f"{ICONS['theme']}Theme</button>"
         "</div></div></header>"
@@ -214,61 +213,51 @@ def build_html_report(
         "</footer>"
     )
 
-    # -- Command palette shell --
-    cmd_palette_html = (
-        '<div class="cmd-palette">'
-        '<div class="cmd-palette-box">'
-        '<input class="cmd-palette-input" type="text" '
-        'placeholder="Search commands… (Ctrl+K)" autocomplete="off"/>'
-        '<div class="cmd-palette-list"></div>'
-        "</div></div>"
-    )
+    cmd_palette_html = ""  # removed
     finding_why_modal_html = (
         '<dialog class="finding-why-modal" id="finding-why-modal" '
-        'aria-label="Why This Finding Was Reported">'
+        'aria-label="Finding Details">'
         '<div class="modal-head">'
-        "<h2>Why This Finding Was Reported</h2>"
+        "<h2>Finding Details</h2>"
         '<button class="modal-close" type="button" data-finding-why-close '
         'aria-label="Close">&times;</button>'
         "</div>"
         '<div class="modal-body"></div>'
         "</dialog>"
     )
-    help_modal_html = (
-        '<dialog class="help-modal" id="help-modal" '
-        'aria-label="Help & Support">'
+    help_modal_html = ""  # removed
+
+    badge_modal_html = (
+        '<dialog class="badge-modal" id="badge-modal" aria-label="Get Badge">'
         '<div class="modal-head">'
-        "<h2>Help &amp; Support</h2>"
-        '<button class="modal-close" type="button" data-help-close '
+        "<h2>Get Badge</h2>"
+        '<button class="modal-close" type="button" data-badge-close '
         'aria-label="Close">&times;</button>'
         "</div>"
         '<div class="modal-body">'
-        '<div class="help-section">'
-        "<p>Use keyboard shortcuts and the command palette to move quickly "
-        "around the report.</p>"
+        # -- variant tabs --
+        '<div class="badge-tabs" role="tablist">'
+        '<button class="badge-tab badge-tab--active" role="tab" '
+        'aria-selected="true" data-badge-tab="grade">Grade only</button>'
+        '<button class="badge-tab" role="tab" '
+        'aria-selected="false" data-badge-tab="full">Score + Grade</button>'
         "</div>"
-        '<div class="help-section">'
-        "<h3>Shortcuts</h3>"
-        '<div class="help-shortcuts">'
-        '<div class="help-shortcut-row"><span>Command palette</span>'
-        '<kbd data-shortcut="mod+K">\u2318K / Ctrl+K</kbd></div>'
-        '<div class="help-shortcut-row"><span>Open help</span>'
-        '<kbd data-shortcut="mod+I">\u2318I / Ctrl+I</kbd></div>'
-        "</div>"
-        "</div>"
-        '<div class="help-section">'
-        "<h3>Resources</h3>"
-        '<div class="help-links">'
-        f'<a href="{DOCS_URL}" target="_blank" rel="noopener noreferrer">'
-        "Documentation</a>"
-        f'<a href="{ISSUES_URL}" target="_blank" rel="noopener noreferrer">'
-        "Issue tracker</a>"
-        f'<a href="{REPOSITORY_URL}" target="_blank" rel="noopener noreferrer">'
-        "Repository</a>"
-        "</div>"
-        "</div>"
-        "</div>"
-        "</dialog>"
+        # -- preview --
+        '<div class="badge-preview" id="badge-preview"></div>'
+        '<p class="badge-disclaimer">'
+        "Badge reflects the current report snapshot.</p>"
+        # -- embed fields --
+        '<label class="badge-field-label">Markdown</label>'
+        '<div class="badge-code-wrap">'
+        '<code class="badge-code" id="badge-code-md"></code>'
+        '<button class="badge-copy-btn" type="button" '
+        'data-badge-copy="md">Copy</button></div>'
+        '<label class="badge-field-label">HTML</label>'
+        '<div class="badge-code-wrap">'
+        '<code class="badge-code" id="badge-code-html"></code>'
+        '<button class="badge-copy-btn" type="button" '
+        'data-badge-copy="html">Copy</button></div>'
+        "</div></dialog>"
     )
 
     # -- Body assembly --
@@ -283,6 +272,7 @@ def build_html_report(
         + finding_why_modal_html
         + help_modal_html
         + cmd_palette_html
+        + badge_modal_html
     )
 
     # -- CSS assembly --
@@ -348,7 +338,7 @@ def build_html_report(
             css_parts.append(explicit_rules)
 
             # 2) Auto-detect: OS prefers light + no explicit dark
-            _auto_pfx = ':root:not([data-theme="dark"])'
+            _auto_pfx = ":root:not([data-theme])"
             auto_reset = (
                 f"{_auto_pfx} .codebox{{{_cb_override}}}\n"
                 f"{_auto_pfx} .codebox span{{{_reset}}}"

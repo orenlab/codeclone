@@ -9,6 +9,33 @@ from tests._report_fixtures import (
 )
 
 
+def _build_group_facts_for_source(
+    *,
+    tmp_path: Path,
+    filename: str,
+    source: str,
+    qualname: str = "mod:f",
+    start_line: int = 2,
+    end_line: int = 4,
+) -> dict[str, str]:
+    group_key = repeated_block_group_key()
+    test_file = tmp_path / filename
+    test_file.write_text(source, "utf-8")
+    facts = build_block_group_facts(
+        {
+            group_key: [
+                {
+                    "qualname": qualname,
+                    "filepath": str(test_file),
+                    "start_line": start_line,
+                    "end_line": end_line,
+                }
+            ]
+        }
+    )
+    return facts[group_key]
+
+
 def test_build_block_group_facts_handles_missing_file() -> None:
     group_key = repeated_block_group_key()
     facts = build_block_group_facts(
@@ -50,56 +77,34 @@ def test_build_block_group_facts_handles_syntax_error_file(tmp_path: Path) -> No
 
 
 def test_build_block_group_facts_assert_detection_with_calls(tmp_path: Path) -> None:
-    group_key = repeated_block_group_key()
-    test_file = tmp_path / "test_calls.py"
-    test_file.write_text(
-        "def f(checker):\n"
-        '    "doc"\n'
-        "    assert_ok(checker)\n"
-        "    checker.assert_ready(checker)\n",
-        "utf-8",
+    group = _build_group_facts_for_source(
+        tmp_path=tmp_path,
+        filename="test_calls.py",
+        source=(
+            "def f(checker):\n"
+            '    "doc"\n'
+            "    assert_ok(checker)\n"
+            "    checker.assert_ready(checker)\n"
+        ),
+        qualname="tests.mod:f",
     )
-    facts = build_block_group_facts(
-        {
-            group_key: [
-                {
-                    "qualname": "tests.mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 4,
-                }
-            ]
-        }
-    )
-    group = facts[group_key]
     assert group["hint"] == "assert_only"
     assert group["assert_ratio"] == "100%"
     assert group["consecutive_asserts"] == "3"
 
 
 def test_build_block_group_facts_non_assert_breaks_hint(tmp_path: Path) -> None:
-    group_key = repeated_block_group_key()
-    test_file = tmp_path / "test_mixed.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    check(html)\n"
-        "    assert 'b' in html\n",
-        "utf-8",
+    group = _build_group_facts_for_source(
+        tmp_path=tmp_path,
+        filename="test_mixed.py",
+        source=(
+            "def f(html):\n"
+            "    assert 'a' in html\n"
+            "    check(html)\n"
+            "    assert 'b' in html\n"
+        ),
+        qualname="tests.mod:f",
     )
-    facts = build_block_group_facts(
-        {
-            group_key: [
-                {
-                    "qualname": "tests.mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 4,
-                }
-            ]
-        }
-    )
-    group = facts[group_key]
     assert "hint" not in group
     assert group["assert_ratio"] == "67%"
     assert group["consecutive_asserts"] == "1"
@@ -140,25 +145,13 @@ def test_build_block_group_facts_handles_empty_stmt_range(tmp_path: Path) -> Non
 
 
 def test_build_block_group_facts_non_assert_call_shapes(tmp_path: Path) -> None:
-    group_key = repeated_block_group_key()
-    test_file = tmp_path / "module.py"
-    test_file.write_text(
-        "def f(checker, x):\n    checker.validate(x)\n    (lambda y: y)(x)\n    x\n",
-        "utf-8",
+    group = _build_group_facts_for_source(
+        tmp_path=tmp_path,
+        filename="module.py",
+        source=(
+            "def f(checker, x):\n    checker.validate(x)\n    (lambda y: y)(x)\n    x\n"
+        ),
     )
-    facts = build_block_group_facts(
-        {
-            group_key: [
-                {
-                    "qualname": "mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 4,
-                }
-            ]
-        }
-    )
-    group = facts[group_key]
     assert group["assert_ratio"] == "0%"
     assert group["consecutive_asserts"] == "0"
     assert "hint" not in group

@@ -252,6 +252,23 @@ def _source_scope_from_filepaths(
             scan_root=scan_root,
         )
         counts[location.source_kind] += 1
+    return _source_scope_from_counts(counts)
+
+
+def _normalized_source_kind(value: object) -> SourceKind:
+    source_kind_text = str(value).strip().lower() or SOURCE_KIND_OTHER
+    if source_kind_text == SOURCE_KIND_PRODUCTION:
+        return SOURCE_KIND_PRODUCTION
+    if source_kind_text == SOURCE_KIND_TESTS:
+        return SOURCE_KIND_TESTS
+    if source_kind_text == SOURCE_KIND_FIXTURES:
+        return SOURCE_KIND_FIXTURES
+    return SOURCE_KIND_OTHER
+
+
+def _source_scope_from_counts(
+    counts: Mapping[SourceKind, int],
+) -> dict[str, object]:
     breakdown = {kind: counts[kind] for kind in _SOURCE_BREAKDOWN_KEYS_TYPED}
     present = tuple(
         kind for kind in _SOURCE_BREAKDOWN_KEYS_TYPED if breakdown[kind] > 0
@@ -288,48 +305,8 @@ def _source_scope_from_locations(
 ) -> dict[str, object]:
     counts: Counter[SourceKind] = Counter()
     for location in locations:
-        source_kind_text = (
-            str(location.get("source_kind", SOURCE_KIND_OTHER)).strip().lower()
-            or SOURCE_KIND_OTHER
-        )
-        if source_kind_text == SOURCE_KIND_PRODUCTION:
-            source_kind: SourceKind = SOURCE_KIND_PRODUCTION
-        elif source_kind_text == SOURCE_KIND_TESTS:
-            source_kind = SOURCE_KIND_TESTS
-        elif source_kind_text == SOURCE_KIND_FIXTURES:
-            source_kind = SOURCE_KIND_FIXTURES
-        else:
-            source_kind = SOURCE_KIND_OTHER
-        counts[source_kind] += 1
-    breakdown = {kind: counts[kind] for kind in _SOURCE_BREAKDOWN_KEYS_TYPED}
-    present = tuple(
-        kind for kind in _SOURCE_BREAKDOWN_KEYS_TYPED if breakdown[kind] > 0
-    )
-    dominant_kind = (
-        present[0]
-        if len(present) == 1
-        else combine_source_kinds(present)
-        if present
-        else SOURCE_KIND_OTHER
-    )
-    production_count = breakdown[SOURCE_KIND_PRODUCTION]
-    non_runtime_count = (
-        breakdown[SOURCE_KIND_TESTS]
-        + breakdown[SOURCE_KIND_FIXTURES]
-        + breakdown[SOURCE_KIND_OTHER]
-    )
-    match (production_count > 0, non_runtime_count == 0, production_count == 0):
-        case (True, True, _):
-            impact_scope = IMPACT_SCOPE_RUNTIME
-        case (_, _, True):
-            impact_scope = IMPACT_SCOPE_NON_RUNTIME
-        case _:
-            impact_scope = IMPACT_SCOPE_MIXED
-    return {
-        "dominant_kind": dominant_kind,
-        "breakdown": breakdown,
-        "impact_scope": impact_scope,
-    }
+        counts[_normalized_source_kind(location.get("source_kind"))] += 1
+    return _source_scope_from_counts(counts)
 
 
 def _collect_paths_from_metrics(metrics: Mapping[str, object]) -> set[str]:
@@ -1395,6 +1372,193 @@ def _build_dead_code_groups(
     return groups
 
 
+def _design_singleton_group(
+    *,
+    category: str,
+    kind: str,
+    severity: str,
+    qualname: str,
+    filepath: str,
+    start_line: int,
+    end_line: int,
+    scan_root: str,
+    item_data: Mapping[str, object],
+    facts: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "id": design_group_id(category, qualname),
+        "family": FAMILY_DESIGN,
+        "category": category,
+        "kind": kind,
+        "severity": severity,
+        "confidence": CONFIDENCE_HIGH,
+        "priority": _priority(severity, EFFORT_MODERATE),
+        "count": 1,
+        "source_scope": _single_location_source_scope(
+            filepath,
+            scan_root=scan_root,
+        ),
+        "spread": {"files": 1, "functions": 1},
+        "items": [
+            {
+                "relative_path": _contract_report_location_path(
+                    filepath,
+                    scan_root=scan_root,
+                ),
+                "qualname": qualname,
+                "start_line": start_line,
+                "end_line": end_line,
+                **item_data,
+            }
+        ],
+        "facts": dict(facts),
+    }
+
+
+def _complexity_design_group(
+    item_map: Mapping[str, object],
+    *,
+    scan_root: str,
+) -> dict[str, object] | None:
+    cc = _as_int(item_map.get("cyclomatic_complexity"), 1)
+    if cc <= 20:
+        return None
+    qualname = str(item_map.get("qualname", ""))
+    filepath = str(item_map.get("relative_path", ""))
+    nesting_depth = _as_int(item_map.get("nesting_depth"))
+    severity = SEVERITY_CRITICAL if cc > 40 else SEVERITY_WARNING
+    return _design_singleton_group(
+        category=CATEGORY_COMPLEXITY,
+        kind="function_hotspot",
+        severity=severity,
+        qualname=qualname,
+        filepath=filepath,
+        start_line=_as_int(item_map.get("start_line")),
+        end_line=_as_int(item_map.get("end_line")),
+        scan_root=scan_root,
+        item_data={
+            "cyclomatic_complexity": cc,
+            "nesting_depth": nesting_depth,
+            "risk": str(item_map.get("risk", RISK_LOW)),
+        },
+        facts={
+            "cyclomatic_complexity": cc,
+            "nesting_depth": nesting_depth,
+        },
+    )
+
+
+def _coupling_design_group(
+    item_map: Mapping[str, object],
+    *,
+    scan_root: str,
+) -> dict[str, object] | None:
+    cbo = _as_int(item_map.get("cbo"))
+    if cbo <= 10:
+        return None
+    qualname = str(item_map.get("qualname", ""))
+    filepath = str(item_map.get("relative_path", ""))
+    coupled_classes = list(_as_sequence(item_map.get("coupled_classes")))
+    return _design_singleton_group(
+        category=CATEGORY_COUPLING,
+        kind="class_hotspot",
+        severity=SEVERITY_WARNING,
+        qualname=qualname,
+        filepath=filepath,
+        start_line=_as_int(item_map.get("start_line")),
+        end_line=_as_int(item_map.get("end_line")),
+        scan_root=scan_root,
+        item_data={
+            "cbo": cbo,
+            "risk": str(item_map.get("risk", RISK_LOW)),
+            "coupled_classes": coupled_classes,
+        },
+        facts={
+            "cbo": cbo,
+            "coupled_classes": coupled_classes,
+        },
+    )
+
+
+def _cohesion_design_group(
+    item_map: Mapping[str, object],
+    *,
+    scan_root: str,
+) -> dict[str, object] | None:
+    lcom4 = _as_int(item_map.get("lcom4"))
+    if lcom4 <= 3:
+        return None
+    qualname = str(item_map.get("qualname", ""))
+    filepath = str(item_map.get("relative_path", ""))
+    method_count = _as_int(item_map.get("method_count"))
+    instance_var_count = _as_int(item_map.get("instance_var_count"))
+    return _design_singleton_group(
+        category=CATEGORY_COHESION,
+        kind="class_hotspot",
+        severity=SEVERITY_WARNING,
+        qualname=qualname,
+        filepath=filepath,
+        start_line=_as_int(item_map.get("start_line")),
+        end_line=_as_int(item_map.get("end_line")),
+        scan_root=scan_root,
+        item_data={
+            "lcom4": lcom4,
+            "risk": str(item_map.get("risk", RISK_LOW)),
+            "method_count": method_count,
+            "instance_var_count": instance_var_count,
+        },
+        facts={
+            "lcom4": lcom4,
+            "method_count": method_count,
+            "instance_var_count": instance_var_count,
+        },
+    )
+
+
+def _dependency_design_group(
+    cycle: object,
+    *,
+    scan_root: str,
+) -> dict[str, object] | None:
+    modules = [str(module) for module in _as_sequence(cycle) if str(module).strip()]
+    if not modules:
+        return None
+    cycle_key = " -> ".join(modules)
+    return {
+        "id": design_group_id(CATEGORY_DEPENDENCY, cycle_key),
+        "family": FAMILY_DESIGN,
+        "category": CATEGORY_DEPENDENCY,
+        "kind": "cycle",
+        "severity": SEVERITY_CRITICAL,
+        "confidence": CONFIDENCE_HIGH,
+        "priority": _priority(SEVERITY_CRITICAL, EFFORT_HARD),
+        "count": len(modules),
+        "source_scope": _source_scope_from_filepaths(
+            (module.replace(".", "/") + ".py" for module in modules),
+            scan_root=scan_root,
+        ),
+        "spread": {"files": len(modules), "functions": 0},
+        "items": [
+            {
+                "module": module,
+                "relative_path": module.replace(".", "/") + ".py",
+                "source_kind": report_location_from_group_item(
+                    {
+                        "filepath": module.replace(".", "/") + ".py",
+                        "qualname": "",
+                        "start_line": 0,
+                        "end_line": 0,
+                    }
+                ).source_kind,
+            }
+            for module in modules
+        ],
+        "facts": {
+            "cycle_length": len(modules),
+        },
+    }
+
+
 def _build_design_groups(
     metrics_payload: Mapping[str, object],
     *,
@@ -1405,187 +1569,27 @@ def _build_design_groups(
 
     complexity = _as_mapping(families.get(CATEGORY_COMPLEXITY))
     for item in _as_sequence(complexity.get("items")):
-        item_map = _as_mapping(item)
-        cc = _as_int(item_map.get("cyclomatic_complexity"), 1)
-        if cc <= 20:
-            continue
-        qualname = str(item_map.get("qualname", ""))
-        filepath = str(item_map.get("relative_path", ""))
-        severity = SEVERITY_CRITICAL if cc > 40 else SEVERITY_WARNING
-        groups.append(
-            {
-                "id": design_group_id(CATEGORY_COMPLEXITY, qualname),
-                "family": FAMILY_DESIGN,
-                "category": CATEGORY_COMPLEXITY,
-                "kind": "function_hotspot",
-                "severity": severity,
-                "confidence": CONFIDENCE_HIGH,
-                "priority": _priority(severity, EFFORT_MODERATE),
-                "count": 1,
-                "source_scope": _single_location_source_scope(
-                    filepath,
-                    scan_root=scan_root,
-                ),
-                "spread": {"files": 1, "functions": 1},
-                "items": [
-                    {
-                        "relative_path": _contract_report_location_path(
-                            filepath,
-                            scan_root=scan_root,
-                        ),
-                        "qualname": qualname,
-                        "start_line": _as_int(item_map.get("start_line")),
-                        "end_line": _as_int(item_map.get("end_line")),
-                        "cyclomatic_complexity": cc,
-                        "nesting_depth": _as_int(item_map.get("nesting_depth")),
-                        "risk": str(item_map.get("risk", RISK_LOW)),
-                    }
-                ],
-                "facts": {
-                    "cyclomatic_complexity": cc,
-                    "nesting_depth": _as_int(item_map.get("nesting_depth")),
-                },
-            }
-        )
+        group = _complexity_design_group(_as_mapping(item), scan_root=scan_root)
+        if group is not None:
+            groups.append(group)
 
     coupling = _as_mapping(families.get(CATEGORY_COUPLING))
     for item in _as_sequence(coupling.get("items")):
-        item_map = _as_mapping(item)
-        cbo = _as_int(item_map.get("cbo"))
-        if cbo <= 10:
-            continue
-        qualname = str(item_map.get("qualname", ""))
-        filepath = str(item_map.get("relative_path", ""))
-        groups.append(
-            {
-                "id": design_group_id(CATEGORY_COUPLING, qualname),
-                "family": FAMILY_DESIGN,
-                "category": CATEGORY_COUPLING,
-                "kind": "class_hotspot",
-                "severity": SEVERITY_WARNING,
-                "confidence": CONFIDENCE_HIGH,
-                "priority": _priority(SEVERITY_WARNING, EFFORT_MODERATE),
-                "count": 1,
-                "source_scope": _single_location_source_scope(
-                    filepath,
-                    scan_root=scan_root,
-                ),
-                "spread": {"files": 1, "functions": 1},
-                "items": [
-                    {
-                        "relative_path": _contract_report_location_path(
-                            filepath,
-                            scan_root=scan_root,
-                        ),
-                        "qualname": qualname,
-                        "start_line": _as_int(item_map.get("start_line")),
-                        "end_line": _as_int(item_map.get("end_line")),
-                        "cbo": cbo,
-                        "risk": str(item_map.get("risk", RISK_LOW)),
-                        "coupled_classes": list(
-                            _as_sequence(item_map.get("coupled_classes"))
-                        ),
-                    }
-                ],
-                "facts": {
-                    "cbo": cbo,
-                    "coupled_classes": list(
-                        _as_sequence(item_map.get("coupled_classes"))
-                    ),
-                },
-            }
-        )
+        group = _coupling_design_group(_as_mapping(item), scan_root=scan_root)
+        if group is not None:
+            groups.append(group)
 
     cohesion = _as_mapping(families.get(CATEGORY_COHESION))
     for item in _as_sequence(cohesion.get("items")):
-        item_map = _as_mapping(item)
-        lcom4 = _as_int(item_map.get("lcom4"))
-        if lcom4 <= 3:
-            continue
-        qualname = str(item_map.get("qualname", ""))
-        filepath = str(item_map.get("relative_path", ""))
-        groups.append(
-            {
-                "id": design_group_id(CATEGORY_COHESION, qualname),
-                "family": FAMILY_DESIGN,
-                "category": CATEGORY_COHESION,
-                "kind": "class_hotspot",
-                "severity": SEVERITY_WARNING,
-                "confidence": CONFIDENCE_HIGH,
-                "priority": _priority(SEVERITY_WARNING, EFFORT_MODERATE),
-                "count": 1,
-                "source_scope": _single_location_source_scope(
-                    filepath,
-                    scan_root=scan_root,
-                ),
-                "spread": {"files": 1, "functions": 1},
-                "items": [
-                    {
-                        "relative_path": _contract_report_location_path(
-                            filepath,
-                            scan_root=scan_root,
-                        ),
-                        "qualname": qualname,
-                        "start_line": _as_int(item_map.get("start_line")),
-                        "end_line": _as_int(item_map.get("end_line")),
-                        "lcom4": lcom4,
-                        "risk": str(item_map.get("risk", RISK_LOW)),
-                        "method_count": _as_int(item_map.get("method_count")),
-                        "instance_var_count": _as_int(
-                            item_map.get("instance_var_count")
-                        ),
-                    }
-                ],
-                "facts": {
-                    "lcom4": lcom4,
-                    "method_count": _as_int(item_map.get("method_count")),
-                    "instance_var_count": _as_int(item_map.get("instance_var_count")),
-                },
-            }
-        )
+        group = _cohesion_design_group(_as_mapping(item), scan_root=scan_root)
+        if group is not None:
+            groups.append(group)
 
     dependencies = _as_mapping(families.get("dependencies"))
     for cycle in _as_sequence(dependencies.get("cycles")):
-        modules = [str(module) for module in _as_sequence(cycle) if str(module).strip()]
-        if not modules:
-            continue
-        cycle_key = " -> ".join(modules)
-        source_scope = _source_scope_from_filepaths(
-            (module.replace(".", "/") + ".py" for module in modules),
-            scan_root=scan_root,
-        )
-        groups.append(
-            {
-                "id": design_group_id(CATEGORY_DEPENDENCY, cycle_key),
-                "family": FAMILY_DESIGN,
-                "category": CATEGORY_DEPENDENCY,
-                "kind": "cycle",
-                "severity": SEVERITY_CRITICAL,
-                "confidence": CONFIDENCE_HIGH,
-                "priority": _priority(SEVERITY_CRITICAL, EFFORT_HARD),
-                "count": len(modules),
-                "source_scope": source_scope,
-                "spread": {"files": len(modules), "functions": 0},
-                "items": [
-                    {
-                        "module": module,
-                        "relative_path": module.replace(".", "/") + ".py",
-                        "source_kind": report_location_from_group_item(
-                            {
-                                "filepath": module.replace(".", "/") + ".py",
-                                "qualname": "",
-                                "start_line": 0,
-                                "end_line": 0,
-                            }
-                        ).source_kind,
-                    }
-                    for module in modules
-                ],
-                "facts": {
-                    "cycle_length": len(modules),
-                },
-            }
-        )
+        group = _dependency_design_group(cycle, scan_root=scan_root)
+        if group is not None:
+            groups.append(group)
 
     groups.sort(key=lambda group: (-_as_float(group["priority"]), str(group["id"])))
     return groups

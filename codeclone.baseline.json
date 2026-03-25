@@ -2,14 +2,14 @@
   "meta": {
     "generator": {
       "name": "codeclone",
-      "version": "2.0.0"
+      "version": "2.0.0b1"
     },
     "schema_version": "2.0",
     "fingerprint_version": "1",
     "python_tag": "cp313",
-    "created_at": "2026-03-07T06:41:05Z",
+    "created_at": "2026-03-24T15:14:34Z",
     "payload_sha256": "691c6cedd10e2a51d6038780f3ae9dffe763356dd2aba742b3980f131b79f217",
-    "metrics_payload_sha256": "8ef0f75798b1a614f88d4ecb40b385a36d36c5e0f626ee8fe01821d813aee9d1"
+    "metrics_payload_sha256": "3310d3a0f64d5fa0373546c5c4c82675dc5a441344f876092005665e81234e94"
   },
   "clones": {
     "functions": [
@@ -26,24 +26,22 @@
     ]
   },
   "metrics": {
-    "max_complexity": 115,
-    "high_risk_functions": [
-      "codeclone.cache:_decode_wire_file_entry",
-      "codeclone.cli:_main_impl",
-      "codeclone.html_report:build_html_report"
-    ],
-    "max_coupling": 8,
+    "max_complexity": 20,
+    "high_risk_functions": [],
+    "max_coupling": 10,
     "high_coupling_classes": [],
     "max_cohesion": 5,
     "low_cohesion_classes": [
-      "tests.test_cli_inprocess:_DummyExecutor",
-      "tests.test_cli_inprocess:_DummyProgress",
+      "codeclone._cli_reports:_OutputPaths",
+      "codeclone._cli_reports:_ReportArtifacts",
+      "codeclone.baseline:Baseline",
+      "codeclone.metrics_baseline:MetricsBaseline",
       "tests.test_golden_v2:_DummyExecutor"
     ],
     "dependency_cycles": [],
     "dependency_max_depth": 9,
     "dead_code_items": [],
-    "health_score": 71,
-    "health_grade": "C"
+    "health_score": 78,
+    "health_grade": "B"
   }
 }

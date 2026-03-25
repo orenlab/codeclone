@@ -29,6 +29,7 @@ from codeclone.report.suggestions import (
     _structural_steps,
     _structural_summary,
 )
+from tests._assertions import assert_contains_all
 
 
 def _occurrence(
@@ -267,10 +268,16 @@ def test_structural_why_template_covers_new_kind_reasoning_paths() -> None:
         max_snippet_lines=20,
     )
 
-    assert "clone cohort members with guard/exit divergence" in guard_html
-    assert "majority guard count" in guard_html
-    assert "cohort members that drift from majority profile" in drift_html
-    assert "Drift fields" in drift_html
+    assert_contains_all(
+        guard_html,
+        "clone cohort members with guard/exit divergence",
+        "majority guard count",
+    )
+    assert_contains_all(
+        drift_html,
+        "cohort members that drift from majority profile",
+        "Drift fields",
+    )
 
 
 def test_markdown_helpers_cover_non_numeric_and_missing_fact_paths() -> None:

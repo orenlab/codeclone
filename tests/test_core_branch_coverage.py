@@ -37,6 +37,7 @@ from codeclone.models import (
     SegmentUnit,
 )
 from codeclone.normalize import NormalizationConfig
+from tests._assertions import assert_contains_all
 
 
 def test_cache_risk_and_shape_helpers() -> None:
@@ -649,148 +650,148 @@ def test_pipeline_decode_cached_structural_group() -> None:
     assert decoded.items[0].file_path.endswith("cache.py")
 
 
-def test_pipeline_discover_uses_cached_metrics_branch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _discover_with_single_cached_entry(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cached_entry: dict[str, object],
+) -> pipeline.DiscoveryResult:
     source = tmp_path / "a.py"
     source.write_text("def f():\n    return 1\n", "utf-8")
     filepath = str(source)
     stat = {"mtime_ns": 1, "size": 1}
-    cached_entry: dict[str, object] = {
-        "stat": stat,
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "class_metrics": [
+    cache_entry = {"stat": stat, **cached_entry}
+
+    class _FakeCache:
+        def get_file_entry(self, _path: str) -> dict[str, object]:
+            return cache_entry
+
+    boot = pipeline.BootstrapResult(
+        root=tmp_path,
+        config=NormalizationConfig(),
+        args=Namespace(skip_metrics=False, min_loc=1, min_stmt=1, processes=1),
+        output_paths=pipeline.OutputPaths(),
+        cache_path=tmp_path / "cache.json",
+    )
+    monkeypatch.setattr(pipeline, "iter_py_files", lambda _root: [filepath])
+    monkeypatch.setattr(pipeline, "file_stat_signature", lambda _path: stat)
+    return pipeline.discover(boot=boot, cache=cast(Cache, _FakeCache()))
+
+
+@pytest.mark.parametrize(
+    ("cached_entry", "expected_cache_hits", "expected_files_to_process"),
+    [
+        (
             {
-                "qualname": "pkg:Cls",
-                "filepath": filepath,
-                "start_line": 1,
-                "end_line": 10,
-                "cbo": 11,
-                "lcom4": 4,
-                "method_count": 4,
-                "instance_var_count": 1,
-                "risk_coupling": "high",
-                "risk_cohesion": "high",
-                "coupled_classes": ["A", "B"],
-            }
-        ],
-        "module_deps": [
-            {"source": "pkg.a", "target": "pkg.b", "import_type": "import", "line": 3}
-        ],
-        "dead_candidates": [
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "class_metrics": [
+                    {
+                        "qualname": "pkg:Cls",
+                        "filepath": "placeholder",
+                        "start_line": 1,
+                        "end_line": 10,
+                        "cbo": 11,
+                        "lcom4": 4,
+                        "method_count": 4,
+                        "instance_var_count": 1,
+                        "risk_coupling": "high",
+                        "risk_cohesion": "high",
+                        "coupled_classes": ["A", "B"],
+                    }
+                ],
+                "module_deps": [
+                    {
+                        "source": "pkg.a",
+                        "target": "pkg.b",
+                        "import_type": "import",
+                        "line": 3,
+                    }
+                ],
+                "dead_candidates": [
+                    {
+                        "qualname": "pkg:dead",
+                        "local_name": "dead",
+                        "filepath": "placeholder",
+                        "start_line": 20,
+                        "end_line": 22,
+                        "kind": "function",
+                    }
+                ],
+                "referenced_names": ["used_name"],
+                "referenced_qualnames": [],
+                "import_names": [],
+                "class_names": [],
+                "source_stats": {
+                    "lines": 2,
+                    "functions": 1,
+                    "methods": 0,
+                    "classes": 0,
+                },
+            },
+            1,
+            (),
+        ),
+        (
             {
-                "qualname": "pkg:dead",
-                "local_name": "dead",
-                "filepath": filepath,
-                "start_line": 20,
-                "end_line": 22,
-                "kind": "function",
-            }
-        ],
-        "referenced_names": ["used_name"],
-        "referenced_qualnames": [],
-        "import_names": [],
-        "class_names": [],
-        "source_stats": {"lines": 2, "functions": 1, "methods": 0, "classes": 0},
-    }
-
-    class _FakeCache:
-        def get_file_entry(self, _path: str) -> dict[str, object]:
-            return cached_entry
-
-    boot = pipeline.BootstrapResult(
-        root=tmp_path,
-        config=NormalizationConfig(),
-        args=Namespace(skip_metrics=False, min_loc=1, min_stmt=1, processes=1),
-        output_paths=pipeline.OutputPaths(),
-        cache_path=tmp_path / "cache.json",
-    )
-    monkeypatch.setattr(pipeline, "iter_py_files", lambda _root: [filepath])
-    monkeypatch.setattr(pipeline, "file_stat_signature", lambda _path: stat)
-
-    discovered = pipeline.discover(boot=boot, cache=cast(Cache, _FakeCache()))
-    assert discovered.cache_hits == 1
-    assert len(discovered.cached_class_metrics) == 1
-    assert len(discovered.cached_module_deps) == 1
-    assert len(discovered.cached_dead_candidates) == 1
-    assert "used_name" in discovered.cached_referenced_names
-
-
-def test_pipeline_discover_missing_source_stats_forces_reprocess(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "class_metrics": [],
+                "module_deps": [],
+                "dead_candidates": [],
+                "referenced_names": ["used_name"],
+                "referenced_qualnames": [],
+                "import_names": [],
+                "class_names": [],
+            },
+            0,
+            ("a.py",),
+        ),
+        (
+            {
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "source_stats": {
+                    "lines": 2,
+                    "functions": 1,
+                    "methods": 0,
+                    "classes": 0,
+                },
+            },
+            0,
+            ("a.py",),
+        ),
+    ],
+    ids=[
+        "cached-metrics-hit",
+        "missing-source-stats",
+        "missing-metrics-sections",
+    ],
+)
+def test_pipeline_discover_cache_admission_branches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cached_entry: dict[str, object],
+    expected_cache_hits: int,
+    expected_files_to_process: tuple[str, ...],
 ) -> None:
-    source = tmp_path / "a.py"
-    source.write_text("def f():\n    return 1\n", "utf-8")
-    filepath = str(source)
-    stat = {"mtime_ns": 1, "size": 1}
-    cached_entry: dict[str, object] = {
-        "stat": stat,
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "class_metrics": [],
-        "module_deps": [],
-        "dead_candidates": [],
-        "referenced_names": ["used_name"],
-        "referenced_qualnames": [],
-        "import_names": [],
-        "class_names": [],
-    }
-
-    class _FakeCache:
-        def get_file_entry(self, _path: str) -> dict[str, object]:
-            return cached_entry
-
-    boot = pipeline.BootstrapResult(
-        root=tmp_path,
-        config=NormalizationConfig(),
-        args=Namespace(skip_metrics=False, min_loc=1, min_stmt=1, processes=1),
-        output_paths=pipeline.OutputPaths(),
-        cache_path=tmp_path / "cache.json",
+    discovered = _discover_with_single_cached_entry(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        cached_entry=cached_entry,
     )
-    monkeypatch.setattr(pipeline, "iter_py_files", lambda _root: [filepath])
-    monkeypatch.setattr(pipeline, "file_stat_signature", lambda _path: stat)
-
-    discovered = pipeline.discover(boot=boot, cache=cast(Cache, _FakeCache()))
-    assert discovered.cache_hits == 0
-    assert discovered.files_to_process == (filepath,)
-
-
-def test_pipeline_discover_cached_without_metrics_forces_reprocess(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    source = tmp_path / "a.py"
-    source.write_text("def f():\n    return 1\n", "utf-8")
-    filepath = str(source)
-    stat = {"mtime_ns": 1, "size": 1}
-    cached_entry: dict[str, object] = {
-        "stat": stat,
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "source_stats": {"lines": 2, "functions": 1, "methods": 0, "classes": 0},
-        # intentionally no metrics keys -> _cache_entry_has_metrics == False
-    }
-
-    class _FakeCache:
-        def get_file_entry(self, _path: str) -> dict[str, object]:
-            return cached_entry
-
-    boot = pipeline.BootstrapResult(
-        root=tmp_path,
-        config=NormalizationConfig(),
-        args=Namespace(skip_metrics=False, min_loc=1, min_stmt=1, processes=1),
-        output_paths=pipeline.OutputPaths(),
-        cache_path=tmp_path / "cache.json",
+    assert discovered.cache_hits == expected_cache_hits
+    assert tuple(Path(path).name for path in discovered.files_to_process) == (
+        expected_files_to_process
     )
-    monkeypatch.setattr(pipeline, "iter_py_files", lambda _root: [filepath])
-    monkeypatch.setattr(pipeline, "file_stat_signature", lambda _path: stat)
-
-    discovered = pipeline.discover(boot=boot, cache=cast(Cache, _FakeCache()))
-    assert discovered.cache_hits == 0
-    assert discovered.files_to_process == (filepath,)
+    if expected_cache_hits == 1:
+        assert len(discovered.cached_class_metrics) == 1
+        assert len(discovered.cached_module_deps) == 1
+        assert len(discovered.cached_dead_candidates) == 1
+        assert "used_name" in discovered.cached_referenced_names
 
 
 def test_pipeline_cached_source_stats_helper_invalid_shapes() -> None:
@@ -865,13 +866,16 @@ def test_cli_metric_reason_parser_and_policy_context() -> None:
         fail_threshold=5,
     )
     metrics_policy = policy_context(args=args, gate_kind="metrics")
-    assert "fail-on-new-metrics" in metrics_policy
-    assert "fail-complexity=10" in metrics_policy
-    assert "fail-coupling=9" in metrics_policy
-    assert "fail-cohesion=8" in metrics_policy
-    assert "fail-cycles" in metrics_policy
-    assert "fail-dead-code" in metrics_policy
-    assert "fail-health=80" in metrics_policy
+    assert_contains_all(
+        metrics_policy,
+        "fail-on-new-metrics",
+        "fail-complexity=10",
+        "fail-coupling=9",
+        "fail-cohesion=8",
+        "fail-cycles",
+        "fail-dead-code",
+        "fail-health=80",
+    )
     assert policy_context(args=args, gate_kind="new-clones") == "fail-on-new"
     assert policy_context(args=args, gate_kind="threshold") == "fail-threshold=5"
     assert policy_context(args=args, gate_kind="unknown") == "custom"

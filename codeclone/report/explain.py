@@ -35,6 +35,7 @@ class _StatementRecord:
 
 
 _StatementIndex = tuple[tuple[_StatementRecord, ...], tuple[int, ...]]
+_EMPTY_ASSERT_RANGE_STATS = (0, 0, 0)
 
 
 def signature_parts(group_key: str) -> list[str]:
@@ -57,6 +58,14 @@ def parsed_file_tree(
         tree = None
     ast_cache[filepath] = tree
     return tree
+
+
+def _cache_empty_assert_range_stats(
+    range_cache: dict[tuple[str, int, int], tuple[int, int, int]],
+    cache_key: tuple[str, int, int],
+) -> tuple[int, int, int]:
+    range_cache[cache_key] = _EMPTY_ASSERT_RANGE_STATS
+    return _EMPTY_ASSERT_RANGE_STATS
 
 
 def _build_statement_index(tree: ast.AST) -> _StatementIndex:
@@ -141,19 +150,16 @@ def assert_range_stats(
         stmt_index_cache=stmt_index_cache,
     )
     if statement_index is None:
-        range_cache[cache_key] = (0, 0, 0)
-        return 0, 0, 0
+        return _cache_empty_assert_range_stats(range_cache, cache_key)
 
     records, start_lines = statement_index
     if not records:
-        range_cache[cache_key] = (0, 0, 0)
-        return 0, 0, 0
+        return _cache_empty_assert_range_stats(range_cache, cache_key)
 
     left = bisect_left(start_lines, start_line)
     right = bisect_right(start_lines, end_line)
     if left >= right:
-        range_cache[cache_key] = (0, 0, 0)
-        return 0, 0, 0
+        return _cache_empty_assert_range_stats(range_cache, cache_key)
 
     total, assert_like, max_consecutive, current_consecutive = (0, 0, 0, 0)
     for record in records[left:right]:
@@ -169,8 +175,7 @@ def assert_range_stats(
             current_consecutive = 0
 
     if total == 0:
-        range_cache[cache_key] = (0, 0, 0)
-        return 0, 0, 0
+        return _cache_empty_assert_range_stats(range_cache, cache_key)
 
     stats = (total, assert_like, max_consecutive)
     range_cache[cache_key] = stats
@@ -222,10 +227,12 @@ def enrich_with_assert_facts(
     stmt_index_cache: dict[str, _StatementIndex | None],
     range_cache: dict[tuple[str, int, int], tuple[int, int, int]],
 ) -> None:
-    assert_only = True
-    total_statements = 0
-    assert_statements = 0
-    max_consecutive_asserts = 0
+    (
+        assert_only,
+        total_statements,
+        assert_statements,
+        max_consecutive_asserts,
+    ) = _initial_assert_fact_state()
 
     if not items:
         assert_only = False
@@ -279,6 +286,10 @@ def enrich_with_assert_facts(
         facts["hint_label"] = BLOCK_HINT_ASSERT_ONLY_LABEL
         facts["hint_confidence"] = BLOCK_HINT_CONFIDENCE_DETERMINISTIC
         facts["hint_note"] = BLOCK_HINT_ASSERT_ONLY_NOTE
+
+
+def _initial_assert_fact_state() -> tuple[bool, int, int, int]:
+    return True, 0, 0, 0
 
 
 def build_block_group_facts(block_groups: GroupMapLike) -> dict[str, dict[str, str]]:

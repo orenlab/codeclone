@@ -86,8 +86,11 @@ def _signature_chips_html(sig: dict[str, str]) -> str:
     """Render signature key=value pairs as category-badge chips."""
     chips: list[str] = []
     for k, v in sorted(sig.items()):
+        key = k.replace("_", " ")
         chips.append(
-            f'<span class="category-badge">{_escape_html(k)}={_escape_html(v)}</span>'
+            f'<span class="category-badge">'
+            f'<span class="category-badge-key">{_escape_html(key)}</span>'
+            f'<span class="category-badge-val">{_escape_html(v)}</span></span>'
         )
     return " ".join(chips)
 
@@ -166,6 +169,14 @@ def _finding_scope_text(items: Sequence[StructuralFindingOccurrence]) -> str:
     )
 
 
+def _render_reason_list_html(reasons: Sequence[str]) -> str:
+    return (
+        '<ul class="finding-why-list">'
+        + "".join(f"<li>{_escape_html(reason)}</li>" for reason in reasons)
+        + "</ul>"
+    )
+
+
 def _finding_reason_list_html(
     group: StructuralFindingGroup,
     items: Sequence[StructuralFindingOccurrence],
@@ -193,11 +204,7 @@ def _finding_reason_list_html(
             ),
             "This is a report-only finding and does not affect clone gating.",
         ]
-        return (
-            '<ul class="finding-why-list">'
-            + "".join(f"<li>{_escape_html(reason)}</li>" for reason in reasons)
-            + "</ul>"
-        )
+        return _render_reason_list_html(reasons)
     if group.finding_kind == STRUCTURAL_KIND_CLONE_COHORT_DRIFT:
         reasons = [
             f"{len(items)} clone members diverge from the cohort majority profile.",
@@ -209,11 +216,7 @@ def _finding_reason_list_html(
             ("Majority profile is compared deterministically with lexical tie-breaks."),
             "This is a report-only finding and does not affect clone gating.",
         ]
-        return (
-            '<ul class="finding-why-list">'
-            + "".join(f"<li>{_escape_html(reason)}</li>" for reason in reasons)
-            + "</ul>"
-        )
+        return _render_reason_list_html(reasons)
 
     stmt_seq = group.signature.get("stmt_seq", "n/a")
     terminal = group.signature.get("terminal", "n/a")
@@ -229,7 +232,7 @@ def _finding_reason_list_html(
         ),
         (
             f"The detector grouped them by structural signature: "
-            f"stmt_seq={stmt_seq} and terminal={terminal}."
+            f"stmt seq: {stmt_seq}, terminal: {terminal}."
         ),
         (
             "Call/raise buckets and nested control-flow flags must also match "
@@ -240,11 +243,11 @@ def _finding_reason_list_html(
             "or CI verdicts."
         ),
     ]
-    return (
-        '<ul class="finding-why-list">'
-        + "".join(f"<li>{_escape_html(reason)}</li>" for reason in reasons)
-        + "</ul>"
-    )
+    return _render_reason_list_html(reasons)
+
+
+def _finding_matters_paragraph(message: str) -> str:
+    return f'<p class="finding-why-text">{_escape_html(message)}</p>'
 
 
 def _finding_matters_html(
@@ -259,14 +262,14 @@ def _finding_matters_html(
             "This often points to a partial fix where one path was updated and "
             "other siblings were left unchanged."
         )
-        return f'<p class="finding-why-text">{_escape_html(message)}</p>'
+        return _finding_matters_paragraph(message)
     if group.finding_kind == STRUCTURAL_KIND_CLONE_COHORT_DRIFT:
         message = (
             "Members of one function-clone cohort drifted from a stable majority "
             "profile (terminal, guard, try/finally, side-effect order). Review "
             "whether divergence is intentional."
         )
-        return f'<p class="finding-why-text">{_escape_html(message)}</p>'
+        return _finding_matters_paragraph(message)
 
     terminal = str(group.signature.get("terminal", "")).strip()
     stmt_seq = str(group.signature.get("stmt_seq", "")).strip()
@@ -294,7 +297,7 @@ def _finding_matters_html(
             f"({stmt_seq or 'unknown signature'}). Review whether the shared "
             "branch body should stay duplicated or become a helper."
         )
-    return f'<p class="finding-why-text">{_escape_html(message)}</p>'
+    return _finding_matters_paragraph(message)
 
 
 def _finding_example_card_html(
@@ -318,8 +321,8 @@ def _finding_example_card_html(
         '<div class="finding-why-example-head">'
         f'<span class="finding-why-example-label">{_escape_html(label)}</span>'
         f'<span class="finding-why-example-meta">{_escape_html(item.qualname)}</span>'
-        f'<span class="finding-why-example-meta">'
-        f"{_escape_html(_short_path(item.file_path))}:{item.start}-{item.end}</span>"
+        f'<span class="finding-why-example-loc">'
+        f"{_escape_html(_short_path(item.file_path))}:{item.start}\u2013{item.end}</span>"
         "</div>"
         f"{snippet.code_html}"
         "</div>"
@@ -371,22 +374,22 @@ def _finding_why_template_html(
         reported_subject = "structurally matching branch bodies"
     return (
         '<div class="metrics-section">'
-        '<div class="metrics-section-title">Why This Matters</div>'
+        '<div class="metrics-section-title">Impact</div>'
         f"{_finding_matters_html(group, items)}"
         "</div>"
         '<div class="metrics-section">'
-        '<div class="metrics-section-title">Why This Was Reported</div>'
+        '<div class="metrics-section-title">Detection Rationale</div>'
         f'<p class="finding-why-text">CodeClone reported this group because it found '
         f"{len(items)} {reported_subject} "
         f"{_escape_html(_finding_scope_text(items))}.</p>"
         f"{_finding_reason_list_html(group, items)}"
         "</div>"
         '<div class="metrics-section">'
-        '<div class="metrics-section-title">Detection Signature</div>'
+        '<div class="metrics-section-title">Signature</div>'
         f'<div class="finding-why-chips">{_signature_chips_html(group.signature)}</div>'
         "</div>"
         '<div class="metrics-section">'
-        '<div class="metrics-section-title">Matching Branch Examples</div>'
+        '<div class="metrics-section-title">Examples</div>'
         f'<div class="finding-why-note">{_escape_html(showing_note)}</div>'
         f'<div class="finding-why-examples">{examples_html}</div>'
         "</div>"
@@ -436,6 +439,17 @@ def _render_finding_card(
     file_word = "file" if spread["files"] == 1 else "files"
     kind_label = _KIND_LABEL.get(g.finding_kind, g.finding_kind)
 
+    # Context chips — source kind + finding kind
+    source_chip = _escape_html(source_kind_label(source_kind))
+    finding_kind_chip = _escape_html(g.finding_kind.replace("_", " "))
+    ctx_chips = (
+        f'<span class="suggestion-chip">{source_chip}</span>'
+        f'<span class="suggestion-chip">{finding_kind_chip}</span>'
+    )
+
+    # Scope text — concise spread summary
+    scope_text = _finding_scope_text(deduped_items)
+
     return (
         f'<article class="sf-card"'
         f' data-sf-group="true"'
@@ -443,17 +457,20 @@ def _render_finding_card(
         f' data-spread-bucket="{_escape_attr(spread_bucket)}">'
         # -- header --
         '<div class="sf-head">'
+        '<span class="sf-kind-badge">info</span>'
         f'<span class="sf-title">{_escape_html(kind_label)}</span>'
         '<span class="sf-meta">'
         f'<span class="suggestion-meta-badge">'
         f"{spread['functions']} {func_word} \u00b7 {spread['files']} {file_word}</span>"
-        f'<button class="btn ghost" type="button" '
+        f'<button class="btn ghost sf-why-btn" type="button" '
         f'data-finding-why-btn="{_escape_attr(why_template_id)}" '
         'aria-haspopup="dialog">Why?</button>'
         "</span></div>"
-        # -- body: signature chips --
+        # -- body: context + signature chips + scope --
         '<div class="sf-body">'
-        f'<div class="sf-scope">{chips_html}</div>'
+        f'<div class="suggestion-context">{ctx_chips}</div>'
+        f'<div class="sf-chips">{chips_html}</div>'
+        f'<div class="sf-scope-text">{_escape_html(scope_text)}</div>'
         "</div>"
         # -- expandable occurrences --
         '<details class="sf-details">'

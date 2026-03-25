@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+import pytest
+
+import codeclone.report.json_contract as json_contract_mod
 from codeclone import _coerce
 from codeclone.models import (
     ReportLocation,
@@ -17,17 +20,22 @@ from codeclone.report import overview as overview_mod
 from codeclone.report.json_contract import (
     _build_design_groups,
     _clone_group_assessment,
+    _collect_paths_from_metrics,
+    _collect_report_file_list,
     _combined_impact_scope,
     _contract_path,
     _count_file_lines,
     _count_file_lines_for_path,
+    _csv_values,
     _derive_inventory_code_counts,
+    _findings_summary,
     _is_absolute_path,
     _normalize_block_machine_facts,
     _normalize_nested_string_rows,
     _parse_ratio_percent,
     _source_scope_from_filepaths,
     _source_scope_from_locations,
+    _structural_group_assessment,
     _suggestion_finding_id,
     build_report_document,
 )
@@ -36,16 +44,31 @@ from codeclone.report.markdown import (
     to_markdown_report,
 )
 from codeclone.report.sarif import (
+    _baseline_state as _sarif_baseline_state,
+)
+from codeclone.report.sarif import (
     _location_entry as _sarif_location_entry,
+)
+from codeclone.report.sarif import (
+    _location_message as _sarif_location_message,
 )
 from codeclone.report.sarif import (
     _logical_locations as _sarif_logical_locations,
 )
 from codeclone.report.sarif import (
+    _partial_fingerprints as _sarif_partial_fingerprints,
+)
+from codeclone.report.sarif import (
     _result_message as _sarif_result_message,
 )
 from codeclone.report.sarif import (
+    _result_properties as _sarif_result_properties,
+)
+from codeclone.report.sarif import (
     _rule_spec as _sarif_rule_spec,
+)
+from codeclone.report.sarif import (
+    _scan_root_uri as _sarif_scan_root_uri,
 )
 from codeclone.report.sarif import (
     _severity_to_level,
@@ -53,9 +76,20 @@ from codeclone.report.sarif import (
     to_sarif_report,
 )
 from codeclone.report.sarif import (
+    _slug as _sarif_slug,
+)
+from codeclone.report.sarif import (
     _text as _sarif_text,
 )
-from codeclone.report.serialize import render_text_report_document
+from codeclone.report.serialize import (
+    _append_single_item_findings,
+    _append_structural_findings,
+    _append_suggestions,
+    _append_suppressed_dead_code_items,
+    _structural_kind_label,
+    render_text_report_document,
+)
+from tests._assertions import assert_mapping_entries
 
 
 def _rich_report_document() -> dict[str, object]:
@@ -459,7 +493,12 @@ def test_report_document_rich_invariants_and_renderers() -> None:
     assert {"CCLONE001", "CSTRUCT001", "CDEAD001", "CDESIGN001", "CDESIGN004"}.issubset(
         rule_ids
     )
+    assert run["originalUriBaseIds"]["%SRCROOT%"]["uri"] == "file:///repo/codeclone/"
+    assert run["artifacts"]
+    assert run["artifacts"][0]["location"]["uriBaseId"] == "%SRCROOT%"
     assert any("relatedLocations" in result for result in run["results"])
+    assert any("baselineState" in result for result in run["results"])
+    assert all("help" in rule for rule in run["tool"]["driver"]["rules"])
 
 
 def test_markdown_and_sarif_reuse_prebuilt_report_document() -> None:
@@ -535,10 +574,17 @@ def test_json_contract_private_helpers_cover_edge_cases(tmp_path: Path) -> None:
     mixed_scope = _source_scope_from_locations(
         [{"source_kind": "production"}, {"source_kind": "strange"}]
     )
-    assert runtime_scope["impact_scope"] == "runtime"
-    assert non_runtime_scope["impact_scope"] == "non_runtime"
-    assert mixed_runtime_scope["impact_scope"] == "mixed"
-    assert mixed_scope["impact_scope"] == "mixed"
+    assert {
+        "runtime": runtime_scope["impact_scope"],
+        "non_runtime": non_runtime_scope["impact_scope"],
+        "mixed_runtime": mixed_runtime_scope["impact_scope"],
+        "mixed_other": mixed_scope["impact_scope"],
+    } == {
+        "runtime": "runtime",
+        "non_runtime": "non_runtime",
+        "mixed_runtime": "mixed",
+        "mixed_other": "mixed",
+    }
 
     assert _normalize_nested_string_rows([["b", "a"], [], ["b", "a"], ["c"]]) == [
         ["c"],
@@ -612,11 +658,14 @@ def test_derive_inventory_code_counts_uses_cached_line_scan_fallback(
         cached_files=1,
     )
 
-    assert counts["parsed_lines"] == 2
-    assert counts["scope"] == "mixed"
-    assert counts["functions"] == 9
-    assert counts["methods"] == 4
-    assert counts["classes"] == 2
+    assert_mapping_entries(
+        counts,
+        parsed_lines=2,
+        scope="mixed",
+        functions=9,
+        methods=4,
+        classes=2,
+    )
 
 
 def test_markdown_render_long_list_branches() -> None:
@@ -829,6 +878,20 @@ def test_overview_handles_non_mapping_metric_summaries() -> None:
     assert health["weakest_dimension"] is None
 
 
+def test_overview_health_snapshot_handles_non_mapping_dimensions() -> None:
+    overview = overview_mod.build_report_overview(
+        suggestions=(),
+        metrics={"health": {"score": 72, "grade": "C", "dimensions": []}},
+    )
+    health = cast(dict[str, object], overview["health"])
+    assert health == {
+        "score": 72,
+        "grade": "C",
+        "strongest_dimension": None,
+        "weakest_dimension": None,
+    }
+
+
 def test_suggestion_finding_id_fallback_branch() -> None:
     @dataclass
     class _FakeSuggestion:
@@ -941,10 +1004,662 @@ def test_sarif_private_helper_branches() -> None:
     related = _sarif_location_entry(
         {"relative_path": "code/a.py", "start_line": 1, "end_line": 2},
         related_id=7,
+        artifact_index_map={"code/a.py": 3},
+        use_uri_base_id=True,
+        message_text="Related occurrence #7",
     )
-    assert related["id"] == 7
+    related_message = cast(dict[str, object], related["message"])
+    related_physical = cast(dict[str, object], related["physicalLocation"])
+    related_artifact = cast(dict[str, object], related_physical["artifactLocation"])
+    assert (
+        related["id"],
+        related_message["text"],
+        related_artifact["uriBaseId"],
+        related_artifact["index"],
+    ) == (7, "Related occurrence #7", "%SRCROOT%", 3)
     no_end_line = _sarif_location_entry(
         {"relative_path": "code/a.py", "start_line": 1, "end_line": 0}
     )
     region = cast(dict[str, object], no_end_line["physicalLocation"])["region"]
     assert region == {"startLine": 1}
+    logical_only = _sarif_location_entry(
+        {"module": "pkg.a"},
+        message_text="Cycle member",
+    )
+    logical_message = cast(dict[str, object], logical_only["message"])
+    assert "physicalLocation" not in logical_only
+    assert logical_only["logicalLocations"] == [{"fullyQualifiedName": "pkg.a"}]
+    assert logical_message["text"] == "Cycle member"
+
+
+def test_sarif_private_helper_family_dispatches() -> None:
+    clone_function = _sarif_rule_spec({"family": "clone", "category": "function"})
+    clone_block = _sarif_rule_spec({"family": "clone", "category": "block"})
+    structural_guard = _sarif_rule_spec(
+        {
+            "family": "structural",
+            "kind": "clone_guard_exit_divergence",
+        }
+    )
+    structural_drift = _sarif_rule_spec(
+        {
+            "family": "structural",
+            "kind": "clone_cohort_drift",
+        }
+    )
+    design_cohesion = _sarif_rule_spec({"family": "design", "category": "cohesion"})
+    design_complexity = _sarif_rule_spec({"family": "design", "category": "complexity"})
+    design_coupling = _sarif_rule_spec({"family": "design", "category": "coupling"})
+    design_dependency = _sarif_rule_spec({"family": "design", "category": "dependency"})
+    assert clone_function.rule_id == "CCLONE001"
+    assert clone_block.rule_id == "CCLONE002"
+    assert structural_guard.rule_id == "CSTRUCT002"
+    assert structural_drift.rule_id == "CSTRUCT003"
+    assert design_cohesion.rule_id == "CDESIGN001"
+    assert design_complexity.rule_id == "CDESIGN002"
+    assert design_coupling.rule_id == "CDESIGN003"
+    assert design_dependency.rule_id == "CDESIGN004"
+
+    assert (
+        _sarif_result_message(
+            {
+                "family": "clone",
+                "category": "function",
+                "clone_type": "Type-2",
+                "count": 3,
+                "spread": {"files": 2},
+                "items": [{"qualname": "pkg.mod:fn"}],
+            }
+        )
+        == "Function clone group (Type-2), 3 occurrences across 2 files."
+    )
+    assert (
+        _sarif_result_message(
+            {
+                "family": "dead_code",
+                "category": "function",
+                "confidence": "medium",
+                "items": [{"relative_path": "pkg/mod.py"}],
+            }
+        )
+        == "Unused function with medium confidence: pkg/mod.py"
+    )
+    assert "LCOM4=4" in _sarif_result_message(
+        {
+            "family": "design",
+            "category": "cohesion",
+            "facts": {"lcom4": 4},
+            "items": [{"qualname": "pkg.mod:Thing"}],
+        }
+    )
+    assert "CC=25" in _sarif_result_message(
+        {
+            "family": "design",
+            "category": "complexity",
+            "facts": {"cyclomatic_complexity": 25},
+            "items": [{"qualname": "pkg.mod:run"}],
+        }
+    )
+    assert "CBO=12" in _sarif_result_message(
+        {
+            "family": "design",
+            "category": "coupling",
+            "facts": {"cbo": 12},
+            "items": [{"qualname": "pkg.mod:Thing"}],
+        }
+    )
+    assert "Dependency cycle" in _sarif_result_message(
+        {
+            "family": "design",
+            "category": "dependency",
+            "items": [{"module": "pkg.a"}, {"module": "pkg.b"}],
+        }
+    )
+
+    clone_props = _sarif_result_properties(
+        {
+            "family": "clone",
+            "novelty": "new",
+            "clone_kind": "function",
+            "clone_type": "Type-2",
+            "count": 2,
+        }
+    )
+    guard_props = _sarif_result_properties(
+        {
+            "family": "structural",
+            "count": 3,
+            "signature": {
+                "stable": {
+                    "family": "clone_guard_exit_divergence",
+                    "cohort_id": "cohort-1",
+                    "majority_guard_count": 2,
+                    "majority_terminal_kind": "return_expr",
+                }
+            },
+        }
+    )
+    drift_props = _sarif_result_properties(
+        {
+            "family": "structural",
+            "count": 3,
+            "signature": {
+                "stable": {
+                    "family": "clone_cohort_drift",
+                    "cohort_id": "cohort-2",
+                    "drift_fields": ["guard_exit_profile", "terminal_kind"],
+                }
+            },
+        }
+    )
+    design_props = _sarif_result_properties(
+        {
+            "family": "design",
+            "facts": {
+                "lcom4": 5,
+                "method_count": 7,
+                "instance_var_count": 2,
+                "cbo": 12,
+                "cyclomatic_complexity": 25,
+                "nesting_depth": 4,
+                "cycle_length": 3,
+            },
+        }
+    )
+    assert clone_props["groupArity"] == 2
+    assert guard_props["cohortId"] == "cohort-1"
+    assert drift_props["driftFields"] == [
+        "guard_exit_profile",
+        "terminal_kind",
+    ]
+    assert design_props["cycle_length"] == 3
+
+    assert _sarif_location_message({"family": "clone"}) == "Representative occurrence"
+    assert (
+        _sarif_location_message({"family": "structural"}, related_id=2)
+        == "Related occurrence #2"
+    )
+    assert (
+        _sarif_location_message({"family": "dead_code"}, related_id=3)
+        == "Related declaration #3"
+    )
+    assert (
+        _sarif_location_message({"family": "design", "category": "dependency"})
+        == "Cycle member"
+    )
+    assert (
+        _sarif_location_message(
+            {"family": "design", "category": "coupling"},
+            related_id=4,
+        )
+        == "Related location #4"
+    )
+
+    line_hash = _sarif_partial_fingerprints(
+        rule_id="CDESIGN002",
+        group={"id": "design:complexity:pkg.mod:run"},
+        primary_item={
+            "relative_path": "pkg/mod.py",
+            "qualname": "pkg.mod:run",
+            "start_line": 10,
+            "end_line": 14,
+        },
+    )
+    no_line_hash = _sarif_partial_fingerprints(
+        rule_id="CDESIGN001",
+        group={"id": "design:cohesion:pkg.mod:Thing"},
+        primary_item={"relative_path": "", "qualname": "", "start_line": 0},
+    )
+    assert "primaryLocationLineHash" in line_hash
+    assert "primaryLocationLineHash" not in no_line_hash
+
+
+def test_sarif_private_helper_edge_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _sarif_slug("Function /// clone   group") == "function-clone-group"
+    assert (
+        _sarif_scan_root_uri({"meta": {"runtime": {"scan_root_absolute": "repo"}}})
+        == ""
+    )
+
+    path_type = type(Path("/tmp"))
+    original_as_uri = path_type.as_uri
+
+    def _broken_as_uri(self: Path) -> str:
+        raise ValueError("boom")
+
+    monkeypatch.setattr(path_type, "as_uri", _broken_as_uri)
+    try:
+        assert (
+            _sarif_scan_root_uri(
+                {"meta": {"runtime": {"scan_root_absolute": "/repo/project"}}}
+            )
+            == ""
+        )
+    finally:
+        monkeypatch.setattr(path_type, "as_uri", original_as_uri)
+
+    dead_code_props = _sarif_result_properties(
+        {"family": "dead_code", "confidence": "medium"}
+    )
+    assert dead_code_props["confidence"] == "medium"
+    assert _sarif_baseline_state({"novelty": "known"}) == "unchanged"
+
+
+def test_render_sarif_report_document_without_srcroot_keeps_relative_payload() -> None:
+    payload = {
+        "report_schema_version": "2.1",
+        "meta": {
+            "codeclone_version": "2.0.0b1",
+            "analysis_mode": "ci",
+            "report_mode": "full",
+            "runtime": {},
+        },
+        "integrity": {"digest": {"value": "abc123"}},
+        "findings": {
+            "groups": {
+                "clones": {"functions": [], "blocks": [], "segments": []},
+                "dead_code": {"groups": []},
+                "structural": {"groups": []},
+                "design": {
+                    "groups": [
+                        {
+                            "id": "design:dependency:pkg.a -> pkg.b",
+                            "family": "design",
+                            "category": "dependency",
+                            "kind": "cycle",
+                            "severity": "critical",
+                            "confidence": "high",
+                            "priority": 3.0,
+                            "count": 2,
+                            "source_scope": {
+                                "impact_scope": "runtime",
+                                "dominant_kind": "production",
+                            },
+                            "spread": {"files": 2, "functions": 0},
+                            "items": [
+                                {"module": "pkg.a", "relative_path": "pkg/a.py"},
+                                {"module": "pkg.b", "relative_path": "pkg/b.py"},
+                            ],
+                            "facts": {"cycle_length": 2},
+                        }
+                    ]
+                },
+            }
+        },
+    }
+    sarif = json.loads(render_sarif_report_document(payload))
+    run = cast(dict[str, object], sarif["runs"][0])
+    assert "originalUriBaseIds" not in run
+    invocation = cast(dict[str, object], cast(list[object], run["invocations"])[0])
+    assert "workingDirectory" not in invocation
+    result = cast(dict[str, object], cast(list[object], run["results"])[0])
+    assert "baselineState" not in result
+    primary_location = cast(list[object], result["locations"])[0]
+    location_map = cast(dict[str, object], primary_location)
+    assert cast(dict[str, object], location_map["message"])["text"] == "Cycle member"
+
+
+def test_collect_paths_from_metrics_covers_all_metric_families_and_skips_missing() -> (
+    None
+):
+    metrics = {
+        "complexity": {
+            "functions": [
+                {"filepath": "/repo/complexity.py"},
+                {"filepath": ""},
+                {},
+            ]
+        },
+        "coupling": {
+            "classes": [
+                {"filepath": "/repo/coupling.py"},
+                {"filepath": None},
+            ]
+        },
+        "cohesion": {
+            "classes": [
+                {"filepath": "/repo/cohesion.py"},
+                {},
+            ]
+        },
+        "dead_code": {
+            "items": [
+                {"filepath": "/repo/dead.py"},
+                {"filepath": ""},
+            ],
+            "suppressed_items": [
+                {"filepath": "/repo/suppressed.py"},
+                {"filepath": None},
+            ],
+        },
+    }
+
+    assert _collect_paths_from_metrics(metrics) == {
+        "/repo/complexity.py",
+        "/repo/coupling.py",
+        "/repo/cohesion.py",
+        "/repo/dead.py",
+        "/repo/suppressed.py",
+    }
+
+
+def test_collect_report_file_list_deterministically_merges_all_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Occurrence:
+        def __init__(self, file_path: str) -> None:
+            self.file_path = file_path
+
+    class _Group:
+        def __init__(self, *paths: str) -> None:
+            self.items = tuple(_Occurrence(path) for path in paths)
+
+    monkeypatch.setattr(
+        json_contract_mod,
+        "normalize_structural_findings",
+        lambda _findings: [_Group("/repo/struct.py", "")],
+    )
+    structural_seed = (
+        StructuralFindingGroup(
+            finding_kind="duplicated_branches",
+            finding_key="seed",
+            signature={"stmt_seq": "Expr,Return"},
+            items=(
+                StructuralFindingOccurrence(
+                    finding_kind="duplicated_branches",
+                    finding_key="seed",
+                    file_path="/repo/ignored.py",
+                    qualname="pkg.mod:fn",
+                    start=1,
+                    end=2,
+                    signature={"stmt_seq": "Expr,Return"},
+                ),
+                StructuralFindingOccurrence(
+                    finding_kind="duplicated_branches",
+                    finding_key="seed",
+                    file_path="/repo/ignored.py",
+                    qualname="pkg.mod:fn",
+                    start=3,
+                    end=4,
+                    signature={"stmt_seq": "Expr,Return"},
+                ),
+            ),
+        ),
+    )
+
+    files = _collect_report_file_list(
+        inventory={"file_list": ["/repo/inventory.py", "", None]},
+        func_groups={"f": [{"filepath": "/repo/function.py"}, {"filepath": ""}]},
+        block_groups={"b": [{"filepath": "/repo/block.py"}]},
+        segment_groups={"s": [{"filepath": None}, {"filepath": "/repo/segment.py"}]},
+        metrics={
+            "complexity": {"functions": [{"filepath": "/repo/metric.py"}]},
+            "coupling": {"classes": []},
+            "cohesion": {"classes": []},
+            "dead_code": {"items": [], "suppressed_items": []},
+        },
+        structural_findings=structural_seed,
+    )
+
+    assert files == [
+        "/repo/block.py",
+        "/repo/function.py",
+        "/repo/inventory.py",
+        "/repo/metric.py",
+        "/repo/segment.py",
+        "/repo/struct.py",
+    ]
+
+
+def test_json_contract_private_helper_edge_branches() -> None:
+    assert _csv_values("") == []
+    assert _csv_values("  , ,  ") == []
+    assert _csv_values("b, a, b") == ["a", "b"]
+
+    severity, priority = _structural_group_assessment(
+        finding_kind="clone_guard_exit_divergence",
+        count=3,
+        spread_functions=1,
+    )
+    assert severity == "critical"
+    assert priority > 0
+
+    severity, priority = _structural_group_assessment(
+        finding_kind="clone_cohort_drift",
+        count=1,
+        spread_functions=2,
+    )
+    assert severity == "critical"
+    assert priority > 0
+
+    summary = _findings_summary(
+        clone_functions=(
+            {
+                "severity": "mystery",
+                "novelty": "new",
+                "source_scope": {"impact_scope": "alien"},
+            },
+        ),
+        clone_blocks=(),
+        clone_segments=(),
+        structural_groups=(),
+        dead_code_groups=(),
+        design_groups=(),
+        dead_code_suppressed=-4,
+    )
+    assert summary["severity"] == {
+        "critical": 0,
+        "warning": 0,
+        "info": 0,
+    }
+    assert summary["impact_scope"] == {
+        "runtime": 0,
+        "non_runtime": 0,
+        "mixed": 0,
+    }
+    assert cast(dict[str, int], summary["clones"])["new"] == 1
+    assert cast(dict[str, int], summary["suppressed"])["dead_code"] == 0
+
+
+def test_build_report_document_suppressed_dead_code_accepts_empty_bindings() -> None:
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics={
+            "complexity": {"summary": {}, "functions": []},
+            "coupling": {"summary": {}, "classes": []},
+            "cohesion": {"summary": {}, "classes": []},
+            "dependencies": {"cycles": [], "edge_list": [], "longest_chains": []},
+            "dead_code": {
+                "summary": {"total": 0, "high_confidence": 0, "suppressed": 1},
+                "items": [],
+                "suppressed_items": [
+                    {
+                        "qualname": "pkg.mod:kept",
+                        "filepath": "/repo/pkg/mod.py",
+                        "start_line": 10,
+                        "end_line": 12,
+                        "kind": "function",
+                        "confidence": "high",
+                        "suppressed_by": [{"rule": "", "source": "   "}, {}],
+                    }
+                ],
+            },
+            "health": {"score": 100, "grade": "A", "dimensions": {}},
+        },
+    )
+
+    dead_code = cast(
+        dict[str, object],
+        cast(dict[str, object], payload["metrics"])["families"],
+    )["dead_code"]
+    dead_code_map = cast(dict[str, object], dead_code)
+    suppressed_item = cast(list[dict[str, object]], dead_code_map["suppressed_items"])[
+        0
+    ]
+    assert suppressed_item["suppressed_by"] == []
+    assert suppressed_item["suppression_rule"] == ""
+    assert suppressed_item["suppression_source"] == ""
+
+
+def test_serialize_private_helpers_cover_structural_and_suppression_paths() -> None:
+    assert _structural_kind_label("custom_kind") == "custom_kind"
+    assert _structural_kind_label("") == "(none)"
+
+    structural_lines: list[str] = []
+    _append_structural_findings(
+        structural_lines,
+        [
+            {
+                "id": "structural:custom:1",
+                "kind": "custom_kind",
+                "severity": "warning",
+                "confidence": "medium",
+                "count": 4,
+                "spread": {"files": 1, "functions": 1},
+                "source_scope": {
+                    "dominant_kind": "production",
+                    "impact_scope": "runtime",
+                },
+                "signature": {
+                    "stable": {
+                        "family": "custom",
+                        "stmt_shape": "Expr,Return",
+                        "terminal_kind": "return",
+                        "control_flow": {
+                            "has_loop": "0",
+                            "has_try": "0",
+                            "nested_if": "0",
+                        },
+                    }
+                },
+                "facts": {"calls": 2},
+                "items": [
+                    {
+                        "qualname": "pkg.mod:fn",
+                        "relative_path": "pkg/mod.py",
+                        "start_line": 1,
+                        "end_line": 1,
+                    },
+                    {
+                        "qualname": "pkg.mod:fn",
+                        "relative_path": "pkg/mod.py",
+                        "start_line": 2,
+                        "end_line": 2,
+                    },
+                    {
+                        "qualname": "pkg.mod:fn",
+                        "relative_path": "pkg/mod.py",
+                        "start_line": 3,
+                        "end_line": 3,
+                    },
+                    {
+                        "qualname": "pkg.mod:fn",
+                        "relative_path": "pkg/mod.py",
+                        "start_line": 4,
+                        "end_line": 4,
+                    },
+                ],
+            }
+        ],
+    )
+    assert any(line.startswith("facts: ") for line in structural_lines)
+    assert any("... and 1 more occurrences" in line for line in structural_lines)
+    assert structural_lines[-1] != ""
+
+    finding_lines: list[str] = []
+    _append_single_item_findings(
+        finding_lines,
+        title="DESIGN FINDINGS",
+        groups=[
+            {
+                "id": "design:complexity:pkg.mod:fn",
+                "category": "complexity",
+                "kind": "function_hotspot",
+                "severity": "warning",
+                "confidence": "high",
+                "source_scope": {
+                    "dominant_kind": "production",
+                    "impact_scope": "runtime",
+                },
+                "facts": {"cyclomatic_complexity": 25},
+                "items": [
+                    {
+                        "qualname": "pkg.mod:fn",
+                        "relative_path": "pkg/mod.py",
+                        "start_line": 10,
+                        "end_line": 14,
+                    }
+                ],
+            }
+        ],
+        fact_keys=("cyclomatic_complexity",),
+    )
+    assert any(line.startswith("facts: ") for line in finding_lines)
+    assert finding_lines[-1] != ""
+
+    suppressed_lines: list[str] = []
+    _append_suppressed_dead_code_items(
+        suppressed_lines,
+        items=[
+            {
+                "kind": "function",
+                "confidence": "high",
+                "relative_path": "pkg/mod.py",
+                "qualname": "pkg.mod:kept",
+                "start_line": 20,
+                "end_line": 22,
+                "suppression_rule": "dead-code",
+                "suppression_source": "inline_codeclone",
+            }
+        ],
+    )
+    assert any(
+        "suppressed_by=dead-code@inline_codeclone" in line for line in suppressed_lines
+    )
+    assert suppressed_lines[-1] != ""
+
+    suppressed_none_lines: list[str] = []
+    _append_suppressed_dead_code_items(
+        suppressed_none_lines,
+        items=[
+            {
+                "kind": "function",
+                "confidence": "medium",
+                "relative_path": "pkg/mod.py",
+                "qualname": "pkg.mod:unknown",
+                "start_line": 30,
+                "end_line": 31,
+            }
+        ],
+    )
+    assert any("suppressed_by=(none)" in line for line in suppressed_none_lines)
+
+    suggestion_lines: list[str] = []
+    _append_suggestions(
+        suggestion_lines,
+        suggestions=[
+            {
+                "title": "Investigate repeated flow",
+                "finding_id": "missing:finding",
+                "summary": "",
+                "location_label": "pkg/mod.py:10-12",
+                "representative_locations": [],
+                "action": {"effort": "easy", "steps": []},
+            }
+        ],
+        findings={
+            "groups": {
+                "clones": {"functions": [], "blocks": [], "segments": []},
+                "structural": {"groups": []},
+                "dead_code": {"groups": []},
+                "design": {"groups": []},
+            }
+        },
+    )
+    assert any("Investigate repeated flow" in line for line in suggestion_lines)
+    assert not any(line.lstrip().startswith("summary:") for line in suggestion_lines)

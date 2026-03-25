@@ -28,8 +28,10 @@ _THEME = """\
   const btn=$('.theme-toggle');
   if(!btn)return;
   btn.addEventListener('click',()=>{
-    const cur=root.getAttribute('data-theme');
-    const next=cur==='light'?'dark':'light';
+    const has=root.getAttribute('data-theme');
+    const isDark=has?has==='dark'
+      :matchMedia('(prefers-color-scheme:light)').matches?false:true;
+    const next=isDark?'light':'dark';
     root.setAttribute('data-theme',next);
     localStorage.setItem(key,next);
   });
@@ -388,6 +390,72 @@ _DEP_GRAPH = """\
 # ---------------------------------------------------------------------------
 
 _META_PANEL = """\
+(function initBadgeModal(){
+  const dlg=$('#badge-modal');
+  if(!dlg)return;
+
+  /* --- state --- */
+  var _grade='',_score=0,_variant='grade';
+
+  /* --- grade→shields color (canonical bands) --- */
+  function badgeColor(g){
+    return g==='A'?'brightgreen':g==='B'?'green':g==='C'?'yellow':g==='D'?'orange':'red'}
+
+  /* --- build shield URLs & embed codes for current variant --- */
+  function render(){
+    var label,alt,url;
+    if(_variant==='full'){
+      label=_score+' ('+_grade+')';alt='codeclone '+_score+' ('+_grade+')';
+    }else{
+      label='grade '+_grade;alt='codeclone grade '+_grade;}
+    url='https://img.shields.io/badge/codeclone-'
+      +encodeURIComponent(label).replace(/-/g,'--')+'-'+badgeColor(_grade);
+    var prev=dlg.querySelector('#badge-preview');
+    if(prev)prev.innerHTML='<img src="'+url+'" alt="'+alt+'">';
+    var md=dlg.querySelector('#badge-code-md');
+    if(md)md.textContent='!['+alt+']('+url+')';
+    var ht=dlg.querySelector('#badge-code-html');
+    if(ht)ht.textContent='<img src="'+url+'" alt="'+alt+'">';}
+
+  /* --- tabs --- */
+  dlg.querySelectorAll('[data-badge-tab]').forEach(function(tab){
+    tab.addEventListener('click',function(){
+      dlg.querySelectorAll('[data-badge-tab]').forEach(function(t){
+        t.classList.remove('badge-tab--active');t.setAttribute('aria-selected','false')});
+      tab.classList.add('badge-tab--active');tab.setAttribute('aria-selected','true');
+      _variant=tab.dataset.badgeTab;render();});});
+
+  /* --- open --- */
+  document.addEventListener('click',function(e){
+    var btn=e.target.closest('[data-badge-open]');
+    if(!btn)return;
+    _grade=btn.dataset.badgeGrade||'';
+    _score=parseInt(btn.dataset.badgeScore||'0',10);
+    _variant='grade';
+    dlg.querySelectorAll('[data-badge-tab]').forEach(function(t){
+      var active=t.dataset.badgeTab==='grade';
+      t.classList.toggle('badge-tab--active',active);
+      t.setAttribute('aria-selected',active?'true':'false');});
+    render();dlg.showModal();
+    var fc=dlg.querySelector('[data-badge-close]');if(fc)fc.focus();});
+
+  /* --- close --- */
+  var closeBtn=dlg.querySelector('[data-badge-close]');
+  if(closeBtn)closeBtn.addEventListener('click',function(){dlg.close()});
+  dlg.addEventListener('click',function(e){if(e.target===dlg)dlg.close()});
+
+  /* --- copy with feedback --- */
+  dlg.addEventListener('click',function(e){
+    var copyBtn=e.target.closest('[data-badge-copy]');
+    if(!copyBtn)return;
+    var which=copyBtn.dataset.badgeCopy;
+    var code=dlg.querySelector('#badge-code-'+which);
+    if(!code)return;
+    navigator.clipboard.writeText(code.textContent).then(function(){
+      copyBtn.textContent='\u2713 Copied';copyBtn.classList.add('badge-copy-btn--ok');
+      setTimeout(function(){copyBtn.textContent='Copy';
+        copyBtn.classList.remove('badge-copy-btn--ok')},1500);});});
+})();
 (function initProvModal(){
   const dlg=$('#prov-modal');
   if(!dlg)return;
@@ -396,20 +464,6 @@ _META_PANEL = """\
   if(openBtn)openBtn.addEventListener('click',()=>dlg.showModal());
   if(closeBtn)closeBtn.addEventListener('click',()=>dlg.close());
   dlg.addEventListener('click',e=>{if(e.target===dlg)dlg.close()});
-})();
-(function initHelpModal(){
-  const dlg=$('#help-modal');
-  if(!dlg)return;
-  const closeBtn=dlg.querySelector('[data-help-close]');
-  const open=()=>dlg.showModal();
-  if(closeBtn)closeBtn.addEventListener('click',()=>dlg.close());
-  dlg.addEventListener('click',e=>{if(e.target===dlg)dlg.close()});
-  document.addEventListener('keydown',e=>{
-    if((e.metaKey||e.ctrlKey) && e.key === 'i'){
-      e.preventDefault();
-      open();
-    }
-  });
 })();
 (function initFindingWhy(){
   var dlg=$('#finding-why-modal');
@@ -434,125 +488,13 @@ _META_PANEL = """\
 # JSON export
 # ---------------------------------------------------------------------------
 
-_EXPORT = """\
-(function initExport(){
-  const btn=$('[data-export-json]');
-  if(!btn)return;
-  btn.addEventListener('click',()=>{
-    const meta=$('#report-meta');
-    if(!meta)return;
-    const d=meta.dataset;
-    const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download='codeclone-report-meta.json';
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast('Report metadata exported');
-  });
-})();
-"""
+_EXPORT = ""  # removed: Export JSON button eliminated from topbar
 
 # ---------------------------------------------------------------------------
 # Command Palette (Cmd/Ctrl+K)
 # ---------------------------------------------------------------------------
 
-_CMD_PALETTE = """\
-(function initCmdPalette(){
-  const palette=$('.cmd-palette');
-  if(!palette)return;
-  const input=palette.querySelector('.cmd-palette-input');
-  const list=palette.querySelector('.cmd-palette-list');
-  const tabs=$$('.main-tab');
-
-  const commands=tabs.map(t=>({
-    label:t.textContent.trim(),
-    action:()=>t.click(),
-    key:t.dataset.tab,
-    shortcut:''
-  }));
-  commands.push({
-    label:'Toggle Theme',
-    action:()=>{const b=$('.theme-toggle');if(b)b.click()},
-    key:'theme',
-    shortcut:''
-  });
-  commands.push({
-    label:'Open Help',
-    action:()=>{
-      const dlg=$('#help-modal');
-      if(dlg)dlg.showModal();
-    },
-    key:'help',
-    shortcut:'mod+I'
-  });
-  commands.push({
-    label:'Export Report',
-    action:()=>{window.print();},
-    key:'print',
-    shortcut:''
-  });
-  commands.push({
-    label:'Export JSON',
-    action:()=>{const b=$('[data-export-json]');if(b)b.click()},
-    key:'export',
-    shortcut:''
-  });
-  commands.push({
-    label:'Collapse All',
-    action:()=>{$$('[data-collapse-all]').forEach(b=>b.click())},
-    key:'collapse',
-    shortcut:''
-  });
-  commands.push({
-    label:'Expand All',
-    action:()=>{$$('[data-expand-all]').forEach(b=>b.click())},
-    key:'expand',
-    shortcut:''
-  });
-
-  let activeIdx=0;
-
-  function render(q){
-    const filtered=commands.filter(c=>c.label.toLowerCase().includes(q.toLowerCase()));
-    activeIdx=0;
-    list.innerHTML=filtered.map((c,i)=>
-      '<div class="cmd-palette-item'+(i===0?' active':'')+'" data-cmd="'+i+'">'
-      +c.label+'<kbd>'+(c.shortcut||c.key)+'</kbd></div>').join('');
-    list.querySelectorAll('.cmd-palette-item').forEach((el,i)=>{
-      el.addEventListener('click',()=>{filtered[i].action();close()});
-      el.addEventListener('mouseenter',()=>{
-        list.querySelectorAll('.cmd-palette-item').forEach(e=>e.classList.remove('active'));
-        el.classList.add('active');activeIdx=i});
-    });
-    return filtered;
-  }
-
-  function open(){palette.classList.add('open');input.value='';render('');input.focus()}
-  function close(){palette.classList.remove('open')}
-
-  document.addEventListener('keydown',e=>{
-    if((e.metaKey||e.ctrlKey) && e.key === 'k'){e.preventDefault();
-      palette.classList.contains('open')?close():open();return}
-    if(!palette.classList.contains('open'))return;
-    if(e.key==='Escape'){close();return}
-    if(e.key==='ArrowDown'||e.key==='ArrowUp'){
-      e.preventDefault();
-      const items=list.querySelectorAll('.cmd-palette-item');
-      if(!items.length)return;
-      items[activeIdx]?.classList.remove('active');
-      activeIdx=e.key==='ArrowDown'?(activeIdx+1)%items.length:(activeIdx-1+items.length)%items.length;
-      items[activeIdx]?.classList.add('active');
-      items[activeIdx]?.scrollIntoView({block:'nearest'});return}
-    if(e.key==='Enter'){
-      const items=list.querySelectorAll('.cmd-palette-item');
-      if(items[activeIdx])items[activeIdx].click();return}
-  });
-
-  input?.addEventListener('input',()=>render(input.value));
-  palette.addEventListener('click',e=>{if(e.target===palette)close()});
-})();
-"""
+_CMD_PALETTE = ""  # removed: command palette eliminated
 
 # ---------------------------------------------------------------------------
 # Table sort

@@ -275,23 +275,62 @@ def render_meta_panel(ctx: ReportContext) -> str:
 
     def _val_html(label: str, value: object) -> str:
         if label in _BOOL and isinstance(value, bool):
+            icon = "\u2713" if value else "\u2717"
             badge_cls = "meta-bool-true" if value else "meta-bool-false"
-            return f'<span class="meta-bool {badge_cls}">{"true" if value else "false"}</span>'
+            return f'<span class="meta-bool {badge_cls}">{icon}</span>'
         return _escape_html(_meta_display(value))
 
-    meta_rows_html = "".join(
-        '<section class="prov-section">'
-        f'<h3 class="prov-section-title">{_escape_html(st)}</h3>'
-        '<table class="prov-table"><tbody>'
-        + "".join(
+    _SECTION_ICONS: dict[str, str] = {
+        "General": (
+            '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">'
+            '<circle cx="8" cy="8" r="6.5"/><path d="M8 5v3"/><circle cx="8" cy="11" r=".5" fill="currentColor"/></svg>'
+        ),
+        "Clone Baseline": (
+            '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">'
+            '<path d="M2 4h12M2 8h12M2 12h8"/></svg>'
+        ),
+        "Metrics Baseline": (
+            '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">'
+            '<path d="M3 13V7M7 13V3M11 13V9M15 13V5"/></svg>'
+        ),
+        "Cache": (
+            '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">'
+            '<ellipse cx="8" cy="4" rx="6" ry="2.5"/><path d="M2 4v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V4"/>'
+            '<path d="M2 8v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V8"/></svg>'
+        ),
+        "Runtime": (
+            '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">'
+            '<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 7l2 2 4-4"/></svg>'
+        ),
+        "Integrity": (
+            '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">'
+            '<path d="M8 1.5L2 4v4c0 3.5 2.5 6 6 7 3.5-1 6-3.5 6-7V4z"/><path d="M5.5 8l2 2 3.5-4"/></svg>'
+        ),
+    }
+
+    def _section_html(title: str, rows: list[tuple[str, object]]) -> str:
+        icon = _SECTION_ICONS.get(title, "")
+        visible_rows = [
+            (label_name, value)
+            for label_name, value in rows
+            if _meta_pick(value) is not None
+        ]
+        if not visible_rows:
+            return ""
+        row_html = "".join(
             f'<tr><td class="prov-td-label">{_escape_html(label)}'
             f"{glossary_tip(label)}</td>"
             f'<td class="prov-td-value">{_val_html(label, value)}</td></tr>'
-            for label, value in rows
+            for label, value in visible_rows
         )
-        + "</tbody></table></section>"
-        for st, rows in meta_sections
-        if rows
+        return (
+            '<section class="prov-section">'
+            f'<h3 class="prov-section-title">{icon}{_escape_html(title)}</h3>'
+            f'<table class="prov-table"><tbody>{row_html}</tbody></table></section>'
+        )
+
+    meta_rows_html = "".join(
+        _section_html(st, rows) for st, rows in meta_sections if rows
     )
 
     def _prov_badge(label: str, color: str) -> str:
@@ -325,9 +364,8 @@ def render_meta_panel(ctx: ReportContext) -> str:
     elif _mbl_loaded is True and _mbl_verified is not True:
         badges.append(_prov_badge("Metrics baseline untrusted", "red"))
 
-    sep = '<span class="prov-sep">\u00b7</span>'
     prov_summary = (
-        f'<div class="prov-summary">{sep.join(badges)}'
+        f'<div class="prov-summary">{"".join(badges)}'
         '<span class="prov-explain">Baseline-aware \u00b7 contract-verified</span></div>'
         if badges
         else ""
