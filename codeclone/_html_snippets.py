@@ -1,29 +1,18 @@
-"""
-CodeClone — AST and CFG-based code clone detector for Python
-focused on architectural duplication.
-
-Copyright (c) 2026 Den Rozhnovskiy
-Licensed under the MIT License.
-"""
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 
 import html
 import importlib
-import itertools
-from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
-from types import ModuleType
-from typing import NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from .errors import FileProcessingError
 
-
-def pairwise(iterable: Iterable[object]) -> Iterable[tuple[object, object]]:
-    a, b = itertools.tee(iterable)
-    next(b, None)
-    return zip(a, b, strict=False)
+if TYPE_CHECKING:
+    from types import ModuleType
 
 
 @dataclass(slots=True)
@@ -77,7 +66,7 @@ class _FileCache:
         currsize: int
 
     def cache_info(self) -> _CacheInfo:
-        return cast(_FileCache._CacheInfo, self._get_file_lines_impl.cache_info())
+        return cast("_FileCache._CacheInfo", self._get_file_lines_impl.cache_info())
 
 
 _PYGMENTS_IMPORTER_ID: int | None = None
@@ -149,32 +138,6 @@ def _pygments_css(style_name: str) -> str:
         return css if isinstance(css, str) else ""
     except Exception:
         return ""
-
-
-def _prefix_css(css: str, prefix: str) -> str:
-    """
-    Prefix every selector block with `prefix `.
-    Safe enough for pygments CSS which is mostly selector blocks and comments.
-    """
-    out_lines: list[str] = []
-    for line in css.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            out_lines.append(line)
-            continue
-        if stripped.startswith(("/*", "*", "*/")):
-            out_lines.append(line)
-            continue
-        if "{" in line:
-            before, after = line.split("{", 1)
-            sel = before.strip()
-            if sel:
-                out_lines.append(f"{prefix} {sel} {{ {after}".rstrip())
-            else:
-                out_lines.append(line)
-        else:
-            out_lines.append(line)
-    return "\n".join(out_lines)
 
 
 def _render_code_block(

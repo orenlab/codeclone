@@ -1,21 +1,18 @@
-"""
-CodeClone — AST and CFG-based code clone detector for Python
-focused on architectural duplication.
-
-Copyright (c) 2026 Den Rozhnovskiy
-Licensed under the MIT License.
-"""
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 
 import ast
 import copy
 from ast import AST
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from .meta_markers import CFG_META_PREFIX
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,9 +90,9 @@ class AstNormalizer(ast.NodeTransformer):
 
     def visit_Call(self, node: ast.Call) -> ast.Call:
         node.func = self._visit_call_target(node.func)
-        node.args = [cast(ast.expr, self.visit(arg)) for arg in node.args]
+        node.args = [cast("ast.expr", self.visit(arg)) for arg in node.args]
         for kw in node.keywords:
-            kw.value = cast(ast.expr, self.visit(kw.value))
+            kw.value = cast("ast.expr", self.visit(kw.value))
         return node
 
     def _visit_call_target(self, node: ast.expr) -> ast.expr:
@@ -107,9 +104,9 @@ class AstNormalizer(ast.NodeTransformer):
             if isinstance(value, (ast.Name, ast.Attribute)):
                 node.value = self._visit_call_target(value)
             else:
-                node.value = cast(ast.expr, self.visit(value))
+                node.value = cast("ast.expr", self.visit(value))
             return node
-        return cast(ast.expr, self.visit(node))
+        return cast("ast.expr", self.visit(node))
 
     def visit_AugAssign(self, node: ast.AugAssign) -> AST:
         # Normalize x += 1 to x = x + 1
@@ -209,28 +206,23 @@ def _is_proven_commutative_constant(value: object, op: ast.operator) -> bool:
     return False
 
 
-def normalized_ast_dump(func_node: ast.AST, cfg: NormalizationConfig) -> str:
-    """
-    Dump the normalized AST.
-    WARNING: This modifies the AST in-place for performance.
-    """
-    normalizer = AstNormalizer(cfg)
-    new_node = ast.fix_missing_locations(normalizer.visit(func_node))
-    return ast.dump(new_node, annotate_fields=True, include_attributes=False)
-
-
 def normalized_ast_dump_from_list(
-    nodes: Sequence[ast.AST], cfg: NormalizationConfig
+    nodes: Sequence[ast.AST],
+    cfg: NormalizationConfig,
+    *,
+    normalizer: AstNormalizer | None = None,
 ) -> str:
     """
     Dump a list of AST nodes after normalization.
     WARNING: This modifies the AST nodes in-place for performance.
     """
-    normalizer = AstNormalizer(cfg)
+    active_normalizer = normalizer or AstNormalizer(cfg)
     dumps: list[str] = []
 
     for node in nodes:
-        new_node = ast.fix_missing_locations(normalizer.visit(node))
+        # Fingerprints ignore location attributes, so we skip location repair.
+        new_node = active_normalizer.visit(node)
+        assert isinstance(new_node, ast.AST)
         dumps.append(ast.dump(new_node, annotate_fields=True, include_attributes=False))
 
     return ";".join(dumps)

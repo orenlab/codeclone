@@ -1,23 +1,28 @@
-"""
-CodeClone — AST and CFG-based code clone detector for Python
-focused on architectural duplication.
-
-Copyright (c) 2026 Den Rozhnovskiy
-Licensed under the MIT License.
-"""
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 
 import sys
-from pathlib import Path
-from typing import TypedDict
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, TypedDict
 
 from .baseline import Baseline, current_python_tag
-from .contracts import REPORT_SCHEMA_VERSION
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from .metrics_baseline import MetricsBaseline
 
 
 def _current_python_version() -> str:
     return f"{sys.version_info.major}.{sys.version_info.minor}"
+
+
+def _current_report_timestamp_utc() -> str:
+    return (
+        datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
 
 
 class ReportMeta(TypedDict):
@@ -32,8 +37,9 @@ class ReportMeta(TypedDict):
     - cache_*: cache status/provenance for run transparency
     """
 
-    report_schema_version: str
     codeclone_version: str
+    project_name: str
+    scan_root: str
     python_version: str
     python_tag: str
     baseline_path: str
@@ -51,11 +57,23 @@ class ReportMeta(TypedDict):
     cache_status: str
     cache_schema_version: str | None
     files_skipped_source_io: int
+    metrics_baseline_path: str
+    metrics_baseline_loaded: bool
+    metrics_baseline_status: str
+    metrics_baseline_schema_version: str | None
+    metrics_baseline_payload_sha256: str | None
+    metrics_baseline_payload_sha256_verified: bool
+    health_score: int | None
+    health_grade: str | None
+    analysis_mode: str
+    metrics_computed: list[str]
+    report_generated_at_utc: str
 
 
 def _build_report_meta(
     *,
     codeclone_version: str,
+    scan_root: Path,
     baseline_path: Path,
     baseline: Baseline,
     baseline_loaded: bool,
@@ -65,10 +83,21 @@ def _build_report_meta(
     cache_status: str,
     cache_schema_version: str | None,
     files_skipped_source_io: int,
+    metrics_baseline_path: Path,
+    metrics_baseline: MetricsBaseline,
+    metrics_baseline_loaded: bool,
+    metrics_baseline_status: str,
+    health_score: int | None,
+    health_grade: str | None,
+    analysis_mode: str,
+    metrics_computed: tuple[str, ...],
+    report_generated_at_utc: str,
 ) -> ReportMeta:
+    project_name = scan_root.name or str(scan_root)
     return {
-        "report_schema_version": REPORT_SCHEMA_VERSION,
         "codeclone_version": codeclone_version,
+        "project_name": project_name,
+        "scan_root": str(scan_root),
         "python_version": _current_python_version(),
         "python_tag": current_python_tag(),
         "baseline_path": str(baseline_path),
@@ -90,4 +119,19 @@ def _build_report_meta(
         "cache_status": cache_status,
         "cache_schema_version": cache_schema_version,
         "files_skipped_source_io": files_skipped_source_io,
+        "metrics_baseline_path": str(metrics_baseline_path),
+        "metrics_baseline_loaded": metrics_baseline_loaded,
+        "metrics_baseline_status": metrics_baseline_status,
+        "metrics_baseline_schema_version": metrics_baseline.schema_version,
+        "metrics_baseline_payload_sha256": metrics_baseline.payload_sha256,
+        "metrics_baseline_payload_sha256_verified": (
+            metrics_baseline_loaded
+            and metrics_baseline_status == "ok"
+            and isinstance(metrics_baseline.payload_sha256, str)
+        ),
+        "health_score": health_score,
+        "health_grade": health_grade,
+        "analysis_mode": analysis_mode,
+        "metrics_computed": list(metrics_computed),
+        "report_generated_at_utc": report_generated_at_utc,
     }

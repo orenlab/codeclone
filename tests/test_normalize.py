@@ -7,9 +7,14 @@ import codeclone.normalize as normalize_mod
 from codeclone.meta_markers import CFG_META_PREFIX
 from codeclone.normalize import (
     NormalizationConfig,
-    normalized_ast_dump,
     normalized_ast_dump_from_list,
 )
+from tests._assertions import assert_contains_all
+from tests._ast_helpers import fix_missing_single_function
+
+
+def normalized_ast_dump(node: ast.AST, cfg: NormalizationConfig) -> str:
+    return normalized_ast_dump_from_list([node], cfg)
 
 
 def _normalized_dump(source: str, cfg: NormalizationConfig) -> str:
@@ -67,49 +72,48 @@ def test_normalization_equivalent_sources(src1: str, src2: str) -> None:
     assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
 
 
-def test_normalization_type_annotations_removed() -> None:
-    src1 = """
+@pytest.mark.parametrize(
+    ("src1", "src2"),
+    [
+        (
+            """
 def f(x: int) -> int:
     return x
-"""
-    src2 = """
+""",
+            """
 def f(x):
     return x
-"""
-    cfg = NormalizationConfig()
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
-
-
-def test_normalization_attributes_and_constants() -> None:
-    src1 = """
+""",
+        ),
+        (
+            """
 def f():
     obj.attr = 123
-"""
-    src2 = """
+""",
+            """
 def f():
     x.y = 999
-"""
-    cfg = NormalizationConfig()
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
-
-
-def test_normalization_augassign_equivalence() -> None:
-    src1 = """
+""",
+        ),
+        (
+            """
 def f():
     x += 1
-"""
-    src2 = """
+""",
+            """
 def f():
     x = x + 1
-"""
-    cfg = NormalizationConfig()
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
+""",
+        ),
+    ],
+    ids=[
+        "type_annotations_removed",
+        "attributes_and_constants",
+        "augassign_equivalence",
+    ],
+)
+def test_normalization_equivalent_shapes(src1: str, src2: str) -> None:
+    _assert_normalized_equal(src1, src2, NormalizationConfig())
 
 
 def test_normalization_augassign_target_without_ctx() -> None:
@@ -125,26 +129,31 @@ def test_normalization_augassign_target_without_ctx() -> None:
     assert "Assign" in dump
 
 
-def test_normalization_unary_non_not_preserved() -> None:
-    src = """
+@pytest.mark.parametrize(
+    ("src", "needle"),
+    [
+        (
+            """
 def f(x):
     return -x
-"""
-    cfg = NormalizationConfig(normalize_names=False)
-    node = ast.parse(src).body[0]
-    dump = normalized_ast_dump(node, cfg)
-    assert "UnaryOp" in dump
-
-
-def test_normalization_not_non_compare_preserved() -> None:
-    src = """
+""",
+            "UnaryOp",
+        ),
+        (
+            """
 def f(x):
     return not x
-"""
+""",
+            "Not",
+        ),
+    ],
+    ids=["unary_non_not_preserved", "not_non_compare_preserved"],
+)
+def test_normalization_unary_shapes_preserved(src: str, needle: str) -> None:
     cfg = NormalizationConfig(normalize_names=False)
     node = ast.parse(src).body[0]
     dump = normalized_ast_dump(node, cfg)
-    assert "Not" in dump
+    assert needle in dump
 
 
 def test_normalization_commutative_binop_reorders() -> None:
@@ -197,34 +206,48 @@ def test_normalization_commutative_binop_not_reordered(src1: str, src2: str) -> 
     _assert_normalized_not_equal(src1, src2, cfg)
 
 
-def test_normalization_preserves_call_target_names() -> None:
-    src1 = """
+@pytest.mark.parametrize(
+    ("src1", "src2"),
+    [
+        (
+            """
 def f(x):
     return load_user(x)
-"""
-    src2 = """
+""",
+            """
 def f(x):
     return delete_user(x)
-"""
-    cfg = NormalizationConfig()
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
-
-
-def test_normalization_preserves_call_target_attributes() -> None:
-    src1 = """
+""",
+        ),
+        (
+            """
 def f():
     return svc.load_user()
-"""
-    src2 = """
+""",
+            """
 def f():
     return svc.delete_user()
-"""
-    cfg = NormalizationConfig()
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
+""",
+        ),
+        (
+            """
+def f():
+    return factory_a().run()
+""",
+            """
+def f():
+    return factory_b().run()
+""",
+        ),
+    ],
+    ids=[
+        "call_target_names",
+        "call_target_attributes",
+        "attribute_call_target_with_call_value",
+    ],
+)
+def test_normalization_preserves_call_targets(src1: str, src2: str) -> None:
+    _assert_normalized_not_equal(src1, src2, NormalizationConfig())
 
 
 @pytest.mark.parametrize(
@@ -262,21 +285,6 @@ def test_normalization_call_values_normalize(src1: str, src2: str) -> None:
     _assert_normalized_equal(src1, src2, cfg)
 
 
-def test_normalization_preserves_attribute_call_target_with_call_value() -> None:
-    src1 = """
-def f():
-    return factory_a().run()
-"""
-    src2 = """
-def f():
-    return factory_b().run()
-"""
-    cfg = NormalizationConfig()
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
-
-
 def test_commutative_operand_recursive_and_constant_guards() -> None:
     nested = ast.parse("(1 + 2) + 3", mode="eval").body
     assert isinstance(nested, ast.BinOp)
@@ -306,28 +314,41 @@ def test_normalization_preserves_semantic_marker_names() -> None:
         ],
         decorator_list=[],
     )
-    module = ast.Module(body=[fn], type_ignores=[])
-    module = ast.fix_missing_locations(module)
-    node = module.body[0]
-    assert isinstance(node, ast.FunctionDef)
+    node = fix_missing_single_function(fn)
     cfg = NormalizationConfig()
     dump = normalized_ast_dump(node, cfg)
     assert f"{CFG_META_PREFIX}MATCH_PATTERN:MatchValue(Constant(value=1))" in dump
 
 
-def test_normalization_non_commutative_binop_not_reordered() -> None:
-    src1 = """
+@pytest.mark.parametrize(
+    ("src1", "src2"),
+    [
+        (
+            """
 def f():
     return a - b
-"""
-    src2 = """
+""",
+            """
 def f():
     return b - a
-"""
+""",
+        ),
+        (
+            """
+def f(x, y):
+    return not (x == y)
+""",
+            """
+def f(x, y):
+    return x != y
+""",
+        ),
+    ],
+    ids=["non_commutative_binop_not_reordered", "no_demorgan"],
+)
+def test_normalization_intentional_non_equivalences(src1: str, src2: str) -> None:
     cfg = NormalizationConfig(normalize_names=False)
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
+    _assert_normalized_not_equal(src1, src2, cfg)
 
 
 def test_normalization_not_in_and_is_not_equivalence() -> None:
@@ -356,21 +377,6 @@ def f(x, y):
     assert normalized_ast_dump(a3, cfg) == normalized_ast_dump(a4, cfg)
 
 
-def test_normalization_no_demorgan() -> None:
-    src1 = """
-def f(x, y):
-    return not (x == y)
-"""
-    src2 = """
-def f(x, y):
-    return x != y
-"""
-    cfg = NormalizationConfig(normalize_names=False)
-    a1 = ast.parse(src1).body[0]
-    a2 = ast.parse(src2).body[0]
-    assert normalized_ast_dump(a1, cfg) != normalized_ast_dump(a2, cfg)
-
-
 def test_normalization_flags_false_preserve_details() -> None:
     src = """
 def f(x: int, /, y: int, *, z: int, **k: int) -> int:
@@ -387,18 +393,27 @@ def f(x: int, /, y: int, *, z: int, **k: int) -> int:
     )
     node = ast.parse(src).body[0]
     dump = normalized_ast_dump(node, cfg)
-    assert "my_attr" in dump
-    assert "123" in dump
-    assert "doc" in dump
-    assert "id='x'" in dump
-    assert "id='int'" in dump
+    assert_contains_all(dump, "my_attr", "123", "doc", "id='x'", "id='int'")
 
 
-def test_normalization_type_annotations_posonly_kwonly_vararg() -> None:
-    src = """
+@pytest.mark.parametrize(
+    "src",
+    [
+        """
 def f(a: int, /, b: int, *args: int, c: int, **kwargs: int) -> int:
     return a
-"""
+""",
+        """
+async def af(x):
+    return x
+""",
+    ],
+    ids=[
+        "type_annotations_posonly_kwonly_vararg",
+        "async_function",
+    ],
+)
+def test_normalization_dump_is_string_for_supported_function_shapes(src: str) -> None:
     cfg = NormalizationConfig()
     node = ast.parse(src).body[0]
     dump = normalized_ast_dump(node, cfg)
@@ -420,14 +435,3 @@ def f():
     dump = normalized_ast_dump(node, cfg)
     assert "attr" in dump
     assert "7" in dump
-
-
-def test_normalization_async_function() -> None:
-    src = """
-async def af(x):
-    return x
-"""
-    cfg = NormalizationConfig()
-    node = ast.parse(src).body[0]
-    dump = normalized_ast_dump(node, cfg)
-    assert isinstance(dump, str)

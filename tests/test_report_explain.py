@@ -1,10 +1,39 @@
+import ast
 from pathlib import Path
 
-from codeclone._report_explain import build_block_group_facts
+import codeclone.report.explain as explain_mod
+from codeclone.report import build_block_group_facts
 from tests._report_fixtures import (
     repeated_block_group_key,
     write_repeated_assert_source,
 )
+
+
+def _build_group_facts_for_source(
+    *,
+    tmp_path: Path,
+    filename: str,
+    source: str,
+    qualname: str = "mod:f",
+    start_line: int = 2,
+    end_line: int = 4,
+) -> dict[str, str]:
+    group_key = repeated_block_group_key()
+    test_file = tmp_path / filename
+    test_file.write_text(source, "utf-8")
+    facts = build_block_group_facts(
+        {
+            group_key: [
+                {
+                    "qualname": qualname,
+                    "filepath": str(test_file),
+                    "start_line": start_line,
+                    "end_line": end_line,
+                }
+            ]
+        }
+    )
+    return facts[group_key]
 
 
 def test_build_block_group_facts_handles_missing_file() -> None:
@@ -48,56 +77,34 @@ def test_build_block_group_facts_handles_syntax_error_file(tmp_path: Path) -> No
 
 
 def test_build_block_group_facts_assert_detection_with_calls(tmp_path: Path) -> None:
-    group_key = repeated_block_group_key()
-    test_file = tmp_path / "test_calls.py"
-    test_file.write_text(
-        "def f(checker):\n"
-        '    "doc"\n'
-        "    assert_ok(checker)\n"
-        "    checker.assert_ready(checker)\n",
-        "utf-8",
+    group = _build_group_facts_for_source(
+        tmp_path=tmp_path,
+        filename="test_calls.py",
+        source=(
+            "def f(checker):\n"
+            '    "doc"\n'
+            "    assert_ok(checker)\n"
+            "    checker.assert_ready(checker)\n"
+        ),
+        qualname="tests.mod:f",
     )
-    facts = build_block_group_facts(
-        {
-            group_key: [
-                {
-                    "qualname": "tests.mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 4,
-                }
-            ]
-        }
-    )
-    group = facts[group_key]
     assert group["hint"] == "assert_only"
     assert group["assert_ratio"] == "100%"
     assert group["consecutive_asserts"] == "3"
 
 
 def test_build_block_group_facts_non_assert_breaks_hint(tmp_path: Path) -> None:
-    group_key = repeated_block_group_key()
-    test_file = tmp_path / "test_mixed.py"
-    test_file.write_text(
-        "def f(html):\n"
-        "    assert 'a' in html\n"
-        "    check(html)\n"
-        "    assert 'b' in html\n",
-        "utf-8",
+    group = _build_group_facts_for_source(
+        tmp_path=tmp_path,
+        filename="test_mixed.py",
+        source=(
+            "def f(html):\n"
+            "    assert 'a' in html\n"
+            "    check(html)\n"
+            "    assert 'b' in html\n"
+        ),
+        qualname="tests.mod:f",
     )
-    facts = build_block_group_facts(
-        {
-            group_key: [
-                {
-                    "qualname": "tests.mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 4,
-                }
-            ]
-        }
-    )
-    group = facts[group_key]
     assert "hint" not in group
     assert group["assert_ratio"] == "67%"
     assert group["consecutive_asserts"] == "1"
@@ -138,25 +145,13 @@ def test_build_block_group_facts_handles_empty_stmt_range(tmp_path: Path) -> Non
 
 
 def test_build_block_group_facts_non_assert_call_shapes(tmp_path: Path) -> None:
-    group_key = repeated_block_group_key()
-    test_file = tmp_path / "module.py"
-    test_file.write_text(
-        "def f(checker, x):\n    checker.validate(x)\n    (lambda y: y)(x)\n    x\n",
-        "utf-8",
+    group = _build_group_facts_for_source(
+        tmp_path=tmp_path,
+        filename="module.py",
+        source=(
+            "def f(checker, x):\n    checker.validate(x)\n    (lambda y: y)(x)\n    x\n"
+        ),
     )
-    facts = build_block_group_facts(
-        {
-            group_key: [
-                {
-                    "qualname": "mod:f",
-                    "filepath": str(test_file),
-                    "start_line": 2,
-                    "end_line": 4,
-                }
-            ]
-        }
-    )
-    group = facts[group_key]
     assert group["assert_ratio"] == "0%"
     assert group["consecutive_asserts"] == "0"
     assert "hint" not in group
@@ -227,3 +222,60 @@ def test_build_block_group_facts_n_way_group_compare_facts(tmp_path: Path) -> No
     assert group["group_compare_note"] == (
         "N-way group: each block matches 2 peers in this group."
     )
+
+
+def test_explain_as_int_variants() -> None:
+    assert explain_mod._as_int(True) == 1
+    assert explain_mod._as_int("7") == 7
+    assert explain_mod._as_int("bad") == 0
+    assert explain_mod._as_int(1.5) == 0
+
+
+def test_parsed_file_tree_cache_and_empty_statement_index_paths(tmp_path: Path) -> None:
+    module = tmp_path / "empty_module.py"
+    module.write_text("", "utf-8")
+
+    ast_cache: dict[str, ast.AST | None] = {}
+    first = explain_mod.parsed_file_tree(str(module), ast_cache=ast_cache)
+    second = explain_mod.parsed_file_tree(str(module), ast_cache=ast_cache)
+    assert first is second
+
+    stmt_index_cache: dict[str, explain_mod._StatementIndex | None] = {}
+    range_cache: dict[tuple[str, int, int], tuple[int, int, int]] = {}
+    total, assert_like, consecutive = explain_mod.assert_range_stats(
+        filepath=str(module),
+        start_line=1,
+        end_line=10,
+        ast_cache=ast_cache,
+        stmt_index_cache=stmt_index_cache,
+        range_cache=range_cache,
+    )
+    assert (total, assert_like, consecutive) == (0, 0, 0)
+
+
+def test_assert_range_stats_skips_records_outside_requested_end_line(
+    tmp_path: Path,
+) -> None:
+    module = tmp_path / "multiline_stmt.py"
+    module.write_text(
+        "def f() -> int:\n"
+        "    value = (\n"
+        "        1 +\n"
+        "        2\n"
+        "    )\n"
+        "    return value\n",
+        "utf-8",
+    )
+    ast_cache: dict[str, ast.AST | None] = {}
+    stmt_index_cache: dict[str, explain_mod._StatementIndex | None] = {}
+    range_cache: dict[tuple[str, int, int], tuple[int, int, int]] = {}
+
+    total, assert_like, consecutive = explain_mod.assert_range_stats(
+        filepath=str(module),
+        start_line=2,
+        end_line=2,
+        ast_cache=ast_cache,
+        stmt_index_cache=stmt_index_cache,
+        range_cache=range_cache,
+    )
+    assert (total, assert_like, consecutive) == (0, 0, 0)

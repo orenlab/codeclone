@@ -1,277 +1,92 @@
-# CodeClone
+<p align="center">
+  <img src="https://orenlab.github.io/codeclone/assets/codeclone-wordmark.svg" alt="CodeClone" height="60">
+</p>
 
-[![PyPI](https://img.shields.io/pypi/v/codeclone.svg?style=flat-square)](https://pypi.org/project/codeclone/)
-[![Downloads](https://img.shields.io/pypi/dm/codeclone.svg?style=flat-square)](https://pypi.org/project/codeclone/)
-[![tests](https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main&style=flat-square)](https://github.com/orenlab/codeclone/actions/workflows/tests.yml)
-[![Python](https://img.shields.io/pypi/pyversions/codeclone.svg?style=flat-square)](https://pypi.org/project/codeclone/)
-![CI First](https://img.shields.io/badge/CI-first-green?style=flat-square)
-![Baseline](https://img.shields.io/badge/baseline-versioned-green?style=flat-square)
-[![License](https://img.shields.io/pypi/l/codeclone.svg?style=flat-square)](LICENSE)
+<p align="center">
+  <strong>Structural code quality analysis for Python</strong>
+</p>
 
-**CodeClone** is a Python code clone detector based on **normalized AST and Control Flow Graphs (CFG)**.
-It discovers architectural duplication and prevents new copy-paste from entering your codebase via CI.
-
----
-
-## Why CodeClone
-
-CodeClone focuses on **architectural duplication**, not text similarity. It detects structural patterns through:
-
-- **Normalized AST analysis** — robust to renaming, formatting, and minor refactors
-- **Control Flow Graphs** — captures execution logic, not just syntax
-- **Strict, explainable matching** — clear signals, not fuzzy heuristics
-
-Unlike token-based tools, CodeClone compares **structure and control flow**, making it ideal for finding:
-
-- Repeated service/orchestration patterns
-- Duplicated guard/validation blocks
-- Copy-pasted handler logic across modules
-- Recurring internal segments in large functions
+<p align="center">
+  <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/v/codeclone.svg?style=flat-square" alt="PyPI"></a>
+  <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/dm/codeclone.svg?style=flat-square" alt="Downloads"></a>
+  <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main&style=flat-square" alt="Tests"></a>
+  <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml/badge.svg?style=flat-square" alt="Benchmark"></a>
+  <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone.svg?style=flat-square" alt="Python"></a>
+  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-81%20(B)-green" alt="codeclone 81 (B)"></a>
+  <a href="https://github.com/orenlab/codeclone/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/codeclone.svg?style=flat-square" alt="License"></a>
+</p>
 
 ---
 
-## Core Capabilities
+CodeClone provides comprehensive structural code quality analysis for Python. It detects architectural
+duplication via normalized AST and Control Flow Graphs, computes quality metrics, and enforces CI gates —
+all with baseline-aware governance that separates **known** technical debt from **new** regressions.
 
-**Three Detection Levels:**
+Docs: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/) ·
+Live sample report:
+[orenlab.github.io/codeclone/examples/report/](https://orenlab.github.io/codeclone/examples/report/)
 
-1. **Function clones (CFG fingerprint)**
-   Strong structural signal for cross-layer duplication
+## Features
 
-2. **Block clones (statement windows)**
-   Detects repeated local logic patterns
-
-3. **Segment clones (report-only)**
-   Internal function repetition for explainability; not used for baseline gating
-
-**CI-Ready Features:**
-
-- Deterministic output with stable ordering
-- Reproducible artifacts for audit trails
-- Baseline-driven gating to prevent new duplication
-- Fast incremental analysis with intelligent caching
-
----
-
-## Installation
-
-```bash
-pip install codeclone
-```
-
-**Requirements:** Python 3.10+
-
----
+- **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
+- **Structural findings** — duplicated branch families, clone guard/exit divergence and clone-cohort drift (report-only)
+- **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, dead code, health
+  score
+- **Baseline governance** — known debt stays accepted; CI blocks only new clones and metric regressions
+- **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
+- **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
+- **Fast*** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
 
 ## Quick Start
 
-### Basic Analysis
-
 ```bash
-# Analyze current directory
-codeclone .
+pip install codeclone        # or: uv tool install codeclone
 
-# Check version
-codeclone --version
+codeclone .                  # analyze current directory
+codeclone . --html           # generate HTML report
+codeclone . --html --open-html-report   # generate and open HTML report
+codeclone . --json --md --sarif --text   # generate machine-readable reports
+codeclone . --html --json --timestamped-report-paths   # keep timestamped report snapshots
+codeclone . --ci             # CI mode (--fail-on-new --no-color --quiet)
 ```
 
-### Generate Reports
+<details>
+<summary>Run without install</summary>
 
 ```bash
-codeclone . \
-  --html .cache/codeclone/report.html \
-  --json .cache/codeclone/report.json \
-  --text .cache/codeclone/report.txt
+uvx codeclone@latest .
 ```
 
-### CI Integration
+</details>
+
+## CI Integration
 
 ```bash
-# 1. Generate baseline once (commit to repo)
+# 1. Generate baseline (commit to repo)
 codeclone . --update-baseline
 
 # 2. Add to CI pipeline
 codeclone . --ci
 ```
 
-The `--ci` preset is equivalent to `--fail-on-new --no-color --quiet`.
+The `--ci` preset equals `--fail-on-new --no-color --quiet`.
+When a trusted metrics baseline is loaded, CI mode also enables
+`--fail-on-new-metrics`.
 
----
-
-## Baseline Workflow
-
-Baselines capture the **current state of duplication** in your codebase. Once committed, they serve as the reference
-point for CI checks.
-
-**Key points (contract-level):**
-
-- Baseline file is versioned (`codeclone.baseline.json`) and used to classify clones as **NEW** vs **KNOWN**.
-- Compatibility is gated by `schema_version`, `fingerprint_version`, and `python_tag`.
-- Baseline trust is gated by `meta.generator.name` (`codeclone`) and integrity (`payload_sha256`).
-- In CI preset (`--ci`), an untrusted baseline is a contract error (exit `2`).
-
-Full contract details: [`docs/book/06-baseline.md`](docs/book/06-baseline.md)
-
----
-
-## Exit Codes
-
-CodeClone uses a deterministic exit code contract:
-
-| Code | Meaning                                                                                                                             |
-|------|-------------------------------------------------------------------------------------------------------------------------------------|
-| `0`  | Success — run completed without gating failures                                                                                     |
-| `2`  | Contract error — baseline missing/untrusted, invalid output extensions, incompatible versions, unreadable source files in CI/gating |
-| `3`  | Gating failure — new clones detected or threshold exceeded                                                                          |
-| `5`  | Internal error — unexpected exception                                                                                               |
-
-**Priority:** Contract errors (`2`) override gating failures (`3`) when both occur.
-
-Full contract details: [`docs/book/03-contracts-exit-codes.md`](docs/book/03-contracts-exit-codes.md)
-
-**Debug Support:**
+### Quality Gates
 
 ```bash
-# Show detailed error information
-codeclone . --debug
+# Metrics thresholds
+codeclone . --fail-complexity 20 --fail-coupling 10 --fail-cohesion 4 --fail-health 60
 
-# Or via environment variable
-CODECLONE_DEBUG=1 codeclone .
+# Structural policies
+codeclone . --fail-cycles --fail-dead-code
+
+# Regression detection vs baseline
+codeclone . --fail-on-new-metrics
 ```
 
----
-
-## Reports
-
-### Supported Formats
-
-- **HTML** (`--html`) — Interactive web report with filtering
-- **JSON** (`--json`) — Machine-readable structured data
-- **Text** (`--text`) — Plain text summary
-
-### Report Schema (JSON v1.1)
-
-The JSON report uses a compact deterministic layout:
-
-- Top-level: `meta`, `files`, `groups`, `groups_split`, `group_item_layout`
-- Optional top-level: `facts`
-- `groups_split` provides explicit **NEW / KNOWN** separation per section
-- `meta.groups_counts` provides deterministic per-section aggregates
-- `meta` follows a shared canonical contract across HTML/JSON/TXT
-
-Canonical report contract: [`docs/book/08-report.md`](docs/book/08-report.md)
-
-**Minimal shape (v1.1):**
-
-```json
-{
-  "meta": {
-    "report_schema_version": "1.1",
-    "codeclone_version": "1.4.0",
-    "python_version": "3.13",
-    "python_tag": "cp313",
-    "baseline_path": "/path/to/codeclone.baseline.json",
-    "baseline_fingerprint_version": "1",
-    "baseline_schema_version": "1.0",
-    "baseline_python_tag": "cp313",
-    "baseline_generator_name": "codeclone",
-    "baseline_generator_version": "1.4.0",
-    "baseline_payload_sha256": "<sha256>",
-    "baseline_payload_sha256_verified": true,
-    "baseline_loaded": true,
-    "baseline_status": "ok",
-    "cache_path": "/path/to/.cache/codeclone/cache.json",
-    "cache_used": true,
-    "cache_status": "ok",
-    "cache_schema_version": "1.3",
-    "files_skipped_source_io": 0,
-    "groups_counts": {
-      "functions": {
-        "total": 0,
-        "new": 0,
-        "known": 0
-      },
-      "blocks": {
-        "total": 0,
-        "new": 0,
-        "known": 0
-      },
-      "segments": {
-        "total": 0,
-        "new": 0,
-        "known": 0
-      }
-    }
-  },
-  "files": [],
-  "groups": {
-    "functions": {},
-    "blocks": {},
-    "segments": {}
-  },
-  "groups_split": {
-    "functions": {
-      "new": [],
-      "known": []
-    },
-    "blocks": {
-      "new": [],
-      "known": []
-    },
-    "segments": {
-      "new": [],
-      "known": []
-    }
-  },
-  "group_item_layout": {
-    "functions": [
-      "file_i",
-      "qualname",
-      "start",
-      "end",
-      "loc",
-      "stmt_count",
-      "fingerprint",
-      "loc_bucket"
-    ],
-    "blocks": [
-      "file_i",
-      "qualname",
-      "start",
-      "end",
-      "size"
-    ],
-    "segments": [
-      "file_i",
-      "qualname",
-      "start",
-      "end",
-      "size",
-      "segment_hash",
-      "segment_sig"
-    ]
-  },
-  "facts": {
-    "blocks": {}
-  }
-}
-```
-
----
-
-## Cache
-
-Cache is an optimization layer only and is never a source of truth.
-
-- Default path: `<root>/.cache/codeclone/cache.json`
-- Schema version: **v1.3**
-- Compatibility includes analysis profile (`min_loc`, `min_stmt`)
-- Invalid or oversized cache is ignored with warning and rebuilt (fail-open)
-
-Full contract details: [`docs/book/07-cache.md`](docs/book/07-cache.md)
-
----
-
-## Pre-commit Integration
+### Pre-commit
 
 ```yaml
 repos:
@@ -286,63 +101,244 @@ repos:
         types: [ python ]
 ```
 
----
+## Configuration
 
-## What CodeClone Is (and Is Not)
+CodeClone can load project-level configuration from `pyproject.toml`:
 
-### CodeClone Is
+```toml
+[tool.codeclone]
+min_loc = 10
+min_stmt = 6
+baseline = "codeclone.baseline.json"
+skip_metrics = false
+quiet = false
+html_out = ".cache/codeclone/report.html"
+json_out = ".cache/codeclone/report.json"
+md_out = ".cache/codeclone/report.md"
+sarif_out = ".cache/codeclone/report.sarif"
+text_out = ".cache/codeclone/report.txt"
+block_min_loc = 20
+block_min_stmt = 8
+segment_min_loc = 20
+segment_min_stmt = 10
+```
 
-- A structural clone detector for Python
-- A CI guard against new duplication
-- A deterministic analysis tool with auditable outputs
+Precedence: CLI flags > `pyproject.toml` > built-in defaults.
 
-### CodeClone Is Not
+## Baseline Workflow
 
-- A linter or code formatter
-- A semantic equivalence prover
-- A runtime execution analyzer
+Baselines capture the current duplication state. Once committed, they become the CI reference point.
 
----
+- Clones are classified as **NEW** (not in baseline) or **KNOWN** (accepted debt)
+- `--update-baseline` writes both clone and metrics snapshots
+- Trust is verified via `generator`, `fingerprint_version`, and `payload_sha256`
+- In `--ci` mode, an untrusted baseline is a contract error (exit 2)
+
+Full contract: [Baseline contract](https://orenlab.github.io/codeclone/book/06-baseline/)
+
+## Exit Codes
+
+| Code | Meaning                                                                       |
+|------|-------------------------------------------------------------------------------|
+| `0`  | Success                                                                       |
+| `2`  | Contract error — untrusted baseline, invalid config, unreadable sources in CI |
+| `3`  | Gating failure — new clones or metric threshold exceeded                      |
+| `5`  | Internal error                                                                |
+
+Contract errors (`2`) take precedence over gating failures (`3`).
+
+## Reports
+
+| Format   | Flag      | Default path                    |
+|----------|-----------|---------------------------------|
+| HTML     | `--html`  | `.cache/codeclone/report.html`  |
+| JSON     | `--json`  | `.cache/codeclone/report.json`  |
+| Markdown | `--md`    | `.cache/codeclone/report.md`    |
+| SARIF    | `--sarif` | `.cache/codeclone/report.sarif` |
+| Text     | `--text`  | `.cache/codeclone/report.txt`   |
+
+All report formats are rendered from one canonical JSON report document.
+
+- `--open-html-report` opens the generated HTML report in the default browser and requires `--html`.
+- `--timestamped-report-paths` appends a UTC timestamp to default report filenames for bare report flags such as
+  `--html` or `--json`. Explicit report paths are not rewritten.
+
+The published docs site also includes a live example HTML/JSON/SARIF report
+generated from the current `codeclone` repository during the docs build.
+
+Structural findings include:
+
+- `duplicated_branches`
+- `clone_guard_exit_divergence`
+- `clone_cohort_drift`
+
+### Inline Suppressions
+
+CodeClone keeps dead-code detection deterministic and static by default. When a symbol is intentionally
+invoked through runtime dynamics (for example framework callbacks, plugin loading, or reflection), suppress
+the known false positive explicitly at the declaration site:
+
+```python
+# codeclone: ignore[dead-code]
+def handle_exception(exc: Exception) -> None:
+    ...
+
+
+class Middleware:  # codeclone: ignore[dead-code]
+    ...
+```
+
+Dynamic/runtime false positives are resolved via explicit inline suppressions, not via broad heuristics.
+
+<details>
+<summary>JSON report shape (v2.1)</summary>
+
+```json
+{
+  "report_schema_version": "2.1",
+  "meta": {
+    "codeclone_version": "2.0.0b1",
+    "project_name": "...",
+    "scan_root": ".",
+    "report_mode": "full",
+    "baseline": {
+      "...": "..."
+    },
+    "cache": {
+      "...": "..."
+    },
+    "metrics_baseline": {
+      "...": "..."
+    },
+    "runtime": {
+      "report_generated_at_utc": "..."
+    }
+  },
+  "inventory": {
+    "files": {
+      "...": "..."
+    },
+    "code": {
+      "...": "..."
+    },
+    "file_registry": {
+      "encoding": "relative_path",
+      "items": []
+    }
+  },
+  "findings": {
+    "summary": {
+      "...": "..."
+    },
+    "groups": {
+      "clones": {
+        "functions": [],
+        "blocks": [],
+        "segments": []
+      },
+      "structural": {
+        "groups": []
+      },
+      "dead_code": {
+        "groups": []
+      },
+      "design": {
+        "groups": []
+      }
+    }
+  },
+  "metrics": {
+    "summary": {},
+    "families": {}
+  },
+  "derived": {
+    "suggestions": [],
+    "overview": {
+      "families": {},
+      "top_risks": [],
+      "source_scope_breakdown": {},
+      "health_snapshot": {}
+    },
+    "hotlists": {
+      "most_actionable_ids": [],
+      "highest_spread_ids": [],
+      "production_hotspot_ids": [],
+      "test_fixture_hotspot_ids": []
+    }
+  },
+  "integrity": {
+    "canonicalization": {
+      "version": "1",
+      "scope": "canonical_only"
+    },
+    "digest": {
+      "algorithm": "sha256",
+      "verified": true,
+      "value": "..."
+    }
+  }
+}
+```
+
+Canonical contract: [Report contract](https://orenlab.github.io/codeclone/book/08-report/) and
+[Dead-code contract](https://orenlab.github.io/codeclone/book/16-dead-code-contract/)
+
+</details>
 
 ## How It Works
 
-**High-level Pipeline:**
+1. **Parse** — Python source to AST
+2. **Normalize** — canonical structure (robust to renaming, formatting)
+3. **CFG** — per-function control flow graph
+4. **Fingerprint** — stable hash computation
+5. **Group** — function, block, and segment clone groups
+6. **Metrics** — complexity, coupling, cohesion, dependencies, dead code, health
+7. **Gate** — baseline comparison, threshold checks
 
-1. **Parse** — Python source → AST
-2. **Normalize** — AST → canonical structure
-3. **CFG Construction** — per-function control flow graph
-4. **Fingerprinting** — stable hash computation
-5. **Grouping** — function/block/segment clone groups
-6. **Determinism** — stable ordering for reproducibility
-7. **Baseline Comparison** — new vs known clones (when requested)
+Architecture: [Architecture narrative](https://orenlab.github.io/codeclone/architecture/) ·
+CFG semantics: [CFG semantics](https://orenlab.github.io/codeclone/cfg/)
 
-Learn more:
+## Documentation
 
-- Architecture: [`docs/architecture.md`](docs/architecture.md)
-- CFG semantics: [`docs/cfg.md`](docs/cfg.md)
+| Topic                      | Link                                                                                               |
+|----------------------------|----------------------------------------------------------------------------------------------------|
+| Contract book (start here) | [Contracts and guarantees](https://orenlab.github.io/codeclone/book/00-intro/)                    |
+| Exit codes                 | [Exit codes and failure policy](https://orenlab.github.io/codeclone/book/03-contracts-exit-codes/) |
+| Configuration              | [Config and defaults](https://orenlab.github.io/codeclone/book/04-config-and-defaults/)           |
+| Baseline contract          | [Baseline contract](https://orenlab.github.io/codeclone/book/06-baseline/)                        |
+| Cache contract             | [Cache contract](https://orenlab.github.io/codeclone/book/07-cache/)                              |
+| Report contract            | [Report contract](https://orenlab.github.io/codeclone/book/08-report/)                            |
+| Metrics & quality gates    | [Metrics and quality gates](https://orenlab.github.io/codeclone/book/15-metrics-and-quality-gates/) |
+| Dead code                  | [Dead-code contract](https://orenlab.github.io/codeclone/book/16-dead-code-contract/)             |
+| Docker benchmark contract  | [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmarking/)                |
+| Determinism                | [Determinism policy](https://orenlab.github.io/codeclone/book/12-determinism/)                    |
 
----
+## * Benchmarking
 
-## Documentation Map
+<details>
+<summary>Reproducible Docker Benchmark</summary>
 
-Use this map to pick the right level of detail:
+```bash
+./benchmarks/run_docker_benchmark.sh
+```
 
-- **Contract book (canonical contracts/specs):** [`docs/book/`](docs/book/)
-    - Start here: [`docs/book/00-intro.md`](docs/book/00-intro.md)
-    - Exit codes and precedence: [`docs/book/03-contracts-exit-codes.md`](docs/book/03-contracts-exit-codes.md)
-    - Baseline contract (schema/trust/integrity): [`docs/book/06-baseline.md`](docs/book/06-baseline.md)
-    - Cache contract (schema/integrity/fail-open): [`docs/book/07-cache.md`](docs/book/07-cache.md)
-    - Report contract (schema v1.1 + NEW/KNOWN split): [`docs/book/08-report.md`](docs/book/08-report.md)
-    - CLI behavior: [`docs/book/09-cli.md`](docs/book/09-cli.md)
-    - HTML rendering: [`docs/book/10-html-render.md`](docs/book/10-html-render.md)
-    - Determinism policy: [`docs/book/12-determinism.md`](docs/book/12-determinism.md)
-    - Compatibility/versioning rules: [
-      `docs/book/14-compatibility-and-versioning.md`](docs/book/14-compatibility-and-versioning.md)
-- **Deep dives:**
-    - Architecture narrative: [`docs/architecture.md`](docs/architecture.md)
-    - CFG semantics: [`docs/cfg.md`](docs/cfg.md)
+The wrapper builds `benchmarks/Dockerfile`, runs isolated container benchmarks, and writes results to
+`.cache/benchmarks/codeclone-benchmark.json`.
+
+Use environment overrides to pin the benchmark envelope:
+
+```bash
+CPUSET=0 CPUS=1.0 MEMORY=2g RUNS=16 WARMUPS=4 \
+  ./benchmarks/run_docker_benchmark.sh
+```
+
+Performance claims are backed by the reproducible benchmark workflow documented
+in [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmarking/)
+
+</details>
 
 ## Links
 
 - **Issues:** <https://github.com/orenlab/codeclone/issues>
 - **PyPI:** <https://pypi.org/project/codeclone/>
+- **License:** MIT

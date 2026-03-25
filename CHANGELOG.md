@@ -1,10 +1,95 @@
 # Changelog
 
+## [2.0.0b1]
+
+Major upgrade: CodeClone evolves from a structural clone detector into a
+**baseline-aware code-health and CI governance tool** for Python.
+
+### Architecture
+
+- Stage-based pipeline (`pipeline.py`): discovery → processing → analysis → reporting → gating.
+- Domain layers: `models.py`, `metrics/`, `report/`, `grouping.py`.
+- Baseline schema `2.0`, report schema `2.1`, cache schema `2.2`; `fingerprint_version` remains `1`.
+
+### Code-Health Analysis
+
+- Seven health dimensions: clones, complexity, coupling, cohesion, dead code, dependencies, coverage.
+- Piecewise clone scoring curve: mild penalty below 5% density, steep 5–20%, aggressive above 20%.
+- Dimension weights: clones 25%, complexity 20%, cohesion 15%, coupling 10%, dead code 10%, dependencies 10%, coverage
+  10%.
+- Grade bands: A ≥90, B ≥75, C ≥60, D ≥40, F <40.
+
+### Detection Thresholds
+
+- Lowered function-level `--min-loc` from 15 to 10 (configurable via CLI/pyproject.toml).
+- Lowered block fragment gate from loc≥40/stmt≥10 to loc≥20/stmt≥8.
+- Lowered segment fragment gate from loc≥30/stmt≥12 to loc≥20/stmt≥10.
+- All six thresholds configurable via `[tool.codeclone]` in `pyproject.toml`.
+
+### Detection Quality
+
+- Conservative dead-code detector: skips tests, dunders, visitors, protocol stubs.
+- Module-level PEP 562 hooks (`__getattr__`, `__dir__`) are treated as non-actionable dead-code candidates.
+- Exact qualname-based liveness with import-alias resolution.
+- Canonical inline suppression syntax: `# codeclone: ignore[dead-code]` on declarations.
+- Structural finding families: `duplicated_branches`, `clone_guard_exit_divergence`, `clone_cohort_drift`.
+
+### Configuration and CLI
+
+- Config from `pyproject.toml` under `[tool.codeclone]`; precedence: CLI > pyproject.toml > defaults.
+- Optional-value report flags: `--html`, `--json`, `--md`, `--sarif`, `--text` with deterministic default paths.
+- `--open-html-report`, `--timestamped-report-paths`, `--ci` preset.
+- Explicit `--no-progress`/`--progress`, `--no-color`/`--color` flag pairs.
+
+### HTML Report
+
+- Overview: KPI grid with health gauge (baseline delta arc), Executive Summary (issue breakdown + source breakdown),
+  Health Profile radar chart.
+- KPI cards show baseline-aware tone: `✓ baselined` pill when all items are accepted debt, `+N` red badge for
+  regressions.
+- Get Badge modal: grade-only and score+grade variants, shields.io preview, Markdown/HTML embeds, copy feedback.
+- Report Provenance modal with section cards, SVG icons, boolean badges.
+- Responsive layout with dark/light theme toggle and system theme detection.
+
+### Baseline and Contracts
+
+- Unified baseline flow: clone keys + optional metrics in one file.
+- Metrics snapshot integrity via `meta.metrics_payload_sha256`.
+- Report contract: canonical `meta`/`inventory`/`findings`/`metrics` + derived `suggestions`/`overview` + `integrity`.
+- SARIF: `%SRCROOT%` anchoring, `baselineState`, rich rule metadata.
+- Cache compatibility now keys off the full six-threshold analysis profile
+  (function + block + segment thresholds), not only the top-level function gate.
+
+### Performance
+
+- Unified AST collection pass (merged 3 separate walks).
+- Suppression fast-path: skip tokenization when `codeclone:` absent.
+- Cache dirty flag: skip `save()` on warm path when nothing changed.
+- Adaptive multiprocessing, batch statement hashing, deferred HTML import.
+
+### Docs and Publishing
+
+- MkDocs site with Material theme and GitHub Pages workflow.
+- Live sample reports (HTML, JSON, SARIF).
+- PyPI-facing README now uses published docs URLs instead of repo-relative doc links.
+
+### Packaging
+
+- Package metadata stays explicitly beta (`2.0.0b1`, `Development Status :: 4 - Beta`).
+- `pyproject.toml` moved to SPDX-style `license = "MIT"` and `project.license-files`
+  for modern setuptools builds without release-time deprecation warnings.
+
+### Stability
+
+- Exit codes unchanged: `0`/`2`/`3`/`5`.
+- Fingerprint contract unchanged: `BASELINE_FINGERPRINT_VERSION = "1"`.
+- Coverage gate: `>=99%`.
+
 ## [1.4.4] - 2026-03-14
 
 ### Performance
 
-- Optimized HTML snippet rendering hot path:
+- Backported report hot-path optimizations from `2.0.0b1` to the `1.4.x` line:
     - file snippets now reuse cached full-file lines and slice ranges without
       repeated full-file scans
     - Pygments modules are loaded once per importer identity instead of

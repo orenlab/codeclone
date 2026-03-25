@@ -1,0 +1,4 @@
+[tool.codeclone]
+min_loc = 1
+min_stmt = 1
+skip_metrics = true

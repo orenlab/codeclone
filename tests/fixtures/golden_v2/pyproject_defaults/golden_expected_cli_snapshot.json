@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "python_tag": "cp313"
+  },
+  "report_schema_version": "2.1",
+  "project_name": "pyproject_defaults",
+  "scan_root": ".",
+  "baseline_status": "missing",
+  "baseline_loaded": false,
+  "cache_used": false,
+  "findings_summary": {
+    "total": 1,
+    "families": {
+      "clones": 1,
+      "structural": 0,
+      "dead_code": 0,
+      "design": 0
+    },
+    "severity": {
+      "critical": 0,
+      "warning": 1,
+      "info": 0
+    },
+    "impact_scope": {
+      "runtime": 1,
+      "non_runtime": 0,
+      "mixed": 0
+    },
+    "clones": {
+      "functions": 1,
+      "blocks": 0,
+      "segments": 0,
+      "new": 1,
+      "known": 0
+    },
+    "suppressed": {
+      "dead_code": 0
+    }
+  },
+  "function_group_ids": [
+    "clone:function:c35ab49bab0141cbc3b2745742d0ff6e186ae15f|0-19"
+  ],
+  "block_group_ids": [],
+  "segment_group_ids": [],
+  "structural_group_ids": [],
+  "structural_group_kinds": []
+}

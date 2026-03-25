@@ -1,0 +1,644 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
+
+"""Overview panel renderer."""
+
+from __future__ import annotations
+
+import math
+from typing import TYPE_CHECKING
+
+from ... import _coerce
+from ..._html_badges import _stat_card
+from ..._html_escape import _escape_html
+from .._components import (
+    Tone,
+    insight_block,
+    overview_cluster_header,
+    overview_source_breakdown_html,
+    overview_summary_item_html,
+)
+from .._glossary import glossary_tip
+
+if TYPE_CHECKING:
+    from .._context import ReportContext
+
+_as_int = _coerce.as_int
+_as_float = _coerce.as_float
+_as_mapping = _coerce.as_mapping
+_as_sequence = _coerce.as_sequence
+
+
+def _health_gauge_html(
+    score: float, grade: str, *, health_delta: int | None = None
+) -> str:
+    """Render an SVG ring gauge for health score with optional baseline arc."""
+    if score < 0:
+        return _stat_card(
+            "Health",
+            "n/a",
+            css_class="meta-item overview-health-card",
+            glossary_tip_fn=glossary_tip,
+        )
+    _R = 42.0
+    circumference = 2.0 * math.pi * _R
+    offset = circumference * (1.0 - score / 100.0)
+    if score >= 75:
+        color = "var(--success)"
+    elif score >= 60:
+        color = "var(--warning)"
+    else:
+        color = "var(--error)"
+
+    # Baseline comparison arc: show where baseline was relative to current.
+    # SVG circle with rotate(-90deg) starts at 12 o'clock, goes clockwise.
+    # Negative stroke-dashoffset shifts the arc forward (clockwise).
+    # To place an arc at P% from 12 o'clock: offset = -(C * P / 100).
+    baseline_arc = ""
+    if health_delta is not None and health_delta != 0:
+        baseline_score = max(0.0, min(100.0, score - health_delta))
+        arc_len = circumference * abs(health_delta) / 100.0
+        if health_delta > 0:
+            # Improvement: ghost arc from baseline to score (gained segment)
+            arc_offset = -circumference * baseline_score / 100.0
+            baseline_arc = (
+                f'<circle class="health-ring-baseline" cx="50" cy="50" r="{_R}" '
+                f'stroke="var(--success)" opacity="0.25" '
+                f'stroke-dasharray="{arc_len:.1f} {circumference - arc_len:.1f}" '
+                f'stroke-dashoffset="{arc_offset:.1f}"/>'
+            )
+        else:
+            # Degradation: red arc from score to baseline (lost segment)
+            arc_offset = -circumference * score / 100.0
+            baseline_arc = (
+                f'<circle class="health-ring-baseline" cx="50" cy="50" r="{_R}" '
+                f'stroke="var(--error)" opacity="0.4" '
+                f'stroke-dasharray="{arc_len:.1f} {circumference - arc_len:.1f}" '
+                f'stroke-dashoffset="{arc_offset:.1f}"/>'
+            )
+
+    delta_html = ""
+    if health_delta is not None and health_delta != 0:
+        if health_delta > 0:
+            cls = "health-ring-delta--up"
+            sign = "+"
+        else:
+            cls = "health-ring-delta--down"
+            sign = ""
+        delta_html = f'<div class="health-ring-delta {cls}">{sign}{health_delta}</div>'
+
+    # "Get Badge" button — shown for grades A, B, C
+    badge_btn_html = ""
+    if grade.upper() in ("A", "B", "C"):
+        badge_btn_html = (
+            '<button class="badge-btn" type="button" data-badge-open'
+            f' data-badge-grade="{_escape_html(grade)}"'
+            f' data-badge-score="{score:.0f}">'
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" '
+            'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+            'stroke-linejoin="round">'
+            '<rect x="3" y="3" width="18" height="18" rx="2"/>'
+            '<path d="M7 7h10M7 12h10M7 17h6"/></svg>'
+            " Get Badge</button>"
+        )
+
+    return (
+        '<div class="meta-item overview-health-card">'
+        '<div class="overview-health-inner">'
+        '<div class="health-ring">'
+        '<svg viewBox="0 0 100 100">'
+        '<circle class="health-ring-bg" cx="50" cy="50" r="42"/>'
+        f"{baseline_arc}"
+        f'<circle class="health-ring-fg" cx="50" cy="50" r="42" '
+        f'stroke="{color}" '
+        f'stroke-dasharray="{circumference:.1f}" '
+        f'stroke-dashoffset="{offset:.1f}"/>'
+        "</svg>"
+        '<div class="health-ring-label">'
+        f'<div class="health-ring-score">{score:.0f}</div>'
+        f'<div class="health-ring-grade">Grade {_escape_html(grade)}</div>'
+        f"{delta_html}"
+        "</div></div>"
+        f"{badge_btn_html}"
+        "</div></div>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Analytics: Health Radar (pure SVG)
+# ---------------------------------------------------------------------------
+
+_RADAR_DIMENSIONS = (
+    "clones",
+    "complexity",
+    "coupling",
+    "cohesion",
+    "dead_code",
+    "dependencies",
+    "coverage",
+)
+
+_RADAR_LABELS = {
+    "clones": "Clones",
+    "complexity": "Complexity",
+    "coupling": "Coupling",
+    "cohesion": "Cohesion",
+    "dead_code": "Dead Code",
+    "dependencies": "Deps",
+    "coverage": "Coverage",
+}
+
+_RADAR_CX, _RADAR_CY, _RADAR_R = 200.0, 200.0, 130.0
+_RADAR_LABEL_R = 155.0
+
+
+def _radar_point(index: int, total: int, radius: float) -> tuple[float, float]:
+    angle = 2.0 * math.pi * index / total - math.pi / 2.0
+    return (
+        round(_RADAR_CX + radius * math.cos(angle), 2),
+        round(_RADAR_CY + radius * math.sin(angle), 2),
+    )
+
+
+def _radar_polygon(total: int, radius: float) -> str:
+    return " ".join(
+        f"{x},{y}" for x, y in (_radar_point(i, total, radius) for i in range(total))
+    )
+
+
+def _health_radar_svg(dimensions: dict[str, int]) -> str:
+    n = len(_RADAR_DIMENSIONS)
+    scores = [max(0, min(100, dimensions.get(d, 0))) for d in _RADAR_DIMENSIONS]
+
+    # Concentric grid rings
+    rings: list[str] = []
+    for pct in (0.33, 0.66, 1.0):
+        pts = _radar_polygon(n, _RADAR_R * pct)
+        rings.append(
+            f'<polygon points="{pts}" fill="none" '
+            f'stroke="var(--border)" stroke-width="0.5" opacity="0.6"/>'
+        )
+
+    # Axis lines
+    axes: list[str] = []
+    for i in range(n):
+        x, y = _radar_point(i, n, _RADAR_R)
+        axes.append(
+            f'<line x1="{_RADAR_CX}" y1="{_RADAR_CY}" x2="{x}" y2="{y}" '
+            f'stroke="var(--border)" stroke-width="0.5" opacity="0.4"/>'
+        )
+
+    # Score polygon
+    score_pts = " ".join(
+        f"{x},{y}"
+        for x, y in (
+            _radar_point(i, n, _RADAR_R * s / 100.0) for i, s in enumerate(scores)
+        )
+    )
+    score_poly = (
+        f'<polygon points="{score_pts}" fill="var(--accent-muted)" '
+        f'stroke="var(--accent-primary)" stroke-width="1.5" '
+        f'stroke-linejoin="round"/>'
+    )
+
+    # Score dots
+    dots: list[str] = []
+    for i, s in enumerate(scores):
+        x, y = _radar_point(i, n, _RADAR_R * s / 100.0)
+        color = "var(--error)" if s < 60 else "var(--accent-primary)"
+        dots.append(f'<circle cx="{x}" cy="{y}" r="2.5" fill="{color}"/>')
+
+    # Labels — two lines: name + score
+    labels: list[str] = []
+    for i, dim in enumerate(_RADAR_DIMENSIONS):
+        lx, ly = _radar_point(i, n, _RADAR_LABEL_R)
+        anchor = "middle"
+        dx = lx - _RADAR_CX
+        if dx < -5:
+            anchor = "end"
+        elif dx > 5:
+            anchor = "start"
+        # Nudge labels outward from center for breathing room
+        nudge = 18.0
+        angle = math.atan2(ly - _RADAR_CY, lx - _RADAR_CX)
+        lx = round(lx + nudge * math.cos(angle), 2)
+        ly = round(ly + nudge * math.sin(angle), 2)
+        s = scores[i]
+        cls = ' class="radar-label--weak"' if s < 60 else ""
+        labels.append(
+            f'<text x="{lx}" y="{ly}" text-anchor="{anchor}"'
+            f' dominant-baseline="central"{cls}>'
+            f"{_RADAR_LABELS.get(dim, dim)}"
+            f'<tspan x="{lx}" dy="14" class="radar-score">{s}</tspan>'
+            f"</text>"
+        )
+
+    return (
+        '<div class="health-radar">'
+        '<svg viewBox="0 0 400 400" role="img" '
+        'aria-label="Health dimensions radar chart">'
+        + "".join(rings)
+        + "".join(axes)
+        + score_poly
+        + "".join(dots)
+        + "".join(labels)
+        + "</svg></div>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Analytics: Findings by Family (horizontal bars)
+# ---------------------------------------------------------------------------
+
+
+def _issue_breakdown_html(
+    ctx: ReportContext,
+    *,
+    deltas: dict[str, int | None],
+) -> str:
+    """Horizontal bar chart of real issue counts with baseline awareness.
+
+    *deltas* maps row key → new-items count (None = no baseline loaded).
+    When delta == 0 the row is fully baselined and rendered muted.
+    When delta > 0 the bar is split: baselined segment (muted) + new segment.
+    """
+    complexity_high = _as_int(
+        _as_mapping(ctx.complexity_map.get("summary")).get("high_risk")
+    )
+    coupling_high = _as_int(
+        _as_mapping(ctx.coupling_map.get("summary")).get("high_risk")
+    )
+    cohesion_low = _as_int(
+        _as_mapping(ctx.cohesion_map.get("summary")).get("low_cohesion")
+    )
+    dead_total = _as_int(_as_mapping(ctx.dead_code_map.get("summary")).get("total"))
+    dep_cycles = len(_as_sequence(ctx.dependencies_map.get("cycles")))
+    structural = len(ctx.structural_findings)
+
+    # (key, label, count, color)
+    raw_rows: list[tuple[str, str, int, str]] = [
+        ("clones", "Clone Groups", ctx.clone_groups_total, "var(--error)"),
+        ("structural", "Structural", structural, "var(--warning)"),
+        ("complexity", "Complexity", complexity_high, "var(--warning)"),
+        ("cohesion", "Cohesion", cohesion_low, "var(--info)"),
+        ("coupling", "Coupling", coupling_high, "var(--info)"),
+        ("dead_code", "Dead Code", dead_total, "var(--text-muted)"),
+        ("dep_cycles", "Dep. Cycles", dep_cycles, "var(--text-muted)"),
+    ]
+    # Filter out zeros — show only actual issues
+    rows = [
+        (key, label, count, color) for key, label, count, color in raw_rows if count > 0
+    ]
+    if not rows:
+        return '<div class="overview-summary-value muted">No issues detected.</div>'
+
+    max_count = max(c for _, _, c, _ in rows)
+    parts: list[str] = []
+    for key, label, count, color in rows:
+        pct = round(count / max_count * 100) if max_count else 0
+        delta = deltas.get(key)
+
+        # Determine row state
+        is_muted = delta is not None and delta == 0
+        has_split = delta is not None and delta > 0 and count > delta
+
+        row_cls = "families-row families-row--muted" if is_muted else "families-row"
+
+        # Build bar: split (baselined + new) or single fill
+        if has_split:
+            assert delta is not None  # for type checker
+            baselined_pct = round((count - delta) / max_count * 100)
+            new_pct = pct - baselined_pct
+            bar_html = (
+                f'<span class="breakdown-bar-track">'
+                f'<span class="breakdown-bar-fill breakdown-bar-fill--baselined"'
+                f' style="width:{baselined_pct}%;background:{color}"></span>'
+                f'<span class="breakdown-bar-fill breakdown-bar-fill--new"'
+                f' style="width:{new_pct}%;background:{color}"></span>'
+                f"</span>"
+            )
+        else:
+            bar_cls = " breakdown-bar-fill--baselined" if is_muted else ""
+            bar_html = (
+                f'<span class="breakdown-bar-track">'
+                f'<span class="breakdown-bar-fill{bar_cls}" style="'
+                f"width:{pct}%;background:{color}"
+                f'"></span></span>'
+            )
+
+        # Delta indicator
+        delta_html = ""
+        if is_muted:
+            delta_html = '<span class="families-delta families-delta--ok">\u2713</span>'
+        elif delta is not None and delta > 0:
+            delta_html = (
+                f'<span class="families-delta families-delta--new">+{delta}</span>'
+            )
+
+        parts.append(
+            f'<div class="{row_cls}">'
+            f'<span class="families-label">{_escape_html(label)}</span>'
+            f'<span class="families-count">{count}</span>'
+            f"{bar_html}{delta_html}</div>"
+        )
+    return '<div class="families-list">' + "".join(parts) + "</div>"
+
+
+def render_overview_panel(ctx: ReportContext) -> str:
+    """Build the Overview tab panel HTML."""
+    complexity_summary = _as_mapping(ctx.complexity_map.get("summary"))
+    coupling_summary = _as_mapping(ctx.coupling_map.get("summary"))
+    cohesion_summary = _as_mapping(ctx.cohesion_map.get("summary"))
+    dead_code_summary = _as_mapping(ctx.dead_code_map.get("summary"))
+    dep_cycles = _as_sequence(ctx.dependencies_map.get("cycles"))
+
+    complexity_high_risk = _as_int(complexity_summary.get("high_risk"))
+    coupling_high_risk = _as_int(coupling_summary.get("high_risk"))
+    cohesion_low = _as_int(cohesion_summary.get("low_cohesion"))
+    dependency_cycle_count = len(dep_cycles)
+    dependency_max_depth = _as_int(ctx.dependencies_map.get("max_depth"))
+    dead_total = _as_int(dead_code_summary.get("total"))
+    dead_high_conf = _as_int(
+        dead_code_summary.get("high_confidence", dead_code_summary.get("critical"))
+    )
+    dead_suppressed = _as_int(dead_code_summary.get("suppressed", 0))
+
+    health_score_raw = ctx.health_map.get("score")
+    health_score_known = (
+        health_score_raw is not None and str(health_score_raw).strip() != ""
+    )
+    health_score = _as_float(health_score_raw) if health_score_known else -1.0
+    health_grade = str(ctx.health_map.get("grade", "n/a"))
+
+    # Overview answer
+    def _answer_and_tone() -> tuple[str, Tone]:
+        if ctx.metrics_available and health_score_known:
+            ans = (
+                f"Health {health_score:.0f}/100 ({health_grade}); "
+                f"{ctx.clone_groups_total} clone groups; "
+                f"{dead_total} dead-code items ({dead_suppressed} suppressed); "
+                f"{dependency_cycle_count} dependency cycles."
+            )
+            if health_score >= 80.0:
+                return ans, "ok"
+            if health_score >= 60.0:
+                return ans, "warn"
+            return ans, "risk"
+        if ctx.metrics_available:
+            ans = (
+                f"{ctx.clone_groups_total} clone groups; "
+                f"{dead_total} dead-code items ({dead_suppressed} suppressed); "
+                f"{dependency_cycle_count} dependency cycles."
+            )
+            return ans, "info"
+        return (
+            f"{ctx.clone_groups_total} clone groups; metrics were skipped for this run.",
+            "info",
+        )
+
+    overview_answer, overview_tone = _answer_and_tone()
+
+    # -- MetricsDiff deltas --
+    md = ctx.metrics_diff
+    _new_complexity = len(md.new_high_risk_functions) if md else None
+    _new_coupling = len(md.new_high_coupling_classes) if md else None
+    _new_dead = len(md.new_dead_code) if md else None
+    _new_cycles = len(md.new_cycles) if md else None
+    _health_delta = md.health_delta if md else None
+    structural_count = len(ctx.structural_findings)
+    structural_kind_count = len({g.finding_kind for g in ctx.structural_findings})
+    clone_suggestion_count = sum(
+        1 for suggestion in ctx.suggestions if suggestion.finding_family == "clones"
+    )
+    structural_suggestion_count = sum(
+        1 for suggestion in ctx.suggestions if suggestion.finding_family == "structural"
+    )
+    metrics_suggestion_count = sum(
+        1 for suggestion in ctx.suggestions if suggestion.finding_family == "metrics"
+    )
+
+    # Clone group novelty — show delta only when baseline comparison is active.
+    # MetricsDiff presence is the reliable indicator of a loaded baseline.
+    _new_clones: int | None = None
+    if md is not None:
+        _new_clones = sum(
+            1 for gk, _ in ctx.func_sorted if gk in ctx.new_func_keys
+        ) + sum(1 for gk, _ in ctx.block_sorted if gk in ctx.new_block_keys)
+
+    def _mb(*pairs: tuple[str, object]) -> str:
+        """Render micro-badges: [label value] [label value] ..."""
+        return "".join(
+            f'<span class="kpi-micro">'
+            f'<span class="kpi-micro-val">{_escape_html(str(v))}</span>'
+            f'<span class="kpi-micro-lbl">{_escape_html(label)}</span></span>'
+            for label, v in pairs
+            if v is not None and str(v) != "n/a"
+        )
+
+    _baseline_ok = (
+        '<span class="kpi-micro kpi-micro--baselined">\u2713 baselined</span>'
+    )
+
+    def _baselined_detail(
+        total: int,
+        delta: int | None,
+        detail: str,
+    ) -> tuple[str, str]:
+        """Return (detail_html, value_tone) accounting for baseline state.
+
+        When baseline is loaded and all items are accepted debt, tone
+        becomes 'muted' and a '✓ baselined' pill is appended.
+        When baseline is loaded but new regressions exist, the accepted
+        count is shown alongside the existing detail.
+        """
+        if delta is None or total == 0:
+            return detail, "good" if total == 0 else "bad"
+        if delta == 0:
+            return detail + _baseline_ok, "muted"
+        baselined = total - delta
+        extra = ""
+        if baselined > 0:
+            extra = _mb(("baselined", baselined))
+        return detail + extra, "bad"
+
+    # KPI cards — compute detail + tone with baseline awareness
+    _clone_detail, _clone_tone = _baselined_detail(
+        ctx.clone_groups_total,
+        _new_clones,
+        _mb(
+            ("func", len(ctx.func_sorted)),
+            ("block", len(ctx.block_sorted)),
+            ("seg", len(ctx.segment_sorted)),
+        ),
+    )
+    _cx_detail, _cx_tone = _baselined_detail(
+        complexity_high_risk,
+        _new_complexity,
+        _mb(
+            ("avg", complexity_summary.get("average", "n/a")),
+            ("max", complexity_summary.get("max", "n/a")),
+        ),
+    )
+    _cp_detail, _cp_tone = _baselined_detail(
+        coupling_high_risk,
+        _new_coupling,
+        _mb(
+            ("avg", coupling_summary.get("average", "n/a")),
+            ("max", coupling_summary.get("max", "n/a")),
+        ),
+    )
+    _cy_detail, _cy_tone = _baselined_detail(
+        dependency_cycle_count,
+        _new_cycles,
+        _mb(("depth", dependency_max_depth)),
+    )
+    _dc_detail, _dc_tone = _baselined_detail(
+        dead_total,
+        _new_dead,
+        _mb(("high-conf", dead_high_conf)),
+    )
+
+    kpis = [
+        _stat_card(
+            "Clone Groups",
+            ctx.clone_groups_total,
+            detail=_clone_detail,
+            tip="Detected code clone groups by detection level",
+            delta_new=_new_clones,
+            value_tone=_clone_tone,
+        ),
+        _stat_card(
+            "High Complexity",
+            complexity_high_risk,
+            detail=_cx_detail,
+            tip="Functions with cyclomatic complexity above threshold",
+            value_tone=_cx_tone,
+            delta_new=_new_complexity,
+        ),
+        _stat_card(
+            "High Coupling",
+            coupling_high_risk,
+            detail=_cp_detail,
+            tip="Classes with high coupling between objects (CBO)",
+            value_tone=_cp_tone,
+            delta_new=_new_coupling,
+        ),
+        _stat_card(
+            "Low Cohesion",
+            cohesion_low,
+            detail=_mb(
+                ("avg", cohesion_summary.get("average", "n/a")),
+                ("max", cohesion_summary.get("max", "n/a")),
+            ),
+            tip="Classes with low internal cohesion (high LCOM4)",
+            value_tone="good" if cohesion_low == 0 else "warn",
+        ),
+        _stat_card(
+            "Dep. Cycles",
+            dependency_cycle_count,
+            detail=_cy_detail,
+            tip="Circular dependencies between project modules",
+            value_tone=_cy_tone,
+            delta_new=_new_cycles,
+        ),
+        _stat_card(
+            "Dead Code",
+            dead_total,
+            detail=_dc_detail,
+            tip="Potentially unused functions, classes, or imports",
+            value_tone=_dc_tone,
+            delta_new=_new_dead,
+        ),
+        _stat_card(
+            "Findings",
+            structural_count,
+            detail=_mb(("kinds", structural_kind_count)),
+            tip="Active structural findings reported in production code",
+            value_tone="good" if structural_count == 0 else "warn",
+        ),
+        _stat_card(
+            "Suggestions",
+            len(ctx.suggestions),
+            detail=_mb(
+                ("clone", clone_suggestion_count),
+                ("struct", structural_suggestion_count),
+                ("metric", metrics_suggestion_count),
+            ),
+            tip="Actionable recommendations derived from clones, findings, and metrics",
+            value_tone="good" if not ctx.suggestions else "warn",
+        ),
+    ]
+
+    # Build deltas map for issue breakdown baseline awareness
+    _issue_deltas: dict[str, int | None] = {
+        "clones": _new_clones,
+        "complexity": _new_complexity,
+        "coupling": _new_coupling,
+        "dead_code": _new_dead,
+        "dep_cycles": _new_cycles,
+        # No baseline tracking for these families
+        "structural": None,
+        "cohesion": None,
+    }
+
+    # Executive summary: issue breakdown (sorted) + source breakdown
+    executive = (
+        '<section class="overview-cluster">'
+        + overview_cluster_header(
+            "Executive Summary",
+            "Project-wide context derived from the full scanned root.",
+        )
+        + '<div class="overview-summary-grid overview-summary-grid--2col">'
+        + overview_summary_item_html(
+            label="Issue breakdown",
+            body_html=_issue_breakdown_html(ctx, deltas=_issue_deltas),
+        )
+        + overview_summary_item_html(
+            label="Source breakdown",
+            body_html=overview_source_breakdown_html(
+                _as_mapping(ctx.overview_data.get("source_breakdown"))
+            ),
+        )
+        + "</div></section>"
+    )
+
+    health_gauge = _health_gauge_html(
+        health_score, health_grade, health_delta=_health_delta
+    )
+
+    return (
+        insight_block(
+            question="What is the current code-health snapshot?",
+            answer=overview_answer,
+            tone=overview_tone,
+        )
+        + '<div class="overview-kpi-grid overview-kpi-grid--with-health">'
+        + health_gauge
+        + '<div class="overview-kpi-cards">'
+        + "".join(kpis)
+        + "</div>"
+        + "</div>"
+        + executive
+        + _analytics_section(ctx)
+    )
+
+
+def _analytics_section(ctx: ReportContext) -> str:
+    """Build the Analytics cluster with full-width radar chart."""
+    raw_dims = _as_mapping(ctx.health_map.get("dimensions"))
+    dimensions = {str(k): _as_int(v) for k, v in raw_dims.items()} if raw_dims else {}
+    if not dimensions:
+        return ""
+
+    radar_html = _health_radar_svg(dimensions)
+
+    return (
+        '<section class="overview-cluster">'
+        + overview_cluster_header(
+            "Health Profile",
+            "Dimension scores across all quality axes.",
+        )
+        + '<div class="overview-summary-grid">'
+        + overview_summary_item_html(label="Health profile", body_html=radar_html)
+        + "</div></section>"
+    )

@@ -1,47 +1,82 @@
 # CodeClone Docs
 
-This directory has two documentation layers.
+This site is built with MkDocs and published to
+[orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/).
 
-- [`docs/book/`](book/): **contract-first** documentation. This is the canonical source for **schemas**, **statuses**, *
-  *exit codes**, **trust model**, and **determinism guarantees**. Everything here is derived from code + locked tests.
-- [`docs/architecture.md`](architecture.md), [`docs/cfg.md`](cfg.md): **deep-dive narrative** docs (architecture and CFG
-  semantics). These may include rationale and design intent, but must not contradict the contract book.
+It has two documentation layers:
+
+- [Contracts Book](book/README.md): **contract-first** documentation. This is the canonical
+  source for **schemas**, **statuses**, **exit codes**, **trust model**, and
+  **determinism guarantees**. Everything here is derived from code + locked
+  tests.
+- [Architecture Narrative](architecture.md), [CFG Semantics](cfg.md):
+  **deep-dive narrative** docs (architecture and CFG semantics). These may
+  include rationale and design intent, but must not contradict the contract
+  book.
+
+The published site also exposes a live sample report generated from the current
+repository build:
+
+- [Examples / Sample Report](examples/report.md)
 
 ## Start Here
 
-- Contracts and guarantees: [`docs/book/00-intro.md`](book/00-intro.md)
-- Architecture map (components + ownership): [`docs/book/01-architecture-map.md`](book/01-architecture-map.md)
-- Terminology: [`docs/book/02-terminology.md`](book/02-terminology.md)
+- [Contracts and guarantees](book/00-intro.md)
+- [Architecture map (components + ownership)](book/01-architecture-map.md)
+- [Terminology](book/02-terminology.md)
 
 ## Core Contracts
 
-- Exit codes and failure policy: [`docs/book/03-contracts-exit-codes.md`](book/03-contracts-exit-codes.md)
-- Config and defaults: [`docs/book/04-config-and-defaults.md`](book/04-config-and-defaults.md)
-- Core pipeline and invariants: [`docs/book/05-core-pipeline.md`](book/05-core-pipeline.md)
-- Baseline contract (schema v1): [`docs/book/06-baseline.md`](book/06-baseline.md)
-- Cache contract (schema v1.3): [`docs/book/07-cache.md`](book/07-cache.md)
-- Report contract (schema v1.1): [`docs/book/08-report.md`](book/08-report.md)
+- [Exit codes and failure policy](book/03-contracts-exit-codes.md)
+- [Config and defaults](book/04-config-and-defaults.md)
+- [Core pipeline and invariants](book/05-core-pipeline.md)
+- [Baseline contract (schema v2.0)](book/06-baseline.md)
+- [Cache contract (schema v2.2)](book/07-cache.md)
+- [Report contract (schema v2.1)](book/08-report.md)
 
 ## Interfaces
 
-- CLI behavior, modes, and UX: [`docs/book/09-cli.md`](book/09-cli.md)
-- HTML report rendering contract: [`docs/book/10-html-render.md`](book/10-html-render.md)
+- [CLI behavior, modes, and UX](book/09-cli.md)
+- [HTML report rendering contract](book/10-html-render.md)
 
 ## System Properties
 
-- Security model and threat boundaries: [`docs/book/11-security-model.md`](book/11-security-model.md)
-- Determinism policy: [`docs/book/12-determinism.md`](book/12-determinism.md)
-- Tests as specification: [`docs/book/13-testing-as-spec.md`](book/13-testing-as-spec.md)
-- Compatibility and versioning rules: [
-  `docs/book/14-compatibility-and-versioning.md`](book/14-compatibility-and-versioning.md)
+- [Security model and threat boundaries](book/11-security-model.md)
+- [Determinism policy](book/12-determinism.md)
+- [Tests as specification](book/13-testing-as-spec.md)
+- [Compatibility and versioning rules](book/14-compatibility-and-versioning.md)
+
+## Quality Contracts
+
+- [Metrics mode and quality gates](book/15-metrics-and-quality-gates.md)
+- [Dead-code contract and test-boundary policy](book/16-dead-code-contract.md)
+- [Suggestions and clone typing contract](book/17-suggestions-and-clone-typing.md)
+- [Reproducible Docker benchmarking](book/18-benchmarking.md)
+- [Inline suppressions contract](book/19-inline-suppressions.md)
 
 ## Deep Dives
 
-- Architecture narrative: [`docs/architecture.md`](architecture.md)
-- CFG design and semantics: [`docs/cfg.md`](cfg.md)
+- [Architecture narrative](architecture.md)
+- [CFG design and semantics](cfg.md)
+- [SARIF integration for IDE/code-scanning use](sarif.md)
+- [Docs publishing and Pages workflow](publishing.md)
 
 ## Reference Appendices
 
-- Status enums and typed contracts: [`docs/book/appendix/a-status-enums.md`](book/appendix/a-status-enums.md)
-- Schema layouts (baseline/cache/report): [`docs/book/appendix/b-schema-layouts.md`](book/appendix/b-schema-layouts.md)
-- Error catalog (contract vs internal): [`docs/book/appendix/c-error-catalog.md`](book/appendix/c-error-catalog.md)
+- [Status enums and typed contracts](book/appendix/a-status-enums.md)
+- [Schema layouts (baseline/cache/report)](book/appendix/b-schema-layouts.md)
+- [Error catalog (contract vs internal)](book/appendix/c-error-catalog.md)
+
+## Local Preview
+
+Build the docs site with MkDocs, then generate the sample report into the built
+site:
+
+```bash
+uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
+```
+
+GitHub Pages publishing is handled by
+[`docs.yml`](https://github.com/orenlab/codeclone/blob/main/.github/workflows/docs.yml)
+via a custom Actions workflow.

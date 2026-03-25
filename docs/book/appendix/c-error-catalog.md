@@ -62,10 +62,10 @@ Refs:
 
 ## Report write errors
 
-| Condition                   | Behavior              |
-|-----------------------------|-----------------------|
-| Baseline write OSError      | contract error exit 2 |
-| HTML/JSON/TXT write OSError | contract error exit 2 |
+| Condition                                  | Behavior              |
+|--------------------------------------------|-----------------------|
+| Baseline write OSError                     | contract error exit 2 |
+| HTML/JSON/Markdown/SARIF/TXT write OSError | contract error exit 2 |
 
 Refs:
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define cache schema v1.3, integrity verification, and fail-open behavior.
+Define cache schema v2.2, integrity verification, and fail-open behavior.
 
 ## Public surface
 
@@ -13,19 +13,34 @@ Define cache schema v1.3, integrity verification, and fail-open behavior.
 
 ## Data model
 
-On-disk schema (`v == "1.3"`):
+On-disk schema (`v == "2.2"`):
 
 - Top-level: `v`, `payload`, `sig`
-- `payload` keys: `py`, `fp`, `ap`, `files`
-- `ap` (`analysis_profile`) keys: `min_loc`, `min_stmt`
+- `payload` keys: `py`, `fp`, `ap`, `files`, optional `sr`
+- `ap` (`analysis_profile`) keys:
+    - `min_loc`, `min_stmt`
+    - `block_min_loc`, `block_min_stmt`
+    - `segment_min_loc`, `segment_min_stmt`
 - `files` map stores compact per-file entries:
     - `st`: `[mtime_ns, size]`
-    - optional `u` (units), `b` (blocks), `s` (segments)
+    - `ss`: `[lines, functions, methods, classes]` (source stats snapshot)
+    - `u` (function units): compact row layout with structural facts:
+      `[qualname,start,end,loc,stmt_count,fingerprint,loc_bucket,cc,nesting,risk,raw_hash,entry_guard_count,entry_guard_terminal_profile,entry_guard_has_side_effect_before,terminal_kind,try_finally_profile,side_effect_order_profile]`
+    - optional analysis sections (`b`/`s` and metrics-related sections)
+    - `rn`: referenced local names (non-test files only)
+    - `rq`: referenced canonical qualnames (non-test files only)
 - file keys are wire relpaths when `root` is configured
+- optional `sr` (`segment report projection`) stores precomputed segment-report
+  merge/suppression output:
+    - `d`: digest of raw segment groups
+    - `s`: suppressed segment groups count
+    - `g`: grouped merged segment items (wire rows)
+- per-file `dc` (`dead_candidates`) rows do not repeat filepath; path is implied by
+  the containing file entry
 
 Refs:
 
-- `codeclone/cache.py:Cache._parse_cache_document`
+- `codeclone/cache.py:Cache.load`
 - `codeclone/cache.py:_encode_wire_file_entry`
 - `codeclone/cache.py:_decode_wire_file_entry`
 
@@ -33,11 +48,15 @@ Refs:
 
 - Cache is optimization-only; invalid cache never blocks analysis.
 - Any cache trust failure triggers warning + empty cache fallback.
+- Cached file entry without valid `ss` (`source_stats`) is treated as cache-miss for
+  processing counters and reprocessed.
 - Cache compatibility gates:
     - version `v == CACHE_VERSION`
     - `payload.py == current_python_tag()`
     - `payload.fp == BASELINE_FINGERPRINT_VERSION`
-    - `payload.ap == {"min_loc": <runtime>, "min_stmt": <runtime>}`
+    - `payload.ap` matches the current six-threshold analysis profile
+      (`min_loc`, `min_stmt`, `block_min_loc`, `block_min_stmt`,
+      `segment_min_loc`, `segment_min_stmt`)
     - `sig` equals deterministic hash of canonical payload
 
 Refs:
@@ -50,12 +69,16 @@ Refs:
 
 - Cache save writes canonical JSON and atomically replaces target file.
 - Empty sections (`u`, `b`, `s`) are omitted from written wire entries.
+- `rn`/`rq` are serialized as sorted unique arrays and omitted when empty.
+- `ss` is written when source stats are available and is required for full cache-hit
+  accounting in discovery stage.
 - Legacy secret file `.cache_secret` is never used for trust; warning only.
 
 Refs:
 
 - `codeclone/cache.py:Cache.save`
 - `codeclone/cache.py:_encode_wire_file_entry`
+- `codeclone/pipeline.py:discover`
 - `codeclone/cache.py:LEGACY_CACHE_SECRET_FILENAME`
 
 ## Failure modes
@@ -84,6 +107,12 @@ Refs:
 
 - Cache signatures are computed over canonical JSON payload.
 - Wire file paths and row arrays are sorted before write.
+- `rn`/`rq` are deterministically normalized to sorted unique arrays.
+- Current schema decodes only the canonical row shapes that current runtime writes;
+  for `u` rows, decoder accepts legacy 11-column layout and canonical 17-column
+  layout (missing structural columns default to neutral values).
+- `sr` is additive and optional; invalid/missing projection never invalidates the
+  cache and simply falls back to runtime recomputation.
 
 Refs:
 
@@ -100,6 +129,7 @@ Refs:
 - `tests/test_cache.py::test_cache_too_large_warns`
 - `tests/test_cli_inprocess.py::test_cli_reports_cache_too_large_respects_max_size_flag`
 - `tests/test_cli_inprocess.py::test_cli_cache_analysis_profile_compatibility`
+- `tests/test_pipeline_metrics.py::test_load_cached_metrics_ignores_referenced_names_from_test_files`
 
 ## Non-guarantees
 

@@ -6,9 +6,10 @@ import pytest
 from codeclone.cfg import CFG, CFGBuilder
 from codeclone.cfg_model import CFG as CFGModel
 from codeclone.cfg_model import Block
-from codeclone.extractor import get_cfg_fingerprint
+from codeclone.extractor import _cfg_fingerprint_and_complexity
 from codeclone.meta_markers import CFG_META_PREFIX
 from codeclone.normalize import NormalizationConfig
+from tests._ast_helpers import fix_missing_single_function
 
 
 def build_cfg_from_source(source: str) -> CFG:
@@ -65,7 +66,7 @@ def _cfg_fingerprint(
 ) -> str:
     func = _parse_function(source, skip_reason=skip_reason)
     cfg = NormalizationConfig()
-    return get_cfg_fingerprint(func, cfg, qualname)
+    return _cfg_fingerprint_and_complexity(func, cfg, qualname)[0]
 
 
 def _assert_fingerprint_diff(
@@ -84,6 +85,22 @@ def _single_return_block(cfg: CFG) -> Block:
     ]
     assert len(return_blocks) == 1
     return return_blocks[0]
+
+
+def _handler_predecessors_from_source(source: str) -> list[Block]:
+    cfg = build_cfg_from_source(source)
+    handler_blocks = [
+        block
+        for block in cfg.blocks
+        if any(
+            (meta := _const_meta_value(stmt)) is not None
+            and meta.startswith(f"{CFG_META_PREFIX}TRY_HANDLER_TYPE:")
+            for stmt in block.statements
+        )
+    ]
+    assert len(handler_blocks) == 1
+    handler_block = handler_blocks[0]
+    return [block for block in cfg.blocks if handler_block in block.successors]
 
 
 def test_cfg_if_else() -> None:
@@ -498,24 +515,7 @@ def test_cfg_try_handler_linking_skips_safe_statements() -> None:
         except ValueError:
             pass
     """
-    func = ast.parse(dedent(code)).body[0]
-    assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
-    cfg = CFGBuilder().build("f", func)
-
-    handler_blocks = [
-        b
-        for b in cfg.blocks
-        if any(
-            (meta := _const_meta_value(s)) is not None
-            and meta.startswith(f"{CFG_META_PREFIX}TRY_HANDLER_TYPE:")
-            for s in b.statements
-        )
-    ]
-
-    assert len(handler_blocks) == 1
-    handler_block = handler_blocks[0]
-
-    predecessors = [b for b in cfg.blocks if handler_block in b.successors]
+    predecessors = _handler_predecessors_from_source(code)
 
     has_assign_only = any(
         any(isinstance(stmt, ast.Assign) for stmt in pred.statements)
@@ -551,23 +551,7 @@ def test_cfg_try_handler_linking_for_raise() -> None:
         except ValueError:
             pass
     """
-    func = ast.parse(dedent(code)).body[0]
-    assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
-    cfg = CFGBuilder().build("f", func)
-
-    handler_blocks = [
-        b
-        for b in cfg.blocks
-        if any(
-            (meta := _const_meta_value(s)) is not None
-            and meta.startswith(f"{CFG_META_PREFIX}TRY_HANDLER_TYPE:")
-            for s in b.statements
-        )
-    ]
-    assert len(handler_blocks) == 1
-    handler_block = handler_blocks[0]
-
-    predecessors = [b for b in cfg.blocks if handler_block in b.successors]
+    predecessors = _handler_predecessors_from_source(code)
     assert any(
         any(isinstance(stmt, ast.Raise) for stmt in pred.statements)
         for pred in predecessors
@@ -844,9 +828,6 @@ def test_cfg_match_with_empty_cases_ast() -> None:
         body=[match_stmt],
         decorator_list=[],
     )
-    module = ast.Module(body=[fn], type_ignores=[])
-    module = ast.fix_missing_locations(module)
-    func = module.body[0]
-    assert isinstance(func, ast.FunctionDef)
+    func = fix_missing_single_function(fn)
     cfg = CFGBuilder().build("f", func)
     assert len(cfg.blocks) >= 3

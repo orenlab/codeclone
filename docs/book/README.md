@@ -1,6 +1,6 @@
 # CodeClone Contracts Book
 
-This book is the contract-level documentation for CodeClone v1.x.
+This book is the contract-level documentation for CodeClone v2.x.
 
 All guarantees here are derived from code and locked tests.
 If a statement is not enforced by code/tests, it is explicitly marked as non-contractual.
@@ -37,6 +37,14 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 - [12-determinism.md](12-determinism.md)
 - [13-testing-as-spec.md](13-testing-as-spec.md)
 - [14-compatibility-and-versioning.md](14-compatibility-and-versioning.md)
+
+### Quality and recommendations
+
+- [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
+- [16-dead-code-contract.md](16-dead-code-contract.md)
+- [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)
+- [18-benchmarking.md](18-benchmarking.md)
+- [19-inline-suppressions.md](19-inline-suppressions.md)
 
 ### Appendix
 

@@ -21,6 +21,13 @@ def _symlink_or_skip(
         pytest.skip("symlink creation is not available in this environment")
 
 
+def _configure_fake_tempdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    fake_temp = tmp_path / "fake_tmp"
+    fake_temp.mkdir()
+    monkeypatch.setattr(scanner, "_get_tempdir", lambda: fake_temp.resolve())
+    return fake_temp
+
+
 def test_iter_py_files_in_temp(tmp_path: Path) -> None:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
@@ -129,6 +136,98 @@ def test_iter_py_files_symlink_loop_does_not_traverse(tmp_path: Path) -> None:
     assert files.count(str(src)) == 1
 
 
+def test_scanner_internal_path_guards_and_symlink_resolve_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+
+    inside = root / "inside.py"
+    inside.write_text("x = 1\n", "utf-8")
+    assert scanner._is_under_root(inside, root) is True
+
+    excluded = root / "__pycache__" / "skip.py"
+    excluded.parent.mkdir()
+    excluded.write_text("x = 1\n", "utf-8")
+    assert (
+        scanner._is_included_python_file(
+            file_path=excluded,
+            excludes_set={"__pycache__"},
+            rootp=root,
+        )
+        is False
+    )
+
+    target = root / "target.py"
+    target.write_text("x = 1\n", "utf-8")
+    link = root / "link.py"
+    _symlink_or_skip(link, target)
+
+    original_resolve = Path.resolve
+
+    def _resolve_with_error(self: Path, *, strict: bool = False) -> Path:
+        if self == link:
+            raise OSError("resolve failed")
+        return original_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _resolve_with_error)
+    assert (
+        scanner._is_included_python_file(
+            file_path=link,
+            excludes_set=set(),
+            rootp=root,
+        )
+        is False
+    )
+
+
+def test_is_included_python_file_non_py_rejected(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    txt = root / "a.txt"
+    txt.write_text("x", "utf-8")
+    assert (
+        scanner._is_included_python_file(
+            file_path=txt,
+            excludes_set=set(),
+            rootp=root,
+        )
+        is False
+    )
+
+
+def test_is_included_python_file_regular_py_accepted(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    pyf = root / "a.py"
+    pyf.write_text("x = 1\n", "utf-8")
+    assert (
+        scanner._is_included_python_file(
+            file_path=pyf,
+            excludes_set=set(),
+            rootp=root,
+        )
+        is True
+    )
+
+
+def test_iter_py_files_excluded_root_short_circuit(tmp_path: Path) -> None:
+    excluded_root = tmp_path / "__pycache__"
+    excluded_root.mkdir()
+    (excluded_root / "a.py").write_text("x = 1\n", "utf-8")
+    assert list(iter_py_files(str(excluded_root))) == []
+
+
+def test_iter_py_files_excluded_parent_dir_does_not_short_circuit(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "build" / "project"
+    root.mkdir(parents=True)
+    src = root / "a.py"
+    src.write_text("x = 1\n", "utf-8")
+    assert list(iter_py_files(str(root))) == [str(src)]
+
+
 def test_sensitive_prefix_blocked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -160,9 +259,7 @@ def test_sensitive_root_blocked(
 def test_sensitive_directory_blocked_via_dotdot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_temp = tmp_path / "fake_tmp"
-    fake_temp.mkdir()
-    monkeypatch.setattr(scanner, "_get_tempdir", lambda: fake_temp.resolve())
+    _configure_fake_tempdir(tmp_path, monkeypatch)
 
     base = tmp_path / "base"
     sensitive_root = tmp_path / "sensitive"
@@ -184,9 +281,7 @@ def test_sensitive_directory_blocked_via_dotdot(
 def test_symlink_to_sensitive_directory_skipped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_temp = tmp_path / "fake_tmp"
-    fake_temp.mkdir()
-    monkeypatch.setattr(scanner, "_get_tempdir", lambda: fake_temp.resolve())
+    _configure_fake_tempdir(tmp_path, monkeypatch)
 
     root = tmp_path / "root"
     sensitive_root = tmp_path / "sensitive_link_target"

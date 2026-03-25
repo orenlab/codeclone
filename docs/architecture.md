@@ -96,15 +96,17 @@ generators with strict hash confirmation.
 
 ## 7. Clone Detection
 
-Two clone types are detected:
+Clone groups are detected at three granularities:
 
-### Function clones (Type-2)
+### Function clone groups
 
-- Entire function CFGs are identical.
+- Grouped by `fingerprint|loc_bucket`.
+- Report typing is deterministic (`Type-1`..`Type-4`) in report layer.
 
-### Block clones (Type-3-lite)
+### Block clone groups
 
-- Repeated structural statement blocks inside larger functions.
+- Repeated structural statement windows across functions.
+- Report typing is `Type-4` with explainability facts from core.
 
 Noise filters applied:
 
@@ -115,7 +117,7 @@ Noise filters applied:
 
 ---
 
-### Segment clones (internal)
+### Segment clones (internal/report-only)
 
 - Detected only **inside the same function**.
 - Used for internal copy‑paste discovery and report explainability.
@@ -126,38 +128,40 @@ Noise filters applied:
 
 ---
 
+### Structural findings (report-only)
+
+- `duplicated_branches`: repeated branch-body signatures.
+- `clone_guard_exit_divergence`: guard/terminal divergence inside one function-clone cohort.
+- `clone_cohort_drift`: drift from majority terminal/guard/try/side-effect profile.
+
+These findings are rendered in reports only and do not change baseline diff or CI
+gating decisions.
+
+---
+
 ## 8. Reporting
 
-Detected clone groups can be:
+Detected findings can be rendered as:
 
-- printed as text,
-- exported as JSON,
-- rendered as an interactive HTML report.
+- interactive HTML (`--html`),
+- canonical JSON (`--json`, schema `2.1`),
+- deterministic text projection (`--text`),
+- deterministic Markdown projection (`--md`),
+- deterministic SARIF projection (`--sarif`).
 
-All report formats include provenance metadata:
+Reporting uses a layered model:
 
-- `report_schema_version`
-- `codeclone_version`
-- `python_version` (runtime major.minor, human-readable)
-- `python_tag` (runtime compatibility tag used by baseline/cache contracts)
-- `baseline_path`
-- `baseline_fingerprint_version`
-- `baseline_schema_version`
-- `baseline_python_tag`
-- `baseline_generator_name`
-- `baseline_generator_version`
-- `baseline_payload_sha256`
-- `baseline_payload_sha256_verified`
-- `baseline_loaded`
-- `baseline_status`
-  (
-  `ok | missing | too_large | invalid_json | invalid_type | missing_fields | mismatch_schema_version | mismatch_fingerprint_version | mismatch_python_version | generator_mismatch | integrity_missing | integrity_failed`;
-  `mismatch_python_version` is the status name used for `python_tag` mismatch)
-- `cache_path`
-- `cache_schema_version`
-- `cache_status`
-- `cache_used`
-- `files_skipped_source_io`
+- canonical sections: `report_schema_version`, `meta`, `inventory`, `findings`, `metrics`
+- non-canonical view layer: `derived`
+- integrity metadata: `integrity` (`canonicalization` + `digest`)
+
+Provenance is carried through `meta` and includes:
+
+- runtime/context (`codeclone_version`, `python_version`, `python_tag`, `analysis_mode`, `report_mode`)
+- baseline status block (`meta.baseline.*`)
+- cache status block (`meta.cache.*`)
+- metrics-baseline status block (`meta.metrics_baseline.*`)
+- generation timestamp (`meta.runtime.report_generated_at_utc`)
 
 Explainability contract (v1):
 
@@ -172,7 +176,8 @@ Explainability contract (v1):
 Baseline comparison allows CI to fail **only on new clones**,
 enabling gradual architectural improvement.
 
-Baseline files use a stable v1 contract. Compatibility is checked by
+Baseline files use a stable v2 contract (schema `2.0`, with compatibility
+support for major `1` legacy schema checks where applicable). Compatibility is checked by
 `schema_version`, `fingerprint_version`, `python_tag`, and `generator.name`,
 not package patch/minor version.
 Regeneration is typically required when `fingerprint_version` or `python_tag` changes.
@@ -229,5 +234,5 @@ patch updates within the same interpreter tag.
 
 ## Summary
 
-CodeClone is an **architectural duplication radar**,
-not a static analyzer or linter.
+CodeClone provides **structural code quality analysis** for Python —
+clone detection, quality metrics, and baseline-aware CI governance.
