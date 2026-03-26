@@ -746,6 +746,54 @@ def test_html_report_topbar_actions_present() -> None:
     assert 'id="help-modal"' not in html
 
 
+def test_html_report_mobile_topbar_reflows_brand_block() -> None:
+    html = build_html_report(func_groups={}, block_groups={}, segment_groups={})
+    _assert_html_contains(
+        html,
+        "@media(max-width:768px){",
+        ".topbar{position:static}",
+        ".topbar-inner{height:auto;padding:var(--sp-3);flex-direction:column;align-items:stretch;gap:var(--sp-2)}",
+        ".brand h1{font-size:1rem}",
+        ".topbar-actions{width:100%;justify-content:flex-start}",
+        ".main-tabs-wrap{top:0}",
+    )
+
+
+def test_html_report_narrow_kpi_cards_keep_badges_inside_card() -> None:
+    html = build_html_report(func_groups={}, block_groups={}, segment_groups={})
+    _assert_html_contains(
+        html,
+        "@media(max-width:520px){",
+        (
+            ".overview-kpi-cards .meta-item{grid-template-rows:auto auto auto;"
+            "align-content:start;"
+        ),
+        ".overview-kpi-cards .kpi-detail{align-self:start}",
+        (
+            ".overview-kpi-cards .kpi-micro{max-width:100%;white-space:normal;"
+            "overflow-wrap:anywhere}"
+        ),
+    )
+
+
+def test_html_report_table_css_matches_rendered_column_classes() -> None:
+    html = build_html_report(func_groups={}, block_groups={}, segment_groups={})
+    _assert_html_contains(
+        html,
+        ".table-wrap{display:block;inline-size:100%;max-inline-size:100%;min-inline-size:0;overflow-x:auto;",
+        ".table{inline-size:max-content;min-inline-size:100%;border-collapse:collapse;",
+        (
+            ".table .col-file,.table .col-path{color:var(--text-muted);"
+            "max-width:240px;overflow:hidden;"
+        ),
+        (
+            ".table .col-number,.table .col-num{font-variant-numeric:"
+            "tabular-nums;text-align:right;white-space:nowrap}"
+        ),
+        ".table .col-risk,.table .col-badge,.table .col-cat{white-space:nowrap}",
+    )
+
+
 def test_html_report_footer_links_present() -> None:
     html = build_html_report(func_groups={}, block_groups={}, segment_groups={})
     assert f'href="{REPOSITORY_URL}"' in html
@@ -807,6 +855,31 @@ def test_html_report_includes_provenance_metadata(
     assert "Generated at 2026-03-10T12:00:00Z" in html
     assert "generated 2026-03-10T12:00:00Z" not in html
     assert "deterministic render" not in html
+
+
+def test_html_report_provenance_summary_uses_card_like_badges(
+    report_meta_factory: Callable[..., dict[str, object]],
+) -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta=report_meta_factory(
+            baseline_schema_version=2,
+            baseline_fingerprint_version=1,
+        ),
+    )
+    _assert_html_contains(
+        html,
+        'class="prov-badge prov-badge--green"',
+        'class="prov-badge prov-badge--neutral"',
+        '<span class="prov-badge-val">verified</span>',
+        '<span class="prov-badge-lbl">Baseline</span>',
+        '<span class="prov-badge-val">2.1</span>',
+        '<span class="prov-badge-lbl">Schema</span>',
+        '<span class="prov-badge-val">1</span>',
+        '<span class="prov-badge-lbl">Fingerprint</span>',
+    )
 
 
 def test_html_report_escapes_meta_and_title(
@@ -1712,10 +1785,17 @@ def test_html_report_provenance_badges_cover_mismatch_and_untrusted_metrics() ->
             "baseline_fingerprint_version": "1",
         },
     )
-    assert "Baseline missing" in html
-    assert "Generator mismatch: other-generator" in html
-    assert "Metrics baseline untrusted" in html
-    assert "Cache N/A" in html
+    _assert_html_contains(
+        html,
+        '<span class="prov-badge-val">missing</span>',
+        '<span class="prov-badge-lbl">Baseline</span>',
+        '<span class="prov-badge-val">other-generator</span>',
+        '<span class="prov-badge-lbl">Generator mismatch</span>',
+        '<span class="prov-badge-val">untrusted</span>',
+        '<span class="prov-badge-lbl">Metrics baseline</span>',
+        '<span class="prov-badge-val">N/A</span>',
+        '<span class="prov-badge-lbl">Cache</span>',
+    )
 
 
 def test_html_report_provenance_handles_non_boolean_baseline_loaded() -> None:
@@ -1729,8 +1809,12 @@ def test_html_report_provenance_handles_non_boolean_baseline_loaded() -> None:
             "report_schema_version": "2.0",
         },
     )
-    assert "Schema 2.0" in html
-    assert "Baseline missing" not in html
+    _assert_html_contains(
+        html,
+        '<span class="prov-badge-val">2.0</span>',
+        '<span class="prov-badge-lbl">Schema</span>',
+    )
+    assert '<span class="prov-badge-lbl">Baseline</span>' not in html
 
 
 def test_html_report_dependency_hubs_deterministic_tie_order() -> None:
