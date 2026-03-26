@@ -491,7 +491,7 @@ def test_report_sarif_uses_representative_and_related_locations() -> None:
     }
     sarif_payload = json.loads(
         to_sarif_report(
-            meta={"codeclone_version": "2.0.0b1", "scan_root": "/repo"},
+            meta={"codeclone_version": "2.0.0b2", "scan_root": "/repo"},
             func_groups=groups,
             block_groups={},
             segment_groups={},

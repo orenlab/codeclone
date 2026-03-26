@@ -2,6 +2,13 @@
 
 ## [2.0.0b1]
 
+Fixed:
+
+- Upgrade requests to 2.33.0 for extract_zipped_paths security fix (CVE-2026-25645)
+
+
+## [2.0.0b1] - 20260325
+
 Major upgrade: CodeClone evolves from a structural clone detector into a
 **baseline-aware code-health and CI governance tool** for Python.
 
