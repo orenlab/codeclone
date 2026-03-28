@@ -288,7 +288,12 @@ _INSIGHT = """\
 
 _TABLES = """\
 .table-wrap{display:block;inline-size:100%;max-inline-size:100%;min-inline-size:0;overflow-x:auto;
-  overflow-y:hidden;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:var(--sp-4)}
+  overflow-y:hidden;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:var(--sp-4);
+  background:
+    linear-gradient(to right,var(--bg-surface) 30%,transparent) left center / 40px 100% no-repeat local,
+    linear-gradient(to left,var(--bg-surface) 30%,transparent) right center / 40px 100% no-repeat local,
+    linear-gradient(to right,rgba(0,0,0,.15),transparent) left center / 14px 100% no-repeat scroll,
+    linear-gradient(to left,rgba(0,0,0,.15),transparent) right center / 14px 100% no-repeat scroll}
 .table{inline-size:max-content;min-inline-size:100%;border-collapse:collapse;font-size:.82rem;
   font-family:var(--font-mono)}
 .table th{position:sticky;top:0;z-index:2;padding:var(--sp-2) var(--sp-3);text-align:left;font-family:var(--font-sans);
@@ -521,7 +526,7 @@ _OVERVIEW = """\
   background:var(--bg-alt)}
 
 /* Badge modal */
-.badge-modal{max-width:540px;width:90vw;max-height:85vh}
+.badge-modal{max-width:680px;width:92vw;max-height:85vh}
 .badge-modal .modal-head{display:flex;align-items:center;justify-content:space-between;
   padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--border)}
 .badge-modal .modal-head h2{font-size:1rem;font-weight:700;margin:0}
@@ -1051,15 +1056,34 @@ _UTILITY = """\
   .overview-row-spread{margin-left:0;width:100%}
   .suggestion-head{flex-direction:column;align-items:flex-start}
   .suggestion-facts{grid-template-columns:1fr}
+  .sf-head{flex-direction:column;align-items:flex-start}
+  .sf-meta{width:100%}
   .container{padding:0 var(--sp-3)}
   .topbar{position:static}
-  .topbar-inner{height:auto;padding:var(--sp-3);flex-direction:column;align-items:stretch;gap:var(--sp-2)}
-  .brand{align-items:flex-start}
-  .brand h1{font-size:1rem}
-  .brand-meta{font-size:.72rem;line-height:1.4}
-  .topbar-actions{width:100%;justify-content:flex-start}
-  .main-tabs-wrap{top:0}
-  .main-tabs{padding:0 var(--sp-3)}
+  .topbar-inner{height:auto;padding:var(--sp-2) var(--sp-3);flex-direction:row;
+    align-items:center;gap:var(--sp-2)}
+  .brand{flex:1;min-width:0;align-items:center;gap:var(--sp-2)}
+  .brand-logo{width:24px;height:24px}
+  .brand-text{gap:0}
+  .brand h1{font-size:.85rem;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .brand-project-name{font-size:.78em;padding:0 3px}
+  .brand-meta{display:none}
+  .topbar-actions{flex-shrink:0;gap:var(--sp-1)}
+  .topbar-actions .btn-prov{font-size:0;gap:0;width:32px;height:32px;
+    padding:0;align-items:center;justify-content:center}
+  .topbar-actions .btn-prov .prov-dot{width:10px;height:10px}
+  .theme-toggle{font-size:0;gap:0;width:32px;height:32px;
+    padding:0;align-items:center;justify-content:center}
+  .theme-toggle svg{width:16px;height:16px}
+  .main-tabs-wrap{position:sticky;top:0;z-index:90;padding:var(--sp-2) 0 0}
+  .main-tabs{padding:var(--sp-1);gap:2px;
+    background:
+      linear-gradient(to right,var(--bg-surface) 30%,transparent) left center / 28px 100% no-repeat local,
+      linear-gradient(to left,var(--bg-surface) 30%,transparent) right center / 28px 100% no-repeat local,
+      linear-gradient(to right,rgba(0,0,0,.12),transparent) left center / 10px 100% no-repeat scroll,
+      linear-gradient(to left,rgba(0,0,0,.12),transparent) right center / 10px 100% no-repeat scroll,
+      var(--bg-surface)}
+  .main-tab{flex:none;padding:var(--sp-1) var(--sp-2);font-size:.78rem}
 }
 @media(max-width:480px){
   .overview-kpi-grid{grid-template-columns:1fr}

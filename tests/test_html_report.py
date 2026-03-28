@@ -752,10 +752,10 @@ def test_html_report_mobile_topbar_reflows_brand_block() -> None:
         html,
         "@media(max-width:768px){",
         ".topbar{position:static}",
-        ".topbar-inner{height:auto;padding:var(--sp-3);flex-direction:column;align-items:stretch;gap:var(--sp-2)}",
-        ".brand h1{font-size:1rem}",
-        ".topbar-actions{width:100%;justify-content:flex-start}",
-        ".main-tabs-wrap{top:0}",
+        ".topbar-inner{height:auto;",
+        ".brand-meta{display:none}",
+        ".main-tabs-wrap{position:sticky;top:0;",
+        ".main-tab{flex:none;",
     )
 
 

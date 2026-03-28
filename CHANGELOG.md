@@ -10,6 +10,7 @@
 
 - Fix page-level horizontal scrolling in wide table tabs by constraining overflow to local table wrappers (#14).
 - Fix mobile header brand block layout on narrow viewports (#15).
+- Make mobile navigation tabs sticky and horizontally scrollable with scroll-shadow affordance.
 - Keep Overview KPI micro-badges inside cards at extreme browser/mobile widths.
 - Restyle Report Provenance summary badges to match the card-style badge language used across the report.
 
