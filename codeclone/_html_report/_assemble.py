@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from .. import __version__, _coerce
 from .._html_css import build_css
-from .._html_escape import _escape_html
+from .._html_escape import _escape_attr, _escape_html
 from .._html_js import build_js
 from .._html_snippets import _FileCache, _pygments_css
 from ..contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
@@ -185,6 +185,22 @@ def build_html_report(
     else:
         prov_dot_cls = "dot-neutral"
 
+    # -- IDE picker menu --
+    ide_options = [
+        ("pycharm", "PyCharm"),
+        ("idea", "IntelliJ IDEA"),
+        ("vscode", "VS Code"),
+        ("cursor", "Cursor"),
+        ("fleet", "Fleet"),
+        ("zed", "Zed"),
+        ("", "None"),
+    ]
+    ide_menu_items = "".join(
+        f'<li><button type="button" data-ide="{ide_id}" role="menuitemradio" '
+        f'aria-checked="false">{label}</button></li>'
+        for ide_id, label in ide_options
+    )
+
     # -- Topbar --
     topbar_html = (
         '<header class="topbar"><div class="topbar-inner">'
@@ -195,6 +211,11 @@ def build_html_report(
         f'<div class="brand-meta">{ctx.brand_meta}</div>'
         "</div></div>"
         '<div class="topbar-actions">'
+        '<div class="ide-picker">'
+        '<button class="ide-picker-btn" type="button" aria-expanded="false" '
+        f'aria-haspopup="true" title="Open in IDE">{ICONS["ide"]}'
+        '<span class="ide-picker-label">IDE</span></button>'
+        f'<ul class="ide-menu" role="menu">{ide_menu_items}</ul></div>'
         f'<button class="btn btn-prov" type="button" data-prov-open>'
         f'<span class="prov-dot {prov_dot_cls}"></span>Report Provenance</button>'
         f'<button class="theme-toggle" type="button" title="Toggle theme">'
@@ -358,4 +379,5 @@ def build_html_report(
         css=css_html,
         js=js_html,
         body=body_html,
+        scan_root=_escape_attr(ctx.scan_root),
     )

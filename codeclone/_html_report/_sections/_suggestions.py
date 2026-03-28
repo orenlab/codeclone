@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from ... import _coerce
 from ..._html_badges import _tab_empty
 from ..._html_data_attrs import _build_data_attrs
-from ..._html_escape import _escape_html
+from ..._html_escape import _escape_attr, _escape_html
 from ..._html_filters import SPREAD_OPTIONS, _render_select
 from ...domain.findings import (
     CATEGORY_CLONE,
@@ -115,9 +115,10 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
     if s.representative_locations:
         locs_items = "".join(
             '<li><span class="suggestion-loc-path">'
+            f'<a class="ide-link" data-file="{_escape_attr(loc.filepath)}" data-line="{loc.start_line}">'
             f"{_escape_html(loc.relative_path)}"
             f'<span class="suggestion-loc-lines">:{loc.start_line}\u2013{loc.end_line}</span>'
-            "</span>"
+            "</a></span>"
             f'<span class="suggestion-loc-name">{_escape_html(ctx.bare_qualname(loc.qualname, loc.filepath))}</span>'
             "</li>"
             for loc in s.representative_locations

@@ -61,6 +61,8 @@ Key artifacts:
 - `.cache/codeclone/cache.json` — analysis cache (integrity-checked)
 - `.cache/codeclone/report.html|report.json|report.md|report.sarif|report.txt` — reports
 - `codeclone-mcp` — optional read-only MCP server (install via `codeclone[mcp]`)
+- MCP runs are in-memory only; review markers are session-local and must never
+  leak into baseline/cache/report artifacts
 - `docs/`, `mkdocs.yml`, `.github/workflows/docs.yml` — published documentation site and docs build pipeline
 
 ---
@@ -170,6 +172,7 @@ Reports come in:
 
 MCP is a separate optional interface, not a report format. It must remain a
 read-only agent layer over the same canonical report/baseline/cache contracts.
+Session review markers are allowed only as ephemeral MCP process state.
 
 ### Report invariants
 
@@ -179,6 +182,10 @@ read-only agent layer over the same canonical report/baseline/cache contracts.
     - baseline fingerprint + schema versions
     - baseline generator version
     - cache path / cache used
+- SARIF `partialFingerprints.primaryLocationLineHash` must remain stable across
+  line-only shifts for the same finding identity.
+- SARIF `automationDetails.id` must be unique per run; result `kind` should be
+  explicit when emitted.
 
 ### Explainability contract (core owns facts)
 
@@ -255,6 +262,13 @@ Agents must preserve these semantics:
   extension, etc.)
 - **3** — analysis gating failure (e.g., `--fail-threshold` exceeded or new clones in `--ci` as designed)
 - **5** — internal error (unexpected exception escaped top-level CLI handling)
+
+Changed-scope flags are contract-sensitive:
+
+- `--changed-only` keeps the canonical analysis/report full, but applies clone
+  summary/threshold evaluation to the changed-files projection.
+- `--diff-against` requires `--changed-only`.
+- `--paths-from-git-diff` implies `--changed-only`.
 
 If you introduce a new exit reason, document it and add tests.
 
@@ -349,7 +363,8 @@ Use this map to route changes to the right owner module.
 - `codeclone/report/*.py` (other modules) — deterministic projections/format transforms (
   text/markdown/sarif/derived/findings/suggestions); avoid injecting new analysis heuristics here.
 - `codeclone/mcp_service.py` — typed, in-process MCP service adapter over the current pipeline/report contracts; keep
-  it read-only and deterministic; do not move shell UX or `sys.exit` behavior here.
+  it deterministic; allow only session-local in-memory state such as reviewed markers, and never move shell UX or
+  `sys.exit` behavior here.
 - `codeclone/mcp_server.py` — optional MCP launcher/server wiring, transport config, and MCP tool/resource
   registration; keep dependency loading lazy so base installs/CI do not require MCP runtime packages.
 - `codeclone/html_report.py` — public HTML facade/re-export surface; preserve backward-compatible imports here; do not
@@ -453,6 +468,7 @@ Policy:
 - Canonical report JSON schema/payload semantics (`REPORT_SCHEMA_VERSION` contract family).
 - Documented report projections and their machine/user-facing semantics (HTML/Markdown/SARIF/Text).
 - Documented MCP launcher/install behavior, tool names, resource URIs, and read-only semantics.
+- Session-local MCP review state semantics (`mark_finding_reviewed`, `exclude_reviewed`) as documented public behavior.
 - Documented finding families/kinds/ids and suppression-facing report fields.
 - Metrics baseline schema/compatibility where used by CI/gating.
 - Benchmark schema/outputs if consumed as a reproducible contract surface.

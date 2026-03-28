@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import TYPE_CHECKING, Literal, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 from . import __version__
 from .contracts import DOCS_URL
@@ -35,7 +36,10 @@ class MCPDependencyError(RuntimeError):
     """Raised when the optional MCP runtime dependency is unavailable."""
 
 
-def _load_mcp_runtime() -> tuple[type[FastMCP], ToolAnnotations]:
+MCPCallable = TypeVar("MCPCallable", bound=Callable[..., object])
+
+
+def _load_mcp_runtime() -> tuple[type[FastMCP], ToolAnnotations, ToolAnnotations]:
     try:
         from mcp.server.fastmcp import FastMCP as runtime_fastmcp
         from mcp.types import ToolAnnotations as runtime_tool_annotations
@@ -45,6 +49,12 @@ def _load_mcp_runtime() -> tuple[type[FastMCP], ToolAnnotations]:
         cast("type[FastMCP]", runtime_fastmcp),
         runtime_tool_annotations(
             readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        runtime_tool_annotations(
+            readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=True,
             openWorldHint=False,
@@ -62,7 +72,7 @@ def build_mcp_server(
     debug: bool = False,
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO",
 ) -> FastMCP:
-    runtime_fastmcp, read_only_tool = _load_mcp_runtime()
+    runtime_fastmcp, read_only_tool, session_tool = _load_mcp_runtime()
     service = CodeCloneMCPService(history_limit=history_limit)
     mcp = runtime_fastmcp(
         name="CodeClone",
@@ -77,19 +87,36 @@ def build_mcp_server(
         dependencies=(f"codeclone=={__version__}",),
     )
 
-    @mcp.tool(
+    def tool(*args: Any, **kwargs: Any) -> Callable[[MCPCallable], MCPCallable]:
+        return cast(
+            "Callable[[MCPCallable], MCPCallable]",
+            mcp.tool(*args, **kwargs),
+        )
+
+    def resource(
+        *args: Any,
+        **kwargs: Any,
+    ) -> Callable[[MCPCallable], MCPCallable]:
+        return cast(
+            "Callable[[MCPCallable], MCPCallable]",
+            mcp.resource(*args, **kwargs),
+        )
+
+    @tool(
         title="Analyze Repository",
         description=(
             "Run a deterministic CodeClone analysis for a repository and register "
             "the result as the latest MCP run."
         ),
-        annotations=read_only_tool,
+        annotations=session_tool,
         structured_output=True,
     )
     def analyze_repository(
         root: str = ".",
         analysis_mode: str = "full",
         respect_pyproject: bool = True,
+        changed_paths: list[str] | None = None,
+        git_diff_ref: str | None = None,
         processes: int | None = None,
         min_loc: int | None = None,
         min_stmt: int | None = None,
@@ -97,6 +124,9 @@ def build_mcp_server(
         block_min_stmt: int | None = None,
         segment_min_loc: int | None = None,
         segment_min_stmt: int | None = None,
+        complexity_threshold: int | None = None,
+        coupling_threshold: int | None = None,
+        cohesion_threshold: int | None = None,
         baseline_path: str | None = None,
         metrics_baseline_path: str | None = None,
         max_baseline_size_mb: int | None = None,
@@ -109,6 +139,8 @@ def build_mcp_server(
                 root=root,
                 analysis_mode=analysis_mode,  # type: ignore[arg-type]
                 respect_pyproject=respect_pyproject,
+                changed_paths=tuple(changed_paths or ()),
+                git_diff_ref=git_diff_ref,
                 processes=processes,
                 min_loc=min_loc,
                 min_stmt=min_stmt,
@@ -116,6 +148,9 @@ def build_mcp_server(
                 block_min_stmt=block_min_stmt,
                 segment_min_loc=segment_min_loc,
                 segment_min_stmt=segment_min_stmt,
+                complexity_threshold=complexity_threshold,
+                coupling_threshold=coupling_threshold,
+                cohesion_threshold=cohesion_threshold,
                 baseline_path=baseline_path,
                 metrics_baseline_path=metrics_baseline_path,
                 max_baseline_size_mb=max_baseline_size_mb,
@@ -125,7 +160,65 @@ def build_mcp_server(
             )
         )
 
-    @mcp.tool(
+    @tool(
+        title="Analyze Changed Paths",
+        description=(
+            "Run a deterministic CodeClone analysis and return a changed-files "
+            "projection using explicit paths or a git diff ref."
+        ),
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def analyze_changed_paths(
+        root: str = ".",
+        changed_paths: list[str] | None = None,
+        git_diff_ref: str | None = None,
+        analysis_mode: str = "full",
+        respect_pyproject: bool = True,
+        processes: int | None = None,
+        min_loc: int | None = None,
+        min_stmt: int | None = None,
+        block_min_loc: int | None = None,
+        block_min_stmt: int | None = None,
+        segment_min_loc: int | None = None,
+        segment_min_stmt: int | None = None,
+        complexity_threshold: int | None = None,
+        coupling_threshold: int | None = None,
+        cohesion_threshold: int | None = None,
+        baseline_path: str | None = None,
+        metrics_baseline_path: str | None = None,
+        max_baseline_size_mb: int | None = None,
+        cache_policy: str = "reuse",
+        cache_path: str | None = None,
+        max_cache_size_mb: int | None = None,
+    ) -> dict[str, object]:
+        return service.analyze_changed_paths(
+            MCPAnalysisRequest(
+                root=root,
+                changed_paths=tuple(changed_paths or ()),
+                git_diff_ref=git_diff_ref,
+                analysis_mode=analysis_mode,  # type: ignore[arg-type]
+                respect_pyproject=respect_pyproject,
+                processes=processes,
+                min_loc=min_loc,
+                min_stmt=min_stmt,
+                block_min_loc=block_min_loc,
+                block_min_stmt=block_min_stmt,
+                segment_min_loc=segment_min_loc,
+                segment_min_stmt=segment_min_stmt,
+                complexity_threshold=complexity_threshold,
+                coupling_threshold=coupling_threshold,
+                cohesion_threshold=cohesion_threshold,
+                baseline_path=baseline_path,
+                metrics_baseline_path=metrics_baseline_path,
+                max_baseline_size_mb=max_baseline_size_mb,
+                cache_policy=cache_policy,  # type: ignore[arg-type]
+                cache_path=cache_path,
+                max_cache_size_mb=max_cache_size_mb,
+            )
+        )
+
+    @tool(
         title="Get Run Summary",
         description="Return the stored summary for the latest or specified MCP run.",
         annotations=read_only_tool,
@@ -134,13 +227,13 @@ def build_mcp_server(
     def get_run_summary(run_id: str | None = None) -> dict[str, object]:
         return service.get_run_summary(run_id)
 
-    @mcp.tool(
+    @tool(
         title="Evaluate Gates",
         description=(
             "Evaluate CodeClone gate conditions against an existing MCP run without "
             "modifying baselines or exiting the process."
         ),
-        annotations=read_only_tool,
+        annotations=session_tool,
         structured_output=True,
     )
     def evaluate_gates(
@@ -170,7 +263,7 @@ def build_mcp_server(
             )
         )
 
-    @mcp.tool(
+    @tool(
         title="Get Report Section",
         description=(
             "Return a canonical CodeClone report section for the latest or "
@@ -188,7 +281,7 @@ def build_mcp_server(
             section=section,  # type: ignore[arg-type]
         )
 
-    @mcp.tool(
+    @tool(
         title="List Findings",
         description=(
             "List canonical finding groups with deterministic ordering, optional "
@@ -200,23 +293,37 @@ def build_mcp_server(
     def list_findings(
         run_id: str | None = None,
         family: str = "all",
+        category: str | None = None,
         severity: str | None = None,
         source_kind: str | None = None,
         novelty: str = "all",
+        sort_by: str = "default",
+        detail_level: str = "normal",
+        changed_paths: list[str] | None = None,
+        git_diff_ref: str | None = None,
+        exclude_reviewed: bool = False,
         offset: int = 0,
         limit: int = 50,
+        max_results: int | None = None,
     ) -> dict[str, object]:
         return service.list_findings(
             run_id=run_id,
             family=family,  # type: ignore[arg-type]
+            category=category,
             severity=severity,
             source_kind=source_kind,
             novelty=novelty,  # type: ignore[arg-type]
+            sort_by=sort_by,  # type: ignore[arg-type]
+            detail_level=detail_level,  # type: ignore[arg-type]
+            changed_paths=tuple(changed_paths or ()),
+            git_diff_ref=git_diff_ref,
+            exclude_reviewed=exclude_reviewed,
             offset=offset,
             limit=limit,
+            max_results=max_results,
         )
 
-    @mcp.tool(
+    @tool(
         title="Get Finding",
         description="Return a single canonical finding group by id.",
         annotations=read_only_tool,
@@ -228,7 +335,24 @@ def build_mcp_server(
     ) -> dict[str, object]:
         return service.get_finding(finding_id=finding_id, run_id=run_id)
 
-    @mcp.tool(
+    @tool(
+        title="Get Remediation",
+        description="Return actionable remediation guidance for a single finding.",
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_remediation(
+        finding_id: str,
+        run_id: str | None = None,
+        detail_level: str = "full",
+    ) -> dict[str, object]:
+        return service.get_remediation(
+            finding_id=finding_id,
+            run_id=run_id,
+            detail_level=detail_level,  # type: ignore[arg-type]
+        )
+
+    @tool(
         title="List Hotspots",
         description=(
             "Return one of the derived CodeClone hotlists for the latest or "
@@ -240,15 +364,219 @@ def build_mcp_server(
     def list_hotspots(
         kind: str,
         run_id: str | None = None,
+        detail_level: str = "normal",
+        changed_paths: list[str] | None = None,
+        git_diff_ref: str | None = None,
+        exclude_reviewed: bool = False,
         limit: int = 10,
+        max_results: int | None = None,
     ) -> dict[str, object]:
         return service.list_hotspots(
             kind=kind,  # type: ignore[arg-type]
             run_id=run_id,
+            detail_level=detail_level,  # type: ignore[arg-type]
+            changed_paths=tuple(changed_paths or ()),
+            git_diff_ref=git_diff_ref,
+            exclude_reviewed=exclude_reviewed,
             limit=limit,
+            max_results=max_results,
         )
 
-    @mcp.resource(
+    @tool(
+        title="Compare Runs",
+        description=(
+            "Compare two registered CodeClone MCP runs by finding ids and health."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def compare_runs(
+        run_id_before: str,
+        run_id_after: str | None = None,
+        focus: str = "all",
+    ) -> dict[str, object]:
+        return service.compare_runs(
+            run_id_before=run_id_before,
+            run_id_after=run_id_after,
+            focus=focus,  # type: ignore[arg-type]
+        )
+
+    @tool(
+        title="Check Complexity",
+        description=(
+            "Return complexity hotspots for a path or repository. If no run "
+            "exists yet, this triggers a full analysis first."
+        ),
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def check_complexity(
+        run_id: str | None = None,
+        root: str = ".",
+        path: str | None = None,
+        min_complexity: int | None = None,
+        max_results: int = 10,
+        detail_level: str = "normal",
+    ) -> dict[str, object]:
+        return service.check_complexity(
+            run_id=run_id,
+            root=root,
+            path=path,
+            min_complexity=min_complexity,
+            max_results=max_results,
+            detail_level=detail_level,  # type: ignore[arg-type]
+        )
+
+    @tool(
+        title="Check Clones",
+        description=(
+            "Return clone findings for a path or repository. If no run exists "
+            "yet, this triggers a full analysis first."
+        ),
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def check_clones(
+        run_id: str | None = None,
+        root: str = ".",
+        path: str | None = None,
+        clone_type: str | None = None,
+        source_kind: str | None = None,
+        max_results: int = 10,
+        detail_level: str = "normal",
+    ) -> dict[str, object]:
+        return service.check_clones(
+            run_id=run_id,
+            root=root,
+            path=path,
+            clone_type=clone_type,
+            source_kind=source_kind,
+            max_results=max_results,
+            detail_level=detail_level,  # type: ignore[arg-type]
+        )
+
+    @tool(
+        title="Check Coupling",
+        description=(
+            "Return coupling hotspots for a path or repository. If no run "
+            "exists yet, this triggers a full analysis first."
+        ),
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def check_coupling(
+        run_id: str | None = None,
+        root: str = ".",
+        path: str | None = None,
+        max_results: int = 10,
+        detail_level: str = "normal",
+    ) -> dict[str, object]:
+        return service.check_coupling(
+            run_id=run_id,
+            root=root,
+            path=path,
+            max_results=max_results,
+            detail_level=detail_level,  # type: ignore[arg-type]
+        )
+
+    @tool(
+        title="Check Cohesion",
+        description=(
+            "Return cohesion hotspots for a path or repository. If no run "
+            "exists yet, this triggers a full analysis first."
+        ),
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def check_cohesion(
+        run_id: str | None = None,
+        root: str = ".",
+        path: str | None = None,
+        max_results: int = 10,
+        detail_level: str = "normal",
+    ) -> dict[str, object]:
+        return service.check_cohesion(
+            run_id=run_id,
+            root=root,
+            path=path,
+            max_results=max_results,
+            detail_level=detail_level,  # type: ignore[arg-type]
+        )
+
+    @tool(
+        title="Check Dead Code",
+        description=(
+            "Return dead-code findings for a path or repository. If no run "
+            "exists yet, this triggers a full analysis first."
+        ),
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def check_dead_code(
+        run_id: str | None = None,
+        root: str = ".",
+        path: str | None = None,
+        min_severity: str | None = None,
+        max_results: int = 10,
+        detail_level: str = "normal",
+    ) -> dict[str, object]:
+        return service.check_dead_code(
+            run_id=run_id,
+            root=root,
+            path=path,
+            min_severity=min_severity,
+            max_results=max_results,
+            detail_level=detail_level,  # type: ignore[arg-type]
+        )
+
+    @tool(
+        title="Generate PR Summary",
+        description="Generate a PR-friendly CodeClone summary for changed files.",
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def generate_pr_summary(
+        run_id: str | None = None,
+        changed_paths: list[str] | None = None,
+        git_diff_ref: str | None = None,
+        format: str = "markdown",
+    ) -> dict[str, object]:
+        return service.generate_pr_summary(
+            run_id=run_id,
+            changed_paths=tuple(changed_paths or ()),
+            git_diff_ref=git_diff_ref,
+            format=format,  # type: ignore[arg-type]
+        )
+
+    @tool(
+        title="Mark Finding Reviewed",
+        description="Mark a finding as reviewed in the current in-memory MCP session.",
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def mark_finding_reviewed(
+        finding_id: str,
+        run_id: str | None = None,
+        note: str | None = None,
+    ) -> dict[str, object]:
+        return service.mark_finding_reviewed(
+            finding_id=finding_id,
+            run_id=run_id,
+            note=note,
+        )
+
+    @tool(
+        title="List Reviewed Findings",
+        description=(
+            "List in-memory reviewed findings for the current or specified run."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def list_reviewed_findings(run_id: str | None = None) -> dict[str, object]:
+        return service.list_reviewed_findings(run_id=run_id)
+
+    @resource(
         "codeclone://latest/summary",
         title="Latest Run Summary",
         description="Canonical JSON summary for the latest CodeClone MCP run.",
@@ -257,7 +585,7 @@ def build_mcp_server(
     def latest_summary_resource() -> str:
         return service.read_resource("codeclone://latest/summary")
 
-    @mcp.resource(
+    @resource(
         "codeclone://latest/report.json",
         title="Latest Canonical Report",
         description="Canonical JSON report for the latest CodeClone MCP run.",
@@ -266,7 +594,45 @@ def build_mcp_server(
     def latest_report_resource() -> str:
         return service.read_resource("codeclone://latest/report.json")
 
-    @mcp.resource(
+    @resource(
+        "codeclone://latest/health",
+        title="Latest Health Snapshot",
+        description="Health score and dimensions for the latest CodeClone MCP run.",
+        mime_type="application/json",
+    )
+    def latest_health_resource() -> str:
+        return service.read_resource("codeclone://latest/health")
+
+    @resource(
+        "codeclone://latest/gates",
+        title="Latest Gate Evaluation",
+        description="Last gate evaluation result produced by this MCP session.",
+        mime_type="application/json",
+    )
+    def latest_gates_resource() -> str:
+        return service.read_resource("codeclone://latest/gates")
+
+    @resource(
+        "codeclone://latest/changed",
+        title="Latest Changed Findings",
+        description=(
+            "Changed-files projection for the latest diff-aware CodeClone MCP run."
+        ),
+        mime_type="application/json",
+    )
+    def latest_changed_resource() -> str:
+        return service.read_resource("codeclone://latest/changed")
+
+    @resource(
+        "codeclone://schema",
+        title="CodeClone Report Schema",
+        description="JSON schema-style descriptor for the canonical CodeClone report.",
+        mime_type="application/json",
+    )
+    def schema_resource() -> str:
+        return service.read_resource("codeclone://schema")
+
+    @resource(
         "codeclone://runs/{run_id}/summary",
         title="Run Summary",
         description="Canonical JSON summary for a specific CodeClone MCP run.",
@@ -275,7 +641,7 @@ def build_mcp_server(
     def run_summary_resource(run_id: str) -> str:
         return service.read_resource(f"codeclone://runs/{run_id}/summary")
 
-    @mcp.resource(
+    @resource(
         "codeclone://runs/{run_id}/report.json",
         title="Run Canonical Report",
         description="Canonical JSON report for a specific CodeClone MCP run.",
@@ -284,7 +650,7 @@ def build_mcp_server(
     def run_report_resource(run_id: str) -> str:
         return service.read_resource(f"codeclone://runs/{run_id}/report.json")
 
-    @mcp.resource(
+    @resource(
         "codeclone://runs/{run_id}/findings/{finding_id}",
         title="Run Finding",
         description="Canonical JSON finding group for a specific CodeClone MCP run.",

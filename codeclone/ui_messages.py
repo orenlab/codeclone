@@ -31,6 +31,18 @@ HELP_ROOT = "Project root directory to scan.\nDefaults to the current directory.
 HELP_MIN_LOC = "Minimum Lines of Code (LOC) required for clone analysis.\nDefault: 10."
 HELP_MIN_STMT = "Minimum AST statement count required for clone analysis.\nDefault: 6."
 HELP_PROCESSES = "Number of parallel worker processes.\nDefault: 4."
+HELP_CHANGED_ONLY = (
+    "Limit clone gating and changed-scope summaries to findings that touch\n"
+    "files from a git diff selection."
+)
+HELP_DIFF_AGAINST = (
+    "Resolve changed files from `git diff --name-only <REF>`.\n"
+    "Use together with --changed-only."
+)
+HELP_PATHS_FROM_GIT_DIFF = (
+    "Shorthand for --changed-only using `git diff --name-only <REF>`.\n"
+    "Useful for PR and CI review flows."
+)
 HELP_CACHE_PATH = (
     "Path to the cache file.\n"
     "If FILE is omitted, uses <root>/.cache/codeclone/cache.json."
@@ -134,6 +146,7 @@ HELP_DEBUG = (
 
 SUMMARY_TITLE = "Summary"
 METRICS_TITLE = "Metrics"
+CHANGED_SCOPE_TITLE = "Changed Scope"
 
 CLI_LAYOUT_MAX_WIDTH = 80
 
@@ -163,6 +176,9 @@ SUMMARY_COMPACT_METRICS = (
     "Metrics  cc={cc_avg}/{cc_max}  cbo={cbo_avg}/{cbo_max}"
     "  lcom4={lcom_avg}/{lcom_max}  cycles={cycles}  dead_code={dead}"
     "  health={health}({grade})"
+)
+SUMMARY_COMPACT_CHANGED_SCOPE = (
+    "Changed  paths={paths}  findings={findings}  new={new}  known={known}"
 )
 
 WARN_SUMMARY_ACCOUNTING_MISMATCH = (
@@ -514,6 +530,35 @@ def fmt_metrics_dead_code(count: int, *, suppressed: int = 0) -> str:
                 f"  {'Dead code':<{_L}}[bold red]{count} found[/bold red]"
                 f"{suppressed_suffix}"
             )
+
+
+def fmt_changed_scope_paths(*, count: int) -> str:
+    return f"  {'Paths':<{_L}}{_v(count, 'bold cyan')} from git diff"
+
+
+def fmt_changed_scope_findings(*, total: int, new: int, known: int) -> str:
+    parts = [
+        f"{_v(total, 'bold')} total",
+        f"{_v(new, 'bold cyan')} new",
+        f"{_v(known)} known",
+    ]
+    separator = " \u00b7 "
+    return f"  {'Findings':<{_L}}{separator.join(parts)}"
+
+
+def fmt_changed_scope_compact(
+    *,
+    paths: int,
+    findings: int,
+    new: int,
+    known: int,
+) -> str:
+    return SUMMARY_COMPACT_CHANGED_SCOPE.format(
+        paths=paths,
+        findings=findings,
+        new=new,
+        known=known,
+    )
 
 
 def fmt_pipeline_done(elapsed: float) -> str:

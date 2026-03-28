@@ -27,6 +27,7 @@ from .derived import (
     relative_report_path,
     report_location_from_structural_occurrence,
 )
+from .json_contract import structural_group_id
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -117,8 +118,10 @@ def _occurrences_table_html(
             short_path = relative_report_path(item.file_path, scan_root=scan_root)
             rows.append(
                 "<tr>"
-                f'<td class="col-path" title="{_escape_html(item.file_path)}">'
-                f"{_escape_html(short_path)}</td>"
+                f'<td class="col-path" title="{_escape_attr(item.file_path)}">'
+                f'<a class="ide-link" data-file="{_escape_attr(item.file_path)}" '
+                f'data-line="{item.start}">'
+                f"{_escape_html(short_path)}</a></td>"
                 f'<td class="col-name">{_source_kind_badge_html(location.source_kind)} '
                 f"{_escape_html(item.qualname)}</td>"
                 f'<td class="col-num">{item.start}-{item.end}</td>'
@@ -449,9 +452,12 @@ def _render_finding_card(
 
     # Scope text — concise spread summary
     scope_text = _finding_scope_text(deduped_items)
+    finding_id = structural_group_id(g.finding_kind, g.finding_key)
 
     return (
         f'<article class="sf-card"'
+        f' id="finding-{_escape_attr(finding_id)}"'
+        f' data-finding-id="{_escape_attr(finding_id)}"'
         f' data-sf-group="true"'
         f' data-source-kind="{_escape_attr(source_kind)}"'
         f' data-spread-bucket="{_escape_attr(spread_bucket)}">'

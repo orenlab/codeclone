@@ -20,7 +20,7 @@ FONT_CSS_URL = (
 
 REPORT_TEMPLATE = Template(
     r"""<!doctype html>
-<html lang="en">
+<html lang="en" data-scan-root="${scan_root}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

@@ -190,6 +190,7 @@ class ReportArtifacts:
     text: str | None = None
     md: str | None = None
     sarif: str | None = None
+    report_document: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1439,6 +1440,7 @@ def report(
     new_block: Collection[str],
     html_builder: Callable[..., str] | None = None,
     metrics_diff: object | None = None,
+    include_report_document: bool = False,
 ) -> ReportArtifacts:
     contents: dict[str, str | None] = {
         "html": None,
@@ -1466,13 +1468,17 @@ def report(
         "file_list": list(discovery.all_file_paths),
     }
     report_document: dict[str, object] | None = None
-    needs_report_document = boot.output_paths.html is not None or any(
-        path is not None
-        for path in (
-            boot.output_paths.json,
-            boot.output_paths.md,
-            boot.output_paths.sarif,
-            boot.output_paths.text,
+    needs_report_document = (
+        include_report_document
+        or boot.output_paths.html is not None
+        or any(
+            path is not None
+            for path in (
+                boot.output_paths.json,
+                boot.output_paths.md,
+                boot.output_paths.sarif,
+                boot.output_paths.text,
+            )
         )
     )
 
@@ -1572,6 +1578,7 @@ def report(
         md=contents["md"],
         sarif=contents["sarif"],
         text=contents["text"],
+        report_document=report_document,
     )
 
 

@@ -42,6 +42,13 @@ Refs:
 - `--open-html-report` is a local UX action layered on top of `--html`; it does not implicitly enable HTML output.
 - `--timestamped-report-paths` only rewrites default report paths requested via bare report flags; explicit FILE values
   stay unchanged.
+- Changed-scope clone review uses:
+    - `--changed-only`
+    - `--diff-against GIT_REF`
+    - `--paths-from-git-diff GIT_REF`
+      Typical usage:
+    - `codeclone . --changed-only --diff-against main`
+    - `codeclone . --paths-from-git-diff HEAD~1`
 - Contract errors are prefixed by `CONTRACT ERROR:`.
 - Gating failures are prefixed by `GATING FAILURE:`.
 - Internal errors use `fmt_internal_error` with optional debug details.
@@ -65,9 +72,15 @@ Refs:
   `.cache/codeclone/`.
 - `--open-html-report` requires `--html`; invalid combination is a contract error.
 - `--timestamped-report-paths` requires at least one requested report output; invalid combination is a contract error.
+- `--changed-only` requires either `--diff-against` or `--paths-from-git-diff`.
+- `--diff-against` requires `--changed-only`.
+- `--diff-against` and `--paths-from-git-diff` are mutually exclusive.
 - Browser-open failure after a successful HTML write is warning-only and does not change the process exit code.
 - Baseline update write failure is contract error.
 - In gating mode, unreadable source files are contract errors with higher priority than clone gating failure.
+- Changed-scope flags do not create a second canonical report: they project clone
+  summary/threshold decisions over the changed-files subset after the normal full
+  analysis completes.
 
 Refs:
 
@@ -82,6 +95,9 @@ Refs:
 | Invalid output extension/path                | contract             | 2    |
 | `--open-html-report` without `--html`        | contract             | 2    |
 | `--timestamped-report-paths` without reports | contract             | 2    |
+| `--changed-only` without diff source         | contract             | 2    |
+| `--diff-against` without `--changed-only`    | contract             | 2    |
+| `--diff-against` + `--paths-from-git-diff`   | contract             | 2    |
 | Baseline untrusted in CI/gating              | contract             | 2    |
 | Unreadable source in CI/gating               | contract             | 2    |
 | New clones with `--fail-on-new`              | gating               | 3    |
@@ -93,6 +109,8 @@ Refs:
 - Summary metric ordering is fixed.
 - Compact summary mode (`--quiet`) is fixed-format text.
 - Help epilog is generated from static constants.
+- `git diff --name-only` input is normalized to sorted repo-relative paths before
+  changed-scope projection is applied.
 
 Refs:
 

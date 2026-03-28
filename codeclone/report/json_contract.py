@@ -889,6 +889,9 @@ def _build_meta_payload(
             ),
         },
         "runtime": {
+            "analysis_started_at_utc": _optional_str(
+                meta.get("analysis_started_at_utc")
+            ),
             "report_generated_at_utc": _optional_str(
                 meta.get("report_generated_at_utc")
             ),

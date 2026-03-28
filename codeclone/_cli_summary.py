@@ -25,6 +25,14 @@ class MetricsSnapshot:
     suppressed_dead_code_count: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class ChangedScopeSnapshot:
+    paths_count: int
+    findings_total: int
+    findings_new: int
+    findings_known: int
+
+
 class _Printer(Protocol):
     def print(self, *objects: object, **kwargs: object) -> None: ...
 
@@ -149,3 +157,34 @@ def _print_metrics(
                 suppressed=metrics.suppressed_dead_code_count,
             )
         )
+
+
+def _print_changed_scope(
+    *,
+    console: _Printer,
+    quiet: bool,
+    changed_scope: ChangedScopeSnapshot,
+) -> None:
+    if quiet:
+        console.print(
+            ui.fmt_changed_scope_compact(
+                paths=changed_scope.paths_count,
+                findings=changed_scope.findings_total,
+                new=changed_scope.findings_new,
+                known=changed_scope.findings_known,
+            )
+        )
+        return
+
+    from rich.rule import Rule
+
+    console.print()
+    console.print(Rule(title=ui.CHANGED_SCOPE_TITLE, style="dim", characters="\u2500"))
+    console.print(ui.fmt_changed_scope_paths(count=changed_scope.paths_count))
+    console.print(
+        ui.fmt_changed_scope_findings(
+            total=changed_scope.findings_total,
+            new=changed_scope.findings_new,
+            known=changed_scope.findings_known,
+        )
+    )

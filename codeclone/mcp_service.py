@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from argparse import Namespace
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
@@ -12,7 +13,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Literal, cast
 
-from . import __version__
+from . import __version__, _coerce
 from ._cli_args import (
     DEFAULT_BASELINE_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -42,7 +43,38 @@ from ._cli_runtime import (
 )
 from .baseline import Baseline
 from .cache import Cache, CacheStatus, build_segment_report_projection
-from .contracts import REPORT_SCHEMA_VERSION
+from .contracts import (
+    DEFAULT_COHESION_THRESHOLD,
+    DEFAULT_COMPLEXITY_THRESHOLD,
+    DEFAULT_COUPLING_THRESHOLD,
+    REPORT_SCHEMA_VERSION,
+)
+from .domain.findings import (
+    CATEGORY_CLONE,
+    CATEGORY_COHESION,
+    CATEGORY_COMPLEXITY,
+    CATEGORY_COUPLING,
+    CATEGORY_DEAD_CODE,
+    CATEGORY_DEPENDENCY,
+    CATEGORY_STRUCTURAL,
+    CLONE_KIND_SEGMENT,
+    FAMILY_CLONE,
+    FAMILY_CLONES,
+    FAMILY_DEAD_CODE,
+    FAMILY_DESIGN,
+    FAMILY_STRUCTURAL,
+)
+from .domain.quality import (
+    CONFIDENCE_HIGH,
+    CONFIDENCE_LOW,
+    CONFIDENCE_MEDIUM,
+    EFFORT_EASY,
+    EFFORT_HARD,
+    EFFORT_MODERATE,
+    SEVERITY_CRITICAL,
+    SEVERITY_INFO,
+    SEVERITY_WARNING,
+)
 from .errors import CacheError
 from .models import MetricsDiff
 from .normalize import NormalizationConfig
@@ -57,18 +89,30 @@ from .pipeline import (
     process,
     report,
 )
-from .report.overview import materialize_report_overview
+from .report.json_contract import (
+    _source_scope_from_filepaths,
+    clone_group_id,
+    dead_code_group_id,
+    design_group_id,
+    structural_group_id,
+)
+from .report.overview import serialize_finding_group_card
 
 AnalysisMode = Literal["full", "clones_only"]
 CachePolicy = Literal["reuse", "refresh", "off"]
 HotlistKind = Literal[
     "most_actionable",
     "highest_spread",
+    "highest_priority",
     "production_hotspots",
     "test_fixture_hotspots",
 ]
 FindingFamilyFilter = Literal["all", "clone", "structural", "dead_code", "design"]
 FindingNoveltyFilter = Literal["all", "new", "known"]
+FindingSort = Literal["default", "priority", "severity", "spread"]
+DetailLevel = Literal["summary", "normal", "full"]
+ComparisonFocus = Literal["all", "clones", "structural", "metrics"]
+PRSummaryFormat = Literal["markdown", "json"]
 ReportSection = Literal[
     "all",
     "meta",
@@ -76,6 +120,7 @@ ReportSection = Literal[
     "findings",
     "metrics",
     "derived",
+    "changed",
     "integrity",
 ]
 
@@ -100,8 +145,263 @@ _MCP_CONFIG_KEYS = frozenset(
 _RESOURCE_SECTION_MAP: dict[str, ReportSection] = {
     "report.json": "all",
     "summary": "meta",
+    "health": "metrics",
+    "changed": "changed",
     "overview": "derived",
 }
+_SEVERITY_WEIGHT = {
+    SEVERITY_CRITICAL: 1.0,
+    SEVERITY_WARNING: 0.6,
+    SEVERITY_INFO: 0.2,
+}
+_EFFORT_WEIGHT = {
+    EFFORT_EASY: 1.0,
+    EFFORT_MODERATE: 0.6,
+    EFFORT_HARD: 0.3,
+}
+_NOVELTY_WEIGHT = {"new": 1.0, "known": 0.5}
+_RUNTIME_WEIGHT = {
+    "production": 1.0,
+    "mixed": 0.8,
+    "tests": 0.4,
+    "fixtures": 0.2,
+    "other": 0.5,
+}
+_CONFIDENCE_WEIGHT = {
+    CONFIDENCE_HIGH: 1.0,
+    CONFIDENCE_MEDIUM: 0.7,
+    CONFIDENCE_LOW: 0.3,
+}
+# Canonical report groups use FAMILY_CLONES ("clones"), while individual finding
+# payloads use FAMILY_CLONE ("clone").
+_VALID_ANALYSIS_MODES = frozenset({"full", "clones_only"})
+_VALID_CACHE_POLICIES = frozenset({"reuse", "refresh", "off"})
+_VALID_FINDING_FAMILIES = frozenset(
+    {"all", "clone", "structural", "dead_code", "design"}
+)
+_VALID_FINDING_NOVELTY = frozenset({"all", "new", "known"})
+_VALID_FINDING_SORT = frozenset({"default", "priority", "severity", "spread"})
+_VALID_DETAIL_LEVELS = frozenset({"summary", "normal", "full"})
+_VALID_COMPARISON_FOCUS = frozenset({"all", "clones", "structural", "metrics"})
+_VALID_PR_SUMMARY_FORMATS = frozenset({"markdown", "json"})
+_VALID_REPORT_SECTIONS = frozenset(
+    {
+        "all",
+        "meta",
+        "inventory",
+        "findings",
+        "metrics",
+        "derived",
+        "changed",
+        "integrity",
+    }
+)
+_VALID_HOTLIST_KINDS = frozenset(
+    {
+        "most_actionable",
+        "highest_spread",
+        "highest_priority",
+        "production_hotspots",
+        "test_fixture_hotspots",
+    }
+)
+_VALID_SEVERITIES = frozenset({SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO})
+_as_int = _coerce.as_int
+_as_float = _coerce.as_float
+_as_str = _coerce.as_str
+
+
+def _design_singleton_group_payload(
+    *,
+    category: str,
+    kind: str,
+    severity: str,
+    qualname: str,
+    filepath: str,
+    start_line: int,
+    end_line: int,
+    item_data: Mapping[str, object],
+    facts: Mapping[str, object],
+    scan_root: str,
+) -> dict[str, object]:
+    relative_path = filepath
+    return {
+        "id": design_group_id(category, qualname),
+        "family": FAMILY_DESIGN,
+        "category": category,
+        "kind": kind,
+        "severity": severity,
+        "confidence": CONFIDENCE_HIGH,
+        "priority": 2.0 if severity == SEVERITY_WARNING else 3.0,
+        "count": 1,
+        "source_scope": _source_scope_from_filepaths(
+            (relative_path,),
+            scan_root=scan_root,
+        ),
+        "spread": {"files": 1, "functions": 1},
+        "items": [
+            {
+                "relative_path": relative_path,
+                "qualname": qualname,
+                "start_line": start_line,
+                "end_line": end_line,
+                **item_data,
+            }
+        ],
+        "facts": dict(facts),
+    }
+
+
+def _complexity_group_for_threshold_payload(
+    item_map: Mapping[str, object],
+    *,
+    threshold: int,
+    scan_root: str,
+) -> dict[str, object] | None:
+    cc = _as_int(item_map.get("cyclomatic_complexity", 1), 1)
+    if cc <= threshold:
+        return None
+    severity = SEVERITY_CRITICAL if cc > max(40, threshold * 2) else SEVERITY_WARNING
+    return _design_singleton_group_payload(
+        category=CATEGORY_COMPLEXITY,
+        kind="function_hotspot",
+        severity=severity,
+        qualname=str(item_map.get("qualname", "")),
+        filepath=str(item_map.get("relative_path", "")),
+        start_line=_as_int(item_map.get("start_line", 0), 0),
+        end_line=_as_int(item_map.get("end_line", 0), 0),
+        scan_root=scan_root,
+        item_data={
+            "cyclomatic_complexity": cc,
+            "nesting_depth": _as_int(item_map.get("nesting_depth", 0), 0),
+            "risk": str(item_map.get("risk", "")),
+        },
+        facts={
+            "cyclomatic_complexity": cc,
+            "nesting_depth": _as_int(item_map.get("nesting_depth", 0), 0),
+        },
+    )
+
+
+def _coupling_group_for_threshold_payload(
+    item_map: Mapping[str, object],
+    *,
+    threshold: int,
+    scan_root: str,
+) -> dict[str, object] | None:
+    cbo = _as_int(item_map.get("cbo", 0), 0)
+    if cbo <= threshold:
+        return None
+    coupled_classes = list(_coerce.as_sequence(item_map.get("coupled_classes")))
+    return _design_singleton_group_payload(
+        category=CATEGORY_COUPLING,
+        kind="class_hotspot",
+        severity=SEVERITY_WARNING,
+        qualname=str(item_map.get("qualname", "")),
+        filepath=str(item_map.get("relative_path", "")),
+        start_line=_as_int(item_map.get("start_line", 0), 0),
+        end_line=_as_int(item_map.get("end_line", 0), 0),
+        scan_root=scan_root,
+        item_data={
+            "cbo": cbo,
+            "risk": str(item_map.get("risk", "")),
+            "coupled_classes": coupled_classes,
+        },
+        facts={
+            "cbo": cbo,
+            "coupled_classes": coupled_classes,
+        },
+    )
+
+
+def _cohesion_group_for_threshold_payload(
+    item_map: Mapping[str, object],
+    *,
+    threshold: int,
+    scan_root: str,
+) -> dict[str, object] | None:
+    lcom4 = _as_int(item_map.get("lcom4", 0), 0)
+    if lcom4 <= threshold:
+        return None
+    return _design_singleton_group_payload(
+        category=CATEGORY_COHESION,
+        kind="class_hotspot",
+        severity=SEVERITY_WARNING,
+        qualname=str(item_map.get("qualname", "")),
+        filepath=str(item_map.get("relative_path", "")),
+        start_line=_as_int(item_map.get("start_line", 0), 0),
+        end_line=_as_int(item_map.get("end_line", 0), 0),
+        scan_root=scan_root,
+        item_data={
+            "lcom4": lcom4,
+            "risk": str(item_map.get("risk", "")),
+            "method_count": _as_int(item_map.get("method_count", 0), 0),
+            "instance_var_count": _as_int(item_map.get("instance_var_count", 0), 0),
+        },
+        facts={
+            "lcom4": lcom4,
+            "method_count": _as_int(item_map.get("method_count", 0), 0),
+            "instance_var_count": _as_int(item_map.get("instance_var_count", 0), 0),
+        },
+    )
+
+
+def _suggestion_finding_id_payload(suggestion: object) -> str:
+    if not hasattr(suggestion, "finding_family"):
+        return ""
+    family = str(getattr(suggestion, "finding_family", "")).strip()
+    if family == FAMILY_CLONES:
+        kind = str(getattr(suggestion, "finding_kind", "")).strip()
+        subject_key = str(getattr(suggestion, "subject_key", "")).strip()
+        return clone_group_id(kind or CLONE_KIND_SEGMENT, subject_key)
+    if family == FAMILY_STRUCTURAL:
+        return structural_group_id(
+            str(getattr(suggestion, "finding_kind", "")).strip() or CATEGORY_STRUCTURAL,
+            str(getattr(suggestion, "subject_key", "")).strip(),
+        )
+    category = str(getattr(suggestion, "category", "")).strip()
+    subject_key = str(getattr(suggestion, "subject_key", "")).strip()
+    if category == CATEGORY_DEAD_CODE:
+        return dead_code_group_id(subject_key)
+    return design_group_id(
+        category,
+        subject_key or str(getattr(suggestion, "title", "")),
+    )
+
+
+def _git_diff_lines_payload(
+    *,
+    root_path: Path,
+    git_diff_ref: str,
+) -> tuple[str, ...]:
+    try:
+        completed = subprocess.run(
+            ["git", "diff", "--name-only", git_diff_ref, "--"],
+            cwd=root_path,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise MCPGitDiffError(
+            f"Unable to resolve changed paths from git diff ref '{git_diff_ref}'."
+        ) from exc
+    return tuple(
+        sorted({line.strip() for line in completed.stdout.splitlines() if line.strip()})
+    )
+
+
+def _load_report_document_payload(report_json: str) -> dict[str, object]:
+    try:
+        payload = json.loads(report_json)
+    except json.JSONDecodeError as exc:
+        raise MCPServiceError(
+            f"Generated canonical report is not valid JSON: {exc}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise MCPServiceError("Generated canonical report must be a JSON object.")
+    return dict(payload)
 
 
 class MCPServiceError(RuntimeError):
@@ -120,6 +420,10 @@ class MCPFindingNotFoundError(MCPServiceError):
     """Raised when a requested finding id is not present in the selected run."""
 
 
+class MCPGitDiffError(MCPServiceError):
+    """Raised when changed paths cannot be resolved from a git ref."""
+
+
 class _BufferConsole:
     def __init__(self) -> None:
         self.messages: list[str] = []
@@ -135,6 +439,8 @@ class MCPAnalysisRequest:
     root: str = DEFAULT_ROOT
     analysis_mode: AnalysisMode = "full"
     respect_pyproject: bool = True
+    changed_paths: tuple[str, ...] = ()
+    git_diff_ref: str | None = None
     processes: int | None = None
     min_loc: int | None = None
     min_stmt: int | None = None
@@ -142,6 +448,9 @@ class MCPAnalysisRequest:
     block_min_stmt: int | None = None
     segment_min_loc: int | None = None
     segment_min_stmt: int | None = None
+    complexity_threshold: int | None = None
+    coupling_threshold: int | None = None
+    cohesion_threshold: int | None = None
     baseline_path: str | None = None
     metrics_baseline_path: str | None = None
     max_baseline_size_mb: int | None = None
@@ -172,6 +481,8 @@ class MCPRunRecord:
     report_document: dict[str, object]
     report_json: str
     summary: dict[str, object]
+    changed_paths: tuple[str, ...]
+    changed_projection: dict[str, object] | None
     warnings: tuple[str, ...]
     failures: tuple[str, ...]
     analysis: AnalysisResult
@@ -204,13 +515,28 @@ class CodeCloneMCPRunStore:
                 raise MCPRunNotFoundError("No matching MCP analysis run is available.")
             return self._records[resolved_run_id]
 
+    def records(self) -> tuple[MCPRunRecord, ...]:
+        with self._lock:
+            return tuple(self._records.values())
+
 
 class CodeCloneMCPService:
     def __init__(self, *, history_limit: int = 16) -> None:
         self._runs = CodeCloneMCPRunStore(history_limit=history_limit)
+        self._state_lock = RLock()
+        self._review_state: dict[str, OrderedDict[str, str | None]] = {}
+        self._last_gate_results: dict[str, dict[str, object]] = {}
+        self._spread_max_cache: dict[str, int] = {}
 
     def analyze_repository(self, request: MCPAnalysisRequest) -> dict[str, object]:
+        self._validate_analysis_request(request)
         root_path = self._resolve_root(request.root)
+        analysis_started_at_utc = _current_report_timestamp_utc()
+        changed_paths = self._resolve_request_changed_paths(
+            root_path=root_path,
+            changed_paths=request.changed_paths,
+            git_diff_ref=request.git_diff_ref,
+        )
         args = self._build_args(root_path=root_path, request=request)
         (
             baseline_path,
@@ -306,6 +632,7 @@ class CodeCloneMCPService:
             ),
             analysis_mode=request.analysis_mode,
             metrics_computed=self._metrics_computed(request.analysis_mode),
+            analysis_started_at_utc=analysis_started_at_utc,
             report_generated_at_utc=_current_report_timestamp_utc(),
         )
 
@@ -357,7 +684,7 @@ class CodeCloneMCPService:
             )
         )
 
-        summary = self._build_run_summary_payload(
+        base_summary = self._build_run_summary_payload(
             run_id=run_id,
             root_path=root_path,
             request=request,
@@ -371,6 +698,28 @@ class CodeCloneMCPService:
             warnings=warnings,
             failures=failures,
         )
+        provisional_record = MCPRunRecord(
+            run_id=run_id,
+            root=root_path,
+            request=request,
+            report_document=report_document,
+            report_json=report_json,
+            summary=base_summary,
+            changed_paths=changed_paths,
+            changed_projection=None,
+            warnings=warnings,
+            failures=failures,
+            analysis=analysis_result,
+            new_func=frozenset(new_func),
+            new_block=frozenset(new_block),
+            metrics_diff=metrics_diff,
+        )
+        changed_projection = self._build_changed_projection(provisional_record)
+        summary = self._augment_summary_with_changed(
+            summary=base_summary,
+            changed_paths=changed_paths,
+            changed_projection=changed_projection,
+        )
         record = MCPRunRecord(
             run_id=run_id,
             root=root_path,
@@ -378,6 +727,8 @@ class CodeCloneMCPService:
             report_document=report_document,
             report_json=report_json,
             summary=summary,
+            changed_paths=changed_paths,
+            changed_projection=changed_projection,
             warnings=warnings,
             failures=failures,
             analysis=analysis_result,
@@ -386,10 +737,73 @@ class CodeCloneMCPService:
             metrics_diff=metrics_diff,
         )
         self._runs.register(record)
+        self._prune_session_state()
         return summary
+
+    def analyze_changed_paths(self, request: MCPAnalysisRequest) -> dict[str, object]:
+        if not request.changed_paths and request.git_diff_ref is None:
+            raise MCPServiceContractError(
+                "analyze_changed_paths requires changed_paths or git_diff_ref."
+            )
+        return self.analyze_repository(request)
 
     def get_run_summary(self, run_id: str | None = None) -> dict[str, object]:
         return dict(self._runs.get(run_id).summary)
+
+    def compare_runs(
+        self,
+        *,
+        run_id_before: str,
+        run_id_after: str | None = None,
+        focus: ComparisonFocus = "all",
+    ) -> dict[str, object]:
+        validated_focus = cast(
+            "ComparisonFocus",
+            self._validate_choice("focus", focus, _VALID_COMPARISON_FOCUS),
+        )
+        before = self._runs.get(run_id_before)
+        after = self._runs.get(run_id_after)
+        before_findings = self._comparison_index(before, focus=validated_focus)
+        after_findings = self._comparison_index(after, focus=validated_focus)
+        before_ids = set(before_findings)
+        after_ids = set(after_findings)
+        regressions = sorted(after_ids - before_ids)
+        improvements = sorted(before_ids - after_ids)
+        common = before_ids & after_ids
+        health_before = self._summary_health_score(before.summary)
+        health_after = self._summary_health_score(after.summary)
+        health_delta = health_after - health_before
+        verdict = self._comparison_verdict(
+            regressions=len(regressions),
+            improvements=len(improvements),
+            health_delta=health_delta,
+        )
+        return {
+            "before": {
+                "run_id": before.run_id,
+                "health": health_before,
+            },
+            "after": {
+                "run_id": after.run_id,
+                "health": health_after,
+            },
+            "health_delta": health_delta,
+            "verdict": verdict,
+            "regressions": [
+                self._finding_summary_card(after, after_findings[finding_id])
+                for finding_id in regressions
+            ],
+            "improvements": [
+                self._finding_summary_card(before, before_findings[finding_id])
+                for finding_id in improvements
+            ],
+            "unchanged_count": len(common),
+            "summary": self._comparison_summary_text(
+                regressions=len(regressions),
+                improvements=len(improvements),
+                health_delta=health_delta,
+            ),
+        }
 
     def evaluate_gates(self, request: MCPGateRequest) -> dict[str, object]:
         record = self._runs.get(request.run_id)
@@ -418,7 +832,7 @@ class CodeCloneMCPService:
             new_block=record.new_block,
             metrics_diff=record.metrics_diff,
         )
-        return {
+        result = {
             "run_id": record.run_id,
             "would_fail": gate_result.exit_code != 0,
             "exit_code": gate_result.exit_code,
@@ -435,6 +849,9 @@ class CodeCloneMCPService:
                 "fail_on_new_metrics": request.fail_on_new_metrics,
             },
         }
+        with self._state_lock:
+            self._last_gate_results[record.run_id] = dict(result)
+        return result
 
     def get_report_section(
         self,
@@ -442,13 +859,24 @@ class CodeCloneMCPService:
         run_id: str | None = None,
         section: ReportSection = "all",
     ) -> dict[str, object]:
-        report_document = self._runs.get(run_id).report_document
-        if section == "all":
+        validated_section = cast(
+            "ReportSection",
+            self._validate_choice("section", section, _VALID_REPORT_SECTIONS),
+        )
+        record = self._runs.get(run_id)
+        report_document = record.report_document
+        if validated_section == "all":
             return dict(report_document)
-        payload = report_document.get(section)
+        if validated_section == "changed":
+            if record.changed_projection is None:
+                raise MCPServiceContractError(
+                    "Report section 'changed' is not available in this run."
+                )
+            return dict(record.changed_projection)
+        payload = report_document.get(validated_section)
         if not isinstance(payload, Mapping):
             raise MCPServiceContractError(
-                f"Report section '{section}' is not available in this run."
+                f"Report section '{validated_section}' is not available in this run."
             )
         return dict(payload)
 
@@ -457,32 +885,71 @@ class CodeCloneMCPService:
         *,
         run_id: str | None = None,
         family: FindingFamilyFilter = "all",
+        category: str | None = None,
         severity: str | None = None,
         source_kind: str | None = None,
         novelty: FindingNoveltyFilter = "all",
+        sort_by: FindingSort = "default",
+        detail_level: DetailLevel = "normal",
+        changed_paths: Sequence[str] = (),
+        git_diff_ref: str | None = None,
+        exclude_reviewed: bool = False,
         offset: int = 0,
         limit: int = 50,
+        max_results: int | None = None,
     ) -> dict[str, object]:
+        validated_family = cast(
+            "FindingFamilyFilter",
+            self._validate_choice("family", family, _VALID_FINDING_FAMILIES),
+        )
+        validated_novelty = cast(
+            "FindingNoveltyFilter",
+            self._validate_choice("novelty", novelty, _VALID_FINDING_NOVELTY),
+        )
+        validated_sort = cast(
+            "FindingSort",
+            self._validate_choice("sort_by", sort_by, _VALID_FINDING_SORT),
+        )
+        validated_detail = cast(
+            "DetailLevel",
+            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        )
+        validated_severity = self._validate_optional_choice(
+            "severity",
+            severity,
+            _VALID_SEVERITIES,
+        )
         record = self._runs.get(run_id)
-        findings = self._flatten_findings(record.report_document)
-        filtered = [
-            finding
-            for finding in findings
-            if self._matches_finding_filters(
-                finding=finding,
-                family=family,
-                severity=severity,
-                source_kind=source_kind,
-                novelty=novelty,
-            )
-        ]
+        paths_filter = self._resolve_query_changed_paths(
+            record=record,
+            changed_paths=changed_paths,
+            git_diff_ref=git_diff_ref,
+        )
+        normalized_limit = max(
+            1,
+            min(max_results if max_results is not None else limit, 200),
+        )
+        filtered = self._query_findings(
+            record=record,
+            family=validated_family,
+            category=category,
+            severity=validated_severity,
+            source_kind=source_kind,
+            novelty=validated_novelty,
+            sort_by=validated_sort,
+            detail_level=validated_detail,
+            changed_paths=paths_filter,
+            exclude_reviewed=exclude_reviewed,
+        )
         total = len(filtered)
         normalized_offset = max(0, offset)
-        normalized_limit = max(1, min(limit, 200))
         items = filtered[normalized_offset : normalized_offset + normalized_limit]
         next_offset = normalized_offset + len(items)
         return {
             "run_id": record.run_id,
+            "detail_level": validated_detail,
+            "sort_by": validated_sort,
+            "changed_paths": list(paths_filter),
             "offset": normalized_offset,
             "limit": normalized_limit,
             "returned": len(items),
@@ -498,38 +965,430 @@ class CodeCloneMCPService:
         run_id: str | None = None,
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
-        for finding in self._flatten_findings(record.report_document):
+        for finding in self._base_findings(record):
             if str(finding.get("id")) == finding_id:
-                return finding
+                return self._decorate_finding(
+                    record,
+                    finding,
+                    detail_level="full",
+                )
         raise MCPFindingNotFoundError(
             f"Finding id '{finding_id}' was not found in run '{record.run_id}'."
         )
+
+    def get_remediation(
+        self,
+        *,
+        finding_id: str,
+        run_id: str | None = None,
+        detail_level: DetailLevel = "full",
+    ) -> dict[str, object]:
+        validated_detail = cast(
+            "DetailLevel",
+            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        )
+        record = self._runs.get(run_id)
+        finding = self.get_finding(finding_id=finding_id, run_id=record.run_id)
+        remediation = self._as_mapping(finding.get("remediation"))
+        if not remediation:
+            raise MCPFindingNotFoundError(
+                f"Finding id '{finding_id}' does not expose remediation guidance."
+            )
+        return {
+            "run_id": record.run_id,
+            "finding_id": finding_id,
+            "detail_level": validated_detail,
+            "remediation": self._project_remediation(
+                remediation,
+                detail_level=validated_detail,
+            ),
+        }
 
     def list_hotspots(
         self,
         *,
         kind: HotlistKind,
         run_id: str | None = None,
+        detail_level: DetailLevel = "normal",
+        changed_paths: Sequence[str] = (),
+        git_diff_ref: str | None = None,
+        exclude_reviewed: bool = False,
         limit: int = 10,
+        max_results: int | None = None,
     ) -> dict[str, object]:
-        record = self._runs.get(run_id)
-        derived = self._as_mapping(record.report_document.get("derived"))
-        materialized = materialize_report_overview(
-            overview=self._as_mapping(derived.get("overview")),
-            hotlists=self._as_mapping(derived.get("hotlists")),
-            findings=self._as_mapping(record.report_document.get("findings")),
+        validated_kind = cast(
+            "HotlistKind",
+            self._validate_choice("kind", kind, _VALID_HOTLIST_KINDS),
         )
-        rows = self._as_sequence(materialized.get(kind))
-        normalized_limit = max(1, min(limit, 50))
+        validated_detail = cast(
+            "DetailLevel",
+            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        )
+        record = self._runs.get(run_id)
+        paths_filter = self._resolve_query_changed_paths(
+            record=record,
+            changed_paths=changed_paths,
+            git_diff_ref=git_diff_ref,
+        )
+        rows = self._hotspot_rows(
+            record=record,
+            kind=validated_kind,
+            detail_level=validated_detail,
+            changed_paths=paths_filter,
+            exclude_reviewed=exclude_reviewed,
+        )
+        normalized_limit = max(
+            1,
+            min(max_results if max_results is not None else limit, 50),
+        )
         return {
             "run_id": record.run_id,
-            "kind": kind,
+            "kind": validated_kind,
+            "detail_level": validated_detail,
+            "changed_paths": list(paths_filter),
             "returned": min(len(rows), normalized_limit),
             "total": len(rows),
             "items": [dict(self._as_mapping(item)) for item in rows[:normalized_limit]],
         }
 
+    def generate_pr_summary(
+        self,
+        *,
+        run_id: str | None = None,
+        changed_paths: Sequence[str] = (),
+        git_diff_ref: str | None = None,
+        format: PRSummaryFormat = "markdown",
+    ) -> dict[str, object]:
+        output_format = cast(
+            "PRSummaryFormat",
+            self._validate_choice("format", format, _VALID_PR_SUMMARY_FORMATS),
+        )
+        record = self._runs.get(run_id)
+        paths_filter = self._resolve_query_changed_paths(
+            record=record,
+            changed_paths=changed_paths,
+            git_diff_ref=git_diff_ref,
+            prefer_record_paths=True,
+        )
+        changed_items = self._query_findings(
+            record=record,
+            detail_level="summary",
+            changed_paths=paths_filter,
+        )
+        previous = self._previous_run_for_root(record)
+        resolved: list[dict[str, object]] = []
+        if previous is not None:
+            compare_payload = self.compare_runs(
+                run_id_before=previous.run_id,
+                run_id_after=record.run_id,
+                focus="all",
+            )
+            resolved = cast("list[dict[str, object]]", compare_payload["improvements"])
+        with self._state_lock:
+            gate_result = dict(
+                self._last_gate_results.get(
+                    record.run_id,
+                    {"would_fail": False, "reasons": []},
+                )
+            )
+        verdict = self._changed_verdict(
+            changed_projection={
+                "total": len(changed_items),
+                "new": sum(
+                    1 for item in changed_items if str(item.get("novelty", "")) == "new"
+                ),
+            },
+            health_delta=self._summary_health_delta(record.summary),
+        )
+        payload = {
+            "run_id": record.run_id,
+            "changed_paths": list(paths_filter),
+            "health": self._as_mapping(record.summary.get("health")),
+            "health_delta": self._summary_health_delta(record.summary),
+            "verdict": verdict,
+            "new_findings_in_changed_files": changed_items,
+            "resolved": resolved,
+            "blocking_gates": list(cast(Sequence[str], gate_result.get("reasons", []))),
+        }
+        if output_format == "json":
+            return payload
+        return {
+            "run_id": record.run_id,
+            "format": output_format,
+            "content": self._render_pr_summary_markdown(payload),
+        }
+
+    def mark_finding_reviewed(
+        self,
+        *,
+        finding_id: str,
+        run_id: str | None = None,
+        note: str | None = None,
+    ) -> dict[str, object]:
+        record = self._runs.get(run_id)
+        self.get_finding(finding_id=finding_id, run_id=record.run_id)
+        with self._state_lock:
+            review_map = self._review_state.setdefault(record.run_id, OrderedDict())
+            review_map[finding_id] = (
+                note.strip() if isinstance(note, str) and note.strip() else None
+            )
+            review_map.move_to_end(finding_id)
+        return {
+            "run_id": record.run_id,
+            "finding_id": finding_id,
+            "reviewed": True,
+            "note": review_map[finding_id],
+            "reviewed_count": len(review_map),
+        }
+
+    def list_reviewed_findings(
+        self,
+        *,
+        run_id: str | None = None,
+    ) -> dict[str, object]:
+        record = self._runs.get(run_id)
+        with self._state_lock:
+            review_items = tuple(
+                self._review_state.get(record.run_id, OrderedDict()).items()
+            )
+        items = []
+        for finding_id, note in review_items:
+            try:
+                finding = self.get_finding(finding_id=finding_id, run_id=record.run_id)
+            except MCPFindingNotFoundError:
+                continue
+            items.append(
+                {
+                    "finding_id": finding_id,
+                    "note": note,
+                    "finding": self._project_finding_detail(
+                        finding,
+                        detail_level="summary",
+                    ),
+                }
+            )
+        return {
+            "run_id": record.run_id,
+            "reviewed_count": len(items),
+            "items": items,
+        }
+
+    def check_complexity(
+        self,
+        *,
+        run_id: str | None = None,
+        root: str = ".",
+        path: str | None = None,
+        min_complexity: int | None = None,
+        max_results: int = 10,
+        detail_level: DetailLevel = "normal",
+    ) -> dict[str, object]:
+        validated_detail = cast(
+            "DetailLevel",
+            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        )
+        record = self._resolve_granular_record(
+            run_id=run_id,
+            root=root,
+            analysis_mode="full",
+        )
+        findings = self._query_findings(
+            record=record,
+            family="design",
+            category=CATEGORY_COMPLEXITY,
+            detail_level=validated_detail,
+            changed_paths=self._path_filter_tuple(path),
+            sort_by="priority",
+        )
+        if min_complexity is not None:
+            findings = [
+                finding
+                for finding in findings
+                if _as_int(
+                    self._as_mapping(finding.get("facts")).get(
+                        "cyclomatic_complexity",
+                        0,
+                    )
+                )
+                >= min_complexity
+            ]
+        return self._granular_payload(
+            record=record,
+            check="complexity",
+            items=findings,
+            detail_level=validated_detail,
+            max_results=max_results,
+            path=path,
+        )
+
+    def check_clones(
+        self,
+        *,
+        run_id: str | None = None,
+        root: str = ".",
+        path: str | None = None,
+        clone_type: str | None = None,
+        source_kind: str | None = None,
+        max_results: int = 10,
+        detail_level: DetailLevel = "normal",
+    ) -> dict[str, object]:
+        validated_detail = cast(
+            "DetailLevel",
+            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        )
+        record = self._resolve_granular_record(
+            run_id=run_id,
+            root=root,
+            analysis_mode="clones_only",
+        )
+        findings = self._query_findings(
+            record=record,
+            family="clone",
+            source_kind=source_kind,
+            detail_level=validated_detail,
+            changed_paths=self._path_filter_tuple(path),
+            sort_by="priority",
+        )
+        if clone_type is not None:
+            findings = [
+                finding
+                for finding in findings
+                if str(finding.get("clone_type", "")).strip() == clone_type
+            ]
+        return self._granular_payload(
+            record=record,
+            check="clones",
+            items=findings,
+            detail_level=validated_detail,
+            max_results=max_results,
+            path=path,
+        )
+
+    def check_coupling(
+        self,
+        *,
+        run_id: str | None = None,
+        root: str = ".",
+        path: str | None = None,
+        max_results: int = 10,
+        detail_level: DetailLevel = "normal",
+    ) -> dict[str, object]:
+        validated_detail = cast(
+            "DetailLevel",
+            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        )
+        record = self._resolve_granular_record(
+            run_id=run_id,
+            root=root,
+            analysis_mode="full",
+        )
+        findings = self._query_findings(
+            record=record,
+            family="design",
+            category=CATEGORY_COUPLING,
+            detail_level=validated_detail,
+            changed_paths=self._path_filter_tuple(path),
+            sort_by="priority",
+        )
+        return self._granular_payload(
+            record=record,
+            check="coupling",
+            items=findings,
+            detail_level=validated_detail,
+            max_results=max_results,
+            path=path,
+        )
+
+    def check_cohesion(
+        self,
+        *,
+        run_id: str | None = None,
+        root: str = ".",
+        path: str | None = None,
+        max_results: int = 10,
+        detail_level: DetailLevel = "normal",
+    ) -> dict[str, object]:
+        validated_detail = cast(
+            "DetailLevel",
+            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        )
+        record = self._resolve_granular_record(
+            run_id=run_id,
+            root=root,
+            analysis_mode="full",
+        )
+        findings = self._query_findings(
+            record=record,
+            family="design",
+            category=CATEGORY_COHESION,
+            detail_level=validated_detail,
+            changed_paths=self._path_filter_tuple(path),
+            sort_by="priority",
+        )
+        return self._granular_payload(
+            record=record,
+            check="cohesion",
+            items=findings,
+            detail_level=validated_detail,
+            max_results=max_results,
+            path=path,
+        )
+
+    def check_dead_code(
+        self,
+        *,
+        run_id: str | None = None,
+        root: str = ".",
+        path: str | None = None,
+        min_severity: str | None = None,
+        max_results: int = 10,
+        detail_level: DetailLevel = "normal",
+    ) -> dict[str, object]:
+        validated_detail = cast(
+            "DetailLevel",
+            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        )
+        validated_min_severity = self._validate_optional_choice(
+            "min_severity",
+            min_severity,
+            _VALID_SEVERITIES,
+        )
+        record = self._resolve_granular_record(
+            run_id=run_id,
+            root=root,
+            analysis_mode="full",
+        )
+        findings = self._query_findings(
+            record=record,
+            family="dead_code",
+            detail_level=validated_detail,
+            changed_paths=self._path_filter_tuple(path),
+            sort_by="priority",
+        )
+        if validated_min_severity is not None:
+            findings = [
+                finding
+                for finding in findings
+                if self._severity_rank(str(finding.get("severity", "")))
+                >= self._severity_rank(validated_min_severity)
+            ]
+        return self._granular_payload(
+            record=record,
+            check="dead_code",
+            items=findings,
+            detail_level=validated_detail,
+            max_results=max_results,
+            path=path,
+        )
+
     def read_resource(self, uri: str) -> str:
+        if uri == "codeclone://schema":
+            return json.dumps(
+                self._schema_resource_payload(),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
         latest_prefix = "codeclone://latest/"
         run_prefix = "codeclone://runs/"
         if uri.startswith(latest_prefix):
@@ -549,6 +1408,44 @@ class CodeCloneMCPService:
         if suffix == "summary":
             return json.dumps(
                 record.summary,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        if suffix == "health":
+            return json.dumps(
+                self._as_mapping(record.summary.get("health")),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        if suffix == "gates":
+            with self._state_lock:
+                gate_result = self._last_gate_results.get(record.run_id)
+            if gate_result is None:
+                raise MCPServiceContractError(
+                    "No gate evaluation result is available in this MCP session."
+                )
+            return json.dumps(
+                gate_result,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        if suffix == "changed":
+            if record.changed_projection is None:
+                raise MCPServiceContractError(
+                    "Changed-findings projection is not available in this run."
+                )
+            return json.dumps(
+                record.changed_projection,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        if suffix == "schema":
+            return json.dumps(
+                self._schema_resource_payload(),
                 ensure_ascii=False,
                 indent=2,
                 sort_keys=True,
@@ -574,6 +1471,1165 @@ class CodeCloneMCPService:
         raise MCPServiceContractError(
             f"Unsupported CodeClone resource suffix '{suffix}'."
         )
+
+    def _resolve_request_changed_paths(
+        self,
+        *,
+        root_path: Path,
+        changed_paths: Sequence[str],
+        git_diff_ref: str | None,
+    ) -> tuple[str, ...]:
+        if changed_paths and git_diff_ref is not None:
+            raise MCPServiceContractError(
+                "Provide changed_paths or git_diff_ref, not both."
+            )
+        if git_diff_ref is not None:
+            return self._git_diff_paths(root_path=root_path, git_diff_ref=git_diff_ref)
+        if not changed_paths:
+            return ()
+        return self._normalize_changed_paths(root_path=root_path, paths=changed_paths)
+
+    def _resolve_query_changed_paths(
+        self,
+        *,
+        record: MCPRunRecord,
+        changed_paths: Sequence[str],
+        git_diff_ref: str | None,
+        prefer_record_paths: bool = False,
+    ) -> tuple[str, ...]:
+        if changed_paths or git_diff_ref is not None:
+            return self._resolve_request_changed_paths(
+                root_path=record.root,
+                changed_paths=changed_paths,
+                git_diff_ref=git_diff_ref,
+            )
+        if prefer_record_paths:
+            return record.changed_paths
+        return ()
+
+    def _normalize_changed_paths(
+        self,
+        *,
+        root_path: Path,
+        paths: Sequence[str],
+    ) -> tuple[str, ...]:
+        normalized: set[str] = set()
+        for raw_path in paths:
+            candidate = Path(str(raw_path)).expanduser()
+            if candidate.is_absolute():
+                try:
+                    relative = candidate.resolve().relative_to(root_path)
+                except (OSError, ValueError) as exc:
+                    raise MCPServiceContractError(
+                        f"Changed path '{raw_path}' is outside root '{root_path}'."
+                    ) from exc
+                normalized.add(relative.as_posix())
+                continue
+            cleaned = candidate.as_posix().strip("./")
+            if cleaned:
+                normalized.add(cleaned)
+        return tuple(sorted(normalized))
+
+    def _git_diff_paths(
+        self,
+        *,
+        root_path: Path,
+        git_diff_ref: str,
+    ) -> tuple[str, ...]:
+        lines = _git_diff_lines_payload(
+            root_path=root_path,
+            git_diff_ref=git_diff_ref,
+        )
+        return self._normalize_changed_paths(root_path=root_path, paths=lines)
+
+    def _prune_session_state(self) -> None:
+        active_run_ids = {record.run_id for record in self._runs.records()}
+        with self._state_lock:
+            for state_map in (
+                self._review_state,
+                self._last_gate_results,
+                self._spread_max_cache,
+            ):
+                stale_run_ids = [
+                    run_id for run_id in state_map if run_id not in active_run_ids
+                ]
+                for run_id in stale_run_ids:
+                    state_map.pop(run_id, None)
+
+    def _summary_health_score(self, summary: Mapping[str, object]) -> int:
+        health = self._as_mapping(summary.get("health"))
+        score = health.get("score", 0)
+        return _as_int(score, 0)
+
+    def _summary_health_delta(self, summary: Mapping[str, object]) -> int:
+        metrics_diff = self._as_mapping(summary.get("metrics_diff"))
+        value = metrics_diff.get("health_delta", 0)
+        return _as_int(value, 0)
+
+    def _severity_rank(self, severity: str) -> int:
+        return {
+            SEVERITY_CRITICAL: 3,
+            SEVERITY_WARNING: 2,
+            SEVERITY_INFO: 1,
+        }.get(severity, 0)
+
+    def _path_filter_tuple(self, path: str | None) -> tuple[str, ...]:
+        if not path:
+            return ()
+        cleaned = Path(path).as_posix().strip("./")
+        return (cleaned,) if cleaned else ()
+
+    def _previous_run_for_root(self, record: MCPRunRecord) -> MCPRunRecord | None:
+        previous: MCPRunRecord | None = None
+        for item in self._runs.records():
+            if item.run_id == record.run_id:
+                return previous
+            if item.root == record.root:
+                previous = item
+        return None
+
+    def _resolve_granular_record(
+        self,
+        *,
+        run_id: str | None,
+        root: str,
+        analysis_mode: AnalysisMode,
+    ) -> MCPRunRecord:
+        if run_id is not None:
+            return self._runs.get(run_id)
+        summary = self.analyze_repository(
+            MCPAnalysisRequest(
+                root=root,
+                analysis_mode=analysis_mode,
+            )
+        )
+        return self._runs.get(str(summary["run_id"]))
+
+    def _base_findings(self, record: MCPRunRecord) -> list[dict[str, object]]:
+        report_document = record.report_document
+        findings = self._as_mapping(report_document.get("findings"))
+        groups = self._as_mapping(findings.get("groups"))
+        clone_groups = self._as_mapping(groups.get(FAMILY_CLONES))
+        design_groups = self._design_groups_for_record(record, groups=groups)
+        return [
+            *self._dict_list(clone_groups.get("functions")),
+            *self._dict_list(clone_groups.get("blocks")),
+            *self._dict_list(clone_groups.get("segments")),
+            *self._dict_list(
+                self._as_mapping(groups.get(FAMILY_STRUCTURAL)).get("groups")
+            ),
+            *self._dict_list(
+                self._as_mapping(groups.get(FAMILY_DEAD_CODE)).get("groups")
+            ),
+            *design_groups,
+        ]
+
+    def _design_groups_for_record(
+        self,
+        record: MCPRunRecord,
+        *,
+        groups: Mapping[str, object],
+    ) -> list[dict[str, object]]:
+        canonical_design_groups = self._dict_list(
+            self._as_mapping(groups.get(FAMILY_DESIGN)).get("groups")
+        )
+        if (
+            record.request.complexity_threshold is None
+            and record.request.coupling_threshold is None
+            and record.request.cohesion_threshold is None
+        ):
+            return canonical_design_groups
+
+        metrics = self._as_mapping(record.report_document.get("metrics"))
+        families = self._as_mapping(metrics.get("families"))
+        complexity_threshold = (
+            record.request.complexity_threshold
+            if record.request.complexity_threshold is not None
+            else DEFAULT_COMPLEXITY_THRESHOLD
+        )
+        coupling_threshold = (
+            record.request.coupling_threshold
+            if record.request.coupling_threshold is not None
+            else DEFAULT_COUPLING_THRESHOLD
+        )
+        cohesion_threshold = (
+            record.request.cohesion_threshold
+            if record.request.cohesion_threshold is not None
+            else DEFAULT_COHESION_THRESHOLD
+        )
+        groups_out: list[dict[str, object]] = []
+        for item in self._as_sequence(
+            self._as_mapping(families.get(CATEGORY_COMPLEXITY)).get("items")
+        ):
+            group = self._complexity_group_for_threshold(
+                self._as_mapping(item),
+                threshold=complexity_threshold,
+                scan_root=str(record.root),
+            )
+            if group is not None:
+                groups_out.append(group)
+        for item in self._as_sequence(
+            self._as_mapping(families.get(CATEGORY_COUPLING)).get("items")
+        ):
+            group = self._coupling_group_for_threshold(
+                self._as_mapping(item),
+                threshold=coupling_threshold,
+                scan_root=str(record.root),
+            )
+            if group is not None:
+                groups_out.append(group)
+        for item in self._as_sequence(
+            self._as_mapping(families.get(CATEGORY_COHESION)).get("items")
+        ):
+            group = self._cohesion_group_for_threshold(
+                self._as_mapping(item),
+                threshold=cohesion_threshold,
+                scan_root=str(record.root),
+            )
+            if group is not None:
+                groups_out.append(group)
+        groups_out.extend(
+            group
+            for group in canonical_design_groups
+            if str(group.get("category", "")) == CATEGORY_DEPENDENCY
+        )
+        groups_out.sort(
+            key=lambda group: (
+                -_as_float(group.get("priority", 0.0), 0.0),
+                str(group.get("id", "")),
+            )
+        )
+        return groups_out
+
+    def _design_singleton_group(
+        self,
+        *,
+        category: str,
+        kind: str,
+        severity: str,
+        qualname: str,
+        filepath: str,
+        start_line: int,
+        end_line: int,
+        item_data: Mapping[str, object],
+        facts: Mapping[str, object],
+        scan_root: str,
+    ) -> dict[str, object]:
+        return _design_singleton_group_payload(
+            category=category,
+            kind=kind,
+            severity=severity,
+            qualname=qualname,
+            filepath=filepath,
+            start_line=start_line,
+            end_line=end_line,
+            item_data=item_data,
+            facts=facts,
+            scan_root=scan_root,
+        )
+
+    def _complexity_group_for_threshold(
+        self,
+        item_map: Mapping[str, object],
+        *,
+        threshold: int,
+        scan_root: str,
+    ) -> dict[str, object] | None:
+        return _complexity_group_for_threshold_payload(
+            item_map,
+            threshold=threshold,
+            scan_root=scan_root,
+        )
+
+    def _coupling_group_for_threshold(
+        self,
+        item_map: Mapping[str, object],
+        *,
+        threshold: int,
+        scan_root: str,
+    ) -> dict[str, object] | None:
+        return _coupling_group_for_threshold_payload(
+            item_map,
+            threshold=threshold,
+            scan_root=scan_root,
+        )
+
+    def _cohesion_group_for_threshold(
+        self,
+        item_map: Mapping[str, object],
+        *,
+        threshold: int,
+        scan_root: str,
+    ) -> dict[str, object] | None:
+        return _cohesion_group_for_threshold_payload(
+            item_map,
+            threshold=threshold,
+            scan_root=scan_root,
+        )
+
+    def _query_findings(
+        self,
+        *,
+        record: MCPRunRecord,
+        family: FindingFamilyFilter = "all",
+        category: str | None = None,
+        severity: str | None = None,
+        source_kind: str | None = None,
+        novelty: FindingNoveltyFilter = "all",
+        sort_by: FindingSort = "default",
+        detail_level: DetailLevel = "normal",
+        changed_paths: Sequence[str] = (),
+        exclude_reviewed: bool = False,
+    ) -> list[dict[str, object]]:
+        findings = self._base_findings(record)
+        max_spread_value = max(
+            (self._spread_value(finding) for finding in findings),
+            default=0,
+        )
+        with self._state_lock:
+            self._spread_max_cache[record.run_id] = max_spread_value
+        filtered = [
+            finding
+            for finding in findings
+            if self._matches_finding_filters(
+                finding=finding,
+                family=family,
+                category=category,
+                severity=severity,
+                source_kind=source_kind,
+                novelty=novelty,
+            )
+            and (
+                not changed_paths
+                or self._finding_touches_paths(
+                    finding=finding,
+                    changed_paths=changed_paths,
+                )
+            )
+            and (not exclude_reviewed or not self._finding_is_reviewed(record, finding))
+        ]
+        remediation_map = {
+            str(finding.get("id", "")): self._remediation_for_finding(record, finding)
+            for finding in filtered
+        }
+        priority_map = {
+            str(finding.get("id", "")): self._priority_score(
+                record,
+                finding,
+                remediation=remediation_map[str(finding.get("id", ""))],
+                max_spread_value=max_spread_value,
+            )
+            for finding in filtered
+        }
+        ordered = self._sort_findings(
+            record=record,
+            findings=filtered,
+            sort_by=sort_by,
+            priority_map=priority_map,
+        )
+        return [
+            self._decorate_finding(
+                record,
+                finding,
+                detail_level=detail_level,
+                remediation=remediation_map[str(finding.get("id", ""))],
+                priority_payload=priority_map[str(finding.get("id", ""))],
+                max_spread_value=max_spread_value,
+            )
+            for finding in ordered
+        ]
+
+    def _sort_findings(
+        self,
+        *,
+        record: MCPRunRecord,
+        findings: Sequence[Mapping[str, object]],
+        sort_by: FindingSort,
+        priority_map: Mapping[str, Mapping[str, object]] | None = None,
+    ) -> list[dict[str, object]]:
+        finding_rows = [dict(finding) for finding in findings]
+        if sort_by == "default":
+            return finding_rows
+        if sort_by == "severity":
+            finding_rows.sort(
+                key=lambda finding: (
+                    -self._severity_rank(str(finding.get("severity", ""))),
+                    str(finding.get("id", "")),
+                )
+            )
+            return finding_rows
+        if sort_by == "spread":
+            finding_rows.sort(
+                key=lambda finding: (
+                    -self._spread_value(finding),
+                    -_as_float(finding.get("priority", 0.0), 0.0),
+                    str(finding.get("id", "")),
+                )
+            )
+            return finding_rows
+        finding_rows.sort(
+            key=lambda finding: (
+                -_as_float(
+                    self._as_mapping(
+                        (priority_map or {}).get(str(finding.get("id", "")))
+                    ).get("score", 0.0),
+                    0.0,
+                )
+                if priority_map is not None
+                else -_as_float(self._priority_score(record, finding)["score"], 0.0),
+                -self._severity_rank(str(finding.get("severity", ""))),
+                str(finding.get("id", "")),
+            )
+        )
+        return finding_rows
+
+    def _decorate_finding(
+        self,
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+        *,
+        detail_level: DetailLevel,
+        remediation: Mapping[str, object] | None = None,
+        priority_payload: Mapping[str, object] | None = None,
+        max_spread_value: int | None = None,
+    ) -> dict[str, object]:
+        resolved_remediation = (
+            remediation
+            if remediation is not None
+            else self._remediation_for_finding(record, finding)
+        )
+        resolved_priority_payload = (
+            dict(priority_payload)
+            if priority_payload is not None
+            else self._priority_score(
+                record,
+                finding,
+                remediation=resolved_remediation,
+                max_spread_value=max_spread_value,
+            )
+        )
+        payload = dict(finding)
+        payload["priority_score"] = resolved_priority_payload["score"]
+        payload["priority_factors"] = resolved_priority_payload["factors"]
+        payload["locations"] = self._locations_for_finding(record, finding)
+        payload["html_anchor"] = f"finding-{finding.get('id', '')}"
+        if resolved_remediation is not None:
+            payload["remediation"] = resolved_remediation
+        return self._project_finding_detail(payload, detail_level=detail_level)
+
+    def _project_finding_detail(
+        self,
+        finding: Mapping[str, object],
+        *,
+        detail_level: DetailLevel,
+    ) -> dict[str, object]:
+        if detail_level == "full":
+            return dict(finding)
+        if detail_level == "summary":
+            return self._finding_summary_card_payload(finding)
+        payload = dict(finding)
+        if "remediation" in payload:
+            payload["remediation"] = self._project_remediation(
+                self._as_mapping(payload["remediation"]),
+                detail_level="summary",
+            )
+        return payload
+
+    def _finding_summary_card(
+        self,
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+    ) -> dict[str, object]:
+        return self._finding_summary_card_payload(
+            self._decorate_finding(record, finding, detail_level="normal")
+        )
+
+    def _finding_summary_card_payload(
+        self,
+        finding: Mapping[str, object],
+    ) -> dict[str, object]:
+        card = serialize_finding_group_card(finding)
+        return {
+            "id": str(finding.get("id", "")),
+            **card,
+            "novelty": str(finding.get("novelty", "")),
+            "priority_score": _as_float(finding.get("priority_score", 0.0), 0.0),
+            "priority_factors": dict(self._as_mapping(finding.get("priority_factors"))),
+            "locations": [
+                dict(self._as_mapping(item))
+                for item in self._as_sequence(finding.get("locations"))[:3]
+            ],
+        }
+
+    def _matches_finding_filters(
+        self,
+        *,
+        finding: Mapping[str, object],
+        family: FindingFamilyFilter,
+        category: str | None = None,
+        severity: str | None,
+        source_kind: str | None,
+        novelty: FindingNoveltyFilter,
+    ) -> bool:
+        finding_family = str(finding.get("family", "")).strip()
+        if family != "all" and finding_family != family:
+            return False
+        if (
+            category is not None
+            and str(finding.get("category", "")).strip() != category
+        ):
+            return False
+        if (
+            severity is not None
+            and str(finding.get("severity", "")).strip() != severity
+        ):
+            return False
+        dominant_kind = str(
+            self._as_mapping(finding.get("source_scope")).get("dominant_kind", "")
+        ).strip()
+        if source_kind is not None and dominant_kind != source_kind:
+            return False
+        return novelty == "all" or str(finding.get("novelty", "")).strip() == novelty
+
+    def _finding_touches_paths(
+        self,
+        *,
+        finding: Mapping[str, object],
+        changed_paths: Sequence[str],
+    ) -> bool:
+        normalized_paths = tuple(changed_paths)
+        for item in self._as_sequence(finding.get("items")):
+            relative_path = str(self._as_mapping(item).get("relative_path", "")).strip()
+            if relative_path and self._path_matches(relative_path, normalized_paths):
+                return True
+        return False
+
+    def _path_matches(self, relative_path: str, changed_paths: Sequence[str]) -> bool:
+        for candidate in changed_paths:
+            if relative_path == candidate or relative_path.startswith(candidate + "/"):
+                return True
+        return False
+
+    def _finding_is_reviewed(
+        self,
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+    ) -> bool:
+        with self._state_lock:
+            review_map = self._review_state.get(record.run_id, OrderedDict())
+            return str(finding.get("id", "")) in review_map
+
+    def _priority_score(
+        self,
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+        *,
+        remediation: Mapping[str, object] | None = None,
+        max_spread_value: int | None = None,
+    ) -> dict[str, object]:
+        spread_weight = self._spread_weight(
+            record,
+            finding,
+            max_spread_value=max_spread_value,
+        )
+        factors = {
+            "severity_weight": _SEVERITY_WEIGHT.get(
+                str(finding.get("severity", "")),
+                0.2,
+            ),
+            "effort_weight": _EFFORT_WEIGHT.get(
+                (
+                    str(remediation.get("effort", EFFORT_MODERATE))
+                    if remediation is not None
+                    else EFFORT_MODERATE
+                ),
+                0.6,
+            ),
+            "novelty_weight": _NOVELTY_WEIGHT.get(
+                str(finding.get("novelty", "")),
+                0.7,
+            ),
+            "runtime_weight": _RUNTIME_WEIGHT.get(
+                str(
+                    self._as_mapping(finding.get("source_scope")).get(
+                        "dominant_kind",
+                        "other",
+                    )
+                ),
+                0.5,
+            ),
+            "spread_weight": spread_weight,
+            "confidence_weight": _CONFIDENCE_WEIGHT.get(
+                str(finding.get("confidence", CONFIDENCE_MEDIUM)),
+                0.7,
+            ),
+        }
+        product = 1.0
+        for value in factors.values():
+            product *= max(_as_float(value, 0.01), 0.01)
+        score = product ** (1.0 / max(len(factors), 1))
+        return {
+            "score": round(score, 4),
+            "factors": {
+                key: round(_as_float(value, 0.0), 4) for key, value in factors.items()
+            },
+        }
+
+    def _spread_weight(
+        self,
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+        *,
+        max_spread_value: int | None = None,
+    ) -> float:
+        spread_value = self._spread_value(finding)
+        if max_spread_value is None:
+            with self._state_lock:
+                max_spread_value = self._spread_max_cache.get(record.run_id)
+            if max_spread_value is None:
+                max_spread_value = max(
+                    (self._spread_value(item) for item in self._base_findings(record)),
+                    default=0,
+                )
+                with self._state_lock:
+                    self._spread_max_cache[record.run_id] = max_spread_value
+        max_value = max_spread_value
+        if max_value <= 0:
+            return 0.3
+        return max(0.2, min(1.0, spread_value / max_value))
+
+    def _spread_value(self, finding: Mapping[str, object]) -> int:
+        spread = self._as_mapping(finding.get("spread"))
+        files = _as_int(spread.get("files", 0), 0)
+        functions = _as_int(spread.get("functions", 0), 0)
+        count = _as_int(finding.get("count", 0), 0)
+        return max(files, functions, count, 1)
+
+    def _locations_for_finding(
+        self,
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+    ) -> list[dict[str, object]]:
+        locations: list[dict[str, object]] = []
+        for item in self._as_sequence(finding.get("items")):
+            item_map = self._as_mapping(item)
+            relative_path = str(item_map.get("relative_path", "")).strip()
+            if not relative_path:
+                continue
+            absolute_path = (record.root / relative_path).resolve()
+            line = _as_int(item_map.get("start_line", 0) or 0, 0)
+            symbol = str(item_map.get("qualname", item_map.get("module", ""))).strip()
+            uri = absolute_path.as_uri()
+            if line > 0:
+                uri = f"{uri}#L{line}"
+            locations.append(
+                {
+                    "file": relative_path,
+                    "line": line,
+                    "symbol": symbol,
+                    "uri": uri,
+                }
+            )
+        deduped: list[dict[str, object]] = []
+        seen: set[tuple[str, int, str]] = set()
+        for location in locations:
+            key = (
+                str(location.get("file", "")),
+                _as_int(location.get("line", 0), 0),
+                str(location.get("symbol", "")),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(location)
+        return deduped
+
+    def _suggestion_finding_id(self, suggestion: object) -> str:
+        return _suggestion_finding_id_payload(suggestion)
+
+    def _remediation_for_finding(
+        self,
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+    ) -> dict[str, object] | None:
+        suggestion = self._suggestion_for_finding(record, str(finding.get("id", "")))
+        if suggestion is None:
+            return None
+        source_kind = str(getattr(suggestion, "source_kind", "other"))
+        spread_files = _as_int(getattr(suggestion, "spread_files", 0), 0)
+        spread_functions = _as_int(getattr(suggestion, "spread_functions", 0), 0)
+        title = str(getattr(suggestion, "title", "")).strip()
+        severity = str(finding.get("severity", "")).strip()
+        novelty = str(finding.get("novelty", "known")).strip()
+        count = _as_int(
+            getattr(suggestion, "fact_count", 0) or finding.get("count", 0) or 0,
+            0,
+        )
+        safe_refactor_shape = self._safe_refactor_shape(suggestion)
+        effort = str(getattr(suggestion, "effort", EFFORT_MODERATE))
+        confidence = str(getattr(suggestion, "confidence", CONFIDENCE_MEDIUM))
+        risk_level = self._risk_level_for_effort(effort)
+        return {
+            "effort": effort,
+            "priority": _as_float(getattr(suggestion, "priority", 0.0), 0.0),
+            "confidence": confidence,
+            "safe_refactor_shape": safe_refactor_shape,
+            "steps": list(getattr(suggestion, "steps", ())),
+            "risk_level": risk_level,
+            "why_now": self._why_now_text(
+                title=title,
+                severity=severity,
+                novelty=novelty,
+                count=count,
+                source_kind=source_kind,
+                spread_files=spread_files,
+                spread_functions=spread_functions,
+                effort=effort,
+            ),
+            "blast_radius": {
+                "files": spread_files,
+                "functions": spread_functions,
+                "is_production": source_kind == "production",
+            },
+        }
+
+    def _suggestion_for_finding(
+        self,
+        record: MCPRunRecord,
+        finding_id: str,
+    ) -> object | None:
+        for suggestion in record.analysis.suggestions:
+            if self._suggestion_finding_id(suggestion) == finding_id:
+                return suggestion
+        return None
+
+    def _safe_refactor_shape(self, suggestion: object) -> str:
+        category = str(getattr(suggestion, "category", "")).strip()
+        clone_type = str(getattr(suggestion, "clone_type", "")).strip()
+        title = str(getattr(suggestion, "title", "")).strip()
+        if category == CATEGORY_CLONE and clone_type == "Type-1":
+            return "Keep one canonical implementation and route callers through it."
+        if category == CATEGORY_CLONE and clone_type == "Type-2":
+            return "Extract shared implementation with explicit parameters."
+        if category == CATEGORY_CLONE and "Block" in title:
+            return "Extract the repeated statement sequence into a helper."
+        if category == CATEGORY_STRUCTURAL:
+            return "Extract the repeated branch family into a named helper."
+        if category == CATEGORY_COMPLEXITY:
+            return "Split the function into smaller named steps."
+        if category == CATEGORY_COUPLING:
+            return "Isolate responsibilities and invert unnecessary dependencies."
+        if category == CATEGORY_COHESION:
+            return "Split the class by responsibility boundary."
+        if category == CATEGORY_DEAD_CODE:
+            return "Delete the unused symbol or document intentional reachability."
+        if category == CATEGORY_DEPENDENCY:
+            return "Break the cycle by moving shared abstractions to a lower layer."
+        return "Extract the repeated logic into a shared, named abstraction."
+
+    def _risk_level_for_effort(self, effort: str) -> str:
+        return {
+            EFFORT_EASY: "low",
+            EFFORT_MODERATE: "medium",
+            EFFORT_HARD: "high",
+        }.get(effort, "medium")
+
+    def _why_now_text(
+        self,
+        *,
+        title: str,
+        severity: str,
+        novelty: str,
+        count: int,
+        source_kind: str,
+        spread_files: int,
+        spread_functions: int,
+        effort: str,
+    ) -> str:
+        novelty_text = "new regression" if novelty == "new" else "known debt"
+        context = (
+            "production code"
+            if source_kind == "production"
+            else source_kind or "mixed scope"
+        )
+        spread_text = f"{spread_files} files / {spread_functions} functions"
+        count_text = f"{count} instances" if count > 0 else "localized issue"
+        return (
+            f"{severity.upper()} {title} in {context} — {count_text}, "
+            f"{spread_text}, {effort} fix, {novelty_text}."
+        )
+
+    def _project_remediation(
+        self,
+        remediation: Mapping[str, object],
+        *,
+        detail_level: DetailLevel,
+    ) -> dict[str, object]:
+        if detail_level == "full":
+            return dict(remediation)
+        projected = {
+            "effort": remediation.get("effort"),
+            "priority": remediation.get("priority"),
+            "confidence": remediation.get("confidence"),
+            "safe_refactor_shape": remediation.get("safe_refactor_shape"),
+            "risk_level": remediation.get("risk_level"),
+            "why_now": remediation.get("why_now"),
+        }
+        if detail_level == "summary":
+            return projected
+        projected["blast_radius"] = dict(
+            self._as_mapping(remediation.get("blast_radius"))
+        )
+        projected["steps"] = list(self._as_sequence(remediation.get("steps")))
+        return projected
+
+    def _hotspot_rows(
+        self,
+        *,
+        record: MCPRunRecord,
+        kind: HotlistKind,
+        detail_level: DetailLevel,
+        changed_paths: Sequence[str],
+        exclude_reviewed: bool,
+    ) -> list[dict[str, object]]:
+        findings = self._base_findings(record)
+        finding_index = {str(finding.get("id", "")): finding for finding in findings}
+        max_spread_value = max(
+            (self._spread_value(finding) for finding in findings),
+            default=0,
+        )
+        with self._state_lock:
+            self._spread_max_cache[record.run_id] = max_spread_value
+        remediation_map = {
+            str(finding.get("id", "")): self._remediation_for_finding(record, finding)
+            for finding in findings
+        }
+        priority_map = {
+            str(finding.get("id", "")): self._priority_score(
+                record,
+                finding,
+                remediation=remediation_map[str(finding.get("id", ""))],
+                max_spread_value=max_spread_value,
+            )
+            for finding in findings
+        }
+        derived = self._as_mapping(record.report_document.get("derived"))
+        hotlists = self._as_mapping(derived.get("hotlists"))
+        if kind == "highest_priority":
+            ordered_ids = [
+                str(finding.get("id", ""))
+                for finding in self._sort_findings(
+                    record=record,
+                    findings=findings,
+                    sort_by="priority",
+                    priority_map=priority_map,
+                )
+            ]
+        else:
+            hotlist_key = f"{kind}_ids"
+            ordered_ids = [
+                str(item)
+                for item in self._as_sequence(hotlists.get(hotlist_key))
+                if str(item)
+            ]
+        rows: list[dict[str, object]] = []
+        for finding_id in ordered_ids:
+            finding = finding_index.get(finding_id)
+            if finding is None:
+                continue
+            if changed_paths and not self._finding_touches_paths(
+                finding=finding,
+                changed_paths=changed_paths,
+            ):
+                continue
+            if exclude_reviewed and self._finding_is_reviewed(record, finding):
+                continue
+            finding_id_key = str(finding.get("id", ""))
+            decorated = self._decorate_finding(
+                record,
+                finding,
+                detail_level=detail_level,
+                remediation=remediation_map[finding_id_key],
+                priority_payload=priority_map[finding_id_key],
+                max_spread_value=max_spread_value,
+            )
+            if detail_level == "summary":
+                rows.append(self._finding_summary_card_payload(decorated))
+            elif detail_level == "full":
+                rows.append(decorated)
+            else:
+                rows.append(
+                    {
+                        **serialize_finding_group_card(decorated),
+                        "id": finding_id,
+                        "novelty": decorated.get("novelty"),
+                        "priority_score": decorated.get("priority_score"),
+                        "priority_factors": decorated.get("priority_factors"),
+                        "locations": decorated.get("locations"),
+                    }
+                )
+        return rows
+
+    def _build_changed_projection(
+        self,
+        record: MCPRunRecord,
+    ) -> dict[str, object] | None:
+        if not record.changed_paths:
+            return None
+        items = self._query_findings(
+            record=record,
+            detail_level="summary",
+            changed_paths=record.changed_paths,
+        )
+        new_count = sum(1 for item in items if str(item.get("novelty", "")) == "new")
+        known_count = sum(
+            1 for item in items if str(item.get("novelty", "")) == "known"
+        )
+        health_delta = self._summary_health_delta(record.summary)
+        return {
+            "run_id": record.run_id,
+            "changed_paths": list(record.changed_paths),
+            "total": len(items),
+            "new": new_count,
+            "known": known_count,
+            "items": items,
+            "health": dict(self._as_mapping(record.summary.get("health"))),
+            "health_delta": health_delta,
+            "verdict": self._changed_verdict(
+                changed_projection={"new": new_count, "total": len(items)},
+                health_delta=health_delta,
+            ),
+        }
+
+    def _augment_summary_with_changed(
+        self,
+        *,
+        summary: Mapping[str, object],
+        changed_paths: Sequence[str],
+        changed_projection: Mapping[str, object] | None,
+    ) -> dict[str, object]:
+        payload = dict(summary)
+        if changed_paths:
+            payload["changed_paths"] = list(changed_paths)
+        if changed_projection is not None:
+            payload["changed_findings"] = {
+                "total": _as_int(changed_projection.get("total", 0), 0),
+                "new": _as_int(changed_projection.get("new", 0), 0),
+                "known": _as_int(changed_projection.get("known", 0), 0),
+                "items": [
+                    dict(self._as_mapping(item))
+                    for item in self._as_sequence(changed_projection.get("items"))[:10]
+                ],
+            }
+            payload["health_delta"] = _as_int(
+                changed_projection.get("health_delta", 0),
+                0,
+            )
+            payload["verdict"] = str(changed_projection.get("verdict", "stable"))
+        return payload
+
+    def _changed_verdict(
+        self,
+        *,
+        changed_projection: Mapping[str, object],
+        health_delta: int,
+    ) -> str:
+        if _as_int(changed_projection.get("new", 0), 0) > 0 or health_delta < 0:
+            return "regressed"
+        if _as_int(changed_projection.get("total", 0), 0) == 0 and health_delta > 0:
+            return "improved"
+        return "stable"
+
+    def _comparison_index(
+        self,
+        record: MCPRunRecord,
+        *,
+        focus: ComparisonFocus,
+    ) -> dict[str, dict[str, object]]:
+        findings = self._base_findings(record)
+        if focus == "clones":
+            findings = [f for f in findings if str(f.get("family", "")) == FAMILY_CLONE]
+        elif focus == "structural":
+            findings = [
+                f for f in findings if str(f.get("family", "")) == FAMILY_STRUCTURAL
+            ]
+        elif focus == "metrics":
+            findings = [
+                f
+                for f in findings
+                if str(f.get("family", "")) in {FAMILY_DESIGN, FAMILY_DEAD_CODE}
+            ]
+        return {str(finding.get("id", "")): dict(finding) for finding in findings}
+
+    def _comparison_verdict(
+        self,
+        *,
+        regressions: int,
+        improvements: int,
+        health_delta: int,
+    ) -> str:
+        if regressions > 0 or health_delta < 0:
+            return "regressed"
+        if improvements > 0 or health_delta > 0:
+            return "improved"
+        return "stable"
+
+    def _comparison_summary_text(
+        self,
+        *,
+        regressions: int,
+        improvements: int,
+        health_delta: int,
+    ) -> str:
+        return (
+            f"{improvements} findings resolved, {regressions} new regressions, "
+            f"health delta {health_delta:+d}"
+        )
+
+    def _render_pr_summary_markdown(self, payload: Mapping[str, object]) -> str:
+        health = self._as_mapping(payload.get("health"))
+        score = health.get("score", "n/a")
+        grade = health.get("grade", "n/a")
+        delta = _as_int(payload.get("health_delta", 0), 0)
+        changed_items = [
+            self._as_mapping(item)
+            for item in self._as_sequence(payload.get("new_findings_in_changed_files"))
+        ]
+        resolved = [
+            self._as_mapping(item)
+            for item in self._as_sequence(payload.get("resolved"))
+        ]
+        blocking_gates = [
+            str(item)
+            for item in self._as_sequence(payload.get("blocking_gates"))
+            if str(item)
+        ]
+        lines = [
+            "## CodeClone Summary",
+            "",
+            (
+                f"Health: {score}/100 ({grade}) | Delta: {delta:+d} | "
+                f"Verdict: {payload.get('verdict', 'stable')}"
+            ),
+            "",
+            f"### New findings in changed files ({len(changed_items)})",
+        ]
+        if not changed_items:
+            lines.append("- None")
+        else:
+            lines.extend(
+                [
+                    (
+                        f"- **{str(item.get('severity', 'info')).upper()}** "
+                        f"{item.get('title', 'Finding')} in "
+                        f"`{item.get('location', '(unknown)')}`"
+                    )
+                    for item in changed_items[:10]
+                ]
+            )
+        lines.extend(["", f"### Resolved ({len(resolved)})"])
+        if not resolved:
+            lines.append("- None")
+        else:
+            lines.extend(
+                [
+                    (
+                        f"- {item.get('title', 'Finding')} in "
+                        f"`{item.get('location', '(unknown)')}`"
+                    )
+                    for item in resolved[:10]
+                ]
+            )
+        lines.extend(["", "### Blocking gates"])
+        if not blocking_gates:
+            lines.append("- none")
+        else:
+            lines.extend([f"- `{reason}`" for reason in blocking_gates])
+        return "\n".join(lines)
+
+    def _granular_payload(
+        self,
+        *,
+        record: MCPRunRecord,
+        check: str,
+        items: Sequence[Mapping[str, object]],
+        detail_level: DetailLevel,
+        max_results: int,
+        path: str | None,
+    ) -> dict[str, object]:
+        bounded_items = [dict(item) for item in items[: max(1, max_results)]]
+        return {
+            "run_id": record.run_id,
+            "check": check,
+            "detail_level": detail_level,
+            "path": path,
+            "returned": len(bounded_items),
+            "total": len(items),
+            "health": dict(self._as_mapping(record.summary.get("health"))),
+            "items": bounded_items,
+        }
+
+    def _schema_resource_payload(self) -> dict[str, object]:
+        return {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "CodeCloneCanonicalReport",
+            "type": "object",
+            "required": [
+                "report_schema_version",
+                "meta",
+                "inventory",
+                "findings",
+                "derived",
+                "integrity",
+            ],
+            "properties": {
+                "report_schema_version": {
+                    "type": "string",
+                    "const": REPORT_SCHEMA_VERSION,
+                },
+                "meta": {"type": "object"},
+                "inventory": {"type": "object"},
+                "findings": {"type": "object"},
+                "metrics": {"type": "object"},
+                "derived": {"type": "object"},
+                "integrity": {"type": "object"},
+            },
+        }
+
+    def _validate_analysis_request(self, request: MCPAnalysisRequest) -> None:
+        self._validate_choice(
+            "analysis_mode",
+            request.analysis_mode,
+            _VALID_ANALYSIS_MODES,
+        )
+        self._validate_choice(
+            "cache_policy",
+            request.cache_policy,
+            _VALID_CACHE_POLICIES,
+        )
+
+    def _validate_choice(
+        self,
+        name: str,
+        value: str,
+        allowed: Sequence[str] | frozenset[str],
+    ) -> str:
+        if value not in allowed:
+            allowed_list = ", ".join(sorted(allowed))
+            raise MCPServiceContractError(
+                f"Invalid value for {name}: {value!r}. Expected one of: {allowed_list}."
+            )
+        return value
+
+    def _validate_optional_choice(
+        self,
+        name: str,
+        value: str | None,
+        allowed: Sequence[str] | frozenset[str],
+    ) -> str | None:
+        if value is None:
+            return None
+        return self._validate_choice(name, value, allowed)
 
     def _resolve_root(self, root: str) -> Path:
         try:
@@ -750,13 +2806,16 @@ class CodeCloneMCPService:
         cache = Cache(
             cache_path,
             root=root_path,
-            max_size_bytes=int(args.max_cache_size_mb) * 1024 * 1024,
-            min_loc=int(args.min_loc),
-            min_stmt=int(args.min_stmt),
-            block_min_loc=int(args.block_min_loc),
-            block_min_stmt=int(args.block_min_stmt),
-            segment_min_loc=int(args.segment_min_loc),
-            segment_min_stmt=int(args.segment_min_stmt),
+            max_size_bytes=_as_int(args.max_cache_size_mb, 0) * 1024 * 1024,
+            min_loc=_as_int(args.min_loc, DEFAULT_MIN_LOC),
+            min_stmt=_as_int(args.min_stmt, DEFAULT_MIN_STMT),
+            block_min_loc=_as_int(args.block_min_loc, DEFAULT_BLOCK_MIN_LOC),
+            block_min_stmt=_as_int(args.block_min_stmt, DEFAULT_BLOCK_MIN_STMT),
+            segment_min_loc=_as_int(args.segment_min_loc, DEFAULT_SEGMENT_MIN_LOC),
+            segment_min_stmt=_as_int(
+                args.segment_min_stmt,
+                DEFAULT_SEGMENT_MIN_STMT,
+            ),
         )
         if policy != "off":
             cache.load()
@@ -793,15 +2852,7 @@ class CodeCloneMCPService:
         )
 
     def _load_report_document(self, report_json: str) -> dict[str, object]:
-        try:
-            payload = json.loads(report_json)
-        except json.JSONDecodeError as exc:
-            raise MCPServiceError(
-                f"Generated canonical report is not valid JSON: {exc}"
-            ) from exc
-        if not isinstance(payload, dict):
-            raise MCPServiceError("Generated canonical report must be a JSON object.")
-        return dict(payload)
+        return _load_report_document_payload(report_json)
 
     def _report_digest(self, report_document: Mapping[str, object]) -> str:
         integrity = self._as_mapping(report_document.get("integrity"))
@@ -916,48 +2967,8 @@ class CodeCloneMCPService:
             "new_high_coupling_classes": len(new_high_coupling_classes),
             "new_cycles": len(new_cycles),
             "new_dead_code": len(new_dead_code),
-            "health_delta": int(health_delta),
+            "health_delta": _as_int(health_delta, 0),
         }
-
-    def _flatten_findings(
-        self,
-        report_document: Mapping[str, object],
-    ) -> list[dict[str, object]]:
-        findings = self._as_mapping(report_document.get("findings"))
-        groups = self._as_mapping(findings.get("groups"))
-        clone_groups = self._as_mapping(groups.get("clones"))
-        return [
-            *self._dict_list(clone_groups.get("functions")),
-            *self._dict_list(clone_groups.get("blocks")),
-            *self._dict_list(clone_groups.get("segments")),
-            *self._dict_list(self._as_mapping(groups.get("structural")).get("groups")),
-            *self._dict_list(self._as_mapping(groups.get("dead_code")).get("groups")),
-            *self._dict_list(self._as_mapping(groups.get("design")).get("groups")),
-        ]
-
-    def _matches_finding_filters(
-        self,
-        *,
-        finding: Mapping[str, object],
-        family: FindingFamilyFilter,
-        severity: str | None,
-        source_kind: str | None,
-        novelty: FindingNoveltyFilter,
-    ) -> bool:
-        finding_family = str(finding.get("family", "")).strip()
-        if family != "all" and finding_family != family:
-            return False
-        if (
-            severity is not None
-            and str(finding.get("severity", "")).strip() != severity
-        ):
-            return False
-        dominant_kind = str(
-            self._as_mapping(finding.get("source_scope")).get("dominant_kind", "")
-        ).strip()
-        if source_kind is not None and dominant_kind != source_kind:
-            return False
-        return novelty == "all" or str(finding.get("novelty", "")).strip() == novelty
 
     def _dict_list(self, value: object) -> list[dict[str, object]]:
         return [dict(self._as_mapping(item)) for item in self._as_sequence(value)]

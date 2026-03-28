@@ -1,11 +1,12 @@
 import json
 import os
+import subprocess
 import sys
 import webbrowser
 from argparse import Namespace
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -151,6 +152,9 @@ def test_cli_help_text_consistency(
         "Structural code quality analysis for Python.",
         "Target:",
         "Analysis:",
+        "--changed-only",
+        "--diff-against GIT_REF",
+        "--paths-from-git-diff GIT_REF",
         "Baselines and CI:",
         "Quality gates:",
         "Analysis stages:",
@@ -203,6 +207,16 @@ def test_report_path_origins_distinguish_bare_and_explicit_flags() -> None:
         "md": "explicit",
         "sarif": "default",
         "text": "default",
+    }
+
+
+def test_report_path_origins_stops_at_double_dash() -> None:
+    assert cli._report_path_origins(("--json=out.json", "--", "--html")) == {
+        "html": None,
+        "json": "explicit",
+        "md": None,
+        "sarif": None,
+        "text": None,
     }
 
 
@@ -302,6 +316,229 @@ def test_argument_parser_contract_error_marker_for_invalid_args(
     assert exc.value.code == 2
     err = capsys.readouterr().err
     assert "CONTRACT ERROR:" in err
+
+
+def test_validate_changed_scope_args_requires_diff_source() -> None:
+    cli.console = cli._make_console(no_color=True)
+    args = Namespace(
+        changed_only=True,
+        diff_against=None,
+        paths_from_git_diff=None,
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli._validate_changed_scope_args(args=args)
+    assert exc.value.code == 2
+
+
+def test_validate_changed_scope_args_requires_changed_only_for_diff_against() -> None:
+    cli.console = cli._make_console(no_color=True)
+    args = Namespace(
+        changed_only=False,
+        diff_against="main",
+        paths_from_git_diff=None,
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli._validate_changed_scope_args(args=args)
+    assert exc.value.code == 2
+
+
+def test_validate_changed_scope_args_promotes_paths_from_git_diff() -> None:
+    args = Namespace(
+        changed_only=False,
+        diff_against=None,
+        paths_from_git_diff="HEAD~1",
+    )
+    assert cli._validate_changed_scope_args(args=args) == "HEAD~1"
+    assert args.changed_only is True
+
+
+def test_normalize_changed_paths_relativizes_dedupes_and_sorts(tmp_path: Path) -> None:
+    root_path = tmp_path.resolve()
+    pkg_dir = root_path / "pkg"
+    pkg_dir.mkdir()
+    first = pkg_dir / "b.py"
+    second = pkg_dir / "a.py"
+    first.write_text("pass\n", "utf-8")
+    second.write_text("pass\n", "utf-8")
+
+    assert cli._normalize_changed_paths(
+        root_path=root_path,
+        paths=("pkg/b.py", str(second), " pkg/b.py ", ""),
+    ) == ("pkg/a.py", "pkg/b.py")
+
+
+def test_normalize_changed_paths_reports_unresolvable_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cli.console = cli._make_console(no_color=True)
+    root_path = tmp_path.resolve()
+    original_resolve = Path.resolve
+
+    def _broken_resolve(self: Path, strict: bool = False) -> Path:
+        if self.name == "broken.py":
+            raise OSError("boom")
+        return original_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _broken_resolve)
+    with pytest.raises(SystemExit) as exc:
+        cli._normalize_changed_paths(root_path=root_path, paths=("broken.py",))
+    assert exc.value.code == 2
+
+
+def test_normalize_changed_paths_rejects_outside_root(tmp_path: Path) -> None:
+    cli.console = cli._make_console(no_color=True)
+    root_path = tmp_path.resolve()
+    outside_dir = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside_dir.mkdir()
+    outside_path = outside_dir / "external.py"
+    outside_path.write_text("pass\n", "utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        cli._normalize_changed_paths(root_path=root_path, paths=(str(outside_path),))
+    assert exc.value.code == 2
+
+
+def test_git_diff_changed_paths_normalizes_subprocess_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root_path = tmp_path.resolve()
+    pkg_dir = root_path / "pkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "a.py").write_text("pass\n", "utf-8")
+    (pkg_dir / "b.py").write_text("pass\n", "utf-8")
+
+    def _run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=["git", "diff", "--name-only", "HEAD~1", "--"],
+            returncode=0,
+            stdout="pkg/b.py\npkg/a.py\n\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", _run)
+    assert cli._git_diff_changed_paths(root_path=root_path, git_diff_ref="HEAD~1") == (
+        "pkg/a.py",
+        "pkg/b.py",
+    )
+
+
+def test_git_diff_changed_paths_reports_subprocess_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cli.console = cli._make_console(no_color=True)
+
+    def _run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd="git diff", timeout=30)
+
+    monkeypatch.setattr(subprocess, "run", _run)
+    with pytest.raises(SystemExit) as exc:
+        cli._git_diff_changed_paths(root_path=tmp_path.resolve(), git_diff_ref="HEAD~1")
+    assert exc.value.code == 2
+
+
+def test_changed_clone_gate_from_report_filters_changed_scope() -> None:
+    gate = cli._changed_clone_gate_from_report(
+        {
+            "findings": {
+                "groups": {
+                    "clones": {
+                        "functions": [
+                            {
+                                "id": "clone:function:new",
+                                "family": "clone",
+                                "category": "function",
+                                "novelty": "new",
+                                "items": [{"relative_path": "pkg/dup.py"}],
+                            },
+                            {
+                                "id": "clone:function:known",
+                                "family": "clone",
+                                "category": "function",
+                                "novelty": "known",
+                                "items": [{"relative_path": "pkg/other.py"}],
+                            },
+                        ],
+                        "blocks": [
+                            {
+                                "id": "clone:block:known",
+                                "family": "clone",
+                                "category": "block",
+                                "novelty": "known",
+                                "items": [{"relative_path": "pkg/dup.py"}],
+                            }
+                        ],
+                        "segments": [],
+                    },
+                    "structural": {
+                        "groups": [
+                            {
+                                "id": "structural:changed",
+                                "family": "structural",
+                                "novelty": "new",
+                                "items": [{"relative_path": "pkg/dup.py"}],
+                            }
+                        ]
+                    },
+                    "dead_code": {"groups": []},
+                    "design": {"groups": []},
+                }
+            }
+        },
+        changed_paths=("pkg/dup.py",),
+    )
+    assert gate.changed_paths == ("pkg/dup.py",)
+    assert gate.total_clone_groups == 2
+    assert gate.new_func == frozenset({"clone:function:new"})
+    assert gate.new_block == frozenset()
+    assert gate.findings_total == 3
+    assert gate.findings_new == 2
+    assert gate.findings_known == 1
+
+
+def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cli.console = cli._make_console(no_color=True)
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        cli,
+        "gate",
+        lambda **_kwargs: pipeline.GatingResult(
+            exit_code=3,
+            reasons=("clone:threshold:8:1",),
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_print_gating_failure_block",
+        lambda *, code, entries, args: observed.update(
+            {"code": code, "entries": tuple(entries), "threshold": args.fail_threshold}
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli._enforce_gating(
+            args=Namespace(fail_threshold=1, verbose=False),
+            boot=cast("pipeline.BootstrapResult", object()),
+            analysis=cast("pipeline.AnalysisResult", object()),
+            processing=cast(Any, Namespace(source_read_failures=[])),
+            source_read_contract_failure=False,
+            baseline_failure_code=None,
+            metrics_baseline_failure_code=None,
+            new_func=set(),
+            new_block=set(),
+            metrics_diff=None,
+            html_report_path=None,
+            clone_threshold_total=2,
+        )
+
+    assert exc.value.code == 3
+    assert observed["code"] == "threshold"
+    assert observed["entries"] == (
+        ("clone_groups_total", 2),
+        ("clone_groups_limit", 1),
+    )
 
 
 def test_make_console_caps_width_to_layout_limit(
@@ -415,6 +652,65 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
     clean_with_suppressed = ui.fmt_metrics_dead_code(0, suppressed=9)
     assert "✔ clean" in clean_with_suppressed
     assert "(9 suppressed)" in clean_with_suppressed
+    changed_paths = ui.fmt_changed_scope_paths(count=45)
+    assert "45" in changed_paths
+    assert "from git diff" in changed_paths
+    changed_findings = ui.fmt_changed_scope_findings(total=7, new=2, known=5)
+    assert "total" in changed_findings
+    assert "new" in changed_findings
+    assert "5 known" in changed_findings
+    changed_compact = ui.fmt_changed_scope_compact(
+        paths=45,
+        findings=7,
+        new=2,
+        known=5,
+    )
+    assert "Changed" in changed_compact
+    assert "paths=45" in changed_compact
+    assert "findings=7" in changed_compact
+
+
+def test_print_changed_scope_uses_dedicated_block(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    cli_summary._print_changed_scope(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=False,
+        changed_scope=cli_summary.ChangedScopeSnapshot(
+            paths_count=45,
+            findings_total=7,
+            findings_new=2,
+            findings_known=5,
+        ),
+    )
+    out = capsys.readouterr().out
+    assert "Changed Scope" in out
+    assert "Paths" in out
+    assert "Findings" in out
+    assert "from git diff" in out
+
+
+def test_print_changed_scope_uses_compact_line_in_quiet_mode(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    cli_summary._print_changed_scope(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=True,
+        changed_scope=cli_summary.ChangedScopeSnapshot(
+            paths_count=45,
+            findings_total=7,
+            findings_new=2,
+            findings_known=5,
+        ),
+    )
+    out = capsys.readouterr().out
+    assert "Changed" in out
+    assert "paths=45" in out
+    assert "findings=7" in out
+    assert "new=2" in out
+    assert "known=5" in out
 
 
 def test_configure_metrics_mode_rejects_skip_metrics_with_metrics_flags(

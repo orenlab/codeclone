@@ -103,7 +103,9 @@ def render_rows_table(
         if h in _PATH_HEADERS and ctx is not None:
             short = ctx.relative_path(cell)
             return (
-                f'<td{cls_attr} title="{_escape_attr(cell)}">{_escape_html(short)}</td>'
+                f'<td{cls_attr} title="{_escape_attr(cell)}">'
+                f'<a class="ide-link" data-file="{_escape_attr(cell)}" data-line="1">'
+                f"{_escape_html(short)}</a></td>"
             )
         return f"<td{cls_attr}>{_escape_html(cell)}</td>"
 

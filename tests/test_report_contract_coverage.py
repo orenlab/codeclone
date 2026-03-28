@@ -65,6 +65,9 @@ from codeclone.report.sarif import (
     _result_properties as _sarif_result_properties,
 )
 from codeclone.report.sarif import (
+    _rule_name as _sarif_rule_name,
+)
+from codeclone.report.sarif import (
     _rule_spec as _sarif_rule_spec,
 )
 from codeclone.report.sarif import (
@@ -74,9 +77,6 @@ from codeclone.report.sarif import (
     _severity_to_level,
     render_sarif_report_document,
     to_sarif_report,
-)
-from codeclone.report.sarif import (
-    _slug as _sarif_slug,
 )
 from codeclone.report.sarif import (
     _text as _sarif_text,
@@ -1082,7 +1082,7 @@ def test_sarif_private_helper_family_dispatches() -> None:
                 "items": [{"relative_path": "pkg/mod.py"}],
             }
         )
-        == "Unused function with medium confidence: pkg/mod.py"
+        == "Unused function with medium confidence: pkg/mod.py."
     )
     assert "LCOM4=4" in _sarif_result_message(
         {
@@ -1210,14 +1210,30 @@ def test_sarif_private_helper_family_dispatches() -> None:
         group={"id": "design:cohesion:pkg.mod:Thing"},
         primary_item={"relative_path": "", "qualname": "", "start_line": 0},
     )
+    shifted_line_hash = _sarif_partial_fingerprints(
+        rule_id="CDESIGN002",
+        group={"id": "design:complexity:pkg.mod:run"},
+        primary_item={
+            "relative_path": "pkg/mod.py",
+            "qualname": "pkg.mod:run",
+            "start_line": 30,
+            "end_line": 34,
+        },
+    )
     assert "primaryLocationLineHash" in line_hash
     assert "primaryLocationLineHash" not in no_line_hash
+    assert set(line_hash) == {"primaryLocationLineHash"}
+    assert (
+        line_hash["primaryLocationLineHash"].split(":", 1)[0]
+        == shifted_line_hash["primaryLocationLineHash"].split(":", 1)[0]
+    )
 
 
 def test_sarif_private_helper_edge_branches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert _sarif_slug("Function /// clone   group") == "function-clone-group"
+    spec = _sarif_rule_spec({"family": "clone", "category": "function"})
+    assert _sarif_rule_name(spec) == "codeclone.CCLONE001"
     assert (
         _sarif_scan_root_uri({"meta": {"runtime": {"scan_root_absolute": "repo"}}})
         == ""
@@ -1294,11 +1310,15 @@ def test_render_sarif_report_document_without_srcroot_keeps_relative_payload() -
     assert "originalUriBaseIds" not in run
     invocation = cast(dict[str, object], cast(list[object], run["invocations"])[0])
     assert "workingDirectory" not in invocation
+    assert "startTimeUtc" not in invocation
+    assert "columnKind" not in run
     result = cast(dict[str, object], cast(list[object], run["results"])[0])
     assert "baselineState" not in result
+    assert result["kind"] == "fail"
     primary_location = cast(list[object], result["locations"])[0]
     location_map = cast(dict[str, object], primary_location)
     assert cast(dict[str, object], location_map["message"])["text"] == "Cycle member"
+    assert cast(str, cast(dict[str, object], result["message"])["text"]).endswith(".")
 
 
 def test_collect_paths_from_metrics_covers_all_metric_families_and_skips_missing() -> (

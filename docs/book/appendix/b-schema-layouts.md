@@ -98,6 +98,7 @@ Notes:
       "...": "..."
     },
     "runtime": {
+      "analysis_started_at_utc": "2026-03-11T08:36:29Z",
       "report_generated_at_utc": "2026-03-11T08:36:32Z"
     }
   },
@@ -268,7 +269,7 @@ Notes:
           "rules": [
             {
               "id": "CCLONE001",
-              "name": "codeclone.function-clone-group",
+              "name": "codeclone.CCLONE001",
               "shortDescription": {
                 "text": "Function clone group"
               },
@@ -297,6 +298,9 @@ Notes:
           ]
         }
       },
+      "automationDetails": {
+        "id": "codeclone/full/2026-03-11T08:36:32Z"
+      },
       "artifacts": [
         {
           "location": {
@@ -308,18 +312,19 @@ Notes:
       "invocations": [
         {
           "executionSuccessful": true,
+          "startTimeUtc": "2026-03-11T08:36:29Z",
           "workingDirectory": {
             "uri": "file:///repo/project/"
           }
         }
       ],
-      "columnKind": "utf16CodeUnits",
       "properties": {
         "profileVersion": "1.0",
         "reportSchemaVersion": "2.1"
       },
       "results": [
         {
+          "kind": "fail",
           "ruleId": "CCLONE001",
           "ruleIndex": 0,
           "baselineState": "new",
@@ -349,6 +354,11 @@ Notes:
               }
             }
           ],
+          "properties": {
+            "primaryPath": "codeclone/report/sarif.py",
+            "primaryQualname": "codeclone.report.sarif:render_sarif_report_document",
+            "primaryRegion": "1:10"
+          },
           "relatedLocations": [],
           "partialFingerprints": {
             "primaryLocationLineHash": "0123456789abcdef:1"

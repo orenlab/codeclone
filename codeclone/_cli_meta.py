@@ -67,6 +67,7 @@ class ReportMeta(TypedDict):
     health_grade: str | None
     analysis_mode: str
     metrics_computed: list[str]
+    analysis_started_at_utc: str | None
     report_generated_at_utc: str
 
 
@@ -91,6 +92,7 @@ def _build_report_meta(
     health_grade: str | None,
     analysis_mode: str,
     metrics_computed: tuple[str, ...],
+    analysis_started_at_utc: str | None,
     report_generated_at_utc: str,
 ) -> ReportMeta:
     project_name = scan_root.name or str(scan_root)
@@ -133,5 +135,6 @@ def _build_report_meta(
         "health_grade": health_grade,
         "analysis_mode": analysis_mode,
         "metrics_computed": list(metrics_computed),
+        "analysis_started_at_utc": analysis_started_at_utc,
         "report_generated_at_utc": report_generated_at_utc,
     }

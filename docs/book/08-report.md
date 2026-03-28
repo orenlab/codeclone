@@ -87,7 +87,9 @@ Per-group common axes (family-specific fields may extend):
 - Overview hotspot/source-breakdown sections must resolve from canonical report
   data or deterministic derived IDs; HTML must not silently substitute stale
   placeholders such as `n/a` or empty-state cards when canonical data exists.
-- `report_generated_at_utc` is carried in `meta.runtime` and reused by UI/renderers.
+- `analysis_started_at_utc` and `report_generated_at_utc` are carried in
+  `meta.runtime`; renderers/projections may use them for provenance but must not
+  reinterpret them as semantic analysis data.
 - Canonical `meta.scan_root` is normalized to `"."`; absolute runtime paths are
   exposed under `meta.runtime.*_absolute`.
 - `clone_type` and `novelty` are group-level properties inside clone groups.

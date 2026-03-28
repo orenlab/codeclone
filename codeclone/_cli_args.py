@@ -130,6 +130,23 @@ def build_parser(version: str) -> _ArgumentParser:
         default=DEFAULT_PROCESSES,
         help=ui.HELP_PROCESSES,
     )
+    _add_bool_optional_argument(
+        analysis_group,
+        flag="--changed-only",
+        help_text=ui.HELP_CHANGED_ONLY,
+    )
+    analysis_group.add_argument(
+        "--diff-against",
+        default=None,
+        metavar="GIT_REF",
+        help=ui.HELP_DIFF_AGAINST,
+    )
+    analysis_group.add_argument(
+        "--paths-from-git-diff",
+        default=None,
+        metavar="GIT_REF",
+        help=ui.HELP_PATHS_FROM_GIT_DIFF,
+    )
     _add_optional_path_argument(
         analysis_group,
         flag="--cache-path",

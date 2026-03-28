@@ -74,17 +74,61 @@ It does **not**:
 - mutate source files
 - add suppressions automatically
 
+Practical contract notes:
+
+- `changed_paths` is a structured `list[str]` of repo-relative paths, not a
+  comma-separated string.
+- `analyze_changed_paths` adds a changed-files projection to the current run. If
+  the canonical report digest does not change, the call may return the same
+  `run_id` as a prior full analysis.
+- `compare_runs` is most useful when both runs were produced for the same
+  repository scope/root and comparable analysis settings.
+- The focused `check_*` tools may trigger a full analysis first when no stored
+  run exists yet.
+- `mark_finding_reviewed` is the only mutable MCP tool, and its state lives only
+  in memory for the current server process.
+
 Current tool surface:
 
 | Tool | Typical use |
 |------|-------------|
 | `analyze_repository` | Run a fresh analysis and register it as the latest in-memory run |
+| `analyze_changed_paths` | Run the diff-aware fast path using explicit `changed_paths` or `git_diff_ref` |
 | `get_run_summary` | Get the compact baseline/cache/health/findings snapshot for the latest or selected run |
+| `compare_runs` | Compare two stored runs and see regressions, improvements, and health delta |
 | `list_findings` | Browse findings with filters and pagination |
 | `get_finding` | Inspect one finding group deeply by id |
-| `list_hotspots` | Jump to high-signal derived views such as `highest_spread` or `production_hotspots` |
+| `get_remediation` | Pull the structured remediation/explainability payload for one finding |
+| `list_hotspots` | Jump to high-signal derived views such as `highest_priority` or `production_hotspots` |
 | `get_report_section` | Read a canonical section (`meta`, `findings`, `metrics`, `derived`, etc.) |
 | `evaluate_gates` | Preview CI/gating outcomes without exiting the process |
+| `check_clones` | Run a focused clone-only check for a repo or path |
+| `check_complexity` | Run a focused complexity hotspot check |
+| `check_coupling` | Run a focused coupling hotspot check |
+| `check_cohesion` | Run a focused cohesion hotspot check |
+| `check_dead_code` | Run a focused dead-code check |
+| `generate_pr_summary` | Build a PR-friendly markdown or JSON summary |
+| `mark_finding_reviewed` | Mark one finding as reviewed in the current MCP session |
+| `list_reviewed_findings` | List the reviewed findings currently stored in memory for the run |
+
+Current resource surface:
+
+| Resource | Typical use |
+|----------|-------------|
+| `codeclone://latest/summary` | Quick latest-run status for clients that prefer resource reads |
+| `codeclone://latest/report.json` | Full canonical report for the latest stored run |
+| `codeclone://latest/health` | Lightweight health snapshot only |
+| `codeclone://latest/gates` | Read back the most recent gate preview in the current MCP session |
+| `codeclone://latest/changed` | Read the latest changed-files projection after a diff-aware run |
+| `codeclone://schema` | Discover the canonical report shape and major section layout |
+| `codeclone://runs/{run_id}/summary` | Stable summary lookup for a specific stored run |
+| `codeclone://runs/{run_id}/report.json` | Stable canonical report lookup for a specific stored run |
+| `codeclone://runs/{run_id}/findings/{finding_id}` | Direct lookup for one finding in one stored run |
+
+If a client needs pure machine-to-machine navigation, the clean split is:
+
+- use tools to create or refine analysis state
+- use resources to re-read stored summaries, reports, health, gate, and finding payloads
 
 ## Recommended agent workflow
 
@@ -95,6 +139,31 @@ For agentic coding and review loops, the clean sequence is:
 3. `list_hotspots` or `list_findings`
 4. `get_finding` for the specific item the agent should inspect
 5. `evaluate_gates` before finalizing the change
+
+For change-focused workflows, prefer:
+
+1. `analyze_changed_paths`
+2. `get_report_section(section="changed")`
+3. `list_findings(changed_paths=..., sort_by="priority")`
+4. `get_remediation`
+5. `generate_pr_summary`
+
+In practice, the changed-files projection is also exposed through:
+
+- `get_report_section(section="changed")`
+- `codeclone://latest/changed`
+
+If you want a resource-first flow after one initial analysis, a practical loop is:
+
+1. `analyze_repository` or `analyze_changed_paths`
+2. `codeclone://latest/summary`
+3. `codeclone://latest/report.json` or `codeclone://runs/{run_id}/findings/{finding_id}`
+
+For review/refactor loops, add:
+
+1. `mark_finding_reviewed`
+2. `list_reviewed_findings`
+3. `exclude_reviewed=true` on later `list_findings` / `list_hotspots` calls
 
 That pattern works especially well for AI-generated code because CodeClone is
 baseline-aware: it helps separate accepted legacy debt from new structural
@@ -201,14 +270,45 @@ Tell me whether the structural picture got better, worse, or stayed flat relativ
 and summarize only the findings that are worth acting on.
 ```
 
+### 11. Changed-files only review
+
+```text
+Use codeclone MCP in changed-files mode for my latest edits.
+Focus only on findings that touch changed files and rank them by priority.
+```
+
+### 12. Run-to-run comparison
+
+```text
+Compare the latest CodeClone MCP run against the previous run for this repository.
+Show me new regressions, resolved findings, and the health delta.
+```
+
+### 13. Remediation-first workflow
+
+```text
+Use codeclone MCP to find one high-priority production finding and fetch its remediation payload.
+Explain the safest refactor shape and why this is a good first target.
+```
+
+### 14. Session-based review loop
+
+```text
+Use codeclone MCP to review findings one by one.
+Mark each finding as reviewed after we discuss it, and exclude reviewed findings from the next list.
+```
+
 ## Prompting tips
 
 - Prefer "production-only" when you care about runtime code.
+- Prefer `analyze_changed_paths` or explicit `changed_paths` when the agent is
+  reviewing one patch or PR, not the whole repository.
 - Prefer "clones-only mode" when you want the cheapest focused pass on duplication.
 - Ask for "safe first candidate" when you want the agent to move from triage to refactor planning.
-- If your broader agent also has shell or file-editing tools, you can still say
-  "do not update baseline" as a workflow constraint. CodeClone MCP itself is
-  read-only and never updates baseline.
+- Use "compare the latest run against the previous run" when you want the agent
+  to reason about improvements/regressions instead of absolute repo state.
+- Use "mark as reviewed" / "exclude reviewed" for long sessions so the agent
+  does not keep circling around the same finding.
 - For AI-generated code, explicitly ask the agent to separate:
     - accepted baseline debt
     - from new structural regressions
@@ -256,6 +356,14 @@ codeclone-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 Then register the remote MCP endpoint in the client or API flow that expects an
 HTTP MCP server. Prefer allowing only the CodeClone tools you need for the
 current workflow.
+
+### Gemini CLI / Gemini MCP-capable clients
+
+Recommended mode: `stdio`
+
+Use the same command-based local server registration pattern when the Gemini
+client can spawn MCP commands locally. If the client only accepts remote MCP
+URLs, use `streamable-http` and point it to the `/mcp` endpoint.
 
 ### Claude Code / Anthropic MCP-capable clients
 
@@ -318,6 +426,7 @@ The CodeClone server surface itself stays the same.
 
 - CodeClone MCP is read-only by design.
 - It stores run history in memory only.
+- Review markers are also in-memory only and disappear when the server process stops.
 - Repository access is limited to what the server process can read locally.
 - Baseline/cache/report semantics remain owned by the normal CodeClone contracts.
 
@@ -351,6 +460,11 @@ endpoint instead of using `stdio`.
 
 Run `analyze_repository` again. Runs are stored in memory per server process and
 `latest` always points at the most recently analyzed run in that process.
+
+### Changed-files tools are rejecting `changed_paths`
+
+Pass `changed_paths` as a real list of repo-relative paths. Do not pass a
+single comma-separated string.
 
 ## See also
 

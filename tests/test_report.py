@@ -437,16 +437,17 @@ def test_report_output_formats(
     assert sarif_payload["$schema"].endswith("sarif-2.1.0.json")
     assert sarif_payload["version"] == "2.1.0"
     assert run["tool"]["driver"]["name"] == "codeclone"
-    assert run["automationDetails"]["id"] == "codeclone/full"
+    assert run["automationDetails"]["id"] == "codeclone/full/2026-03-10T12:00:00Z"
     assert run["properties"]["reportSchemaVersion"] == REPORT_SCHEMA_VERSION
     assert run["properties"]["reportGeneratedAtUtc"] == "2026-03-10T12:00:00Z"
-    assert run["columnKind"] == "utf16CodeUnits"
+    assert "columnKind" not in run
     assert run["originalUriBaseIds"]["%SRCROOT%"]["uri"] == "file:///repo/"
     assert run["artifacts"]
     assert run["invocations"][0]["workingDirectory"]["uri"] == "file:///repo/"
+    assert "semanticVersion" not in run["tool"]["driver"]
     assert any(rule["id"] == "CCLONE001" for rule in run["tool"]["driver"]["rules"])
     first_rule = run["tool"]["driver"]["rules"][0]
-    assert first_rule["name"].startswith("codeclone.")
+    assert first_rule["name"] == "codeclone.CCLONE001"
     assert "help" in first_rule
     assert "markdown" in first_rule["help"]
     assert first_rule["properties"]["tags"]
@@ -522,7 +523,13 @@ def test_report_sarif_uses_representative_and_related_locations() -> None:
     assert result["relatedLocations"][0]["message"]["text"] == "Related occurrence #1"
     assert result["properties"]["cloneType"] == "Type-2"
     assert result["properties"]["groupArity"] == 2
-    assert "primaryLocationLineHash" in result["partialFingerprints"]
+    assert result["kind"] == "fail"
+    assert set(result["partialFingerprints"]) == {"primaryLocationLineHash"}
+    assert (
+        result["properties"]["primaryPath"] == "tests/fixtures/golden_project/alpha.py"
+    )
+    assert result["properties"]["primaryQualname"] == "pkg.alpha:transform_alpha"
+    assert result["properties"]["primaryRegion"] == "1-10"
 
 
 def test_report_json_deterministic_group_order() -> None:

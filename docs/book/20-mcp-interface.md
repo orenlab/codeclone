@@ -42,6 +42,8 @@ Current server characteristics:
     - `baseline`, `metrics_baseline`, `cache`
     - `inventory`, `findings_summary`, `health`
     - `baseline_diff`, `metrics_diff`
+    - optional `changed_paths` (`list[str]`, repo-relative),
+      `changed_findings`, `health_delta`, `verdict`
     - `warnings`, `failures`
 
 The MCP layer does not introduce a separate analysis engine. It calls the
@@ -52,27 +54,49 @@ produced by the report contract.
 
 Current tool set:
 
-| Tool                 | Purpose                                                                                                          |
-|----------------------|------------------------------------------------------------------------------------------------------------------|
-| `analyze_repository` | Run deterministic CodeClone analysis and register the result as the latest MCP run                               |
-| `get_run_summary`    | Return the stored summary for the latest or specified run                                                        |
-| `evaluate_gates`     | Evaluate CI/gating conditions against an existing run without exiting the process                                |
-| `get_report_section` | Return a canonical report section (`meta`, `inventory`, `findings`, `metrics`, `derived`, `integrity`, or `all`) |
-| `list_findings`      | Return deterministically ordered finding groups with filters and pagination                                      |
-| `get_finding`        | Return one canonical finding group by id                                                                         |
-| `list_hotspots`      | Return one derived hotlist (`most_actionable`, `highest_spread`, `production_hotspots`, `test_fixture_hotspots`) |
+| Tool                     | Key parameters                                                                                                                                         | Purpose / notes                                                                                                                      |
+|--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| `analyze_repository`     | `root`, `analysis_mode`, `changed_paths`, `git_diff_ref`, inline thresholds, cache/baseline paths                                                      | Run deterministic CodeClone analysis and register the result as the latest MCP run                                                   |
+| `analyze_changed_paths`  | `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, inline thresholds                                                                          | Diff-aware fast path: analyze a repo and attach a changed-files projection to the run                                                |
+| `get_run_summary`        | `run_id`                                                                                                                                               | Return the stored summary for the latest or specified run                                                                            |
+| `compare_runs`           | `run_id_before`, `run_id_after`, `focus`                                                                                                               | Compare two registered runs by finding ids and health delta                                                                          |
+| `evaluate_gates`         | `run_id`, gate thresholds/booleans                                                                                                                     | Evaluate CI/gating conditions against an existing run without exiting the process                                                    |
+| `get_report_section`     | `run_id`, `section`                                                                                                                                    | Return a canonical report section (`meta`, `inventory`, `findings`, `metrics`, `derived`, `integrity`, `changed`, or `all`)          |
+| `list_findings`          | `family`, `category`, `severity`, `source_kind`, `novelty`, `sort_by`, `detail_level`, `changed_paths`, `git_diff_ref`, `exclude_reviewed`, pagination | Return deterministically ordered finding groups with filtering and pagination                                                        |
+| `get_finding`            | `finding_id`, `run_id`                                                                                                                                 | Return one canonical finding group by id with locations, priority, and remediation payload when available                            |
+| `get_remediation`        | `finding_id`, `run_id`, `detail_level`                                                                                                                 | Return just the remediation/explainability packet for one finding                                                                    |
+| `list_hotspots`          | `kind`, `run_id`, `detail_level`, `changed_paths`, `git_diff_ref`, `exclude_reviewed`, `limit`, `max_results`                                          | Return one derived hotlist (`most_actionable`, `highest_spread`, `highest_priority`, `production_hotspots`, `test_fixture_hotspots`) |
+| `check_clones`           | `run_id`, `root`, `path`, `clone_type`, `source_kind`, `max_results`, `detail_level`                                                                   | Return clone findings for a repository or path                                                                                       |
+| `check_complexity`       | `run_id`, `root`, `path`, `min_complexity`, `max_results`, `detail_level`                                                                              | Return complexity hotspots for a repository or path                                                                                  |
+| `check_coupling`         | `run_id`, `root`, `path`, `max_results`, `detail_level`                                                                                                | Return coupling hotspots for a repository or path                                                                                    |
+| `check_cohesion`         | `run_id`, `root`, `path`, `max_results`, `detail_level`                                                                                                | Return cohesion hotspots for a repository or path                                                                                    |
+| `check_dead_code`        | `run_id`, `root`, `path`, `min_severity`, `max_results`, `detail_level`                                                                                | Return dead-code findings for a repository or path                                                                                   |
+| `generate_pr_summary`    | `run_id`, `changed_paths`, `git_diff_ref`, `format`                                                                                                    | Build a PR-friendly changed-files summary in markdown or JSON                                                                        |
+| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note`                                                                                                                         | Mark a finding as reviewed in the in-memory MCP session                                                                              |
+| `list_reviewed_findings` | `run_id`                                                                                                                                               | Return the current reviewed findings for the selected run                                                                            |
 
-All current tools are registered as read-only MCP tools.
+All analysis/report tools are read-only with respect to repo state. The only
+mutable MCP tool is `mark_finding_reviewed`, and its state is in-memory only.
+`analyze_repository`, `analyze_changed_paths`, `evaluate_gates`, and the
+granular `check_*` tools are sessionful: they may populate or reuse in-memory
+run state, and the `check_*` tools may trigger a full analysis when no
+compatible run exists yet.
 
 ## Resources
 
 Current resources:
 
-- `codeclone://latest/summary`
-- `codeclone://latest/report.json`
-- `codeclone://runs/{run_id}/summary`
-- `codeclone://runs/{run_id}/report.json`
-- `codeclone://runs/{run_id}/findings/{finding_id}`
+| Resource                                          | Payload                                               | Availability                                          |
+|---------------------------------------------------|-------------------------------------------------------|-------------------------------------------------------|
+| `codeclone://latest/summary`                      | latest run summary projection                         | always after at least one run                         |
+| `codeclone://latest/report.json`                  | latest canonical report document                      | always after at least one run                         |
+| `codeclone://latest/health`                       | latest health score + dimensions                      | always after at least one run                         |
+| `codeclone://latest/gates`                        | latest gate evaluation result                         | only after `evaluate_gates` in current server process |
+| `codeclone://latest/changed`                      | latest changed-files projection                       | only for a diff-aware latest run                      |
+| `codeclone://schema`                              | schema-style descriptor for canonical report sections | always available                                      |
+| `codeclone://runs/{run_id}/summary`               | run-specific summary projection                       | for any stored run                                    |
+| `codeclone://runs/{run_id}/report.json`           | run-specific canonical report                         | for any stored run                                    |
+| `codeclone://runs/{run_id}/findings/{finding_id}` | run-specific canonical finding group                  | for an existing finding in a stored run               |
 
 Resources are convenience views over already registered runs. They do not
 trigger fresh analysis by themselves.
@@ -83,6 +107,9 @@ trigger fresh analysis by themselves.
     - no source-file mutation
     - no baseline update
     - no metrics-baseline update
+- Session review markers are **ephemeral only**:
+    - stored in memory per server process
+    - never written to baseline, cache, or report artifacts
 - MCP must reuse current:
     - pipeline stages
     - baseline trust semantics
@@ -90,10 +117,12 @@ trigger fresh analysis by themselves.
     - canonical report contract
 - `get_run_summary` is a deterministic convenience projection derived from the
   canonical report (`meta`, `inventory`, `findings.summary`,
-  `metrics.summary.health`) plus baseline-diff/gate context.
+  `metrics.summary.health`) plus baseline-diff/gate/changed-files context.
 - Canonical JSON remains the source of truth for report semantics.
 - `list_findings` and `list_hotspots` are deterministic projections over the
   canonical report, not a separate analysis branch.
+- `get_remediation` is a deterministic MCP projection over existing
+  suggestions/explainability data, not a second remediation engine.
 - `analysis_mode="clones_only"` must mirror the same metric/dependency
   skip-semantics as the regular pipeline.
 - Missing optional MCP dependency is handled explicitly by the launcher with a
@@ -103,11 +132,22 @@ trigger fresh analysis by themselves.
 
 - Tool names are stable public surface.
 - Resource URI shapes are stable public surface.
-- Read-only tool annotations remain accurate.
+- Read-only vs session-local tool annotations remain accurate.
 - `analyze_repository` always registers exactly one latest run.
+- `analyze_changed_paths` requires `changed_paths` or `git_diff_ref`.
+- `changed_paths` is a structured `list[str]` of repo-relative paths, not a
+  comma-separated string payload.
+- `analyze_changed_paths` may return the same `run_id` as a previous run when
+  the canonical report digest is unchanged; changed-files state is an overlay,
+  not a second canonical report.
 - `get_run_summary` with no `run_id` resolves to the latest stored run.
 - `get_report_section(section="all")` returns the full canonical report document.
+- `get_report_section(section="changed")` is available only for diff-aware runs.
 - `run_id` must equal the canonical report digest for that run.
+- Finding `locations` and `html_anchor` values are stable projections over the
+  current run and do not invent non-canonical ids.
+- `compare_runs` is only semantically meaningful when both runs use comparable
+  repository scope/root and analysis settings.
 
 ## Failure modes
 
@@ -130,6 +170,8 @@ trigger fresh analysis by themselves.
 
 - `tests/test_mcp_service.py::test_mcp_service_analyze_repository_registers_latest_run`
 - `tests/test_mcp_service.py::test_mcp_service_lists_findings_and_hotspots`
+- `tests/test_mcp_service.py::test_mcp_service_changed_runs_remediation_and_review_flow`
+- `tests/test_mcp_service.py::test_mcp_service_granular_checks_pr_summary_and_resources`
 - `tests/test_mcp_service.py::test_mcp_service_evaluate_gates_on_existing_run`
 - `tests/test_mcp_service.py::test_mcp_service_resources_expose_latest_summary_and_report`
 - `tests/test_mcp_server.py::test_mcp_server_exposes_expected_read_only_tools`

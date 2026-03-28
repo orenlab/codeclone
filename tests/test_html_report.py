@@ -23,7 +23,11 @@ from codeclone.models import (
     Suggestion,
 )
 from codeclone.report import build_block_group_facts
-from codeclone.report.json_contract import build_report_document
+from codeclone.report.json_contract import (
+    build_report_document,
+    clone_group_id,
+    structural_group_id,
+)
 from codeclone.report.serialize import render_json_report_document
 from tests._report_fixtures import (
     REPEATED_ASSERT_SOURCE,
@@ -550,6 +554,78 @@ def test_html_report_structural_findings_why_modal_renders_examples(
         "codebox",
     ):
         assert needle in html
+
+
+def test_html_report_finding_cards_expose_stable_anchor_ids(tmp_path: Path) -> None:
+    f1 = tmp_path / "a.py"
+    f2 = tmp_path / "b.py"
+    f1.write_text("def alpha():\n    return 1\n", "utf-8")
+    f2.write_text("def beta():\n    return 1\n", "utf-8")
+    clone_key = "pkg.mod:dup"
+    finding_key = "anchor-key"
+    html = build_html_report(
+        func_groups={
+            clone_key: [
+                {
+                    "qualname": "pkg.mod:alpha",
+                    "filepath": str(f1),
+                    "start_line": 1,
+                    "end_line": 2,
+                },
+                {
+                    "qualname": "pkg.mod:beta",
+                    "filepath": str(f2),
+                    "start_line": 1,
+                    "end_line": 2,
+                },
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        structural_findings=[
+            StructuralFindingGroup(
+                finding_kind="duplicated_branches",
+                finding_key=finding_key,
+                signature={
+                    "calls": "1",
+                    "has_loop": "0",
+                    "has_try": "0",
+                    "nested_if": "0",
+                    "raises": "0",
+                    "stmt_seq": "Expr,Return",
+                    "terminal": "return_const",
+                },
+                items=(
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key=finding_key,
+                        file_path=str(f1),
+                        qualname="pkg.mod:alpha",
+                        start=1,
+                        end=2,
+                        signature={"stmt_seq": "Expr,Return"},
+                    ),
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key=finding_key,
+                        file_path=str(f2),
+                        qualname="pkg.mod:beta",
+                        start=1,
+                        end=2,
+                        signature={"stmt_seq": "Expr,Return"},
+                    ),
+                ),
+            )
+        ],
+    )
+    clone_id = clone_group_id("function", clone_key)
+    finding_id = structural_group_id("duplicated_branches", finding_key)
+    _assert_html_contains(
+        html,
+        f'id="finding-{clone_id}"',
+        f'id="finding-{finding_id}"',
+        f'data-finding-id="{finding_id}"',
+    )
 
 
 def test_html_report_block_group_includes_match_basis_and_compact_key() -> None:

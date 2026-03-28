@@ -26,6 +26,13 @@ Docs: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/) ·
 Live sample report:
 [orenlab.github.io/codeclone/examples/report/](https://orenlab.github.io/codeclone/examples/report/)
 
+> [!NOTE]
+> This README and docs site track the in-development `v2.0.x` line from `main`.
+> For the latest stable CodeClone documentation (`v1.4.4`), see the
+> [`v1.4.4` README](https://github.com/orenlab/codeclone/blob/v1.4.4/README.md)
+> and the
+> [`v1.4.4` docs tree](https://github.com/orenlab/codeclone/tree/v1.4.4/docs).
+
 ## Features
 
 - **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
@@ -48,6 +55,8 @@ codeclone . --html           # generate HTML report
 codeclone . --html --open-html-report   # generate and open HTML report
 codeclone . --json --md --sarif --text   # generate machine-readable reports
 codeclone . --html --json --timestamped-report-paths   # keep timestamped report snapshots
+codeclone . --changed-only --diff-against main   # changed-scope clone gating against git diff
+codeclone . --paths-from-git-diff HEAD~1         # shorthand diff source for changed-scope review
 codeclone . --ci             # CI mode (--fail-on-new --no-color --quiet)
 ```
 
@@ -80,8 +89,29 @@ For local command-based clients, prefer `stdio`. Use `streamable-http` only
 when the client expects a remote MCP endpoint.
 
 CodeClone MCP is read-only and baseline-aware. It exposes deterministic tools
-for analysis, summaries, findings, hotspots, report sections, and gate previews
-without mutating source files or baselines.
+for:
+
+- full repository analysis and changed-files analysis
+- run summaries and run-to-run comparison
+- findings, hotspots, remediation payloads, and PR summaries
+- granular clone / complexity / coupling / cohesion / dead-code checks
+- session-local review markers for long agent workflows
+
+It never mutates source files, baselines, or repo state.
+Diff-aware MCP calls use repo-relative `changed_paths` lists (or `git_diff_ref`)
+and may reuse the same `run_id` when the canonical report digest stays
+unchanged.
+Focused `check_*` MCP tools may trigger a full analysis first when no stored run
+exists yet.
+
+Latest-run resources are also available for MCP-capable clients:
+
+- `codeclone://latest/summary`
+- `codeclone://latest/report.json`
+- `codeclone://latest/health`
+- `codeclone://latest/gates`
+- `codeclone://latest/changed`
+- `codeclone://schema`
 
 Docs:
 [MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
@@ -240,6 +270,7 @@ Dynamic/runtime false positives are resolved via explicit inline suppressions, n
       "...": "..."
     },
     "runtime": {
+      "analysis_started_at_utc": "...",
       "report_generated_at_utc": "..."
     }
   },
@@ -329,20 +360,20 @@ CFG semantics: [CFG semantics](https://orenlab.github.io/codeclone/cfg/)
 
 ## Documentation
 
-| Topic                      | Link                                                                                               |
-|----------------------------|----------------------------------------------------------------------------------------------------|
-| Contract book (start here) | [Contracts and guarantees](https://orenlab.github.io/codeclone/book/00-intro/)                    |
-| Exit codes                 | [Exit codes and failure policy](https://orenlab.github.io/codeclone/book/03-contracts-exit-codes/) |
-| Configuration              | [Config and defaults](https://orenlab.github.io/codeclone/book/04-config-and-defaults/)           |
-| Baseline contract          | [Baseline contract](https://orenlab.github.io/codeclone/book/06-baseline/)                        |
-| Cache contract             | [Cache contract](https://orenlab.github.io/codeclone/book/07-cache/)                              |
-| Report contract            | [Report contract](https://orenlab.github.io/codeclone/book/08-report/)                            |
+| Topic                      | Link                                                                                                |
+|----------------------------|-----------------------------------------------------------------------------------------------------|
+| Contract book (start here) | [Contracts and guarantees](https://orenlab.github.io/codeclone/book/00-intro/)                      |
+| Exit codes                 | [Exit codes and failure policy](https://orenlab.github.io/codeclone/book/03-contracts-exit-codes/)  |
+| Configuration              | [Config and defaults](https://orenlab.github.io/codeclone/book/04-config-and-defaults/)             |
+| Baseline contract          | [Baseline contract](https://orenlab.github.io/codeclone/book/06-baseline/)                          |
+| Cache contract             | [Cache contract](https://orenlab.github.io/codeclone/book/07-cache/)                                |
+| Report contract            | [Report contract](https://orenlab.github.io/codeclone/book/08-report/)                              |
 | Metrics & quality gates    | [Metrics and quality gates](https://orenlab.github.io/codeclone/book/15-metrics-and-quality-gates/) |
-| Dead code                  | [Dead-code contract](https://orenlab.github.io/codeclone/book/16-dead-code-contract/)             |
-| Docker benchmark contract  | [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmarking/)                |
-| Determinism                | [Determinism policy](https://orenlab.github.io/codeclone/book/12-determinism/)                    |
+| Dead code                  | [Dead-code contract](https://orenlab.github.io/codeclone/book/16-dead-code-contract/)               |
+| Docker benchmark contract  | [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmarking/)                  |
+| Determinism                | [Determinism policy](https://orenlab.github.io/codeclone/book/12-determinism/)                      |
 
-## * Benchmarking
+##  * Benchmarking
 
 <details>
 <summary>Reproducible Docker Benchmark</summary>

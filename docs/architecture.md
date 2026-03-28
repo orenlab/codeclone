@@ -201,11 +201,16 @@ The MCP layer is intentionally thin. It does not add a separate analysis engine;
 it adapts the existing pipeline into tools/resources such as:
 
 - analyze repository
+- analyze changed paths
 - get run summary
+- compare runs
 - list findings
 - inspect one finding
+- project remediation payloads
 - list hotspots
+- generate PR summary
 - preview gate outcomes
+- keep session-local reviewed markers
 
 This keeps agent integrations deterministic and aligned with the same canonical
 report document used by JSON/HTML/SARIF.
