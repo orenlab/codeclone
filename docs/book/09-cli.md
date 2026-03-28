@@ -115,5 +115,6 @@ Refs:
 ## See also
 
 - [04-config-and-defaults.md](04-config-and-defaults.md)
+- [20-mcp-interface.md](20-mcp-interface.md)
 - [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
 - [16-dead-code-contract.md](16-dead-code-contract.md)

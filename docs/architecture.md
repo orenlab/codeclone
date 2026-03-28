@@ -171,6 +171,47 @@ Explainability contract (v1):
 
 ---
 
+## 9. MCP Agent Interface
+
+CodeClone also exposes an optional MCP layer for AI agents and MCP-capable
+clients.
+
+Current shape:
+
+- install via the optional `codeclone[mcp]` extra
+- launch via `codeclone-mcp`
+- transports:
+    - `stdio`
+    - `streamable-http`
+- semantics:
+    - read-only
+    - baseline-aware
+    - built on the same pipeline/report contracts as the CLI
+    - bounded in-memory run history
+
+Operational note:
+
+- `codeclone/mcp_server.py` is only a thin launcher/registration layer.
+- The optional MCP runtime is imported lazily so the base `codeclone` install
+  and normal CI paths do not require MCP packages.
+- `codeclone/mcp_service.py` is the in-process adapter over the existing
+  pipeline/report contracts.
+
+The MCP layer is intentionally thin. It does not add a separate analysis engine;
+it adapts the existing pipeline into tools/resources such as:
+
+- analyze repository
+- get run summary
+- list findings
+- inspect one finding
+- list hotspots
+- preview gate outcomes
+
+This keeps agent integrations deterministic and aligned with the same canonical
+report document used by JSON/HTML/SARIF.
+
+---
+
 ## CI Integration
 
 Baseline comparison allows CI to fail **only on new clones**,

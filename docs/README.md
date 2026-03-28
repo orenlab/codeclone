@@ -37,6 +37,7 @@ repository build:
 ## Interfaces
 
 - [CLI behavior, modes, and UX](book/09-cli.md)
+- [MCP interface contract](book/20-mcp-interface.md)
 - [HTML report rendering contract](book/10-html-render.md)
 
 ## System Properties
@@ -58,6 +59,7 @@ repository build:
 
 - [Architecture narrative](architecture.md)
 - [CFG design and semantics](cfg.md)
+- [MCP integration for AI agents and clients](mcp.md)
 - [SARIF integration for IDE/code-scanning use](sarif.md)
 - [Docs publishing and Pages workflow](publishing.md)
 

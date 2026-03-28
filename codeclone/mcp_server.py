@@ -1,0 +1,383 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Den Rozhnovskiy
+
+from __future__ import annotations
+
+import argparse
+import sys
+from typing import TYPE_CHECKING, Literal, cast
+
+from . import __version__
+from .contracts import DOCS_URL
+from .mcp_service import (
+    CodeCloneMCPService,
+    MCPAnalysisRequest,
+    MCPGateRequest,
+)
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
+    from mcp.types import ToolAnnotations
+
+_SERVER_INSTRUCTIONS = (
+    "CodeClone MCP is a deterministic, baseline-aware, read-only analysis server "
+    "for Python repositories. Use analyze_repository first, then query the latest "
+    "or a specific run with summary, finding, hotspot, gate, and report-section "
+    "tools. This server never updates baselines and never mutates source files."
+)
+_MCP_INSTALL_HINT = (
+    "CodeClone MCP support requires the optional 'mcp' extra. "
+    "Install it with: pip install 'codeclone[mcp]'"
+)
+
+
+class MCPDependencyError(RuntimeError):
+    """Raised when the optional MCP runtime dependency is unavailable."""
+
+
+def _load_mcp_runtime() -> tuple[type[FastMCP], ToolAnnotations]:
+    try:
+        from mcp.server.fastmcp import FastMCP as runtime_fastmcp
+        from mcp.types import ToolAnnotations as runtime_tool_annotations
+    except ImportError as exc:
+        raise MCPDependencyError(_MCP_INSTALL_HINT) from exc
+    return (
+        cast("type[FastMCP]", runtime_fastmcp),
+        runtime_tool_annotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+
+
+def build_mcp_server(
+    *,
+    history_limit: int = 16,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    json_response: bool = False,
+    stateless_http: bool = False,
+    debug: bool = False,
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO",
+) -> FastMCP:
+    runtime_fastmcp, read_only_tool = _load_mcp_runtime()
+    service = CodeCloneMCPService(history_limit=history_limit)
+    mcp = runtime_fastmcp(
+        name="CodeClone",
+        instructions=_SERVER_INSTRUCTIONS,
+        website_url=DOCS_URL,
+        host=host,
+        port=port,
+        json_response=json_response,
+        stateless_http=stateless_http,
+        debug=debug,
+        log_level=log_level,
+        dependencies=(f"codeclone=={__version__}",),
+    )
+
+    @mcp.tool(
+        title="Analyze Repository",
+        description=(
+            "Run a deterministic CodeClone analysis for a repository and register "
+            "the result as the latest MCP run."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def analyze_repository(
+        root: str = ".",
+        analysis_mode: str = "full",
+        respect_pyproject: bool = True,
+        processes: int | None = None,
+        min_loc: int | None = None,
+        min_stmt: int | None = None,
+        block_min_loc: int | None = None,
+        block_min_stmt: int | None = None,
+        segment_min_loc: int | None = None,
+        segment_min_stmt: int | None = None,
+        baseline_path: str | None = None,
+        metrics_baseline_path: str | None = None,
+        max_baseline_size_mb: int | None = None,
+        cache_policy: str = "reuse",
+        cache_path: str | None = None,
+        max_cache_size_mb: int | None = None,
+    ) -> dict[str, object]:
+        return service.analyze_repository(
+            MCPAnalysisRequest(
+                root=root,
+                analysis_mode=analysis_mode,  # type: ignore[arg-type]
+                respect_pyproject=respect_pyproject,
+                processes=processes,
+                min_loc=min_loc,
+                min_stmt=min_stmt,
+                block_min_loc=block_min_loc,
+                block_min_stmt=block_min_stmt,
+                segment_min_loc=segment_min_loc,
+                segment_min_stmt=segment_min_stmt,
+                baseline_path=baseline_path,
+                metrics_baseline_path=metrics_baseline_path,
+                max_baseline_size_mb=max_baseline_size_mb,
+                cache_policy=cache_policy,  # type: ignore[arg-type]
+                cache_path=cache_path,
+                max_cache_size_mb=max_cache_size_mb,
+            )
+        )
+
+    @mcp.tool(
+        title="Get Run Summary",
+        description="Return the stored summary for the latest or specified MCP run.",
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_run_summary(run_id: str | None = None) -> dict[str, object]:
+        return service.get_run_summary(run_id)
+
+    @mcp.tool(
+        title="Evaluate Gates",
+        description=(
+            "Evaluate CodeClone gate conditions against an existing MCP run without "
+            "modifying baselines or exiting the process."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def evaluate_gates(
+        run_id: str | None = None,
+        fail_on_new: bool = False,
+        fail_threshold: int = -1,
+        fail_complexity: int = -1,
+        fail_coupling: int = -1,
+        fail_cohesion: int = -1,
+        fail_cycles: bool = False,
+        fail_dead_code: bool = False,
+        fail_health: int = -1,
+        fail_on_new_metrics: bool = False,
+    ) -> dict[str, object]:
+        return service.evaluate_gates(
+            MCPGateRequest(
+                run_id=run_id,
+                fail_on_new=fail_on_new,
+                fail_threshold=fail_threshold,
+                fail_complexity=fail_complexity,
+                fail_coupling=fail_coupling,
+                fail_cohesion=fail_cohesion,
+                fail_cycles=fail_cycles,
+                fail_dead_code=fail_dead_code,
+                fail_health=fail_health,
+                fail_on_new_metrics=fail_on_new_metrics,
+            )
+        )
+
+    @mcp.tool(
+        title="Get Report Section",
+        description=(
+            "Return a canonical CodeClone report section for the latest or "
+            "specified MCP run."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_report_section(
+        run_id: str | None = None,
+        section: str = "all",
+    ) -> dict[str, object]:
+        return service.get_report_section(
+            run_id=run_id,
+            section=section,  # type: ignore[arg-type]
+        )
+
+    @mcp.tool(
+        title="List Findings",
+        description=(
+            "List canonical finding groups with deterministic ordering, optional "
+            "filters, and pagination."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def list_findings(
+        run_id: str | None = None,
+        family: str = "all",
+        severity: str | None = None,
+        source_kind: str | None = None,
+        novelty: str = "all",
+        offset: int = 0,
+        limit: int = 50,
+    ) -> dict[str, object]:
+        return service.list_findings(
+            run_id=run_id,
+            family=family,  # type: ignore[arg-type]
+            severity=severity,
+            source_kind=source_kind,
+            novelty=novelty,  # type: ignore[arg-type]
+            offset=offset,
+            limit=limit,
+        )
+
+    @mcp.tool(
+        title="Get Finding",
+        description="Return a single canonical finding group by id.",
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_finding(
+        finding_id: str,
+        run_id: str | None = None,
+    ) -> dict[str, object]:
+        return service.get_finding(finding_id=finding_id, run_id=run_id)
+
+    @mcp.tool(
+        title="List Hotspots",
+        description=(
+            "Return one of the derived CodeClone hotlists for the latest or "
+            "specified MCP run."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def list_hotspots(
+        kind: str,
+        run_id: str | None = None,
+        limit: int = 10,
+    ) -> dict[str, object]:
+        return service.list_hotspots(
+            kind=kind,  # type: ignore[arg-type]
+            run_id=run_id,
+            limit=limit,
+        )
+
+    @mcp.resource(
+        "codeclone://latest/summary",
+        title="Latest Run Summary",
+        description="Canonical JSON summary for the latest CodeClone MCP run.",
+        mime_type="application/json",
+    )
+    def latest_summary_resource() -> str:
+        return service.read_resource("codeclone://latest/summary")
+
+    @mcp.resource(
+        "codeclone://latest/report.json",
+        title="Latest Canonical Report",
+        description="Canonical JSON report for the latest CodeClone MCP run.",
+        mime_type="application/json",
+    )
+    def latest_report_resource() -> str:
+        return service.read_resource("codeclone://latest/report.json")
+
+    @mcp.resource(
+        "codeclone://runs/{run_id}/summary",
+        title="Run Summary",
+        description="Canonical JSON summary for a specific CodeClone MCP run.",
+        mime_type="application/json",
+    )
+    def run_summary_resource(run_id: str) -> str:
+        return service.read_resource(f"codeclone://runs/{run_id}/summary")
+
+    @mcp.resource(
+        "codeclone://runs/{run_id}/report.json",
+        title="Run Canonical Report",
+        description="Canonical JSON report for a specific CodeClone MCP run.",
+        mime_type="application/json",
+    )
+    def run_report_resource(run_id: str) -> str:
+        return service.read_resource(f"codeclone://runs/{run_id}/report.json")
+
+    @mcp.resource(
+        "codeclone://runs/{run_id}/findings/{finding_id}",
+        title="Run Finding",
+        description="Canonical JSON finding group for a specific CodeClone MCP run.",
+        mime_type="application/json",
+    )
+    def run_finding_resource(run_id: str, finding_id: str) -> str:
+        return service.read_resource(f"codeclone://runs/{run_id}/findings/{finding_id}")
+
+    return mcp
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="codeclone-mcp",
+        description=(
+            "CodeClone MCP server for deterministic, baseline-aware, read-only "
+            "analysis of Python repositories."
+        ),
+    )
+    parser.add_argument(
+        "--transport",
+        choices=("stdio", "streamable-http"),
+        default="stdio",
+        help="MCP transport to run. Defaults to stdio.",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind when using streamable-http.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind when using streamable-http.",
+    )
+    parser.add_argument(
+        "--history-limit",
+        type=int,
+        default=16,
+        help="Maximum number of in-memory analysis runs retained by the server.",
+    )
+    parser.add_argument(
+        "--json-response",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use JSON responses for streamable-http transport.",
+    )
+    parser.add_argument(
+        "--stateless-http",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use stateless Streamable HTTP mode when transport is streamable-http.",
+    )
+    parser.add_argument(
+        "--debug",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable FastMCP debug mode.",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
+        default="INFO",
+        help="FastMCP server log level.",
+    )
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    try:
+        server = build_mcp_server(
+            history_limit=args.history_limit,
+            host=args.host,
+            port=args.port,
+            json_response=args.json_response,
+            stateless_http=args.stateless_http,
+            debug=args.debug,
+            log_level=args.log_level,
+        )
+    except MCPDependencyError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+    try:
+        server.run(transport=args.transport)
+    except KeyboardInterrupt:
+        return
+
+
+__all__ = [
+    "MCPDependencyError",
+    "build_mcp_server",
+    "build_parser",
+    "main",
+]

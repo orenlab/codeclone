@@ -34,6 +34,7 @@ Live sample report:
   score
 - **Baseline governance** — known debt stays accepted; CI blocks only new clones and metric regressions
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
+- **MCP server** — optional read-only MCP surface for AI agents, IDEs, and MCP-capable clients
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Fast*** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
 
@@ -58,6 +59,34 @@ uvx codeclone@latest .
 ```
 
 </details>
+
+## MCP Server
+
+Install MCP support only when you need the agent interface:
+
+```bash
+pip install "codeclone[mcp]"
+```
+
+Then run the optional MCP launcher:
+
+```bash
+codeclone-mcp --transport stdio
+# or
+codeclone-mcp --transport streamable-http --port 8000
+```
+
+For local command-based clients, prefer `stdio`. Use `streamable-http` only
+when the client expects a remote MCP endpoint.
+
+CodeClone MCP is read-only and baseline-aware. It exposes deterministic tools
+for analysis, summaries, findings, hotspots, report sections, and gate previews
+without mutating source files or baselines.
+
+Docs:
+[MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
+·
+[MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
 
 ## CI Integration
 
@@ -197,7 +226,7 @@ Dynamic/runtime false positives are resolved via explicit inline suppressions, n
 {
   "report_schema_version": "2.1",
   "meta": {
-    "codeclone_version": "2.0.0b2",
+    "codeclone_version": "2.0.0b3",
     "project_name": "...",
     "scan_root": ".",
     "report_mode": "full",

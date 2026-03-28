@@ -12,6 +12,7 @@ Main ownership layers:
 - Quality metrics pipeline: complexity/coupling/cohesion/dependencies/dead-code/health.
 - Contracts and persistence: baseline, metrics baseline, cache, exit semantics.
 - Report model and serialization: deterministic JSON/TXT + explainability facts.
+- MCP agent surface: read-only server layer over the same pipeline/report contracts.
 - Render layer: HTML rendering and template assets.
 
 ## Data model
@@ -27,6 +28,7 @@ Main ownership layers:
 | Report core           | `codeclone/report/*`, `codeclone/_cli_meta.py`                                                                                                                                                     | Merge windows, explainability facts, deterministic JSON/TXT schema + shared metadata |
 | Persistence           | `codeclone/baseline.py`, `codeclone/metrics_baseline.py`, `codeclone/cache.py`                                                                                                                     | Baseline/cache trust/compat/integrity and atomic persistence                         |
 | Runtime orchestration | `codeclone/pipeline.py`, `codeclone/cli.py`, `codeclone/_cli_args.py`, `codeclone/_cli_paths.py`, `codeclone/_cli_summary.py`, `codeclone/_cli_config.py`, `codeclone/ui_messages.py`              | CLI UX, stage orchestration, status handling, outputs, error markers                 |
+| MCP agent interface   | `codeclone/mcp_service.py`, `codeclone/mcp_server.py`                                                                                                                                              | Read-only MCP tools/resources over canonical analysis and report layers              |
 | Rendering             | `codeclone/html_report.py`, `codeclone/_html_report/*`, `codeclone/_html_badges.py`, `codeclone/_html_js.py`, `codeclone/_html_escape.py`, `codeclone/_html_snippets.py`, `codeclone/templates.py` | HTML-only view layer over report data                                                |
 
 Refs:
@@ -39,6 +41,8 @@ Refs:
 - Core analysis modules do not depend on render/UI modules.
 - HTML renderer receives already-computed report data/facts and does not
   recompute detection semantics.
+- MCP layer reuses current pipeline/report semantics and must not introduce a
+  separate analysis truth path.
 - Baseline, metrics baseline, and cache are validated before being trusted.
 
 Refs:
@@ -106,6 +110,7 @@ Refs:
 | Clone baseline trust/compat/integrity | [06-baseline.md](06-baseline.md)                                                                                 |
 | Cache trust and fail-open behavior    | [07-cache.md](07-cache.md)                                                                                       |
 | Report schema and provenance          | [08-report.md](08-report.md), [10-html-render.md](10-html-render.md)                                             |
+| MCP agent surface                     | [20-mcp-interface.md](20-mcp-interface.md)                                                                       |
 | Metrics gates and metrics baseline    | [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)                                               |
 | Dead-code liveness policy             | [16-dead-code-contract.md](16-dead-code-contract.md)                                                             |
 | Suggestions and clone typing          | [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)                                         |

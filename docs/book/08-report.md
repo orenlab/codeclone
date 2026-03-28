@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define report contracts in `2.0.0b2`: canonical JSON (`report_schema_version=2.1`)
+Define report contracts in `2.0.0b3`: canonical JSON (`report_schema_version=2.1`)
 plus deterministic TXT/Markdown/SARIF projections.
 
 ## Public surface
@@ -73,6 +73,8 @@ Per-group common axes (family-specific fields may extend):
 
 - JSON is source of truth for report semantics.
 - Markdown and SARIF are deterministic projections from the same report document.
+- MCP summary/finding/hotlist/report-section queries are deterministic views over
+  the same canonical report document.
 - SARIF is an IDE/code-scanning-oriented projection:
     - repo-relative result paths are anchored via `%SRCROOT%`
     - referenced files are listed under `run.artifacts`
@@ -148,6 +150,7 @@ Refs:
 - [07-cache.md](07-cache.md)
 - [09-cli.md](09-cli.md)
 - [10-html-render.md](10-html-render.md)
+- [20-mcp-interface.md](20-mcp-interface.md)
 - [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)
 - [../sarif.md](../sarif.md)
 - [../examples/report.md](../examples/report.md)

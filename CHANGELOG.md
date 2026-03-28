@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.0b3]
+
+### MCP
+
+- Add optional `codeclone[mcp]` extra and `codeclone-mcp` launcher.
+- Add a deterministic, read-only MCP server over the canonical pipeline and report contracts.
+- Expose MCP tools/resources for repository analysis, run summaries, report sections, findings, hotlists, and gate previews.
+
 ## [2.0.0b2]
 
 ### Dependencies

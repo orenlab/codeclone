@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codeclone"
-version = "2.0.0b2"
+version = "2.0.0b3"
 description = "Structural code quality analysis for Python"
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "MIT"
@@ -61,6 +61,9 @@ Changelog = "https://github.com/orenlab/codeclone/releases"
 Documentation = "https://orenlab.github.io/codeclone/"
 
 [project.optional-dependencies]
+mcp = [
+    "mcp>=1.26.0,<2",
+]
 dev = [
     "pytest>=9.0.0",
     "pytest-cov>=7.1.0",
@@ -73,6 +76,7 @@ dev = [
 
 [project.scripts]
 codeclone = "codeclone.cli:main"
+codeclone-mcp = "codeclone.mcp_server:main"
 
 [tool.setuptools]
 packages = [

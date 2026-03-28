@@ -71,9 +71,24 @@ Refs:
 
 - `codeclone/cli.py:_main_impl`
 
+## MCP interface errors
+
+| Condition | Behavior |
+|-----------|----------|
+| Optional `mcp` extra missing | `codeclone-mcp` prints install hint and exits `2` |
+| Invalid root path / invalid numeric config | MCP service contract error |
+| Missing run or finding id | MCP service request error |
+| Unsupported MCP resource URI / report section | MCP service contract error |
+
+Refs:
+
+- `codeclone/mcp_server.py:main`
+- `codeclone/mcp_service.py`
+
 ## Locked by tests
 
 - `tests/test_cli_inprocess.py::test_cli_report_write_error_is_contract_error`
 - `tests/test_cli_inprocess.py::test_cli_update_baseline_write_error_is_contract_error`
 - `tests/test_cli_inprocess.py::test_cli_unreadable_source_fails_in_ci_with_contract_error`
 - `tests/test_cli_unit.py::test_cli_internal_error_marker`
+- `tests/test_mcp_server.py::test_mcp_server_main_reports_missing_optional_dependency`

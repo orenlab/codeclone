@@ -12,6 +12,7 @@ compatibility is enforced.
 - Metrics baseline compatibility checks: `codeclone/metrics_baseline.py:MetricsBaseline.verify_compatibility`
 - Cache compatibility checks: `codeclone/cache.py:Cache.load`
 - Report schema assignment: `codeclone/report/json_contract.py:build_report_document`
+- MCP public surface: `codeclone/mcp_server.py`, `codeclone/mcp_service.py`
 
 ## Data model
 
@@ -37,6 +38,9 @@ Version bump rules:
 - Bump **report schema** for canonical report document contract changes
   (`report_schema_version`, consumed by JSON/TXT/Markdown/SARIF and HTML provenance/view).
 - Bump **metrics-baseline schema** only for standalone metrics-baseline payload changes.
+- MCP does not currently define a separate schema/version constant; tool names,
+  resource shapes, and documented request/response semantics are therefore
+  package-versioned public surface and must be documented/tested when changed.
 
 Baseline compatibility rules:
 
