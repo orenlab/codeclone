@@ -1,6 +1,20 @@
 # Changelog
 
-## [2.0.0b1]
+## [2.0.0b2]
+
+### Dependencies
+
+- Upgrade requests (dev dep) to 2.33.0 for extract_zipped_paths security fix (CVE-2026-25645)
+
+### HTML
+
+- Fix page-level horizontal scrolling in wide table tabs by constraining overflow to local table wrappers (#14).
+- Fix mobile header brand block layout on narrow viewports (#15).
+- Make mobile navigation tabs sticky and horizontally scrollable with scroll-shadow affordance.
+- Keep Overview KPI micro-badges inside cards at extreme browser/mobile widths.
+- Restyle Report Provenance summary badges to match the card-style badge language used across the report.
+
+## [2.0.0b1] - 20260325
 
 Major upgrade: CodeClone evolves from a structural clone detector into a
 **baseline-aware code-health and CI governance tool** for Python.

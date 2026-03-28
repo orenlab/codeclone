@@ -197,7 +197,7 @@ Dynamic/runtime false positives are resolved via explicit inline suppressions, n
 {
   "report_schema_version": "2.1",
   "meta": {
-    "codeclone_version": "2.0.0b1",
+    "codeclone_version": "2.0.0b2",
     "project_name": "...",
     "scan_root": ".",
     "report_mode": "full",

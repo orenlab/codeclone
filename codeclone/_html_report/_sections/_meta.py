@@ -333,36 +333,41 @@ def render_meta_panel(ctx: ReportContext) -> str:
         _section_html(st, rows) for st, rows in meta_sections if rows
     )
 
-    def _prov_badge(label: str, color: str) -> str:
-        return f'<span class="prov-badge {color}">{_escape_html(label)}</span>'
+    def _prov_badge(label: str, value: str, color: str) -> str:
+        return (
+            f'<span class="prov-badge prov-badge--{color}">'
+            f'<span class="prov-badge-val">{_escape_html(value)}</span>'
+            f'<span class="prov-badge-lbl">{_escape_html(label)}</span>'
+            "</span>"
+        )
 
     badges: list[str] = []
     if _bl_verified is True:
-        badges.append(_prov_badge("Baseline verified", "green"))
+        badges.append(_prov_badge("Baseline", "verified", "green"))
     elif _bl_loaded is True and _bl_verified is not True:
-        badges.append(_prov_badge("Baseline untrusted", "red"))
+        badges.append(_prov_badge("Baseline", "untrusted", "red"))
     elif _bl_loaded is False or _bl_loaded is None:
-        badges.append(_prov_badge("Baseline missing", "amber"))
+        badges.append(_prov_badge("Baseline", "missing", "amber"))
     if ctx.report_schema_version:
-        badges.append(_prov_badge(f"Schema {ctx.report_schema_version}", "neutral"))
+        badges.append(_prov_badge("Schema", str(ctx.report_schema_version), "neutral"))
     if _bl_fp_ver is not None:
-        badges.append(_prov_badge(f"Fingerprint {_bl_fp_ver}", "neutral"))
+        badges.append(_prov_badge("Fingerprint", str(_bl_fp_ver), "neutral"))
     gen_name = str(_bl_gen_name or "")
     if gen_name and gen_name != "codeclone":
-        badges.append(_prov_badge(f"Generator mismatch: {gen_name}", "red"))
+        badges.append(_prov_badge("Generator mismatch", gen_name, "red"))
     if _cache_used is True:
-        badges.append(_prov_badge("Cache hit", "green"))
+        badges.append(_prov_badge("Cache", "hit", "green"))
     elif _cache_used is False:
-        badges.append(_prov_badge("Cache miss", "amber"))
+        badges.append(_prov_badge("Cache", "miss", "amber"))
     else:
-        badges.append(_prov_badge("Cache N/A", "neutral"))
+        badges.append(_prov_badge("Cache", "N/A", "neutral"))
     analysis_mode = str(_meta_pick(meta.get("analysis_mode")) or "")
     if analysis_mode:
-        badges.append(_prov_badge(f"Mode: {analysis_mode}", "neutral"))
+        badges.append(_prov_badge("Mode", analysis_mode, "neutral"))
     if _mbl_verified is True:
-        badges.append(_prov_badge("Metrics baseline verified", "green"))
+        badges.append(_prov_badge("Metrics baseline", "verified", "green"))
     elif _mbl_loaded is True and _mbl_verified is not True:
-        badges.append(_prov_badge("Metrics baseline untrusted", "red"))
+        badges.append(_prov_badge("Metrics baseline", "untrusted", "red"))
 
     prov_summary = (
         f'<div class="prov-summary">{"".join(badges)}'

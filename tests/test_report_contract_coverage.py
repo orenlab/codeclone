@@ -427,7 +427,7 @@ def _rich_report_document() -> dict[str, object]:
         ),
     )
     meta = {
-        "codeclone_version": "2.0.0b1",
+        "codeclone_version": "2.0.0b2",
         "project_name": "codeclone",
         "scan_root": "/repo/codeclone",
         "python_version": "3.13.11",
@@ -1251,7 +1251,7 @@ def test_render_sarif_report_document_without_srcroot_keeps_relative_payload() -
     payload = {
         "report_schema_version": "2.1",
         "meta": {
-            "codeclone_version": "2.0.0b1",
+            "codeclone_version": "2.0.0b2",
             "analysis_mode": "ci",
             "report_mode": "full",
             "runtime": {},
