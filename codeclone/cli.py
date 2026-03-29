@@ -140,6 +140,8 @@ __all__ = [
     "report",
 ]
 
+# Lazy singleton for pipeline module — deferred import to keep CLI startup fast.
+# Tests monkeypatch this via _pipeline_module() to inject mocks.
 _PIPELINE_MODULE: ModuleType | None = None
 
 
@@ -258,6 +260,13 @@ def _normalize_changed_paths(
 
 
 def _git_diff_changed_paths(*, root_path: Path, git_diff_ref: str) -> tuple[str, ...]:
+    if git_diff_ref.startswith("-"):
+        console.print(
+            ui.fmt_contract_error(
+                f"Invalid git diff ref '{git_diff_ref}': must not start with '-'."
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
     try:
         completed = subprocess.run(
             ["git", "diff", "--name-only", git_diff_ref, "--"],

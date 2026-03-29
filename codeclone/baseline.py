@@ -9,6 +9,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -23,7 +24,7 @@ from .contracts import (
 from .errors import BaselineValidationError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
 # Any: baseline JSON parsing/serialization boundary. Values are validated
 # and narrowed before entering compatibility/integrity checks.
@@ -416,13 +417,21 @@ class Baseline:
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    tmp_path = path.with_name(f"{path.name}.tmp")
     data = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
-    with tmp_path.open("wb") as tmp_file:
-        tmp_file.write(data.encode("utf-8"))
-        tmp_file.flush()
-        os.fsync(tmp_file.fileno())
-    os.replace(tmp_path, path)
+    fd_num, tmp_name = tempfile.mkstemp(
+        dir=path.parent,
+        suffix=".tmp",
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd_num, "wb") as fd:
+            fd.write(data.encode("utf-8"))
+            fd.flush()
+            os.fsync(fd.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def _safe_stat_size(path: Path) -> int:
@@ -574,8 +583,8 @@ def _baseline_payload(
     sorted_functions = sorted(functions)
     sorted_blocks = sorted(blocks)
     payload_sha256 = _compute_payload_sha256(
-        functions=set(sorted_functions),
-        blocks=set(sorted_blocks),
+        functions=sorted_functions,
+        blocks=sorted_blocks,
         fingerprint_version=resolved_fingerprint,
         python_tag=resolved_python_tag,
     )
@@ -601,8 +610,8 @@ def _baseline_payload(
 
 def _compute_payload_sha256(
     *,
-    functions: set[str],
-    blocks: set[str],
+    functions: Collection[str],
+    blocks: Collection[str],
     fingerprint_version: str,
     python_tag: str,
 ) -> str:

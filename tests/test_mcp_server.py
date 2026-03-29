@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import builtins
 import json
@@ -93,6 +94,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert set(tools) == {
         "analyze_repository",
         "analyze_changed_paths",
+        "clear_session_runs",
         "get_run_summary",
         "evaluate_gates",
         "get_report_section",
@@ -115,6 +117,11 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         assert tool.annotations.readOnlyHint is (
             name
             in {
+                "check_complexity",
+                "check_clones",
+                "check_coupling",
+                "check_cohesion",
+                "check_dead_code",
                 "get_run_summary",
                 "get_report_section",
                 "list_findings",
@@ -128,10 +135,8 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         )
         assert tool.annotations.destructiveHint is False
         assert tool.annotations.idempotentHint is True
-    assert "triggers a full analysis first" in str(
-        tools["check_complexity"].description
-    )
-    assert "triggers a full analysis first" in str(tools["check_clones"].description)
+    assert "Use analyze_repository first" in str(tools["check_complexity"].description)
+    assert "Use analyze_repository first" in str(tools["check_clones"].description)
 
 
 def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
@@ -153,7 +158,21 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             )
         )
     )
+    changed_summary = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "analyze_changed_paths",
+                {
+                    "root": str(tmp_path),
+                    "respect_pyproject": False,
+                    "cache_policy": "off",
+                    "changed_paths": ["pkg/dup.py"],
+                },
+            )
+        )
+    )
     run_id = str(summary["run_id"])
+    changed_run_id = str(changed_summary["run_id"])
 
     latest = _structured_tool_result(
         asyncio.run(server.call_tool("get_run_summary", {}))
@@ -195,7 +214,9 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     latest_changed_resource = list(
         asyncio.run(server.read_resource("codeclone://latest/changed"))
     )
-    assert json.loads(latest_changed_resource[0].content)["run_id"] == run_id
+    latest_changed_payload = json.loads(latest_changed_resource[0].content)
+    assert latest_changed_payload["run_id"] == changed_run_id
+    assert latest_changed_payload["changed_paths"] == changed_summary["changed_paths"]
 
     report_resource = list(
         asyncio.run(server.read_resource(f"codeclone://runs/{run_id}/report.json"))
@@ -223,7 +244,7 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     changed_section = _structured_tool_result(
         asyncio.run(server.call_tool("get_report_section", {"section": "changed"}))
     )
-    assert changed_section["changed_paths"] == ["pkg/dup.py", "pkg/quality.py"]
+    assert changed_section["changed_paths"] == changed_summary["changed_paths"]
 
     finding = _structured_tool_result(
         asyncio.run(server.call_tool("get_finding", {"finding_id": first_finding_id}))
@@ -239,7 +260,20 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     hotspots = _structured_tool_result(
         asyncio.run(server.call_tool("list_hotspots", {"kind": "highest_priority"}))
     )
+    comparison = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "compare_runs",
+                {
+                    "run_id_before": run_id,
+                    "run_id_after": changed_run_id,
+                    "focus": "all",
+                },
+            )
+        )
+    )
     assert cast(int, hotspots["total"]) >= 1
+    assert comparison["summary"]
 
     complexity = _structured_tool_result(
         asyncio.run(
@@ -258,6 +292,20 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             server.call_tool(
                 "check_clones",
                 {"run_id": run_id, "path": "pkg/dup.py"},
+            )
+        )
+    )
+    coupling = _structured_tool_result(
+        asyncio.run(server.call_tool("check_coupling", {"run_id": run_id}))
+    )
+    cohesion = _structured_tool_result(
+        asyncio.run(server.call_tool("check_cohesion", {"run_id": run_id}))
+    )
+    dead_code = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "check_dead_code",
+                {"run_id": run_id, "path": "pkg/quality.py"},
             )
         )
     )
@@ -290,6 +338,9 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     )
     assert complexity["check"] == "complexity"
     assert cast(int, clones["total"]) >= 1
+    assert coupling["check"] == "coupling"
+    assert cohesion["check"] == "cohesion"
+    assert dead_code["check"] == "dead_code"
     assert reviewed["reviewed"] is True
     assert reviewed_items["reviewed_count"] == 1
     assert "## CodeClone Summary" in str(pr_summary["content"])
@@ -313,6 +364,16 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert schema_payload["title"] == "CodeCloneCanonicalReport"
     assert "report_schema_version" in schema_payload["properties"]
 
+    cleared = _structured_tool_result(
+        asyncio.run(server.call_tool("clear_session_runs", {}))
+    )
+    assert cast(int, cleared["cleared_runs"]) >= 1
+    assert run_id in cast("list[str]", cleared["cleared_run_ids"])
+    from mcp.server.fastmcp.exceptions import ResourceError
+
+    with pytest.raises(ResourceError):
+        list(asyncio.run(server.read_resource("codeclone://latest/summary")))
+
 
 def test_mcp_server_parser_defaults_and_main_success(
     monkeypatch: pytest.MonkeyPatch,
@@ -320,10 +381,11 @@ def test_mcp_server_parser_defaults_and_main_success(
     parser = mcp_server.build_parser()
     args = parser.parse_args([])
     assert args.transport == "stdio"
-    assert args.history_limit == 16
+    assert args.history_limit == 4
     assert args.json_response is True
     assert args.stateless_http is True
     assert args.log_level == "INFO"
+    assert args.allow_remote is False
 
     captured: dict[str, object] = {}
 
@@ -358,6 +420,63 @@ def test_mcp_server_parser_defaults_and_main_success(
     assert kwargs["history_limit"] == 8
 
 
+def test_mcp_server_parser_rejects_excessive_history_limit() -> None:
+    parser = mcp_server.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--history-limit", "11"])
+
+
+def test_mcp_server_main_rejects_non_loopback_host_without_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "codeclone-mcp",
+            "--transport",
+            "streamable-http",
+            "--host",
+            "0.0.0.0",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        mcp_server.main()
+
+    assert exc_info.value.code == 2
+    assert "without --allow-remote" in capsys.readouterr().err
+
+
+def test_mcp_server_main_allows_non_loopback_host_with_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeServer:
+        def run(self, *, transport: str) -> None:
+            captured["transport"] = transport
+
+    monkeypatch.setattr(mcp_server, "build_mcp_server", lambda **kwargs: _FakeServer())
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "codeclone-mcp",
+            "--transport",
+            "streamable-http",
+            "--host",
+            "0.0.0.0",
+            "--allow-remote",
+        ],
+    )
+
+    mcp_server.main()
+
+    assert captured["transport"] == "streamable-http"
+
+
 def test_mcp_server_main_reports_missing_optional_dependency(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -374,6 +493,13 @@ def test_mcp_server_main_reports_missing_optional_dependency(
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
     assert "codeclone[mcp]" in err
+
+
+def test_mcp_server_history_limit_arg_rejects_non_integer() -> None:
+    with pytest.raises(
+        argparse.ArgumentTypeError, match="history limit must be an integer"
+    ):
+        mcp_server._history_limit_arg("oops")
 
 
 def test_mcp_server_load_runtime_wraps_import_error(
@@ -415,3 +541,13 @@ def test_mcp_server_main_swallows_keyboard_interrupt(
     )
 
     mcp_server.main()
+
+
+def test_mcp_server_host_loopback_detection() -> None:
+    assert mcp_server._host_is_loopback("") is False
+    assert mcp_server._host_is_loopback("127.0.0.1") is True
+    assert mcp_server._host_is_loopback("localhost") is True
+    assert mcp_server._host_is_loopback("::1") is True
+    assert mcp_server._host_is_loopback("[::1]") is True
+    assert mcp_server._host_is_loopback("0.0.0.0") is False
+    assert mcp_server._host_is_loopback("example.com") is False

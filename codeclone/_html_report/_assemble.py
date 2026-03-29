@@ -228,7 +228,7 @@ def build_html_report(
     footer_html = (
         '<footer class="report-footer">'
         f'<a href="{REPOSITORY_URL}" target="_blank" rel="noopener">CodeClone</a> '
-        f'<span class="muted">v{version}</span> · '
+        f'<span class="muted">v{_escape_html(version)}</span> · '
         f'<a href="{DOCS_URL}" target="_blank" rel="noopener">Docs</a> · '
         f'<a href="{ISSUES_URL}" target="_blank" rel="noopener">Issues</a>'
         "</footer>"
@@ -305,9 +305,11 @@ def build_html_report(
         out: list[str] = []
         for line in css.splitlines():
             stripped = line.strip()
-            if not stripped or stripped.startswith("/*"):
-                continue
-            if not stripped.startswith(".codebox"):
+            if (
+                not stripped
+                or stripped.startswith("/*")
+                or not stripped.startswith(".codebox")
+            ):
                 continue
             out.append(stripped)
         return "\n".join(out)

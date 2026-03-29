@@ -2,33 +2,37 @@
 
 ## [2.0.0b3]
 
-### MCP
+### MCP server
 
-- Add optional `codeclone[mcp]` extra and `codeclone-mcp` launcher.
-- Add a deterministic, read-only MCP server over the canonical pipeline and report contracts.
-- Expose diff-aware MCP tools/resources for changed-files analysis, run comparison, report sections, findings,
-  remediation payloads, hotlists, granular checks, and gate previews.
-- Add stable MCP resources for latest-run summary/report/health/gates/changed projections and schema discovery.
-- Add session-local reviewed-finding state for long AI-agent workflows without mutating baseline or repo state.
-- Add stable HTML deep-link anchors (`finding-{finding_id}`) for clone and structural finding cards.
+- Add optional `codeclone[mcp]` extra with `codeclone-mcp` launcher (`stdio` and `streamable-http` transports).
+- Expose 19 read-only tools and 9 resources over the canonical pipeline: analysis, diff-aware changed-files, run
+  comparison, findings/hotspots/remediation, granular checks, gate preview, PR summary, and session review markers.
+- Bound in-memory run retention (`--history-limit`, default `4`, max `10`) and prune stale session state automatically.
+- Require explicit `--allow-remote` for non-loopback `streamable-http` binds; reject `cache_policy=refresh` to preserve
+  read-only semantics.
+- Defer MCP process-count policy to the core runtime when `processes` is not explicitly overridden.
 
 ### CLI
 
-- Add `--changed-only`, `--diff-against`, and `--paths-from-git-diff` for changed-scope clone review and gating over a
-  full canonical analysis.
-- Render changed-scope results as a first-class summary block in normal CLI output while keeping quiet mode compact.
+- Add `--changed-only`, `--diff-against`, and `--paths-from-git-diff` for changed-scope clone review and gating.
+- Render changed-scope results as a first-class summary block in normal CLI output.
 
 ### SARIF
 
-- Stabilize `primaryLocationLineHash` across line-only shifts by hashing finding identity without line numbers.
-- Emit run-unique `automationDetails.id`, optional `startTimeUtc`, and explicit result `kind: "fail"`.
-- Move ancillary finding identity fields to SARIF `properties` and keep `partialFingerprints` minimal.
+- Stabilize `primaryLocationLineHash` by excluding line numbers from the hash material.
+- Add run-unique `automationDetails.id`, `startTimeUtc`, and explicit result `kind: "fail"`.
+- Move ancillary identity fields to SARIF `properties`; keep only `primaryLocationLineHash` in `partialFingerprints`.
 
-### HTML
+### HTML report
 
-- Add IDE picker with persistent selection (localStorage) supporting PyCharm, IntelliJ IDEA, VS Code, Cursor, Fleet, and
-  Zed.
-- Make file paths across Clones, Quality, Suggestions, Dead Code, and Findings tabs clickable IDE deep links.
+- Add IDE picker (PyCharm, IntelliJ IDEA, VS Code, Cursor, Fleet, Zed) with localStorage persistence.
+- Make file paths across all tabs clickable IDE deep links via `jetbrains://`, `vscode://`, and other protocol schemes.
+- Add stable deep-link anchors (`finding-{finding_id}`) for clone and structural finding cards.
+
+### GitHub Action
+
+- Ship composite GitHub Action v2 with configurable quality gates, SARIF upload to Code Scanning, and PR summary
+  comments.
 
 ## [2.0.0b2]
 

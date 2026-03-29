@@ -74,6 +74,7 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 DEFAULT_BATCH_SIZE = 100
 PARALLEL_MIN_FILES_PER_WORKER = 8
 PARALLEL_MIN_FILES_FLOOR = 16
+DEFAULT_RUNTIME_PROCESSES = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,6 +338,12 @@ def _segment_to_group_item(segment: SegmentUnit) -> GroupItem:
 
 def _parallel_min_files(processes: int) -> int:
     return max(PARALLEL_MIN_FILES_FLOOR, processes * PARALLEL_MIN_FILES_PER_WORKER)
+
+
+def _resolve_process_count(processes: object) -> int:
+    if processes is None:
+        return DEFAULT_RUNTIME_PROCESSES
+    return max(1, _coerce.as_int(processes, DEFAULT_RUNTIME_PROCESSES))
 
 
 def _should_collect_structural_findings(output_paths: OutputPaths) -> bool:
@@ -817,7 +824,9 @@ def process(
     failed_files: list[str] = []
     source_read_failures: list[str] = []
     root_str = str(boot.root)
-    processes = max(1, int(boot.args.processes))
+    # Keep process-count fallback in the core runtime so non-CLI callers such as
+    # the MCP service do not need to guess or mirror parallelism policy.
+    processes = _resolve_process_count(boot.args.processes)
     min_loc = int(boot.args.min_loc)
     min_stmt = int(boot.args.min_stmt)
     block_min_loc = int(boot.args.block_min_loc)
@@ -1429,6 +1438,18 @@ def analyze(
     )
 
 
+def _load_markdown_report_renderer() -> Callable[..., str]:
+    from .report.markdown import to_markdown_report
+
+    return to_markdown_report
+
+
+def _load_sarif_report_renderer() -> Callable[..., str]:
+    from .report.sarif import to_sarif_report
+
+    return to_sarif_report
+
+
 def report(
     *,
     boot: BootstrapResult,
@@ -1531,10 +1552,11 @@ def report(
     if boot.output_paths.json and report_document is not None:
         contents["json"] = render_json_report_document(report_document)
 
-    if boot.output_paths.md and report_document is not None:
-        from .report.markdown import to_markdown_report
-
-        contents["md"] = to_markdown_report(
+    def _render_projection_artifact(
+        renderer: Callable[..., str],
+    ) -> str:
+        assert report_document is not None
+        return renderer(
             report_document=report_document,
             meta=report_meta,
             inventory=report_inventory,
@@ -1550,24 +1572,12 @@ def report(
             structural_findings=sf,
         )
 
-    if boot.output_paths.sarif and report_document is not None:
-        from .report.sarif import to_sarif_report
-
-        contents["sarif"] = to_sarif_report(
-            report_document=report_document,
-            meta=report_meta,
-            inventory=report_inventory,
-            func_groups=analysis.func_groups,
-            block_groups=analysis.block_groups_report,
-            segment_groups=analysis.segment_groups,
-            block_facts=analysis.block_group_facts,
-            new_function_group_keys=new_func,
-            new_block_group_keys=new_block,
-            new_segment_group_keys=set(analysis.segment_groups.keys()),
-            metrics=analysis.metrics_payload,
-            suggestions=analysis.suggestions,
-            structural_findings=sf,
-        )
+    for key, output_path, loader in (
+        ("md", boot.output_paths.md, _load_markdown_report_renderer),
+        ("sarif", boot.output_paths.sarif, _load_sarif_report_renderer),
+    ):
+        if output_path and report_document is not None:
+            contents[key] = _render_projection_artifact(loader())
 
     if boot.output_paths.text and report_document is not None:
         contents["text"] = render_text_report_document(report_document)

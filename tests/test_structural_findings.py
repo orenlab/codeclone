@@ -676,6 +676,26 @@ def test_private_member_decoding_and_majority_defaults() -> None:
     assert sf._member_profile_value(member, "unknown-field") == ""
 
 
+def test_summarize_branch_does_not_descend_into_nested_scopes() -> None:
+    body = ast.parse(
+        """
+if cond:
+    def inner():
+        while True:
+            helper()
+    class Inner:
+        def method(self):
+            raise RuntimeError("boom")
+    value = 1
+""",
+    ).body
+    signature = sf._summarize_branch(body)
+    assert signature is not None
+    assert signature["calls"] == "0"
+    assert signature["raises"] == "0"
+    assert signature["has_loop"] == "0"
+
+
 def test_clone_cohort_builders_cover_early_exit_paths() -> None:
     base_member = sf._CloneCohortMember(
         file_path="pkg/a.py",

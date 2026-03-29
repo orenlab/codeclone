@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
-from typing import Literal, cast
+from typing import Final, Literal, cast
 
 from . import __version__, _coerce
 from ._cli_args import (
@@ -22,7 +22,6 @@ from ._cli_args import (
     DEFAULT_MAX_CACHE_SIZE_MB,
     DEFAULT_MIN_LOC,
     DEFAULT_MIN_STMT,
-    DEFAULT_PROCESSES,
     DEFAULT_ROOT,
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
@@ -42,12 +41,13 @@ from ._cli_runtime import (
     validate_numeric_args,
 )
 from .baseline import Baseline
-from .cache import Cache, CacheStatus, build_segment_report_projection
+from .cache import Cache, CacheStatus
 from .contracts import (
     DEFAULT_COHESION_THRESHOLD,
     DEFAULT_COMPLEXITY_THRESHOLD,
     DEFAULT_COUPLING_THRESHOLD,
     REPORT_SCHEMA_VERSION,
+    ExitCode,
 )
 from .domain.findings import (
     CATEGORY_CLONE,
@@ -75,17 +75,15 @@ from .domain.quality import (
     SEVERITY_INFO,
     SEVERITY_WARNING,
 )
-from .errors import CacheError
-from .models import MetricsDiff
-from .normalize import NormalizationConfig
+from .models import MetricsDiff, ProjectMetrics, Suggestion
 from .pipeline import (
-    AnalysisResult,
-    BootstrapResult,
+    GatingResult,
+    MetricGateConfig,
     OutputPaths,
     analyze,
     bootstrap,
     discover,
-    gate,
+    metric_gate_reasons,
     process,
     report,
 )
@@ -142,32 +140,32 @@ _MCP_CONFIG_KEYS = frozenset(
         "metrics_baseline",
     }
 )
-_RESOURCE_SECTION_MAP: dict[str, ReportSection] = {
+_RESOURCE_SECTION_MAP: Final[dict[str, ReportSection]] = {
     "report.json": "all",
     "summary": "meta",
     "health": "metrics",
     "changed": "changed",
     "overview": "derived",
 }
-_SEVERITY_WEIGHT = {
+_SEVERITY_WEIGHT: Final[dict[str, float]] = {
     SEVERITY_CRITICAL: 1.0,
     SEVERITY_WARNING: 0.6,
     SEVERITY_INFO: 0.2,
 }
-_EFFORT_WEIGHT = {
+_EFFORT_WEIGHT: Final[dict[str, float]] = {
     EFFORT_EASY: 1.0,
     EFFORT_MODERATE: 0.6,
     EFFORT_HARD: 0.3,
 }
-_NOVELTY_WEIGHT = {"new": 1.0, "known": 0.5}
-_RUNTIME_WEIGHT = {
+_NOVELTY_WEIGHT: Final[dict[str, float]] = {"new": 1.0, "known": 0.5}
+_RUNTIME_WEIGHT: Final[dict[str, float]] = {
     "production": 1.0,
     "mixed": 0.8,
     "tests": 0.4,
     "fixtures": 0.2,
     "other": 0.5,
 }
-_CONFIDENCE_WEIGHT = {
+_CONFIDENCE_WEIGHT: Final[dict[str, float]] = {
     CONFIDENCE_HIGH: 1.0,
     CONFIDENCE_MEDIUM: 0.7,
     CONFIDENCE_LOW: 0.3,
@@ -184,6 +182,8 @@ _VALID_FINDING_SORT = frozenset({"default", "priority", "severity", "spread"})
 _VALID_DETAIL_LEVELS = frozenset({"summary", "normal", "full"})
 _VALID_COMPARISON_FOCUS = frozenset({"all", "clones", "structural", "metrics"})
 _VALID_PR_SUMMARY_FORMATS = frozenset({"markdown", "json"})
+DEFAULT_MCP_HISTORY_LIMIT = 4
+MAX_MCP_HISTORY_LIMIT = 10
 _VALID_REPORT_SECTIONS = frozenset(
     {
         "all",
@@ -374,6 +374,10 @@ def _git_diff_lines_payload(
     root_path: Path,
     git_diff_ref: str,
 ) -> tuple[str, ...]:
+    if git_diff_ref.startswith("-"):
+        raise MCPGitDiffError(
+            f"Invalid git diff ref '{git_diff_ref}': must not start with '-'."
+        )
     try:
         completed = subprocess.run(
             ["git", "diff", "--name-only", git_diff_ref, "--"],
@@ -402,6 +406,14 @@ def _load_report_document_payload(report_json: str) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise MCPServiceError("Generated canonical report must be a JSON object.")
     return dict(payload)
+
+
+def _validated_history_limit(history_limit: int) -> int:
+    if not 1 <= history_limit <= MAX_MCP_HISTORY_LIMIT:
+        raise ValueError(
+            f"history_limit must be between 1 and {MAX_MCP_HISTORY_LIMIT}."
+        )
+    return history_limit
 
 
 class MCPServiceError(RuntimeError):
@@ -479,21 +491,23 @@ class MCPRunRecord:
     root: Path
     request: MCPAnalysisRequest
     report_document: dict[str, object]
-    report_json: str
     summary: dict[str, object]
     changed_paths: tuple[str, ...]
     changed_projection: dict[str, object] | None
     warnings: tuple[str, ...]
     failures: tuple[str, ...]
-    analysis: AnalysisResult
+    func_clones_count: int
+    block_clones_count: int
+    project_metrics: ProjectMetrics | None
+    suggestions: tuple[Suggestion, ...]
     new_func: frozenset[str]
     new_block: frozenset[str]
     metrics_diff: MetricsDiff | None
 
 
 class CodeCloneMCPRunStore:
-    def __init__(self, *, history_limit: int = 16) -> None:
-        self._history_limit = max(1, history_limit)
+    def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
+        self._history_limit = _validated_history_limit(history_limit)
         self._lock = RLock()
         self._records: OrderedDict[str, MCPRunRecord] = OrderedDict()
         self._latest_run_id: str | None = None
@@ -519,9 +533,16 @@ class CodeCloneMCPRunStore:
         with self._lock:
             return tuple(self._records.values())
 
+    def clear(self) -> tuple[str, ...]:
+        with self._lock:
+            removed_run_ids = tuple(self._records.keys())
+            self._records.clear()
+            self._latest_run_id = None
+            return removed_run_ids
+
 
 class CodeCloneMCPService:
-    def __init__(self, *, history_limit: int = 16) -> None:
+    def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
         self._runs = CodeCloneMCPRunStore(history_limit=history_limit)
         self._state_lock = RLock()
         self._review_state: dict[str, OrderedDict[str, str | None]] = {}
@@ -567,13 +588,6 @@ class CodeCloneMCPService:
             discovery=discovery_result,
             processing=processing_result,
         )
-
-        if request.cache_policy == "refresh":
-            self._refresh_cache_projection(cache=cache, analysis=analysis_result)
-            try:
-                cache.save()
-            except CacheError as exc:
-                console.print(f"Cache save failed: {exc}")
 
         clone_baseline_state = resolve_clone_baseline_state(
             args=args,
@@ -703,13 +717,15 @@ class CodeCloneMCPService:
             root=root_path,
             request=request,
             report_document=report_document,
-            report_json=report_json,
             summary=base_summary,
             changed_paths=changed_paths,
             changed_projection=None,
             warnings=warnings,
             failures=failures,
-            analysis=analysis_result,
+            func_clones_count=analysis_result.func_clones_count,
+            block_clones_count=analysis_result.block_clones_count,
+            project_metrics=analysis_result.project_metrics,
+            suggestions=analysis_result.suggestions,
             new_func=frozenset(new_func),
             new_block=frozenset(new_block),
             metrics_diff=metrics_diff,
@@ -725,13 +741,15 @@ class CodeCloneMCPService:
             root=root_path,
             request=request,
             report_document=report_document,
-            report_json=report_json,
             summary=summary,
             changed_paths=changed_paths,
             changed_projection=changed_projection,
             warnings=warnings,
             failures=failures,
-            analysis=analysis_result,
+            func_clones_count=analysis_result.func_clones_count,
+            block_clones_count=analysis_result.block_clones_count,
+            project_metrics=analysis_result.project_metrics,
+            suggestions=analysis_result.suggestions,
             new_func=frozenset(new_func),
             new_block=frozenset(new_block),
             metrics_diff=metrics_diff,
@@ -807,31 +825,7 @@ class CodeCloneMCPService:
 
     def evaluate_gates(self, request: MCPGateRequest) -> dict[str, object]:
         record = self._runs.get(request.run_id)
-        gate_args = Namespace(
-            fail_on_new=request.fail_on_new,
-            fail_threshold=request.fail_threshold,
-            fail_complexity=request.fail_complexity,
-            fail_coupling=request.fail_coupling,
-            fail_cohesion=request.fail_cohesion,
-            fail_cycles=request.fail_cycles,
-            fail_dead_code=request.fail_dead_code,
-            fail_health=request.fail_health,
-            fail_on_new_metrics=request.fail_on_new_metrics,
-        )
-        boot = BootstrapResult(
-            root=record.root,
-            config=NormalizationConfig(),
-            args=gate_args,
-            output_paths=OutputPaths(),
-            cache_path=_REPORT_DUMMY_PATH,
-        )
-        gate_result = gate(
-            boot=boot,
-            analysis=record.analysis,
-            new_func=record.new_func,
-            new_block=record.new_block,
-            metrics_diff=record.metrics_diff,
-        )
+        gate_result = self._evaluate_gate_snapshot(record=record, request=request)
         result = {
             "run_id": record.run_id,
             "would_fail": gate_result.exit_code != 0,
@@ -852,6 +846,45 @@ class CodeCloneMCPService:
         with self._state_lock:
             self._last_gate_results[record.run_id] = dict(result)
         return result
+
+    def _evaluate_gate_snapshot(
+        self,
+        *,
+        record: MCPRunRecord,
+        request: MCPGateRequest,
+    ) -> GatingResult:
+        reasons: list[str] = []
+        if record.project_metrics is not None:
+            metric_reasons = metric_gate_reasons(
+                project_metrics=record.project_metrics,
+                metrics_diff=record.metrics_diff,
+                config=MetricGateConfig(
+                    fail_complexity=request.fail_complexity,
+                    fail_coupling=request.fail_coupling,
+                    fail_cohesion=request.fail_cohesion,
+                    fail_cycles=request.fail_cycles,
+                    fail_dead_code=request.fail_dead_code,
+                    fail_health=request.fail_health,
+                    fail_on_new_metrics=request.fail_on_new_metrics,
+                ),
+            )
+            reasons.extend(f"metric:{reason}" for reason in metric_reasons)
+
+        if request.fail_on_new and (record.new_func or record.new_block):
+            reasons.append("clone:new")
+
+        total_clone_groups = record.func_clones_count + record.block_clones_count
+        if 0 <= request.fail_threshold < total_clone_groups:
+            reasons.append(
+                f"clone:threshold:{total_clone_groups}:{request.fail_threshold}"
+            )
+
+        if reasons:
+            return GatingResult(
+                exit_code=int(ExitCode.GATING_FAILURE),
+                reasons=tuple(reasons),
+            )
+        return GatingResult(exit_code=int(ExitCode.SUCCESS), reasons=())
 
     def get_report_section(
         self,
@@ -1173,6 +1206,25 @@ class CodeCloneMCPService:
             "items": items,
         }
 
+    def clear_session_runs(self) -> dict[str, object]:
+        removed_run_ids = self._runs.clear()
+        with self._state_lock:
+            cleared_review_entries = sum(
+                len(entries) for entries in self._review_state.values()
+            )
+            cleared_gate_results = len(self._last_gate_results)
+            cleared_spread_cache_entries = len(self._spread_max_cache)
+            self._review_state.clear()
+            self._last_gate_results.clear()
+            self._spread_max_cache.clear()
+        return {
+            "cleared_runs": len(removed_run_ids),
+            "cleared_run_ids": list(removed_run_ids),
+            "cleared_review_entries": cleared_review_entries,
+            "cleared_gate_results": cleared_gate_results,
+            "cleared_spread_cache_entries": cleared_spread_cache_entries,
+        }
+
     def check_complexity(
         self,
         *,
@@ -1451,7 +1503,11 @@ class CodeCloneMCPService:
                 sort_keys=True,
             )
         if suffix == "report.json":
-            return record.report_json
+            return json.dumps(
+                record.report_document,
+                ensure_ascii=False,
+                indent=2,
+            )
         if suffix == "overview":
             return json.dumps(
                 self.list_hotspots(kind="highest_spread", run_id=record.run_id),
@@ -1525,7 +1581,7 @@ class CodeCloneMCPService:
                     ) from exc
                 normalized.add(relative.as_posix())
                 continue
-            cleaned = candidate.as_posix().strip("./")
+            cleaned = self._normalize_relative_path(candidate.as_posix())
             if cleaned:
                 normalized.add(cleaned)
         return tuple(sorted(normalized))
@@ -1576,8 +1632,16 @@ class CodeCloneMCPService:
     def _path_filter_tuple(self, path: str | None) -> tuple[str, ...]:
         if not path:
             return ()
-        cleaned = Path(path).as_posix().strip("./")
+        cleaned = self._normalize_relative_path(Path(path).as_posix())
         return (cleaned,) if cleaned else ()
+
+    def _normalize_relative_path(self, path: str) -> str:
+        cleaned = path.strip()
+        if cleaned == ".":
+            return ""
+        if cleaned.startswith("./"):
+            cleaned = cleaned[2:]
+        return cleaned.rstrip("/")
 
     def _previous_run_for_root(self, record: MCPRunRecord) -> MCPRunRecord | None:
         previous: MCPRunRecord | None = None
@@ -1588,6 +1652,33 @@ class CodeCloneMCPService:
                 previous = item
         return None
 
+    def _record_supports_analysis_mode(
+        self,
+        record: MCPRunRecord,
+        *,
+        analysis_mode: AnalysisMode,
+    ) -> bool:
+        record_mode = record.request.analysis_mode
+        if analysis_mode == "clones_only":
+            return record_mode in {"clones_only", "full"}
+        return record_mode == "full"
+
+    def _latest_compatible_record(
+        self,
+        *,
+        analysis_mode: AnalysisMode,
+        root_path: Path | None = None,
+    ) -> MCPRunRecord | None:
+        for item in reversed(self._runs.records()):
+            if root_path is not None and item.root != root_path:
+                continue
+            if self._record_supports_analysis_mode(
+                item,
+                analysis_mode=analysis_mode,
+            ):
+                return item
+        return None
+
     def _resolve_granular_record(
         self,
         *,
@@ -1596,14 +1687,34 @@ class CodeCloneMCPService:
         analysis_mode: AnalysisMode,
     ) -> MCPRunRecord:
         if run_id is not None:
-            return self._runs.get(run_id)
-        summary = self.analyze_repository(
-            MCPAnalysisRequest(
-                root=root,
-                analysis_mode=analysis_mode,
+            record = self._runs.get(run_id)
+            if self._record_supports_analysis_mode(record, analysis_mode=analysis_mode):
+                return record
+            raise MCPServiceContractError(
+                "Selected MCP run is not compatible with this check. "
+                f"Call analyze_repository(root='{record.root}', "
+                "analysis_mode='full') first."
             )
+        root_path: Path | None = None
+        if root != DEFAULT_ROOT:
+            root_path = self._resolve_root(root)
+        latest_record = self._latest_compatible_record(
+            analysis_mode=analysis_mode,
+            root_path=root_path,
         )
-        return self._runs.get(str(summary["run_id"]))
+        if latest_record is not None:
+            return latest_record
+        if root_path is not None:
+            raise MCPRunNotFoundError(
+                f"No compatible MCP analysis run is available for root: {root_path}. "
+                f"Call analyze_repository(root='{root_path}') or "
+                f"analyze_changed_paths(root='{root_path}', changed_paths=[...]) first."
+            )
+        raise MCPRunNotFoundError(
+            "No compatible MCP analysis run is available. "
+            "Call analyze_repository(root='/path/to/repo') or "
+            "analyze_changed_paths(root='/path/to/repo', changed_paths=[...]) first."
+        )
 
     def _base_findings(self, record: MCPRunRecord) -> list[dict[str, object]]:
         report_document = record.report_document
@@ -1857,8 +1968,7 @@ class CodeCloneMCPService:
                     str(finding.get("id", "")),
                 )
             )
-            return finding_rows
-        if sort_by == "spread":
+        elif sort_by == "spread":
             finding_rows.sort(
                 key=lambda finding: (
                     -self._spread_value(finding),
@@ -1866,21 +1976,24 @@ class CodeCloneMCPService:
                     str(finding.get("id", "")),
                 )
             )
-            return finding_rows
-        finding_rows.sort(
-            key=lambda finding: (
-                -_as_float(
-                    self._as_mapping(
-                        (priority_map or {}).get(str(finding.get("id", "")))
-                    ).get("score", 0.0),
-                    0.0,
+        else:
+            finding_rows.sort(
+                key=lambda finding: (
+                    -_as_float(
+                        self._as_mapping(
+                            (priority_map or {}).get(str(finding.get("id", "")))
+                        ).get("score", 0.0),
+                        0.0,
+                    )
+                    if priority_map is not None
+                    else -_as_float(
+                        self._priority_score(record, finding)["score"],
+                        0.0,
+                    ),
+                    -self._severity_rank(str(finding.get("severity", ""))),
+                    str(finding.get("id", "")),
                 )
-                if priority_map is not None
-                else -_as_float(self._priority_score(record, finding)["score"], 0.0),
-                -self._severity_rank(str(finding.get("severity", ""))),
-                str(finding.get("id", "")),
             )
-        )
         return finding_rows
 
     def _decorate_finding(
@@ -2138,10 +2251,9 @@ class CodeCloneMCPService:
                 _as_int(location.get("line", 0), 0),
                 str(location.get("symbol", "")),
             )
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(location)
+            if key not in seen:
+                seen.add(key)
+                deduped.append(location)
         return deduped
 
     def _suggestion_finding_id(self, suggestion: object) -> str:
@@ -2198,7 +2310,7 @@ class CodeCloneMCPService:
         record: MCPRunRecord,
         finding_id: str,
     ) -> object | None:
-        for suggestion in record.analysis.suggestions:
+        for suggestion in record.suggestions:
             if self._suggestion_finding_id(suggestion) == finding_id:
                 return suggestion
         return None
@@ -2607,6 +2719,11 @@ class CodeCloneMCPService:
             request.cache_policy,
             _VALID_CACHE_POLICIES,
         )
+        if request.cache_policy == "refresh":
+            raise MCPServiceContractError(
+                "cache_policy='refresh' is not supported by the read-only "
+                "CodeClone MCP server. Use 'reuse' or 'off'."
+            )
 
     def _validate_choice(
         self,
@@ -2651,7 +2768,7 @@ class CodeCloneMCPService:
             block_min_stmt=DEFAULT_BLOCK_MIN_STMT,
             segment_min_loc=DEFAULT_SEGMENT_MIN_LOC,
             segment_min_stmt=DEFAULT_SEGMENT_MIN_STMT,
-            processes=DEFAULT_PROCESSES,
+            processes=None,
             cache_path=None,
             max_cache_size_mb=DEFAULT_MAX_CACHE_SIZE_MB,
             baseline=DEFAULT_BASELINE_PATH,
@@ -2820,22 +2937,6 @@ class CodeCloneMCPService:
         if policy != "off":
             cache.load()
         return cache
-
-    def _refresh_cache_projection(
-        self,
-        *,
-        cache: Cache,
-        analysis: AnalysisResult,
-    ) -> None:
-        if not hasattr(cache, "segment_report_projection"):
-            return
-        new_projection = build_segment_report_projection(
-            suppressed=analysis.suppressed_segment_groups,
-            digest=analysis.segment_groups_raw_digest,
-            groups=analysis.segment_groups,
-        )
-        if new_projection != cache.segment_report_projection:
-            cache.segment_report_projection = new_projection
 
     def _metrics_computed(self, analysis_mode: AnalysisMode) -> tuple[str, ...]:
         return (

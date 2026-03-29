@@ -3,16 +3,43 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
 import os
 from collections.abc import Collection
 from enum import Enum
+from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, TypeGuard, TypeVar, cast
 
 from .baseline import current_python_tag
+from .cache_io import (
+    as_int_or_none as _cache_as_int,
+)
+from .cache_io import (
+    as_object_list as _cache_as_list,
+)
+from .cache_io import (
+    as_str_dict as _cache_as_str_dict,
+)
+from .cache_io import (
+    as_str_or_none as _cache_as_str,
+)
+from .cache_io import (
+    read_json_document,
+    sign_cache_payload,
+    verify_cache_payload_signature,
+    write_json_document_atomically,
+)
+from .cache_paths import runtime_filepath_from_wire, wire_filepath_from_runtime
+from .cache_segments import (
+    SegmentReportProjection as _SegmentReportProjection,
+)
+from .cache_segments import (
+    build_segment_report_projection as _build_segment_report_projection,
+)
+from .cache_segments import (
+    decode_segment_report_projection,
+    encode_segment_report_projection,
+)
 from .contracts import BASELINE_FINGERPRINT_VERSION, CACHE_VERSION
 from .errors import CacheError
 from .models import (
@@ -33,6 +60,13 @@ from .structural_findings import normalize_structural_finding_group
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+
+SegmentReportProjection = _SegmentReportProjection
+build_segment_report_projection = _build_segment_report_projection
+_as_str = _cache_as_str
+_as_int = _cache_as_int
+_as_list = _cache_as_list
+_as_str_dict = _cache_as_str_dict
 
 MAX_CACHE_SIZE_BYTES = 50 * 1024 * 1024
 LEGACY_CACHE_SECRET_FILENAME = ".cache_secret"
@@ -161,67 +195,6 @@ class CacheData(TypedDict):
     fingerprint_version: str
     analysis_profile: AnalysisProfile
     files: dict[str, CacheEntry]
-
-
-class SegmentReportProjection(TypedDict):
-    digest: str
-    suppressed: int
-    groups: dict[str, list[SegmentDict]]
-
-
-def build_segment_report_projection(
-    *,
-    digest: str,
-    suppressed: int,
-    groups: Mapping[str, Sequence[Mapping[str, object]]],
-) -> SegmentReportProjection:
-    normalized_groups: dict[str, list[SegmentDict]] = {}
-    for group_key in sorted(groups):
-        normalized_items: list[SegmentDict] = []
-        for raw_item in sorted(
-            groups[group_key],
-            key=lambda item: (
-                str(item.get("filepath", "")),
-                str(item.get("qualname", "")),
-                _as_int(item.get("start_line")) or 0,
-                _as_int(item.get("end_line")) or 0,
-            ),
-        ):
-            segment_hash = _as_str(raw_item.get("segment_hash"))
-            segment_sig = _as_str(raw_item.get("segment_sig"))
-            filepath = _as_str(raw_item.get("filepath"))
-            qualname = _as_str(raw_item.get("qualname"))
-            start_line = _as_int(raw_item.get("start_line"))
-            end_line = _as_int(raw_item.get("end_line"))
-            size = _as_int(raw_item.get("size"))
-            if (
-                segment_hash is None
-                or segment_sig is None
-                or filepath is None
-                or qualname is None
-                or start_line is None
-                or end_line is None
-                or size is None
-            ):
-                continue
-            normalized_items.append(
-                SegmentGroupItem(
-                    segment_hash=segment_hash,
-                    segment_sig=segment_sig,
-                    filepath=filepath,
-                    qualname=qualname,
-                    start_line=start_line,
-                    end_line=end_line,
-                    size=size,
-                )
-            )
-        if normalized_items:
-            normalized_groups[group_key] = normalized_items
-    return {
-        "digest": digest,
-        "suppressed": max(0, int(suppressed)),
-        "groups": normalized_groups,
-    }
 
 
 def _normalize_cached_structural_group(
@@ -421,12 +394,6 @@ class Cache:
             schema_version=version,
         )
 
-    @staticmethod
-    def _sign_data(data: Mapping[str, object]) -> str:
-        """Create deterministic SHA-256 signature for canonical payload data."""
-        canonical = _canonical_json(data)
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
     def load(self) -> None:
         try:
             exists = self.path.exists()
@@ -455,7 +422,7 @@ class Cache:
                 )
                 return
 
-            raw_obj: object = json.loads(self.path.read_text("utf-8"))
+            raw_obj = read_json_document(self.path)
             parsed = self._load_and_validate(raw_obj)
             if parsed is None:
                 return
@@ -470,7 +437,7 @@ class Cache:
                 f"Cache unreadable; ignoring cache: {e}",
                 status=CacheStatus.UNREADABLE,
             )
-        except json.JSONDecodeError:
+        except JSONDecodeError:
             self._ignore_cache(
                 "Cache corrupted; ignoring cache.",
                 status=CacheStatus.INVALID_JSON,
@@ -499,8 +466,7 @@ class Cache:
         if sig is None or payload is None:
             return self._reject_invalid_cache_format(schema_version=version)
 
-        expected_sig = self._sign_data(payload)
-        if not hmac.compare_digest(sig, expected_sig):
+        if not verify_cache_payload_signature(payload, sig):
             return self._reject_cache_load(
                 "Cache signature mismatch; ignoring cache.",
                 status=CacheStatus.INTEGRITY_FAILED,
@@ -556,13 +522,14 @@ class Cache:
 
         parsed_files: dict[str, CacheEntry] = {}
         for wire_path, file_entry_obj in files_dict.items():
-            runtime_path = self._runtime_filepath_from_wire(wire_path)
+            runtime_path = runtime_filepath_from_wire(wire_path, root=self.root)
             parsed_entry = self._decode_entry(file_entry_obj, runtime_path)
             if parsed_entry is None:
                 return self._reject_invalid_cache_format(schema_version=version)
             parsed_files[runtime_path] = _canonicalize_cache_entry(parsed_entry)
-        self.segment_report_projection = self._decode_segment_report_projection(
-            payload.get("sr")
+        self.segment_report_projection = decode_segment_report_projection(
+            payload.get("sr"),
+            root=self.root,
         )
 
         self.cache_schema_version = version
@@ -578,10 +545,10 @@ class Cache:
         if not self._dirty:
             return
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
             wire_files: dict[str, object] = {}
             wire_map = {
-                rp: self._wire_filepath_from_runtime(rp) for rp in self.data["files"]
+                rp: wire_filepath_from_runtime(rp, root=self.root)
+                for rp in self.data["files"]
             }
             for runtime_path in sorted(self.data["files"], key=wire_map.__getitem__):
                 entry = self.get_file_entry(runtime_path)
@@ -595,22 +562,18 @@ class Cache:
                 "ap": self.analysis_profile,
                 "files": wire_files,
             }
-            segment_projection = self._encode_segment_report_projection()
+            segment_projection = encode_segment_report_projection(
+                self.segment_report_projection,
+                root=self.root,
+            )
             if segment_projection is not None:
                 payload["sr"] = segment_projection
             signed_doc = {
                 "v": self._CACHE_VERSION,
                 "payload": payload,
-                "sig": self._sign_data(payload),
+                "sig": sign_cache_payload(payload),
             }
-
-            tmp_path = self.path.with_name(f"{self.path.name}.tmp")
-            data = _canonical_json(signed_doc).encode("utf-8")
-            with tmp_path.open("wb") as tmp_file:
-                tmp_file.write(data)
-                tmp_file.flush()
-                os.fsync(tmp_file.fileno())
-            os.replace(tmp_path, self.path)
+            write_json_document_atomically(self.path, signed_doc)
             self._dirty = False
 
             self.data["version"] = self._CACHE_VERSION
@@ -628,131 +591,6 @@ class Cache:
     @staticmethod
     def _encode_entry(entry: CacheEntry) -> dict[str, object]:
         return _encode_wire_file_entry(entry)
-
-    def _wire_filepath_from_runtime(self, runtime_filepath: str) -> str:
-        runtime_path = Path(runtime_filepath)
-        if self.root is None:
-            return runtime_path.as_posix()
-
-        try:
-            relative = runtime_path.relative_to(self.root)
-            return relative.as_posix()
-        except ValueError:
-            pass
-
-        try:
-            relative = runtime_path.resolve().relative_to(self.root.resolve())
-            return relative.as_posix()
-        except OSError:
-            return runtime_path.as_posix()
-        except ValueError:
-            return runtime_path.as_posix()
-
-    def _runtime_filepath_from_wire(self, wire_filepath: str) -> str:
-        wire_path = Path(wire_filepath)
-        if self.root is None or wire_path.is_absolute():
-            return str(wire_path)
-
-        combined = self.root / wire_path
-        try:
-            return str(combined.resolve(strict=False))
-        except OSError:
-            return str(combined)
-
-    def _decode_segment_report_projection(
-        self,
-        value: object,
-    ) -> SegmentReportProjection | None:
-        obj = _as_str_dict(value)
-        if obj is None:
-            return None
-        digest = _as_str(obj.get("d"))
-        suppressed = _as_int(obj.get("s"))
-        groups_raw = _as_list(obj.get("g"))
-        if digest is None or suppressed is None or groups_raw is None:
-            return None
-        groups: dict[str, list[SegmentDict]] = {}
-        for group_row in groups_raw:
-            group_list = _as_list(group_row)
-            if group_list is None or len(group_list) != 2:
-                return None
-            group_key = _as_str(group_list[0])
-            items_raw = _as_list(group_list[1])
-            if group_key is None or items_raw is None:
-                return None
-            items: list[SegmentDict] = []
-            for item_raw in items_raw:
-                item_list = _as_list(item_raw)
-                if item_list is None or len(item_list) != 7:
-                    return None
-                wire_filepath = _as_str(item_list[0])
-                qualname = _as_str(item_list[1])
-                start_line = _as_int(item_list[2])
-                end_line = _as_int(item_list[3])
-                size = _as_int(item_list[4])
-                segment_hash = _as_str(item_list[5])
-                segment_sig = _as_str(item_list[6])
-                if (
-                    wire_filepath is None
-                    or qualname is None
-                    or start_line is None
-                    or end_line is None
-                    or size is None
-                    or segment_hash is None
-                    or segment_sig is None
-                ):
-                    return None
-                items.append(
-                    SegmentGroupItem(
-                        segment_hash=segment_hash,
-                        segment_sig=segment_sig,
-                        filepath=self._runtime_filepath_from_wire(wire_filepath),
-                        qualname=qualname,
-                        start_line=start_line,
-                        end_line=end_line,
-                        size=size,
-                    )
-                )
-            groups[group_key] = items
-        return {
-            "digest": digest,
-            "suppressed": max(0, suppressed),
-            "groups": groups,
-        }
-
-    def _encode_segment_report_projection(self) -> dict[str, object] | None:
-        projection = self.segment_report_projection
-        if projection is None:
-            return None
-        groups_rows: list[list[object]] = []
-        for group_key in sorted(projection["groups"]):
-            items = sorted(
-                projection["groups"][group_key],
-                key=lambda item: (
-                    item["filepath"],
-                    item["qualname"],
-                    item["start_line"],
-                    item["end_line"],
-                ),
-            )
-            encoded_items = [
-                [
-                    self._wire_filepath_from_runtime(item["filepath"]),
-                    item["qualname"],
-                    item["start_line"],
-                    item["end_line"],
-                    item["size"],
-                    item["segment_hash"],
-                    item["segment_sig"],
-                ]
-                for item in items
-            ]
-            groups_rows.append([group_key, encoded_items])
-        return {
-            "d": projection["digest"],
-            "s": max(0, int(projection["suppressed"])),
-            "g": groups_rows,
-        }
 
     def _store_canonical_file_entry(
         self,
@@ -772,8 +610,8 @@ class Cache:
         runtime_lookup_key = filepath
         entry_obj = self.data["files"].get(runtime_lookup_key)
         if entry_obj is None:
-            wire_key = self._wire_filepath_from_runtime(filepath)
-            runtime_lookup_key = self._runtime_filepath_from_wire(wire_key)
+            wire_key = wire_filepath_from_runtime(filepath, root=self.root)
+            runtime_lookup_key = runtime_filepath_from_wire(wire_key, root=self.root)
             entry_obj = self.data["files"].get(runtime_lookup_key)
 
         if entry_obj is None:
@@ -858,8 +696,9 @@ class Cache:
         file_metrics: FileMetrics | None = None,
         structural_findings: list[StructuralFindingGroup] | None = None,
     ) -> None:
-        runtime_path = self._runtime_filepath_from_wire(
-            self._wire_filepath_from_runtime(filepath)
+        runtime_path = runtime_filepath_from_wire(
+            wire_filepath_from_runtime(filepath, root=self.root),
+            root=self.root,
         )
 
         unit_rows = [_unit_dict_from_model(unit, runtime_path) for unit in units]
@@ -951,22 +790,6 @@ def _empty_cache_data(
         analysis_profile=analysis_profile,
         files={},
     )
-
-
-def _canonical_json(data: object) -> str:
-    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
-def _as_str(value: object) -> str | None:
-    return value if isinstance(value, str) else None
-
-
-def _as_int(value: object) -> int | None:
-    return value if isinstance(value, int) else None
-
-
-def _as_list(value: object) -> list[object] | None:
-    return value if isinstance(value, list) else None
 
 
 def _as_risk_literal(value: object) -> Literal["low", "medium", "high"] | None:
@@ -1181,6 +1004,13 @@ def _as_typed_string_list(value: object) -> list[str] | None:
     return _as_typed_list(value, predicate=lambda item: isinstance(item, str))
 
 
+def _normalized_optional_string_list(value: object) -> list[str] | None:
+    items = _as_typed_string_list(value)
+    if not items:
+        return None
+    return sorted(set(items))
+
+
 def _is_canonical_cache_entry(value: object) -> TypeGuard[CacheEntry]:
     return isinstance(value, dict) and _has_cache_entry_container_shape(value)
 
@@ -1309,15 +1139,6 @@ def _decode_wire_qualname_span_size(
         return None
     qualname, start_line, end_line = qualname_span
     return qualname, start_line, end_line, size
-
-
-def _as_str_dict(value: object) -> dict[str, object] | None:
-    if not isinstance(value, dict):
-        return None
-    for key in value:
-        if not isinstance(key, str):
-            return None
-    return value
 
 
 def _as_analysis_profile(value: object) -> AnalysisProfile | None:
@@ -2135,6 +1956,15 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
         ),
     )
     if class_metrics:
+        coupled_classes_rows: list[list[object]] = []
+
+        def _append_coupled_classes_row(metric: ClassMetricsDict) -> None:
+            coupled_classes = _normalized_optional_string_list(
+                metric.get("coupled_classes", [])
+            )
+            if coupled_classes:
+                coupled_classes_rows.append([metric["qualname"], coupled_classes])
+
         wire["cm"] = [
             [
                 metric["qualname"],
@@ -2149,15 +1979,8 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
             ]
             for metric in class_metrics
         ]
-        coupled_classes_rows = []
         for metric in class_metrics:
-            coupled_classes_raw = metric.get("coupled_classes", [])
-            if not _is_string_list(coupled_classes_raw):
-                continue
-            coupled_classes = sorted(set(coupled_classes_raw))
-            if not coupled_classes:
-                continue
-            coupled_classes_rows.append([metric["qualname"], coupled_classes])
+            _append_coupled_classes_row(metric)
         if coupled_classes_rows:
             wire["cc"] = coupled_classes_rows
 
@@ -2199,10 +2022,9 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
                 candidate["kind"],
             ]
             suppressed_rules = candidate.get("suppressed_rules", [])
-            if _is_string_list(suppressed_rules):
-                normalized_rules = sorted(set(suppressed_rules))
-                if normalized_rules:
-                    encoded.append(normalized_rules)
+            normalized_rules = _normalized_optional_string_list(suppressed_rules)
+            if normalized_rules:
+                encoded.append(normalized_rules)
             encoded_dead_candidates.append(encoded)
         wire["dc"] = encoded_dead_candidates
 

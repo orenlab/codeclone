@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
@@ -11,9 +12,12 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 from . import __version__
 from .contracts import DOCS_URL
 from .mcp_service import (
+    DEFAULT_MCP_HISTORY_LIMIT,
+    MAX_MCP_HISTORY_LIMIT,
     CodeCloneMCPService,
     MCPAnalysisRequest,
     MCPGateRequest,
+    _validated_history_limit,
 )
 
 if TYPE_CHECKING:
@@ -64,7 +68,7 @@ def _load_mcp_runtime() -> tuple[type[FastMCP], ToolAnnotations, ToolAnnotations
 
 def build_mcp_server(
     *,
-    history_limit: int = 16,
+    history_limit: int = DEFAULT_MCP_HISTORY_LIMIT,
     host: str = "127.0.0.1",
     port: int = 8000,
     json_response: bool = False,
@@ -73,7 +77,7 @@ def build_mcp_server(
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO",
 ) -> FastMCP:
     runtime_fastmcp, read_only_tool, session_tool = _load_mcp_runtime()
-    service = CodeCloneMCPService(history_limit=history_limit)
+    service = CodeCloneMCPService(history_limit=_validated_history_limit(history_limit))
     mcp = runtime_fastmcp(
         name="CodeClone",
         instructions=_SERVER_INSTRUCTIONS,
@@ -404,10 +408,10 @@ def build_mcp_server(
     @tool(
         title="Check Complexity",
         description=(
-            "Return complexity hotspots for a path or repository. If no run "
-            "exists yet, this triggers a full analysis first."
+            "Return complexity hotspots from a compatible stored run. "
+            "Use analyze_repository first if no full run is available."
         ),
-        annotations=session_tool,
+        annotations=read_only_tool,
         structured_output=True,
     )
     def check_complexity(
@@ -430,10 +434,10 @@ def build_mcp_server(
     @tool(
         title="Check Clones",
         description=(
-            "Return clone findings for a path or repository. If no run exists "
-            "yet, this triggers a full analysis first."
+            "Return clone findings from a compatible stored run. "
+            "Use analyze_repository first if no compatible run is available."
         ),
-        annotations=session_tool,
+        annotations=read_only_tool,
         structured_output=True,
     )
     def check_clones(
@@ -458,10 +462,10 @@ def build_mcp_server(
     @tool(
         title="Check Coupling",
         description=(
-            "Return coupling hotspots for a path or repository. If no run "
-            "exists yet, this triggers a full analysis first."
+            "Return coupling hotspots from a compatible stored run. "
+            "Use analyze_repository first if no full run is available."
         ),
-        annotations=session_tool,
+        annotations=read_only_tool,
         structured_output=True,
     )
     def check_coupling(
@@ -482,10 +486,10 @@ def build_mcp_server(
     @tool(
         title="Check Cohesion",
         description=(
-            "Return cohesion hotspots for a path or repository. If no run "
-            "exists yet, this triggers a full analysis first."
+            "Return cohesion hotspots from a compatible stored run. "
+            "Use analyze_repository first if no full run is available."
         ),
-        annotations=session_tool,
+        annotations=read_only_tool,
         structured_output=True,
     )
     def check_cohesion(
@@ -506,10 +510,10 @@ def build_mcp_server(
     @tool(
         title="Check Dead Code",
         description=(
-            "Return dead-code findings for a path or repository. If no run "
-            "exists yet, this triggers a full analysis first."
+            "Return dead-code findings from a compatible stored run. "
+            "Use analyze_repository first if no full run is available."
         ),
-        annotations=session_tool,
+        annotations=read_only_tool,
         structured_output=True,
     )
     def check_dead_code(
@@ -575,6 +579,18 @@ def build_mcp_server(
     )
     def list_reviewed_findings(run_id: str | None = None) -> dict[str, object]:
         return service.list_reviewed_findings(run_id=run_id)
+
+    @tool(
+        title="Clear Session Runs",
+        description=(
+            "Clear all in-memory MCP analysis runs and ephemeral session state "
+            "for this server process."
+        ),
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def clear_session_runs() -> dict[str, object]:
+        return service.clear_session_runs()
 
     @resource(
         "codeclone://latest/summary",
@@ -662,6 +678,19 @@ def build_mcp_server(
     return mcp
 
 
+def _history_limit_arg(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"history limit must be an integer between 1 and {MAX_MCP_HISTORY_LIMIT}."
+        ) from exc
+    try:
+        return _validated_history_limit(parsed)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="codeclone-mcp",
@@ -682,6 +711,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Host to bind when using streamable-http.",
     )
     parser.add_argument(
+        "--allow-remote",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Allow binding streamable-http to a non-loopback host. "
+            "Disabled by default because CodeClone MCP has no built-in authentication."
+        ),
+    )
+    parser.add_argument(
         "--port",
         type=int,
         default=8000,
@@ -689,9 +727,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--history-limit",
-        type=int,
-        default=16,
-        help="Maximum number of in-memory analysis runs retained by the server.",
+        type=_history_limit_arg,
+        default=DEFAULT_MCP_HISTORY_LIMIT,
+        help=(
+            "Maximum number of in-memory analysis runs retained by the server "
+            f"(1-{MAX_MCP_HISTORY_LIMIT}, default: {DEFAULT_MCP_HISTORY_LIMIT})."
+        ),
     )
     parser.add_argument(
         "--json-response",
@@ -720,8 +761,34 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _host_is_loopback(host: str) -> bool:
+    cleaned = host.strip().strip("[]")
+    if not cleaned:
+        return False
+    if cleaned.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(cleaned).is_loopback
+    except ValueError:
+        return False
+
+
 def main() -> None:
     args = build_parser().parse_args()
+    if (
+        args.transport == "streamable-http"
+        and not args.allow_remote
+        and not _host_is_loopback(args.host)
+    ):
+        print(
+            (
+                "Refusing to bind CodeClone MCP streamable-http to non-loopback "
+                f"host '{args.host}' without --allow-remote. "
+                "The server has no built-in authentication."
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
     try:
         server = build_mcp_server(
             history_limit=args.history_limit,

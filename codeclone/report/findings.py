@@ -185,8 +185,8 @@ def _finding_reason_list_html(
     items: Sequence[StructuralFindingOccurrence],
 ) -> str:
     spread = _spread(items)
-    if group.finding_kind == STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE:
-        reasons = [
+    clone_cohort_reasons = {
+        STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE: [
             (
                 f"{len(items)} divergent clone members were detected after "
                 "stable sorting and deduplication."
@@ -206,20 +206,20 @@ def _finding_reason_list_html(
                 f"{spread['files']} {'file' if spread['files'] == 1 else 'files'}."
             ),
             "This is a report-only finding and does not affect clone gating.",
-        ]
-        return _render_reason_list_html(reasons)
-    if group.finding_kind == STRUCTURAL_KIND_CLONE_COHORT_DRIFT:
-        reasons = [
+        ],
+        STRUCTURAL_KIND_CLONE_COHORT_DRIFT: [
             f"{len(items)} clone members diverge from the cohort majority profile.",
             f"Drift fields: {group.signature.get('drift_fields', 'n/a')}.",
             (
                 f"Cohort id: {group.signature.get('cohort_id', 'unknown')} with "
                 f"arity {group.signature.get('cohort_arity', 'n/a')}."
             ),
-            ("Majority profile is compared deterministically with lexical tie-breaks."),
+            "Majority profile is compared deterministically with lexical tie-breaks.",
             "This is a report-only finding and does not affect clone gating.",
-        ]
-        return _render_reason_list_html(reasons)
+        ],
+    }
+    if group.finding_kind in clone_cohort_reasons:
+        return _render_reason_list_html(clone_cohort_reasons[group.finding_kind])
 
     stmt_seq = group.signature.get("stmt_seq", "n/a")
     terminal = group.signature.get("terminal", "n/a")
@@ -259,20 +259,20 @@ def _finding_matters_html(
 ) -> str:
     spread = _spread(items)
     count = len(items)
-    if group.finding_kind == STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE:
-        message = (
+    special_messages = {
+        STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE: (
             "Members of one function-clone cohort diverged in guard/exit behavior. "
             "This often points to a partial fix where one path was updated and "
             "other siblings were left unchanged."
-        )
-        return _finding_matters_paragraph(message)
-    if group.finding_kind == STRUCTURAL_KIND_CLONE_COHORT_DRIFT:
-        message = (
+        ),
+        STRUCTURAL_KIND_CLONE_COHORT_DRIFT: (
             "Members of one function-clone cohort drifted from a stable majority "
             "profile (terminal, guard, try/finally, side-effect order). Review "
             "whether divergence is intentional."
-        )
-        return _finding_matters_paragraph(message)
+        ),
+    }
+    if group.finding_kind in special_messages:
+        return _finding_matters_paragraph(special_messages[group.finding_kind])
 
     terminal = str(group.signature.get("terminal", "")).strip()
     stmt_seq = str(group.signature.get("stmt_seq", "")).strip()
@@ -282,23 +282,26 @@ def _finding_matters_html(
             f"{spread['files']} files, so the same branch policy may be copied "
             "between multiple code paths."
         )
-    elif terminal == "raise":
-        message = (
-            "This group points to repeated guard or validation exits inside one "
-            "function. Consolidating the shared exit policy usually reduces "
-            "branch noise."
-        )
-    elif terminal == "return":
-        message = (
-            "This group points to repeated return-path logic inside one function. "
-            "A helper can often keep the branch predicate local while sharing "
-            "the emitted behavior."
-        )
     else:
-        message = (
-            f"This group reports {count} branches with the same local shape "
-            f"({stmt_seq or 'unknown signature'}). Review whether the shared "
-            "branch body should stay duplicated or become a helper."
+        terminal_messages = {
+            "raise": (
+                "This group points to repeated guard or validation exits inside one "
+                "function. Consolidating the shared exit policy usually reduces "
+                "branch noise."
+            ),
+            "return": (
+                "This group points to repeated return-path logic inside one function. "
+                "A helper can often keep the branch predicate local while sharing "
+                "the emitted behavior."
+            ),
+        }
+        message = terminal_messages.get(
+            terminal,
+            (
+                f"This group reports {count} branches with the same local shape "
+                f"({stmt_seq or 'unknown signature'}). Review whether the shared "
+                "branch body should stay duplicated or become a helper."
+            ),
         )
     return _finding_matters_paragraph(message)
 

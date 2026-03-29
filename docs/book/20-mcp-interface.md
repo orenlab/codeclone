@@ -26,17 +26,20 @@ Current server characteristics:
     - `streamable-http`
 - run storage:
     - in-memory only
-    - bounded history (`--history-limit`, default `16`)
+    - bounded history (`--history-limit`, default `4`, maximum `10`)
     - latest-run pointer for `codeclone://latest/...` resources
 - run identity:
     - `run_id` is derived from the canonical report integrity digest
 - analysis modes:
     - `full`
     - `clones_only`
+- process-count policy:
+    - `processes` is an optional override
+    - when omitted, MCP defers to the core CodeClone runtime
 - cache policies:
     - `reuse`
-    - `refresh`
     - `off`
+  `refresh` is rejected in MCP because the server is read-only.
 - summary payload:
     - `run_id`, `root`, `analysis_mode`
     - `baseline`, `metrics_baseline`, `cache`
@@ -66,21 +69,24 @@ Current tool set:
 | `get_finding`            | `finding_id`, `run_id`                                                                                                                                 | Return one canonical finding group by id with locations, priority, and remediation payload when available                            |
 | `get_remediation`        | `finding_id`, `run_id`, `detail_level`                                                                                                                 | Return just the remediation/explainability packet for one finding                                                                    |
 | `list_hotspots`          | `kind`, `run_id`, `detail_level`, `changed_paths`, `git_diff_ref`, `exclude_reviewed`, `limit`, `max_results`                                          | Return one derived hotlist (`most_actionable`, `highest_spread`, `highest_priority`, `production_hotspots`, `test_fixture_hotspots`) |
-| `check_clones`           | `run_id`, `root`, `path`, `clone_type`, `source_kind`, `max_results`, `detail_level`                                                                   | Return clone findings for a repository or path                                                                                       |
-| `check_complexity`       | `run_id`, `root`, `path`, `min_complexity`, `max_results`, `detail_level`                                                                              | Return complexity hotspots for a repository or path                                                                                  |
-| `check_coupling`         | `run_id`, `root`, `path`, `max_results`, `detail_level`                                                                                                | Return coupling hotspots for a repository or path                                                                                    |
-| `check_cohesion`         | `run_id`, `root`, `path`, `max_results`, `detail_level`                                                                                                | Return cohesion hotspots for a repository or path                                                                                    |
-| `check_dead_code`        | `run_id`, `root`, `path`, `min_severity`, `max_results`, `detail_level`                                                                                | Return dead-code findings for a repository or path                                                                                   |
+| `check_clones`           | `run_id`, `root`, `path`, `clone_type`, `source_kind`, `max_results`, `detail_level`                                                                   | Return clone findings from a compatible stored run                                                                                   |
+| `check_complexity`       | `run_id`, `root`, `path`, `min_complexity`, `max_results`, `detail_level`                                                                              | Return complexity hotspots from a compatible stored run                                                                              |
+| `check_coupling`         | `run_id`, `root`, `path`, `max_results`, `detail_level`                                                                                                | Return coupling hotspots from a compatible stored run                                                                                |
+| `check_cohesion`         | `run_id`, `root`, `path`, `max_results`, `detail_level`                                                                                                | Return cohesion hotspots from a compatible stored run                                                                                |
+| `check_dead_code`        | `run_id`, `root`, `path`, `min_severity`, `max_results`, `detail_level`                                                                                | Return dead-code findings from a compatible stored run                                                                               |
 | `generate_pr_summary`    | `run_id`, `changed_paths`, `git_diff_ref`, `format`                                                                                                    | Build a PR-friendly changed-files summary in markdown or JSON                                                                        |
 | `mark_finding_reviewed`  | `finding_id`, `run_id`, `note`                                                                                                                         | Mark a finding as reviewed in the in-memory MCP session                                                                              |
 | `list_reviewed_findings` | `run_id`                                                                                                                                               | Return the current reviewed findings for the selected run                                                                            |
+| `clear_session_runs`     | none                                                                                                                                                   | Clear all stored in-memory runs plus ephemeral review/gate/session caches for the current server process                             |
 
 All analysis/report tools are read-only with respect to repo state. The only
-mutable MCP tool is `mark_finding_reviewed`, and its state is in-memory only.
-`analyze_repository`, `analyze_changed_paths`, `evaluate_gates`, and the
-granular `check_*` tools are sessionful: they may populate or reuse in-memory
-run state, and the `check_*` tools may trigger a full analysis when no
-compatible run exists yet.
+mutable MCP tools are `mark_finding_reviewed` and `clear_session_runs`, and
+their effects are session-local and in-memory only. `analyze_repository`,
+`analyze_changed_paths`, and `evaluate_gates` are
+sessionful and may populate or reuse in-memory run state. The granular
+`check_*` tools are read-only over stored runs: use `analyze_repository` or
+`analyze_changed_paths` first, then query the latest run or pass a specific
+`run_id`.
 
 ## Resources
 
@@ -107,9 +113,13 @@ trigger fresh analysis by themselves.
     - no source-file mutation
     - no baseline update
     - no metrics-baseline update
+    - no cache refresh writes
 - Session review markers are **ephemeral only**:
     - stored in memory per server process
     - never written to baseline, cache, or report artifacts
+- `streamable-http` defaults to loopback binding.
+  Non-loopback hosts require explicit `--allow-remote` because the server has
+  no built-in authentication.
 - MCP must reuse current:
     - pipeline stages
     - baseline trust semantics
@@ -182,6 +192,8 @@ trigger fresh analysis by themselves.
 
 - There is currently no standalone `mcp_api_version` constant.
 - In-memory run history does not survive process restart.
+- `clear_session_runs` resets the in-memory run registry and related session
+  caches, but does not mutate baseline/cache/report artifacts on disk.
 - Client-specific UI/approval behavior is not part of the CodeClone contract.
 
 ## See also

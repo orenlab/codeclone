@@ -11,6 +11,8 @@ import pytest
 import codeclone.cache as cache_mod
 from codeclone.blocks import BlockUnit, SegmentUnit
 from codeclone.cache import Cache, CacheStatus
+from codeclone.cache_io import sign_cache_payload
+from codeclone.cache_paths import runtime_filepath_from_wire, wire_filepath_from_runtime
 from codeclone.errors import CacheError
 from codeclone.extractor import Unit
 
@@ -161,7 +163,7 @@ def test_cache_load_normalizes_stale_structural_findings(tmp_path: Path) -> None
         cache,
         files={"x.py": cache_mod._encode_wire_file_entry(entry)},
     )
-    signature = cache._sign_data(payload)
+    signature = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
         "utf-8",
@@ -289,7 +291,7 @@ def test_cache_v13_missing_optional_sections_default_empty(tmp_path: Path) -> No
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={"x.py": {"st": [1, 2]}})
-    signature = cache._sign_data(payload)
+    signature = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
         "utf-8",
@@ -393,9 +395,8 @@ def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
 
 def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
     data = {"version": "0.0", "files": {}}
-    signature = cache._sign_data(data)
+    signature = sign_cache_payload(data)
     cache_path.write_text(
         json.dumps({**data, "_signature": signature}, ensure_ascii=False, indent=2),
         "utf-8",
@@ -415,7 +416,7 @@ def test_cache_v_field_version_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={})
-    signature = cache._sign_data(payload)
+    signature = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": "0.0", "payload": payload, "sig": signature}), "utf-8"
     )
@@ -737,7 +738,7 @@ def test_cache_load_invalid_files_type(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files=[])
-    signature = cache._sign_data(payload)
+    signature = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
         "utf-8",
@@ -838,7 +839,7 @@ def test_cache_load_missing_v_field(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={})
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(json.dumps({"payload": payload, "sig": sig}), "utf-8")
     cache.load()
     assert cache.load_warning is not None
@@ -871,7 +872,7 @@ def test_cache_load_rejects_missing_required_payload_fields(
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = payload_factory(cache)
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -889,7 +890,7 @@ def test_cache_load_python_tag_mismatch(tmp_path: Path) -> None:
         "ap": cache.data["analysis_profile"],
         "files": {},
     }
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -907,7 +908,7 @@ def test_cache_load_fingerprint_version_mismatch(tmp_path: Path) -> None:
         "ap": cache.data["analysis_profile"],
         "files": {},
     }
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -940,7 +941,7 @@ def test_cache_load_missing_analysis_profile_in_payload(tmp_path: Path) -> None:
         "fp": cache.data["fingerprint_version"],
         "files": {},
     }
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -971,7 +972,7 @@ def test_cache_load_invalid_analysis_profile_payload(
         "ap": bad_analysis_profile,
         "files": {},
     }
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -988,7 +989,7 @@ def test_cache_load_invalid_wire_file_entry(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={"x.py": {"st": "bad"}})
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -1028,7 +1029,9 @@ def test_wire_filepath_outside_root_falls_back_to_runtime_path(tmp_path: Path) -
     root.mkdir()
     cache = Cache(tmp_path / "cache.json", root=root)
     outside = tmp_path / "outside.py"
-    assert cache._wire_filepath_from_runtime(str(outside)) == outside.as_posix()
+    assert (
+        wire_filepath_from_runtime(str(outside), root=cache.root) == outside.as_posix()
+    )
 
 
 def test_wire_filepath_resolve_oserror_falls_back_to_runtime_path(
@@ -1046,7 +1049,9 @@ def test_wire_filepath_resolve_oserror_falls_back_to_runtime_path(
         return original_resolve(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _resolve_with_error)
-    assert cache._wire_filepath_from_runtime(str(runtime)) == runtime.as_posix()
+    assert (
+        wire_filepath_from_runtime(str(runtime), root=cache.root) == runtime.as_posix()
+    )
 
 
 def test_wire_filepath_resolve_relative_success_path(
@@ -1067,7 +1072,7 @@ def test_wire_filepath_resolve_relative_success_path(
         return original_resolve(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _resolve_with_mapping)
-    assert cache._wire_filepath_from_runtime(str(runtime)) == "pkg/module.py"
+    assert wire_filepath_from_runtime(str(runtime), root=cache.root) == "pkg/module.py"
 
 
 def test_runtime_filepath_from_wire_resolve_oserror(
@@ -1085,7 +1090,7 @@ def test_runtime_filepath_from_wire_resolve_oserror(
         return original_resolve(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _resolve_with_error)
-    assert cache._runtime_filepath_from_wire("pkg/module.py") == str(combined)
+    assert runtime_filepath_from_wire("pkg/module.py", root=cache.root) == str(combined)
 
 
 def test_as_str_dict_rejects_non_string_keys() -> None:

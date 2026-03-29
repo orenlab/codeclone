@@ -75,8 +75,11 @@ class _ParseTimeoutError(Exception):
     pass
 
 
+# Sync or async function definition node.
 FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
+# Any named declaration: function, async function, or class.
 _NamedDeclarationNode = FunctionNode | ast.ClassDef
+# Unique key for a declaration's token index: (start_line, end_line, qualname).
 _DeclarationTokenIndexKey = tuple[int, int, str]
 
 
@@ -649,18 +652,18 @@ def _resolve_referenced_qualnames(
 
     for attr_node in state.attr_nodes:
         base = attr_node.value
-        if not isinstance(base, ast.Name):
-            continue
-        imported_module = state.imported_module_aliases.get(base.id)
-        if imported_module is not None:
-            resolved.add(f"{imported_module}:{attr_node.attr}")
-            continue
-        class_qualname = top_level_class_by_name.get(base.id)
-        if class_qualname is None:
-            continue
-        local_method_qualname = f"{module_name}:{class_qualname}.{attr_node.attr}"
-        if local_method_qualname in local_method_qualnames:
-            resolved.add(local_method_qualname)
+        if isinstance(base, ast.Name):
+            imported_module = state.imported_module_aliases.get(base.id)
+            if imported_module is not None:
+                resolved.add(f"{imported_module}:{attr_node.attr}")
+            else:
+                class_qualname = top_level_class_by_name.get(base.id)
+                if class_qualname is not None:
+                    local_method_qualname = (
+                        f"{module_name}:{class_qualname}.{attr_node.attr}"
+                    )
+                    if local_method_qualname in local_method_qualnames:
+                        resolved.add(local_method_qualname)
 
     return frozenset(resolved)
 
@@ -694,16 +697,14 @@ def _collect_module_walk_data(
                 state=state,
                 collect_referenced_names=collect_referenced_names,
             )
-            continue
-        if isinstance(node, ast.ImportFrom):
+        elif isinstance(node, ast.ImportFrom):
             _collect_import_from_node(
                 node=node,
                 module_name=module_name,
                 state=state,
                 collect_referenced_names=collect_referenced_names,
             )
-            continue
-        if collect_referenced_names:
+        elif collect_referenced_names:
             _collect_load_reference_node(node=node, state=state)
 
     deps_sorted = tuple(
@@ -767,27 +768,25 @@ def _collect_dead_candidates(
             suppression_index=suppression_index,
             protocol_class_qualnames=protocol_class_qualnames,
         )
-        if candidate is None:
-            continue
-        candidates.append(candidate)
+        if candidate is not None:
+            candidates.append(candidate)
 
     for class_qualname, class_node in collector.class_nodes:
         span = _node_line_span(class_node)
-        if span is None:
-            continue
-        start, end = span
-        candidates.append(
-            _build_dead_candidate(
-                module_name=module_name,
-                local_name=class_qualname,
-                node=class_node,
-                filepath=filepath,
-                kind="class",
-                suppression_index=suppression_index,
-                start_line=start,
-                end_line=end,
+        if span is not None:
+            start, end = span
+            candidates.append(
+                _build_dead_candidate(
+                    module_name=module_name,
+                    local_name=class_qualname,
+                    node=class_node,
+                    filepath=filepath,
+                    kind="class",
+                    suppression_index=suppression_index,
+                    start_line=start,
+                    end_line=end,
+                )
             )
-        )
 
     return tuple(
         sorted(
@@ -1009,7 +1008,6 @@ def extract_units_and_stats_from_source(
         risk = risk_level(complexity)
         raw_hash = _raw_source_hash_for_range(source_lines, start, end)
 
-        # Function-level unit (including __init__)
         units.append(
             Unit(
                 qualname=qualname,
@@ -1037,7 +1035,6 @@ def extract_units_and_stats_from_source(
             )
         )
 
-        # Block-level and segment-level units share statement hashes
         needs_blocks = (
             not local_name.endswith("__init__")
             and loc >= block_min_loc
@@ -1077,7 +1074,6 @@ def extract_units_and_stats_from_source(
                     )
                 )
 
-        # Structural findings extraction (report-only, no re-parse)
         if collect_structural_findings:
             structural_findings.extend(structure_facts.structural_findings)
 

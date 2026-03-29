@@ -10,6 +10,7 @@ import pytest
 
 import codeclone.pipeline as pipeline
 from codeclone.cache import Cache, CacheEntry, SourceStatsDict, file_stat_signature
+from codeclone.models import HealthScore, ProjectMetrics
 from codeclone.normalize import NormalizationConfig
 
 
@@ -51,6 +52,12 @@ def _build_boot(tmp_path: Path, *, processes: int) -> pipeline.BootstrapResult:
         output_paths=pipeline.OutputPaths(html=None, json=None, text=None),
         cache_path=tmp_path / "cache.json",
     )
+
+
+def test_resolve_process_count_defaults_in_runtime() -> None:
+    assert pipeline._resolve_process_count(None) == pipeline.DEFAULT_RUNTIME_PROCESSES
+    assert pipeline._resolve_process_count(0) == 1
+    assert pipeline._resolve_process_count(3) == 3
 
 
 def _build_discovery(filepaths: tuple[str, ...]) -> pipeline.DiscoveryResult:
@@ -454,3 +461,83 @@ def test_report_json_only_does_not_import_markdown_or_sarif(
     assert artifacts.json is not None
     assert artifacts.md is None
     assert artifacts.sarif is None
+
+
+def test_analyze_skips_suppressed_dead_code_scan_when_dead_code_is_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boot = pipeline.BootstrapResult(
+        root=tmp_path,
+        config=NormalizationConfig(),
+        args=Namespace(
+            processes=None,
+            skip_metrics=False,
+            skip_dead_code=True,
+            skip_dependencies=True,
+        ),
+        output_paths=pipeline.OutputPaths(),
+        cache_path=tmp_path / "cache.json",
+    )
+    discovery = _build_discovery(())
+    processing = pipeline.ProcessingResult(
+        units=(),
+        blocks=(),
+        segments=(),
+        class_metrics=(),
+        module_deps=(),
+        dead_candidates=(),
+        referenced_names=frozenset(),
+        referenced_qualnames=frozenset(),
+        structural_findings=(),
+        files_analyzed=0,
+        files_skipped=0,
+        analyzed_lines=0,
+        analyzed_functions=0,
+        analyzed_methods=0,
+        analyzed_classes=0,
+        failed_files=(),
+        source_read_failures=(),
+    )
+    project_metrics = ProjectMetrics(
+        complexity_avg=0.0,
+        complexity_max=0,
+        high_risk_functions=(),
+        coupling_avg=0.0,
+        coupling_max=0,
+        high_risk_classes=(),
+        cohesion_avg=0.0,
+        cohesion_max=0,
+        low_cohesion_classes=(),
+        dependency_modules=0,
+        dependency_edges=0,
+        dependency_edge_list=(),
+        dependency_cycles=(),
+        dependency_max_depth=0,
+        dependency_longest_chains=(),
+        dead_code=(),
+        health=HealthScore(total=100, grade="A", dimensions={"overall": 100}),
+    )
+
+    monkeypatch.setattr(
+        pipeline,
+        "compute_project_metrics",
+        lambda **kwargs: (project_metrics, None, ()),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "find_suppressed_unused",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("should not compute suppressed dead-code items")
+        ),
+    )
+    monkeypatch.setattr(pipeline, "compute_suggestions", lambda **kwargs: ())
+    monkeypatch.setattr(
+        pipeline,
+        "build_metrics_report_payload",
+        lambda **kwargs: {"health": {"score": 100, "grade": "A", "dimensions": {}}},
+    )
+
+    analysis = pipeline.analyze(boot=boot, discovery=discovery, processing=processing)
+    assert analysis.project_metrics == project_metrics
+    assert analysis.suppressed_dead_code_items == 0

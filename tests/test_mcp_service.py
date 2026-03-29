@@ -15,7 +15,6 @@ import pytest
 from codeclone import mcp_service as mcp_service_mod
 from codeclone._cli_config import ConfigValidationError
 from codeclone.cache import Cache
-from codeclone.errors import CacheError
 from codeclone.mcp_service import (
     CodeCloneMCPService,
     MCPAnalysisRequest,
@@ -104,13 +103,15 @@ def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
         root=root,
         request=MCPAnalysisRequest(root=str(root), respect_pyproject=False),
         report_document={},
-        report_json="{}",
         summary={"run_id": run_id, "health": {"score": 0, "grade": "N/A"}},
         changed_paths=(),
         changed_projection=None,
         warnings=(),
         failures=(),
-        analysis=cast(Any, SimpleNamespace(suggestions=[])),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
@@ -343,6 +344,45 @@ def test_mcp_service_granular_checks_pr_summary_and_resources(
     assert json_summary["changed_paths"] == ["pkg/dup.py"]
 
 
+def test_mcp_service_granular_checks_require_existing_run_by_default(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+
+    with pytest.raises(
+        MCPRunNotFoundError, match="analyze_repository\\(root='/path/to/repo'\\)"
+    ):
+        service.check_clones(detail_level="summary")
+
+    with pytest.raises(
+        MCPRunNotFoundError,
+        match=f"analyze_repository\\(root='{tmp_path}'\\)",
+    ):
+        service.check_dead_code(root=str(tmp_path), detail_level="summary")
+
+
+def test_mcp_service_granular_checks_reject_incompatible_run_modes(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+            analysis_mode="clones_only",
+        )
+    )
+
+    with pytest.raises(MCPServiceContractError, match="not compatible"):
+        service.check_dead_code(
+            run_id=str(summary["run_id"]),
+            detail_level="summary",
+        )
+
+
 def test_mcp_service_summary_reuses_canonical_meta_for_cache_and_health(
     tmp_path: Path,
 ) -> None:
@@ -499,6 +539,7 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
         ),
     )
     assert args.min_loc == 12
+    assert args.processes is None
     assert args.skip_metrics is True
     assert args.skip_dead_code is True
     assert args.skip_dependencies is True
@@ -618,33 +659,115 @@ def test_mcp_service_helper_filters_and_metrics_payload() -> None:
     assert service._as_sequence("not-a-sequence") == ()
 
 
-def test_mcp_service_refresh_cache_reports_save_warning(
+def test_mcp_service_git_diff_and_helper_branch_edges(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
-    refresh_calls: list[str] = []
 
-    def _fake_refresh(*, cache: object, analysis: object) -> None:
-        refresh_calls.append("called")
+    with pytest.raises(MCPGitDiffError, match="must not start with '-'"):
+        mcp_service_mod._git_diff_lines_payload(
+            root_path=tmp_path,
+            git_diff_ref="--cached",
+        )
 
-    def _fake_save(self: Cache) -> None:
-        raise CacheError("boom")
+    assert service._normalize_relative_path("./.github/workflows/docs.yml") == (
+        ".github/workflows/docs.yml"
+    )
 
-    monkeypatch.setattr(service, "_refresh_cache_projection", _fake_refresh)
-    monkeypatch.setattr(Cache, "save", _fake_save)
-
-    summary = service.analyze_repository(
+    full_record = _dummy_run_record(tmp_path, "full")
+    object.__setattr__(
+        full_record,
+        "request",
         MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            cache_policy="refresh",
+            analysis_mode="full",
+        ),
+    )
+    clones_only_record = _dummy_run_record(tmp_path, "clones")
+    object.__setattr__(
+        clones_only_record,
+        "request",
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            analysis_mode="clones_only",
+        ),
+    )
+    other_root_record = _dummy_run_record(tmp_path / "other", "other")
+    object.__setattr__(
+        other_root_record,
+        "request",
+        MCPAnalysisRequest(
+            root=str(tmp_path / "other"),
+            respect_pyproject=False,
+            analysis_mode="full",
+        ),
+    )
+    service._runs.register(clones_only_record)
+    service._runs.register(other_root_record)
+    service._runs.register(full_record)
+
+    assert (
+        service._latest_compatible_record(
+            analysis_mode="clones_only",
+            root_path=tmp_path,
         )
+        is full_record
+    )
+    assert (
+        service._latest_compatible_record(
+            analysis_mode="full",
+            root_path=tmp_path,
+        )
+        is full_record
+    )
+    assert (
+        service._latest_compatible_record(
+            analysis_mode="full",
+            root_path=tmp_path / "other",
+        )
+        is other_root_record
     )
 
-    assert refresh_calls == ["called"]
-    assert "Cache save failed: boom" in cast("list[str]", summary["warnings"])
+    service_full_fallback = CodeCloneMCPService(history_limit=4)
+    service_full_fallback._runs.register(clones_only_record)
+    service_full_fallback._runs.register(full_record)
+    service_full_fallback._runs.register(
+        _dummy_run_record(tmp_path, "latest-clones-only")
+    )
+    object.__setattr__(
+        service_full_fallback._runs.get("latest-clones-only"),
+        "request",
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            analysis_mode="clones_only",
+        ),
+    )
+    assert (
+        service_full_fallback._latest_compatible_record(
+            analysis_mode="full",
+            root_path=tmp_path,
+        )
+        is full_record
+    )
+
+
+def test_mcp_service_rejects_refresh_cache_policy_in_read_only_mode(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+
+    with pytest.raises(MCPServiceContractError, match="read-only"):
+        service.analyze_repository(
+            MCPAnalysisRequest(
+                root=str(tmp_path),
+                respect_pyproject=False,
+                cache_policy="refresh",
+            )
+        )
 
 
 def test_mcp_service_all_section_and_optional_path_overrides(tmp_path: Path) -> None:
@@ -705,32 +828,35 @@ def test_mcp_service_root_cache_and_projection_helpers(
     )
     assert load_calls == ["loaded"]
 
-    cache_without_projection = SimpleNamespace()
-    service._refresh_cache_projection(
-        cache=cast(Any, cache_without_projection),
-        analysis=cast(
-            Any,
-            SimpleNamespace(
-                suppressed_segment_groups=0,
-                segment_groups_raw_digest=None,
-                segment_groups={},
-            ),
-        ),
-    )
 
-    cache_with_projection = SimpleNamespace(segment_report_projection=())
-    service._refresh_cache_projection(
-        cache=cast(Any, cache_with_projection),
-        analysis=cast(
-            Any,
-            SimpleNamespace(
-                suppressed_segment_groups=0,
-                segment_groups_raw_digest="digest",
-                segment_groups={},
-            ),
-        ),
+def test_mcp_service_build_args_defers_process_count_to_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+
+    monkeypatch.setattr(
+        mcp_service_mod,
+        "load_pyproject_config",
+        lambda _root: {"processes": 3},
     )
-    assert cache_with_projection.segment_report_projection is not None
+    args = service._build_args(
+        root_path=tmp_path,
+        request=MCPAnalysisRequest(respect_pyproject=False),
+    )
+    assert args.processes is None
+
+    args_from_config = service._build_args(
+        root_path=tmp_path,
+        request=MCPAnalysisRequest(respect_pyproject=True),
+    )
+    assert args_from_config.processes == 3
+
+    args_from_request = service._build_args(
+        root_path=tmp_path,
+        request=MCPAnalysisRequest(respect_pyproject=False, processes=2),
+    )
+    assert args_from_request.processes == 2
 
 
 def test_mcp_service_invalid_path_resolution_contract_errors(
@@ -824,6 +950,8 @@ def test_mcp_service_low_level_runtime_helpers_and_run_store(
     assert tuple(record.run_id for record in store.records()) == ("second",)
     with pytest.raises(MCPRunNotFoundError):
         store.get("first")
+    with pytest.raises(ValueError):
+        mcp_service_mod.CodeCloneMCPRunStore(history_limit=11)
 
 
 def test_mcp_service_branch_helpers_on_real_runs(
@@ -942,9 +1070,9 @@ def test_mcp_service_branch_helpers_on_real_runs(
     abs_dup = tmp_path / "pkg" / "dup.py"
     normalized = service._normalize_changed_paths(
         root_path=tmp_path,
-        paths=(str(abs_dup), "./pkg/dup.py", "pkg"),
+        paths=(str(abs_dup), "./pkg/dup.py", "pkg", "./.github/workflows/docs.yml"),
     )
-    assert normalized == ("pkg", "pkg/dup.py")
+    assert normalized == (".github/workflows/docs.yml", "pkg", "pkg/dup.py")
     with pytest.raises(MCPServiceContractError):
         service._normalize_changed_paths(
             root_path=tmp_path,
@@ -1484,13 +1612,15 @@ def test_mcp_service_additional_projection_and_error_branches(
                 }
             },
         },
-        report_json="{}",
         summary={"run_id": "design", "health": {"score": 80, "grade": "B"}},
         changed_paths=(),
         changed_projection=None,
         warnings=(),
         failures=(),
-        analysis=cast(Any, SimpleNamespace(suggestions=[])),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
@@ -1596,13 +1726,15 @@ def test_mcp_service_additional_projection_and_error_branches(
             **record.report_document,
             "derived": {"hotlists": {"highest_spread_ids": ["missing-id"]}},
         },
-        report_json=record.report_json,
         summary=record.summary,
         changed_paths=record.changed_paths,
         changed_projection=record.changed_projection,
         warnings=record.warnings,
         failures=record.failures,
-        analysis=record.analysis,
+        func_clones_count=record.func_clones_count,
+        block_clones_count=record.block_clones_count,
+        project_metrics=record.project_metrics,
+        suggestions=record.suggestions,
         new_func=record.new_func,
         new_block=record.new_block,
         metrics_diff=record.metrics_diff,
@@ -1643,6 +1775,34 @@ def test_mcp_service_additional_projection_and_error_branches(
         detail_level="summary",
     )
     assert complexity_check["check"] == "complexity"
+    unfiltered_complexity = service.check_complexity(
+        run_id=run_id,
+        detail_level="summary",
+    )
+    assert unfiltered_complexity["check"] == "complexity"
+
+
+def test_mcp_service_clear_session_runs_clears_in_memory_state(tmp_path: Path) -> None:
+    service = _build_quality_service(tmp_path)
+    run_id = str(service.get_run_summary()["run_id"])
+    first_finding = cast(
+        "list[dict[str, object]]",
+        service.list_findings(family="clone", detail_level="summary")["items"],
+    )[0]
+    service.mark_finding_reviewed(
+        run_id=run_id,
+        finding_id=str(first_finding["id"]),
+        note="triaged",
+    )
+    service.evaluate_gates(MCPGateRequest(run_id=run_id, fail_threshold=0))
+
+    cleared = service.clear_session_runs()
+
+    assert cleared["cleared_runs"] == 1
+    assert cleared["cleared_review_entries"] == 1
+    assert cleared["cleared_gate_results"] == 1
+    with pytest.raises(MCPRunNotFoundError):
+        service.get_run_summary()
 
 
 def test_mcp_service_metrics_diff_warning_and_projection_branches(
@@ -1693,13 +1853,133 @@ def test_mcp_service_metrics_diff_warning_and_projection_branches(
     metrics_diff = cast("dict[str, object]", summary["metrics_diff"])
     assert metrics_diff["new_high_risk_functions"] == 1
     assert "cache warning" in cast("list[str]", summary["warnings"])
-    analysis = cast(
-        Any,
-        SimpleNamespace(
-            suppressed_segment_groups=0,
-            segment_groups_raw_digest="digest",
-            segment_groups={},
-        ),
+
+
+def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    request = MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False)
+    record = MCPRunRecord(
+        run_id="helpers",
+        root=tmp_path,
+        request=request,
+        report_document={"metrics": 1},
+        summary={},
+        changed_paths=(),
+        changed_projection=None,
+        warnings=(),
+        failures=(),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        suggestions=(),
+        new_func=frozenset(),
+        new_block=frozenset(),
+        metrics_diff=None,
     )
-    service._refresh_cache_projection(cache=cache_with_warning, analysis=analysis)
-    service._refresh_cache_projection(cache=cache_with_warning, analysis=analysis)
+    service._runs.register(record)
+
+    success_gate = service._evaluate_gate_snapshot(
+        record=record,
+        request=MCPGateRequest(fail_on_new=True, fail_threshold=10),
+    )
+    assert success_gate.exit_code == 0
+    assert success_gate.reasons == ()
+
+    clone_gate_record = MCPRunRecord(
+        run_id="helpers-new",
+        root=tmp_path,
+        request=request,
+        report_document={"meta": {}},
+        summary={},
+        changed_paths=(),
+        changed_projection=None,
+        warnings=(),
+        failures=(),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        suggestions=(),
+        new_func=frozenset({"clone:new"}),
+        new_block=frozenset(),
+        metrics_diff=None,
+    )
+    clone_gate = service._evaluate_gate_snapshot(
+        record=clone_gate_record,
+        request=MCPGateRequest(fail_on_new=True, fail_threshold=10),
+    )
+    assert clone_gate.exit_code == 3
+    assert clone_gate.reasons == ("clone:new",)
+
+    with pytest.raises(MCPServiceContractError):
+        service.get_report_section(run_id="helpers", section="metrics")
+
+    assert service._suggestion_for_finding(record, "missing") is None
+    assert (
+        service._remediation_for_finding(
+            record,
+            {"id": "missing", "severity": "info"},
+        )
+        is None
+    )
+    detail = service._decorate_finding(
+        record,
+        {"id": "missing", "title": "Missing remediation", "severity": "info"},
+        detail_level="summary",
+        remediation=None,
+        priority_payload={"score": 0.1, "factors": {}},
+    )
+    assert detail["id"] == "missing"
+    assert "remediation" not in detail
+
+
+def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    request = MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False)
+    record = MCPRunRecord(
+        run_id="lookup",
+        root=tmp_path,
+        request=request,
+        report_document={"meta": {}},
+        summary={},
+        changed_paths=(),
+        changed_projection=None,
+        warnings=(),
+        failures=(),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        suggestions=(),
+        new_func=frozenset(),
+        new_block=frozenset(),
+        metrics_diff=None,
+    )
+    service._runs.register(record)
+
+    foreign_record = MCPRunRecord(
+        run_id="foreign",
+        root=tmp_path,
+        request=request,
+        report_document={"meta": {}},
+        summary={},
+        changed_paths=(),
+        changed_projection=None,
+        warnings=(),
+        failures=(),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        suggestions=(),
+        new_func=frozenset(),
+        new_block=frozenset(),
+        metrics_diff=None,
+    )
+    assert service._previous_run_for_root(foreign_record) is None
+    assert (
+        service._latest_compatible_record(
+            analysis_mode="full",
+            root_path=tmp_path / "other",
+        )
+        is None
+    )

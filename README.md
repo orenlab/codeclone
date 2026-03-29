@@ -69,55 +69,6 @@ uvx codeclone@latest .
 
 </details>
 
-## MCP Server
-
-Install MCP support only when you need the agent interface:
-
-```bash
-pip install "codeclone[mcp]"
-```
-
-Then run the optional MCP launcher:
-
-```bash
-codeclone-mcp --transport stdio
-# or
-codeclone-mcp --transport streamable-http --port 8000
-```
-
-For local command-based clients, prefer `stdio`. Use `streamable-http` only
-when the client expects a remote MCP endpoint.
-
-CodeClone MCP is read-only and baseline-aware. It exposes deterministic tools
-for:
-
-- full repository analysis and changed-files analysis
-- run summaries and run-to-run comparison
-- findings, hotspots, remediation payloads, and PR summaries
-- granular clone / complexity / coupling / cohesion / dead-code checks
-- session-local review markers for long agent workflows
-
-It never mutates source files, baselines, or repo state.
-Diff-aware MCP calls use repo-relative `changed_paths` lists (or `git_diff_ref`)
-and may reuse the same `run_id` when the canonical report digest stays
-unchanged.
-Focused `check_*` MCP tools may trigger a full analysis first when no stored run
-exists yet.
-
-Latest-run resources are also available for MCP-capable clients:
-
-- `codeclone://latest/summary`
-- `codeclone://latest/report.json`
-- `codeclone://latest/health`
-- `codeclone://latest/gates`
-- `codeclone://latest/changed`
-- `codeclone://schema`
-
-Docs:
-[MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
-·
-[MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
-
 ## CI Integration
 
 ```bash
@@ -131,6 +82,28 @@ codeclone . --ci
 The `--ci` preset equals `--fail-on-new --no-color --quiet`.
 When a trusted metrics baseline is loaded, CI mode also enables
 `--fail-on-new-metrics`.
+
+### GitHub Action
+
+CodeClone also ships a composite GitHub Action for PR and CI workflows:
+
+```yaml
+- uses: orenlab/codeclone/.github/actions/codeclone@main
+  with:
+    fail-on-new: "true"
+    sarif: "true"
+    pr-comment: "true"
+```
+
+It can:
+
+- run baseline-aware gating
+- generate JSON and SARIF reports
+- upload SARIF to GitHub Code Scanning
+- post or update a PR summary comment
+
+Action docs:
+[.github/actions/codeclone/README.md](https://github.com/orenlab/codeclone/blob/main/.github/actions/codeclone/README.md)
 
 ### Quality Gates
 
@@ -159,6 +132,25 @@ repos:
         args: [ ".", "--ci" ]
         types: [ python ]
 ```
+
+## MCP Server
+
+CodeClone ships an optional read-only MCP server for AI agents and IDE clients.
+
+```bash
+pip install "codeclone[mcp]"          # install the extra
+codeclone-mcp --transport stdio       # local agents (Claude Code, Codex, Copilot, Gemini CLI)
+codeclone-mcp --transport streamable-http --port 8000   # remote/HTTP-only clients
+```
+
+The server exposes 19 tools (analysis, diff-aware checks, findings, remediation, gates, PR summaries)
+and 9 resources — all deterministic, baseline-aware, and read-only.
+It never mutates source files, baselines, or repo state.
+
+Docs:
+[MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
+·
+[MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
 
 ## Configuration
 

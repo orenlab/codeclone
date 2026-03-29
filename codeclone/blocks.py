@@ -49,10 +49,11 @@ def extract_blocks(
     for i in range(len(stmt_hash_rows) - block_size + 1):
         start = getattr(body[i], "lineno", None)
         end = getattr(body[i + block_size - 1], "end_lineno", None)
-        if not start or not end:
-            continue
-
-        if last_start is not None and start - last_start < min_line_distance:
+        if (
+            not start
+            or not end
+            or (last_start is not None and start - last_start < min_line_distance)
+        ):
             continue
 
         bh = "|".join(stmt_hash_rows[i : i + block_size])

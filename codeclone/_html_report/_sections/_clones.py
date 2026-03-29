@@ -382,7 +382,9 @@ def _render_group_items_html(
                 group_arity=group_arity,
                 peer_count=peer_count,
             )
-            compare_html = f'<div class="item-compare-meta">{compare_text}</div>'
+            compare_html = (
+                f'<div class="item-compare-meta">{_escape_html(compare_text)}</div>'
+            )
         rendered.append(
             f'<div class="item" data-qualname="{_escape_attr(qualname)}" '
             f'data-filepath="{_escape_attr(filepath)}" '
