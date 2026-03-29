@@ -20,7 +20,7 @@ Current contract versions:
 
 - `BASELINE_SCHEMA_VERSION = "2.0"`
 - `BASELINE_FINGERPRINT_VERSION = "1"`
-- `CACHE_VERSION = "2.2"`
+- `CACHE_VERSION = "2.3"`
 - `REPORT_SCHEMA_VERSION = "2.1"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.0"` (standalone metrics-baseline file)
 
@@ -34,13 +34,21 @@ Version bump rules:
 
 - Bump **baseline schema** only for baseline JSON layout/type changes.
 - Bump **fingerprint version** when clone key semantics change.
-- Bump **cache schema** for cache wire-format/validation changes.
+- Bump **cache schema** for cache wire-format/validation changes and for
+  cached-analysis semantic changes that would otherwise leave stale cache
+  entries looking compatible to runtime validation.
 - Bump **report schema** for canonical report document contract changes
   (`report_schema_version`, consumed by JSON/TXT/Markdown/SARIF and HTML provenance/view).
 - Bump **metrics-baseline schema** only for standalone metrics-baseline payload changes.
 - MCP does not currently define a separate schema/version constant; tool names,
   resource shapes, and documented request/response semantics are therefore
   package-versioned public surface and must be documented/tested when changed.
+- Slimming or splitting MCP-only projections (for example, summary payloads or
+  `metrics` vs `metrics_detail`) does not change `report_schema_version` as long
+  as the canonical report document and finding identities remain unchanged.
+- The same rule applies to finding-level MCP projection changes such as
+  envelope-level `base_uri`, slim summary locations, or omitting
+  `priority_factors` outside `detail_level="full"`.
 
 Baseline compatibility rules:
 

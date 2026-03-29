@@ -40,14 +40,14 @@ core CodeClone runtime.
 | Tool                     | Purpose                                                              |
 |--------------------------|----------------------------------------------------------------------|
 | `analyze_repository`     | Full analysis → register as latest run                               |
-| `analyze_changed_paths`  | Diff-aware analysis with `changed_paths` or `git_diff_ref`           |
-| `get_run_summary`        | Compact health/findings/baseline snapshot                            |
+| `analyze_changed_paths`  | Diff-aware analysis with `changed_paths` or `git_diff_ref`; summary inventory is slimmed to counts |
+| `get_run_summary`        | Compact health/findings/baseline snapshot with slim inventory counts |
 | `compare_runs`           | Regressions, improvements, health delta between two runs             |
-| `list_findings`          | Filtered, paginated finding groups                                   |
+| `list_findings`          | Filtered, paginated finding groups with envelope-level `base_uri`    |
 | `get_finding`            | Deep inspection of one finding by id                                 |
 | `get_remediation`        | Structured remediation payload for one finding                       |
-| `list_hotspots`          | Derived views: highest priority, production hotspots, spread, etc.   |
-| `get_report_section`     | Read canonical report sections (meta, findings, metrics, derived, …) |
+| `list_hotspots`          | Derived views: highest priority, production hotspots, spread, etc., with compact summary cards |
+| `get_report_section`     | Read canonical report sections; `metrics` is summary-only, `metrics_detail` is the full metrics dump |
 | `evaluate_gates`         | Preview CI/gating decisions without exiting                          |
 | `check_clones`           | Clone findings from a stored run                                     |
 | `check_complexity`       | Complexity hotspots from a stored run                                |
@@ -61,6 +61,12 @@ core CodeClone runtime.
 
 > `check_*` tools query stored runs only. Call `analyze_repository` or
 > `analyze_changed_paths` first.
+
+`check_*` responses keep `health.score` and `health.grade`, but slim
+`health.dimensions` down to the one dimension relevant to that tool.
+List-style finding responses also expose `base_uri` once per envelope and keep
+summary locations as `file` + `line`; richer `symbol` / `uri` data stays in
+`normal` / `full` responses and `get_finding`.
 
 ## Resource surface
 

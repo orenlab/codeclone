@@ -1,3 +1,9 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
 import ast
 import os
 import signal
@@ -12,7 +18,7 @@ import pytest
 from codeclone import extractor
 from codeclone.errors import ParseError
 from codeclone.metrics import find_unused
-from codeclone.models import BlockUnit, ModuleDep, SegmentUnit
+from codeclone.models import BlockUnit, ClassMetrics, ModuleDep, SegmentUnit
 from codeclone.normalize import NormalizationConfig
 
 
@@ -853,6 +859,55 @@ live()
 
     assert test_metrics.referenced_names == frozenset()
     assert "live" in regular_metrics.referenced_names
+
+
+def test_extract_stats_keeps_class_cohesion_metrics_after_unit_fingerprinting() -> None:
+    src = """
+class Service:
+    def __init__(self):
+        self.path = "x"
+        self.data = {}
+
+    def load(self):
+        if self.path:
+            return self.data
+        return {}
+
+    def save(self):
+        if self.path:
+            self.data["saved"] = True
+        return self.data
+
+    def verify(self):
+        return bool(self.path) and bool(self.data)
+
+    @staticmethod
+    def make():
+        return Service()
+"""
+    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+        source=src,
+        filepath="pkg/service.py",
+        module_name="pkg.service",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert file_metrics.class_metrics == (
+        ClassMetrics(
+            qualname="pkg.service:Service",
+            filepath="pkg/service.py",
+            start_line=2,
+            end_line=22,
+            cbo=0,
+            lcom4=2,
+            method_count=5,
+            instance_var_count=2,
+            risk_coupling="low",
+            risk_cohesion="medium",
+        ),
+    )
 
 
 def test_dead_code_marks_symbol_dead_when_referenced_only_by_tests() -> None:

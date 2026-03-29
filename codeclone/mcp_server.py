@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -271,7 +274,8 @@ def build_mcp_server(
         title="Get Report Section",
         description=(
             "Return a canonical CodeClone report section for the latest or "
-            "specified MCP run."
+            "specified MCP run. The 'metrics' section returns only the "
+            "summary, while 'metrics_detail' returns the full metrics dump."
         ),
         annotations=read_only_tool,
         structured_output=True,

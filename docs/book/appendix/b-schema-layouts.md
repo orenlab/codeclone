@@ -25,11 +25,11 @@ Compact structural layouts for baseline/cache/report contracts in `2.0.0b3`.
 }
 ```
 
-## Cache schema (`2.2`)
+## Cache schema (`2.3`)
 
 ```json
 {
-  "v": "2.2",
+  "v": "2.3",
   "payload": {
     "py": "cp313",
     "fp": "1",

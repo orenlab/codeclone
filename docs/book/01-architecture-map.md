@@ -43,6 +43,12 @@ Refs:
   recompute detection semantics.
 - MCP layer reuses current pipeline/report semantics and must not introduce a
   separate analysis truth path.
+- MCP may ship task-specific slim projections (for example, summary-only metrics
+  or inventory counts) as long as canonical report data remains the source of
+  truth and richer detail stays reachable through dedicated tools/sections.
+- MCP finding lists may also move repeated absolute location context to
+  envelope-level metadata such as `base_uri`, while keeping `get_finding` as
+  the richer per-finding inspection path.
 - Baseline, metrics baseline, and cache are validated before being trusted.
 
 Refs:

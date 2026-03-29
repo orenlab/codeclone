@@ -1,3 +1,9 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
 from __future__ import annotations
 
 import json
@@ -412,13 +418,14 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     assert loaded.cache_schema_version == "0.0"
 
 
-def test_cache_v_field_version_mismatch_warns(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version", ["0.0", "2.2"])
+def test_cache_v_field_version_mismatch_warns(tmp_path: Path, version: str) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={})
     signature = sign_cache_payload(payload)
     cache_path.write_text(
-        json.dumps({"v": "0.0", "payload": payload, "sig": signature}), "utf-8"
+        json.dumps({"v": version, "payload": payload, "sig": signature}), "utf-8"
     )
 
     loaded = Cache(cache_path)
@@ -427,7 +434,7 @@ def test_cache_v_field_version_mismatch_warns(tmp_path: Path) -> None:
     assert "version mismatch" in loaded.load_warning
     assert loaded.data["files"] == {}
     assert loaded.load_status == CacheStatus.VERSION_MISMATCH
-    assert loaded.cache_schema_version == "0.0"
+    assert loaded.cache_schema_version == version
 
 
 def test_cache_too_large_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

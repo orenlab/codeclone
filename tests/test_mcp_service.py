@@ -1,4 +1,8 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 
@@ -29,10 +33,11 @@ from codeclone.mcp_service import (
 from codeclone.models import MetricsDiff
 
 
-def _write_clone_fixture(root: Path) -> None:
-    root.joinpath("pkg").mkdir(exist_ok=True)
-    root.joinpath("pkg", "__init__.py").write_text("", "utf-8")
-    root.joinpath("pkg", "dup.py").write_text(
+def _write_clone_fixture(root: Path, relative_dir: str = "pkg") -> None:
+    fixture_dir = root.joinpath(relative_dir)
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    fixture_dir.joinpath("__init__.py").write_text("", "utf-8")
+    fixture_dir.joinpath("dup.py").write_text(
         (
             "def alpha(value: int) -> int:\n"
             "    total = value + 1\n"
@@ -132,6 +137,27 @@ def _build_quality_service(root: Path) -> CodeCloneMCPService:
     return service
 
 
+def _analyze_quality_repository(
+    root: Path,
+) -> tuple[CodeCloneMCPService, dict[str, object]]:
+    _write_clone_fixture(root)
+    _write_quality_fixture(root)
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(root),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    return service, summary
+
+
+def _file_registry(payload: dict[str, object]) -> dict[str, object]:
+    inventory = cast("dict[str, object]", payload["inventory"])
+    return cast("dict[str, object]", inventory["file_registry"])
+
+
 def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> None:
     _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
@@ -157,6 +183,34 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
     latest_health = cast("dict[str, object]", latest["health"])
     assert isinstance(latest_health["score"], int)
     assert latest_health["grade"]
+
+
+def test_mcp_service_summary_inventory_is_slim_but_analysis_summary_is_full(
+    tmp_path: Path,
+) -> None:
+    service, repository_summary = _analyze_quality_repository(tmp_path)
+    changed_summary = service.analyze_changed_paths(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+            changed_paths=("pkg/dup.py",),
+        )
+    )
+    stored_summary = service.get_run_summary(run_id=str(repository_summary["run_id"]))
+
+    repo_registry = _file_registry(repository_summary)
+    changed_registry = _file_registry(changed_summary)
+    stored_registry = _file_registry(stored_summary)
+
+    assert isinstance(repo_registry["items"], list)
+    assert "count" not in repo_registry
+    assert changed_registry["count"] == len(
+        cast("list[object]", repo_registry["items"])
+    )
+    assert "items" not in changed_registry
+    assert stored_registry["count"] == len(cast("list[object]", repo_registry["items"]))
+    assert "items" not in stored_registry
 
 
 def test_mcp_service_lists_findings_and_hotspots(tmp_path: Path) -> None:
@@ -288,6 +342,8 @@ def test_mcp_service_granular_checks_pr_summary_and_resources(
         path="pkg/dup.py",
         detail_level="summary",
     )
+    summary_health = cast("dict[str, object]", summary["health"])
+    summary_dimensions = cast("dict[str, object]", summary_health["dimensions"])
     assert clones["check"] == "clones"
     assert cast(int, clones["total"]) >= 1
 
@@ -311,6 +367,20 @@ def test_mcp_service_granular_checks_pr_summary_and_resources(
     cohesion = service.check_cohesion(run_id=run_id, detail_level="summary")
     assert coupling["check"] == "coupling"
     assert cohesion["check"] == "cohesion"
+    for dimension, payload in (
+        ("clones", clones),
+        ("complexity", complexity),
+        ("dead_code", dead_code),
+        ("coupling", coupling),
+        ("cohesion", cohesion),
+    ):
+        assert payload["base_uri"] == tmp_path.as_uri()
+        check_health = cast("dict[str, object]", payload["health"])
+        assert check_health["score"] == summary_health["score"]
+        assert check_health["grade"] == summary_health["grade"]
+        assert cast("dict[str, object]", check_health["dimensions"]) == {
+            dimension: summary_dimensions[dimension]
+        }
 
     gate_result = service.evaluate_gates(
         MCPGateRequest(run_id=run_id, fail_threshold=0)
@@ -416,6 +486,33 @@ def test_mcp_service_summary_reuses_canonical_meta_for_cache_and_health(
     assert cache_summary["used"] == cache_meta["used"]
     assert cache_summary["schema_version"] == cache_meta["schema_version"]
     assert health_summary == metrics_health
+    assert "families" not in report_metrics
+
+
+def test_mcp_service_metrics_sections_split_summary_and_detail(
+    tmp_path: Path,
+) -> None:
+    service, summary = _analyze_quality_repository(tmp_path)
+    run_id = str(summary["run_id"])
+
+    metrics_summary = service.get_report_section(run_id=run_id, section="metrics")
+    metrics_detail = service.get_report_section(
+        run_id=run_id,
+        section="metrics_detail",
+    )
+
+    assert set(cast("dict[str, object]", metrics_summary["summary"])) >= {
+        "complexity",
+        "coupling",
+        "cohesion",
+        "dependencies",
+        "dead_code",
+        "health",
+    }
+    assert "families" not in metrics_summary
+    assert len(json.dumps(metrics_summary, ensure_ascii=False, sort_keys=True)) < 5000
+    assert set(metrics_detail) == {"summary", "families"}
+    assert cast("dict[str, object]", metrics_detail["families"])
 
 
 def test_mcp_service_evaluate_gates_on_existing_run(tmp_path: Path) -> None:
@@ -454,7 +551,106 @@ def test_mcp_service_resources_expose_latest_summary_and_report(tmp_path: Path) 
     latest_report = json.loads(service.read_resource("codeclone://latest/report.json"))
 
     assert latest_summary["run_id"] == summary["run_id"]
+    assert latest_summary["inventory"]["file_registry"]["count"] >= 1
+    assert "items" not in latest_summary["inventory"]["file_registry"]
     assert latest_report["report_schema_version"] == "2.1"
+
+
+def test_mcp_service_hotspot_summary_preserves_fixtures_source_kind(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path, relative_dir="tests/fixtures")
+    service = CodeCloneMCPService(history_limit=4)
+    service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+
+    findings = service.list_findings(
+        family="clone",
+        detail_level="summary",
+        limit=1,
+    )
+    hotspots = service.list_hotspots(
+        kind="highest_spread",
+        detail_level="summary",
+        limit=1,
+    )
+
+    finding = cast("list[dict[str, object]]", findings["items"])[0]
+    hotspot = cast("list[dict[str, object]]", hotspots["items"])[0]
+    assert hotspots["base_uri"] == tmp_path.as_uri()
+    assert finding["id"] == hotspot["id"]
+    assert finding["source_kind"] == "fixtures"
+    assert hotspot["source_kind"] == finding["source_kind"]
+    assert "priority_factors" not in hotspot
+    assert all(
+        set(cast("dict[str, object]", location)) <= {"file", "line"}
+        for location in cast("list[object]", hotspot["locations"])
+    )
+
+
+def test_mcp_service_list_findings_detail_levels_slim_and_full_payloads(
+    tmp_path: Path,
+) -> None:
+    service, summary = _analyze_quality_repository(tmp_path)
+    run_id = str(summary["run_id"])
+
+    summary_payload = service.list_findings(
+        run_id=run_id,
+        family="clone",
+        detail_level="summary",
+        limit=1,
+    )
+    normal_payload = service.list_findings(
+        run_id=run_id,
+        family="clone",
+        detail_level="normal",
+        limit=1,
+    )
+    full_payload = service.list_findings(
+        run_id=run_id,
+        family="clone",
+        detail_level="full",
+        limit=1,
+    )
+
+    assert summary_payload["base_uri"] == tmp_path.as_uri()
+    summary_item = cast("list[dict[str, object]]", summary_payload["items"])[0]
+    normal_item = cast("list[dict[str, object]]", normal_payload["items"])[0]
+    full_item = cast("list[dict[str, object]]", full_payload["items"])[0]
+
+    assert "priority_factors" not in summary_item
+    assert "priority_factors" not in normal_item
+    assert cast("dict[str, object]", full_item["priority_factors"])
+    assert all(
+        set(cast("dict[str, object]", location)) <= {"file", "line"}
+        for location in cast("list[object]", summary_item["locations"])
+    )
+    assert all(
+        "symbol" in cast("dict[str, object]", location)
+        and "uri" not in cast("dict[str, object]", location)
+        for location in cast("list[object]", normal_item["locations"])
+    )
+    assert all(
+        "symbol" in cast("dict[str, object]", location)
+        and "uri" in cast("dict[str, object]", location)
+        for location in cast("list[object]", full_item["locations"])
+    )
+
+    finding = service.get_finding(
+        run_id=run_id,
+        finding_id=str(summary_item["id"]),
+    )
+    assert cast("dict[str, object]", finding["priority_factors"])
+    assert all(
+        "symbol" in cast("dict[str, object]", location)
+        and "uri" in cast("dict[str, object]", location)
+        for location in cast("list[object]", finding["locations"])
+    )
 
 
 def test_mcp_service_run_store_evicts_old_runs(tmp_path: Path) -> None:
@@ -1137,17 +1333,7 @@ def test_mcp_service_branch_helpers_on_real_runs(
 def test_mcp_service_remediation_and_comparison_helper_branches(
     tmp_path: Path,
 ) -> None:
-    _write_clone_fixture(tmp_path)
-    _write_quality_fixture(tmp_path)
-    service = CodeCloneMCPService(history_limit=4)
-
-    before = service.analyze_repository(
-        MCPAnalysisRequest(
-            root=str(tmp_path),
-            respect_pyproject=False,
-            cache_policy="off",
-        )
-    )
+    service, before = _analyze_quality_repository(tmp_path)
     tmp_path.joinpath("pkg", "dup.py").write_text(
         "def alpha(value: int) -> int:\n    return value + 1\n",
         "utf-8",
@@ -1709,6 +1895,21 @@ def test_mcp_service_additional_projection_and_error_branches(
         },
     )[0]["uri"]
     assert "#L" not in str(location_without_line)
+    location_without_uri = service._locations_for_finding(
+        record,
+        {
+            "items": [
+                {
+                    "relative_path": "pkg/dup.py",
+                    "start_line": 1,
+                    "qualname": "pkg.dup:alpha",
+                }
+            ]
+        },
+        include_uri=False,
+    )[0]
+    assert "uri" not in location_without_uri
+    assert location_without_uri["symbol"] == "pkg.dup:alpha"
     assert (
         service.list_hotspots(
             kind="highest_spread",
@@ -1912,8 +2113,11 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
     assert clone_gate.exit_code == 3
     assert clone_gate.reasons == ("clone:new",)
 
+    assert service.get_report_section(run_id="helpers", section="metrics") == {
+        "summary": {}
+    }
     with pytest.raises(MCPServiceContractError):
-        service.get_report_section(run_id="helpers", section="metrics")
+        service.get_report_section(run_id="helpers", section="metrics_detail")
 
     assert service._suggestion_for_finding(record, "missing") is None
     assert (

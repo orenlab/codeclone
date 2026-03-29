@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -533,6 +536,59 @@ def _node_line_span(node: ast.AST) -> tuple[int, int] | None:
     return start, end
 
 
+def _eligible_unit_shape(
+    node: FunctionNode,
+    *,
+    min_loc: int,
+    min_stmt: int,
+) -> tuple[int, int, int, int] | None:
+    span = _node_line_span(node)
+    if span is None:
+        return None
+    start, end = span
+    if end < start:
+        return None
+    loc = end - start + 1
+    stmt_count = _stmt_count(node)
+    if loc < min_loc or stmt_count < min_stmt:
+        return None
+    return start, end, loc, stmt_count
+
+
+def _class_metrics_for_node(
+    *,
+    module_name: str,
+    class_qualname: str,
+    class_node: ast.ClassDef,
+    filepath: str,
+    module_import_names: set[str],
+    module_class_names: set[str],
+) -> ClassMetrics | None:
+    span = _node_line_span(class_node)
+    if span is None:
+        return None
+    start, end = span
+    cbo, coupled_classes = compute_cbo(
+        class_node,
+        module_import_names=module_import_names,
+        module_class_names=module_class_names,
+    )
+    lcom4, method_count, instance_var_count = compute_lcom4(class_node)
+    return ClassMetrics(
+        qualname=f"{module_name}:{class_qualname}",
+        filepath=filepath,
+        start_line=start,
+        end_line=end,
+        cbo=cbo,
+        lcom4=lcom4,
+        method_count=method_count,
+        instance_var_count=instance_var_count,
+        risk_coupling=coupling_risk(cbo),
+        risk_cohesion=cohesion_risk(lcom4),
+        coupled_classes=coupled_classes,
+    )
+
+
 def _dead_candidate_kind(local_name: str) -> Literal["function", "method"]:
     return "method" if "." in local_name else "function"
 
@@ -984,17 +1040,14 @@ def extract_units_and_stats_from_source(
     structural_findings: list[StructuralFindingGroup] = []
 
     for local_name, node in collector.units:
-        start = getattr(node, "lineno", None)
-        end = getattr(node, "end_lineno", None)
-
-        if not start or not end or end < start:
+        unit_shape = _eligible_unit_shape(
+            node,
+            min_loc=min_loc,
+            min_stmt=min_stmt,
+        )
+        if unit_shape is None:
             continue
-
-        loc = end - start + 1
-        stmt_count = _stmt_count(node)
-
-        if loc < min_loc or stmt_count < min_stmt:
-            continue
+        start, end, loc, stmt_count = unit_shape
 
         qualname = f"{module_name}:{local_name}"
         fingerprint, complexity = _cfg_fingerprint_and_complexity(node, cfg, qualname)
@@ -1078,31 +1131,16 @@ def extract_units_and_stats_from_source(
             structural_findings.extend(structure_facts.structural_findings)
 
     for class_qualname, class_node in collector.class_nodes:
-        start = int(getattr(class_node, "lineno", 0))
-        end = int(getattr(class_node, "end_lineno", 0))
-        if start <= 0 or end <= 0:
-            continue
-        cbo, coupled_classes = compute_cbo(
-            class_node,
+        class_metric = _class_metrics_for_node(
+            module_name=module_name,
+            class_qualname=class_qualname,
+            class_node=class_node,
+            filepath=filepath,
             module_import_names=module_import_names,
             module_class_names=module_class_names,
         )
-        lcom4, method_count, instance_var_count = compute_lcom4(class_node)
-        class_metrics.append(
-            ClassMetrics(
-                qualname=f"{module_name}:{class_qualname}",
-                filepath=filepath,
-                start_line=start,
-                end_line=end,
-                cbo=cbo,
-                lcom4=lcom4,
-                method_count=method_count,
-                instance_var_count=instance_var_count,
-                risk_coupling=coupling_risk(cbo),
-                risk_cohesion=cohesion_risk(lcom4),
-                coupled_classes=coupled_classes,
-            )
-        )
+        if class_metric is not None:
+            class_metrics.append(class_metric)
 
     dead_candidates = _collect_dead_candidates(
         filepath=filepath,

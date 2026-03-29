@@ -1,4 +1,8 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 
@@ -173,11 +177,19 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     )
     run_id = str(summary["run_id"])
     changed_run_id = str(changed_summary["run_id"])
+    changed_inventory = cast("dict[str, object]", changed_summary["inventory"])
+    changed_registry = cast("dict[str, object]", changed_inventory["file_registry"])
+    assert cast(int, changed_registry["count"]) >= 1
+    assert "items" not in changed_registry
 
     latest = _structured_tool_result(
         asyncio.run(server.call_tool("get_run_summary", {}))
     )
     assert latest["run_id"] == run_id
+    latest_inventory = cast("dict[str, object]", latest["inventory"])
+    latest_registry = cast("dict[str, object]", latest_inventory["file_registry"])
+    assert cast(int, latest_registry["count"]) >= 1
+    assert "items" not in latest_registry
 
     findings_result = _structured_tool_result(
         asyncio.run(
@@ -191,7 +203,14 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             )
         )
     )
+    assert findings_result["base_uri"] == tmp_path.as_uri()
     assert cast(int, findings_result["total"]) >= 1
+    summary_finding = cast("list[dict[str, object]]", findings_result["items"])[0]
+    assert "priority_factors" not in summary_finding
+    assert all(
+        set(cast("dict[str, object]", location)) <= {"file", "line"}
+        for location in cast("list[object]", summary_finding["locations"])
+    )
 
     latest_summary_resource = list(
         asyncio.run(server.read_resource("codeclone://latest/summary"))
@@ -200,6 +219,16 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     latest_summary_text = latest_summary_resource[0].content
     latest_summary = json.loads(latest_summary_text)
     assert latest_summary["run_id"] == run_id
+    latest_summary_inventory = cast(
+        "dict[str, object]",
+        latest_summary["inventory"],
+    )
+    latest_summary_registry = cast(
+        "dict[str, object]",
+        latest_summary_inventory["file_registry"],
+    )
+    assert cast(int, latest_summary_registry["count"]) >= 1
+    assert "items" not in latest_summary_registry
 
     latest_report_resource = list(
         asyncio.run(server.read_resource("codeclone://latest/report.json"))
@@ -241,6 +270,17 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         asyncio.run(server.call_tool("get_report_section", {"section": "meta"}))
     )
     assert report_section["codeclone_version"]
+    metrics_section = _structured_tool_result(
+        asyncio.run(server.call_tool("get_report_section", {"section": "metrics"}))
+    )
+    assert "summary" in metrics_section
+    assert "families" not in metrics_section
+    metrics_detail_section = _structured_tool_result(
+        asyncio.run(
+            server.call_tool("get_report_section", {"section": "metrics_detail"})
+        )
+    )
+    assert "families" in metrics_detail_section
     changed_section = _structured_tool_result(
         asyncio.run(server.call_tool("get_report_section", {"section": "changed"}))
     )
@@ -272,6 +312,7 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             )
         )
     )
+    assert hotspots["base_uri"] == tmp_path.as_uri()
     assert cast(int, hotspots["total"]) >= 1
     assert comparison["summary"]
 
@@ -337,10 +378,15 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         )
     )
     assert complexity["check"] == "complexity"
+    assert complexity["base_uri"] == tmp_path.as_uri()
     assert cast(int, clones["total"]) >= 1
+    assert clones["base_uri"] == tmp_path.as_uri()
     assert coupling["check"] == "coupling"
+    assert coupling["base_uri"] == tmp_path.as_uri()
     assert cohesion["check"] == "cohesion"
+    assert cohesion["base_uri"] == tmp_path.as_uri()
     assert dead_code["check"] == "dead_code"
+    assert dead_code["base_uri"] == tmp_path.as_uri()
     assert reviewed["reviewed"] is True
     assert reviewed_items["reviewed_count"] == 1
     assert "## CodeClone Summary" in str(pr_summary["content"])

@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Licensing
+
+- Re-license repository code to MPL-2.0 and keep documentation under MIT.
+
+### Packaging
+
+- Ship both `LICENSE` and `LICENSE-docs`, update package metadata, and sync file-level SPDX headers.
+
 ## [2.0.0b3]
 
 ### MCP server
@@ -11,6 +21,18 @@
 - Require explicit `--allow-remote` for non-loopback `streamable-http` binds; reject `cache_policy=refresh` to preserve
   read-only semantics.
 - Defer MCP process-count policy to the core runtime when `processes` is not explicitly overridden.
+- Slim MCP summary payloads for agent usage: `get_run_summary`, summary resources, and `analyze_changed_paths` now
+  replace `inventory.file_registry.items` with `{encoding, count}` while `analyze_repository` keeps the full registry.
+- Split `get_report_section(section="metrics")` into a summary-only projection and add `metrics_detail` for the full
+  metrics payload, without changing canonical report schema `2.1`.
+- Slim `health.dimensions` in granular `check_*` responses to the single dimension relevant to each tool.
+- Keep hotspot `source_kind` aligned with canonical finding payloads, including fixture-scoped findings.
+- Add envelope-level `base_uri` to `list_findings`, `list_hotspots`, and `check_*`, while removing repeated per-location
+  `uri` values from summary/normal finding payloads.
+- Slim finding list payloads further: summary responses drop `priority_factors` and keep only `file` + `line` in
+  locations; normal responses keep `symbol` but still omit `uri` and `priority_factors`; `get_finding` remains full.
+- Bump cache schema to `2.3` so stale per-file analysis entries from older metric semantics are ignored and rebuilt
+  instead of being treated as reusable cache hits.
 
 ### CLI
 

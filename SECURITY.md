@@ -27,35 +27,73 @@ CodeClone operates purely on static input and follows a conservative execution m
 - Performs analysis in-process with explicit resource limits
 - Generates static HTML reports without external dependencies
 
-Potential risk areas include:
+### Core analysis
 
-- malformed or adversarial source files
-- extremely large inputs leading to resource exhaustion
-- HTML report generation and embedding
+- Scanner traversal is root-confined and prevents symlink-based path escape.
+- Temporary files use unpredictable names (`tempfile.NamedTemporaryFile` with `delete=False`)
+  and atomic replacement (`os.replace`) to prevent predictable-path attacks.
 
-These areas are explicitly tested and hardened, but are still the primary focus of
-ongoing security review.
-
-Additional safeguards:
+### HTML reports
 
 - HTML report content is escaped in both text and attribute contexts to prevent script injection.
 - Reports are static and do not execute analyzed code.
-- Report explainability fields are generated in Python core; UI is rendering-only and does not infer semantics.
-- Scanner traversal is root-confined and prevents symlink-based path escape.
+- Report explainability fields are generated in Python core; UI is rendering-only and does not
+  infer semantics.
+
+### Baseline and cache integrity
+
 - Baseline files are schema/type validated with size limits and tamper-evident integrity fields
   (`meta.generator` as trust gate, `meta.payload_sha256` as integrity hash in baseline schema `2.0`).
 - Baseline integrity is tamper-evident (audit signal), not tamper-proof cryptographic signing.
   An actor who can rewrite baseline content and recompute `payload_sha256` can still alter it.
-- Baseline hash covers canonical payload only (`clones.functions`, `clones.blocks`,
+- Baseline hash covers canonical clone payload (`clones.functions`, `clones.blocks`,
   `meta.fingerprint_version`, `meta.python_tag`).
 - Baseline hash excludes non-semantic metadata (`created_at`, `meta.generator.version`).
 - `meta.schema_version` and `meta.generator.name` are validated as compatibility/trust gates and are
   intentionally excluded from `payload_sha256`.
+- Metrics baseline (`MetricsBaseline`) maintains a separate integrity hash over its own payload,
+  independent of the clone baseline hash.
 - In `--ci` (or explicit `--fail-on-new`), untrusted baseline states fail fast; otherwise baseline is ignored
   with explicit warning and comparison proceeds against an empty baseline.
 - Cache files are integrity-signed with canonical payload hashing (constant-time comparison),
   size-limited, and ignored on mismatch.
 - Legacy cache secret files (`.cache/codeclone/.cache_secret`) are obsolete and should be removed.
+
+### MCP server
+
+CodeClone includes an optional read-only MCP server (`codeclone[mcp]`) that exposes
+analysis results over JSON-RPC (stdio transport).
+
+- The MCP server is **read-only**: it never mutates baselines, source files, cache, or repo state.
+- Session-local review markers are in-memory only and discarded on process exit.
+- Tool arguments that accept git refs (`git_diff_ref`) are validated against a strict regex
+  to prevent command injection via `subprocess` calls.
+- The MCP run store is bounded (`history_limit`) with FIFO eviction to prevent unbounded
+  memory growth from repeated analysis calls.
+- MCP is an optional extra (`codeclone[mcp]`); its runtime dependencies are never loaded
+  by the base install or CLI.
+
+### GitHub Action
+
+CodeClone ships a composite GitHub Action (`.github/actions/codeclone/`).
+
+- All `${{ inputs.* }}` values are passed through `env:` variables, never inlined in shell
+  scripts, to prevent script injection from untrusted PR authors.
+- External subprocess calls use explicit timeouts (`timeout=600` for analysis,
+  `timeout=30` for git commands) to prevent hanging CI runners.
+
+### Potential risk areas
+
+Potential risk areas include:
+
+- malformed or adversarial source files
+- extremely large inputs leading to resource exhaustion
+- HTML report generation and embedding
+- MCP tool arguments from untrusted agent contexts
+- GitHub Action inputs from untrusted PR authors
+
+These areas are explicitly tested and hardened, but remain the primary focus of
+ongoing security review.
 
 ---
 

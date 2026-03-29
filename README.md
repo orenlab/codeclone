@@ -12,8 +12,8 @@
   <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main&style=flat-square" alt="Tests"></a>
   <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml/badge.svg?style=flat-square" alt="Benchmark"></a>
   <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone.svg?style=flat-square" alt="Python"></a>
-  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-81%20(B)-green" alt="codeclone 81 (B)"></a>
-  <a href="https://github.com/orenlab/codeclone/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/codeclone.svg?style=flat-square" alt="License"></a>
+  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-85%20(B)-green" alt="codeclone 85 (B)"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-MPL--2.0-brightgreen?style=flat-square" alt="License"></a>
 </p>
 
 ---
@@ -48,17 +48,30 @@ Live sample report:
 ## Quick Start
 
 ```bash
-pip install codeclone        # or: uv tool install codeclone
+pip install codeclone          # or: uv tool install codeclone
 
-codeclone .                  # analyze current directory
-codeclone . --html           # generate HTML report
-codeclone . --html --open-html-report   # generate and open HTML report
-codeclone . --json --md --sarif --text   # generate machine-readable reports
-codeclone . --html --json --timestamped-report-paths   # keep timestamped report snapshots
-codeclone . --changed-only --diff-against main   # changed-scope clone gating against git diff
-codeclone . --paths-from-git-diff HEAD~1         # shorthand diff source for changed-scope review
-codeclone . --ci             # CI mode (--fail-on-new --no-color --quiet)
+codeclone .                    # analyze
+codeclone . --html             # HTML report
+codeclone . --html --open-html-report  # open in browser
+codeclone . --json --md --sarif --text # all formats
+codeclone . --ci               # CI mode
 ```
+
+<details>
+<summary>More examples</summary>
+
+```bash
+# timestamped report snapshots
+codeclone . --html --json --timestamped-report-paths
+
+# changed-scope gating against git diff
+codeclone . --changed-only --diff-against main
+
+# shorthand: diff source for changed-scope review
+codeclone . --paths-from-git-diff HEAD~1
+```
+
+</details>
 
 <details>
 <summary>Run without install</summary>
@@ -138,14 +151,22 @@ repos:
 CodeClone ships an optional read-only MCP server for AI agents and IDE clients.
 
 ```bash
-pip install "codeclone[mcp]"          # install the extra
-codeclone-mcp --transport stdio       # local agents (Claude Code, Codex, Copilot, Gemini CLI)
-codeclone-mcp --transport streamable-http --port 8000   # remote/HTTP-only clients
+# install the MCP extra
+pip install "codeclone[mcp]"
+
+# local agents (Claude Code, Codex, Copilot, Gemini CLI)
+codeclone-mcp --transport stdio
+
+# remote / HTTP-only clients
+codeclone-mcp --transport streamable-http --port 8000
 ```
 
-The server exposes 19 tools (analysis, diff-aware checks, findings, remediation, gates, PR summaries)
-and 9 resources — all deterministic, baseline-aware, and read-only.
-It never mutates source files, baselines, or repo state.
+19 tools + 9 resources — deterministic, baseline-aware, read-only.
+Never mutates source files, baselines, or repo state.
+List-style finding responses expose a single `base_uri` per envelope and keep
+summary locations compact; `get_finding` remains the full-detail endpoint.
+`get_run_summary` and `analyze_changed_paths` return slim inventory counts;
+`get_report_section(metrics)` returns summary-only, `metrics_detail` gives the full dump.
 
 Docs:
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
@@ -389,8 +410,15 @@ in [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmark
 
 </details>
 
+## License
+
+- **Code:** MPL-2.0
+- **Documentation:** MIT
+
+Versions released before this change remain under their original license terms.
+
 ## Links
 
 - **Issues:** <https://github.com/orenlab/codeclone/issues>
 - **PyPI:** <https://pypi.org/project/codeclone/>
-- **License:** MIT
+- **Licenses:** [MPL-2.0](LICENSE) · [MIT docs](LICENSE-docs)

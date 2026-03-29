@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -117,6 +120,7 @@ ReportSection = Literal[
     "inventory",
     "findings",
     "metrics",
+    "metrics_detail",
     "derived",
     "changed",
     "integrity",
@@ -191,6 +195,7 @@ _VALID_REPORT_SECTIONS = frozenset(
         "inventory",
         "findings",
         "metrics",
+        "metrics_detail",
         "derived",
         "changed",
         "integrity",
@@ -206,6 +211,13 @@ _VALID_HOTLIST_KINDS = frozenset(
     }
 )
 _VALID_SEVERITIES = frozenset({SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO})
+_CHECK_TO_DIMENSION: Final[dict[str, str]] = {
+    "cohesion": "cohesion",
+    "coupling": "coupling",
+    "dead_code": "dead_code",
+    "complexity": "complexity",
+    "clones": "clones",
+}
 _as_int = _coerce.as_int
 _as_float = _coerce.as_float
 _as_str = _coerce.as_str
@@ -763,10 +775,12 @@ class CodeCloneMCPService:
             raise MCPServiceContractError(
                 "analyze_changed_paths requires changed_paths or git_diff_ref."
             )
-        return self.analyze_repository(request)
+        summary = dict(self.analyze_repository(request))
+        return self._summary_payload(summary)
 
     def get_run_summary(self, run_id: str | None = None) -> dict[str, object]:
-        return dict(self._runs.get(run_id).summary)
+        summary = dict(self._runs.get(run_id).summary)
+        return self._summary_payload(summary)
 
     def compare_runs(
         self,
@@ -906,6 +920,16 @@ class CodeCloneMCPService:
                     "Report section 'changed' is not available in this run."
                 )
             return dict(record.changed_projection)
+        if validated_section == "metrics":
+            metrics = self._as_mapping(report_document.get("metrics"))
+            return {"summary": dict(self._as_mapping(metrics.get("summary")))}
+        if validated_section == "metrics_detail":
+            payload = report_document.get("metrics")
+            if not isinstance(payload, Mapping):
+                raise MCPServiceContractError(
+                    "Report section 'metrics_detail' is not available in this run."
+                )
+            return dict(payload)
         payload = report_document.get(validated_section)
         if not isinstance(payload, Mapping):
             raise MCPServiceContractError(
@@ -980,6 +1004,7 @@ class CodeCloneMCPService:
         next_offset = normalized_offset + len(items)
         return {
             "run_id": record.run_id,
+            "base_uri": record.root.as_uri(),
             "detail_level": validated_detail,
             "sort_by": validated_sort,
             "changed_paths": list(paths_filter),
@@ -1076,6 +1101,7 @@ class CodeCloneMCPService:
         )
         return {
             "run_id": record.run_id,
+            "base_uri": record.root.as_uri(),
             "kind": validated_kind,
             "detail_level": validated_detail,
             "changed_paths": list(paths_filter),
@@ -1459,7 +1485,7 @@ class CodeCloneMCPService:
     def _render_resource(self, record: MCPRunRecord, suffix: str) -> str:
         if suffix == "summary":
             return json.dumps(
-                record.summary,
+                self._summary_payload(dict(record.summary)),
                 ensure_ascii=False,
                 indent=2,
                 sort_keys=True,
@@ -2024,7 +2050,11 @@ class CodeCloneMCPService:
         payload = dict(finding)
         payload["priority_score"] = resolved_priority_payload["score"]
         payload["priority_factors"] = resolved_priority_payload["factors"]
-        payload["locations"] = self._locations_for_finding(record, finding)
+        payload["locations"] = self._locations_for_finding(
+            record,
+            finding,
+            include_uri=detail_level == "full",
+        )
         payload["html_anchor"] = f"finding-{finding.get('id', '')}"
         if resolved_remediation is not None:
             payload["remediation"] = resolved_remediation
@@ -2041,6 +2071,7 @@ class CodeCloneMCPService:
         if detail_level == "summary":
             return self._finding_summary_card_payload(finding)
         payload = dict(finding)
+        payload.pop("priority_factors", None)
         if "remediation" in payload:
             payload["remediation"] = self._project_remediation(
                 self._as_mapping(payload["remediation"]),
@@ -2067,9 +2098,11 @@ class CodeCloneMCPService:
             **card,
             "novelty": str(finding.get("novelty", "")),
             "priority_score": _as_float(finding.get("priority_score", 0.0), 0.0),
-            "priority_factors": dict(self._as_mapping(finding.get("priority_factors"))),
             "locations": [
-                dict(self._as_mapping(item))
+                {
+                    "file": str(self._as_mapping(item).get("file", "")),
+                    "line": _as_int(self._as_mapping(item).get("line", 0), 0),
+                }
                 for item in self._as_sequence(finding.get("locations"))[:3]
             ],
         }
@@ -2131,6 +2164,21 @@ class CodeCloneMCPService:
         with self._state_lock:
             review_map = self._review_state.get(record.run_id, OrderedDict())
             return str(finding.get("id", "")) in review_map
+
+    def _include_hotspot_finding(
+        self,
+        *,
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+        changed_paths: Sequence[str],
+        exclude_reviewed: bool,
+    ) -> bool:
+        if changed_paths and not self._finding_touches_paths(
+            finding=finding,
+            changed_paths=changed_paths,
+        ):
+            return False
+        return not exclude_reviewed or not self._finding_is_reviewed(record, finding)
 
     def _priority_score(
         self,
@@ -2222,6 +2270,8 @@ class CodeCloneMCPService:
         self,
         record: MCPRunRecord,
         finding: Mapping[str, object],
+        *,
+        include_uri: bool = True,
     ) -> list[dict[str, object]]:
         locations: list[dict[str, object]] = []
         for item in self._as_sequence(finding.get("items")):
@@ -2229,20 +2279,20 @@ class CodeCloneMCPService:
             relative_path = str(item_map.get("relative_path", "")).strip()
             if not relative_path:
                 continue
-            absolute_path = (record.root / relative_path).resolve()
             line = _as_int(item_map.get("start_line", 0) or 0, 0)
             symbol = str(item_map.get("qualname", item_map.get("module", ""))).strip()
-            uri = absolute_path.as_uri()
-            if line > 0:
-                uri = f"{uri}#L{line}"
-            locations.append(
-                {
-                    "file": relative_path,
-                    "line": line,
-                    "symbol": symbol,
-                    "uri": uri,
-                }
-            )
+            location: dict[str, object] = {
+                "file": relative_path,
+                "line": line,
+                "symbol": symbol,
+            }
+            if include_uri:
+                absolute_path = (record.root / relative_path).resolve()
+                uri = absolute_path.as_uri()
+                if line > 0:
+                    uri = f"{uri}#L{line}"
+                location["uri"] = uri
+            locations.append(location)
         deduped: list[dict[str, object]] = []
         seen: set[tuple[str, int, str]] = set()
         for location in locations:
@@ -2447,20 +2497,21 @@ class CodeCloneMCPService:
         rows: list[dict[str, object]] = []
         for finding_id in ordered_ids:
             finding = finding_index.get(finding_id)
-            if finding is None:
-                continue
-            if changed_paths and not self._finding_touches_paths(
+            if finding is None or not self._include_hotspot_finding(
+                record=record,
                 finding=finding,
                 changed_paths=changed_paths,
+                exclude_reviewed=exclude_reviewed,
             ):
                 continue
-            if exclude_reviewed and self._finding_is_reviewed(record, finding):
-                continue
             finding_id_key = str(finding.get("id", ""))
+            projection_detail: DetailLevel = (
+                "normal" if detail_level == "summary" else detail_level
+            )
             decorated = self._decorate_finding(
                 record,
                 finding,
-                detail_level=detail_level,
+                detail_level=projection_detail,
                 remediation=remediation_map[finding_id_key],
                 priority_payload=priority_map[finding_id_key],
                 max_spread_value=max_spread_value,
@@ -2476,7 +2527,6 @@ class CodeCloneMCPService:
                         "id": finding_id,
                         "novelty": decorated.get("novelty"),
                         "priority_score": decorated.get("priority_score"),
-                        "priority_factors": decorated.get("priority_factors"),
                         "locations": decorated.get("locations"),
                     }
                 )
@@ -2670,14 +2720,27 @@ class CodeCloneMCPService:
         path: str | None,
     ) -> dict[str, object]:
         bounded_items = [dict(item) for item in items[: max(1, max_results)]]
+        full_health = dict(self._as_mapping(record.summary.get("health")))
+        dimensions = self._as_mapping(full_health.get("dimensions"))
+        relevant_dimension = _CHECK_TO_DIMENSION.get(check)
+        slim_dimensions = (
+            {relevant_dimension: dimensions.get(relevant_dimension)}
+            if relevant_dimension and relevant_dimension in dimensions
+            else dict(dimensions)
+        )
         return {
             "run_id": record.run_id,
+            "base_uri": record.root.as_uri(),
             "check": check,
             "detail_level": detail_level,
             "path": path,
             "returned": len(bounded_items),
             "total": len(items),
-            "health": dict(self._as_mapping(record.summary.get("health"))),
+            "health": {
+                "score": full_health.get("score"),
+                "grade": full_health.get("grade"),
+                "dimensions": slim_dimensions,
+            },
             "items": bounded_items,
         }
 
@@ -3043,6 +3106,28 @@ class CodeCloneMCPService:
             "warnings": list(warnings),
             "failures": list(failures),
         }
+
+    def _summary_payload(
+        self,
+        summary: Mapping[str, object],
+    ) -> dict[str, object]:
+        payload = dict(summary)
+        inventory = self._as_mapping(payload.get("inventory"))
+        if inventory:
+            payload["inventory"] = self._slim_inventory(inventory)
+        return payload
+
+    def _slim_inventory(
+        self,
+        inventory: Mapping[str, object],
+    ) -> dict[str, object]:
+        slim_inventory = dict(inventory)
+        registry = self._as_mapping(slim_inventory.get("file_registry"))
+        slim_inventory["file_registry"] = {
+            "encoding": registry.get("encoding", "relative_path"),
+            "count": len(self._as_sequence(registry.get("items"))),
+        }
+        return slim_inventory
 
     def _metrics_diff_payload(
         self,
