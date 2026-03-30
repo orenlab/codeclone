@@ -14,9 +14,11 @@ from typing import cast
 import pytest
 
 import codeclone.report as report_mod
+import codeclone.report.findings as report_findings_mod
 import codeclone.report.merge as merge_mod
 import codeclone.report.overview as overview_mod
 import codeclone.report.serialize as serialize_mod
+from codeclone._html_snippets import _FileCache
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.models import (
     StructuralFindingGroup,
@@ -1645,6 +1647,81 @@ def test_report_overview_serialize_finding_group_card_covers_families() -> None:
     assert dependency_card["title"] == "Break circular dependency"
     assert dependency_card["summary"] == "3 modules participate in this cycle"
     assert dependency_card["location"] == "pkg.a -> pkg.b -> pkg.c"
+
+    fallback_dependency_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "design",
+            "category": "dependency",
+            "severity": "warning",
+            "confidence": "medium",
+            "count": 2,
+            "source_scope": {"dominant_kind": "production"},
+            "spread": {"files": 2, "functions": 0},
+            "items": [{"module": ""}],
+            "facts": {},
+        }
+    )
+    assert (
+        fallback_dependency_card["location"]
+        == "2 occurrences across 2 files / 0 functions"
+    )
+
+    unknown_design_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "design",
+            "category": "unknown",
+            "severity": "info",
+            "confidence": "low",
+            "count": 1,
+            "source_scope": {"dominant_kind": "other"},
+            "spread": {"files": 1, "functions": 1},
+            "items": [{"relative_path": "pkg/mod.py", "start_line": 1, "end_line": 1}],
+            "facts": {},
+        }
+    )
+    assert unknown_design_card["title"] == "Finding"
+    assert unknown_design_card["summary"] == ""
+
+
+def test_report_findings_template_html_covers_custom_kind_fallback(
+    tmp_path: Path,
+) -> None:
+    snippet_path = tmp_path / "custom.py"
+    snippet_path.write_text("value = 1\nvalue = 2\n", encoding="utf-8")
+    items = (
+        StructuralFindingOccurrence(
+            finding_kind="custom_kind",
+            finding_key="custom:1",
+            file_path=str(snippet_path),
+            qualname="pkg.mod:fn",
+            start=1,
+            end=1,
+            signature={"stmt_seq": "Assign", "terminal": "fallthrough"},
+        ),
+        StructuralFindingOccurrence(
+            finding_kind="custom_kind",
+            finding_key="custom:1",
+            file_path=str(snippet_path),
+            qualname="pkg.mod:fn",
+            start=2,
+            end=2,
+            signature={"stmt_seq": "Assign", "terminal": "fallthrough"},
+        ),
+    )
+    html = report_findings_mod._finding_why_template_html(
+        StructuralFindingGroup(
+            finding_kind="custom_kind",
+            finding_key="custom:1",
+            signature={"stmt_seq": "Assign", "terminal": "fallthrough"},
+            items=items,
+        ),
+        items,
+        file_cache=_FileCache(),
+        context_lines=0,
+        max_snippet_lines=10,
+    )
+    assert "structurally matching branch bodies" in html
+    assert "Showing the first 2 matching branches" in html
 
 
 def test_report_overview_materialize_preserves_existing_cards_and_breakdown() -> None:

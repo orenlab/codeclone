@@ -12,10 +12,12 @@ import webbrowser
 from argparse import Namespace
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
+import codeclone._cli_meta as cli_meta_mod
 import codeclone._cli_reports as cli_reports
 import codeclone._cli_summary as cli_summary
 import codeclone.baseline as baseline_mod
@@ -26,6 +28,7 @@ from codeclone import __version__
 from codeclone import ui_messages as ui
 from codeclone._cli_args import build_parser
 from codeclone._cli_config import ConfigValidationError
+from codeclone.cache import Cache
 from codeclone.cli import process_file
 from codeclone.contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
 from codeclone.errors import BaselineValidationError
@@ -251,6 +254,16 @@ def test_open_html_report_in_browser_raises_without_handler(
         cli_reports._open_html_report_in_browser(path=report_path)
 
 
+def test_open_html_report_in_browser_succeeds_when_handler_exists(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "report.html"
+    report_path.write_text("<html></html>", encoding="utf-8")
+    monkeypatch.setattr(webbrowser, "open_new_tab", lambda _uri: True)
+    cli_reports._open_html_report_in_browser(path=report_path)
+
+
 def test_cli_plain_console_status_context() -> None:
     plain = cli._make_plain_console()
     with plain.status("noop"):
@@ -358,6 +371,18 @@ def test_validate_changed_scope_args_promotes_paths_from_git_diff() -> None:
     assert args.changed_only is True
 
 
+def test_validate_changed_scope_args_rejects_conflicting_diff_sources() -> None:
+    cli.console = cli._make_console(no_color=True)
+    args = Namespace(
+        changed_only=True,
+        diff_against="HEAD~1",
+        paths_from_git_diff="HEAD~2",
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli._validate_changed_scope_args(args=args)
+    assert exc.value.code == 2
+
+
 def test_normalize_changed_paths_relativizes_dedupes_and_sorts(tmp_path: Path) -> None:
     root_path = tmp_path.resolve()
     pkg_dir = root_path / "pkg"
@@ -371,6 +396,26 @@ def test_normalize_changed_paths_relativizes_dedupes_and_sorts(tmp_path: Path) -
         root_path=root_path,
         paths=("pkg/b.py", str(second), " pkg/b.py ", ""),
     ) == ("pkg/a.py", "pkg/b.py")
+
+
+def test_normalize_changed_paths_skips_empty_relative_results(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root_path = tmp_path.resolve()
+    candidate = root_path / "marker.py"
+    candidate.write_text("pass\n", encoding="utf-8")
+    original_relative_to = Path.relative_to
+
+    def _fake_relative_to(self: Path, *other: str | Path) -> Path:
+        if self == candidate:
+            return Path("/")
+        return original_relative_to(self, *other)
+
+    monkeypatch.setattr(Path, "relative_to", _fake_relative_to)
+    assert (
+        cli._normalize_changed_paths(root_path=root_path, paths=(str(candidate),)) == ()
+    )
 
 
 def test_normalize_changed_paths_reports_unresolvable_path(
@@ -442,6 +487,25 @@ def test_git_diff_changed_paths_reports_subprocess_errors(
     assert exc.value.code == 2
 
 
+def test_git_diff_changed_paths_rejects_option_like_ref(tmp_path: Path) -> None:
+    cli.console = cli._make_console(no_color=True)
+    with pytest.raises(SystemExit) as exc:
+        cli._git_diff_changed_paths(
+            root_path=tmp_path.resolve(), git_diff_ref="--cached"
+        )
+    assert exc.value.code == 2
+
+
+def test_report_path_origins_ignores_unrelated_equals_tokens() -> None:
+    assert cli._report_path_origins(("--unknown=value", "--json=out.json")) == {
+        "html": None,
+        "json": "explicit",
+        "md": None,
+        "sarif": None,
+        "text": None,
+    }
+
+
 def test_changed_clone_gate_from_report_filters_changed_scope() -> None:
     gate = cli._changed_clone_gate_from_report(
         {
@@ -501,6 +565,68 @@ def test_changed_clone_gate_from_report_filters_changed_scope() -> None:
     assert gate.findings_known == 1
 
 
+def test_run_analysis_stages_requires_rich_console_when_progress_ui_is_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cli.console = cli._make_plain_console()
+    monkeypatch.setattr(
+        cli,
+        "discover",
+        lambda **_kwargs: SimpleNamespace(
+            skipped_warnings=(), files_to_process=("x.py",)
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Rich console is required"):
+        cli._run_analysis_stages(
+            args=Namespace(quiet=False, no_progress=False),
+            boot=cast(Any, object()),
+            cache=Cache(tmp_path / "cache.json"),
+        )
+
+
+def test_run_analysis_stages_prints_source_read_failures_when_failed_files_are_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cli.console = cli._make_plain_console()
+    printed: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        cli,
+        "_print_failed_files",
+        lambda failures: printed.append(tuple(failures)),
+    )
+    monkeypatch.setattr(
+        cli,
+        "discover",
+        lambda **_kwargs: SimpleNamespace(skipped_warnings=(), files_to_process=()),
+    )
+    monkeypatch.setattr(
+        cli,
+        "process",
+        lambda **_kwargs: SimpleNamespace(
+            failed_files=(),
+            source_read_failures=("pkg/mod.py: unreadable",),
+        ),
+    )
+    monkeypatch.setattr(cli, "analyze", lambda **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        cli,
+        "_cache_update_segment_projection",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(Cache, "save", lambda self: None)
+
+    cli._run_analysis_stages(
+        args=Namespace(quiet=False, no_progress=True),
+        boot=cast(Any, object()),
+        cache=Cache(tmp_path / "cache.json"),
+    )
+
+    assert printed == [(), ("pkg/mod.py: unreadable",)]
+
+
 def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -545,6 +671,166 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
         ("clone_groups_total", 2),
         ("clone_groups_limit", 1),
     )
+
+
+def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cli.console = cli._make_console(no_color=True)
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        cli,
+        "gate",
+        lambda **_kwargs: pipeline.GatingResult(
+            exit_code=3,
+            reasons=("clone:threshold:8:1",),
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_print_gating_failure_block",
+        lambda **kwargs: observed.update(kwargs),
+    )
+
+    cli._enforce_gating(
+        args=Namespace(fail_threshold=5, verbose=False),
+        boot=cast("pipeline.BootstrapResult", object()),
+        analysis=cast("pipeline.AnalysisResult", object()),
+        processing=cast(Any, Namespace(source_read_failures=[])),
+        source_read_contract_failure=False,
+        baseline_failure_code=None,
+        metrics_baseline_failure_code=None,
+        new_func=set(),
+        new_block=set(),
+        metrics_diff=None,
+        html_report_path=None,
+        clone_threshold_total=2,
+    )
+
+    assert observed == {}
+
+
+def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    metrics_path = tmp_path / "metrics.json"
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "codeclone",
+            str(tmp_path),
+            "--quiet",
+            "--changed-only",
+            "--diff-against",
+            "HEAD~1",
+            "--baseline",
+            str(baseline_path),
+            "--metrics-baseline",
+            str(metrics_path),
+            "--cache-path",
+            str(cache_path),
+        ],
+    )
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(cli, "load_pyproject_config", lambda _root: {})
+    monkeypatch.setattr(
+        cli,
+        "apply_pyproject_config_overrides",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_git_diff_changed_paths",
+        lambda **_kwargs: ("pkg/dup.py",),
+    )
+    monkeypatch.setattr(cli, "_validate_report_ui_flags", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "bootstrap", lambda **_kwargs: cast(Any, object()))
+    monkeypatch.setattr(
+        cli,
+        "_run_analysis_stages",
+        lambda **_kwargs: (
+            SimpleNamespace(files_found=1, cache_hits=0),
+            SimpleNamespace(
+                files_analyzed=1,
+                files_skipped=0,
+                analyzed_lines=10,
+                analyzed_functions=1,
+                analyzed_methods=0,
+                analyzed_classes=0,
+                source_read_failures=(),
+            ),
+            SimpleNamespace(
+                func_groups={},
+                block_groups={},
+                func_clones_count=0,
+                block_clones_count=0,
+                segment_clones_count=0,
+                suppressed_segment_groups=0,
+                project_metrics=None,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_resolve_clone_baseline_state",
+        lambda **_kwargs: SimpleNamespace(
+            baseline=baseline_mod.Baseline(baseline_path),
+            loaded=False,
+            status=baseline_mod.BaselineStatus.MISSING,
+            trusted_for_diff=False,
+            updated_path=None,
+            failure_code=None,
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_resolve_metrics_baseline_state",
+        lambda **_kwargs: SimpleNamespace(
+            baseline=metrics_baseline_mod.MetricsBaseline(metrics_path),
+            loaded=False,
+            status=metrics_baseline_mod.MetricsBaselineStatus.MISSING,
+            trusted_for_diff=False,
+            failure_code=None,
+        ),
+    )
+    monkeypatch.setattr(cli_meta_mod, "_build_report_meta", lambda **_kwargs: {})
+    monkeypatch.setattr(cli, "_print_summary", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        cli, "report", lambda **_kwargs: SimpleNamespace(report_document={})
+    )
+    monkeypatch.setattr(
+        cli,
+        "_changed_clone_gate_from_report",
+        lambda _report, changed_paths: cli.ChangedCloneGate(
+            changed_paths=tuple(changed_paths),
+            new_func=frozenset(),
+            new_block=frozenset(),
+            total_clone_groups=0,
+            findings_total=3,
+            findings_new=1,
+            findings_known=2,
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_print_changed_scope",
+        lambda **kwargs: observed.update(kwargs),
+    )
+    monkeypatch.setattr(cli, "_write_report_outputs", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "_enforce_gating", lambda **_kwargs: None)
+
+    cli._main_impl()
+
+    changed_scope = cast(Any, observed["changed_scope"])
+    assert observed["quiet"] is True
+    assert changed_scope.paths_count == 1
+    assert changed_scope.findings_total == 3
 
 
 def test_make_console_caps_width_to_layout_limit(

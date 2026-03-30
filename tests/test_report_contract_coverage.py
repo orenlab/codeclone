@@ -65,6 +65,12 @@ from codeclone.report.sarif import (
     _partial_fingerprints as _sarif_partial_fingerprints,
 )
 from codeclone.report.sarif import (
+    _primary_location_properties as _sarif_primary_location_properties,
+)
+from codeclone.report.sarif import (
+    _result_entry as _sarif_result_entry,
+)
+from codeclone.report.sarif import (
     _result_message as _sarif_result_message,
 )
 from codeclone.report.sarif import (
@@ -88,6 +94,7 @@ from codeclone.report.sarif import (
     _text as _sarif_text,
 )
 from codeclone.report.serialize import (
+    _append_clone_section,
     _append_single_item_findings,
     _append_structural_findings,
     _append_suggestions,
@@ -1597,6 +1604,33 @@ def test_serialize_private_helpers_cover_structural_and_suppression_paths() -> N
     assert any("... and 1 more occurrences" in line for line in structural_lines)
     assert structural_lines[-1] != ""
 
+    clone_lines: list[str] = []
+    _append_clone_section(
+        clone_lines,
+        title="FUNCTION CLONES",
+        groups=[
+            {
+                "id": "clone:function:1",
+                "novelty": "new",
+                "clone_type": "Type-2",
+                "severity": "warning",
+                "count": 1,
+                "spread": {"files": 1, "functions": 1},
+                "source_scope": {
+                    "dominant_kind": "production",
+                    "impact_scope": "runtime",
+                },
+                "items": [],
+            }
+        ],
+        novelty="new",
+        metric_name="cyclomatic_complexity",
+    )
+    assert clone_lines[0] == "FUNCTION CLONES (NEW) (groups=1)"
+    assert not any(line.startswith("facts: ") for line in clone_lines)
+    assert not any(line.startswith("display_facts: ") for line in clone_lines)
+    assert clone_lines[-1] != ""
+
     finding_lines: list[str] = []
     _append_single_item_findings(
         finding_lines,
@@ -1664,6 +1698,136 @@ def test_serialize_private_helpers_cover_structural_and_suppression_paths() -> N
         ],
     )
     assert any("suppressed_by=(none)" in line for line in suppressed_none_lines)
+
+
+def test_sarif_and_serialize_helpers_cover_missing_primary_path_and_no_empty_tail() -> (
+    None
+):
+    assert _sarif_primary_location_properties(
+        {"qualname": "pkg.mod:fn", "start_line": 3, "end_line": 4}
+    ) == {
+        "primaryQualname": "pkg.mod:fn",
+        "primaryRegion": "3-4",
+    }
+    result = _sarif_result_entry(
+        group={"id": "clone:function:1", "severity": "warning", "items": []},
+        rule_id="codeclone.clone.function",
+        rule_index=0,
+        artifact_index_map={},
+        use_uri_base_id=False,
+    )
+    assert result["locations"] == []
+    assert "primaryPath" not in cast(dict[str, object], result["properties"])
+
+    class _NoEmptyList(list[str]):
+        def append(self, item: str) -> None:
+            if item != "":
+                super().append(item)
+
+    clone_lines: list[str] = _NoEmptyList()
+    _append_clone_section(
+        clone_lines,
+        title="BLOCK CLONES",
+        groups=[
+            {
+                "id": "clone:block:1",
+                "novelty": "known",
+                "clone_type": "Type-4",
+                "severity": "warning",
+                "count": 1,
+                "spread": {"files": 1, "functions": 1},
+                "source_scope": {
+                    "dominant_kind": "production",
+                    "impact_scope": "runtime",
+                },
+                "items": [
+                    {
+                        "qualname": "pkg.mod:fn",
+                        "relative_path": "pkg/mod.py",
+                        "start_line": 1,
+                        "end_line": 2,
+                    }
+                ],
+            }
+        ],
+        novelty="known",
+        metric_name="cyclomatic_complexity",
+    )
+    assert clone_lines[-1].startswith("- pkg.mod:fn")
+
+    structural_lines: list[str] = _NoEmptyList()
+    _append_structural_findings(
+        structural_lines,
+        [
+            {
+                "id": "structural:custom:2",
+                "kind": "custom_kind",
+                "severity": "info",
+                "confidence": "low",
+                "count": 1,
+                "spread": {"files": 1, "functions": 1},
+                "source_scope": {
+                    "dominant_kind": "production",
+                    "impact_scope": "runtime",
+                },
+                "signature": {"stable": {"family": "custom", "control_flow": {}}},
+                "items": [
+                    {
+                        "qualname": "pkg.mod:fn",
+                        "relative_path": "pkg/mod.py",
+                        "start_line": 1,
+                        "end_line": 1,
+                    }
+                ],
+            }
+        ],
+    )
+    assert structural_lines[-1].startswith("- pkg.mod:fn")
+
+    finding_lines: list[str] = _NoEmptyList()
+    _append_single_item_findings(
+        finding_lines,
+        title="DESIGN FINDINGS",
+        groups=[
+            {
+                "id": "design:coupling:pkg.mod:fn",
+                "category": "coupling",
+                "kind": "class_hotspot",
+                "severity": "warning",
+                "confidence": "medium",
+                "source_scope": {
+                    "dominant_kind": "production",
+                    "impact_scope": "runtime",
+                },
+                "items": [
+                    {
+                        "qualname": "pkg.mod:fn",
+                        "relative_path": "pkg/mod.py",
+                        "start_line": 10,
+                        "end_line": 11,
+                    }
+                ],
+            }
+        ],
+        fact_keys=("cbo",),
+    )
+    assert finding_lines[-1].startswith("- pkg.mod:fn")
+
+    suppressed_lines: list[str] = _NoEmptyList()
+    _append_suppressed_dead_code_items(
+        suppressed_lines,
+        items=[
+            {
+                "kind": "function",
+                "confidence": "high",
+                "relative_path": "pkg/mod.py",
+                "qualname": "pkg.mod:keep",
+                "start_line": 12,
+                "end_line": 13,
+            }
+        ],
+    )
+    assert suppressed_lines[-1].startswith("- pkg.mod:keep")
 
     suggestion_lines: list[str] = []
     _append_suggestions(

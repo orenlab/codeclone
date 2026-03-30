@@ -2118,6 +2118,10 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
     }
     with pytest.raises(MCPServiceContractError):
         service.get_report_section(run_id="helpers", section="metrics_detail")
+    with pytest.raises(MCPServiceContractError):
+        service.get_report_section(run_id="helpers", section="findings")
+
+    assert service._summary_payload({"inventory": {}}) == {"inventory": {}}
 
     assert service._suggestion_for_finding(record, "missing") is None
     assert (

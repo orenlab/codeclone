@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.0b3]
 
 ### Licensing
 
@@ -9,8 +9,6 @@
 ### Packaging
 
 - Ship both `LICENSE` and `LICENSE-docs`, update package metadata, and sync file-level SPDX headers.
-
-## [2.0.0b3]
 
 ### MCP server
 

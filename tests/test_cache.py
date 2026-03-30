@@ -1277,6 +1277,73 @@ def test_decode_wire_file_entry_optional_source_stats() -> None:
     )
 
 
+def test_cache_helpers_cover_invalid_analysis_profile_and_source_stats_shapes() -> None:
+    assert (
+        cache_mod._decode_wire_qualname_span_size(["pkg.mod:fn", 1, 2, "bad"]) is None
+    )
+    assert cache_mod._decode_wire_qualname_span_size([None, 1, 2, 4]) is None
+    assert (
+        cache_mod._as_analysis_profile(
+            {
+                "min_loc": 1,
+                "min_stmt": 1,
+                "block_min_loc": 2,
+                "block_min_stmt": "bad",
+                "segment_min_loc": 3,
+                "segment_min_stmt": 4,
+            }
+        )
+        is None
+    )
+    assert (
+        cache_mod._decode_optional_wire_source_stats(obj={"ss": [1, 2, "bad", 0]})
+        is None
+    )
+
+
+def test_canonicalize_cache_entry_skips_invalid_dead_candidate_suppression_shape() -> (
+    None
+):
+    normalized = cache_mod._canonicalize_cache_entry(
+        cast(
+            Any,
+            {
+                "stat": {"mtime_ns": 1, "size": 2},
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "class_metrics": [],
+                "module_deps": [],
+                "dead_candidates": [
+                    {
+                        "qualname": "pkg.mod:unused",
+                        "local_name": "unused",
+                        "filepath": "pkg/mod.py",
+                        "start_line": 1,
+                        "end_line": 2,
+                        "kind": "function",
+                        "suppressed_rules": "dead-code",
+                    }
+                ],
+                "referenced_names": [],
+                "referenced_qualnames": [],
+                "import_names": [],
+                "class_names": [],
+            },
+        )
+    )
+    assert normalized["dead_candidates"] == [
+        {
+            "qualname": "pkg.mod:unused",
+            "local_name": "unused",
+            "filepath": "pkg/mod.py",
+            "start_line": 1,
+            "end_line": 2,
+            "kind": "function",
+        }
+    ]
+
+
 def test_decode_optional_wire_coupled_classes_rejects_non_string_qualname() -> None:
     assert (
         cache_mod._decode_optional_wire_coupled_classes(
@@ -1562,6 +1629,18 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
     assert cache_mod._is_class_metrics_dict([]) is False
     assert cache_mod._is_module_dep_dict([]) is False
     assert cache_mod._is_dead_candidate_dict([]) is False
+    assert (
+        cache_mod._is_dead_candidate_dict(
+            {
+                "qualname": "pkg.mod:broken",
+                "local_name": "broken",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 2,
+            }
+        )
+        is False
+    )
     assert (
         cache_mod._is_dead_candidate_dict(
             {

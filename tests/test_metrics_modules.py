@@ -103,6 +103,20 @@ async def worker(items, value):
     assert nesting_depth(func) == 4
 
 
+def test_nesting_depth_counts_if_else_branches() -> None:
+    func = _parse_function(
+        """
+def choose(flag):
+    if flag:
+        return 1
+    else:
+        return 2
+""".strip(),
+        "choose",
+    )
+    assert nesting_depth(func) == 1
+
+
 def test_iter_nested_statement_lists_try_and_empty_match() -> None:
     module = ast.parse(
         """

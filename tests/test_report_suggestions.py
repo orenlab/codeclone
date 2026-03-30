@@ -11,6 +11,8 @@ from codeclone.models import (
     DeadItem,
     HealthScore,
     ProjectMetrics,
+    StructuralFindingGroup,
+    StructuralFindingOccurrence,
 )
 from codeclone.report import suggestions as suggestions_mod
 from codeclone.report.suggestions import classify_clone_type, generate_suggestions
@@ -372,3 +374,38 @@ def test_generate_suggestions_uses_full_spread_for_group_location_label() -> Non
     assert (
         clone_suggestion.location_label == "4 occurrences across 4 files / 4 functions"
     )
+
+
+def test_structural_suggestions_raise_clone_cohort_drift_to_warning() -> None:
+    suggestions = suggestions_mod._structural_suggestions(
+        (
+            StructuralFindingGroup(
+                finding_kind="clone_cohort_drift",
+                finding_key="structural:clone_cohort_drift:1",
+                signature={"cohort_id": "c1", "drift_fields": "terminal_kind"},
+                items=(
+                    StructuralFindingOccurrence(
+                        finding_kind="clone_cohort_drift",
+                        finding_key="structural:clone_cohort_drift:1",
+                        file_path="/repo/pkg/a.py",
+                        qualname="pkg.a:alpha",
+                        start=10,
+                        end=12,
+                        signature={"cohort_id": "c1"},
+                    ),
+                    StructuralFindingOccurrence(
+                        finding_kind="clone_cohort_drift",
+                        finding_key="structural:clone_cohort_drift:1",
+                        file_path="/repo/pkg/b.py",
+                        qualname="pkg.b:beta",
+                        start=20,
+                        end=22,
+                        signature={"cohort_id": "c1"},
+                    ),
+                ),
+            ),
+        ),
+        scan_root="/repo",
+    )
+    assert len(suggestions) == 1
+    assert suggestions[0].severity == "warning"

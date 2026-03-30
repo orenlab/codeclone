@@ -140,6 +140,75 @@ def test_declaration_token_index_uses_prebuilt_index() -> None:
     )
 
 
+def test_declaration_helpers_cover_async_found_tokens_and_eof_scan() -> None:
+    async_node = ast.parse(
+        """
+async def demo():
+    return 1
+"""
+    ).body[0]
+    assert isinstance(async_node, ast.AsyncFunctionDef)
+    assert extractor._declaration_token_name(async_node) == "async"
+
+    tokens = extractor._source_tokens("def demo():\n    return 1\n")
+    assert (
+        extractor._declaration_token_index(
+            source_tokens=tokens,
+            start_line=1,
+            start_col=0,
+            declaration_token="def",
+        )
+        == 0
+    )
+
+    nested_tokens = extractor._source_tokens(
+        "def demo(arg: tuple[int, int]) -> tuple[int, int]:\n    return arg\n"
+    )
+    assert (
+        extractor._scan_declaration_colon_line(
+            source_tokens=nested_tokens,
+            start_index=0,
+        )
+        == 1
+    )
+
+    default_tokens = extractor._source_tokens(
+        "def demo(arg=(1, [2])):\n    return arg\n"
+    )
+    assert (
+        extractor._scan_declaration_colon_line(
+            source_tokens=default_tokens,
+            start_index=0,
+        )
+        == 1
+    )
+
+    eof_tokens = (
+        tokenize.TokenInfo(tokenize.NAME, "def", (1, 0), (1, 3), "def demo("),
+        tokenize.TokenInfo(tokenize.NAME, "demo", (1, 4), (1, 8), "def demo("),
+        tokenize.TokenInfo(tokenize.OP, "(", (1, 8), (1, 9), "def demo("),
+    )
+    assert (
+        extractor._scan_declaration_colon_line(
+            source_tokens=eof_tokens,
+            start_index=0,
+        )
+        is None
+    )
+
+    unmatched_close_tokens = (
+        tokenize.TokenInfo(tokenize.NAME, "def", (1, 0), (1, 3), "def demo)"),
+        tokenize.TokenInfo(tokenize.OP, ")", (1, 8), (1, 9), "def demo)"),
+    )
+    assert (
+        extractor._scan_declaration_colon_line(
+            source_tokens=unmatched_close_tokens,
+            start_index=0,
+        )
+        is None
+    )
+
+
 def test_scan_declaration_colon_line_returns_none_when_header_is_incomplete() -> None:
     tokens = extractor._source_tokens("def broken\n")
     assert (
@@ -172,6 +241,40 @@ def broken():
     assert isinstance(node, ast.FunctionDef)
     node.lineno = 0
     assert extractor._declaration_end_line(node, source_tokens=()) == 0
+
+
+def test_declaration_fallback_helpers_cover_empty_and_same_line_bodies() -> None:
+    empty_body_node = ast.parse(
+        """
+def demo():
+    return 1
+"""
+    ).body[0]
+    assert isinstance(empty_body_node, ast.FunctionDef)
+    empty_body_node.body = []
+    assert extractor._fallback_declaration_end_line(empty_body_node, start_line=2) == 2
+
+    inline_body_node = ast.parse(
+        """
+def demo():
+    return 1
+"""
+    ).body[0]
+    assert isinstance(inline_body_node, ast.FunctionDef)
+    inline_body_node.body[0].lineno = 2
+    assert extractor._fallback_declaration_end_line(inline_body_node, start_line=2) == 2
+
+    no_colon_tokens = (
+        tokenize.TokenInfo(tokenize.NAME, "def", (2, 0), (2, 3), "def demo"),
+        tokenize.TokenInfo(tokenize.NAME, "demo", (2, 4), (2, 8), "def demo"),
+    )
+    assert (
+        extractor._declaration_end_line(
+            inline_body_node,
+            source_tokens=no_colon_tokens,
+        )
+        == 2
+    )
 
 
 def test_init_function_is_ignored_for_blocks() -> None:
@@ -832,6 +935,92 @@ handler = Service.hook
     assert "pkg.mod:Service.hook" in walk.referenced_qualnames
     assert "pkg.helpers:tools" in walk.referenced_qualnames
     assert "pkg.helpers:decorate" not in walk.referenced_qualnames
+
+
+def test_extractor_private_helper_branches_cover_invalid_protocol_and_declarations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expr = ast.Attribute(
+        value=ast.Call(
+            func=ast.Name(id="factory", ctx=ast.Load()),
+            args=[],
+            keywords=[],
+        ),
+        attr="method",
+        ctx=ast.Load(),
+    )
+    assert extractor._dotted_expr_name(expr) is None
+
+    protocol_class = ast.parse(
+        """
+class Demo(Unknown, alias.Protocol):
+    pass
+"""
+    ).body[0]
+    assert isinstance(protocol_class, ast.ClassDef)
+    assert (
+        extractor._is_protocol_class(
+            protocol_class,
+            protocol_symbol_aliases=frozenset({"Protocol"}),
+            protocol_module_aliases=frozenset({"typing"}),
+        )
+        is False
+    )
+
+    bad_span_node = ast.parse(
+        """
+def demo():
+    return 1
+"""
+    ).body[0]
+    assert isinstance(bad_span_node, ast.FunctionDef)
+    bad_span_node.lineno = 3
+    bad_span_node.end_lineno = 2
+    assert extractor._eligible_unit_shape(bad_span_node, min_loc=1, min_stmt=1) is None
+
+    _, missing_method_collector, missing_method_walk = _collect_module_walk(
+        """
+class Service:
+    def real(self) -> int:
+        return 1
+
+handler = Service.missing
+"""
+    )
+    assert "pkg.mod:Service.missing" not in missing_method_walk.referenced_qualnames
+    assert missing_method_collector.class_nodes[0][0] == "Service"
+
+    _, declaration_collector = _parse_tree_and_collector(
+        """
+class Demo:
+    def work(self) -> int:
+        return 1
+"""
+    )
+    declaration_collector.units[0][1].end_lineno = 0
+    declaration_collector.class_nodes[0][1].end_lineno = 0
+    assert (
+        extractor._collect_declaration_targets(
+            filepath="pkg/mod.py",
+            module_name="pkg.mod",
+            collector=declaration_collector,
+        )
+        == ()
+    )
+
+    suppression_source = """
+def demo():  # codeclone: ignore[dead-code]
+    return 1
+"""
+    _, suppression_collector = _parse_tree_and_collector(suppression_source)
+    monkeypatch.setattr(extractor, "_source_tokens", lambda _source: ())
+    suppression_index = extractor._build_suppression_index_for_source(
+        source=suppression_source,
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        collector=suppression_collector,
+    )
+    assert tuple(suppression_index.values()) == (("dead-code",),)
 
 
 def test_extract_stats_drops_referenced_names_for_test_filepaths() -> None:

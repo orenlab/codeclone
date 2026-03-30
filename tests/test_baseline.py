@@ -7,6 +7,7 @@
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -223,6 +224,16 @@ def test_baseline_load_legacy_payload(tmp_path: Path) -> None:
     with pytest.raises(BaselineValidationError, match="legacy") as exc:
         baseline.load()
     assert exc.value.status == "missing_fields"
+
+
+def test_baseline_load_rejects_non_object_preloaded_payload(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    _write_payload(baseline_path, _trusted_payload())
+    baseline = Baseline(baseline_path)
+
+    with pytest.raises(BaselineValidationError, match="must be an object") as exc:
+        baseline.load(preloaded_payload=cast(Any, []))
+    assert exc.value.status == "invalid_type"
 
 
 def test_baseline_load_missing_top_level_key(tmp_path: Path) -> None:
@@ -784,6 +795,25 @@ def test_baseline_safe_stat_size_oserror(
     assert exc.value.status == "invalid_type"
 
 
+def test_baseline_atomic_write_json_cleans_up_temp_file_on_replace_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "baseline.json"
+    temp_holder: dict[str, Path] = {}
+
+    def _boom_replace(src: str | Path, dst: str | Path) -> None:
+        temp_holder["path"] = Path(src)
+        raise OSError("replace failed")
+
+    monkeypatch.setattr("codeclone.baseline.os.replace", _boom_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        baseline_mod._atomic_write_json(path, _trusted_payload())
+
+    assert temp_holder["path"].exists() is False
+
+
 def test_baseline_load_json_read_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -813,6 +843,22 @@ def test_baseline_optional_str_paths(tmp_path: Path) -> None:
         baseline_mod._optional_str(
             {"generator_version": 1},
             "generator_version",
+            path=path,
+        )
+    assert exc.value.status == "invalid_type"
+
+
+def test_baseline_require_utc_iso8601_z_rejects_invalid_calendar_date(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "baseline.json"
+    with pytest.raises(
+        BaselineValidationError,
+        match="'created_at' must be UTC ISO-8601 with Z",
+    ) as exc:
+        baseline_mod._require_utc_iso8601_z(
+            {"created_at": "2026-02-31T00:00:00Z"},
+            "created_at",
             path=path,
         )
     assert exc.value.status == "invalid_type"
