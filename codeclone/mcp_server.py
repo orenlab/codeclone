@@ -113,7 +113,8 @@ def build_mcp_server(
         title="Analyze Repository",
         description=(
             "Run a deterministic CodeClone analysis for a repository and register "
-            "the result as the latest MCP run."
+            "the result as the latest MCP run. Tip: set cache_policy='off' to "
+            "bypass cache and get fully fresh results."
         ),
         annotations=session_tool,
         structured_output=True,
@@ -171,7 +172,8 @@ def build_mcp_server(
         title="Analyze Changed Paths",
         description=(
             "Run a deterministic CodeClone analysis and return a changed-files "
-            "projection using explicit paths or a git diff ref."
+            "projection using explicit paths or a git diff ref. Tip: set "
+            "cache_policy='off' to bypass cache and get fully fresh results."
         ),
         annotations=session_tool,
         structured_output=True,
@@ -233,6 +235,27 @@ def build_mcp_server(
     )
     def get_run_summary(run_id: str | None = None) -> dict[str, object]:
         return service.get_run_summary(run_id)
+
+    @tool(
+        title="Get Production Triage",
+        description=(
+            "Return a production-first triage view over a stored run: health, "
+            "effective cache freshness, production hotspots, and production "
+            "suggestions, while keeping global source-kind counters visible."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_production_triage(
+        run_id: str | None = None,
+        max_hotspots: int = 3,
+        max_suggestions: int = 3,
+    ) -> dict[str, object]:
+        return service.get_production_triage(
+            run_id=run_id,
+            max_hotspots=max_hotspots,
+            max_suggestions=max_suggestions,
+        )
 
     @tool(
         title="Evaluate Gates",
@@ -642,6 +665,15 @@ def build_mcp_server(
     )
     def latest_changed_resource() -> str:
         return service.read_resource("codeclone://latest/changed")
+
+    @resource(
+        "codeclone://latest/triage",
+        title="Latest Production Triage",
+        description=("Production-first triage view for the latest CodeClone MCP run."),
+        mime_type="application/json",
+    )
+    def latest_triage_resource() -> str:
+        return service.read_resource("codeclone://latest/triage")
 
     @resource(
         "codeclone://schema",

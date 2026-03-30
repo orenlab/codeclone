@@ -21,7 +21,7 @@ Current contract versions:
 - `BASELINE_SCHEMA_VERSION = "2.0"`
 - `BASELINE_FINGERPRINT_VERSION = "1"`
 - `CACHE_VERSION = "2.3"`
-- `REPORT_SCHEMA_VERSION = "2.1"`
+- `REPORT_SCHEMA_VERSION = "2.2"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.0"` (standalone metrics-baseline file)
 
 Refs:
@@ -49,6 +49,14 @@ Version bump rules:
 - The same rule applies to finding-level MCP projection changes such as
   envelope-level `base_uri`, slim summary locations, or omitting
   `priority_factors` outside `detail_level="full"`.
+- Additive MCP-only convenience fields/projections such as
+  `cache.effective_freshness` or production-first triage also do not change
+  `report_schema_version` when they are derived from unchanged canonical report
+  and summary data.
+- Canonical report changes such as `meta.analysis_thresholds.design_findings`
+  or threshold-aware design finding materialization do change
+  `report_schema_version` because they alter canonical report semantics and
+  integrity payload.
 
 Baseline compatibility rules:
 
@@ -96,8 +104,8 @@ Refs:
 
 ## Locked by tests
 
-- `tests/test_baseline.py::test_baseline_verify_schema_too_new`
-- `tests/test_baseline.py::test_baseline_verify_schema_major_mismatch`
+- `tests/test_baseline.py::test_baseline_verify_schema_incompatibilities[schema_too_new]`
+- `tests/test_baseline.py::test_baseline_verify_schema_incompatibilities[schema_major_mismatch]`
 - `tests/test_baseline.py::test_baseline_verify_fingerprint_mismatch`
 - `tests/test_cache.py::test_cache_v_field_version_mismatch_warns`
 - `tests/test_report.py::test_report_json_compact_v21_contract`

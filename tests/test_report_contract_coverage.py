@@ -15,6 +15,7 @@ import pytest
 
 import codeclone.report.json_contract as json_contract_mod
 from codeclone import _coerce
+from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import (
     ReportLocation,
     StructuralFindingGroup,
@@ -489,6 +490,69 @@ def test_report_document_rich_invariants_and_renderers() -> None:
     design_groups = cast(list[dict[str, object]], design)
     categories = {str(item["category"]) for item in design_groups}
     assert {"complexity", "coupling", "cohesion", "dependency"}.issubset(categories)
+    design_thresholds = cast(
+        "dict[str, dict[str, object]]",
+        cast(
+            "dict[str, object]",
+            cast("dict[str, object]", payload["meta"])["analysis_thresholds"],
+        )["design_findings"],
+    )
+    assert design_thresholds["complexity"] == {
+        "metric": "cyclomatic_complexity",
+        "operator": ">",
+        "value": 20,
+    }
+    assert design_thresholds["coupling"] == {
+        "metric": "cbo",
+        "operator": ">",
+        "value": 10,
+    }
+    assert design_thresholds["cohesion"] == {
+        "metric": "lcom4",
+        "operator": ">=",
+        "value": 4,
+    }
+    directory_hotspots = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", payload["derived"])["overview"],
+    )["directory_hotspots"]
+    hotspot_buckets = cast("dict[str, object]", directory_hotspots)
+    assert set(hotspot_buckets) == {
+        "all",
+        "clones",
+        "structural",
+        "complexity",
+        "cohesion",
+        "coupling",
+        "dead_code",
+        "dependency",
+    }
+    all_rows = cast(
+        "list[dict[str, object]]",
+        cast("dict[str, object]", hotspot_buckets["all"])["items"],
+    )
+    assert {
+        "path": all_rows[0]["path"],
+        "finding_groups": all_rows[0]["finding_groups"],
+        "affected_items": all_rows[0]["affected_items"],
+        "files": all_rows[0]["files"],
+        "share_pct": all_rows[0]["share_pct"],
+    } == {
+        "path": "codeclone",
+        "finding_groups": 9,
+        "affected_items": 11,
+        "files": 3,
+        "share_pct": 68.8,
+    }
+    assert cast("dict[str, int]", all_rows[0]["kind_breakdown"]) == {
+        "clones": 3,
+        "structural": 1,
+        "dead_code": 1,
+        "complexity": 2,
+        "coupling": 1,
+        "cohesion": 1,
+        "dependency": 0,
+    }
 
     clones = cast(dict[str, object], groups["clones"])
     block_groups = cast(list[dict[str, object]], clones["blocks"])
@@ -512,6 +576,158 @@ def test_report_document_rich_invariants_and_renderers() -> None:
     assert any("relatedLocations" in result for result in run["results"])
     assert any("baselineState" in result for result in run["results"])
     assert all("help" in rule for rule in run["tool"]["driver"]["rules"])
+
+
+def test_report_document_design_thresholds_can_change_canonical_findings() -> None:
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={
+            "scan_root": "/repo/project",
+            "design_complexity_threshold": 30,
+            "design_coupling_threshold": 12,
+            "design_cohesion_threshold": 5,
+        },
+        metrics={
+            "complexity": {
+                "functions": [
+                    {
+                        "qualname": "pkg.mod:hot",
+                        "filepath": "/repo/project/pkg/mod.py",
+                        "start_line": 10,
+                        "end_line": 20,
+                        "cyclomatic_complexity": 25,
+                        "nesting_depth": 3,
+                        "risk": "medium",
+                    }
+                ]
+            },
+            "coupling": {
+                "classes": [
+                    {
+                        "qualname": "pkg.mod:Service",
+                        "filepath": "/repo/project/pkg/mod.py",
+                        "start_line": 30,
+                        "end_line": 60,
+                        "cbo": 11,
+                        "risk": "high",
+                        "coupled_classes": ["A", "B"],
+                    }
+                ]
+            },
+            "cohesion": {
+                "classes": [
+                    {
+                        "qualname": "pkg.mod:Service",
+                        "filepath": "/repo/project/pkg/mod.py",
+                        "start_line": 30,
+                        "end_line": 60,
+                        "lcom4": 4,
+                        "risk": "high",
+                        "method_count": 4,
+                        "instance_var_count": 1,
+                    }
+                ]
+            },
+            "dependencies": {
+                "cycles": [["pkg.alpha", "pkg.beta"]],
+            },
+        },
+    )
+    finding_groups = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", payload["findings"])["groups"],
+    )
+    design_groups = cast(
+        "list[dict[str, object]]",
+        cast("dict[str, object]", finding_groups["design"])["groups"],
+    )
+    assert [str(group["category"]) for group in design_groups] == ["dependency"]
+    thresholds = cast(
+        "dict[str, dict[str, object]]",
+        cast(
+            "dict[str, object]",
+            cast("dict[str, object]", payload["meta"])["analysis_thresholds"],
+        )["design_findings"],
+    )
+    assert thresholds["complexity"]["value"] == 30
+    assert thresholds["coupling"]["value"] == 12
+    assert thresholds["cohesion"]["value"] == 5
+
+
+def test_directory_hotspots_has_more_root_paths_and_stable_sort() -> None:
+    findings = {
+        "groups": {
+            "clones": {
+                "functions": [
+                    {
+                        "id": "clone:function:g1",
+                        "family": "clone",
+                        "category": "function",
+                        "items": [
+                            {"relative_path": "a.py"},
+                            {"relative_path": "a.py"},
+                        ],
+                    }
+                ],
+                "blocks": [],
+                "segments": [],
+            },
+            "structural": {"groups": []},
+            "dead_code": {
+                "groups": [
+                    {
+                        "id": f"dead:{index}",
+                        "family": "dead_code",
+                        "category": "function",
+                        "items": [
+                            {"relative_path": f"dir{index}/mod.py"},
+                        ],
+                    }
+                    for index in (5, 3, 1, 4, 2, 6)
+                ]
+            },
+            "design": {"groups": []},
+        }
+    }
+
+    hotspots = overview_mod.build_directory_hotspots(findings=findings)
+    clone_rows = cast(
+        "list[dict[str, object]]",
+        cast("dict[str, object]", hotspots["clones"])["items"],
+    )
+    assert clone_rows == [
+        {
+            "path": ".",
+            "finding_groups": 1,
+            "affected_items": 2,
+            "files": 1,
+            "share_pct": 100.0,
+            "source_scope": {
+                "dominant_kind": "production",
+                "breakdown": {
+                    "production": 2,
+                    "tests": 0,
+                    "fixtures": 0,
+                    "other": 0,
+                },
+                "impact_scope": "runtime",
+            },
+        }
+    ]
+    dead_code_bucket = cast("dict[str, object]", hotspots["dead_code"])
+    dead_code_rows = cast("list[dict[str, object]]", dead_code_bucket["items"])
+    assert dead_code_bucket["total_directories"] == 6
+    assert dead_code_bucket["returned"] == 5
+    assert dead_code_bucket["has_more"] is True
+    assert [str(row["path"]) for row in dead_code_rows] == [
+        "dir1",
+        "dir2",
+        "dir3",
+        "dir4",
+        "dir5",
+    ]
 
 
 def test_markdown_and_sarif_reuse_prebuilt_report_document() -> None:
@@ -1278,7 +1494,7 @@ def test_sarif_private_helper_edge_branches(
 
 def test_render_sarif_report_document_without_srcroot_keeps_relative_payload() -> None:
     payload = {
-        "report_schema_version": "2.1",
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "meta": {
             "codeclone_version": "2.0.0b2",
             "analysis_mode": "ci",

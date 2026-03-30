@@ -825,6 +825,12 @@ def test_report_json_serializes_rich_suggestions_and_overview() -> None:
     overview = payload["derived"]["overview"]
     assert overview["families"]["clones"] == 0
     assert overview["source_scope_breakdown"] == {}
+    assert overview["directory_hotspots"]["all"] == {
+        "total_directories": 0,
+        "returned": 0,
+        "has_more": False,
+        "items": [],
+    }
     assert payload["derived"]["hotlists"]["most_actionable_ids"] == []
 
 

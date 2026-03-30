@@ -18,6 +18,7 @@ from typing import cast
 import pytest
 
 from codeclone import mcp_server
+from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.mcp_server import MCPDependencyError, build_mcp_server
 
 
@@ -29,6 +30,14 @@ def _structured_tool_result(result: object) -> dict[str, object]:
     payload = result[1]
     assert isinstance(payload, dict)
     return cast("dict[str, object]", payload)
+
+
+def _mapping_child(payload: Mapping[str, object], key: str) -> dict[str, object]:
+    return cast("dict[str, object]", payload[key])
+
+
+def _summary_registry(payload: Mapping[str, object]) -> dict[str, object]:
+    return _mapping_child(_mapping_child(payload, "inventory"), "file_registry")
 
 
 def _require_mcp_runtime() -> None:
@@ -100,6 +109,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "analyze_changed_paths",
         "clear_session_runs",
         "get_run_summary",
+        "get_production_triage",
         "evaluate_gates",
         "get_report_section",
         "list_findings",
@@ -127,6 +137,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "check_cohesion",
                 "check_dead_code",
                 "get_run_summary",
+                "get_production_triage",
                 "get_report_section",
                 "list_findings",
                 "get_finding",
@@ -139,6 +150,8 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         )
         assert tool.annotations.destructiveHint is False
         assert tool.annotations.idempotentHint is True
+    assert "cache_policy='off'" in str(tools["analyze_repository"].description)
+    assert "cache_policy='off'" in str(tools["analyze_changed_paths"].description)
     assert "Use analyze_repository first" in str(tools["check_complexity"].description)
     assert "Use analyze_repository first" in str(tools["check_clones"].description)
 
@@ -177,8 +190,7 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     )
     run_id = str(summary["run_id"])
     changed_run_id = str(changed_summary["run_id"])
-    changed_inventory = cast("dict[str, object]", changed_summary["inventory"])
-    changed_registry = cast("dict[str, object]", changed_inventory["file_registry"])
+    changed_registry = _summary_registry(changed_summary)
     assert cast(int, changed_registry["count"]) >= 1
     assert "items" not in changed_registry
 
@@ -186,8 +198,7 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         asyncio.run(server.call_tool("get_run_summary", {}))
     )
     assert latest["run_id"] == run_id
-    latest_inventory = cast("dict[str, object]", latest["inventory"])
-    latest_registry = cast("dict[str, object]", latest_inventory["file_registry"])
+    latest_registry = _summary_registry(latest)
     assert cast(int, latest_registry["count"]) >= 1
     assert "items" not in latest_registry
 
@@ -219,22 +230,22 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     latest_summary_text = latest_summary_resource[0].content
     latest_summary = json.loads(latest_summary_text)
     assert latest_summary["run_id"] == run_id
-    latest_summary_inventory = cast(
-        "dict[str, object]",
-        latest_summary["inventory"],
-    )
-    latest_summary_registry = cast(
-        "dict[str, object]",
-        latest_summary_inventory["file_registry"],
-    )
+    latest_summary_registry = _summary_registry(latest_summary)
     assert cast(int, latest_summary_registry["count"]) >= 1
     assert "items" not in latest_summary_registry
+
+    production_triage = _structured_tool_result(
+        asyncio.run(server.call_tool("get_production_triage", {}))
+    )
+    assert production_triage["run_id"] == run_id
+    assert _mapping_child(production_triage, "cache")["effective_freshness"]
 
     latest_report_resource = list(
         asyncio.run(server.read_resource("codeclone://latest/report.json"))
     )
     assert (
-        json.loads(latest_report_resource[0].content)["report_schema_version"] == "2.1"
+        json.loads(latest_report_resource[0].content)["report_schema_version"]
+        == REPORT_SCHEMA_VERSION
     )
     latest_health_resource = list(
         asyncio.run(server.read_resource("codeclone://latest/health"))
@@ -246,13 +257,17 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     latest_changed_payload = json.loads(latest_changed_resource[0].content)
     assert latest_changed_payload["run_id"] == changed_run_id
     assert latest_changed_payload["changed_paths"] == changed_summary["changed_paths"]
+    latest_triage_resource = list(
+        asyncio.run(server.read_resource("codeclone://latest/triage"))
+    )
+    assert json.loads(latest_triage_resource[0].content)["run_id"] == run_id
 
     report_resource = list(
         asyncio.run(server.read_resource(f"codeclone://runs/{run_id}/report.json"))
     )
     assert report_resource
     report_payload = json.loads(report_resource[0].content)
-    assert report_payload["report_schema_version"] == "2.1"
+    assert report_payload["report_schema_version"] == REPORT_SCHEMA_VERSION
 
     finding_items = cast("list[dict[str, object]]", findings_result["items"])
     first_finding_id = str(finding_items[0]["id"])
@@ -270,6 +285,9 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         asyncio.run(server.call_tool("get_report_section", {"section": "meta"}))
     )
     assert report_section["codeclone_version"]
+    assert cast("dict[str, object]", report_section["analysis_thresholds"])[
+        "design_findings"
+    ]
     metrics_section = _structured_tool_result(
         asyncio.run(server.call_tool("get_report_section", {"section": "metrics"}))
     )

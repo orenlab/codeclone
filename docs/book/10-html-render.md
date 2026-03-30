@@ -44,6 +44,7 @@ Refs:
     - KPI cards with baseline-aware tone (`✓ baselined` / `+N` regression)
     - Health gauge with baseline delta arc (improvement/degradation)
     - Executive Summary: issue breakdown (sorted bars) + source breakdown
+    - Hotspots by Directory: render-only view over `derived.overview.directory_hotspots`
     - Health Profile: full-width radar chart of dimension scores
     - Get Badge modal: grade-only / score+grade variants with shields.io embed
 - Dead-code UI is a single top-level `Dead Code` tab with deterministic split
@@ -128,3 +129,6 @@ Refs:
   protocol handler registration (e.g. JetBrains Toolbox for `jetbrains://`).
 - Overview layout (KPI grid, executive summary, analytics) is a pure view
   concern; only the underlying data identity and ordering are contract-sensitive.
+- Direct `build_html_report(...)` compatibility paths without a canonical
+  `report_document` may omit `directory_hotspots`; HTML must not approximate
+  directory aggregates from suggestion cards.

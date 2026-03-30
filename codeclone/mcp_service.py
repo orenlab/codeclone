@@ -10,7 +10,7 @@ import json
 import subprocess
 from argparse import Namespace
 from collections import OrderedDict
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
@@ -46,9 +46,9 @@ from ._cli_runtime import (
 from .baseline import Baseline
 from .cache import Cache, CacheStatus
 from .contracts import (
-    DEFAULT_COHESION_THRESHOLD,
-    DEFAULT_COMPLEXITY_THRESHOLD,
-    DEFAULT_COUPLING_THRESHOLD,
+    DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+    DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+    DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
     REPORT_SCHEMA_VERSION,
     ExitCode,
 )
@@ -78,6 +78,14 @@ from .domain.quality import (
     SEVERITY_INFO,
     SEVERITY_WARNING,
 )
+from .domain.source_scope import (
+    SOURCE_KIND_FIXTURES,
+    SOURCE_KIND_MIXED,
+    SOURCE_KIND_ORDER,
+    SOURCE_KIND_OTHER,
+    SOURCE_KIND_PRODUCTION,
+    SOURCE_KIND_TESTS,
+)
 from .models import MetricsDiff, ProjectMetrics, Suggestion
 from .pipeline import (
     GatingResult,
@@ -91,7 +99,6 @@ from .pipeline import (
     report,
 )
 from .report.json_contract import (
-    _source_scope_from_filepaths,
     clone_group_id,
     dead_code_group_id,
     design_group_id,
@@ -101,6 +108,7 @@ from .report.overview import serialize_finding_group_card
 
 AnalysisMode = Literal["full", "clones_only"]
 CachePolicy = Literal["reuse", "refresh", "off"]
+FreshnessKind = Literal["fresh", "mixed", "reused"]
 HotlistKind = Literal[
     "most_actionable",
     "highest_spread",
@@ -211,6 +219,19 @@ _VALID_HOTLIST_KINDS = frozenset(
     }
 )
 _VALID_SEVERITIES = frozenset({SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO})
+_SOURCE_KIND_BREAKDOWN_ORDER: Final[tuple[str, ...]] = (
+    SOURCE_KIND_PRODUCTION,
+    SOURCE_KIND_TESTS,
+    SOURCE_KIND_FIXTURES,
+    SOURCE_KIND_MIXED,
+    SOURCE_KIND_OTHER,
+)
+_HOTLIST_REPORT_KEYS: Final[dict[str, str]] = {
+    "most_actionable": "most_actionable_ids",
+    "highest_spread": "highest_spread_ids",
+    "production_hotspots": "production_hotspot_ids",
+    "test_fixture_hotspots": "test_fixture_hotspot_ids",
+}
 _CHECK_TO_DIMENSION: Final[dict[str, str]] = {
     "cohesion": "cohesion",
     "coupling": "coupling",
@@ -221,141 +242,6 @@ _CHECK_TO_DIMENSION: Final[dict[str, str]] = {
 _as_int = _coerce.as_int
 _as_float = _coerce.as_float
 _as_str = _coerce.as_str
-
-
-def _design_singleton_group_payload(
-    *,
-    category: str,
-    kind: str,
-    severity: str,
-    qualname: str,
-    filepath: str,
-    start_line: int,
-    end_line: int,
-    item_data: Mapping[str, object],
-    facts: Mapping[str, object],
-    scan_root: str,
-) -> dict[str, object]:
-    relative_path = filepath
-    return {
-        "id": design_group_id(category, qualname),
-        "family": FAMILY_DESIGN,
-        "category": category,
-        "kind": kind,
-        "severity": severity,
-        "confidence": CONFIDENCE_HIGH,
-        "priority": 2.0 if severity == SEVERITY_WARNING else 3.0,
-        "count": 1,
-        "source_scope": _source_scope_from_filepaths(
-            (relative_path,),
-            scan_root=scan_root,
-        ),
-        "spread": {"files": 1, "functions": 1},
-        "items": [
-            {
-                "relative_path": relative_path,
-                "qualname": qualname,
-                "start_line": start_line,
-                "end_line": end_line,
-                **item_data,
-            }
-        ],
-        "facts": dict(facts),
-    }
-
-
-def _complexity_group_for_threshold_payload(
-    item_map: Mapping[str, object],
-    *,
-    threshold: int,
-    scan_root: str,
-) -> dict[str, object] | None:
-    cc = _as_int(item_map.get("cyclomatic_complexity", 1), 1)
-    if cc <= threshold:
-        return None
-    severity = SEVERITY_CRITICAL if cc > max(40, threshold * 2) else SEVERITY_WARNING
-    return _design_singleton_group_payload(
-        category=CATEGORY_COMPLEXITY,
-        kind="function_hotspot",
-        severity=severity,
-        qualname=str(item_map.get("qualname", "")),
-        filepath=str(item_map.get("relative_path", "")),
-        start_line=_as_int(item_map.get("start_line", 0), 0),
-        end_line=_as_int(item_map.get("end_line", 0), 0),
-        scan_root=scan_root,
-        item_data={
-            "cyclomatic_complexity": cc,
-            "nesting_depth": _as_int(item_map.get("nesting_depth", 0), 0),
-            "risk": str(item_map.get("risk", "")),
-        },
-        facts={
-            "cyclomatic_complexity": cc,
-            "nesting_depth": _as_int(item_map.get("nesting_depth", 0), 0),
-        },
-    )
-
-
-def _coupling_group_for_threshold_payload(
-    item_map: Mapping[str, object],
-    *,
-    threshold: int,
-    scan_root: str,
-) -> dict[str, object] | None:
-    cbo = _as_int(item_map.get("cbo", 0), 0)
-    if cbo <= threshold:
-        return None
-    coupled_classes = list(_coerce.as_sequence(item_map.get("coupled_classes")))
-    return _design_singleton_group_payload(
-        category=CATEGORY_COUPLING,
-        kind="class_hotspot",
-        severity=SEVERITY_WARNING,
-        qualname=str(item_map.get("qualname", "")),
-        filepath=str(item_map.get("relative_path", "")),
-        start_line=_as_int(item_map.get("start_line", 0), 0),
-        end_line=_as_int(item_map.get("end_line", 0), 0),
-        scan_root=scan_root,
-        item_data={
-            "cbo": cbo,
-            "risk": str(item_map.get("risk", "")),
-            "coupled_classes": coupled_classes,
-        },
-        facts={
-            "cbo": cbo,
-            "coupled_classes": coupled_classes,
-        },
-    )
-
-
-def _cohesion_group_for_threshold_payload(
-    item_map: Mapping[str, object],
-    *,
-    threshold: int,
-    scan_root: str,
-) -> dict[str, object] | None:
-    lcom4 = _as_int(item_map.get("lcom4", 0), 0)
-    if lcom4 <= threshold:
-        return None
-    return _design_singleton_group_payload(
-        category=CATEGORY_COHESION,
-        kind="class_hotspot",
-        severity=SEVERITY_WARNING,
-        qualname=str(item_map.get("qualname", "")),
-        filepath=str(item_map.get("relative_path", "")),
-        start_line=_as_int(item_map.get("start_line", 0), 0),
-        end_line=_as_int(item_map.get("end_line", 0), 0),
-        scan_root=scan_root,
-        item_data={
-            "lcom4": lcom4,
-            "risk": str(item_map.get("risk", "")),
-            "method_count": _as_int(item_map.get("method_count", 0), 0),
-            "instance_var_count": _as_int(item_map.get("instance_var_count", 0), 0),
-        },
-        facts={
-            "lcom4": lcom4,
-            "method_count": _as_int(item_map.get("method_count", 0), 0),
-            "instance_var_count": _as_int(item_map.get("instance_var_count", 0), 0),
-        },
-    )
 
 
 def _suggestion_finding_id_payload(suggestion: object) -> str:
@@ -658,6 +544,30 @@ class CodeCloneMCPService:
             ),
             analysis_mode=request.analysis_mode,
             metrics_computed=self._metrics_computed(request.analysis_mode),
+            design_complexity_threshold=_as_int(
+                getattr(
+                    args,
+                    "design_complexity_threshold",
+                    DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+                ),
+                DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+            ),
+            design_coupling_threshold=_as_int(
+                getattr(
+                    args,
+                    "design_coupling_threshold",
+                    DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+                ),
+                DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+            ),
+            design_cohesion_threshold=_as_int(
+                getattr(
+                    args,
+                    "design_cohesion_threshold",
+                    DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+                ),
+                DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+            ),
             analysis_started_at_utc=analysis_started_at_utc,
             report_generated_at_utc=_current_report_timestamp_utc(),
         )
@@ -1110,6 +1020,70 @@ class CodeCloneMCPService:
             "items": [dict(self._as_mapping(item)) for item in rows[:normalized_limit]],
         }
 
+    def get_production_triage(
+        self,
+        *,
+        run_id: str | None = None,
+        max_hotspots: int = 3,
+        max_suggestions: int = 3,
+    ) -> dict[str, object]:
+        record = self._runs.get(run_id)
+        summary = self._summary_payload(dict(record.summary))
+        findings = self._base_findings(record)
+        findings_breakdown = self._source_kind_breakdown(
+            self._finding_source_kind(finding) for finding in findings
+        )
+        suggestion_rows = self._triage_suggestion_rows(record)
+        suggestion_breakdown = self._source_kind_breakdown(
+            row.get("source_kind") for row in suggestion_rows
+        )
+        hotspot_limit = max(1, min(max_hotspots, 10))
+        suggestion_limit = max(1, min(max_suggestions, 10))
+        production_hotspots = self._hotspot_rows(
+            record=record,
+            kind="production_hotspots",
+            detail_level="summary",
+            changed_paths=(),
+            exclude_reviewed=False,
+        )
+        production_suggestions = [
+            dict(row)
+            for row in suggestion_rows
+            if str(row.get("source_kind", "")) == SOURCE_KIND_PRODUCTION
+        ]
+        return {
+            "run_id": record.run_id,
+            "base_uri": record.root.as_uri(),
+            "health": dict(self._as_mapping(summary.get("health"))),
+            "cache": dict(self._as_mapping(summary.get("cache"))),
+            "findings": {
+                "total": len(findings),
+                "by_source_kind": findings_breakdown,
+                "outside_focus": len(findings)
+                - findings_breakdown[SOURCE_KIND_PRODUCTION],
+            },
+            "top_hotspots": {
+                "kind": "production_hotspots",
+                "available": len(production_hotspots),
+                "returned": min(len(production_hotspots), hotspot_limit),
+                "items": [
+                    dict(self._as_mapping(item))
+                    for item in production_hotspots[:hotspot_limit]
+                ],
+            },
+            "suggestions": {
+                "total": len(suggestion_rows),
+                "by_source_kind": suggestion_breakdown,
+                "outside_focus": len(suggestion_rows)
+                - suggestion_breakdown[SOURCE_KIND_PRODUCTION],
+            },
+            "top_suggestions": {
+                "available": len(production_suggestions),
+                "returned": min(len(production_suggestions), suggestion_limit),
+                "items": production_suggestions[:suggestion_limit],
+            },
+        }
+
     def generate_pr_summary(
         self,
         *,
@@ -1467,6 +1441,14 @@ class CodeCloneMCPService:
                 indent=2,
                 sort_keys=True,
             )
+        if uri == "codeclone://latest/triage":
+            latest = self._runs.get()
+            return json.dumps(
+                self.get_production_triage(run_id=latest.run_id),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
         latest_prefix = "codeclone://latest/"
         run_prefix = "codeclone://runs/"
         if uri.startswith(latest_prefix):
@@ -1489,6 +1471,10 @@ class CodeCloneMCPService:
                 ensure_ascii=False,
                 indent=2,
                 sort_keys=True,
+            )
+        if suffix == "triage":
+            raise MCPServiceContractError(
+                "Production triage is exposed only as codeclone://latest/triage."
             )
         if suffix == "health":
             return json.dumps(
@@ -1747,7 +1733,6 @@ class CodeCloneMCPService:
         findings = self._as_mapping(report_document.get("findings"))
         groups = self._as_mapping(findings.get("groups"))
         clone_groups = self._as_mapping(groups.get(FAMILY_CLONES))
-        design_groups = self._design_groups_for_record(record, groups=groups)
         return [
             *self._dict_list(clone_groups.get("functions")),
             *self._dict_list(clone_groups.get("blocks")),
@@ -1758,151 +1743,8 @@ class CodeCloneMCPService:
             *self._dict_list(
                 self._as_mapping(groups.get(FAMILY_DEAD_CODE)).get("groups")
             ),
-            *design_groups,
+            *self._dict_list(self._as_mapping(groups.get(FAMILY_DESIGN)).get("groups")),
         ]
-
-    def _design_groups_for_record(
-        self,
-        record: MCPRunRecord,
-        *,
-        groups: Mapping[str, object],
-    ) -> list[dict[str, object]]:
-        canonical_design_groups = self._dict_list(
-            self._as_mapping(groups.get(FAMILY_DESIGN)).get("groups")
-        )
-        if (
-            record.request.complexity_threshold is None
-            and record.request.coupling_threshold is None
-            and record.request.cohesion_threshold is None
-        ):
-            return canonical_design_groups
-
-        metrics = self._as_mapping(record.report_document.get("metrics"))
-        families = self._as_mapping(metrics.get("families"))
-        complexity_threshold = (
-            record.request.complexity_threshold
-            if record.request.complexity_threshold is not None
-            else DEFAULT_COMPLEXITY_THRESHOLD
-        )
-        coupling_threshold = (
-            record.request.coupling_threshold
-            if record.request.coupling_threshold is not None
-            else DEFAULT_COUPLING_THRESHOLD
-        )
-        cohesion_threshold = (
-            record.request.cohesion_threshold
-            if record.request.cohesion_threshold is not None
-            else DEFAULT_COHESION_THRESHOLD
-        )
-        groups_out: list[dict[str, object]] = []
-        for item in self._as_sequence(
-            self._as_mapping(families.get(CATEGORY_COMPLEXITY)).get("items")
-        ):
-            group = self._complexity_group_for_threshold(
-                self._as_mapping(item),
-                threshold=complexity_threshold,
-                scan_root=str(record.root),
-            )
-            if group is not None:
-                groups_out.append(group)
-        for item in self._as_sequence(
-            self._as_mapping(families.get(CATEGORY_COUPLING)).get("items")
-        ):
-            group = self._coupling_group_for_threshold(
-                self._as_mapping(item),
-                threshold=coupling_threshold,
-                scan_root=str(record.root),
-            )
-            if group is not None:
-                groups_out.append(group)
-        for item in self._as_sequence(
-            self._as_mapping(families.get(CATEGORY_COHESION)).get("items")
-        ):
-            group = self._cohesion_group_for_threshold(
-                self._as_mapping(item),
-                threshold=cohesion_threshold,
-                scan_root=str(record.root),
-            )
-            if group is not None:
-                groups_out.append(group)
-        groups_out.extend(
-            group
-            for group in canonical_design_groups
-            if str(group.get("category", "")) == CATEGORY_DEPENDENCY
-        )
-        groups_out.sort(
-            key=lambda group: (
-                -_as_float(group.get("priority", 0.0), 0.0),
-                str(group.get("id", "")),
-            )
-        )
-        return groups_out
-
-    def _design_singleton_group(
-        self,
-        *,
-        category: str,
-        kind: str,
-        severity: str,
-        qualname: str,
-        filepath: str,
-        start_line: int,
-        end_line: int,
-        item_data: Mapping[str, object],
-        facts: Mapping[str, object],
-        scan_root: str,
-    ) -> dict[str, object]:
-        return _design_singleton_group_payload(
-            category=category,
-            kind=kind,
-            severity=severity,
-            qualname=qualname,
-            filepath=filepath,
-            start_line=start_line,
-            end_line=end_line,
-            item_data=item_data,
-            facts=facts,
-            scan_root=scan_root,
-        )
-
-    def _complexity_group_for_threshold(
-        self,
-        item_map: Mapping[str, object],
-        *,
-        threshold: int,
-        scan_root: str,
-    ) -> dict[str, object] | None:
-        return _complexity_group_for_threshold_payload(
-            item_map,
-            threshold=threshold,
-            scan_root=scan_root,
-        )
-
-    def _coupling_group_for_threshold(
-        self,
-        item_map: Mapping[str, object],
-        *,
-        threshold: int,
-        scan_root: str,
-    ) -> dict[str, object] | None:
-        return _coupling_group_for_threshold_payload(
-            item_map,
-            threshold=threshold,
-            scan_root=scan_root,
-        )
-
-    def _cohesion_group_for_threshold(
-        self,
-        item_map: Mapping[str, object],
-        *,
-        threshold: int,
-        scan_root: str,
-    ) -> dict[str, object] | None:
-        return _cohesion_group_for_threshold_payload(
-            item_map,
-            threshold=threshold,
-            scan_root=scan_root,
-        )
 
     def _query_findings(
         self,
@@ -2488,7 +2330,9 @@ class CodeCloneMCPService:
                 )
             ]
         else:
-            hotlist_key = f"{kind}_ids"
+            hotlist_key = _HOTLIST_REPORT_KEYS.get(kind)
+            if hotlist_key is None:
+                return []
             ordered_ids = [
                 str(item)
                 for item in self._as_sequence(hotlists.get(hotlist_key))
@@ -2744,6 +2588,48 @@ class CodeCloneMCPService:
             "items": bounded_items,
         }
 
+    def _normalized_source_kind(self, value: object) -> str:
+        normalized = str(value).strip().lower()
+        if normalized in SOURCE_KIND_ORDER:
+            return normalized
+        return SOURCE_KIND_OTHER
+
+    def _finding_source_kind(self, finding: Mapping[str, object]) -> str:
+        source_scope = self._as_mapping(finding.get("source_scope"))
+        return self._normalized_source_kind(source_scope.get("dominant_kind"))
+
+    def _source_kind_breakdown(
+        self,
+        source_kinds: Iterable[object],
+    ) -> dict[str, int]:
+        breakdown = dict.fromkeys(_SOURCE_KIND_BREAKDOWN_ORDER, 0)
+        for value in source_kinds:
+            breakdown[self._normalized_source_kind(value)] += 1
+        return breakdown
+
+    def _triage_suggestion_rows(self, record: MCPRunRecord) -> list[dict[str, object]]:
+        derived = self._as_mapping(record.report_document.get("derived"))
+        canonical_rows = self._dict_list(derived.get("suggestions"))
+        suggestion_source_kinds = {
+            self._suggestion_finding_id(suggestion): self._normalized_source_kind(
+                getattr(suggestion, "source_kind", SOURCE_KIND_OTHER)
+            )
+            for suggestion in record.suggestions
+        }
+        rows: list[dict[str, object]] = []
+        for row in canonical_rows:
+            finding_id = str(row.get("finding_id", ""))
+            rows.append(
+                {
+                    **row,
+                    "source_kind": suggestion_source_kinds.get(
+                        finding_id,
+                        SOURCE_KIND_OTHER,
+                    ),
+                }
+            )
+        return rows
+
     def _schema_resource_payload(self) -> dict[str, object]:
         return {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2847,6 +2733,9 @@ class CodeCloneMCPService:
             fail_dead_code=False,
             fail_health=-1,
             fail_on_new_metrics=False,
+            design_complexity_threshold=DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+            design_coupling_threshold=DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+            design_cohesion_threshold=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
             update_metrics_baseline=False,
             metrics_baseline=DEFAULT_BASELINE_PATH,
             skip_metrics=False,
@@ -2909,6 +2798,9 @@ class CodeCloneMCPService:
             "segment_min_stmt": request.segment_min_stmt,
             "max_baseline_size_mb": request.max_baseline_size_mb,
             "max_cache_size_mb": request.max_cache_size_mb,
+            "design_complexity_threshold": request.complexity_threshold,
+            "design_coupling_threshold": request.coupling_threshold,
+            "design_cohesion_threshold": request.cohesion_threshold,
         }
         for key, value in override_map.items():
             if value is not None:
@@ -3051,7 +2943,7 @@ class CodeCloneMCPService:
         metrics = self._as_mapping(report_document.get("metrics"))
         metrics_summary = self._as_mapping(metrics.get("summary"))
         summary = self._as_mapping(findings.get("summary"))
-        return {
+        payload = {
             "run_id": run_id,
             "root": str(root_path),
             "analysis_mode": request.analysis_mode,
@@ -3106,16 +2998,47 @@ class CodeCloneMCPService:
             "warnings": list(warnings),
             "failures": list(failures),
         }
+        payload["cache"] = self._summary_cache_payload(payload)
+        return payload
 
     def _summary_payload(
         self,
         summary: Mapping[str, object],
     ) -> dict[str, object]:
         payload = dict(summary)
+        cache = self._as_mapping(payload.get("cache"))
+        if cache:
+            payload["cache"] = self._summary_cache_payload(summary)
         inventory = self._as_mapping(payload.get("inventory"))
         if inventory:
             payload["inventory"] = self._slim_inventory(inventory)
         return payload
+
+    def _summary_cache_payload(
+        self,
+        summary: Mapping[str, object],
+    ) -> dict[str, object]:
+        cache = dict(self._as_mapping(summary.get("cache")))
+        if not cache:
+            return {}
+        cache["effective_freshness"] = self._effective_freshness(summary)
+        return cache
+
+    def _effective_freshness(
+        self,
+        summary: Mapping[str, object],
+    ) -> FreshnessKind:
+        inventory = self._as_mapping(summary.get("inventory"))
+        files = self._as_mapping(inventory.get("files"))
+        analyzed = max(0, _as_int(files.get("analyzed", 0), 0))
+        cached = max(0, _as_int(files.get("cached", 0), 0))
+        cache = self._as_mapping(summary.get("cache"))
+        cache_used = bool(cache.get("used"))
+        if cache_used and cached > 0 and analyzed == 0:
+            return "reused"
+        if cache_used and cached > 0 and analyzed > 0:
+            return "mixed"
+        return "fresh"
 
     def _slim_inventory(
         self,

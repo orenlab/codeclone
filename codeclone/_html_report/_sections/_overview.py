@@ -9,10 +9,11 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from ... import _coerce
-from ..._html_badges import _stat_card
+from ..._html_badges import _source_kind_badge_html, _stat_card
 from ..._html_escape import _escape_html
 from .._components import (
     Tone,
@@ -30,6 +31,36 @@ _as_int = _coerce.as_int
 _as_float = _coerce.as_float
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
+
+_DIRECTORY_BUCKET_LABELS: dict[str, str] = {
+    "all": "All Findings",
+    "clones": "Clone Groups",
+    "structural": "Structural Findings",
+    "complexity": "High Complexity",
+    "cohesion": "Low Cohesion",
+    "coupling": "High Coupling",
+    "dead_code": "Dead Code",
+    "dependency": "Dependency Cycles",
+}
+_DIRECTORY_BUCKET_ORDER: tuple[str, ...] = (
+    "all",
+    "clones",
+    "structural",
+    "complexity",
+    "cohesion",
+    "coupling",
+    "dead_code",
+    "dependency",
+)
+_DIRECTORY_KIND_LABELS: dict[str, str] = {
+    "clones": "clones",
+    "structural": "structural",
+    "dead_code": "dead code",
+    "complexity": "complexity",
+    "cohesion": "cohesion",
+    "coupling": "coupling",
+    "dependency": "dependency",
+}
 
 
 def _health_gauge_html(
@@ -347,6 +378,102 @@ def _issue_breakdown_html(
     return '<div class="families-list">' + "".join(parts) + "</div>"
 
 
+def _directory_kind_summary(kind_breakdown: Mapping[str, object]) -> str:
+    rows = [
+        (str(kind), _as_int(count))
+        for kind, count in kind_breakdown.items()
+        if _as_int(count) > 0
+    ]
+    rows.sort(key=lambda item: (-item[1], item[0]))
+    top_rows = rows[:2]
+    if not top_rows:
+        return ""
+    return "; ".join(
+        f"{count} {_DIRECTORY_KIND_LABELS.get(kind, kind)}" for kind, count in top_rows
+    )
+
+
+def _directory_hotspot_bucket_body(bucket: str, payload: Mapping[str, object]) -> str:
+    items = list(map(_as_mapping, _as_sequence(payload.get("items"))))
+    if not items:
+        return ""
+    returned = _as_int(payload.get("returned"))
+    total_directories = _as_int(payload.get("total_directories"))
+    has_more = bool(payload.get("has_more"))
+    subtitle_html = ""
+    if has_more and returned > 0 and total_directories > returned:
+        subtitle_html = (
+            '<div class="overview-summary-value">'
+            f"top {returned} of {total_directories} directories"
+            "</div>"
+        )
+    rows: list[str] = []
+    for item in items:
+        path = str(item.get("path", ".")).strip() or "."
+        source_scope = _as_mapping(item.get("source_scope"))
+        dominant_kind = (
+            str(source_scope.get("dominant_kind", "other")).strip() or "other"
+        )
+        detail = (
+            f"{_as_int(item.get('finding_groups'))} groups; "
+            f"{_as_int(item.get('affected_items'))} items; "
+            f"{_as_int(item.get('files'))} files; "
+            f"{_as_float(item.get('share_pct')):.1f}%"
+        )
+        kind_summary = ""
+        if bucket == "all":
+            kind_summary = _directory_kind_summary(
+                _as_mapping(item.get("kind_breakdown"))
+            )
+        kind_html = (
+            f'<div class="overview-row-summary">{_escape_html(kind_summary)}</div>'
+            if kind_summary
+            else ""
+        )
+        rows.append(
+            "<li>"
+            '<div class="overview-row-title">'
+            f"<code>{_escape_html(path)}</code> {_source_kind_badge_html(dominant_kind)}"
+            "</div>"
+            f'<div class="overview-row-summary">{_escape_html(detail)}</div>'
+            f"{kind_html}"
+            "</li>"
+        )
+    return (
+        subtitle_html + '<ul class="overview-summary-list">' + "".join(rows) + "</ul>"
+    )
+
+
+def _directory_hotspots_section(ctx: ReportContext) -> str:
+    directory_hotspots = _as_mapping(ctx.overview_data.get("directory_hotspots"))
+    if not directory_hotspots:
+        return ""
+    cards: list[str] = []
+    for bucket in _DIRECTORY_BUCKET_ORDER:
+        payload = _as_mapping(directory_hotspots.get(bucket))
+        body_html = _directory_hotspot_bucket_body(bucket, payload)
+        if not body_html:
+            continue
+        cards.append(
+            overview_summary_item_html(
+                label=_DIRECTORY_BUCKET_LABELS.get(bucket, bucket),
+                body_html=body_html,
+            )
+        )
+    if not cards:
+        return ""
+    return (
+        '<section class="overview-cluster">'
+        + overview_cluster_header(
+            "Hotspots by Directory",
+            "Directories with the highest concentration of findings by category.",
+        )
+        + '<div class="overview-summary-grid overview-summary-grid--2col">'
+        + "".join(cards)
+        + "</div></section>"
+    )
+
+
 def render_overview_panel(ctx: ReportContext) -> str:
     """Build the Overview tab panel HTML."""
     complexity_summary = _as_mapping(ctx.complexity_map.get("summary"))
@@ -622,6 +749,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
         + "</div>"
         + "</div>"
         + executive
+        + _directory_hotspots_section(ctx)
         + _analytics_section(ctx)
     )
 

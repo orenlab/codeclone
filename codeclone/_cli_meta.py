@@ -11,6 +11,11 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, TypedDict
 
 from .baseline import Baseline, current_python_tag
+from .contracts import (
+    DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+    DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+    DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -70,6 +75,9 @@ class ReportMeta(TypedDict):
     health_grade: str | None
     analysis_mode: str
     metrics_computed: list[str]
+    design_complexity_threshold: int
+    design_coupling_threshold: int
+    design_cohesion_threshold: int
     analysis_started_at_utc: str | None
     report_generated_at_utc: str
 
@@ -95,6 +103,9 @@ def _build_report_meta(
     health_grade: str | None,
     analysis_mode: str,
     metrics_computed: tuple[str, ...],
+    design_complexity_threshold: int = DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+    design_coupling_threshold: int = DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+    design_cohesion_threshold: int = DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
     analysis_started_at_utc: str | None,
     report_generated_at_utc: str,
 ) -> ReportMeta:
@@ -138,6 +149,9 @@ def _build_report_meta(
         "health_grade": health_grade,
         "analysis_mode": analysis_mode,
         "metrics_computed": list(metrics_computed),
+        "design_complexity_threshold": design_complexity_threshold,
+        "design_coupling_threshold": design_coupling_threshold,
+        "design_cohesion_threshold": design_cohesion_threshold,
         "analysis_started_at_utc": analysis_started_at_utc,
         "report_generated_at_utc": report_generated_at_utc,
     }

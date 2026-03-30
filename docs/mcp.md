@@ -37,27 +37,28 @@ core CodeClone runtime.
 
 ## Tool surface
 
-| Tool                     | Purpose                                                              |
-|--------------------------|----------------------------------------------------------------------|
-| `analyze_repository`     | Full analysis → register as latest run                               |
-| `analyze_changed_paths`  | Diff-aware analysis with `changed_paths` or `git_diff_ref`; summary inventory is slimmed to counts |
-| `get_run_summary`        | Compact health/findings/baseline snapshot with slim inventory counts |
-| `compare_runs`           | Regressions, improvements, health delta between two runs             |
-| `list_findings`          | Filtered, paginated finding groups with envelope-level `base_uri`    |
-| `get_finding`            | Deep inspection of one finding by id                                 |
-| `get_remediation`        | Structured remediation payload for one finding                       |
-| `list_hotspots`          | Derived views: highest priority, production hotspots, spread, etc., with compact summary cards |
+| Tool                     | Purpose                                                                                              |
+|--------------------------|------------------------------------------------------------------------------------------------------|
+| `analyze_repository`     | Full analysis → register as latest run                                                               |
+| `analyze_changed_paths`  | Diff-aware analysis with `changed_paths` or `git_diff_ref`; summary inventory is slimmed to counts   |
+| `get_run_summary`        | Compact health/findings/baseline snapshot with slim inventory counts                                 |
+| `get_production_triage`  | Compact production-first view: health, cache freshness, production hotspots, production suggestions  |
+| `compare_runs`           | Regressions, improvements, health delta between two runs                                             |
+| `list_findings`          | Filtered, paginated finding groups with envelope-level `base_uri`                                    |
+| `get_finding`            | Deep inspection of one finding by id                                                                 |
+| `get_remediation`        | Structured remediation payload for one finding                                                       |
+| `list_hotspots`          | Derived views: highest priority, production hotspots, spread, etc., with compact summary cards       |
 | `get_report_section`     | Read canonical report sections; `metrics` is summary-only, `metrics_detail` is the full metrics dump |
-| `evaluate_gates`         | Preview CI/gating decisions without exiting                          |
-| `check_clones`           | Clone findings from a stored run                                     |
-| `check_complexity`       | Complexity hotspots from a stored run                                |
-| `check_coupling`         | Coupling hotspots from a stored run                                  |
-| `check_cohesion`         | Cohesion hotspots from a stored run                                  |
-| `check_dead_code`        | Dead-code findings from a stored run                                 |
-| `generate_pr_summary`    | PR-friendly markdown or JSON summary                                 |
-| `mark_finding_reviewed`  | Session-local review marker (in-memory only)                         |
-| `list_reviewed_findings` | List reviewed findings for a run                                     |
-| `clear_session_runs`     | Reset all in-memory runs and session caches                          |
+| `evaluate_gates`         | Preview CI/gating decisions without exiting                                                          |
+| `check_clones`           | Clone findings from a stored run                                                                     |
+| `check_complexity`       | Complexity hotspots from a stored run                                                                |
+| `check_coupling`         | Coupling hotspots from a stored run                                                                  |
+| `check_cohesion`         | Cohesion hotspots from a stored run                                                                  |
+| `check_dead_code`        | Dead-code findings from a stored run                                                                 |
+| `generate_pr_summary`    | PR-friendly markdown or JSON summary                                                                 |
+| `mark_finding_reviewed`  | Session-local review marker (in-memory only)                                                         |
+| `list_reviewed_findings` | List reviewed findings for a run                                                                     |
+| `clear_session_runs`     | Reset all in-memory runs and session caches                                                          |
 
 > `check_*` tools query stored runs only. Call `analyze_repository` or
 > `analyze_changed_paths` first.
@@ -66,30 +67,48 @@ core CodeClone runtime.
 `health.dimensions` down to the one dimension relevant to that tool.
 List-style finding responses also expose `base_uri` once per envelope and keep
 summary locations as `file` + `line`; richer `symbol` / `uri` data stays in
-`normal` / `full` responses and `get_finding`.
+`normal` / `full` responses and `get_finding`. Summary-style MCP cache payloads
+also expose `effective_freshness` (`fresh`, `mixed`, `reused`).
+Inline design-threshold parameters on `analyze_repository` /
+`analyze_changed_paths` become part of the canonical run: they are recorded in
+`meta.analysis_thresholds.design_findings` and define that run's canonical
+design findings.
 
 ## Resource surface
 
-| Resource                                          | Content                                    |
-|---------------------------------------------------|--------------------------------------------|
-| `codeclone://latest/summary`                      | Latest run summary                         |
-| `codeclone://latest/report.json`                  | Full canonical report                      |
-| `codeclone://latest/health`                       | Health score and dimensions                |
-| `codeclone://latest/gates`                        | Last gate evaluation result                |
-| `codeclone://latest/changed`                      | Changed-files projection (diff-aware runs) |
-| `codeclone://schema`                              | Canonical report shape descriptor          |
-| `codeclone://runs/{run_id}/summary`               | Summary for a specific run                 |
-| `codeclone://runs/{run_id}/report.json`           | Report for a specific run                  |
-| `codeclone://runs/{run_id}/findings/{finding_id}` | One finding from a specific run            |
+Fixed resources:
 
-Resources are read-only views over stored runs — they do not trigger analysis.
+| Resource                         | Content                                    |
+|----------------------------------|--------------------------------------------|
+| `codeclone://latest/summary`     | Latest run summary                         |
+| `codeclone://latest/triage`      | Latest production-first triage             |
+| `codeclone://latest/report.json` | Full canonical report                      |
+| `codeclone://latest/health`      | Health score and dimensions                |
+| `codeclone://latest/gates`       | Last gate evaluation result                |
+| `codeclone://latest/changed`     | Changed-files projection (diff-aware runs) |
+| `codeclone://schema`             | Canonical report shape descriptor          |
+
+Run-scoped resource templates:
+
+| URI template                                      | Content                         |
+|---------------------------------------------------|---------------------------------|
+| `codeclone://runs/{run_id}/summary`               | Summary for a specific run      |
+| `codeclone://runs/{run_id}/report.json`           | Report for a specific run       |
+| `codeclone://runs/{run_id}/findings/{finding_id}` | One finding from a specific run |
+
+Resources and URI templates are read-only views over stored runs; they do not
+trigger analysis.
+
+`codeclone://latest/*` always resolves to the most recent run registered in the
+current MCP server session. A later `analyze_repository` or
+`analyze_changed_paths` call moves that pointer.
 
 ## Recommended workflows
 
 ### Full repository review
 
 ```
-analyze_repository → get_run_summary → list_hotspots → get_finding → evaluate_gates
+analyze_repository → get_production_triage → get_finding → evaluate_gates
 ```
 
 ### Changed-files review (PR / patch)
@@ -170,6 +189,8 @@ Show regressions, resolved findings, and health delta.
 **Tips:**
 
 - Use `analyze_changed_paths` for PRs, not full analysis.
+- Set `cache_policy="off"` when you need the freshest truth from a new analysis
+  run, not whatever older session state currently sits behind `latest/*`.
 - Use `"production-only"` / `source_kind` filters to cut test/fixture noise.
 - Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
 - Ask the agent to separate baseline debt from new regressions.

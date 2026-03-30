@@ -2,57 +2,54 @@
 
 ## [2.0.0b3]
 
-### Licensing
+2.0.0b3 is the release where CodeClone stops looking like "a strong analyzer with extras" and starts looking like a
+coherent platform: canonical-report-first, agent-facing, CI-native, and product-grade.
 
-- Re-license repository code to MPL-2.0 and keep documentation under MIT.
+### Licensing & packaging
 
-### Packaging
+Re-license source code to MPL-2.0 while keeping documentation under MIT. Ship dual `LICENSE` / `LICENSE-docs` files and
+sync SPDX headers.
 
-- Ship both `LICENSE` and `LICENSE-docs`, update package metadata, and sync file-level SPDX headers.
+### MCP server (new)
 
-### MCP server
-
-- Add optional `codeclone[mcp]` extra with `codeclone-mcp` launcher (`stdio` and `streamable-http` transports).
-- Expose 19 read-only tools and 9 resources over the canonical pipeline: analysis, diff-aware changed-files, run
-  comparison, findings/hotspots/remediation, granular checks, gate preview, PR summary, and session review markers.
-- Bound in-memory run retention (`--history-limit`, default `4`, max `10`) and prune stale session state automatically.
-- Require explicit `--allow-remote` for non-loopback `streamable-http` binds; reject `cache_policy=refresh` to preserve
+- Optional `codeclone[mcp]` extra with `codeclone-mcp` launcher (`stdio` and `streamable-http` transports).
+- 20 read-only tools + 10 resources: analysis, diff-aware changed-files, run comparison, findings / hotspots /
+  remediation, granular checks, gate preview, PR summary, and session review markers.
+- Bounded run retention (`--history-limit`), `--allow-remote` guard, `cache_policy=refresh` rejected to preserve
   read-only semantics.
-- Defer MCP process-count policy to the core runtime when `processes` is not explicitly overridden.
-- Slim MCP summary payloads for agent usage: `get_run_summary`, summary resources, and `analyze_changed_paths` now
-  replace `inventory.file_registry.items` with `{encoding, count}` while `analyze_repository` keeps the full registry.
-- Split `get_report_section(section="metrics")` into a summary-only projection and add `metrics_detail` for the full
-  metrics payload, without changing canonical report schema `2.1`.
-- Slim `health.dimensions` in granular `check_*` responses to the single dimension relevant to each tool.
-- Keep hotspot `source_kind` aligned with canonical finding payloads, including fixture-scoped findings.
-- Add envelope-level `base_uri` to `list_findings`, `list_hotspots`, and `check_*`, while removing repeated per-location
-  `uri` values from summary/normal finding payloads.
-- Slim finding list payloads further: summary responses drop `priority_factors` and keep only `file` + `line` in
-  locations; normal responses keep `symbol` but still omit `uri` and `priority_factors`; `get_finding` remains full.
-- Bump cache schema to `2.3` so stale per-file analysis entries from older metric semantics are ignored and rebuilt
-  instead of being treated as reusable cache hits.
+- Agent-optimised payloads: slim inventory counts in summaries, `base_uri` envelope with relative locations,
+  single-dimension `health` in `check_*`, three-tier `detail_level` on finding cards, and `metrics` / `metrics_detail`
+  split — all without changing canonical report schema until the later `2.2` report-threshold update below.
+- `cache.effective_freshness` marker and `get_production_triage` / `codeclone://latest/triage` for compact
+  production-first overview.
+- Fix hotlist key resolution for `production_hotspots` and `test_fixture_hotspots`.
+- Bump cache schema to `2.3` (stale metric entries rebuilt, not reused).
+
+### Report contract
+
+- Bump canonical report schema to `2.2`.
+- Add canonical `meta.analysis_thresholds.design_findings` provenance and move threshold-aware design findings fully
+  into the canonical report, so MCP/HTML read the same design-finding universe instead of re-synthesizing it.
+- Add `derived.overview.directory_hotspots` and render it in the HTML Overview tab as `Hotspots by Directory`.
 
 ### CLI
 
-- Add `--changed-only`, `--diff-against`, and `--paths-from-git-diff` for changed-scope clone review and gating.
-- Render changed-scope results as a first-class summary block in normal CLI output.
+- `--changed-only`, `--diff-against`, `--paths-from-git-diff` for changed-scope review and gating with first-class
+  summary output.
 
 ### SARIF
 
-- Stabilize `primaryLocationLineHash` by excluding line numbers from the hash material.
-- Add run-unique `automationDetails.id`, `startTimeUtc`, and explicit result `kind: "fail"`.
-- Move ancillary identity fields to SARIF `properties`; keep only `primaryLocationLineHash` in `partialFingerprints`.
+- Stable `primaryLocationLineHash` (line numbers excluded), run-unique `automationDetails.id` / `startTimeUtc`, explicit
+  `kind: "fail"`, ancillary fields moved to `properties`.
 
 ### HTML report
 
-- Add IDE picker (PyCharm, IntelliJ IDEA, VS Code, Cursor, Fleet, Zed) with localStorage persistence.
-- Make file paths across all tabs clickable IDE deep links via `jetbrains://`, `vscode://`, and other protocol schemes.
-- Add stable deep-link anchors (`finding-{finding_id}`) for clone and structural finding cards.
+- IDE picker (PyCharm, IDEA, VS Code, Cursor, Fleet, Zed) with persistent selection; clickable file-path deep links
+  across all tabs; stable `finding-{id}` anchors.
 
 ### GitHub Action
 
-- Ship composite GitHub Action v2 with configurable quality gates, SARIF upload to Code Scanning, and PR summary
-  comments.
+- Composite Action v2: configurable quality gates, SARIF upload to Code Scanning, PR summary comments.
 
 ## [2.0.0b2]
 

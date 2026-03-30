@@ -18,9 +18,12 @@
 
 ---
 
-CodeClone provides comprehensive structural code quality analysis for Python. It detects architectural
-duplication via normalized AST and Control Flow Graphs, computes quality metrics, and enforces CI gates —
-all with baseline-aware governance that separates **known** technical debt from **new** regressions.
+CodeClone provides deterministic structural code quality analysis for Python.
+It detects architectural duplication via normalized AST and Control Flow Graphs,
+computes quality metrics, and enforces CI gates — all with **baseline-aware
+governance** that separates **known** technical debt from **new** regressions.
+An optional read-only MCP interface exposes the same analysis pipeline to AI agents, IDEs, and other MCP-capable
+clients.
 
 Docs: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/) ·
 Live sample report:
@@ -43,7 +46,7 @@ Live sample report:
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
 - **MCP server** — optional read-only MCP surface for AI agents, IDEs, and MCP-capable clients
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
-- **Fast*** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
+- **Fast** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
 
 ## Quick Start
 
@@ -92,9 +95,12 @@ codeclone . --update-baseline
 codeclone . --ci
 ```
 
-The `--ci` preset equals `--fail-on-new --no-color --quiet`.
+<details>
+<summary>What <code>--ci</code> enables</summary>
+The <code>--ci</code> preset equals <code>--fail-on-new --no-color --quiet</code>.
 When a trusted metrics baseline is loaded, CI mode also enables
-`--fail-on-new-metrics`.
+<code>--fail-on-new-metrics</code>.
+</details>
 
 ### GitHub Action
 
@@ -161,12 +167,9 @@ codeclone-mcp --transport stdio
 codeclone-mcp --transport streamable-http --port 8000
 ```
 
-19 tools + 9 resources — deterministic, baseline-aware, read-only.
-Never mutates source files, baselines, or repo state.
-List-style finding responses expose a single `base_uri` per envelope and keep
-summary locations compact; `get_finding` remains the full-detail endpoint.
-`get_run_summary` and `analyze_changed_paths` return slim inventory counts;
-`get_report_section(metrics)` returns summary-only, `metrics_detail` gives the full dump.
+20 tools + 10 resources — deterministic, baseline-aware, and read-only. Never mutates source files, baselines, or repo
+state.
+Payloads are optimised for LLM context: compact summaries by default, full detail on demand.
 
 Docs:
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
@@ -263,16 +266,21 @@ class Middleware:  # codeclone: ignore[dead-code]
 Dynamic/runtime false positives are resolved via explicit inline suppressions, not via broad heuristics.
 
 <details>
-<summary>JSON report shape (v2.1)</summary>
+<summary>JSON report shape (v2.2)</summary>
 
 ```json
 {
-  "report_schema_version": "2.1",
+  "report_schema_version": "2.2",
   "meta": {
     "codeclone_version": "2.0.0b3",
     "project_name": "...",
     "scan_root": ".",
     "report_mode": "full",
+    "analysis_thresholds": {
+      "design_findings": {
+        "...": "..."
+      }
+    },
     "baseline": {
       "...": "..."
     },
@@ -330,7 +338,8 @@ Dynamic/runtime false positives are resolved via explicit inline suppressions, n
       "families": {},
       "top_risks": [],
       "source_scope_breakdown": {},
-      "health_snapshot": {}
+      "health_snapshot": {},
+      "directory_hotspots": {}
     },
     "hotlists": {
       "most_actionable_ids": [],
@@ -386,7 +395,7 @@ CFG semantics: [CFG semantics](https://orenlab.github.io/codeclone/cfg/)
 | Docker benchmark contract  | [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmarking/)                  |
 | Determinism                | [Determinism policy](https://orenlab.github.io/codeclone/book/12-determinism/)                      |
 
-##  * Benchmarking
+## Benchmarking Notes
 
 <details>
 <summary>Reproducible Docker Benchmark</summary>

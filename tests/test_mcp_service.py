@@ -10,6 +10,7 @@ import importlib
 import json
 import subprocess
 from collections import OrderedDict
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -19,6 +20,7 @@ import pytest
 from codeclone import mcp_service as mcp_service_mod
 from codeclone._cli_config import ConfigValidationError
 from codeclone.cache import Cache
+from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.mcp_service import (
     CodeCloneMCPService,
     MCPAnalysisRequest,
@@ -102,6 +104,43 @@ def _write_quality_fixture(root: Path) -> None:
     )
 
 
+def _write_clone_variant_fixture(
+    root: Path,
+    *,
+    relative_dir: str,
+    module_name: str,
+    seed: int,
+) -> None:
+    fixture_dir = root.joinpath(relative_dir)
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    fixture_dir.joinpath("__init__.py").write_text("", "utf-8")
+    fixture_dir.joinpath(module_name).write_text(
+        (
+            "def gamma(value: int) -> int:\n"
+            f"    total = value * {seed}\n"
+            f"    total -= {seed + 1}\n"
+            f"    total *= {seed + 2}\n"
+            f"    total -= {seed + 3}\n"
+            f"    total *= {seed + 4}\n"
+            f"    total -= {seed + 5}\n"
+            f"    total *= {seed + 6}\n"
+            f"    total -= {seed + 7}\n"
+            "    return total\n\n"
+            "def delta(value: int) -> int:\n"
+            f"    total = value * {seed}\n"
+            f"    total -= {seed + 1}\n"
+            f"    total *= {seed + 2}\n"
+            f"    total -= {seed + 3}\n"
+            f"    total *= {seed + 4}\n"
+            f"    total -= {seed + 5}\n"
+            f"    total *= {seed + 6}\n"
+            f"    total -= {seed + 7}\n"
+            "    return total\n"
+        ),
+        "utf-8",
+    )
+
+
 def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
     return MCPRunRecord(
         run_id=run_id,
@@ -158,6 +197,13 @@ def _file_registry(payload: dict[str, object]) -> dict[str, object]:
     return cast("dict[str, object]", inventory["file_registry"])
 
 
+def _mapping_child(
+    payload: dict[str, object] | Mapping[str, object],
+    key: str,
+) -> dict[str, object]:
+    return cast("dict[str, object]", payload[key])
+
+
 def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> None:
     _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
@@ -174,7 +220,7 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
     assert summary["run_id"] == latest["run_id"]
     assert summary["root"] == str(tmp_path)
     assert summary["analysis_mode"] == "full"
-    assert summary["report_schema_version"] == "2.1"
+    assert summary["report_schema_version"] == REPORT_SCHEMA_VERSION
     latest_baseline = cast("dict[str, object]", latest["baseline"])
     latest_cache = cast("dict[str, object]", latest["cache"])
     assert latest_baseline["status"] == "missing"
@@ -237,6 +283,79 @@ def test_mcp_service_lists_findings_and_hotspots(tmp_path: Path) -> None:
     hotspots = service.list_hotspots(kind="highest_spread")
     assert hotspots["run_id"] == summary["run_id"]
     assert cast(int, hotspots["total"]) >= 1
+
+
+def test_mcp_service_hotspot_resources_and_triage_are_production_first(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    _write_clone_variant_fixture(
+        tmp_path,
+        relative_dir="tests",
+        module_name="test_dup.py",
+        seed=20,
+    )
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+
+    production_hotspots = service.list_hotspots(
+        kind="production_hotspots",
+        detail_level="summary",
+    )
+    test_fixture_hotspots = service.list_hotspots(
+        kind="test_fixture_hotspots",
+        detail_level="summary",
+    )
+    triage = service.get_production_triage(max_hotspots=2, max_suggestions=2)
+    latest_triage = json.loads(service.read_resource("codeclone://latest/triage"))
+
+    assert production_hotspots["run_id"] == summary["run_id"]
+    assert cast(int, production_hotspots["total"]) >= 1
+    assert cast(int, test_fixture_hotspots["total"]) >= 1
+
+    triage_findings = _mapping_child(triage, "findings")
+    triage_suggestions = _mapping_child(triage, "suggestions")
+    findings_breakdown = cast("dict[str, int]", triage_findings["by_source_kind"])
+    suggestions_breakdown = cast(
+        "dict[str, int]",
+        triage_suggestions["by_source_kind"],
+    )
+    top_hotspots = _mapping_child(triage, "top_hotspots")
+    top_suggestions = _mapping_child(triage, "top_suggestions")
+    production_items = cast("list[dict[str, object]]", production_hotspots["items"])
+
+    assert triage["run_id"] == summary["run_id"]
+    assert _mapping_child(triage, "cache")["effective_freshness"] == "fresh"
+    assert findings_breakdown["production"] >= 1
+    assert findings_breakdown["tests"] >= 1
+    assert cast(int, triage_findings["outside_focus"]) >= 1
+    assert suggestions_breakdown["production"] >= 1
+    assert suggestions_breakdown["tests"] >= 1
+    assert cast(int, triage_suggestions["outside_focus"]) >= 1
+    assert top_hotspots["kind"] == "production_hotspots"
+    assert top_hotspots["available"] == production_hotspots["total"]
+    assert cast(int, top_hotspots["returned"]) >= 1
+    assert all(
+        str(item["id"]) in {str(row["id"]) for row in production_items}
+        for item in cast("list[dict[str, object]]", top_hotspots["items"])
+    )
+    assert cast(int, top_suggestions["available"]) >= 1
+    assert all(
+        str(item["source_kind"]) == "production"
+        for item in cast("list[dict[str, object]]", top_suggestions["items"])
+    )
+    assert latest_triage["run_id"] == summary["run_id"]
+    with pytest.raises(
+        MCPServiceContractError,
+        match="only as codeclone://latest/triage",
+    ):
+        service.read_resource(f"codeclone://runs/{summary['run_id']}/triage")
 
 
 def test_mcp_service_changed_runs_remediation_and_review_flow(tmp_path: Path) -> None:
@@ -336,6 +455,52 @@ def test_mcp_service_granular_checks_pr_summary_and_resources(
         )
     )
     run_id = str(summary["run_id"])
+    report_document = service.get_report_section(run_id=run_id, section="all")
+    design_thresholds = cast(
+        "dict[str, dict[str, object]]",
+        cast(
+            "dict[str, object]",
+            cast("dict[str, object]", report_document["meta"])["analysis_thresholds"],
+        )["design_findings"],
+    )
+    assert design_thresholds == {
+        "complexity": {
+            "metric": "cyclomatic_complexity",
+            "operator": ">",
+            "value": 1,
+        },
+        "coupling": {
+            "metric": "cbo",
+            "operator": ">",
+            "value": 10,
+        },
+        "cohesion": {
+            "metric": "lcom4",
+            "operator": ">=",
+            "value": 4,
+        },
+    }
+    finding_groups = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", report_document["findings"])["groups"],
+    )
+    design_groups = cast(
+        "list[dict[str, object]]",
+        cast("dict[str, object]", finding_groups["design"])["groups"],
+    )
+    canonical_design_ids = {str(group["id"]) for group in design_groups}
+    listed_design_ids = {
+        str(item["id"])
+        for item in cast(
+            "list[dict[str, object]]",
+            service.list_findings(
+                run_id=run_id,
+                family="design",
+                detail_level="summary",
+            )["items"],
+        )
+    }
+    assert listed_design_ids == canonical_design_ids
 
     clones = service.check_clones(
         run_id=run_id,
@@ -475,11 +640,11 @@ def test_mcp_service_summary_reuses_canonical_meta_for_cache_and_health(
         run_id=str(summary["run_id"]),
         section="metrics",
     )
-    cache_summary = cast("dict[str, object]", summary["cache"])
-    cache_meta = cast("dict[str, object]", report_meta["cache"])
-    health_summary = cast("dict[str, object]", summary["health"])
-    metrics_summary = cast("dict[str, object]", report_metrics["summary"])
-    metrics_health = cast("dict[str, object]", metrics_summary["health"])
+    cache_summary = _mapping_child(summary, "cache")
+    cache_meta = _mapping_child(report_meta, "cache")
+    health_summary = _mapping_child(summary, "health")
+    metrics_summary = _mapping_child(report_metrics, "summary")
+    metrics_health = _mapping_child(metrics_summary, "health")
 
     assert cache_summary["path"] == cache_meta["path"]
     assert cache_summary["status"] == cache_meta["status"]
@@ -487,6 +652,38 @@ def test_mcp_service_summary_reuses_canonical_meta_for_cache_and_health(
     assert cache_summary["schema_version"] == cache_meta["schema_version"]
     assert health_summary == metrics_health
     assert "families" not in report_metrics
+
+
+def test_mcp_service_effective_freshness_classifies_summary_cache_usage() -> None:
+    service = CodeCloneMCPService(history_limit=4)
+
+    assert (
+        service._effective_freshness(
+            {
+                "cache": {"used": False},
+                "inventory": {"files": {"analyzed": 2, "cached": 0}},
+            }
+        )
+        == "fresh"
+    )
+    assert (
+        service._effective_freshness(
+            {
+                "cache": {"used": True},
+                "inventory": {"files": {"analyzed": 0, "cached": 2}},
+            }
+        )
+        == "reused"
+    )
+    assert (
+        service._effective_freshness(
+            {
+                "cache": {"used": True},
+                "inventory": {"files": {"analyzed": 1, "cached": 2}},
+            }
+        )
+        == "mixed"
+    )
 
 
 def test_mcp_service_metrics_sections_split_summary_and_detail(
@@ -551,9 +748,10 @@ def test_mcp_service_resources_expose_latest_summary_and_report(tmp_path: Path) 
     latest_report = json.loads(service.read_resource("codeclone://latest/report.json"))
 
     assert latest_summary["run_id"] == summary["run_id"]
+    assert latest_summary["cache"]["effective_freshness"] == "fresh"
     assert latest_summary["inventory"]["file_registry"]["count"] >= 1
     assert "items" not in latest_summary["inventory"]["file_registry"]
-    assert latest_report["report_schema_version"] == "2.1"
+    assert latest_report["report_schema_version"] == REPORT_SCHEMA_VERSION
 
 
 def test_mcp_service_hotspot_summary_preserves_fixtures_source_kind(
@@ -978,7 +1176,7 @@ def test_mcp_service_all_section_and_optional_path_overrides(tmp_path: Path) -> 
     )
 
     report_document = service.get_report_section(section="all")
-    assert report_document["report_schema_version"] == "2.1"
+    assert report_document["report_schema_version"] == REPORT_SCHEMA_VERSION
 
     args = service._build_args(
         root_path=tmp_path,
@@ -1540,48 +1738,6 @@ def test_mcp_service_additional_projection_and_error_branches(
     run_id = str(summary["run_id"])
     record = service._runs.get(run_id)
 
-    complexity_group = mcp_service_mod._complexity_group_for_threshold_payload(
-        {
-            "qualname": "pkg.quality:hot",
-            "relative_path": "pkg/quality.py",
-            "start_line": 1,
-            "end_line": 5,
-            "cyclomatic_complexity": 99,
-            "nesting_depth": 4,
-            "risk": "high",
-        },
-        threshold=20,
-        scan_root=str(tmp_path),
-    )
-    assert complexity_group is not None
-    assert complexity_group["severity"] == "critical"
-    assert mcp_service_mod._coupling_group_for_threshold_payload(
-        {
-            "qualname": "pkg.quality:coupled",
-            "relative_path": "pkg/quality.py",
-            "start_line": 1,
-            "end_line": 5,
-            "cbo": 3,
-            "risk": "high",
-            "coupled_classes": ["A", "B"],
-        },
-        threshold=1,
-        scan_root=str(tmp_path),
-    )
-    assert mcp_service_mod._cohesion_group_for_threshold_payload(
-        {
-            "qualname": "pkg.quality:cohesive",
-            "relative_path": "pkg/quality.py",
-            "start_line": 1,
-            "end_line": 5,
-            "lcom4": 2,
-            "risk": "medium",
-            "method_count": 3,
-            "instance_var_count": 2,
-        },
-        threshold=1,
-        scan_root=str(tmp_path),
-    )
     assert mcp_service_mod._suggestion_finding_id_payload(object()) == ""
     assert mcp_service_mod._suggestion_finding_id_payload(
         SimpleNamespace(
@@ -1811,33 +1967,12 @@ def test_mcp_service_additional_projection_and_error_branches(
         new_block=frozenset(),
         metrics_diff=None,
     )
-    findings_section = cast(
-        "dict[str, object]",
-        fake_design_record.report_document["findings"],
-    )
-    fake_design_groups = cast("dict[str, object]", findings_section["groups"])
-    assert (
-        len(
-            service._design_groups_for_record(
-                fake_design_record,
-                groups=fake_design_groups,
-            )
-        )
-        == 3
-    )
-    wrapped_group = service._design_singleton_group(
-        category="cohesion",
-        kind="class_hotspot",
-        severity="warning",
-        qualname="pkg.quality:cohesive",
-        filepath="pkg/quality.py",
-        start_line=1,
-        end_line=5,
-        item_data={"lcom4": 2},
-        facts={"lcom4": 2},
-        scan_root=str(tmp_path),
-    )
-    assert wrapped_group["category"] == "cohesion"
+    design_findings = [
+        finding
+        for finding in service._base_findings(fake_design_record)
+        if str(finding.get("family", "")) == "design"
+    ]
+    assert design_findings == []
     detail_payload = service._project_finding_detail(
         {
             "id": "finding",

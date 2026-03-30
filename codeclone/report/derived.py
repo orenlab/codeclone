@@ -7,10 +7,14 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .. import _coerce
 from ..domain.source_scope import (
+    IMPACT_SCOPE_MIXED,
+    IMPACT_SCOPE_NON_RUNTIME,
+    IMPACT_SCOPE_RUNTIME,
+    SOURCE_KIND_BREAKDOWN_KEYS,
     SOURCE_KIND_FIXTURES,
     SOURCE_KIND_MIXED,
     SOURCE_KIND_OTHER,
@@ -38,6 +42,8 @@ __all__ = [
     "report_location_from_structural_occurrence",
     "representative_locations",
     "source_kind_breakdown",
+    "source_scope_from_counts",
+    "source_scope_from_locations",
 ]
 
 SOURCE_KIND_ORDER: dict[SourceKind, int] = {
@@ -116,6 +122,64 @@ def combine_source_kinds(
     if len(unique) == 1:
         return unique[0]
     return SOURCE_KIND_MIXED
+
+
+def normalized_source_kind(value: object) -> SourceKind:
+    source_kind_text = str(value).strip().lower() or SOURCE_KIND_OTHER
+    if source_kind_text == SOURCE_KIND_PRODUCTION:
+        return SOURCE_KIND_PRODUCTION
+    if source_kind_text == SOURCE_KIND_TESTS:
+        return SOURCE_KIND_TESTS
+    if source_kind_text == SOURCE_KIND_FIXTURES:
+        return SOURCE_KIND_FIXTURES
+    return SOURCE_KIND_OTHER
+
+
+def source_scope_from_counts(
+    counts: Mapping[SourceKind, int] | Mapping[str, int],
+) -> dict[str, object]:
+    normalized_counts = cast("Mapping[str, int]", counts)
+
+    def _count(kind: str) -> int:
+        value = normalized_counts.get(kind, 0)
+        return int(value)
+
+    breakdown = {kind: _count(kind) for kind in SOURCE_KIND_BREAKDOWN_KEYS}
+    present = tuple(kind for kind in SOURCE_KIND_BREAKDOWN_KEYS if breakdown[kind] > 0)
+    dominant_kind = (
+        present[0]
+        if len(present) == 1
+        else combine_source_kinds(present)
+        if present
+        else SOURCE_KIND_OTHER
+    )
+    production_count = breakdown[SOURCE_KIND_PRODUCTION]
+    non_runtime_count = (
+        breakdown[SOURCE_KIND_TESTS]
+        + breakdown[SOURCE_KIND_FIXTURES]
+        + breakdown[SOURCE_KIND_OTHER]
+    )
+    match (production_count > 0, non_runtime_count == 0, production_count == 0):
+        case (True, True, _):
+            impact_scope = IMPACT_SCOPE_RUNTIME
+        case (_, _, True):
+            impact_scope = IMPACT_SCOPE_NON_RUNTIME
+        case _:
+            impact_scope = IMPACT_SCOPE_MIXED
+    return {
+        "dominant_kind": dominant_kind,
+        "breakdown": breakdown,
+        "impact_scope": impact_scope,
+    }
+
+
+def source_scope_from_locations(
+    locations: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    counts: Counter[SourceKind] = Counter()
+    for location in locations:
+        counts[normalized_source_kind(location.get("source_kind"))] += 1
+    return source_scope_from_counts(counts)
 
 
 def report_location_from_group_item(

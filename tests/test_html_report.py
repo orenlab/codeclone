@@ -8,11 +8,17 @@ import importlib
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
-from codeclone.contracts import CACHE_VERSION, DOCS_URL, ISSUES_URL, REPOSITORY_URL
+from codeclone.contracts import (
+    CACHE_VERSION,
+    DOCS_URL,
+    ISSUES_URL,
+    REPORT_SCHEMA_VERSION,
+    REPOSITORY_URL,
+)
 from codeclone.errors import FileProcessingError
 from codeclone.html_report import (
     _FileCache,
@@ -957,7 +963,7 @@ def test_html_report_provenance_summary_uses_card_like_badges(
         'class="prov-badge prov-badge--neutral"',
         '<span class="prov-badge-val">verified</span>',
         '<span class="prov-badge-lbl">Baseline</span>',
-        '<span class="prov-badge-val">2.1</span>',
+        f'<span class="prov-badge-val">{REPORT_SCHEMA_VERSION}</span>',
         '<span class="prov-badge-lbl">Schema</span>',
         '<span class="prov-badge-val">1</span>',
         '<span class="prov-badge-lbl">Fingerprint</span>',
@@ -1641,6 +1647,68 @@ def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
     assert "High Complexity" in html
     assert '<span class="kpi-micro-val">2.5</span>' in html
     assert '<span class="kpi-micro-lbl">avg</span>' in html
+
+
+def test_html_report_renders_directory_hotspots_from_canonical_report() -> None:
+    report_document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo/project", "project_name": "project"},
+        metrics={
+            "dead_code": {
+                "summary": {"count": 6, "critical": 6},
+                "items": [
+                    {
+                        "qualname": f"pkg.dir{index}:unused",
+                        "filepath": f"/repo/project/dir{index}/mod.py",
+                        "start_line": 1,
+                        "end_line": 2,
+                        "kind": "function",
+                        "confidence": "high",
+                    }
+                    for index in range(1, 7)
+                ],
+            }
+        },
+    )
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta=cast("dict[str, Any]", report_document["meta"]),
+        metrics=cast("dict[str, Any]", report_document["metrics"]),
+        report_document=report_document,
+    )
+    _assert_html_contains(
+        html,
+        "Hotspots by Directory",
+        "top 5 of 6 directories",
+        "<code>dir1</code>",
+        "<code>dir5</code>",
+    )
+
+
+def test_html_report_direct_path_skips_directory_hotspots_cluster() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=_metrics_payload(
+            health_score=70,
+            health_grade="B",
+            complexity_max=1,
+            complexity_high_risk=0,
+            coupling_high_risk=0,
+            cohesion_low=0,
+            dep_cycles=[],
+            dep_max_depth=0,
+            dead_total=0,
+            dead_critical=0,
+        ),
+    )
+    assert "Hotspots by Directory" not in html
 
 
 def test_html_report_metrics_bad_health_score_and_dead_code_ok_tone() -> None:

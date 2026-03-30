@@ -40,6 +40,7 @@ from codeclone._html_report._sections._suggestions import (
 )
 from codeclone._html_report._tabs import render_split_tabs
 from codeclone._html_snippets import _FileCache
+from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import MetricsDiff, ReportLocation, Suggestion
 
 
@@ -188,7 +189,7 @@ def _section_ctx(**overrides: object) -> SimpleNamespace:
         "metrics_baseline_meta": {},
         "runtime_meta": {},
         "integrity_map": {},
-        "report_schema_version": "2.1",
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "report_generated_at": "2026-03-22T21:30:45Z",
     }
     base.update(overrides)

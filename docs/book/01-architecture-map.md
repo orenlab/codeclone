@@ -46,6 +46,9 @@ Refs:
 - MCP may ship task-specific slim projections (for example, summary-only metrics
   or inventory counts) as long as canonical report data remains the source of
   truth and richer detail stays reachable through dedicated tools/sections.
+- The same rule applies to summary cache convenience fields such as
+  `effective_freshness` and to production-first triage projections built from
+  canonical hotlists/suggestions.
 - MCP finding lists may also move repeated absolute location context to
   envelope-level metadata such as `base_uri`, while keeping `get_finding` as
   the richer per-finding inspection path.

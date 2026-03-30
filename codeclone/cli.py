@@ -94,7 +94,13 @@ from ._cli_summary import (
 )
 from .baseline import Baseline
 from .cache import Cache, CacheStatus, build_segment_report_projection
-from .contracts import ISSUES_URL, ExitCode
+from .contracts import (
+    DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+    DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+    DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+    ISSUES_URL,
+    ExitCode,
+)
 from .errors import CacheError
 
 if TYPE_CHECKING:
@@ -1398,6 +1404,9 @@ def _main_impl() -> None:
         ),
         analysis_mode=("clones_only" if args.skip_metrics else "full"),
         metrics_computed=_metrics_computed(args),
+        design_complexity_threshold=DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+        design_coupling_threshold=DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+        design_cohesion_threshold=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
         analysis_started_at_utc=analysis_started_at_utc,
         report_generated_at_utc=report_generated_at_utc,
     )

@@ -13,7 +13,12 @@ from hashlib import sha256
 from typing import TYPE_CHECKING, Literal
 
 from .. import _coerce
-from ..contracts import REPORT_SCHEMA_VERSION
+from ..contracts import (
+    DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+    DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+    DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+    REPORT_SCHEMA_VERSION,
+)
 from ..domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
@@ -58,12 +63,18 @@ from ..domain.source_scope import (
 from ..structural_findings import normalize_structural_findings
 from ..suppressions import INLINE_CODECLONE_SUPPRESSION_SOURCE
 from .derived import (
-    combine_source_kinds,
     group_spread,
     relative_report_path,
     report_location_from_group_item,
     report_location_from_structural_occurrence,
 )
+from .derived import (
+    source_scope_from_counts as _report_source_scope_from_counts,
+)
+from .derived import (
+    source_scope_from_locations as _report_source_scope_from_locations,
+)
+from .overview import build_directory_hotspots
 from .suggestions import classify_clone_type
 
 if TYPE_CHECKING:
@@ -88,19 +99,51 @@ _as_float = _coerce.as_float
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
 
-_SOURCE_BREAKDOWN_KEYS_TYPED: tuple[SourceKind, ...] = (
-    SOURCE_KIND_PRODUCTION,
-    SOURCE_KIND_TESTS,
-    SOURCE_KIND_FIXTURES,
-    SOURCE_KIND_OTHER,
-)
-
 
 def _optional_str(value: object) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _coerced_nonnegative_threshold(value: object, *, default: int) -> int:
+    threshold = _as_int(value, default)
+    return threshold if threshold >= 0 else default
+
+
+def _design_findings_thresholds_payload(
+    raw_meta: Mapping[str, object] | None,
+) -> dict[str, object]:
+    meta = dict(raw_meta or {})
+    return {
+        "design_findings": {
+            CATEGORY_COMPLEXITY: {
+                "metric": "cyclomatic_complexity",
+                "operator": ">",
+                "value": _coerced_nonnegative_threshold(
+                    meta.get("design_complexity_threshold"),
+                    default=DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+                ),
+            },
+            CATEGORY_COUPLING: {
+                "metric": "cbo",
+                "operator": ">",
+                "value": _coerced_nonnegative_threshold(
+                    meta.get("design_coupling_threshold"),
+                    default=DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+                ),
+            },
+            CATEGORY_COHESION: {
+                "metric": "lcom4",
+                "operator": ">=",
+                "value": _coerced_nonnegative_threshold(
+                    meta.get("design_cohesion_threshold"),
+                    default=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+                ),
+            },
+        }
+    }
 
 
 def _normalize_path(value: str) -> str:
@@ -272,44 +315,17 @@ def _normalized_source_kind(value: object) -> SourceKind:
 def _source_scope_from_counts(
     counts: Mapping[SourceKind, int],
 ) -> dict[str, object]:
-    breakdown = {kind: counts[kind] for kind in _SOURCE_BREAKDOWN_KEYS_TYPED}
-    present = tuple(
-        kind for kind in _SOURCE_BREAKDOWN_KEYS_TYPED if breakdown[kind] > 0
-    )
-    dominant_kind = (
-        present[0]
-        if len(present) == 1
-        else combine_source_kinds(present)
-        if present
-        else SOURCE_KIND_OTHER
-    )
-    production_count = breakdown[SOURCE_KIND_PRODUCTION]
-    non_runtime_count = (
-        breakdown[SOURCE_KIND_TESTS]
-        + breakdown[SOURCE_KIND_FIXTURES]
-        + breakdown[SOURCE_KIND_OTHER]
-    )
-    match (production_count > 0, non_runtime_count == 0, production_count == 0):
-        case (True, True, _):
-            impact_scope = IMPACT_SCOPE_RUNTIME
-        case (_, _, True):
-            impact_scope = IMPACT_SCOPE_NON_RUNTIME
-        case _:
-            impact_scope = IMPACT_SCOPE_MIXED
-    return {
-        "dominant_kind": dominant_kind,
-        "breakdown": breakdown,
-        "impact_scope": impact_scope,
-    }
+    return _report_source_scope_from_counts(counts)
 
 
 def _source_scope_from_locations(
     locations: Sequence[Mapping[str, object]],
 ) -> dict[str, object]:
-    counts: Counter[SourceKind] = Counter()
-    for location in locations:
-        counts[_normalized_source_kind(location.get("source_kind"))] += 1
-    return _source_scope_from_counts(counts)
+    normalized_locations = [
+        {"source_kind": _normalized_source_kind(location.get("source_kind"))}
+        for location in locations
+    ]
+    return _report_source_scope_from_locations(normalized_locations)
 
 
 def _collect_paths_from_metrics(metrics: Mapping[str, object]) -> set[str]:
@@ -852,6 +868,7 @@ def _build_meta_payload(
         "analysis_mode": str(meta.get("analysis_mode", "full") or "full"),
         "report_mode": str(meta.get("report_mode", "full") or "full"),
         "computed_metric_families": metrics_computed,
+        "analysis_thresholds": _design_findings_thresholds_payload(meta),
         "baseline": {
             "path": baseline_path,
             "path_scope": baseline_path_scope,
@@ -1424,10 +1441,11 @@ def _design_singleton_group(
 def _complexity_design_group(
     item_map: Mapping[str, object],
     *,
+    threshold: int,
     scan_root: str,
 ) -> dict[str, object] | None:
     cc = _as_int(item_map.get("cyclomatic_complexity"), 1)
-    if cc <= 20:
+    if cc <= threshold:
         return None
     qualname = str(item_map.get("qualname", ""))
     filepath = str(item_map.get("relative_path", ""))
@@ -1457,10 +1475,11 @@ def _complexity_design_group(
 def _coupling_design_group(
     item_map: Mapping[str, object],
     *,
+    threshold: int,
     scan_root: str,
 ) -> dict[str, object] | None:
     cbo = _as_int(item_map.get("cbo"))
-    if cbo <= 10:
+    if cbo <= threshold:
         return None
     qualname = str(item_map.get("qualname", ""))
     filepath = str(item_map.get("relative_path", ""))
@@ -1489,10 +1508,11 @@ def _coupling_design_group(
 def _cohesion_design_group(
     item_map: Mapping[str, object],
     *,
+    threshold: int,
     scan_root: str,
 ) -> dict[str, object] | None:
     lcom4 = _as_int(item_map.get("lcom4"))
-    if lcom4 <= 3:
+    if lcom4 < threshold:
         return None
     qualname = str(item_map.get("qualname", ""))
     filepath = str(item_map.get("relative_path", ""))
@@ -1568,26 +1588,52 @@ def _dependency_design_group(
 def _build_design_groups(
     metrics_payload: Mapping[str, object],
     *,
+    design_thresholds: Mapping[str, object] | None = None,
     scan_root: str,
 ) -> list[dict[str, object]]:
     families = _as_mapping(metrics_payload.get("families"))
+    thresholds = _as_mapping(design_thresholds)
+    complexity_threshold = _coerced_nonnegative_threshold(
+        _as_mapping(thresholds.get(CATEGORY_COMPLEXITY)).get("value"),
+        default=DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+    )
+    coupling_threshold = _coerced_nonnegative_threshold(
+        _as_mapping(thresholds.get(CATEGORY_COUPLING)).get("value"),
+        default=DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+    )
+    cohesion_threshold = _coerced_nonnegative_threshold(
+        _as_mapping(thresholds.get(CATEGORY_COHESION)).get("value"),
+        default=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+    )
     groups: list[dict[str, object]] = []
 
     complexity = _as_mapping(families.get(CATEGORY_COMPLEXITY))
     for item in _as_sequence(complexity.get("items")):
-        group = _complexity_design_group(_as_mapping(item), scan_root=scan_root)
+        group = _complexity_design_group(
+            _as_mapping(item),
+            threshold=complexity_threshold,
+            scan_root=scan_root,
+        )
         if group is not None:
             groups.append(group)
 
     coupling = _as_mapping(families.get(CATEGORY_COUPLING))
     for item in _as_sequence(coupling.get("items")):
-        group = _coupling_design_group(_as_mapping(item), scan_root=scan_root)
+        group = _coupling_design_group(
+            _as_mapping(item),
+            threshold=coupling_threshold,
+            scan_root=scan_root,
+        )
         if group is not None:
             groups.append(group)
 
     cohesion = _as_mapping(families.get(CATEGORY_COHESION))
     for item in _as_sequence(cohesion.get("items")):
-        group = _cohesion_design_group(_as_mapping(item), scan_root=scan_root)
+        group = _cohesion_design_group(
+            _as_mapping(item),
+            threshold=cohesion_threshold,
+            scan_root=scan_root,
+        )
         if group is not None:
             groups.append(group)
 
@@ -1913,6 +1959,7 @@ def _build_derived_overview(
             if dominant_kind_counts[key] > 0
         },
         "health_snapshot": _health_snapshot(metrics_payload),
+        "directory_hotspots": build_directory_hotspots(findings=findings),
     }
     hotlists: dict[str, object] = {
         "most_actionable_ids": _sort_flat_finding_ids(
@@ -2049,6 +2096,7 @@ def _build_findings_payload(
     new_function_group_keys: Collection[str] | None,
     new_block_group_keys: Collection[str] | None,
     new_segment_group_keys: Collection[str] | None,
+    design_thresholds: Mapping[str, object] | None,
     scan_root: str,
 ) -> dict[str, object]:
     clone_functions = _build_clone_groups(
@@ -2095,6 +2143,7 @@ def _build_findings_payload(
     )
     design_groups = _build_design_groups(
         metrics_payload,
+        design_thresholds=design_thresholds,
         scan_root=scan_root,
     )
     return {
@@ -2221,6 +2270,9 @@ def build_report_document(
     report_schema_version = REPORT_SCHEMA_VERSION
     scan_root = str(_as_mapping(meta).get("scan_root", ""))
     meta_payload = _build_meta_payload(meta, scan_root=scan_root)
+    design_thresholds = _as_mapping(
+        _as_mapping(meta_payload.get("analysis_thresholds")).get("design_findings")
+    )
     metrics_payload = _build_metrics_payload(metrics, scan_root=scan_root)
     file_list = _collect_report_file_list(
         inventory=inventory,
@@ -2247,6 +2299,7 @@ def build_report_document(
         new_function_group_keys=new_function_group_keys,
         new_block_group_keys=new_block_group_keys,
         new_segment_group_keys=new_segment_group_keys,
+        design_thresholds=design_thresholds,
         scan_root=scan_root,
     )
     overview_payload, hotlists_payload = _build_derived_overview(

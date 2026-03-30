@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the current public MCP surface in `2.0.0b3`.
+Define the current public MCP surface in the `2.0` beta line.
 
 This interface is **optional** and is installed via the `mcp` extra. It does
 not replace the CLI or the canonical JSON report contract. Instead, it exposes
@@ -28,6 +28,7 @@ Current server characteristics:
     - in-memory only
     - bounded history (`--history-limit`, default `4`, maximum `10`)
     - latest-run pointer for `codeclone://latest/...` resources
+    - the `latest` pointer moves whenever a newer `analyze_*` call registers a run
 - run identity:
     - `run_id` is derived from the canonical report integrity digest
 - analysis modes:
@@ -43,6 +44,8 @@ Current server characteristics:
 - summary payload:
     - `run_id`, `root`, `analysis_mode`
     - `baseline`, `metrics_baseline`, `cache`
+    - `cache.effective_freshness` classifies summary cache reuse as
+      `fresh`, `mixed`, or `reused`
     - `inventory`, `findings_summary`, `health`
     - `get_run_summary` and summary resources expose slim inventory
       `file_registry` as `{ encoding, count }`
@@ -75,6 +78,7 @@ Current tool set:
 | `analyze_repository`     | `root`, `analysis_mode`, `changed_paths`, `git_diff_ref`, inline thresholds, cache/baseline paths                                                      | Run deterministic CodeClone analysis and register the result as the latest MCP run                                                                                             |
 | `analyze_changed_paths`  | `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, inline thresholds                                                                          | Diff-aware fast path: analyze a repo and attach a changed-files projection to the run; summary inventory is slimmed to `{count}`                                               |
 | `get_run_summary`        | `run_id`                                                                                                                                               | Return the stored summary for the latest or specified run, with slim inventory counts instead of the full file registry                                                        |
+| `get_production_triage`  | `run_id`, `max_hotspots`, `max_suggestions`                                                                                                            | Return a compact production-first MCP projection: health, cache `effective_freshness`, production hotspots, production suggestions, and global source-kind counters             |
 | `compare_runs`           | `run_id_before`, `run_id_after`, `focus`                                                                                                               | Compare two registered runs by finding ids and health delta                                                                                                                    |
 | `evaluate_gates`         | `run_id`, gate thresholds/booleans                                                                                                                     | Evaluate CI/gating conditions against an existing run without exiting the process                                                                                              |
 | `get_report_section`     | `run_id`, `section`                                                                                                                                    | Return a canonical report section. `metrics` is summary-only; `metrics_detail` exposes the full metrics payload; other sections stay canonical                                 |
@@ -103,22 +107,31 @@ sessionful and may populate or reuse in-memory run state. The granular
 
 ## Resources
 
-Current resources:
+Current fixed resources:
 
-| Resource                                          | Payload                                               | Availability                                          |
-|---------------------------------------------------|-------------------------------------------------------|-------------------------------------------------------|
-| `codeclone://latest/summary`                      | latest run summary projection                         | always after at least one run                         |
-| `codeclone://latest/report.json`                  | latest canonical report document                      | always after at least one run                         |
-| `codeclone://latest/health`                       | latest health score + dimensions                      | always after at least one run                         |
-| `codeclone://latest/gates`                        | latest gate evaluation result                         | only after `evaluate_gates` in current server process |
-| `codeclone://latest/changed`                      | latest changed-files projection                       | only for a diff-aware latest run                      |
-| `codeclone://schema`                              | schema-style descriptor for canonical report sections | always available                                      |
-| `codeclone://runs/{run_id}/summary`               | run-specific summary projection                       | for any stored run                                    |
-| `codeclone://runs/{run_id}/report.json`           | run-specific canonical report                         | for any stored run                                    |
-| `codeclone://runs/{run_id}/findings/{finding_id}` | run-specific canonical finding group                  | for an existing finding in a stored run               |
+| Resource                         | Payload                                               | Availability                                          |
+|----------------------------------|-------------------------------------------------------|-------------------------------------------------------|
+| `codeclone://latest/summary`     | latest run summary projection                         | always after at least one run                         |
+| `codeclone://latest/triage`      | latest production-first triage projection             | always after at least one run                         |
+| `codeclone://latest/report.json` | latest canonical report document                      | always after at least one run                         |
+| `codeclone://latest/health`      | latest health score + dimensions                      | always after at least one run                         |
+| `codeclone://latest/gates`       | latest gate evaluation result                         | only after `evaluate_gates` in current server process |
+| `codeclone://latest/changed`     | latest changed-files projection                       | only for a diff-aware latest run                      |
+| `codeclone://schema`             | schema-style descriptor for canonical report sections | always available                                      |
 
-Resources are convenience views over already registered runs. They do not
-trigger fresh analysis by themselves.
+Current run-scoped URI templates:
+
+| URI template                                      | Payload                              | Availability                            |
+|---------------------------------------------------|--------------------------------------|-----------------------------------------|
+| `codeclone://runs/{run_id}/summary`               | run-specific summary projection      | for any stored run                      |
+| `codeclone://runs/{run_id}/report.json`           | run-specific canonical report        | for any stored run                      |
+| `codeclone://runs/{run_id}/findings/{finding_id}` | run-specific canonical finding group | for an existing finding in a stored run |
+
+Fixed resources and URI templates are convenience views over already
+registered runs. They do not trigger fresh analysis by themselves.
+If a client needs the freshest truth, it must start a fresh analysis run first
+(typically with `cache_policy="off"`), rather than relying on older session
+state behind `codeclone://latest/...`.
 
 ## Contracts
 
@@ -138,9 +151,17 @@ trigger fresh analysis by themselves.
     - baseline trust semantics
     - cache semantics
     - canonical report contract
+- Inline MCP design-threshold parameters (`complexity_threshold`,
+  `coupling_threshold`, `cohesion_threshold`) define the canonical design
+  finding universe of that run and are recorded in
+  `meta.analysis_thresholds.design_findings`.
 - `get_run_summary` is a deterministic convenience projection derived from the
   canonical report (`meta`, `inventory`, `findings.summary`,
   `metrics.summary.health`) plus baseline-diff/gate/changed-files context.
+- `get_production_triage` is also a deterministic MCP projection over the same
+  canonical run state (`summary`, `derived.hotlists`, `derived.suggestions`,
+  and canonical finding source scope). It must not create a second analysis or
+  remediation truth path.
 - Canonical JSON remains the source of truth for report semantics.
 - `list_findings` and `list_hotspots` are deterministic projections over the
   canonical report, not a separate analysis branch.
@@ -164,6 +185,11 @@ trigger fresh analysis by themselves.
   the canonical report digest is unchanged; changed-files state is an overlay,
   not a second canonical report.
 - `get_run_summary` with no `run_id` resolves to the latest stored run.
+- `codeclone://latest/...` resources always resolve to the latest stored run in
+  the current MCP server process, not to a globally fresh analysis state.
+- Summary-style MCP payloads expose `cache.effective_freshness` as a derived
+  convenience marker; canonical cache fields (`status`, `used`, `schema_version`)
+  remain unchanged.
 - `get_report_section(section="all")` returns the full canonical report document.
 - `get_report_section(section="metrics")` returns only `metrics.summary`.
 - `get_report_section(section="metrics_detail")` returns the full canonical
@@ -180,6 +206,8 @@ trigger fresh analysis by themselves.
   `priority_factors` and location `uri` are still available there.
 - `compare_runs` is only semantically meaningful when both runs use comparable
   repository scope/root and analysis settings.
+- `codeclone://latest/triage` is a latest-only resource; run-specific triage is
+  available via the tool, not via a `codeclone://runs/{run_id}/...` resource URI.
 
 ## Failure modes
 
@@ -197,6 +225,8 @@ trigger fresh analysis by themselves.
 - Finding order is inherited from canonical report ordering.
 - Hotlists are derived from canonical report data and deterministic derived ids.
 - No MCP-only heuristics may change analysis or gating semantics.
+- MCP must not re-synthesize design findings from raw metrics after the run;
+  threshold-aware design findings belong to the canonical report document.
 
 ## Locked by tests
 

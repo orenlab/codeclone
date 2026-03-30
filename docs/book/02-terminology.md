@@ -87,7 +87,7 @@ Refs:
 ## Locked by tests
 
 - `tests/test_baseline.py::test_baseline_id_lists_must_be_sorted_and_unique`
-- `tests/test_report.py::test_report_json_group_order_is_lexicographic`
+- `tests/test_report.py::test_report_json_group_order_is_deterministic_by_count_then_id`
 - `tests/test_cache.py::test_cache_version_mismatch_warns`
 
 ## Non-guarantees
