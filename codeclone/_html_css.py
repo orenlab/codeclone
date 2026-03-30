@@ -170,12 +170,14 @@ _LAYOUT = """\
   background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);
   overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .main-tabs::-webkit-scrollbar{display:none}
-.main-tab{position:relative;flex:1;text-align:center;padding:var(--sp-2) var(--sp-3);
-  background:none;border:none;cursor:pointer;font-size:.85rem;font-weight:500;
-  color:var(--text-muted);white-space:nowrap;border-radius:var(--radius-md);
-  transition:all var(--dur-fast) var(--ease)}
+.main-tab{position:relative;flex:1;display:inline-flex;align-items:center;justify-content:center;
+  gap:var(--sp-1);text-align:center;padding:var(--sp-2) var(--sp-3);background:none;
+  border:none;cursor:pointer;font-size:.85rem;font-weight:500;color:var(--text-muted);
+  white-space:nowrap;border-radius:var(--radius-md);transition:all var(--dur-fast) var(--ease)}
 .main-tab:hover{color:var(--text-primary);background:var(--bg-raised)}
 .main-tab[aria-selected="true"]{color:var(--accent-primary);background:var(--accent-muted)}
+.main-tab-icon{flex-shrink:0;opacity:.72}
+.main-tab-label{display:inline-flex;align-items:center}
 .tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;
   height:18px;padding:0 5px;font-size:.7rem;font-weight:700;border-radius:9px;
   background:var(--bg-overlay);color:var(--text-muted);margin-left:var(--sp-1)}
@@ -656,6 +658,23 @@ _OVERVIEW = """\
 .breakdown-bar-track{height:6px;border-radius:3px;background:var(--bg-raised);overflow:hidden}
 .breakdown-bar-fill{display:block;height:100%;border-radius:3px;
   background:var(--accent-primary);transition:width .6s var(--ease)}
+/* Directory hotspot entries */
+.dir-hotspot-list{display:flex;flex-direction:column;gap:0}
+.dir-hotspot-entry{padding:var(--sp-2) 0;border-bottom:1px solid color-mix(in srgb,var(--border) 50%,transparent)}
+.dir-hotspot-entry:last-child{border-bottom:none;padding-bottom:0}
+.dir-hotspot-entry:first-child{padding-top:0}
+.dir-hotspot-path{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:4px;min-width:0}
+.dir-hotspot-path code{font-size:.78rem;font-weight:600;color:var(--text-primary);line-height:1.3}
+.dir-hotspot-bar-row{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:3px}
+.dir-hotspot-bar-track{flex:1;height:4px;border-radius:2px;background:var(--bg-raised);
+  overflow:hidden;display:flex}
+.dir-hotspot-bar-prev{height:100%;background:var(--text-muted);opacity:.18}
+.dir-hotspot-bar-cur{height:100%;background:var(--accent-primary);opacity:.7}
+.dir-hotspot-pct{font-size:.7rem;font-weight:600;font-variant-numeric:tabular-nums;
+  color:var(--text-muted);min-width:3.2em;text-align:right}
+.dir-hotspot-meta{display:flex;flex-wrap:wrap;gap:6px;font-size:.68rem;color:var(--text-muted)}
+.dir-hotspot-meta span{font-variant-numeric:tabular-nums}
+.dir-hotspot-meta-sep{opacity:.3}
 /* Health radar chart */
 .health-radar{display:flex;justify-content:center;padding:var(--sp-3) 0}
 .health-radar svg{width:100%;max-width:520px;height:auto;overflow:visible}
@@ -781,10 +800,10 @@ _SUGGESTIONS = """\
 .suggestion-sev-inline{font-size:.72rem;font-weight:600;padding:1px var(--sp-1);
   border-radius:var(--radius-sm)}
 .suggestion-title{font-weight:600;font-size:.85rem;color:var(--text-primary);flex:1;min-width:0}
-.suggestion-meta{display:flex;align-items:center;gap:var(--sp-1);flex-shrink:0;flex-wrap:wrap}
-.suggestion-meta-badge{font-size:.68rem;font-family:var(--font-mono);font-weight:500;
-  padding:1px var(--sp-2);border-radius:var(--radius-sm);background:var(--bg-overlay);
-  color:var(--text-muted);white-space:nowrap}
+.suggestion-meta{display:flex;align-items:center;gap:var(--sp-2);flex-shrink:0;flex-wrap:wrap}
+.suggestion-meta-badge{font-size:.68rem;font-weight:600;padding:2px var(--sp-2);
+  border-radius:999px;background:var(--bg-overlay);color:var(--text-muted);
+  white-space:nowrap;line-height:1.2;font-variant-numeric:tabular-nums}
 .suggestion-effort--easy{color:var(--success);background:var(--success-muted, rgba(34,197,94,.1))}
 .suggestion-effort--moderate{color:var(--warning);background:var(--warning-muted)}
 .suggestion-effort--hard{color:var(--error);background:var(--error-muted)}
@@ -1092,6 +1111,7 @@ _UTILITY = """\
       linear-gradient(to left,rgba(0,0,0,.12),transparent) right center / 10px 100% no-repeat scroll,
       var(--bg-surface)}
   .main-tab{flex:none;padding:var(--sp-1) var(--sp-2);font-size:.78rem}
+  .main-tab-icon{width:13px;height:13px}
 }
 @media(max-width:480px){
   .overview-kpi-grid{grid-template-columns:1fr}

@@ -29,14 +29,19 @@ from codeclone._html_report._sections._dependencies import (
 )
 from codeclone._html_report._sections._meta import _path_basename, render_meta_panel
 from codeclone._html_report._sections._overview import (
+    _directory_hotspot_bucket_body,
+    _directory_kind_meta_parts,
     _health_gauge_html,
     _issue_breakdown_html,
     render_overview_panel,
 )
 from codeclone._html_report._sections._suggestions import (
     _format_source_breakdown,
+    _priority_badge_label,
     _render_card,
     _render_fact_summary,
+    _spread_label,
+    _suggestion_context_labels,
 )
 from codeclone._html_report._tabs import render_split_tabs
 from codeclone._html_snippets import _FileCache
@@ -62,6 +67,22 @@ def test_summary_helpers_cover_breakdown_bars_and_clone_badges() -> None:
         body_html="<div>body</div>",
     )
     assert "summary-icon--info" in summary_html
+
+    all_findings_html = overview_summary_item_html(
+        label="All Findings",
+        body_html="<div>body</div>",
+    )
+    clone_groups_html = overview_summary_item_html(
+        label="Clone Groups",
+        body_html="<div>body</div>",
+    )
+    low_cohesion_html = overview_summary_item_html(
+        label="Low Cohesion",
+        body_html="<div>body</div>",
+    )
+    assert "summary-icon--info" in all_findings_html
+    assert "summary-icon--info" in clone_groups_html
+    assert "summary-icon--info" in low_cohesion_html
 
 
 def test_clone_display_name_and_group_explanation_edge_branches() -> None:
@@ -304,6 +325,53 @@ def test_render_dead_code_panel_warns_when_only_medium_confidence_items_exist() 
     assert "No dead code detected." not in panel_html
 
 
+def test_directory_hotspot_meta_omits_redundant_single_family_breakdown() -> None:
+    assert _directory_kind_meta_parts({"clones": 8}, total_groups=8) == []
+    assert _directory_kind_meta_parts(
+        {"clones": 8, "cohesion": 1},
+        total_groups=9,
+    ) == ["<span>8 clones</span>", "<span>1 cohesion</span>"]
+
+    body_html = _directory_hotspot_bucket_body(
+        "all",
+        {
+            "items": [
+                {
+                    "path": "tests/fixtures",
+                    "finding_groups": 8,
+                    "affected_items": 32,
+                    "files": 4,
+                    "share_pct": 97.0,
+                    "source_scope": {"dominant_kind": "fixtures"},
+                    "kind_breakdown": {"clones": 8},
+                },
+                {
+                    "path": "tests",
+                    "finding_groups": 9,
+                    "affected_items": 33,
+                    "files": 5,
+                    "share_pct": 100.0,
+                    "source_scope": {"dominant_kind": "mixed"},
+                    "kind_breakdown": {"clones": 8, "cohesion": 1},
+                },
+            ],
+            "returned": 2,
+            "total_directories": 2,
+            "has_more": False,
+        },
+    )
+    assert '8 groups</span><span class="dir-hotspot-meta-sep">' in body_html
+    assert "<span>8 clones</span>" in body_html
+    assert "<span>1 cohesion</span>" in body_html
+    assert (
+        '<div class="dir-hotspot-meta"><span>8 groups</span>'
+        '<span class="dir-hotspot-meta-sep">·</span>'
+        "<span>32 items</span>"
+        '<span class="dir-hotspot-meta-sep">·</span>'
+        "<span>4 files</span></div>"
+    ) in body_html
+
+
 def test_suggestion_helpers_cover_empty_summary_breakdown_and_optional_sections(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -342,6 +410,60 @@ def test_suggestion_helpers_cover_empty_summary_breakdown_and_optional_sections(
     assert "suggestion-summary" not in card_html
     assert "Locations (" not in card_html
     assert "Refactoring steps" not in card_html
+
+
+def test_suggestion_context_labels_prefer_specific_clone_kind() -> None:
+    clone_labels = _suggestion_context_labels(
+        _make_suggestion(
+            category=cast(Any, "clone"),
+            source_kind=cast(Any, "fixtures"),
+            finding_kind="function",
+            clone_type="Type-2",
+        )
+    )
+    assert clone_labels == ("Fixtures", "Function", "Type-2")
+
+    generic_labels = _suggestion_context_labels(
+        _make_suggestion(category=cast(Any, "dead_code"))
+    )
+    assert generic_labels == ("Production", "Dead Code")
+
+
+def test_render_card_uses_professional_clone_context_chip_rhythm() -> None:
+    card_html = _render_card(
+        _make_suggestion(
+            category=cast(Any, "clone"),
+            source_kind=cast(Any, "fixtures"),
+            finding_kind="block",
+            clone_type="Type-4",
+        ),
+        cast(Any, _section_ctx()),
+    )
+    assert (
+        '<div class="suggestion-context">'
+        '<span class="suggestion-chip">Fixtures</span>'
+        '<span class="suggestion-chip">Block</span>'
+        '<span class="suggestion-chip">Type-4</span>'
+        "</div>"
+    ) in card_html
+
+
+def test_suggestion_meta_labels_are_more_readable() -> None:
+    assert _priority_badge_label(1.5) == "Priority 1.5"
+    assert _spread_label(spread_functions=1, spread_files=2) == "1 function · 2 files"
+
+    card_html = _render_card(
+        _make_suggestion(effort="easy", priority=1.5), cast(Any, _section_ctx())
+    )
+    assert (
+        '<span class="suggestion-meta-badge suggestion-effort--easy">Easy</span>'
+        in card_html
+    )
+    assert '<span class="suggestion-meta-badge">Priority 1.5</span>' in card_html
+    assert (
+        '<span class="suggestion-meta-badge">3 functions · 2 files</span>' in card_html
+    )
+    assert "<div><dt>Spread</dt><dd>3 functions · 2 files</dd></div>" in card_html
 
 
 def test_meta_snippet_and_assembly_helpers_cover_empty_optional_paths(

@@ -21,6 +21,8 @@ Suggestion shape:
 - `severity`: `critical|warning|info`
 - `category`:
   `clone|structural|complexity|coupling|cohesion|dead_code|dependency`
+- `source_kind`: source classification of the primary location
+  (`production` / `tests` / `fixtures` / `other`)
 - `title`, `location`, `steps`, `effort`, `priority`
 
 Clone typing:

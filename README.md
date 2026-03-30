@@ -170,6 +170,9 @@ codeclone-mcp --transport streamable-http --port 8000
 20 tools + 10 resources — deterministic, baseline-aware, and read-only. Never mutates source files, baselines, or repo
 state.
 Payloads are optimised for LLM context: compact summaries by default, full detail on demand.
+Run comparison stays compact too: `compare_runs` reports `mixed` when finding deltas and run-to-run health move in
+opposite directions, and `incomparable` when roots or effective analysis settings differ.
+When metrics are skipped (`clones_only`), MCP marks `health` as unavailable instead of returning fake zeros.
 
 Docs:
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)

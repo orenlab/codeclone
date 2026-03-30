@@ -378,19 +378,30 @@ def _issue_breakdown_html(
     return '<div class="families-list">' + "".join(parts) + "</div>"
 
 
-def _directory_kind_summary(kind_breakdown: Mapping[str, object]) -> str:
-    rows = [
+def _dir_meta_span(val: int, label: str) -> str:
+    return f"<span>{val} {_escape_html(label)}</span>"
+
+
+_DIR_META_SEP = '<span class="dir-hotspot-meta-sep">\u00b7</span>'
+
+
+def _directory_kind_meta_parts(
+    kind_breakdown: Mapping[str, object],
+    *,
+    total_groups: int,
+) -> list[str]:
+    kind_rows = [
         (str(kind), _as_int(count))
         for kind, count in kind_breakdown.items()
         if _as_int(count) > 0
     ]
-    rows.sort(key=lambda item: (-item[1], item[0]))
-    top_rows = rows[:2]
-    if not top_rows:
-        return ""
-    return "; ".join(
-        f"{count} {_DIRECTORY_KIND_LABELS.get(kind, kind)}" for kind, count in top_rows
-    )
+    kind_rows.sort(key=lambda item: (-item[1], item[0]))
+    if len(kind_rows) <= 1:
+        return []
+    parts: list[str] = []
+    for kind, count in kind_rows[:2]:
+        parts.append(_dir_meta_span(count, _DIRECTORY_KIND_LABELS.get(kind, kind)))
+    return parts
 
 
 def _directory_hotspot_bucket_body(bucket: str, payload: Mapping[str, object]) -> str:
@@ -408,40 +419,57 @@ def _directory_hotspot_bucket_body(bucket: str, payload: Mapping[str, object]) -
             "</div>"
         )
     rows: list[str] = []
+    cumulative = 0.0
     for item in items:
         path = str(item.get("path", ".")).strip() or "."
         source_scope = _as_mapping(item.get("source_scope"))
         dominant_kind = (
             str(source_scope.get("dominant_kind", "other")).strip() or "other"
         )
-        detail = (
-            f"{_as_int(item.get('finding_groups'))} groups; "
-            f"{_as_int(item.get('affected_items'))} items; "
-            f"{_as_int(item.get('files'))} files; "
-            f"{_as_float(item.get('share_pct')):.1f}%"
-        )
-        kind_summary = ""
+        share_pct = _as_float(item.get("share_pct"))
+        groups = _as_int(item.get("finding_groups"))
+        affected = _as_int(item.get("affected_items"))
+        files = _as_int(item.get("files"))
+
+        meta_parts = [
+            _dir_meta_span(groups, "groups"),
+            _dir_meta_span(affected, "items"),
+            _dir_meta_span(files, "files"),
+        ]
         if bucket == "all":
-            kind_summary = _directory_kind_summary(
-                _as_mapping(item.get("kind_breakdown"))
+            meta_parts.extend(
+                _directory_kind_meta_parts(
+                    _as_mapping(item.get("kind_breakdown")),
+                    total_groups=groups,
+                )
             )
-        kind_html = (
-            f'<div class="overview-row-summary">{_escape_html(kind_summary)}</div>'
-            if kind_summary
-            else ""
+
+        path_html = _escape_html(path).replace("/", "/<wbr>")
+
+        prev_pct = min(cumulative, 100.0)
+        cur_pct = min(share_pct, 100.0 - prev_pct)
+        cumulative += share_pct
+
+        bar_html = (
+            '<span class="dir-hotspot-bar-track">'
+            f'<span class="dir-hotspot-bar-prev" style="width:{prev_pct:.1f}%"></span>'
+            f'<span class="dir-hotspot-bar-cur" style="width:{cur_pct:.1f}%"></span>'
+            "</span>"
         )
+
         rows.append(
-            "<li>"
-            '<div class="overview-row-title">'
-            f"<code>{_escape_html(path)}</code> {_source_kind_badge_html(dominant_kind)}"
+            '<div class="dir-hotspot-entry">'
+            '<div class="dir-hotspot-path">'
+            f"<code>{path_html}</code>"
+            f" {_source_kind_badge_html(dominant_kind)}"
             "</div>"
-            f'<div class="overview-row-summary">{_escape_html(detail)}</div>'
-            f"{kind_html}"
-            "</li>"
+            f'<div class="dir-hotspot-bar-row">{bar_html}'
+            f'<span class="dir-hotspot-pct">{share_pct:.1f}%</span>'
+            "</div>"
+            f'<div class="dir-hotspot-meta">{_DIR_META_SEP.join(meta_parts)}</div>'
+            "</div>"
         )
-    return (
-        subtitle_html + '<ul class="overview-summary-list">' + "".join(rows) + "</ul>"
-    )
+    return subtitle_html + '<div class="dir-hotspot-list">' + "".join(rows) + "</div>"
 
 
 def _directory_hotspots_section(ctx: ReportContext) -> str:

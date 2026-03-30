@@ -299,6 +299,7 @@ Before cutting a release:
 - Don’t introduce nondeterministic ordering (dict iteration, set ordering, filesystem traversal without sort).
 - Don’t make the base `codeclone` install depend on optional MCP runtime packages.
 - Don’t let MCP mutate baselines, source files, or repo state.
+- Don’t let MCP re-synthesize design findings from raw metrics; read canonical `findings.groups.design` only.
 
 ---
 
@@ -367,6 +368,8 @@ Use this map to route changes to the right owner module.
   `sys.exit` behavior here.
 - `codeclone/mcp_server.py` — optional MCP launcher/server wiring, transport config, and MCP tool/resource
   registration; keep dependency loading lazy so base installs/CI do not require MCP runtime packages.
+- `tests/test_mcp_service.py`, `tests/test_mcp_server.py` — MCP contract and integration tests; run these when
+  touching any MCP surface.
 - `codeclone/html_report.py` — public HTML facade/re-export surface; preserve backward-compatible imports here; do not
   grow section/layout logic in this module.
 - `codeclone/_html_report/*` — actual HTML assembly, context shaping, tabs, sections, and overview/navigation behavior;

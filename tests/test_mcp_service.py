@@ -146,6 +146,7 @@ def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
         run_id=run_id,
         root=root,
         request=MCPAnalysisRequest(root=str(root), respect_pyproject=False),
+        comparison_settings=(),
         report_document={},
         summary={"run_id": run_id, "health": {"score": 0, "grade": "N/A"}},
         changed_paths=(),
@@ -160,6 +161,46 @@ def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
         new_block=frozenset(),
         metrics_diff=None,
     )
+
+
+def _two_clone_fixture_roots(tmp_path: Path) -> tuple[Path, Path]:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    _write_clone_fixture(first_root)
+    _write_clone_fixture(second_root)
+    return first_root, second_root
+
+
+def _assert_comparable_comparison(
+    comparison: dict[str, object],
+    *,
+    verdict: str,
+) -> None:
+    assert comparison["verdict"] == verdict
+    comparability = cast("dict[str, object]", comparison["comparability"])
+    assert comparability["comparable"] is True
+    assert comparability["reason"] == "comparable"
+    assert "run health delta" in str(comparison["summary"])
+
+
+def _assert_incomparable_comparison(
+    comparison: dict[str, object],
+    *,
+    reason: str,
+) -> None:
+    assert cast("dict[str, object]", comparison["comparability"]) == {
+        "comparable": False,
+        "same_root": reason != "different_root",
+        "same_analysis_settings": reason != "different_analysis_settings",
+        "reason": reason,
+    }
+    assert comparison["health_delta"] is None
+    assert comparison["verdict"] == "incomparable"
+    assert comparison["regressions"] == []
+    assert comparison["improvements"] == []
+    assert comparison["unchanged_count"] is None
 
 
 def _build_quality_service(root: Path) -> CodeCloneMCPService:
@@ -398,7 +439,7 @@ def test_mcp_service_changed_runs_remediation_and_review_flow(tmp_path: Path) ->
         run_id_after=str(after["run_id"]),
         focus="clones",
     )
-    assert comparison["verdict"] == "regressed"
+    _assert_comparable_comparison(comparison, verdict="regressed")
     assert cast("list[dict[str, object]]", comparison["regressions"])
 
     findings = service.list_findings(
@@ -616,6 +657,31 @@ def test_mcp_service_granular_checks_reject_incompatible_run_modes(
             run_id=str(summary["run_id"]),
             detail_level="summary",
         )
+
+
+def test_mcp_service_clones_only_health_is_marked_unavailable(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+            analysis_mode="clones_only",
+        )
+    )
+
+    stored_summary = service.get_run_summary(run_id=str(summary["run_id"]))
+    triage = service.get_production_triage(run_id=str(summary["run_id"]))
+    latest_health = json.loads(service.read_resource("codeclone://latest/health"))
+    expected = {"available": False, "reason": "metrics_skipped"}
+
+    assert summary["health"] == expected
+    assert stored_summary["health"] == expected
+    assert triage["health"] == expected
+    assert latest_health == expected
 
 
 def test_mcp_service_summary_reuses_canonical_meta_for_cache_and_health(
@@ -852,12 +918,7 @@ def test_mcp_service_list_findings_detail_levels_slim_and_full_payloads(
 
 
 def test_mcp_service_run_store_evicts_old_runs(tmp_path: Path) -> None:
-    first_root = tmp_path / "first"
-    second_root = tmp_path / "second"
-    first_root.mkdir()
-    second_root.mkdir()
-    _write_clone_fixture(first_root)
-    _write_clone_fixture(second_root)
+    first_root, second_root = _two_clone_fixture_roots(tmp_path)
     service = CodeCloneMCPService(history_limit=1)
 
     first = service.analyze_repository(
@@ -1544,14 +1605,13 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
         )
     )
     before_record = service._runs.get(str(before["run_id"]))
-    after_record = service._runs.get(str(after["run_id"]))
 
     comparison = service.compare_runs(
         run_id_before=str(before["run_id"]),
         run_id_after=str(after["run_id"]),
         focus="clones",
     )
-    assert comparison["verdict"] == "improved"
+    _assert_comparable_comparison(comparison, verdict="improved")
     assert (
         service._comparison_verdict(
             regressions=1,
@@ -1570,11 +1630,43 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
     )
     assert (
         service._comparison_verdict(
+            regressions=1,
+            improvements=0,
+            health_delta=1,
+        )
+        == "mixed"
+    )
+    assert (
+        service._comparison_verdict(
+            regressions=0,
+            improvements=1,
+            health_delta=-1,
+        )
+        == "mixed"
+    )
+    assert (
+        service._comparison_verdict(
+            regressions=1,
+            improvements=1,
+            health_delta=0,
+        )
+        == "mixed"
+    )
+    assert (
+        service._comparison_verdict(
             regressions=0,
             improvements=0,
             health_delta=0,
         )
         == "stable"
+    )
+    assert (
+        service._comparison_verdict(
+            regressions=0,
+            improvements=1,
+            health_delta=None,
+        )
+        == "improved"
     )
     assert (
         service._changed_verdict(
@@ -1638,6 +1730,47 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
         spread_functions=2,
         effort="moderate",
     )
+
+
+def test_mcp_service_compare_runs_marks_different_roots_incomparable(
+    tmp_path: Path,
+) -> None:
+    first_root, second_root = _two_clone_fixture_roots(tmp_path)
+    second_root.joinpath("pkg", "extra.py").write_text(
+        "def gamma(value: int) -> int:\n    return value * 2\n",
+        "utf-8",
+    )
+    service = CodeCloneMCPService(history_limit=4)
+    before = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(first_root),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    after = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(second_root),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    after_record = service._runs.get(str(after["run_id"]))
+
+    comparison = service.compare_runs(
+        run_id_before=str(before["run_id"]),
+        run_id_after=str(after["run_id"]),
+        focus="all",
+    )
+
+    before_payload = cast("dict[str, object]", comparison["before"])
+    after_payload = cast("dict[str, object]", comparison["after"])
+    assert before_payload["root"] == str(first_root)
+    assert after_payload["root"] == str(second_root)
+    assert before_payload["analysis_mode"] == "full"
+    assert after_payload["analysis_mode"] == "full"
+    _assert_incomparable_comparison(comparison, reason="different_root")
+    assert "Finding and run health deltas omitted" in str(comparison["summary"])
     assert "known debt" in service._why_now_text(
         title="Clone group",
         severity="warning",
@@ -1707,6 +1840,41 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
     )
     assert augmented["changed_paths"] == ["pkg/dup.py"]
     assert cast("dict[str, object]", augmented["changed_findings"])["total"] == 1
+
+
+def test_mcp_service_compare_runs_marks_different_settings_incomparable(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    _write_quality_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    before = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    after = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+            complexity_threshold=1,
+        )
+    )
+
+    comparison = service.compare_runs(
+        run_id_before=str(before["run_id"]),
+        run_id_after=str(after["run_id"]),
+        focus="all",
+    )
+
+    _assert_incomparable_comparison(
+        comparison,
+        reason="different_analysis_settings",
+    )
+    assert "different analysis settings" in str(comparison["summary"])
 
 
 def test_mcp_service_additional_projection_and_error_branches(
@@ -1900,6 +2068,7 @@ def test_mcp_service_additional_projection_and_error_branches(
             coupling_threshold=1,
             cohesion_threshold=1,
         ),
+        comparison_settings=(),
         report_document={
             "metrics": {
                 "families": {
@@ -2058,6 +2227,7 @@ def test_mcp_service_additional_projection_and_error_branches(
         run_id="hotspot",
         root=record.root,
         request=record.request,
+        comparison_settings=record.comparison_settings,
         report_document={
             **record.report_document,
             "derived": {"hotlists": {"highest_spread_ids": ["missing-id"]}},
@@ -2200,6 +2370,7 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         run_id="helpers",
         root=tmp_path,
         request=request,
+        comparison_settings=(),
         report_document={"metrics": 1},
         summary={},
         changed_paths=(),
@@ -2227,6 +2398,7 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         run_id="helpers-new",
         root=tmp_path,
         request=request,
+        comparison_settings=(),
         report_document={"meta": {}},
         summary={},
         changed_paths=(),
@@ -2256,7 +2428,10 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
     with pytest.raises(MCPServiceContractError):
         service.get_report_section(run_id="helpers", section="findings")
 
-    assert service._summary_payload({"inventory": {}}) == {"inventory": {}}
+    assert service._summary_payload({"inventory": {}}) == {
+        "inventory": {},
+        "health": {"available": False, "reason": "unavailable"},
+    }
 
     assert service._suggestion_for_finding(record, "missing") is None
     assert (
@@ -2284,6 +2459,7 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         run_id="lookup",
         root=tmp_path,
         request=request,
+        comparison_settings=(),
         report_document={"meta": {}},
         summary={},
         changed_paths=(),
@@ -2304,6 +2480,7 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         run_id="foreign",
         root=tmp_path,
         request=request,
+        comparison_settings=(),
         report_document={"meta": {}},
         summary={},
         changed_paths=(),

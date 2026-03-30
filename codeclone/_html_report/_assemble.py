@@ -21,7 +21,7 @@ from ..domain.quality import CONFIDENCE_HIGH
 from ..structural_findings import normalize_structural_findings
 from ..templates import FONT_CSS_URL, REPORT_TEMPLATE
 from ._context import _meta_pick, build_context
-from ._icons import BRAND_LOGO, ICONS
+from ._icons import BRAND_LOGO, ICONS, section_icon_html
 from ._sections._clones import render_clones_panel
 from ._sections._coupling import render_quality_panel
 from ._sections._dead_code import render_dead_code_panel
@@ -119,6 +119,15 @@ def build_html_report(
         return f'<span class="tab-count">{count}</span>'
 
     # -- Main tab navigation --
+    tab_icon_keys: dict[str, str] = {
+        "overview": "overview",
+        "clones": "clones",
+        "quality": "quality",
+        "dependencies": "dependencies",
+        "dead-code": "dead-code",
+        "suggestions": "suggestions",
+        "structural-findings": "structural-findings",
+    }
     tab_defs = [
         ("overview", "Overview", overview_html, ""),
         ("clones", "Clones", clones_html, _tab_badge(ctx.clone_groups_total)),
@@ -151,10 +160,15 @@ def build_html_report(
         extra = tab_extra_attrs.get(tab_id, "")
         if extra:
             extra = " " + extra
+        tab_icon = section_icon_html(
+            tab_icon_keys.get(tab_id, ""),
+            class_name="main-tab-icon",
+            size=14,
+        )
         tab_buttons.append(
             f'<button class="main-tab" role="tab" data-tab="{tab_id}" '
             f'aria-selected="{selected}" aria-controls="panel-{tab_id}"{extra}>'
-            f"{tab_label}{badge}</button>"
+            f'{tab_icon}<span class="main-tab-label">{tab_label}</span>{badge}</button>'
         )
         active = " active" if idx == 0 else ""
         tab_panels.append(

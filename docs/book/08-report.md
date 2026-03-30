@@ -97,6 +97,11 @@ Per-group common axes (family-specific fields may extend):
 - `derived.overview.directory_hotspots` is a deterministic report-layer
   aggregation over canonical findings; HTML must render it as-is or omit it on
   compatibility paths without a canonical report document.
+- `derived.overview.directory_hotspots[*].path` is an overview-oriented
+  directory key: runtime findings keep their parent directory, while test-only
+  and fixture-only findings collapse to the corresponding source-scope roots
+  (`.../tests` or `.../tests/fixtures`) to avoid duplicating the same hotspot
+  across leaf fixture paths.
 - Overview hotspot/source-breakdown sections must resolve from canonical report
   data or deterministic derived IDs; HTML must not silently substitute stale
   placeholders such as `n/a` or empty-state cards when canonical data exists.

@@ -77,9 +77,9 @@ Current tool set:
 |--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `analyze_repository`     | `root`, `analysis_mode`, `changed_paths`, `git_diff_ref`, inline thresholds, cache/baseline paths                                                      | Run deterministic CodeClone analysis and register the result as the latest MCP run                                                                                             |
 | `analyze_changed_paths`  | `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, inline thresholds                                                                          | Diff-aware fast path: analyze a repo and attach a changed-files projection to the run; summary inventory is slimmed to `{count}`                                               |
-| `get_run_summary`        | `run_id`                                                                                                                                               | Return the stored summary for the latest or specified run, with slim inventory counts instead of the full file registry                                                        |
+| `get_run_summary`        | `run_id`                                                                                                                                               | Return the stored summary for the latest or specified run, with slim inventory counts instead of the full file registry; `health` becomes explicit `available=false` when metrics were skipped |
 | `get_production_triage`  | `run_id`, `max_hotspots`, `max_suggestions`                                                                                                            | Return a compact production-first MCP projection: health, cache `effective_freshness`, production hotspots, production suggestions, and global source-kind counters             |
-| `compare_runs`           | `run_id_before`, `run_id_after`, `focus`                                                                                                               | Compare two registered runs by finding ids and health delta                                                                                                                    |
+| `compare_runs`           | `run_id_before`, `run_id_after`, `focus`                                                                                                               | Compare two registered runs by finding ids and run-to-run health delta; `verdict` becomes `mixed` when findings and health move in opposite directions, and `incomparable` when roots/settings differ. In incomparable cases, finding and health deltas are omitted |
 | `evaluate_gates`         | `run_id`, gate thresholds/booleans                                                                                                                     | Evaluate CI/gating conditions against an existing run without exiting the process                                                                                              |
 | `get_report_section`     | `run_id`, `section`                                                                                                                                    | Return a canonical report section. `metrics` is summary-only; `metrics_detail` exposes the full metrics payload; other sections stay canonical                                 |
 | `list_findings`          | `family`, `category`, `severity`, `source_kind`, `novelty`, `sort_by`, `detail_level`, `changed_paths`, `git_diff_ref`, `exclude_reviewed`, pagination | Return deterministically ordered finding groups with filtering and pagination; list responses include `base_uri` and compact summary/normal projections                        |
@@ -206,6 +206,16 @@ state behind `codeclone://latest/...`.
   `priority_factors` and location `uri` are still available there.
 - `compare_runs` is only semantically meaningful when both runs use comparable
   repository scope/root and analysis settings.
+- `compare_runs` exposes a `comparability` block. When roots or effective
+  analysis settings differ, finding deltas and `health_delta` are omitted and
+  `verdict` becomes `incomparable`.
+- `compare_runs.health_delta` is `after.health - before.health` between the two
+  selected comparable runs. It is independent of baseline or metrics-baseline
+  drift.
+- `compare_runs.verdict` is intentionally conservative but not one-dimensional:
+  it returns `mixed` when run-to-run finding deltas and `health_delta` disagree.
+- `analysis_mode="clones_only"` keeps clone findings fully usable, but MCP
+  surfaces mark `health` as unavailable instead of fabricating zeroed metrics.
 - `codeclone://latest/triage` is a latest-only resource; run-specific triage is
   available via the tool, not via a `codeclone://runs/{run_id}/...` resource URI.
 

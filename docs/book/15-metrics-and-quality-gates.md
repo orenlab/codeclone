@@ -52,8 +52,8 @@ Refs:
   runtime auto-enables clone-only mode (`skip_metrics=true`).
 - In clone-only mode:
   `skip_dead_code=true`, `skip_dependencies=true`.
-- `--fail-dead-code` forces dead-code analysis on.
-- `--fail-cycles` forces dependency analysis on.
+- `--fail-dead-code` forces dead-code analysis on (even if metrics are skipped).
+- `--fail-cycles` forces dependency analysis on (even if metrics are skipped).
 - `--update-baseline` in full mode implies metrics-baseline update in the same
   run.
 - If metrics baseline path equals clone baseline path and clone baseline file is

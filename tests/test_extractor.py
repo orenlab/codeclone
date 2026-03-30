@@ -15,11 +15,12 @@ from typing import cast
 
 import pytest
 
-from codeclone import extractor
+from codeclone import extractor, qualnames
 from codeclone.errors import ParseError
 from codeclone.metrics import find_unused
 from codeclone.models import BlockUnit, ClassMetrics, ModuleDep, SegmentUnit
 from codeclone.normalize import NormalizationConfig
+from codeclone.qualnames import FunctionNode, QualnameCollector
 
 
 def extract_units_from_source(
@@ -58,9 +59,9 @@ def extract_units_from_source(
 
 def _parse_tree_and_collector(
     source: str,
-) -> tuple[ast.Module, extractor._QualnameCollector]:
+) -> tuple[ast.Module, QualnameCollector]:
     tree = ast.parse(source)
-    collector = extractor._QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(tree)
     return tree, collector
 
@@ -70,7 +71,7 @@ def _collect_module_walk(
     *,
     module_name: str = "pkg.mod",
     collect_referenced_names: bool = True,
-) -> tuple[ast.Module, extractor._QualnameCollector, extractor._ModuleWalkResult]:
+) -> tuple[ast.Module, QualnameCollector, extractor._ModuleWalkResult]:
     tree, collector = _parse_tree_and_collector(source)
     walk = extractor._collect_module_walk_data(
         tree=tree,
@@ -666,7 +667,7 @@ foo()
 obj.method()
 """.strip()
     )
-    collector = extractor._QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(tree)
     walk = extractor._collect_module_walk_data(
         tree=tree,
@@ -706,7 +707,7 @@ obj.method()
 
 def test_collect_module_walk_data_edge_branches() -> None:
     tree = ast.parse("from .... import parent")
-    collector = extractor._QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(tree)
     walk = extractor._collect_module_walk_data(
         tree=tree,
@@ -719,7 +720,7 @@ def test_collect_module_walk_data_edge_branches() -> None:
     assert walk.referenced_names == frozenset()
 
     lambda_call_tree = ast.parse("(lambda x: x)(1)")
-    lambda_collector = extractor._QualnameCollector()
+    lambda_collector = QualnameCollector()
     lambda_collector.visit(lambda_call_tree)
     lambda_walk = extractor._collect_module_walk_data(
         tree=lambda_call_tree,
@@ -738,7 +739,7 @@ from .pkg import utils
 from .... import parent
 """.strip()
     )
-    collector = extractor._QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(tree)
     walk = extractor._collect_module_walk_data(
         tree=tree,
@@ -834,7 +835,7 @@ class B(te.Protocol[int]):
     pass
 """.strip()
     )
-    collector = extractor._QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(tree)
     walk = extractor._collect_module_walk_data(
         tree=tree,
@@ -1286,7 +1287,7 @@ class Settings:  # codeclone: ignore[dead-code]
 def test_collect_dead_candidates_and_extract_skip_classes_without_lineno(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    collector = extractor._QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(
         ast.parse(
             """
@@ -1314,7 +1315,7 @@ def used():
 
     class _CollectorNoClassMetrics:
         def __init__(self) -> None:
-            self.units: list[tuple[str, extractor.FunctionNode]] = []
+            self.units: list[tuple[str, FunctionNode]] = []
             self.class_nodes = [("Broken", broken_class)]
             self.function_count = 0
             self.method_count = 0
@@ -1323,7 +1324,7 @@ def used():
         def visit(self, _tree: ast.AST) -> None:
             return None
 
-    monkeypatch.setattr(extractor, "_QualnameCollector", _CollectorNoClassMetrics)
+    monkeypatch.setattr(qualnames, "QualnameCollector", _CollectorNoClassMetrics)
     _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
         source="class Broken:\n    pass\n",
         filepath="pkg/mod.py",

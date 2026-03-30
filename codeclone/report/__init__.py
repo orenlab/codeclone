@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-from ..extractor import _QualnameCollector
 from ..grouping import build_block_groups, build_groups, build_segment_groups
 from .blocks import merge_block_items as _merge_block_items
 from .blocks import prepare_block_report_groups
@@ -51,7 +50,6 @@ __all__ = [
     "_FORBIDDEN_STMTS",
     "GroupItem",
     "GroupMap",
-    "_QualnameCollector",
     "_SegmentAnalysis",
     "_analyze_segment_statements",
     "_assign_targets_attribute_only",

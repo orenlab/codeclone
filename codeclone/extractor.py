@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from hashlib import sha1 as _sha1
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
+from . import qualnames as _qualnames
 from .blockhash import stmt_hashes
 from .blocks import extract_blocks, extract_segments
 from .cfg import CFGBuilder
@@ -63,7 +64,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Unit",
-    "_QualnameCollector",
     "extract_units_and_stats_from_source",
 ]
 
@@ -78,10 +78,8 @@ class _ParseTimeoutError(Exception):
     pass
 
 
-# Sync or async function definition node.
-FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
 # Any named declaration: function, async function, or class.
-_NamedDeclarationNode = FunctionNode | ast.ClassDef
+_NamedDeclarationNode = _qualnames.FunctionNode | ast.ClassDef
 # Unique key for a declaration's token index: (start_line, end_line, qualname).
 _DeclarationTokenIndexKey = tuple[int, int, str]
 
@@ -273,57 +271,13 @@ def _declaration_end_line(
     return _fallback_declaration_end_line(node, start_line=start_line)
 
 
-class _QualnameCollector(ast.NodeVisitor):
-    __slots__ = (
-        "class_count",
-        "class_nodes",
-        "funcs",
-        "function_count",
-        "method_count",
-        "stack",
-        "units",
-    )
-
-    def __init__(self) -> None:
-        self.stack: list[str] = []
-        self.units: list[tuple[str, FunctionNode]] = []
-        self.class_nodes: list[tuple[str, ast.ClassDef]] = []
-        self.funcs: dict[str, FunctionNode] = {}
-        self.class_count = 0
-        self.function_count = 0
-        self.method_count = 0
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        self.class_count += 1
-        class_qualname = ".".join([*self.stack, node.name]) if self.stack else node.name
-        self.class_nodes.append((class_qualname, node))
-        self.stack.append(node.name)
-        self.generic_visit(node)
-        self.stack.pop()
-
-    def _register_function(self, node: FunctionNode) -> None:
-        name = ".".join([*self.stack, node.name]) if self.stack else node.name
-        if self.stack:
-            self.method_count += 1
-        else:
-            self.function_count += 1
-        self.units.append((name, node))
-        self.funcs[name] = node
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._register_function(node)
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._register_function(node)
-
-
 # =========================
 # CFG fingerprinting
 # =========================
 
 
 def _cfg_fingerprint_and_complexity(
-    node: FunctionNode,
+    node: _qualnames.FunctionNode,
     cfg: NormalizationConfig,
     qualname: str,
 ) -> tuple[str, int]:
@@ -517,7 +471,7 @@ def _is_protocol_class(
     return False
 
 
-def _is_non_runtime_candidate(node: FunctionNode) -> bool:
+def _is_non_runtime_candidate(node: _qualnames.FunctionNode) -> bool:
     for decorator in node.decorator_list:
         name = _dotted_expr_name(decorator)
         if name is None:
@@ -537,7 +491,7 @@ def _node_line_span(node: ast.AST) -> tuple[int, int] | None:
 
 
 def _eligible_unit_shape(
-    node: FunctionNode,
+    node: _qualnames.FunctionNode,
     *,
     min_loc: int,
     min_stmt: int,
@@ -595,7 +549,7 @@ def _dead_candidate_kind(local_name: str) -> Literal["function", "method"]:
 
 def _should_skip_dead_candidate(
     local_name: str,
-    node: FunctionNode,
+    node: _qualnames.FunctionNode,
     *,
     protocol_class_qualnames: set[str],
 ) -> bool:
@@ -643,7 +597,7 @@ def _dead_candidate_for_unit(
     *,
     module_name: str,
     local_name: str,
-    node: FunctionNode,
+    node: _qualnames.FunctionNode,
     filepath: str,
     suppression_index: Mapping[SuppressionTargetKey, tuple[str, ...]],
     protocol_class_qualnames: set[str],
@@ -687,7 +641,7 @@ def _collect_load_reference_node(
 def _resolve_referenced_qualnames(
     *,
     module_name: str,
-    collector: _QualnameCollector,
+    collector: _qualnames.QualnameCollector,
     state: _ModuleWalkState,
 ) -> frozenset[str]:
     top_level_class_by_name = {
@@ -737,7 +691,7 @@ def _collect_module_walk_data(
     *,
     tree: ast.AST,
     module_name: str,
-    collector: _QualnameCollector,
+    collector: _qualnames.QualnameCollector,
     collect_referenced_names: bool,
 ) -> _ModuleWalkResult:
     """Single ast.walk that collects imports, deps, names, qualnames & protocol aliases.
@@ -793,7 +747,7 @@ def _collect_dead_candidates(
     *,
     filepath: str,
     module_name: str,
-    collector: _QualnameCollector,
+    collector: _qualnames.QualnameCollector,
     protocol_symbol_aliases: frozenset[str] = frozenset({"Protocol"}),
     protocol_module_aliases: frozenset[str] = frozenset(
         {"typing", "typing_extensions"}
@@ -861,7 +815,7 @@ def _collect_declaration_targets(
     *,
     filepath: str,
     module_name: str,
-    collector: _QualnameCollector,
+    collector: _qualnames.QualnameCollector,
     source_tokens: tuple[tokenize.TokenInfo, ...] = (),
     source_token_index: Mapping[_DeclarationTokenIndexKey, int] | None = None,
     include_inline_lines: bool = False,
@@ -940,7 +894,7 @@ def _build_suppression_index_for_source(
     source: str,
     filepath: str,
     module_name: str,
-    collector: _QualnameCollector,
+    collector: _qualnames.QualnameCollector,
 ) -> Mapping[SuppressionTargetKey, tuple[str, ...]]:
     suppression_directives = extract_suppression_directives(source)
     if not suppression_directives:
@@ -1002,7 +956,7 @@ def extract_units_and_stats_from_source(
     except SyntaxError as e:
         raise ParseError(f"Failed to parse {filepath}: {e}") from e
 
-    collector = _QualnameCollector()
+    collector = _qualnames.QualnameCollector()
     collector.visit(tree)
     source_lines = source.splitlines()
     source_line_count = len(source_lines)

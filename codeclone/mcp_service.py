@@ -388,6 +388,7 @@ class MCPRunRecord:
     run_id: str
     root: Path
     request: MCPAnalysisRequest
+    comparison_settings: tuple[object, ...]
     report_document: dict[str, object]
     summary: dict[str, object]
     changed_paths: tuple[str, ...]
@@ -638,6 +639,7 @@ class CodeCloneMCPService:
             run_id=run_id,
             root=root_path,
             request=request,
+            comparison_settings=self._comparison_settings(args=args, request=request),
             report_document=report_document,
             summary=base_summary,
             changed_paths=changed_paths,
@@ -662,6 +664,7 @@ class CodeCloneMCPService:
             run_id=run_id,
             root=root_path,
             request=request,
+            comparison_settings=self._comparison_settings(args=args, request=request),
             report_document=report_document,
             summary=summary,
             changed_paths=changed_paths,
@@ -714,33 +717,60 @@ class CodeCloneMCPService:
         common = before_ids & after_ids
         health_before = self._summary_health_score(before.summary)
         health_after = self._summary_health_score(after.summary)
-        health_delta = health_after - health_before
-        verdict = self._comparison_verdict(
-            regressions=len(regressions),
-            improvements=len(improvements),
-            health_delta=health_delta,
+        comparability = self._comparison_scope(before=before, after=after)
+        comparable = bool(comparability["comparable"])
+        health_delta = (
+            health_after - health_before
+            if comparable and health_before is not None and health_after is not None
+            else None
+        )
+        verdict = (
+            self._comparison_verdict(
+                regressions=len(regressions),
+                improvements=len(improvements),
+                health_delta=health_delta,
+            )
+            if comparable
+            else "incomparable"
+        )
+        regressions_payload = (
+            [
+                self._finding_summary_card(after, after_findings[finding_id])
+                for finding_id in regressions
+            ]
+            if comparable
+            else []
+        )
+        improvements_payload = (
+            [
+                self._finding_summary_card(before, before_findings[finding_id])
+                for finding_id in improvements
+            ]
+            if comparable
+            else []
         )
         return {
             "before": {
                 "run_id": before.run_id,
+                "root": str(before.root),
+                "analysis_mode": before.request.analysis_mode,
                 "health": health_before,
             },
             "after": {
                 "run_id": after.run_id,
+                "root": str(after.root),
+                "analysis_mode": after.request.analysis_mode,
                 "health": health_after,
             },
+            "comparability": comparability,
             "health_delta": health_delta,
             "verdict": verdict,
-            "regressions": [
-                self._finding_summary_card(after, after_findings[finding_id])
-                for finding_id in regressions
-            ],
-            "improvements": [
-                self._finding_summary_card(before, before_findings[finding_id])
-                for finding_id in improvements
-            ],
-            "unchanged_count": len(common),
+            "regressions": regressions_payload,
+            "improvements": improvements_payload,
+            "unchanged_count": len(common) if comparable else None,
             "summary": self._comparison_summary_text(
+                comparable=comparable,
+                comparability_reason=str(comparability["reason"]),
                 regressions=len(regressions),
                 improvements=len(improvements),
                 health_delta=health_delta,
@@ -1054,7 +1084,7 @@ class CodeCloneMCPService:
         return {
             "run_id": record.run_id,
             "base_uri": record.root.as_uri(),
-            "health": dict(self._as_mapping(summary.get("health"))),
+            "health": dict(self._summary_health_payload(summary)),
             "cache": dict(self._as_mapping(summary.get("cache"))),
             "findings": {
                 "total": len(findings),
@@ -1133,10 +1163,10 @@ class CodeCloneMCPService:
             },
             health_delta=self._summary_health_delta(record.summary),
         )
-        payload = {
+        payload: dict[str, object] = {
             "run_id": record.run_id,
             "changed_paths": list(paths_filter),
-            "health": self._as_mapping(record.summary.get("health")),
+            "health": self._summary_health_payload(record.summary),
             "health_delta": self._summary_health_delta(record.summary),
             "verdict": verdict,
             "new_findings_in_changed_files": changed_items,
@@ -1478,7 +1508,7 @@ class CodeCloneMCPService:
             )
         if suffix == "health":
             return json.dumps(
-                self._as_mapping(record.summary.get("health")),
+                self._summary_health_payload(record.summary),
                 ensure_ascii=False,
                 indent=2,
                 sort_keys=True,
@@ -1624,15 +1654,81 @@ class CodeCloneMCPService:
                 for run_id in stale_run_ids:
                     state_map.pop(run_id, None)
 
-    def _summary_health_score(self, summary: Mapping[str, object]) -> int:
-        health = self._as_mapping(summary.get("health"))
+    def _summary_health_score(self, summary: Mapping[str, object]) -> int | None:
+        health = self._summary_health_payload(summary)
+        if health.get("available") is False:
+            return None
         score = health.get("score", 0)
         return _as_int(score, 0)
 
-    def _summary_health_delta(self, summary: Mapping[str, object]) -> int:
+    def _summary_health_delta(self, summary: Mapping[str, object]) -> int | None:
+        if self._summary_health_payload(summary).get("available") is False:
+            return None
         metrics_diff = self._as_mapping(summary.get("metrics_diff"))
         value = metrics_diff.get("health_delta", 0)
         return _as_int(value, 0)
+
+    def _summary_health_payload(
+        self,
+        summary: Mapping[str, object],
+    ) -> dict[str, object]:
+        if str(summary.get("analysis_mode", "")) == "clones_only":
+            return {"available": False, "reason": "metrics_skipped"}
+        health = dict(self._as_mapping(summary.get("health")))
+        if health:
+            return health
+        return {"available": False, "reason": "unavailable"}
+
+    def _comparison_settings(
+        self,
+        *,
+        args: Namespace,
+        request: MCPAnalysisRequest,
+    ) -> tuple[object, ...]:
+        return (
+            request.analysis_mode,
+            _as_int(args.min_loc, DEFAULT_MIN_LOC),
+            _as_int(args.min_stmt, DEFAULT_MIN_STMT),
+            _as_int(args.block_min_loc, DEFAULT_BLOCK_MIN_LOC),
+            _as_int(args.block_min_stmt, DEFAULT_BLOCK_MIN_STMT),
+            _as_int(args.segment_min_loc, DEFAULT_SEGMENT_MIN_LOC),
+            _as_int(args.segment_min_stmt, DEFAULT_SEGMENT_MIN_STMT),
+            _as_int(
+                args.design_complexity_threshold,
+                DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+            ),
+            _as_int(
+                args.design_coupling_threshold,
+                DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+            ),
+            _as_int(
+                args.design_cohesion_threshold,
+                DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+            ),
+        )
+
+    def _comparison_scope(
+        self,
+        *,
+        before: MCPRunRecord,
+        after: MCPRunRecord,
+    ) -> dict[str, object]:
+        same_root = before.root == after.root
+        same_analysis_settings = before.comparison_settings == after.comparison_settings
+        if same_root and same_analysis_settings:
+            reason = "comparable"
+        elif not same_root and not same_analysis_settings:
+            reason = "different_root_and_analysis_settings"
+        elif not same_root:
+            reason = "different_root"
+        else:
+            reason = "different_analysis_settings"
+        return {
+            "comparable": same_root and same_analysis_settings,
+            "same_root": same_root,
+            "same_analysis_settings": same_analysis_settings,
+            "reason": reason,
+        }
 
     def _severity_rank(self, severity: str) -> int:
         return {
@@ -2399,7 +2495,7 @@ class CodeCloneMCPService:
             "new": new_count,
             "known": known_count,
             "items": items,
-            "health": dict(self._as_mapping(record.summary.get("health"))),
+            "health": dict(self._summary_health_payload(record.summary)),
             "health_delta": health_delta,
             "verdict": self._changed_verdict(
                 changed_projection={"new": new_count, "total": len(items)},
@@ -2427,9 +2523,10 @@ class CodeCloneMCPService:
                     for item in self._as_sequence(changed_projection.get("items"))[:10]
                 ],
             }
-            payload["health_delta"] = _as_int(
-                changed_projection.get("health_delta", 0),
-                0,
+            payload["health_delta"] = (
+                _as_int(changed_projection.get("health_delta", 0), 0)
+                if changed_projection.get("health_delta") is not None
+                else None
             )
             payload["verdict"] = str(changed_projection.get("verdict", "stable"))
         return payload
@@ -2438,11 +2535,17 @@ class CodeCloneMCPService:
         self,
         *,
         changed_projection: Mapping[str, object],
-        health_delta: int,
+        health_delta: int | None,
     ) -> str:
-        if _as_int(changed_projection.get("new", 0), 0) > 0 or health_delta < 0:
+        if _as_int(changed_projection.get("new", 0), 0) > 0 or (
+            health_delta is not None and health_delta < 0
+        ):
             return "regressed"
-        if _as_int(changed_projection.get("total", 0), 0) == 0 and health_delta > 0:
+        if (
+            _as_int(changed_projection.get("total", 0), 0) == 0
+            and health_delta is not None
+            and health_delta > 0
+        ):
             return "improved"
         return "stable"
 
@@ -2472,24 +2575,48 @@ class CodeCloneMCPService:
         *,
         regressions: int,
         improvements: int,
-        health_delta: int,
+        health_delta: int | None,
     ) -> str:
-        if regressions > 0 or health_delta < 0:
+        has_negative_signal = regressions > 0 or (
+            health_delta is not None and health_delta < 0
+        )
+        has_positive_signal = improvements > 0 or (
+            health_delta is not None and health_delta > 0
+        )
+        if has_negative_signal and has_positive_signal:
+            return "mixed"
+        if has_negative_signal:
             return "regressed"
-        if improvements > 0 or health_delta > 0:
+        if has_positive_signal:
             return "improved"
         return "stable"
 
     def _comparison_summary_text(
         self,
         *,
+        comparable: bool,
+        comparability_reason: str,
         regressions: int,
         improvements: int,
-        health_delta: int,
+        health_delta: int | None,
     ) -> str:
+        if not comparable:
+            reason_text = {
+                "different_root": "different roots",
+                "different_analysis_settings": "different analysis settings",
+                "different_root_and_analysis_settings": (
+                    "different roots and analysis settings"
+                ),
+            }.get(comparability_reason, "incomparable runs")
+            return f"Finding and run health deltas omitted ({reason_text})"
+        if health_delta is None:
+            return (
+                f"{improvements} findings resolved, {regressions} new regressions; "
+                "run health delta omitted (metrics unavailable)"
+            )
         return (
             f"{improvements} findings resolved, {regressions} new regressions, "
-            f"health delta {health_delta:+d}"
+            f"run health delta {health_delta:+d}"
         )
 
     def _render_pr_summary_markdown(self, payload: Mapping[str, object]) -> str:
@@ -2510,13 +2637,19 @@ class CodeCloneMCPService:
             for item in self._as_sequence(payload.get("blocking_gates"))
             if str(item)
         ]
+        health_line = (
+            f"Health: {score}/100 ({grade}) | Delta: {delta:+d} | "
+            f"Verdict: {payload.get('verdict', 'stable')}"
+            if payload.get("health_delta") is not None
+            else (
+                f"Health: {score}/100 ({grade}) | Delta: n/a | "
+                f"Verdict: {payload.get('verdict', 'stable')}"
+            )
+        )
         lines = [
             "## CodeClone Summary",
             "",
-            (
-                f"Health: {score}/100 ({grade}) | Delta: {delta:+d} | "
-                f"Verdict: {payload.get('verdict', 'stable')}"
-            ),
+            health_line,
             "",
             f"### New findings in changed files ({len(changed_items)})",
         ]
@@ -2999,6 +3132,7 @@ class CodeCloneMCPService:
             "failures": list(failures),
         }
         payload["cache"] = self._summary_cache_payload(payload)
+        payload["health"] = self._summary_health_payload(payload)
         return payload
 
     def _summary_payload(
@@ -3009,6 +3143,7 @@ class CodeCloneMCPService:
         cache = self._as_mapping(payload.get("cache"))
         if cache:
             payload["cache"] = self._summary_cache_payload(summary)
+        payload["health"] = self._summary_health_payload(payload)
         inventory = self._as_mapping(payload.get("inventory"))
         if inventory:
             payload["inventory"] = self._slim_inventory(inventory)

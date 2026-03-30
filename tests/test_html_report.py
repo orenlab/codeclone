@@ -1618,7 +1618,12 @@ def test_html_report_metrics_risk_branches() -> None:
     assert 'stroke="var(--error)"' in html
     assert "Cycles: 1; max dependency depth: 4." in html
     assert "5 candidates total; 2 high-confidence items; 0 suppressed." in html
-    assert 'Dead Code<span class="tab-count">2</span>' in html
+    assert '<button class="main-tab" role="tab" data-tab="dead-code"' in html
+    assert '<svg class="main-tab-icon"' in html
+    assert (
+        '<span class="main-tab-label">Dead Code</span><span class="tab-count">2</span>'
+        in html
+    )
 
 
 def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
@@ -1709,6 +1714,79 @@ def test_html_report_direct_path_skips_directory_hotspots_cluster() -> None:
         ),
     )
     assert "Hotspots by Directory" not in html
+
+
+def test_html_report_directory_hotspots_use_test_scope_roots() -> None:
+    report_document = build_report_document(
+        func_groups={
+            "fixture-clone": [
+                {
+                    "qualname": "tests.fixtures.golden_project.alpha:render_alpha",
+                    "filepath": "/repo/project/tests/fixtures/golden_project/alpha.py",
+                    "start_line": 1,
+                    "end_line": 5,
+                    "loc": 5,
+                    "stmt_count": 4,
+                    "fingerprint": "fixture-fp",
+                    "loc_bucket": "0-19",
+                },
+                {
+                    "qualname": "tests.fixtures.golden_project.beta:render_beta",
+                    "filepath": "/repo/project/tests/fixtures/golden_project/beta.py",
+                    "start_line": 1,
+                    "end_line": 5,
+                    "loc": 5,
+                    "stmt_count": 4,
+                    "fingerprint": "fixture-fp",
+                    "loc_bucket": "0-19",
+                },
+                {
+                    "qualname": "tests.fixtures.golden_v2.pkg.a:render_a",
+                    "filepath": (
+                        "/repo/project/tests/fixtures/golden_v2/"
+                        "clone_metrics_cycle/pkg/a.py"
+                    ),
+                    "start_line": 1,
+                    "end_line": 5,
+                    "loc": 5,
+                    "stmt_count": 4,
+                    "fingerprint": "fixture-fp",
+                    "loc_bucket": "0-19",
+                },
+                {
+                    "qualname": "tests.fixtures.golden_v2.pkg.b:render_b",
+                    "filepath": (
+                        "/repo/project/tests/fixtures/golden_v2/"
+                        "clone_metrics_cycle/pkg/b.py"
+                    ),
+                    "start_line": 1,
+                    "end_line": 5,
+                    "loc": 5,
+                    "stmt_count": 4,
+                    "fingerprint": "fixture-fp",
+                    "loc_bucket": "0-19",
+                },
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo/project", "project_name": "project"},
+    )
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta=cast("dict[str, Any]", report_document["meta"]),
+        metrics=cast("dict[str, Any]", report_document["metrics"]),
+        report_document=report_document,
+    )
+    _assert_html_contains(
+        html,
+        "Hotspots by Directory",
+        "<code>tests/<wbr>fixtures</code>",
+    )
+    assert "golden_project" not in html
+    assert "clone_metrics_cycle" not in html
 
 
 def test_html_report_metrics_bad_health_score_and_dead_code_ok_tone() -> None:

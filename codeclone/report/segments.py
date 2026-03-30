@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..extractor import _QualnameCollector
+from ..qualnames import FunctionNode, QualnameCollector
 from .merge import coerce_positive_int, merge_overlapping_items
 
 if TYPE_CHECKING:
@@ -55,7 +55,7 @@ def merge_segment_items(items: GroupItemsLike) -> list[GroupItem]:
 
 def collect_file_functions(
     filepath: str,
-) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None:
+) -> dict[str, FunctionNode] | None:
     try:
         source = Path(filepath).read_text("utf-8")
     except OSError:
@@ -65,13 +65,13 @@ def collect_file_functions(
     except SyntaxError:
         return None
 
-    collector = _QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(tree)
     return collector.funcs
 
 
 def segment_statements(
-    func_node: ast.FunctionDef | ast.AsyncFunctionDef, start_line: int, end_line: int
+    func_node: FunctionNode, start_line: int, end_line: int
 ) -> list[ast.stmt]:
     body = getattr(func_node, "body", None)
     if not isinstance(body, list):
@@ -140,7 +140,7 @@ def analyze_segment_statements(statements: list[ast.stmt]) -> _SegmentAnalysis |
 def _analyze_segment_item(
     item: GroupItemLike,
     *,
-    file_cache: dict[str, dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None],
+    file_cache: dict[str, dict[str, FunctionNode] | None],
 ) -> _SegmentAnalysis | None:
     filepath = str(item.get("filepath", ""))
     qualname = str(item.get("qualname", ""))
@@ -167,7 +167,7 @@ def _analyze_segment_item(
 def _analyze_segment_group(
     items: Sequence[GroupItemLike],
     *,
-    file_cache: dict[str, dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None],
+    file_cache: dict[str, dict[str, FunctionNode] | None],
 ) -> list[_SegmentAnalysis] | None:
     analyses: list[_SegmentAnalysis] = []
     for item in items:
@@ -185,7 +185,7 @@ def prepare_segment_report_groups(segment_groups: GroupMapLike) -> tuple[GroupMa
     """
     suppressed = 0
     filtered: GroupMap = {}
-    file_cache: dict[str, dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None] = {}
+    file_cache: dict[str, dict[str, FunctionNode] | None] = {}
 
     for key, items in segment_groups.items():
         merged_items = merge_segment_items(items)

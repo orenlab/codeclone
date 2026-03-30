@@ -730,6 +730,114 @@ def test_directory_hotspots_has_more_root_paths_and_stable_sort() -> None:
     ]
 
 
+def test_directory_hotspots_collapses_test_scope_roots_for_overview() -> None:
+    findings = {
+        "groups": {
+            "clones": {
+                "functions": [
+                    {
+                        "id": "clone:function:g1",
+                        "family": "clone",
+                        "category": "function",
+                        "items": [
+                            {"relative_path": "tests/fixtures/golden_project/alpha.py"},
+                            {"relative_path": "tests/fixtures/golden_project/beta.py"},
+                            {
+                                "relative_path": (
+                                    "tests/fixtures/golden_v2/"
+                                    "clone_metrics_cycle/pkg/a.py"
+                                )
+                            },
+                            {
+                                "relative_path": (
+                                    "tests/fixtures/golden_v2/"
+                                    "clone_metrics_cycle/pkg/b.py"
+                                )
+                            },
+                        ],
+                    }
+                ],
+                "blocks": [],
+                "segments": [],
+            },
+            "structural": {"groups": []},
+            "dead_code": {"groups": []},
+            "design": {
+                "groups": [
+                    {
+                        "id": "design:cohesion:tests.helper:Runner",
+                        "family": "design",
+                        "category": "cohesion",
+                        "items": [
+                            {"relative_path": "pkg/tests/unit/test_runner.py"},
+                        ],
+                    }
+                ]
+            },
+        }
+    }
+
+    hotspots = overview_mod.build_directory_hotspots(findings=findings)
+    all_rows = cast(
+        "list[dict[str, object]]",
+        cast("dict[str, object]", hotspots["all"])["items"],
+    )
+    assert all_rows == [
+        {
+            "path": "tests/fixtures",
+            "finding_groups": 1,
+            "affected_items": 4,
+            "files": 4,
+            "share_pct": 80.0,
+            "source_scope": {
+                "dominant_kind": "fixtures",
+                "breakdown": {
+                    "production": 0,
+                    "tests": 0,
+                    "fixtures": 4,
+                    "other": 0,
+                },
+                "impact_scope": "non_runtime",
+            },
+            "kind_breakdown": {
+                "clones": 1,
+                "structural": 0,
+                "dead_code": 0,
+                "complexity": 0,
+                "coupling": 0,
+                "cohesion": 0,
+                "dependency": 0,
+            },
+        },
+        {
+            "path": "pkg/tests",
+            "finding_groups": 1,
+            "affected_items": 1,
+            "files": 1,
+            "share_pct": 20.0,
+            "source_scope": {
+                "dominant_kind": "tests",
+                "breakdown": {
+                    "production": 0,
+                    "tests": 1,
+                    "fixtures": 0,
+                    "other": 0,
+                },
+                "impact_scope": "non_runtime",
+            },
+            "kind_breakdown": {
+                "clones": 0,
+                "structural": 0,
+                "dead_code": 0,
+                "complexity": 0,
+                "coupling": 0,
+                "cohesion": 1,
+                "dependency": 0,
+            },
+        },
+    ]
+
+
 def test_markdown_and_sarif_reuse_prebuilt_report_document() -> None:
     payload = _rich_report_document()
     md = to_markdown_report(

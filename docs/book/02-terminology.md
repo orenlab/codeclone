@@ -29,6 +29,25 @@ Define terms exactly as used by code and tests.
     - report schema (`report_schema_version`) for report format compatibility.
 - **payload_sha256**: canonical baseline semantic hash.
 - **trusted baseline**: baseline loaded + status `ok`.
+- **source_kind**: file classification — `production`, `tests`, `fixtures`, `other` —
+  determined by scanner path rules. Drives source-scope breakdown and
+  hotspot attribution.
+- **health score**: weighted blend of seven dimension scores (0–100).
+  Dimensions: clones 25%, complexity 20%, cohesion 15%, coupling 10%,
+  dead code 10%, dependencies 10%, coverage 10%.
+  Grade bands: A ≥90, B ≥75, C ≥60, D ≥40, F <40.
+- **design finding**: metric-driven finding (complexity/coupling/cohesion)
+  emitted by the canonical report builder when a class or function exceeds
+  the report-level design threshold. Thresholds are stored in
+  `meta.analysis_thresholds.design_findings`.
+- **suggestion**: advisory recommendation card derived from clones, structural
+  findings, or metric violations. Advisory only — never gates CI.
+- **production_hotspot**: finding group whose items are concentrated in
+  production source scope (`source_kind=production`).
+- **effective_freshness**: cache-level indicator (`fresh` / `mixed` / `reused`)
+  reflecting how much of the analysis was recomputed vs cache-served.
+- **directory_hotspot**: derived aggregation in `derived.overview` showing
+  which directories concentrate the most findings by category.
 
 Refs:
 
@@ -37,12 +56,20 @@ Refs:
 - `codeclone/blocks.py:extract_segments`
 - `codeclone/baseline.py:current_python_tag`
 - `codeclone/baseline.py:Baseline.verify_compatibility`
+- `codeclone/scanner.py:classify_source_kind`
+- `codeclone/metrics/health.py:compute_health`
+- `codeclone/report/json_contract.py:_design_findings_thresholds_payload`
+- `codeclone/report/suggestions.py:generate_suggestions`
+- `codeclone/report/overview.py:build_directory_hotspots`
 
 ## Contracts
 
 - New/known classification is key-based, not item-heuristic-based.
 - Baseline trust is status-driven.
 - Cache trust is status-driven and independent from baseline trust.
+- Design finding universe is determined solely by the canonical report builder;
+  MCP and HTML read, never resynthesize.
+- Suggestions are advisory and never affect exit code.
 
 Refs:
 

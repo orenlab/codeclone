@@ -177,6 +177,47 @@ def _directory_path_label(relative_path: str) -> str:
     return parent if parent not in {"", "/"} else "."
 
 
+def _directory_scope_root_label(
+    relative_path: str,
+    *,
+    source_kind: str,
+) -> str | None:
+    parts = tuple(
+        part for part in PurePosixPath(relative_path).parts if part not in {"", "."}
+    )
+    if not parts:
+        return None
+    tests_idx = next(
+        (index for index, part in enumerate(parts) if part == SOURCE_KIND_TESTS),
+        None,
+    )
+    if tests_idx is None:
+        return None
+    if (
+        source_kind == SOURCE_KIND_FIXTURES
+        and tests_idx + 1 < len(parts)
+        and parts[tests_idx + 1] == SOURCE_KIND_FIXTURES
+    ):
+        return "/".join(parts[: tests_idx + 2])
+    if source_kind == SOURCE_KIND_TESTS:
+        return "/".join(parts[: tests_idx + 1])
+    return None
+
+
+def _overview_directory_label(
+    relative_path: str,
+    *,
+    source_kind: str,
+) -> str:
+    scope_root = _directory_scope_root_label(
+        relative_path,
+        source_kind=source_kind,
+    )
+    if scope_root:
+        return scope_root
+    return _directory_path_label(relative_path)
+
+
 def _directory_contributions(
     group: Mapping[str, object],
 ) -> dict[str, dict[str, object]]:
@@ -185,10 +226,10 @@ def _directory_contributions(
         relative_path = _directory_relative_path(item)
         if relative_path is None:
             continue
-        directory = _directory_path_label(relative_path)
         source_kind = str(item.get("source_kind", "")).strip() or classify_source_kind(
             relative_path
         )
+        directory = _overview_directory_label(relative_path, source_kind=source_kind)
         entry = contributions.setdefault(
             directory,
             {

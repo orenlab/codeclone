@@ -41,9 +41,9 @@ core CodeClone runtime.
 |--------------------------|------------------------------------------------------------------------------------------------------|
 | `analyze_repository`     | Full analysis → register as latest run                                                               |
 | `analyze_changed_paths`  | Diff-aware analysis with `changed_paths` or `git_diff_ref`; summary inventory is slimmed to counts   |
-| `get_run_summary`        | Compact health/findings/baseline snapshot with slim inventory counts                                 |
+| `get_run_summary`        | Compact health/findings/baseline snapshot with slim inventory counts; `health` is explicit `available=false` when metrics were skipped |
 | `get_production_triage`  | Compact production-first view: health, cache freshness, production hotspots, production suggestions  |
-| `compare_runs`           | Regressions, improvements, health delta between two runs                                             |
+| `compare_runs`           | Regressions, improvements, and run-to-run health delta between comparable runs; returns `mixed` for conflicting signals and `incomparable` when roots/settings differ, omitting deltas in that case |
 | `list_findings`          | Filtered, paginated finding groups with envelope-level `base_uri`                                    |
 | `get_finding`            | Deep inspection of one finding by id                                                                 |
 | `get_remediation`        | Structured remediation payload for one finding                                                       |

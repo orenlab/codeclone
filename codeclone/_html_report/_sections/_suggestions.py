@@ -37,6 +37,11 @@ if TYPE_CHECKING:
     from .._context import ReportContext
 
 _as_int = _coerce.as_int
+_CLONE_KIND_CHIP_LABELS: dict[str, str] = {
+    "function": "Function",
+    "block": "Block",
+    "segment": "Segment",
+}
 
 
 def _render_fact_summary(raw: str) -> str:
@@ -74,6 +79,34 @@ def _format_source_breakdown(
     return " \u00b7 ".join(f"{source_kind_label(k)} {c}" for k, c in rows if c > 0)
 
 
+def _suggestion_context_labels(s: Suggestion) -> tuple[str, ...]:
+    labels: list[str] = []
+    source_label = source_kind_label(s.source_kind)
+    if source_label:
+        labels.append(source_label)
+    if s.category == CATEGORY_CLONE:
+        kind_label = _CLONE_KIND_CHIP_LABELS.get(s.finding_kind.strip().lower())
+        if kind_label:
+            labels.append(kind_label)
+        if s.clone_type:
+            labels.append(s.clone_type)
+        return tuple(labels)
+    category_label = s.category.replace("_", " ").title()
+    if category_label:
+        labels.append(category_label)
+    return tuple(labels)
+
+
+def _priority_badge_label(priority: float) -> str:
+    return f"Priority {priority:g}"
+
+
+def _spread_label(*, spread_functions: int, spread_files: int) -> str:
+    function_word = "function" if spread_functions == 1 else "functions"
+    file_word = "file" if spread_files == 1 else "files"
+    return f"{spread_functions} {function_word} \u00b7 {spread_files} {file_word}"
+
+
 def _render_card(s: Suggestion, ctx: ReportContext) -> str:
     actionable = "true" if s.severity != "info" else "false"
     spread_bucket = "high" if s.spread_files > 1 or s.spread_functions > 1 else "low"
@@ -81,18 +114,11 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
     facts_source = _escape_html(breakdown_text or source_kind_label(s.source_kind))
     facts_location = _escape_html(s.location_label or s.location)
 
-    # Context chips — more visible than a single muted line
-    ctx_chips: list[str] = []
-    sk = source_kind_label(s.source_kind)
-    if sk:
-        ctx_chips.append(f'<span class="suggestion-chip">{_escape_html(sk)}</span>')
-    cat = s.category.replace("_", " ")
-    if cat:
-        ctx_chips.append(f'<span class="suggestion-chip">{_escape_html(cat)}</span>')
-    if s.clone_type:
-        ctx_chips.append(
-            f'<span class="suggestion-chip">{_escape_html(s.clone_type)}</span>'
-        )
+    # Context chips stay compact and specific: source scope first, then kind.
+    ctx_chips = [
+        f'<span class="suggestion-chip">{_escape_html(label)}</span>'
+        for label in _suggestion_context_labels(s)
+    ]
     ctx_html = f'<div class="suggestion-context">{"".join(ctx_chips)}</div>'
 
     # Next step — primary actionable CTA
@@ -109,9 +135,12 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
 
     # Effort badge — color-coded
     effort_cls = f" suggestion-effort--{_escape_html(s.effort)}"
-
-    # Priority — clean display (drop trailing zeros)
-    priority_str = f"{s.priority:g}"
+    effort_label = s.effort.title()
+    priority_label = _priority_badge_label(s.priority)
+    spread_label = _spread_label(
+        spread_functions=s.spread_functions,
+        spread_files=s.spread_files,
+    )
 
     # Locations inside details
     locs_html = ""
@@ -155,9 +184,9 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
         f'<span class="suggestion-sev suggestion-sev--{_escape_html(s.severity)}">{_escape_html(s.severity)}</span>'
         f'<span class="suggestion-title">{_escape_html(s.title)}</span>'
         '<span class="suggestion-meta">'
-        f'<span class="suggestion-meta-badge{effort_cls}">{_escape_html(s.effort)}</span>'
-        f'<span class="suggestion-meta-badge">P{priority_str}</span>'
-        f'<span class="suggestion-meta-badge">{s.spread_functions} fn / {s.spread_files} files</span>'
+        f'<span class="suggestion-meta-badge{effort_cls}">{_escape_html(effort_label)}</span>'
+        f'<span class="suggestion-meta-badge">{_escape_html(priority_label)}</span>'
+        f'<span class="suggestion-meta-badge">{_escape_html(spread_label)}</span>'
         "</span></div>"
         # -- body --
         '<div class="suggestion-body">'
@@ -174,7 +203,7 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
         '<div class="suggestion-fact-group-title">Facts</div>'
         '<dl class="suggestion-dl">'
         f"<div><dt>Finding</dt><dd>{_escape_html(s.fact_kind or s.category)}</dd></div>"
-        f"<div><dt>Spread</dt><dd>{s.spread_functions} fn / {s.spread_files} files</dd></div>"
+        f"<div><dt>Spread</dt><dd>{_escape_html(spread_label)}</dd></div>"
         f"<div><dt>Source</dt><dd>{facts_source}</dd></div>"
         f"<div><dt>Scope</dt><dd>{facts_location}</dd></div>"
         "</dl></div>"
@@ -183,7 +212,7 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
         '<dl class="suggestion-dl">'
         f"<div><dt>Severity</dt><dd>{sev_dd}</dd></div>"
         f"<div><dt>Confidence</dt><dd>{_escape_html(s.confidence)}</dd></div>"
-        f"<div><dt>Priority</dt><dd>{priority_str}</dd></div>"
+        f"<div><dt>Priority</dt><dd>{_escape_html(priority_label)}</dd></div>"
         f"<div><dt>Family</dt><dd>{_escape_html(s.finding_family)}</dd></div>"
         "</dl></div>"
         "</div>"

@@ -17,6 +17,15 @@ def _svg(size: int, sw: str, body: str) -> str:
     )
 
 
+def _svg_with_class(size: int, sw: str, body: str, *, class_name: str = "") -> str:
+    class_attr = f' class="{class_name}"' if class_name else ""
+    return (
+        f'<svg{class_attr} width="{size}" height="{size}" viewBox="0 0 24 24" '
+        f'fill="none" stroke="currentColor" stroke-width="{sw}" '
+        f'stroke-linecap="round" stroke-linejoin="round">{body}</svg>'
+    )
+
+
 BRAND_LOGO = (
     '<svg class="brand-logo" width="32" height="32" viewBox="0 0 32 32" fill="none">'
     '<rect x="9" y="3" width="18" height="23" rx="3.5" '
@@ -82,3 +91,99 @@ ICONS: dict[str, str] = {
         '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
     ),
 }
+
+_SECTION_ICON_BODIES: dict[str, tuple[str, str]] = {
+    "overview": (
+        "2",
+        '<rect x="3" y="4" width="8" height="7" rx="1.5"/>'
+        '<rect x="13" y="4" width="8" height="7" rx="1.5"/>'
+        '<rect x="3" y="13" width="8" height="7" rx="1.5"/>'
+        '<rect x="13" y="13" width="8" height="7" rx="1.5"/>',
+    ),
+    "clones": (
+        "2",
+        '<rect x="9" y="9" width="10" height="10" rx="2"/>'
+        '<rect x="5" y="5" width="10" height="10" rx="2"/>',
+    ),
+    "quality": (
+        "2",
+        '<path d="M4 19h16"/><rect x="5" y="11" width="3" height="6" rx="1"/>'
+        '<rect x="10.5" y="7" width="3" height="10" rx="1"/>'
+        '<rect x="16" y="4" width="3" height="13" rx="1"/>',
+    ),
+    "dependencies": (
+        "2",
+        '<circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/>'
+        '<circle cx="12" cy="18" r="2"/><path d="M8 7.5l2.5 6.5"/>'
+        '<path d="M16 7.5l-2.5 6.5"/>',
+    ),
+    "dead-code": (
+        "2",
+        '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>'
+        '<path d="M14 3v6h6"/><path d="M9 14l6 6"/><path d="M15 14l-6 6"/>',
+    ),
+    "suggestions": (
+        "2",
+        '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8Z"/>'
+        '<path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8Z"/>',
+    ),
+    "structural-findings": (
+        "2",
+        '<circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/>'
+        '<circle cx="18" cy="6" r="2"/><path d="M8 6h8"/>'
+        '<path d="M6 8v8a2 2 0 0 0 2 2h8"/>',
+    ),
+    "top-risks": (
+        "2",
+        '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86'
+        'a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/>'
+        '<line x1="12" y1="17" x2="12.01" y2="17"/>',
+    ),
+    "issue-breakdown": (
+        "2",
+        '<rect x="3" y="3" width="18" height="4" rx="1"/>'
+        '<rect x="3" y="10" width="13" height="4" rx="1"/>'
+        '<rect x="3" y="17" width="8" height="4" rx="1"/>',
+    ),
+    "source-breakdown": (
+        "2",
+        '<path d="M21.21 15.89A10 10 0 118 2.83"/>'
+        '<path d="M22 12A10 10 0 0012 2v10z"/>',
+    ),
+    "health-profile": (
+        "2",
+        '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/>'
+        '<circle cx="12" cy="12" r="2"/><line x1="12" y1="2" x2="12" y2="6"/>'
+        '<line x1="12" y1="18" x2="12" y2="22"/>',
+    ),
+    "all-findings": (
+        "2",
+        '<circle cx="5" cy="6" r="1.5"/><circle cx="5" cy="12" r="1.5"/>'
+        '<circle cx="5" cy="18" r="1.5"/><path d="M10 6h10"/><path d="M10 12h10"/>'
+        '<path d="M10 18h10"/>',
+    ),
+    "clone-groups": (
+        "2",
+        '<rect x="9" y="9" width="10" height="10" rx="2"/>'
+        '<rect x="5" y="5" width="10" height="10" rx="2"/>',
+    ),
+    "low-cohesion": (
+        "2",
+        '<rect x="4" y="5" width="6" height="14" rx="1.5"/>'
+        '<rect x="14" y="5" width="6" height="14" rx="1.5"/>'
+        '<path d="M10 12h4"/>',
+    ),
+}
+
+
+def section_icon_html(
+    key: str,
+    *,
+    class_name: str = "",
+    size: int = 16,
+) -> str:
+    spec = _SECTION_ICON_BODIES.get(key.strip().lower())
+    if spec is None:
+        return ""
+    stroke_width, body = spec
+    return _svg_with_class(size, stroke_width, body, class_name=class_name)
