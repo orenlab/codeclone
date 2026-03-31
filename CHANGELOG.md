@@ -13,8 +13,9 @@ sync SPDX headers.
 ### MCP server (new)
 
 - Optional `codeclone[mcp]` extra with `codeclone-mcp` launcher (`stdio` and `streamable-http` transports).
-- 20 read-only tools + 10 resources: analysis, diff-aware changed-files, run comparison, findings / hotspots /
-  remediation, granular checks, gate preview, PR summary, and session review markers.
+- 20 read-only tools + 7 fixed resources + 3 run-scoped URI templates: analysis, diff-aware changed-files, run
+  comparison, findings / hotspots / remediation, granular checks, gate preview, and in-memory-only review/session
+  markers.
 - Bounded run retention (`--history-limit`), `--allow-remote` guard, `cache_policy=refresh` rejected to preserve
   read-only semantics.
 - Agent-optimised payloads: short MCP run/finding ids, slim summary inventory, compact summary/default finding cards,

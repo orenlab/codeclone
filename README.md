@@ -43,7 +43,8 @@ Live sample report:
   score
 - **Baseline governance** — known debt stays accepted; CI blocks only new clones and metric regressions
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
-- **MCP server** — optional read-only MCP surface for AI agents, IDEs, and MCP-capable clients
+- **MCP server** — optional MCP surface for AI agents, IDEs, and MCP-capable clients; read-only with respect to repo and
+  persisted artifacts
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Fast** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
 

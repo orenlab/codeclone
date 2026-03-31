@@ -1,9 +1,9 @@
 # MCP Usage Guide
 
 CodeClone MCP is a **read-only, baseline-aware** analysis server for AI agents
-and MCP-capable clients. It exposes the existing deterministic pipeline as tools
-and resources — no separate analysis engine, no source mutation, no baseline
-writes.
+and MCP-capable clients. It exposes the existing deterministic pipeline without
+mutating source files, baselines, cache, or on-disk report artifacts. Only
+session-local review/run state is mutable in memory.
 
 MCP is a **client integration surface**, not a model-specific feature. It works
 with any MCP-capable client regardless of the backend model.
@@ -26,7 +26,8 @@ codeclone-mcp --transport stdio
 
 MCP analysis tools require an absolute repository root. Relative roots such as
 `.` are rejected, because the server process working directory may differ from
-the client workspace.
+the client workspace. The same absolute-path rule applies to `check_*` tools
+when a `root` filter is provided.
 
 **Remote / HTTP-only clients:**
 
@@ -41,28 +42,28 @@ core CodeClone runtime.
 
 ## Tool surface
 
-| Tool                     | Purpose                                                                                                                                                                                             |
-|--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `analyze_repository`     | Full analysis → register as latest run and return a compact MCP summary                                                                                                                             |
-| `analyze_changed_paths`  | Diff-aware analysis with `changed_paths` or `git_diff_ref`; returns a compact changed-files snapshot                                                                                                |
-| `get_run_summary`        | Compact health/findings/baseline snapshot with slim inventory counts; `health` is explicit `available=false` when metrics were skipped                                                              |
-| `get_production_triage`  | Compact production-first view: health, cache freshness, production hotspots, production suggestions                                                                                                 |
-| `compare_runs`           | Regressions, improvements, and run-to-run health delta between comparable runs; returns `mixed` for conflicting signals and `incomparable` when roots/settings differ, omitting deltas in that case |
-| `list_findings`          | Filtered, paginated finding groups with compact summary payloads by default                                                                                                                         |
-| `get_finding`            | Deep inspection of one finding by id; defaults to normal detail and accepts `detail_level`                                                                                                          |
-| `get_remediation`        | Structured remediation payload for one finding; defaults to normal detail                                                                                                                           |
-| `list_hotspots`          | Derived views: highest priority, production hotspots, spread, etc., with compact summary cards                                                                                                      |
-| `get_report_section`     | Read canonical report sections; `metrics` is summary-only, `metrics_detail` is paginated/bounded                                                                                                    |
-| `evaluate_gates`         | Preview CI/gating decisions without exiting                                                                                                                                                         |
-| `check_clones`           | Clone findings from a stored run                                                                                                                                                                    |
-| `check_complexity`       | Complexity hotspots from a stored run                                                                                                                                                               |
-| `check_coupling`         | Coupling hotspots from a stored run                                                                                                                                                                 |
-| `check_cohesion`         | Cohesion hotspots from a stored run                                                                                                                                                                 |
-| `check_dead_code`        | Dead-code findings from a stored run                                                                                                                                                                |
-| `generate_pr_summary`    | PR-friendly markdown or JSON summary                                                                                                                                                                |
-| `mark_finding_reviewed`  | Session-local review marker (in-memory only)                                                                                                                                                        |
-| `list_reviewed_findings` | List reviewed findings for a run                                                                                                                                                                    |
-| `clear_session_runs`     | Reset all in-memory runs and session caches                                                                                                                                                         |
+| Tool                     | Purpose                                                                                                                                                                                                                                 |
+|--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `analyze_repository`     | Full analysis → register as latest run and return a compact MCP summary                                                                                                                                                                 |
+| `analyze_changed_paths`  | Diff-aware analysis with `changed_paths` or `git_diff_ref`; returns a compact changed-files snapshot                                                                                                                                    |
+| `get_run_summary`        | Compact health/findings/baseline snapshot with slim inventory counts; `health` is explicit `available=false` when metrics were skipped                                                                                                  |
+| `get_production_triage`  | Compact production-first view: health, cache freshness, production hotspots, production suggestions                                                                                                                                     |
+| `compare_runs`           | Regressions, improvements, and run-to-run health delta between comparable runs; returns `mixed` for conflicting signals and `incomparable` when roots/settings differ, with empty comparison cards and `health_delta=null` in that case |
+| `list_findings`          | Filtered, paginated finding groups with compact summary payloads by default                                                                                                                                                             |
+| `get_finding`            | Deep inspection of one finding by id; defaults to normal detail and accepts `detail_level`                                                                                                                                              |
+| `get_remediation`        | Structured remediation payload for one finding; defaults to normal detail                                                                                                                                                               |
+| `list_hotspots`          | Derived views: highest priority, production hotspots, spread, etc., with compact summary cards                                                                                                                                          |
+| `get_report_section`     | Read canonical report sections; `metrics` is summary-only, `metrics_detail` is paginated/bounded                                                                                                                                        |
+| `evaluate_gates`         | Preview CI/gating decisions without exiting                                                                                                                                                                                             |
+| `check_clones`           | Clone findings from a stored run                                                                                                                                                                                                        |
+| `check_complexity`       | Complexity hotspots from a stored run                                                                                                                                                                                                   |
+| `check_coupling`         | Coupling hotspots from a stored run                                                                                                                                                                                                     |
+| `check_cohesion`         | Cohesion hotspots from a stored run                                                                                                                                                                                                     |
+| `check_dead_code`        | Dead-code findings from a stored run                                                                                                                                                                                                    |
+| `generate_pr_summary`    | PR-friendly markdown or JSON summary                                                                                                                                                                                                    |
+| `mark_finding_reviewed`  | Session-local review marker (in-memory only)                                                                                                                                                                                            |
+| `list_reviewed_findings` | List reviewed findings for a run                                                                                                                                                                                                        |
+| `clear_session_runs`     | Reset all in-memory runs and session caches                                                                                                                                                                                             |
 
 > `check_*` tools query stored runs only. Call `analyze_repository` or
 > `analyze_changed_paths` first.
@@ -113,6 +114,8 @@ trigger analysis.
 `codeclone://latest/*` always resolves to the most recent run registered in the
 current MCP server session. A later `analyze_repository` or
 `analyze_changed_paths` call moves that pointer.
+`mark_finding_reviewed` and `clear_session_runs` mutate only in-memory session
+state. They never touch source files, baselines, cache, or report artifacts.
 
 ## Recommended workflows
 
