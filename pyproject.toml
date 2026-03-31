@@ -20,7 +20,7 @@ maintainers = [
 requires-python = ">=3.10"
 
 dependencies = [
-    "pygments>=2.19.2",
+    "pygments>=2.20.0",
     "rich>=14.3.2",
     "tomli>=2.0.1; python_version < '3.11'",
 ]
