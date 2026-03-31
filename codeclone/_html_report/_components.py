@@ -11,13 +11,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal
 
-from .. import _coerce
+from .._coerce import as_int as _as_int
 from .._html_badges import _source_kind_badge_html
 from .._html_escape import _escape_attr, _escape_html
 from ._icons import section_icon_html
-
-_as_int = _coerce.as_int
-_as_mapping = _coerce.as_mapping
 
 Tone = Literal["ok", "warn", "risk", "info"]
 

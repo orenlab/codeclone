@@ -22,7 +22,7 @@ Main ownership layers:
 | Contracts             | `codeclone/contracts.py`, `codeclone/errors.py`                                                                                                                                                    | Shared schema versions, URLs, exit-code enum, typed exceptions                       |
 | Domain models         | `codeclone/models.py`, `codeclone/domain/*.py`                                                                                                                                                     | Typed dataclasses/enums plus centralized finding/scope/severity taxonomies           |
 | Discovery + parsing   | `codeclone/scanner.py`, `codeclone/extractor.py`                                                                                                                                                   | Enumerate files, parse AST, extract function/block/segment units                     |
-| Structural analysis   | `codeclone/cfg.py`, `codeclone/normalize.py`, `codeclone/blockhash.py`, `codeclone/fingerprint.py`, `codeclone/blocks.py`                                                                          | CFG, normalization, statement hashes, block/segment windows                          |
+| Structural analysis   | `codeclone/cfg.py`, `codeclone/normalize.py`, `codeclone/fingerprint.py`, `codeclone/blocks.py`                                                                                                    | CFG, normalization, statement hashes, block/segment windows                          |
 | Grouping              | `codeclone/grouping.py`                                                                                                                                                                            | Build function/block/segment groups                                                  |
 | Metrics               | `codeclone/metrics/*`                                                                                                                                                                              | Compute complexity/coupling/cohesion/dependency/dead-code/health signals             |
 | Report core           | `codeclone/report/*`, `codeclone/_cli_meta.py`                                                                                                                                                     | Merge windows, explainability facts, deterministic JSON/TXT schema + shared metadata |
@@ -47,11 +47,11 @@ Refs:
   or inventory counts) as long as canonical report data remains the source of
   truth and richer detail stays reachable through dedicated tools/sections.
 - The same rule applies to summary cache convenience fields such as
-  `effective_freshness` and to production-first triage projections built from
+  `freshness` and to production-first triage projections built from
   canonical hotlists/suggestions.
-- MCP finding lists may also move repeated absolute location context to
-  envelope-level metadata such as `base_uri`, while keeping `get_finding` as
-  the richer per-finding inspection path.
+- MCP finding lists may also expose short run/finding ids and slimmer relative
+  location projections, while keeping `get_finding(detail_level="full")` as the
+  richer per-finding inspection path.
 - Baseline, metrics baseline, and cache are validated before being trusted.
 
 Refs:

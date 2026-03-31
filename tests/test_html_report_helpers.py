@@ -17,6 +17,7 @@ from codeclone._html_report._components import (
     overview_source_breakdown_html,
     overview_summary_item_html,
 )
+from codeclone._html_report._icons import section_icon_html
 from codeclone._html_report._sections._clones import (
     _derive_group_display_name,
     _render_group_explanation,
@@ -427,6 +428,20 @@ def test_suggestion_context_labels_prefer_specific_clone_kind() -> None:
         _make_suggestion(category=cast(Any, "dead_code"))
     )
     assert generic_labels == ("Production", "Dead Code")
+
+    clone_labels_without_type = _suggestion_context_labels(
+        _make_suggestion(
+            category=cast(Any, "clone"),
+            source_kind=cast(Any, "tests"),
+            finding_kind="function",
+            clone_type="",
+        )
+    )
+    assert clone_labels_without_type == ("Tests", "Function")
+
+
+def test_section_icon_html_returns_empty_for_unknown_keys() -> None:
+    assert section_icon_html(" missing-section ") == ""
 
 
 def test_render_card_uses_professional_clone_context_chip_rhythm() -> None:

@@ -12,7 +12,10 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from hashlib import sha256
 from typing import TYPE_CHECKING, Literal
 
-from .. import _coerce
+from .._coerce import as_float as _as_float
+from .._coerce import as_int as _as_int
+from .._coerce import as_mapping as _as_mapping
+from .._coerce import as_sequence as _as_sequence
 from ..contracts import (
     DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
@@ -93,11 +96,6 @@ __all__ = [
     "design_group_id",
     "structural_group_id",
 ]
-
-_as_int = _coerce.as_int
-_as_float = _coerce.as_float
-_as_mapping = _coerce.as_mapping
-_as_sequence = _coerce.as_sequence
 
 
 def _optional_str(value: object) -> str | None:

@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .blockhash import stmt_hashes
 from .fingerprint import sha1
 from .models import BlockUnit, SegmentUnit
+from .normalize import stmt_hashes
 
 if TYPE_CHECKING:
     import ast

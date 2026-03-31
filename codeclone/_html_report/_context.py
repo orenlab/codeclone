@@ -12,7 +12,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .. import _coerce
+from .._coerce import as_mapping as _as_mapping
 from ..contracts import REPORT_SCHEMA_VERSION
 from ..report.overview import build_report_overview, materialize_report_overview
 
@@ -25,9 +25,6 @@ if TYPE_CHECKING:
         StructuralFindingGroup,
         Suggestion,
     )
-
-_as_mapping = _coerce.as_mapping
-_as_sequence = _coerce.as_sequence
 
 
 @dataclass(frozen=True, slots=True)

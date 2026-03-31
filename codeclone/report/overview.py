@@ -11,7 +11,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, cast
 
-from .. import _coerce
+from .._coerce import as_int as _as_int
+from .._coerce import as_mapping as _as_mapping
+from .._coerce import as_sequence as _as_sequence
 from ..domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
@@ -56,10 +58,6 @@ __all__ = [
     "materialize_report_overview",
     "serialize_suggestion_card",
 ]
-
-_as_int = _coerce.as_int
-_as_mapping = _coerce.as_mapping
-_as_sequence = _coerce.as_sequence
 
 
 def serialize_suggestion_card(suggestion: Suggestion) -> dict[str, object]:

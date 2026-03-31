@@ -17,13 +17,15 @@ sync SPDX headers.
   remediation, granular checks, gate preview, PR summary, and session review markers.
 - Bounded run retention (`--history-limit`), `--allow-remote` guard, `cache_policy=refresh` rejected to preserve
   read-only semantics.
-- Agent-optimised payloads: slim inventory counts in summaries, `base_uri` envelope with relative locations,
-  single-dimension `health` in `check_*`, three-tier `detail_level` on finding cards, and `metrics` / `metrics_detail`
-  split — all without changing canonical report schema until the later `2.2` report-threshold update below.
-- `cache.effective_freshness` marker and `get_production_triage` / `codeclone://latest/triage` for compact
-  production-first overview.
+- Agent-optimised payloads: short MCP run/finding ids, slim summary inventory, compact summary/default finding cards,
+  single-dimension `health` in `check_*`, bounded `metrics_detail`, and compact changed-files / compare-runs responses
+  — all without changing the canonical report contract.
+- `cache.freshness` marker and `get_production_triage` / `codeclone://latest/triage` for compact production-first
+  overview.
 - Honest run comparison: `compare_runs` reports `mixed` / `incomparable` instead of misleading single verdicts;
   `clones_only` runs surface `health: unavailable` instead of zeroed placeholders.
+- Safety hardening: MCP analysis now requires an absolute repository root and rejects relative roots like `.`, so the
+  server cannot silently analyze the wrong directory when its cwd differs from the client workspace.
 - Fix hotlist key resolution for `production_hotspots` and `test_fixture_hotspots`.
 - Bump cache schema to `2.3` (stale metric entries rebuilt, not reused).
 

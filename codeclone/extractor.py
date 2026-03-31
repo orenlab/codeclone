@@ -18,7 +18,6 @@ from hashlib import sha1 as _sha1
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from . import qualnames as _qualnames
-from .blockhash import stmt_hashes
 from .blocks import extract_blocks, extract_segments
 from .cfg import CFGBuilder
 from .errors import ParseError
@@ -46,6 +45,7 @@ from .normalize import (
     AstNormalizer,
     NormalizationConfig,
     normalized_ast_dump_from_list,
+    stmt_hashes,
 )
 from .paths import is_test_filepath
 from .structural_findings import scan_function_structure

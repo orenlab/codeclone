@@ -9,13 +9,13 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 
-from .. import _coerce
+from .._coerce import as_int, as_mapping, as_sequence
 from ..domain.source_scope import IMPACT_SCOPE_NON_RUNTIME, SOURCE_KIND_OTHER
 from ._formatting import format_spread_text
 
-_as_int = _coerce.as_int
-_as_mapping = _coerce.as_mapping
-_as_sequence = _coerce.as_sequence
+_as_int = as_int
+_as_mapping = as_mapping
+_as_sequence = as_sequence
 
 
 def render_json_report_document(payload: Mapping[str, object]) -> str:

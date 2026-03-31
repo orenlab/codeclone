@@ -13,7 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from .. import _coerce
+from .._coerce import as_float as _as_float
+from .._coerce import as_int as _as_int
+from .._coerce import as_mapping as _as_mapping
+from .._coerce import as_sequence as _as_sequence
 from ..contracts import DOCS_URL, REPOSITORY_URL
 from ..domain.findings import (
     CATEGORY_COHESION,
@@ -66,12 +69,6 @@ class _RuleSpec:
     category: str
     kind: str
     precision: str
-
-
-_as_int = _coerce.as_int
-_as_float = _coerce.as_float
-_as_mapping = _coerce.as_mapping
-_as_sequence = _coerce.as_sequence
 
 
 def _text(value: object) -> str:

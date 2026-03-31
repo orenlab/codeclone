@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .. import _coerce
+from .._coerce import as_int
 from .explain_contract import (
     BLOCK_HINT_ASSERT_ONLY,
     BLOCK_HINT_ASSERT_ONLY_LABEL,
@@ -40,12 +40,11 @@ class _StatementRecord:
 _StatementIndex = tuple[tuple[_StatementRecord, ...], tuple[int, ...]]
 _EMPTY_ASSERT_RANGE_STATS = (0, 0, 0)
 
+_as_int = as_int
+
 
 def signature_parts(group_key: str) -> list[str]:
     return [part for part in group_key.split("|") if part]
-
-
-_as_int = _coerce.as_int
 
 
 def parsed_file_tree(

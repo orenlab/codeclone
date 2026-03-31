@@ -31,7 +31,8 @@ _SERVER_INSTRUCTIONS = (
     "CodeClone MCP is a deterministic, baseline-aware, read-only analysis server "
     "for Python repositories. Use analyze_repository first, then query the latest "
     "or a specific run with summary, finding, hotspot, gate, and report-section "
-    "tools. This server never updates baselines and never mutates source files."
+    "tools. Pass an absolute repository root to analysis tools. This server "
+    "never updates baselines and never mutates source files."
 )
 _MCP_INSTALL_HINT = (
     "CodeClone MCP support requires the optional 'mcp' extra. "
@@ -113,14 +114,15 @@ def build_mcp_server(
         title="Analyze Repository",
         description=(
             "Run a deterministic CodeClone analysis for a repository and register "
-            "the result as the latest MCP run. Tip: set cache_policy='off' to "
-            "bypass cache and get fully fresh results."
+            "the result as the latest MCP run. Pass an absolute repository root: "
+            "relative roots like '.' are rejected in MCP. Tip: set "
+            "cache_policy='off' to bypass cache and get fully fresh results."
         ),
         annotations=session_tool,
         structured_output=True,
     )
     def analyze_repository(
-        root: str = ".",
+        root: str,
         analysis_mode: str = "full",
         respect_pyproject: bool = True,
         changed_paths: list[str] | None = None,
@@ -172,14 +174,15 @@ def build_mcp_server(
         title="Analyze Changed Paths",
         description=(
             "Run a deterministic CodeClone analysis and return a changed-files "
-            "projection using explicit paths or a git diff ref. Tip: set "
-            "cache_policy='off' to bypass cache and get fully fresh results."
+            "projection using explicit paths or a git diff ref. Pass an absolute "
+            "repository root: relative roots like '.' are rejected in MCP. Tip: "
+            "set cache_policy='off' to bypass cache and get fully fresh results."
         ),
         annotations=session_tool,
         structured_output=True,
     )
     def analyze_changed_paths(
-        root: str = ".",
+        root: str,
         changed_paths: list[str] | None = None,
         git_diff_ref: str | None = None,
         analysis_mode: str = "full",
@@ -229,7 +232,9 @@ def build_mcp_server(
 
     @tool(
         title="Get Run Summary",
-        description="Return the stored summary for the latest or specified MCP run.",
+        description=(
+            "Return the stored compact MCP summary for the latest or specified run."
+        ),
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -240,8 +245,8 @@ def build_mcp_server(
         title="Get Production Triage",
         description=(
             "Return a production-first triage view over a stored run: health, "
-            "effective cache freshness, production hotspots, and production "
-            "suggestions, while keeping global source-kind counters visible."
+            "cache freshness, production hotspots, and production suggestions, "
+            "while keeping global source-kind counters visible."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -298,7 +303,8 @@ def build_mcp_server(
         description=(
             "Return a canonical CodeClone report section for the latest or "
             "specified MCP run. The 'metrics' section returns only the "
-            "summary, while 'metrics_detail' returns the full metrics dump."
+            "summary, while 'metrics_detail' returns paginated item slices or "
+            "summary+hint when unfiltered."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -306,17 +312,25 @@ def build_mcp_server(
     def get_report_section(
         run_id: str | None = None,
         section: str = "all",
+        family: str | None = None,
+        path: str | None = None,
+        offset: int = 0,
+        limit: int = 50,
     ) -> dict[str, object]:
         return service.get_report_section(
             run_id=run_id,
             section=section,  # type: ignore[arg-type]
+            family=family,  # type: ignore[arg-type]
+            path=path,
+            offset=offset,
+            limit=limit,
         )
 
     @tool(
         title="List Findings",
         description=(
             "List canonical finding groups with deterministic ordering, optional "
-            "filters, and pagination."
+            "filters, pagination, and compact summary cards by default."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -329,7 +343,7 @@ def build_mcp_server(
         source_kind: str | None = None,
         novelty: str = "all",
         sort_by: str = "default",
-        detail_level: str = "normal",
+        detail_level: str = "summary",
         changed_paths: list[str] | None = None,
         git_diff_ref: str | None = None,
         exclude_reviewed: bool = False,
@@ -356,26 +370,37 @@ def build_mcp_server(
 
     @tool(
         title="Get Finding",
-        description="Return a single canonical finding group by id.",
+        description=(
+            "Return a single canonical finding group by short or full id. "
+            "Normal detail is the default."
+        ),
         annotations=read_only_tool,
         structured_output=True,
     )
     def get_finding(
         finding_id: str,
         run_id: str | None = None,
+        detail_level: str = "normal",
     ) -> dict[str, object]:
-        return service.get_finding(finding_id=finding_id, run_id=run_id)
+        return service.get_finding(
+            finding_id=finding_id,
+            run_id=run_id,
+            detail_level=detail_level,  # type: ignore[arg-type]
+        )
 
     @tool(
         title="Get Remediation",
-        description="Return actionable remediation guidance for a single finding.",
+        description=(
+            "Return actionable remediation guidance for a single finding. "
+            "Normal detail is the default."
+        ),
         annotations=read_only_tool,
         structured_output=True,
     )
     def get_remediation(
         finding_id: str,
         run_id: str | None = None,
-        detail_level: str = "full",
+        detail_level: str = "normal",
     ) -> dict[str, object]:
         return service.get_remediation(
             finding_id=finding_id,
@@ -387,7 +412,7 @@ def build_mcp_server(
         title="List Hotspots",
         description=(
             "Return one of the derived CodeClone hotlists for the latest or "
-            "specified MCP run."
+            "specified MCP run, using compact summary cards by default."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -395,7 +420,7 @@ def build_mcp_server(
     def list_hotspots(
         kind: str,
         run_id: str | None = None,
-        detail_level: str = "normal",
+        detail_level: str = "summary",
         changed_paths: list[str] | None = None,
         git_diff_ref: str | None = None,
         exclude_reviewed: bool = False,
@@ -416,7 +441,9 @@ def build_mcp_server(
     @tool(
         title="Compare Runs",
         description=(
-            "Compare two registered CodeClone MCP runs by finding ids and health."
+            "Compare two registered CodeClone MCP runs by finding ids and "
+            "run-to-run health. Returns 'incomparable' when roots or effective "
+            "analysis settings differ."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -436,18 +463,19 @@ def build_mcp_server(
         title="Check Complexity",
         description=(
             "Return complexity hotspots from a compatible stored run. "
-            "Use analyze_repository first if no full run is available."
+            "Use analyze_repository first if no full run is available. When "
+            "filtering by root without run_id, pass an absolute root."
         ),
         annotations=read_only_tool,
         structured_output=True,
     )
     def check_complexity(
         run_id: str | None = None,
-        root: str = ".",
+        root: str | None = None,
         path: str | None = None,
         min_complexity: int | None = None,
         max_results: int = 10,
-        detail_level: str = "normal",
+        detail_level: str = "summary",
     ) -> dict[str, object]:
         return service.check_complexity(
             run_id=run_id,
@@ -462,19 +490,20 @@ def build_mcp_server(
         title="Check Clones",
         description=(
             "Return clone findings from a compatible stored run. "
-            "Use analyze_repository first if no compatible run is available."
+            "Use analyze_repository first if no compatible run is available. "
+            "When filtering by root without run_id, pass an absolute root."
         ),
         annotations=read_only_tool,
         structured_output=True,
     )
     def check_clones(
         run_id: str | None = None,
-        root: str = ".",
+        root: str | None = None,
         path: str | None = None,
         clone_type: str | None = None,
         source_kind: str | None = None,
         max_results: int = 10,
-        detail_level: str = "normal",
+        detail_level: str = "summary",
     ) -> dict[str, object]:
         return service.check_clones(
             run_id=run_id,
@@ -490,17 +519,18 @@ def build_mcp_server(
         title="Check Coupling",
         description=(
             "Return coupling hotspots from a compatible stored run. "
-            "Use analyze_repository first if no full run is available."
+            "Use analyze_repository first if no full run is available. When "
+            "filtering by root without run_id, pass an absolute root."
         ),
         annotations=read_only_tool,
         structured_output=True,
     )
     def check_coupling(
         run_id: str | None = None,
-        root: str = ".",
+        root: str | None = None,
         path: str | None = None,
         max_results: int = 10,
-        detail_level: str = "normal",
+        detail_level: str = "summary",
     ) -> dict[str, object]:
         return service.check_coupling(
             run_id=run_id,
@@ -514,17 +544,18 @@ def build_mcp_server(
         title="Check Cohesion",
         description=(
             "Return cohesion hotspots from a compatible stored run. "
-            "Use analyze_repository first if no full run is available."
+            "Use analyze_repository first if no full run is available. When "
+            "filtering by root without run_id, pass an absolute root."
         ),
         annotations=read_only_tool,
         structured_output=True,
     )
     def check_cohesion(
         run_id: str | None = None,
-        root: str = ".",
+        root: str | None = None,
         path: str | None = None,
         max_results: int = 10,
-        detail_level: str = "normal",
+        detail_level: str = "summary",
     ) -> dict[str, object]:
         return service.check_cohesion(
             run_id=run_id,
@@ -538,14 +569,15 @@ def build_mcp_server(
         title="Check Dead Code",
         description=(
             "Return dead-code findings from a compatible stored run. "
-            "Use analyze_repository first if no full run is available."
+            "Use analyze_repository first if no full run is available. When "
+            "filtering by root without run_id, pass an absolute root."
         ),
         annotations=read_only_tool,
         structured_output=True,
     )
     def check_dead_code(
         run_id: str | None = None,
-        root: str = ".",
+        root: str | None = None,
         path: str | None = None,
         min_severity: str | None = None,
         max_results: int = 10,

@@ -47,10 +47,10 @@ Version bump rules:
   `metrics` vs `metrics_detail`) does not change `report_schema_version` as long
   as the canonical report document and finding identities remain unchanged.
 - The same rule applies to finding-level MCP projection changes such as
-  envelope-level `base_uri`, slim summary locations, or omitting
-  `priority_factors` outside `detail_level="full"`.
+  short MCP ids, slim summary locations, or omitting `priority_factors`
+  outside `detail_level="full"`.
 - Additive MCP-only convenience fields/projections such as
-  `cache.effective_freshness` or production-first triage also do not change
+  `cache.freshness` or production-first triage also do not change
   `report_schema_version` when they are derived from unchanged canonical report
   and summary data.
 - Canonical report changes such as `meta.analysis_thresholds.design_findings`

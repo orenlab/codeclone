@@ -163,7 +163,7 @@ def build_html_report(
         tab_icon = section_icon_html(
             tab_icon_keys.get(tab_id, ""),
             class_name="main-tab-icon",
-            size=14,
+            size=15,
         )
         tab_buttons.append(
             f'<button class="main-tab" role="tab" data-tab="{tab_id}" '

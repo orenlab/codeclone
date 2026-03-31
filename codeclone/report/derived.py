@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import TYPE_CHECKING, cast
 
-from .. import _coerce
+from .._coerce import as_int as _as_int
 from ..domain.source_scope import (
     IMPACT_SCOPE_MIXED,
     IMPACT_SCOPE_NON_RUNTIME,
@@ -53,8 +53,6 @@ SOURCE_KIND_ORDER: dict[SourceKind, int] = {
     SOURCE_KIND_MIXED: _SOURCE_KIND_ORDER[SOURCE_KIND_MIXED],
     SOURCE_KIND_OTHER: _SOURCE_KIND_ORDER[SOURCE_KIND_OTHER],
 }
-
-_as_int = _coerce.as_int
 
 
 def _normalize_path(value: str) -> str:

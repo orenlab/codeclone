@@ -44,7 +44,7 @@ Define terms exactly as used by code and tests.
   findings, or metric violations. Advisory only — never gates CI.
 - **production_hotspot**: finding group whose items are concentrated in
   production source scope (`source_kind=production`).
-- **effective_freshness**: cache-level indicator (`fresh` / `mixed` / `reused`)
+- **freshness**: MCP cache indicator (`fresh` / `mixed` / `reused`)
   reflecting how much of the analysis was recomputed vs cache-served.
 - **directory_hotspot**: derived aggregation in `derived.overview` showing
   which directories concentrate the most findings by category.

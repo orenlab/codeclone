@@ -838,6 +838,80 @@ def test_directory_hotspots_collapses_test_scope_roots_for_overview() -> None:
     ]
 
 
+def test_directory_hotspot_helpers_cover_fallback_paths() -> None:
+    assert overview_mod._directory_bucket_keys(
+        {"family": "other", "category": "x"}
+    ) == ("all",)
+    assert (
+        overview_mod._directory_kind_breakdown_key(
+            {"family": "design", "category": "unknown"}
+        )
+        is None
+    )
+    assert overview_mod._directory_relative_path({"module": "pkg.mod"}) == "pkg/mod.py"
+    assert overview_mod._directory_scope_root_label(".", source_kind="tests") is None
+    assert (
+        overview_mod._directory_scope_root_label(
+            "pkg/tests/unit/test_mod.py",
+            source_kind="production",
+        )
+        is None
+    )
+    assert overview_mod._directory_contributions({"items": [{}]}) == {}
+    assert (
+        overview_mod._directory_group_data({"items": [{"relative_path": "pkg/mod.py"}]})
+        is None
+    )
+    assert overview_mod._directory_group_data({"id": "g1", "items": [{}]}) is None
+
+    hotspots = overview_mod.build_directory_hotspots(
+        findings={
+            "groups": {
+                "clones": {"functions": [], "blocks": [], "segments": []},
+                "structural": {"groups": [{"family": "structural", "items": [{}]}]},
+                "dead_code": {"groups": []},
+                "design": {"groups": []},
+            }
+        }
+    )
+    assert cast("dict[str, object]", hotspots["all"]) == {
+        "total_directories": 0,
+        "returned": 0,
+        "has_more": False,
+        "items": [],
+    }
+    unknown_design_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "design",
+            "category": "unknown",
+            "severity": "info",
+            "confidence": "low",
+            "count": 1,
+            "source_scope": {"dominant_kind": "other"},
+            "spread": {"files": 1, "functions": 1},
+            "items": [{"relative_path": "pkg/mod.py", "start_line": 1, "end_line": 1}],
+            "facts": {},
+        }
+    )
+    assert unknown_design_card["title"] == "Finding"
+    assert unknown_design_card["summary"] == ""
+    unknown_family_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "other",
+            "category": "misc",
+            "severity": "info",
+            "confidence": "low",
+            "count": 1,
+            "source_scope": {"dominant_kind": "other"},
+            "spread": {"files": 1, "functions": 0},
+            "items": [{"relative_path": "pkg/mod.py"}],
+            "facts": {},
+        }
+    )
+    assert unknown_family_card["title"] == "Finding"
+    assert unknown_family_card["summary"] == ""
+
+
 def test_markdown_and_sarif_reuse_prebuilt_report_document() -> None:
     payload = _rich_report_document()
     md = to_markdown_report(

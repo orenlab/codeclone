@@ -36,10 +36,6 @@ def _mapping_child(payload: Mapping[str, object], key: str) -> dict[str, object]
     return cast("dict[str, object]", payload[key])
 
 
-def _summary_registry(payload: Mapping[str, object]) -> dict[str, object]:
-    return _mapping_child(_mapping_child(payload, "inventory"), "file_registry")
-
-
 def _require_mcp_runtime() -> None:
     pytest.importorskip("mcp.server.fastmcp")
 
@@ -152,8 +148,28 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         assert tool.annotations.idempotentHint is True
     assert "cache_policy='off'" in str(tools["analyze_repository"].description)
     assert "cache_policy='off'" in str(tools["analyze_changed_paths"].description)
+    assert "absolute repository root" in str(tools["analyze_repository"].description)
+    assert "absolute repository root" in str(tools["analyze_changed_paths"].description)
     assert "Use analyze_repository first" in str(tools["check_complexity"].description)
     assert "Use analyze_repository first" in str(tools["check_clones"].description)
+    analyze_repository_schema = cast(
+        "dict[str, object]",
+        tools["analyze_repository"].inputSchema,
+    )
+    analyze_changed_schema = cast(
+        "dict[str, object]",
+        tools["analyze_changed_paths"].inputSchema,
+    )
+    assert "root" in cast("list[str]", analyze_repository_schema["required"])
+    assert "root" in cast("list[str]", analyze_changed_schema["required"])
+    assert "default" not in cast(
+        "dict[str, object]",
+        cast("dict[str, object]", analyze_repository_schema["properties"])["root"],
+    )
+    assert "default" not in cast(
+        "dict[str, object]",
+        cast("dict[str, object]", analyze_changed_schema["properties"])["root"],
+    )
 
 
 def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
@@ -190,17 +206,19 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     )
     run_id = str(summary["run_id"])
     changed_run_id = str(changed_summary["run_id"])
-    changed_registry = _summary_registry(changed_summary)
-    assert cast(int, changed_registry["count"]) >= 1
-    assert "items" not in changed_registry
+    assert "inventory" not in changed_summary
+    assert cast(int, changed_summary["changed_files"]) == 1
 
     latest = _structured_tool_result(
         asyncio.run(server.call_tool("get_run_summary", {}))
     )
     assert latest["run_id"] == run_id
-    latest_registry = _summary_registry(latest)
-    assert cast(int, latest_registry["count"]) >= 1
-    assert "items" not in latest_registry
+    assert set(cast("dict[str, object]", latest["inventory"])) == {
+        "files",
+        "lines",
+        "functions",
+        "classes",
+    }
 
     findings_result = _structured_tool_result(
         asyncio.run(
@@ -214,12 +232,11 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             )
         )
     )
-    assert findings_result["base_uri"] == tmp_path.as_uri()
     assert cast(int, findings_result["total"]) >= 1
     summary_finding = cast("list[dict[str, object]]", findings_result["items"])[0]
     assert "priority_factors" not in summary_finding
     assert all(
-        set(cast("dict[str, object]", location)) <= {"file", "line"}
+        isinstance(location, str)
         for location in cast("list[object]", summary_finding["locations"])
     )
 
@@ -230,15 +247,18 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     latest_summary_text = latest_summary_resource[0].content
     latest_summary = json.loads(latest_summary_text)
     assert latest_summary["run_id"] == run_id
-    latest_summary_registry = _summary_registry(latest_summary)
-    assert cast(int, latest_summary_registry["count"]) >= 1
-    assert "items" not in latest_summary_registry
+    assert set(cast("dict[str, object]", latest_summary["inventory"])) == {
+        "files",
+        "lines",
+        "functions",
+        "classes",
+    }
 
     production_triage = _structured_tool_result(
         asyncio.run(server.call_tool("get_production_triage", {}))
     )
     assert production_triage["run_id"] == run_id
-    assert _mapping_child(production_triage, "cache")["effective_freshness"]
+    assert _mapping_child(production_triage, "cache")["freshness"]
 
     latest_report_resource = list(
         asyncio.run(server.read_resource("codeclone://latest/report.json"))
@@ -256,7 +276,7 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     )
     latest_changed_payload = json.loads(latest_changed_resource[0].content)
     assert latest_changed_payload["run_id"] == changed_run_id
-    assert latest_changed_payload["changed_paths"] == changed_summary["changed_paths"]
+    assert latest_changed_payload["changed_paths"] == ["pkg/dup.py"]
     latest_triage_resource = list(
         asyncio.run(server.read_resource("codeclone://latest/triage"))
     )
@@ -298,11 +318,20 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             server.call_tool("get_report_section", {"section": "metrics_detail"})
         )
     )
-    assert "families" in metrics_detail_section
+    assert "_hint" in metrics_detail_section
+    metrics_detail_page = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_report_section",
+                {"section": "metrics_detail", "family": "complexity", "limit": 5},
+            )
+        )
+    )
+    assert cast("list[dict[str, object]]", metrics_detail_page["items"])
     changed_section = _structured_tool_result(
         asyncio.run(server.call_tool("get_report_section", {"section": "changed"}))
     )
-    assert changed_section["changed_paths"] == changed_summary["changed_paths"]
+    assert changed_section["changed_paths"] == ["pkg/dup.py"]
 
     finding = _structured_tool_result(
         asyncio.run(server.call_tool("get_finding", {"finding_id": first_finding_id}))
@@ -330,7 +359,6 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             )
         )
     )
-    assert hotspots["base_uri"] == tmp_path.as_uri()
     assert cast(int, hotspots["total"]) >= 1
     assert comparison["summary"]
 
@@ -396,15 +424,10 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         )
     )
     assert complexity["check"] == "complexity"
-    assert complexity["base_uri"] == tmp_path.as_uri()
     assert cast(int, clones["total"]) >= 1
-    assert clones["base_uri"] == tmp_path.as_uri()
     assert coupling["check"] == "coupling"
-    assert coupling["base_uri"] == tmp_path.as_uri()
     assert cohesion["check"] == "cohesion"
-    assert cohesion["base_uri"] == tmp_path.as_uri()
     assert dead_code["check"] == "dead_code"
-    assert dead_code["base_uri"] == tmp_path.as_uri()
     assert reviewed["reviewed"] is True
     assert reviewed_items["reviewed_count"] == 1
     assert "## CodeClone Summary" in str(pr_summary["content"])

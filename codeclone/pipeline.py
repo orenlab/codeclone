@@ -13,7 +13,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
-from . import _coerce
+from ._coerce import as_int, as_str
 from .cache import (
     Cache,
     CacheEntry,
@@ -78,6 +78,9 @@ DEFAULT_BATCH_SIZE = 100
 PARALLEL_MIN_FILES_PER_WORKER = 8
 PARALLEL_MIN_FILES_FLOOR = 16
 DEFAULT_RUNTIME_PROCESSES = 4
+
+_as_int = as_int
+_as_str = as_str
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,10 +209,6 @@ class MetricGateConfig:
     fail_dead_code: bool
     fail_health: int
     fail_on_new_metrics: bool
-
-
-_as_int = _coerce.as_int
-_as_str = _coerce.as_str
 
 
 def _as_sorted_str_tuple(value: object) -> tuple[str, ...]:
@@ -346,7 +345,7 @@ def _parallel_min_files(processes: int) -> int:
 def _resolve_process_count(processes: object) -> int:
     if processes is None:
         return DEFAULT_RUNTIME_PROCESSES
-    return max(1, _coerce.as_int(processes, DEFAULT_RUNTIME_PROCESSES))
+    return max(1, _as_int(processes, DEFAULT_RUNTIME_PROCESSES))
 
 
 def _should_collect_structural_findings(output_paths: OutputPaths) -> bool:

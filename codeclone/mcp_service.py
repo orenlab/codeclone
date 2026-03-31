@@ -16,7 +16,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Final, Literal, cast
 
-from . import __version__, _coerce
+from . import __version__
 from ._cli_args import (
     DEFAULT_BASELINE_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -25,7 +25,6 @@ from ._cli_args import (
     DEFAULT_MAX_CACHE_SIZE_MB,
     DEFAULT_MIN_LOC,
     DEFAULT_MIN_STMT,
-    DEFAULT_ROOT,
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
 )
@@ -43,6 +42,8 @@ from ._cli_runtime import (
     resolve_cache_status,
     validate_numeric_args,
 )
+from ._coerce import as_float as _as_float
+from ._coerce import as_int as _as_int
 from .baseline import Baseline
 from .cache import Cache, CacheStatus
 from .contracts import (
@@ -104,7 +105,6 @@ from .report.json_contract import (
     design_group_id,
     structural_group_id,
 )
-from .report.overview import serialize_finding_group_card
 
 AnalysisMode = Literal["full", "clones_only"]
 CachePolicy = Literal["reuse", "refresh", "off"]
@@ -122,6 +122,14 @@ FindingSort = Literal["default", "priority", "severity", "spread"]
 DetailLevel = Literal["summary", "normal", "full"]
 ComparisonFocus = Literal["all", "clones", "structural", "metrics"]
 PRSummaryFormat = Literal["markdown", "json"]
+MetricsDetailFamily = Literal[
+    "complexity",
+    "coupling",
+    "cohesion",
+    "dependencies",
+    "dead_code",
+    "health",
+]
 ReportSection = Literal[
     "all",
     "meta",
@@ -239,9 +247,18 @@ _CHECK_TO_DIMENSION: Final[dict[str, str]] = {
     "complexity": "complexity",
     "clones": "clones",
 }
-_as_int = _coerce.as_int
-_as_float = _coerce.as_float
-_as_str = _coerce.as_str
+_VALID_METRICS_DETAIL_FAMILIES = frozenset(
+    {
+        "complexity",
+        "coupling",
+        "cohesion",
+        "dependencies",
+        "dead_code",
+        "health",
+    }
+)
+_SHORT_RUN_ID_LENGTH = 8
+_SHORT_HASH_ID_LENGTH = 6
 
 
 def _suggestion_finding_id_payload(suggestion: object) -> str:
@@ -265,6 +282,67 @@ def _suggestion_finding_id_payload(suggestion: object) -> str:
         category,
         subject_key or str(getattr(suggestion, "title", "")),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _CloneShortIdEntry:
+    canonical_id: str
+    alias: str
+    token: str
+    suffix: str
+
+    def render(self, prefix_length: int) -> str:
+        if prefix_length <= 0:
+            prefix_length = len(self.token)
+        return f"{self.alias}:{self.token[:prefix_length]}{self.suffix}"
+
+
+def _partitioned_short_id(alias: str, remainder: str) -> str:
+    first, _, rest = remainder.partition(":")
+    return f"{alias}:{first}:{rest}" if rest else f"{alias}:{first}"
+
+
+def _clone_short_id_entry_payload(canonical_id: str) -> _CloneShortIdEntry:
+    _prefix, _, remainder = canonical_id.partition(":")
+    clone_kind, _, group_key = remainder.partition(":")
+    hashes = [part for part in group_key.split("|") if part]
+    if clone_kind == "function":
+        fingerprint = hashes[0] if hashes else group_key
+        bucket = ""
+        if "|" in group_key:
+            bucket = "|" + group_key.split("|")[-1]
+        return _CloneShortIdEntry(
+            canonical_id=canonical_id,
+            alias="fn",
+            token=fingerprint,
+            suffix=bucket,
+        )
+    alias = {"block": "blk", "segment": "seg"}.get(clone_kind, "clone")
+    token = "".join(hashes) if hashes else group_key
+    return _CloneShortIdEntry(
+        canonical_id=canonical_id,
+        alias=alias,
+        token=token,
+        suffix=f"|x{len(hashes) or 1}",
+    )
+
+
+def _disambiguated_clone_short_ids_payload(
+    canonical_ids: Sequence[str],
+) -> dict[str, str]:
+    clone_entries = [
+        _clone_short_id_entry_payload(canonical_id) for canonical_id in canonical_ids
+    ]
+    max_token_length = max((len(entry.token) for entry in clone_entries), default=0)
+    for prefix_length in range(_SHORT_HASH_ID_LENGTH + 2, max_token_length + 1, 2):
+        candidates = {
+            entry.canonical_id: entry.render(prefix_length) for entry in clone_entries
+        }
+        if len(set(candidates.values())) == len(candidates):
+            return candidates
+    return {
+        entry.canonical_id: entry.render(max_token_length) for entry in clone_entries
+    }
 
 
 def _git_diff_lines_payload(
@@ -346,7 +424,7 @@ class _BufferConsole:
 
 @dataclass(frozen=True, slots=True)
 class MCPAnalysisRequest:
-    root: str = DEFAULT_ROOT
+    root: str | None = None
     analysis_mode: AnalysisMode = "full"
     respect_pyproject: bool = True
     changed_paths: tuple[str, ...] = ()
@@ -423,10 +501,26 @@ class CodeCloneMCPRunStore:
 
     def get(self, run_id: str | None = None) -> MCPRunRecord:
         with self._lock:
-            resolved_run_id = run_id or self._latest_run_id
-            if resolved_run_id is None or resolved_run_id not in self._records:
+            resolved_run_id = self._resolve_run_id(run_id)
+            if resolved_run_id is None:
                 raise MCPRunNotFoundError("No matching MCP analysis run is available.")
             return self._records[resolved_run_id]
+
+    def _resolve_run_id(self, run_id: str | None) -> str | None:
+        if run_id is None:
+            return self._latest_run_id
+        if run_id in self._records:
+            return run_id
+        matches = [
+            candidate for candidate in self._records if candidate.startswith(run_id)
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise MCPServiceContractError(
+                f"Run id '{run_id}' is ambiguous in this MCP session."
+            )
+        return None
 
     def records(self) -> tuple[MCPRunRecord, ...]:
         with self._lock:
@@ -681,19 +775,20 @@ class CodeCloneMCPService:
         )
         self._runs.register(record)
         self._prune_session_state()
-        return summary
+        return self._summary_payload(record.summary, record=record)
 
     def analyze_changed_paths(self, request: MCPAnalysisRequest) -> dict[str, object]:
         if not request.changed_paths and request.git_diff_ref is None:
             raise MCPServiceContractError(
                 "analyze_changed_paths requires changed_paths or git_diff_ref."
             )
-        summary = dict(self.analyze_repository(request))
-        return self._summary_payload(summary)
+        analysis_summary = self.analyze_repository(request)
+        record = self._runs.get(str(analysis_summary.get("run_id", "")) or None)
+        return self._changed_analysis_payload(record)
 
     def get_run_summary(self, run_id: str | None = None) -> dict[str, object]:
-        summary = dict(self._runs.get(run_id).summary)
-        return self._summary_payload(summary)
+        record = self._runs.get(run_id)
+        return self._summary_payload(record.summary, record=record)
 
     def compare_runs(
         self,
@@ -735,7 +830,10 @@ class CodeCloneMCPService:
         )
         regressions_payload = (
             [
-                self._finding_summary_card(after, after_findings[finding_id])
+                self._comparison_finding_card(
+                    after,
+                    after_findings[finding_id],
+                )
                 for finding_id in regressions
             ]
             if comparable
@@ -743,31 +841,30 @@ class CodeCloneMCPService:
         )
         improvements_payload = (
             [
-                self._finding_summary_card(before, before_findings[finding_id])
+                self._comparison_finding_card(
+                    before,
+                    before_findings[finding_id],
+                )
                 for finding_id in improvements
             ]
             if comparable
             else []
         )
-        return {
+        payload: dict[str, object] = {
             "before": {
-                "run_id": before.run_id,
-                "root": str(before.root),
-                "analysis_mode": before.request.analysis_mode,
+                "run_id": self._short_run_id(before.run_id),
                 "health": health_before,
             },
             "after": {
-                "run_id": after.run_id,
-                "root": str(after.root),
-                "analysis_mode": after.request.analysis_mode,
+                "run_id": self._short_run_id(after.run_id),
                 "health": health_after,
             },
-            "comparability": comparability,
+            "comparable": comparable,
             "health_delta": health_delta,
             "verdict": verdict,
             "regressions": regressions_payload,
             "improvements": improvements_payload,
-            "unchanged_count": len(common) if comparable else None,
+            "unchanged": len(common) if comparable else None,
             "summary": self._comparison_summary_text(
                 comparable=comparable,
                 comparability_reason=str(comparability["reason"]),
@@ -776,12 +873,15 @@ class CodeCloneMCPService:
                 health_delta=health_delta,
             ),
         }
+        if not comparable:
+            payload["reason"] = comparability["reason"]
+        return payload
 
     def evaluate_gates(self, request: MCPGateRequest) -> dict[str, object]:
         record = self._runs.get(request.run_id)
         gate_result = self._evaluate_gate_snapshot(record=record, request=request)
         result = {
-            "run_id": record.run_id,
+            "run_id": self._short_run_id(record.run_id),
             "would_fail": gate_result.exit_code != 0,
             "exit_code": gate_result.exit_code,
             "reasons": list(gate_result.reasons),
@@ -845,6 +945,10 @@ class CodeCloneMCPService:
         *,
         run_id: str | None = None,
         section: ReportSection = "all",
+        family: MetricsDetailFamily | None = None,
+        path: str | None = None,
+        offset: int = 0,
+        limit: int = 50,
     ) -> dict[str, object]:
         validated_section = cast(
             "ReportSection",
@@ -864,12 +968,26 @@ class CodeCloneMCPService:
             metrics = self._as_mapping(report_document.get("metrics"))
             return {"summary": dict(self._as_mapping(metrics.get("summary")))}
         if validated_section == "metrics_detail":
-            payload = report_document.get("metrics")
-            if not isinstance(payload, Mapping):
+            metrics = self._as_mapping(report_document.get("metrics"))
+            if not metrics:
                 raise MCPServiceContractError(
                     "Report section 'metrics_detail' is not available in this run."
                 )
-            return dict(payload)
+            validated_family = cast(
+                "MetricsDetailFamily | None",
+                self._validate_optional_choice(
+                    "family",
+                    family,
+                    _VALID_METRICS_DETAIL_FAMILIES,
+                ),
+            )
+            return self._metrics_detail_payload(
+                metrics=metrics,
+                family=validated_family,
+                path=path,
+                offset=offset,
+                limit=limit,
+            )
         payload = report_document.get(validated_section)
         if not isinstance(payload, Mapping):
             raise MCPServiceContractError(
@@ -887,7 +1005,7 @@ class CodeCloneMCPService:
         source_kind: str | None = None,
         novelty: FindingNoveltyFilter = "all",
         sort_by: FindingSort = "default",
-        detail_level: DetailLevel = "normal",
+        detail_level: DetailLevel = "summary",
         changed_paths: Sequence[str] = (),
         git_diff_ref: str | None = None,
         exclude_reviewed: bool = False,
@@ -943,8 +1061,7 @@ class CodeCloneMCPService:
         items = filtered[normalized_offset : normalized_offset + normalized_limit]
         next_offset = normalized_offset + len(items)
         return {
-            "run_id": record.run_id,
-            "base_uri": record.root.as_uri(),
+            "run_id": self._short_run_id(record.run_id),
             "detail_level": validated_detail,
             "sort_by": validated_sort,
             "changed_paths": list(paths_filter),
@@ -961,17 +1078,24 @@ class CodeCloneMCPService:
         *,
         finding_id: str,
         run_id: str | None = None,
+        detail_level: DetailLevel = "normal",
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
+        validated_detail = cast(
+            "DetailLevel",
+            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        )
+        canonical_id = self._resolve_canonical_finding_id(record, finding_id)
         for finding in self._base_findings(record):
-            if str(finding.get("id")) == finding_id:
+            if str(finding.get("id")) == canonical_id:
                 return self._decorate_finding(
                     record,
                     finding,
-                    detail_level="full",
+                    detail_level=validated_detail,
                 )
         raise MCPFindingNotFoundError(
-            f"Finding id '{finding_id}' was not found in run '{record.run_id}'."
+            f"Finding id '{finding_id}' was not found in run "
+            f"'{self._short_run_id(record.run_id)}'."
         )
 
     def get_remediation(
@@ -979,22 +1103,27 @@ class CodeCloneMCPService:
         *,
         finding_id: str,
         run_id: str | None = None,
-        detail_level: DetailLevel = "full",
+        detail_level: DetailLevel = "normal",
     ) -> dict[str, object]:
         validated_detail = cast(
             "DetailLevel",
             self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
         )
         record = self._runs.get(run_id)
-        finding = self.get_finding(finding_id=finding_id, run_id=record.run_id)
+        canonical_id = self._resolve_canonical_finding_id(record, finding_id)
+        finding = self.get_finding(
+            finding_id=canonical_id,
+            run_id=record.run_id,
+            detail_level="full",
+        )
         remediation = self._as_mapping(finding.get("remediation"))
         if not remediation:
             raise MCPFindingNotFoundError(
                 f"Finding id '{finding_id}' does not expose remediation guidance."
             )
         return {
-            "run_id": record.run_id,
-            "finding_id": finding_id,
+            "run_id": self._short_run_id(record.run_id),
+            "finding_id": self._short_finding_id(record, canonical_id),
             "detail_level": validated_detail,
             "remediation": self._project_remediation(
                 remediation,
@@ -1007,7 +1136,7 @@ class CodeCloneMCPService:
         *,
         kind: HotlistKind,
         run_id: str | None = None,
-        detail_level: DetailLevel = "normal",
+        detail_level: DetailLevel = "summary",
         changed_paths: Sequence[str] = (),
         git_diff_ref: str | None = None,
         exclude_reviewed: bool = False,
@@ -1040,8 +1169,7 @@ class CodeCloneMCPService:
             min(max_results if max_results is not None else limit, 50),
         )
         return {
-            "run_id": record.run_id,
-            "base_uri": record.root.as_uri(),
+            "run_id": self._short_run_id(record.run_id),
             "kind": validated_kind,
             "detail_level": validated_detail,
             "changed_paths": list(paths_filter),
@@ -1058,7 +1186,7 @@ class CodeCloneMCPService:
         max_suggestions: int = 3,
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
-        summary = self._summary_payload(dict(record.summary))
+        summary = self._summary_payload(record.summary, record=record)
         findings = self._base_findings(record)
         findings_breakdown = self._source_kind_breakdown(
             self._finding_source_kind(finding) for finding in findings
@@ -1082,8 +1210,7 @@ class CodeCloneMCPService:
             if str(row.get("source_kind", "")) == SOURCE_KIND_PRODUCTION
         ]
         return {
-            "run_id": record.run_id,
-            "base_uri": record.root.as_uri(),
+            "run_id": self._short_run_id(record.run_id),
             "health": dict(self._summary_health_payload(summary)),
             "cache": dict(self._as_mapping(summary.get("cache"))),
             "findings": {
@@ -1164,8 +1291,8 @@ class CodeCloneMCPService:
             health_delta=self._summary_health_delta(record.summary),
         )
         payload: dict[str, object] = {
-            "run_id": record.run_id,
-            "changed_paths": list(paths_filter),
+            "run_id": self._short_run_id(record.run_id),
+            "changed_files": len(paths_filter),
             "health": self._summary_health_payload(record.summary),
             "health_delta": self._summary_health_delta(record.summary),
             "verdict": verdict,
@@ -1176,7 +1303,7 @@ class CodeCloneMCPService:
         if output_format == "json":
             return payload
         return {
-            "run_id": record.run_id,
+            "run_id": self._short_run_id(record.run_id),
             "format": output_format,
             "content": self._render_pr_summary_markdown(payload),
         }
@@ -1189,18 +1316,23 @@ class CodeCloneMCPService:
         note: str | None = None,
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
-        self.get_finding(finding_id=finding_id, run_id=record.run_id)
+        canonical_id = self._resolve_canonical_finding_id(record, finding_id)
+        self.get_finding(
+            finding_id=canonical_id,
+            run_id=record.run_id,
+            detail_level="normal",
+        )
         with self._state_lock:
             review_map = self._review_state.setdefault(record.run_id, OrderedDict())
-            review_map[finding_id] = (
+            review_map[canonical_id] = (
                 note.strip() if isinstance(note, str) and note.strip() else None
             )
-            review_map.move_to_end(finding_id)
+            review_map.move_to_end(canonical_id)
         return {
-            "run_id": record.run_id,
-            "finding_id": finding_id,
+            "run_id": self._short_run_id(record.run_id),
+            "finding_id": self._short_finding_id(record, canonical_id),
             "reviewed": True,
-            "note": review_map[finding_id],
+            "note": review_map[canonical_id],
             "reviewed_count": len(review_map),
         }
 
@@ -1222,16 +1354,17 @@ class CodeCloneMCPService:
                 continue
             items.append(
                 {
-                    "finding_id": finding_id,
+                    "finding_id": self._short_finding_id(record, finding_id),
                     "note": note,
                     "finding": self._project_finding_detail(
+                        record,
                         finding,
                         detail_level="summary",
                     ),
                 }
             )
         return {
-            "run_id": record.run_id,
+            "run_id": self._short_run_id(record.run_id),
             "reviewed_count": len(items),
             "items": items,
         }
@@ -1249,7 +1382,9 @@ class CodeCloneMCPService:
             self._spread_max_cache.clear()
         return {
             "cleared_runs": len(removed_run_ids),
-            "cleared_run_ids": list(removed_run_ids),
+            "cleared_run_ids": [
+                self._short_run_id(run_id) for run_id in removed_run_ids
+            ],
             "cleared_review_entries": cleared_review_entries,
             "cleared_gate_results": cleared_gate_results,
             "cleared_spread_cache_entries": cleared_spread_cache_entries,
@@ -1259,11 +1394,11 @@ class CodeCloneMCPService:
         self,
         *,
         run_id: str | None = None,
-        root: str = ".",
+        root: str | None = None,
         path: str | None = None,
         min_complexity: int | None = None,
         max_results: int = 10,
-        detail_level: DetailLevel = "normal",
+        detail_level: DetailLevel = "summary",
     ) -> dict[str, object]:
         validated_detail = cast(
             "DetailLevel",
@@ -1307,12 +1442,12 @@ class CodeCloneMCPService:
         self,
         *,
         run_id: str | None = None,
-        root: str = ".",
+        root: str | None = None,
         path: str | None = None,
         clone_type: str | None = None,
         source_kind: str | None = None,
         max_results: int = 10,
-        detail_level: DetailLevel = "normal",
+        detail_level: DetailLevel = "summary",
     ) -> dict[str, object]:
         validated_detail = cast(
             "DetailLevel",
@@ -1350,10 +1485,10 @@ class CodeCloneMCPService:
         self,
         *,
         run_id: str | None = None,
-        root: str = ".",
+        root: str | None = None,
         path: str | None = None,
         max_results: int = 10,
-        detail_level: DetailLevel = "normal",
+        detail_level: DetailLevel = "summary",
     ) -> dict[str, object]:
         validated_detail = cast(
             "DetailLevel",
@@ -1385,10 +1520,10 @@ class CodeCloneMCPService:
         self,
         *,
         run_id: str | None = None,
-        root: str = ".",
+        root: str | None = None,
         path: str | None = None,
         max_results: int = 10,
-        detail_level: DetailLevel = "normal",
+        detail_level: DetailLevel = "summary",
     ) -> dict[str, object]:
         validated_detail = cast(
             "DetailLevel",
@@ -1420,11 +1555,11 @@ class CodeCloneMCPService:
         self,
         *,
         run_id: str | None = None,
-        root: str = ".",
+        root: str | None = None,
         path: str | None = None,
         min_severity: str | None = None,
         max_results: int = 10,
-        detail_level: DetailLevel = "normal",
+        detail_level: DetailLevel = "summary",
     ) -> dict[str, object]:
         validated_detail = cast(
             "DetailLevel",
@@ -1497,7 +1632,7 @@ class CodeCloneMCPService:
     def _render_resource(self, record: MCPRunRecord, suffix: str) -> str:
         if suffix == "summary":
             return json.dumps(
-                self._summary_payload(dict(record.summary)),
+                self._summary_payload(record.summary, record=record),
                 ensure_ascii=False,
                 indent=2,
                 sort_keys=True,
@@ -1679,6 +1814,136 @@ class CodeCloneMCPService:
             return health
         return {"available": False, "reason": "unavailable"}
 
+    def _short_run_id(self, run_id: str) -> str:
+        return run_id[:_SHORT_RUN_ID_LENGTH]
+
+    def _finding_id_maps(
+        self,
+        record: MCPRunRecord,
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        canonical_ids = sorted(
+            str(finding.get("id", ""))
+            for finding in self._base_findings(record)
+            if str(finding.get("id", ""))
+        )
+        base_ids = {
+            canonical_id: self._base_short_finding_id(canonical_id)
+            for canonical_id in canonical_ids
+        }
+        grouped: dict[str, list[str]] = {}
+        for canonical_id, short_id in base_ids.items():
+            grouped.setdefault(short_id, []).append(canonical_id)
+        canonical_to_short: dict[str, str] = {}
+        short_to_canonical: dict[str, str] = {}
+        for short_id, group in grouped.items():
+            if len(group) == 1:
+                canonical_id = group[0]
+                canonical_to_short[canonical_id] = short_id
+                short_to_canonical[short_id] = canonical_id
+                continue
+            disambiguated_ids = self._disambiguated_short_finding_ids(group)
+            for canonical_id, disambiguated in disambiguated_ids.items():
+                canonical_to_short[canonical_id] = disambiguated
+                short_to_canonical[disambiguated] = canonical_id
+        return canonical_to_short, short_to_canonical
+
+    def _base_short_finding_id(self, canonical_id: str) -> str:
+        prefix, _, remainder = canonical_id.partition(":")
+        if prefix == "clone":
+            clone_kind, _, group_key = remainder.partition(":")
+            hashes = [part for part in group_key.split("|") if part]
+            if clone_kind == "function":
+                fingerprint = hashes[0] if hashes else group_key
+                bucket = ""
+                if "|" in group_key:
+                    bucket = "|" + group_key.split("|")[-1]
+                return f"fn:{fingerprint[:_SHORT_HASH_ID_LENGTH]}{bucket}"
+            alias = {"block": "blk", "segment": "seg"}.get(clone_kind, "clone")
+            fingerprint = hashes[0] if hashes else group_key
+            return f"{alias}:{fingerprint[:_SHORT_HASH_ID_LENGTH]}|x{len(hashes) or 1}"
+        if prefix == "structural":
+            finding_kind, _, finding_key = remainder.partition(":")
+            return f"struct:{finding_kind}:{finding_key[:_SHORT_HASH_ID_LENGTH]}"
+        if prefix == "dead_code":
+            return f"dead:{self._leaf_symbol_name(remainder)}"
+        if prefix == "design":
+            category, _, subject_key = remainder.partition(":")
+            return f"design:{category}:{self._leaf_symbol_name(subject_key)}"
+        return canonical_id
+
+    def _disambiguated_short_finding_id(self, canonical_id: str) -> str:
+        prefix, _, remainder = canonical_id.partition(":")
+        if prefix == "clone":
+            clone_kind, _, group_key = remainder.partition(":")
+            hashes = [part for part in group_key.split("|") if part]
+            fingerprint = hashes[0] if hashes else group_key
+            if clone_kind == "function":
+                bucket = ""
+                if "|" in group_key:
+                    bucket = "|" + group_key.split("|")[-1]
+                return f"fn:{fingerprint}{bucket}"
+            alias = {"block": "blk", "segment": "seg"}.get(clone_kind, "clone")
+            return f"{alias}:{fingerprint}|x{len(hashes) or 1}"
+        if prefix == "structural":
+            return _partitioned_short_id("struct", remainder)
+        if prefix == "dead_code":
+            return f"dead:{remainder}"
+        if prefix == "design":
+            return _partitioned_short_id("design", remainder)
+        return canonical_id
+
+    def _disambiguated_short_finding_ids(
+        self,
+        canonical_ids: Sequence[str],
+    ) -> dict[str, str]:
+        clone_ids = [
+            canonical_id
+            for canonical_id in canonical_ids
+            if canonical_id.startswith("clone:")
+        ]
+        if len(clone_ids) == len(canonical_ids):
+            clone_short_ids = _disambiguated_clone_short_ids_payload(clone_ids)
+            if len(set(clone_short_ids.values())) == len(clone_short_ids):
+                return clone_short_ids
+        return {
+            canonical_id: self._disambiguated_short_finding_id(canonical_id)
+            for canonical_id in canonical_ids
+        }
+
+    def _short_finding_id(
+        self,
+        record: MCPRunRecord,
+        canonical_id: str,
+    ) -> str:
+        canonical_to_short, _short_to_canonical = self._finding_id_maps(record)
+        return canonical_to_short.get(canonical_id, canonical_id)
+
+    def _resolve_canonical_finding_id(
+        self,
+        record: MCPRunRecord,
+        finding_id: str,
+    ) -> str:
+        canonical_to_short, short_to_canonical = self._finding_id_maps(record)
+        if finding_id in canonical_to_short:
+            return finding_id
+        canonical = short_to_canonical.get(finding_id)
+        if canonical is not None:
+            return canonical
+        raise MCPFindingNotFoundError(
+            f"Finding id '{finding_id}' was not found in run "
+            f"'{self._short_run_id(record.run_id)}'."
+        )
+
+    def _leaf_symbol_name(self, value: object) -> str:
+        text = str(value).strip()
+        if not text:
+            return ""
+        if ":" in text:
+            text = text.rsplit(":", maxsplit=1)[-1]
+        if "." in text:
+            text = text.rsplit(".", maxsplit=1)[-1]
+        return text
+
     def _comparison_settings(
         self,
         *,
@@ -1791,7 +2056,7 @@ class CodeCloneMCPService:
         self,
         *,
         run_id: str | None,
-        root: str,
+        root: str | None,
         analysis_mode: AnalysisMode,
     ) -> MCPRunRecord:
         if run_id is not None:
@@ -1803,9 +2068,7 @@ class CodeCloneMCPService:
                 f"Call analyze_repository(root='{record.root}', "
                 "analysis_mode='full') first."
             )
-        root_path: Path | None = None
-        if root != DEFAULT_ROOT:
-            root_path = self._resolve_root(root)
+        root_path = self._resolve_optional_root(root)
         latest_record = self._latest_compatible_record(
             analysis_mode=analysis_mode,
             root_path=root_path,
@@ -1996,25 +2259,68 @@ class CodeCloneMCPService:
         payload["html_anchor"] = f"finding-{finding.get('id', '')}"
         if resolved_remediation is not None:
             payload["remediation"] = resolved_remediation
-        return self._project_finding_detail(payload, detail_level=detail_level)
+        return self._project_finding_detail(
+            record,
+            payload,
+            detail_level=detail_level,
+        )
 
     def _project_finding_detail(
         self,
+        record: MCPRunRecord,
         finding: Mapping[str, object],
         *,
         detail_level: DetailLevel,
     ) -> dict[str, object]:
         if detail_level == "full":
-            return dict(finding)
-        if detail_level == "summary":
-            return self._finding_summary_card_payload(finding)
-        payload = dict(finding)
-        payload.pop("priority_factors", None)
-        if "remediation" in payload:
-            payload["remediation"] = self._project_remediation(
-                self._as_mapping(payload["remediation"]),
-                detail_level="summary",
+            full_payload = dict(finding)
+            full_payload["id"] = self._short_finding_id(
+                record,
+                str(finding.get("id", "")),
             )
+            return full_payload
+        payload: dict[str, object] = {
+            "id": self._short_finding_id(record, str(finding.get("id", ""))),
+            "kind": self._finding_kind_label(finding),
+            "severity": str(finding.get("severity", "")),
+            "novelty": str(finding.get("novelty", "")),
+            "scope": self._finding_source_kind(finding),
+            "count": _as_int(finding.get("count", 0), 0),
+            "spread": dict(self._as_mapping(finding.get("spread"))),
+            "priority": round(_as_float(finding.get("priority_score", 0.0), 0.0), 2),
+        }
+        clone_type = str(finding.get("clone_type", "")).strip()
+        if clone_type:
+            payload["type"] = clone_type
+        locations = [
+            self._as_mapping(item)
+            for item in self._as_sequence(finding.get("locations"))
+        ]
+        if detail_level == "summary":
+            remediation = self._as_mapping(finding.get("remediation"))
+            if remediation:
+                payload["effort"] = str(remediation.get("effort", ""))
+            payload["locations"] = [
+                summary_location
+                for summary_location in (
+                    self._summary_location_string(location) for location in locations
+                )
+                if summary_location
+            ]
+            return payload
+        remediation = self._as_mapping(finding.get("remediation"))
+        if remediation:
+            payload["remediation"] = self._project_remediation(
+                remediation,
+                detail_level="normal",
+            )
+        payload["locations"] = [
+            projected
+            for projected in (
+                self._normal_location_payload(location) for location in locations
+            )
+            if projected
+        ]
         return payload
 
     def _finding_summary_card(
@@ -2023,27 +2329,64 @@ class CodeCloneMCPService:
         finding: Mapping[str, object],
     ) -> dict[str, object]:
         return self._finding_summary_card_payload(
-            self._decorate_finding(record, finding, detail_level="normal")
+            record,
+            self._decorate_finding(record, finding, detail_level="full"),
         )
 
     def _finding_summary_card_payload(
         self,
+        record: MCPRunRecord,
         finding: Mapping[str, object],
     ) -> dict[str, object]:
-        card = serialize_finding_group_card(finding)
+        return self._project_finding_detail(record, finding, detail_level="summary")
+
+    def _comparison_finding_card(
+        self,
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+    ) -> dict[str, object]:
+        summary_card = self._finding_summary_card(record, finding)
         return {
-            "id": str(finding.get("id", "")),
-            **card,
-            "novelty": str(finding.get("novelty", "")),
-            "priority_score": _as_float(finding.get("priority_score", 0.0), 0.0),
-            "locations": [
-                {
-                    "file": str(self._as_mapping(item).get("file", "")),
-                    "line": _as_int(self._as_mapping(item).get("line", 0), 0),
-                }
-                for item in self._as_sequence(finding.get("locations"))[:3]
-            ],
+            "id": summary_card.get("id"),
+            "kind": summary_card.get("kind"),
+            "severity": summary_card.get("severity"),
         }
+
+    def _finding_kind_label(self, finding: Mapping[str, object]) -> str:
+        family = str(finding.get("family", "")).strip()
+        kind = str(finding.get("kind", finding.get("category", ""))).strip()
+        if family == FAMILY_CLONE:
+            clone_kind = str(
+                finding.get("clone_kind", finding.get("category", kind))
+            ).strip()
+            return f"{clone_kind}_clone" if clone_kind else "clone"
+        if family == FAMILY_DEAD_CODE:
+            return "dead_code"
+        return kind or family
+
+    def _summary_location_string(self, location: Mapping[str, object]) -> str:
+        path = str(location.get("file", "")).strip()
+        line = _as_int(location.get("line", 0), 0)
+        if not path:
+            return ""
+        return f"{path}:{line}" if line > 0 else path
+
+    def _normal_location_payload(
+        self,
+        location: Mapping[str, object],
+    ) -> dict[str, object]:
+        path = str(location.get("file", "")).strip()
+        if not path:
+            return {}
+        payload: dict[str, object] = {
+            "path": path,
+            "line": _as_int(location.get("line", 0), 0),
+            "end_line": _as_int(location.get("end_line", 0), 0),
+        }
+        symbol = self._leaf_symbol_name(location.get("symbol"))
+        if symbol:
+            payload["symbol"] = symbol
+        return payload
 
     def _matches_finding_filters(
         self,
@@ -2218,10 +2561,12 @@ class CodeCloneMCPService:
             if not relative_path:
                 continue
             line = _as_int(item_map.get("start_line", 0) or 0, 0)
+            end_line = _as_int(item_map.get("end_line", 0) or 0, 0)
             symbol = str(item_map.get("qualname", item_map.get("module", ""))).strip()
             location: dict[str, object] = {
                 "file": relative_path,
                 "line": line,
+                "end_line": end_line,
                 "symbol": symbol,
             }
             if include_uri:
@@ -2369,17 +2714,12 @@ class CodeCloneMCPService:
             return dict(remediation)
         projected = {
             "effort": remediation.get("effort"),
-            "priority": remediation.get("priority"),
-            "confidence": remediation.get("confidence"),
-            "safe_refactor_shape": remediation.get("safe_refactor_shape"),
-            "risk_level": remediation.get("risk_level"),
+            "risk": remediation.get("risk_level"),
+            "shape": remediation.get("safe_refactor_shape"),
             "why_now": remediation.get("why_now"),
         }
         if detail_level == "summary":
             return projected
-        projected["blast_radius"] = dict(
-            self._as_mapping(remediation.get("blast_radius"))
-        )
         projected["steps"] = list(self._as_sequence(remediation.get("steps")))
         return projected
 
@@ -2445,31 +2785,16 @@ class CodeCloneMCPService:
             ):
                 continue
             finding_id_key = str(finding.get("id", ""))
-            projection_detail: DetailLevel = (
-                "normal" if detail_level == "summary" else detail_level
-            )
-            decorated = self._decorate_finding(
-                record,
-                finding,
-                detail_level=projection_detail,
-                remediation=remediation_map[finding_id_key],
-                priority_payload=priority_map[finding_id_key],
-                max_spread_value=max_spread_value,
-            )
-            if detail_level == "summary":
-                rows.append(self._finding_summary_card_payload(decorated))
-            elif detail_level == "full":
-                rows.append(decorated)
-            else:
-                rows.append(
-                    {
-                        **serialize_finding_group_card(decorated),
-                        "id": finding_id,
-                        "novelty": decorated.get("novelty"),
-                        "priority_score": decorated.get("priority_score"),
-                        "locations": decorated.get("locations"),
-                    }
+            rows.append(
+                self._decorate_finding(
+                    record,
+                    finding,
+                    detail_level=detail_level,
+                    remediation=remediation_map[finding_id_key],
+                    priority_payload=priority_map[finding_id_key],
+                    max_spread_value=max_spread_value,
                 )
+            )
         return rows
 
     def _build_changed_projection(
@@ -2489,7 +2814,7 @@ class CodeCloneMCPService:
         )
         health_delta = self._summary_health_delta(record.summary)
         return {
-            "run_id": record.run_id,
+            "run_id": self._short_run_id(record.run_id),
             "changed_paths": list(record.changed_paths),
             "total": len(items),
             "new": new_count,
@@ -2501,6 +2826,35 @@ class CodeCloneMCPService:
                 changed_projection={"new": new_count, "total": len(items)},
                 health_delta=health_delta,
             ),
+        }
+
+    def _changed_analysis_payload(
+        self,
+        record: MCPRunRecord,
+    ) -> dict[str, object]:
+        changed_projection = self._as_mapping(record.changed_projection)
+        health = self._summary_health_payload(record.summary)
+        health_payload = (
+            {
+                "score": health.get("score"),
+                "grade": health.get("grade"),
+            }
+            if health.get("available") is not False
+            else dict(health)
+        )
+        return {
+            "run_id": self._short_run_id(record.run_id),
+            "changed_files": len(record.changed_paths),
+            "health": health_payload,
+            "health_delta": (
+                _as_int(changed_projection.get("health_delta", 0), 0)
+                if changed_projection.get("health_delta") is not None
+                else None
+            ),
+            "verdict": str(changed_projection.get("verdict", "stable")),
+            "new_findings": _as_int(changed_projection.get("new", 0), 0),
+            "resolved_findings": 0,
+            "changed_findings": [],
         }
 
     def _augment_summary_with_changed(
@@ -2660,8 +3014,8 @@ class CodeCloneMCPService:
                 [
                     (
                         f"- **{str(item.get('severity', 'info')).upper()}** "
-                        f"{item.get('title', 'Finding')} in "
-                        f"`{item.get('location', '(unknown)')}`"
+                        f"{item.get('kind', 'finding')} in "
+                        f"`{self._finding_display_location(item)}`"
                     )
                     for item in changed_items[:10]
                 ]
@@ -2673,8 +3027,8 @@ class CodeCloneMCPService:
             lines.extend(
                 [
                     (
-                        f"- {item.get('title', 'Finding')} in "
-                        f"`{item.get('location', '(unknown)')}`"
+                        f"- {item.get('kind', 'finding')} in "
+                        f"`{self._finding_display_location(item)}`"
                     )
                     for item in resolved[:10]
                 ]
@@ -2685,6 +3039,20 @@ class CodeCloneMCPService:
         else:
             lines.extend([f"- `{reason}`" for reason in blocking_gates])
         return "\n".join(lines)
+
+    def _finding_display_location(self, finding: Mapping[str, object]) -> str:
+        locations = self._as_sequence(finding.get("locations"))
+        if not locations:
+            return "(unknown)"
+        first = locations[0]
+        if isinstance(first, str):
+            return first
+        location = self._as_mapping(first)
+        path = str(location.get("path", location.get("file", ""))).strip()
+        line = _as_int(location.get("line", 0), 0)
+        if not path:
+            return "(unknown)"
+        return f"{path}:{line}" if line > 0 else path
 
     def _granular_payload(
         self,
@@ -2706,8 +3074,7 @@ class CodeCloneMCPService:
             else dict(dimensions)
         )
         return {
-            "run_id": record.run_id,
-            "base_uri": record.root.as_uri(),
+            "run_id": self._short_run_id(record.run_id),
             "check": check,
             "detail_level": detail_level,
             "path": path,
@@ -2751,12 +3118,25 @@ class CodeCloneMCPService:
         }
         rows: list[dict[str, object]] = []
         for row in canonical_rows:
-            finding_id = str(row.get("finding_id", ""))
+            canonical_finding_id = str(row.get("finding_id", ""))
+            action = self._as_mapping(row.get("action"))
+            try:
+                finding_id = self._short_finding_id(
+                    record,
+                    self._resolve_canonical_finding_id(record, canonical_finding_id),
+                )
+            except MCPFindingNotFoundError:
+                finding_id = self._base_short_finding_id(canonical_finding_id)
             rows.append(
                 {
-                    **row,
+                    "id": f"suggestion:{finding_id}",
+                    "finding_id": finding_id,
+                    "title": str(row.get("title", "")),
+                    "summary": str(row.get("summary", "")),
+                    "effort": str(action.get("effort", "")),
+                    "steps": list(self._as_sequence(action.get("steps"))),
                     "source_kind": suggestion_source_kinds.get(
-                        finding_id,
+                        canonical_finding_id,
                         SOURCE_KIND_OTHER,
                     ),
                 }
@@ -2830,16 +3210,39 @@ class CodeCloneMCPService:
             return None
         return self._validate_choice(name, value, allowed)
 
-    def _resolve_root(self, root: str) -> Path:
+    def _resolve_root(self, root: str | None) -> Path:
+        cleaned_root = "" if root is None else str(root).strip()
+        if not cleaned_root:
+            raise MCPServiceContractError(
+                "MCP analysis requires an absolute repository root. "
+                "Omitted or relative roots are unsafe because the MCP server "
+                "working directory may not match the client workspace."
+            )
+        candidate = Path(cleaned_root).expanduser()
+        if not candidate.is_absolute():
+            raise MCPServiceContractError(
+                f"MCP requires an absolute repository root; got relative root "
+                f"{cleaned_root!r}. Relative roots like '.' are unsafe because "
+                "the MCP server working directory may not match the client "
+                "workspace."
+            )
         try:
-            root_path = Path(root).expanduser().resolve()
+            root_path = candidate.resolve()
         except OSError as exc:
-            raise MCPServiceContractError(f"Invalid root path '{root}': {exc}") from exc
+            raise MCPServiceContractError(
+                f"Invalid root path '{cleaned_root}': {exc}"
+            ) from exc
         if not root_path.exists():
             raise MCPServiceContractError(f"Root path does not exist: {root_path}")
         if not root_path.is_dir():
             raise MCPServiceContractError(f"Root path is not a directory: {root_path}")
         return root_path
+
+    def _resolve_optional_root(self, root: str | None) -> Path | None:
+        cleaned_root = "" if root is None else str(root).strip()
+        if not cleaned_root:
+            return None
+        return self._resolve_root(cleaned_root)
 
     def _build_args(self, *, root_path: Path, request: MCPAnalysisRequest) -> Namespace:
         args = Namespace(
@@ -3138,16 +3541,61 @@ class CodeCloneMCPService:
     def _summary_payload(
         self,
         summary: Mapping[str, object],
+        *,
+        record: MCPRunRecord | None = None,
     ) -> dict[str, object]:
-        payload = dict(summary)
-        cache = self._as_mapping(payload.get("cache"))
-        if cache:
-            payload["cache"] = self._summary_cache_payload(summary)
-        payload["health"] = self._summary_health_payload(payload)
-        inventory = self._as_mapping(payload.get("inventory"))
-        if inventory:
-            payload["inventory"] = self._slim_inventory(inventory)
+        inventory = self._as_mapping(summary.get("inventory"))
+        if (
+            not summary.get("run_id")
+            and not record
+            and "inventory" in summary
+            and not summary.get("baseline")
+        ):
+            return {
+                "inventory": self._summary_inventory_payload(inventory),
+                "health": self._summary_health_payload(summary),
+            }
+        resolved_run_id = (
+            record.run_id if record is not None else str(summary.get("run_id", ""))
+        )
+        payload: dict[str, object] = {
+            "run_id": self._short_run_id(resolved_run_id) if resolved_run_id else "",
+            "version": str(summary.get("codeclone_version", __version__)),
+            "schema": str(summary.get("report_schema_version", REPORT_SCHEMA_VERSION)),
+            "mode": str(summary.get("analysis_mode", "")),
+            "baseline": self._summary_baseline_payload(summary),
+            "metrics_baseline": self._summary_metrics_baseline_payload(summary),
+            "cache": self._summary_cache_payload(summary),
+            "inventory": self._summary_inventory_payload(inventory),
+            "health": self._summary_health_payload(summary),
+            "findings": self._summary_findings_payload(summary, record=record),
+            "diff": self._summary_diff_payload(summary),
+            "warnings": list(self._as_sequence(summary.get("warnings"))),
+            "failures": list(self._as_sequence(summary.get("failures"))),
+        }
         return payload
+
+    def _summary_baseline_payload(
+        self,
+        summary: Mapping[str, object],
+    ) -> dict[str, object]:
+        baseline = self._as_mapping(summary.get("baseline"))
+        return {
+            "loaded": bool(baseline.get("loaded", False)),
+            "status": str(baseline.get("status", "")),
+            "trusted": bool(baseline.get("trusted_for_diff", False)),
+        }
+
+    def _summary_metrics_baseline_payload(
+        self,
+        summary: Mapping[str, object],
+    ) -> dict[str, object]:
+        baseline = self._as_mapping(summary.get("metrics_baseline"))
+        return {
+            "loaded": bool(baseline.get("loaded", False)),
+            "status": str(baseline.get("status", "")),
+            "trusted": bool(baseline.get("trusted_for_diff", False)),
+        }
 
     def _summary_cache_payload(
         self,
@@ -3156,8 +3604,10 @@ class CodeCloneMCPService:
         cache = dict(self._as_mapping(summary.get("cache")))
         if not cache:
             return {}
-        cache["effective_freshness"] = self._effective_freshness(summary)
-        return cache
+        return {
+            "used": bool(cache.get("used", False)),
+            "freshness": self._effective_freshness(summary),
+        }
 
     def _effective_freshness(
         self,
@@ -3175,17 +3625,192 @@ class CodeCloneMCPService:
             return "mixed"
         return "fresh"
 
-    def _slim_inventory(
+    def _summary_inventory_payload(
         self,
         inventory: Mapping[str, object],
     ) -> dict[str, object]:
-        slim_inventory = dict(inventory)
-        registry = self._as_mapping(slim_inventory.get("file_registry"))
-        slim_inventory["file_registry"] = {
-            "encoding": registry.get("encoding", "relative_path"),
-            "count": len(self._as_sequence(registry.get("items"))),
+        if not inventory:
+            return {}
+        files = self._as_mapping(inventory.get("files"))
+        code = self._as_mapping(inventory.get("code"))
+        total_files = _as_int(
+            files.get(
+                "total_found",
+                files.get(
+                    "analyzed",
+                    len(
+                        self._as_sequence(
+                            self._as_mapping(inventory.get("file_registry")).get(
+                                "items"
+                            )
+                        )
+                    ),
+                ),
+            ),
+            0,
+        )
+        functions = _as_int(code.get("functions", 0), 0) + _as_int(
+            code.get("methods", 0),
+            0,
+        )
+        return {
+            "files": total_files,
+            "lines": _as_int(code.get("parsed_lines", 0), 0),
+            "functions": functions,
+            "classes": _as_int(code.get("classes", 0), 0),
         }
-        return slim_inventory
+
+    def _summary_findings_payload(
+        self,
+        summary: Mapping[str, object],
+        *,
+        record: MCPRunRecord | None,
+    ) -> dict[str, object]:
+        findings_summary = self._as_mapping(summary.get("findings_summary"))
+        if record is None:
+            return {
+                "total": _as_int(findings_summary.get("total", 0), 0),
+                "new": 0,
+                "known": 0,
+                "by_family": {},
+                "production": 0,
+            }
+        findings = self._base_findings(record)
+        by_family: dict[str, int] = {
+            "clones": 0,
+            "structural": 0,
+            "dead_code": 0,
+            "design": 0,
+        }
+        new_count = 0
+        known_count = 0
+        production_count = 0
+        for finding in findings:
+            family = str(finding.get("family", "")).strip()
+            family_key = "clones" if family == FAMILY_CLONE else family
+            if family_key in by_family:
+                by_family[family_key] += 1
+            if str(finding.get("novelty", "")).strip() == "new":
+                new_count += 1
+            else:
+                known_count += 1
+            if self._finding_source_kind(finding) == SOURCE_KIND_PRODUCTION:
+                production_count += 1
+        return {
+            "total": len(findings),
+            "new": new_count,
+            "known": known_count,
+            "by_family": {key: value for key, value in by_family.items() if value > 0},
+            "production": production_count,
+        }
+
+    def _summary_diff_payload(
+        self,
+        summary: Mapping[str, object],
+    ) -> dict[str, object]:
+        baseline_diff = self._as_mapping(summary.get("baseline_diff"))
+        metrics_diff = self._as_mapping(summary.get("metrics_diff"))
+        return {
+            "new_clones": _as_int(baseline_diff.get("new_clone_groups_total", 0), 0),
+            "health_delta": (
+                _as_int(metrics_diff.get("health_delta", 0), 0)
+                if metrics_diff
+                and self._summary_health_payload(summary).get("available") is not False
+                else None
+            ),
+        }
+
+    def _metrics_detail_payload(
+        self,
+        *,
+        metrics: Mapping[str, object],
+        family: MetricsDetailFamily | None,
+        path: str | None,
+        offset: int,
+        limit: int,
+    ) -> dict[str, object]:
+        summary = dict(self._as_mapping(metrics.get("summary")))
+        families = self._as_mapping(metrics.get("families"))
+        normalized_path = self._normalize_relative_path(path or "")
+        if family is None and not normalized_path:
+            return {
+                "summary": summary,
+                "_hint": "Use family and/or path parameters to access per-item detail.",
+            }
+        normalized_offset = max(0, offset)
+        normalized_limit = max(1, min(limit, 200))
+        family_names: Sequence[str] = (
+            (family,) if family is not None else tuple(sorted(families))
+        )
+        items: list[dict[str, object]] = []
+        for family_name in family_names:
+            family_payload = self._as_mapping(families.get(family_name))
+            for item in self._as_sequence(family_payload.get("items")):
+                item_map = self._as_mapping(item)
+                if normalized_path and not self._metric_item_matches_path(
+                    item_map,
+                    normalized_path,
+                ):
+                    continue
+                compact_item = self._compact_metrics_item(item_map)
+                if family is None:
+                    compact_item = {"family": family_name, **compact_item}
+                items.append(compact_item)
+        items.sort(
+            key=lambda item: (
+                str(item.get("family", family or "")),
+                str(item.get("path", "")),
+                str(item.get("qualname", "")),
+                _as_int(item.get("start_line", 0), 0),
+            )
+        )
+        page = items[normalized_offset : normalized_offset + normalized_limit]
+        return {
+            "family": family,
+            "path": normalized_path or None,
+            "offset": normalized_offset,
+            "limit": normalized_limit,
+            "returned": len(page),
+            "total": len(items),
+            "has_more": normalized_offset + len(page) < len(items),
+            "items": page,
+        }
+
+    def _metric_item_matches_path(
+        self,
+        item: Mapping[str, object],
+        normalized_path: str,
+    ) -> bool:
+        path_value = (
+            str(item.get("relative_path", "")).strip()
+            or str(item.get("path", "")).strip()
+            or str(item.get("filepath", "")).strip()
+            or str(item.get("file", "")).strip()
+        )
+        if not path_value:
+            return False
+        return self._path_matches(path_value, (normalized_path,))
+
+    def _compact_metrics_item(
+        self,
+        item: Mapping[str, object],
+    ) -> dict[str, object]:
+        compact: dict[str, object] = {}
+        path_value = (
+            str(item.get("relative_path", "")).strip()
+            or str(item.get("path", "")).strip()
+            or str(item.get("filepath", "")).strip()
+            or str(item.get("file", "")).strip()
+        )
+        if path_value:
+            compact["path"] = path_value
+        for key, value in item.items():
+            if key in {"relative_path", "path", "filepath", "file"}:
+                continue
+            if value in ("", None, [], {}, ()):
+                continue
+            compact[str(key)] = value
+        return compact
 
     def _metrics_diff_payload(
         self,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 from ast import AST
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
@@ -231,3 +232,19 @@ def normalized_ast_dump_from_list(
         dumps.append(ast.dump(new_node, annotate_fields=True, include_attributes=False))
 
     return ";".join(dumps)
+
+
+def _normalized_stmt_dump(stmt: ast.stmt, normalizer: AstNormalizer) -> str:
+    normalized = normalizer.visit(stmt)
+    assert isinstance(normalized, ast.AST)
+    return ast.dump(normalized, annotate_fields=True, include_attributes=False)
+
+
+def stmt_hashes(statements: Sequence[ast.stmt], cfg: NormalizationConfig) -> list[str]:
+    normalizer = AstNormalizer(cfg)
+    return [
+        hashlib.sha1(
+            _normalized_stmt_dump(stmt, normalizer).encode("utf-8")
+        ).hexdigest()
+        for stmt in statements
+    ]

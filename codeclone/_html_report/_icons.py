@@ -94,16 +94,16 @@ ICONS: dict[str, str] = {
 
 _SECTION_ICON_BODIES: dict[str, tuple[str, str]] = {
     "overview": (
-        "2",
-        '<rect x="3" y="4" width="8" height="7" rx="1.5"/>'
-        '<rect x="13" y="4" width="8" height="7" rx="1.5"/>'
-        '<rect x="3" y="13" width="8" height="7" rx="1.5"/>'
-        '<rect x="13" y="13" width="8" height="7" rx="1.5"/>',
+        "1.8",
+        '<rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/>'
+        '<rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/>'
+        '<rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/>'
+        '<rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/>',
     ),
     "clones": (
         "2",
-        '<rect x="9" y="9" width="10" height="10" rx="2"/>'
-        '<rect x="5" y="5" width="10" height="10" rx="2"/>',
+        '<rect x="9" y="9" width="11" height="11" rx="2"/>'
+        '<rect x="4" y="4" width="11" height="11" rx="2"/>',
     ),
     "quality": (
         "2",
@@ -113,9 +113,9 @@ _SECTION_ICON_BODIES: dict[str, tuple[str, str]] = {
     ),
     "dependencies": (
         "2",
-        '<circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/>'
-        '<circle cx="12" cy="18" r="2"/><path d="M8 7.5l2.5 6.5"/>'
-        '<path d="M16 7.5l-2.5 6.5"/>',
+        '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/>'
+        '<circle cx="12" cy="18" r="2.5"/><path d="M8 7.8l2.7 6.4"/>'
+        '<path d="M16 7.8l-2.7 6.4"/>',
     ),
     "dead-code": (
         "2",
@@ -124,14 +124,14 @@ _SECTION_ICON_BODIES: dict[str, tuple[str, str]] = {
     ),
     "suggestions": (
         "2",
-        '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8Z"/>'
-        '<path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8Z"/>',
+        '<path d="M11.5 3l1.9 5 5 1.9-5 1.9L11.5 17l-1.9-5-5-1.9 5-1.9Z"/>'
+        '<path d="M19.5 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8Z"/>',
     ),
     "structural-findings": (
         "2",
-        '<circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/>'
-        '<circle cx="18" cy="6" r="2"/><path d="M8 6h8"/>'
-        '<path d="M6 8v8a2 2 0 0 0 2 2h8"/>',
+        '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/>'
+        '<circle cx="18" cy="6" r="2.5"/><path d="M8.5 6h7"/>'
+        '<path d="M6 8.5v7a2 2 0 0 0 2 2h7"/>',
     ),
     "top-risks": (
         "2",
@@ -164,8 +164,8 @@ _SECTION_ICON_BODIES: dict[str, tuple[str, str]] = {
     ),
     "clone-groups": (
         "2",
-        '<rect x="9" y="9" width="10" height="10" rx="2"/>'
-        '<rect x="5" y="5" width="10" height="10" rx="2"/>',
+        '<rect x="9" y="9" width="11" height="11" rx="2"/>'
+        '<rect x="4" y="4" width="11" height="11" rx="2"/>',
     ),
     "low-cohesion": (
         "2",
