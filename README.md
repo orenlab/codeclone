@@ -22,8 +22,7 @@ CodeClone provides deterministic structural code quality analysis for Python.
 It detects architectural duplication via normalized AST and Control Flow Graphs,
 computes quality metrics, and enforces CI gates — all with **baseline-aware
 governance** that separates **known** technical debt from **new** regressions.
-An optional read-only MCP interface exposes the same analysis pipeline to AI agents, IDEs, and other MCP-capable
-clients.
+An optional MCP interface exposes the same pipeline to AI agents and IDEs.
 
 Docs: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/) ·
 Live sample report:
@@ -170,9 +169,6 @@ codeclone-mcp --transport streamable-http --port 8000
 20 tools + 10 resources — deterministic, baseline-aware, and read-only. Never mutates source files, baselines, or repo
 state.
 Payloads are optimised for LLM context: compact summaries by default, full detail on demand.
-Run comparison stays compact too: `compare_runs` reports `mixed` when finding deltas and run-to-run health move in
-opposite directions, and `incomparable` when roots or effective analysis settings differ.
-When metrics are skipped (`clones_only`), MCP marks `health` as unavailable instead of returning fake zeros.
 
 Docs:
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)

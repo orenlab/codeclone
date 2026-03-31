@@ -22,9 +22,8 @@ sync SPDX headers.
   split — all without changing canonical report schema until the later `2.2` report-threshold update below.
 - `cache.effective_freshness` marker and `get_production_triage` / `codeclone://latest/triage` for compact
   production-first overview.
-- `compare_runs` now reports `mixed` when new regressions and `health_delta` point in opposite directions.
-- `compare_runs` now reports `incomparable` and omits `health_delta` when run roots or effective analysis settings do not match.
-- MCP summary/triage/health surfaces now mark `health` as unavailable in `clones_only` runs instead of emitting zeroed placeholders.
+- Honest run comparison: `compare_runs` reports `mixed` / `incomparable` instead of misleading single verdicts;
+  `clones_only` runs surface `health: unavailable` instead of zeroed placeholders.
 - Fix hotlist key resolution for `production_hotspots` and `test_fixture_hotspots`.
 - Bump cache schema to `2.3` (stale metric entries rebuilt, not reused).
 
