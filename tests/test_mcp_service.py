@@ -2599,7 +2599,10 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
     )
 
 
-def test_mcp_service_short_id_and_comparison_helper_branches(tmp_path: Path) -> None:
+def test_mcp_service_short_id_and_comparison_helper_branches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     service = CodeCloneMCPService(history_limit=4)
 
     entry = mcp_service_mod._CloneShortIdEntry(
@@ -2627,7 +2630,7 @@ def test_mcp_service_short_id_and_comparison_helper_branches(tmp_path: Path) -> 
 
     fallback_entry = mcp_service_mod._clone_short_id_entry_payload("clone:weird:opaque")
     assert fallback_entry.alias == "clone"
-    assert fallback_entry.token == "opaque"
+    assert len(fallback_entry.token) == 64  # sha256 hex digest
     assert fallback_entry.suffix == "|x1"
 
     canonical_one = "clone:block:abcdefghzz|rest"
@@ -2636,10 +2639,14 @@ def test_mcp_service_short_id_and_comparison_helper_branches(tmp_path: Path) -> 
         [canonical_one, canonical_two]
     )
     assert len(set(clone_short_ids.values())) == 2
-    assert all(value.startswith("blk:abcdefgh") for value in clone_short_ids.values())
-    assert mcp_service_mod._disambiguated_clone_short_ids_payload(
+    assert all(value.startswith("blk:") for value in clone_short_ids.values())
+    assert all("|x2" in value for value in clone_short_ids.values())
+    single_result = mcp_service_mod._disambiguated_clone_short_ids_payload(
         ["clone:block:ab"]
-    ) == {"clone:block:ab": "blk:ab|x1"}
+    )
+    assert "clone:block:ab" in single_result
+    assert single_result["clone:block:ab"].startswith("blk:")
+    assert single_result["clone:block:ab"].endswith("|x1")
 
     record = MCPRunRecord(
         run_id="helper-ids",
@@ -2679,15 +2686,26 @@ def test_mcp_service_short_id_and_comparison_helper_branches(tmp_path: Path) -> 
     canonical_to_short, short_to_canonical = service._finding_id_maps(record)
     assert len(set(canonical_to_short.values())) == 2
     assert set(short_to_canonical) == set(canonical_to_short.values())
-    assert service._disambiguated_short_finding_ids([canonical_one, canonical_two]) == (
-        canonical_to_short
+    assert (
+        service._disambiguated_short_finding_ids([canonical_one, canonical_two])
+        == clone_short_ids
     )
 
-    assert service._base_short_finding_id(canonical_one) == "blk:abcdef|x2"
+    assert service._base_short_finding_id(canonical_one) == "blk:a1c488|x2"
+    assert (
+        mcp_service_mod._base_short_finding_id_payload("clone:function:abcdef123456")
+        == "fn:abcdef"
+    )
     assert service._base_short_finding_id("clone:function:abcdef123456") == "fn:abcdef"
     assert (
         service._base_short_finding_id("structural:duplicated_branches:abcdef123456")
         == "struct:duplicated_branches:abcdef"
+    )
+    assert (
+        mcp_service_mod._base_short_finding_id_payload(
+            "design:cohesion:pkg.mod:Runner.run"
+        )
+        == "design:cohesion:run"
     )
     assert service._base_short_finding_id("custom:finding") == "custom:finding"
     assert (
@@ -2700,7 +2718,7 @@ def test_mcp_service_short_id_and_comparison_helper_branches(tmp_path: Path) -> 
     )
     assert (
         service._disambiguated_short_finding_id("clone:block:abcdef123456|rest")
-        == "blk:abcdef123456|x2"
+        == "blk:e38144d04782fe95c05f0588c53ea7d553f0efdc555788f629e73be6501597d1|x2"
     )
     assert (
         service._disambiguated_short_finding_id("structural:dup:abc:def")
@@ -2715,6 +2733,12 @@ def test_mcp_service_short_id_and_comparison_helper_branches(tmp_path: Path) -> 
         service._disambiguated_short_finding_id("design:cohesion:pkg.mod:Runner")
         == "design:cohesion:pkg.mod:Runner"
     )
+    assert (
+        mcp_service_mod._disambiguated_short_finding_id_payload(
+            "dead_code:pkg.mod:Runner.run"
+        )
+        == "dead:pkg.mod:Runner.run"
+    )
     mixed_short_ids = service._disambiguated_short_finding_ids(
         [canonical_one, "design:cohesion:pkg.mod:Runner"]
     )
@@ -2725,6 +2749,42 @@ def test_mcp_service_short_id_and_comparison_helper_branches(tmp_path: Path) -> 
     assert service._leaf_symbol_name("") == ""
     assert service._leaf_symbol_name("pkg.mod:Runner.run") == "run"
     assert service._leaf_symbol_name("pkg.mod") == "mod"
+    assert mcp_service_mod._leaf_symbol_name_payload("pkg.mod:Runner.run") == "run"
+    assert json.loads(mcp_service_mod._json_text_payload({"b": 1, "a": 2})) == {
+        "a": 2,
+        "b": 1,
+    }
+
+    collision_service = CodeCloneMCPService(history_limit=4)
+    monkeypatch.setattr(
+        collision_service,
+        "_base_findings",
+        lambda _record: [{"id": "clone:block:one"}, {"id": "clone:block:two"}],
+    )
+    monkeypatch.setattr(
+        collision_service,
+        "_base_short_finding_id",
+        lambda _cid: "blk:dup|x1",
+    )
+    monkeypatch.setattr(
+        collision_service,
+        "_disambiguated_short_finding_ids",
+        lambda _ids: {
+            "clone:block:one": "blk:resolved1|x1",
+            "clone:block:two": "blk:resolved2|x1",
+        },
+    )
+    collision_to_short, collision_to_canonical = collision_service._finding_id_maps(
+        record
+    )
+    assert collision_to_short == {
+        "clone:block:one": "blk:resolved1|x1",
+        "clone:block:two": "blk:resolved2|x1",
+    }
+    assert collision_to_canonical == {
+        "blk:resolved1|x1": "clone:block:one",
+        "blk:resolved2|x1": "clone:block:two",
+    }
 
     same_root = _dummy_run_record(tmp_path, "same-root")
     different_scope = MCPRunRecord(
@@ -2752,6 +2812,62 @@ def test_mcp_service_short_id_and_comparison_helper_branches(tmp_path: Path) -> 
     scope = service._comparison_scope(before=same_root, after=different_scope)
     assert scope["comparable"] is False
     assert scope["reason"] == "different_root_and_analysis_settings"
+
+
+def test_mcp_service_clone_short_id_helper_iteration_and_fallback_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    iterative_entries = {
+        "clone:block:one": mcp_service_mod._CloneShortIdEntry(
+            canonical_id="clone:block:one",
+            alias="blk",
+            token="abcdefghij",
+            suffix="|x1",
+        ),
+        "clone:block:two": mcp_service_mod._CloneShortIdEntry(
+            canonical_id="clone:block:two",
+            alias="blk",
+            token="abcdefghkl",
+            suffix="|x1",
+        ),
+    }
+    monkeypatch.setattr(
+        mcp_service_mod,
+        "_clone_short_id_entry_payload",
+        lambda canonical_id: iterative_entries[canonical_id],
+    )
+    assert mcp_service_mod._disambiguated_clone_short_ids_payload(
+        ["clone:block:one", "clone:block:two"]
+    ) == {
+        "clone:block:one": "blk:abcdefghij|x1",
+        "clone:block:two": "blk:abcdefghkl|x1",
+    }
+
+    fallback_entries = {
+        "clone:block:one": mcp_service_mod._CloneShortIdEntry(
+            canonical_id="clone:block:one",
+            alias="blk",
+            token="abcdefghij",
+            suffix="|x1",
+        ),
+        "clone:block:two": mcp_service_mod._CloneShortIdEntry(
+            canonical_id="clone:block:two",
+            alias="blk",
+            token="abcdefghij",
+            suffix="|x1",
+        ),
+    }
+    monkeypatch.setattr(
+        mcp_service_mod,
+        "_clone_short_id_entry_payload",
+        lambda canonical_id: fallback_entries[canonical_id],
+    )
+    assert mcp_service_mod._disambiguated_clone_short_ids_payload(
+        ["clone:block:one", "clone:block:two"]
+    ) == {
+        "clone:block:one": "blk:abcdefghij|x1",
+        "clone:block:two": "blk:abcdefghij|x1",
+    }
 
 
 def test_mcp_service_payload_and_resolution_helper_fallbacks(
@@ -2917,6 +3033,9 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
 ) -> None:
     service = CodeCloneMCPService(history_limit=4)
 
+    with pytest.raises(MCPServiceContractError, match="section 'derived'"):
+        service._derived_section_payload(_dummy_run_record(tmp_path, "no-derived"))
+
     assert service._summary_health_payload({"analysis_mode": "clones_only"}) == {
         "available": False,
         "reason": "metrics_skipped",
@@ -3034,7 +3153,11 @@ def test_mcp_service_clone_only_short_id_fallback_branch(
     result = service._disambiguated_short_finding_ids(
         ["clone:block:one", "clone:block:two"]
     )
+    import hashlib
+
+    one_digest = hashlib.sha256(b"one").hexdigest()
+    two_digest = hashlib.sha256(b"two").hexdigest()
     assert result == {
-        "clone:block:one": "blk:one|x1",
-        "clone:block:two": "blk:two|x1",
+        "clone:block:one": f"blk:{one_digest}|x1",
+        "clone:block:two": f"blk:{two_digest}|x1",
     }

@@ -99,6 +99,10 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     _require_mcp_runtime()
     server = build_mcp_server(history_limit=4)
 
+    assert "prefer get_run_summary or get_production_triage" in str(server.instructions)
+    assert "Use list_hotspots or focused check_* tools" in str(server.instructions)
+    assert "prefer generate_pr_summary(format='markdown')" in str(server.instructions)
+
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert set(tools) == {
         "analyze_repository",
@@ -150,8 +154,28 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "cache_policy='off'" in str(tools["analyze_changed_paths"].description)
     assert "absolute repository root" in str(tools["analyze_repository"].description)
     assert "absolute repository root" in str(tools["analyze_changed_paths"].description)
+    assert "get_run_summary or get_production_triage" in str(
+        tools["analyze_repository"].description
+    )
+    assert "get_report_section(section='changed')" in str(
+        tools["analyze_changed_paths"].description
+    )
     assert "Use analyze_repository first" in str(tools["check_complexity"].description)
     assert "Use analyze_repository first" in str(tools["check_clones"].description)
+    assert "default first-pass review" in str(
+        tools["get_production_triage"].description
+    )
+    assert "Prefer list_hotspots or focused check_* tools" in str(
+        tools["list_findings"].description
+    )
+    assert "Use this after list_hotspots" in str(tools["get_finding"].description)
+    assert "Prefer this for first-pass triage" in str(
+        tools["list_hotspots"].description
+    )
+    assert "Prefer format='markdown'" in str(tools["generate_pr_summary"].description)
+    assert "Prefer specific sections instead of 'all'" in str(
+        tools["get_report_section"].description
+    )
     analyze_repository_schema = cast(
         "dict[str, object]",
         tools["analyze_repository"].inputSchema,

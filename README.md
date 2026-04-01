@@ -44,7 +44,7 @@ Live sample report:
 - **Baseline governance** — known debt stays accepted; CI blocks only new clones and metric regressions
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
 - **MCP server** — optional MCP surface for AI agents, IDEs, and MCP-capable clients; read-only with respect to repo and
-  persisted artifacts
+  persisted artifacts, budget-aware, and designed as a guided control surface for agentic development
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Fast** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
 
@@ -170,6 +170,10 @@ codeclone-mcp --transport streamable-http --port 8000
 20 tools + 10 resources — deterministic, baseline-aware, and read-only. Never mutates source files, baselines, or repo
 state.
 Payloads are optimised for LLM context: compact summaries by default, full detail on demand.
+The cheapest useful path is also the most obvious path: first-pass triage stays compact, and deeper detail is explicit.
+Recommended budget-first flow for agents: `analyze_repository` or
+`analyze_changed_paths` → `get_run_summary` or `get_production_triage` →
+`list_hotspots` or `check_*` → `get_finding` → `get_remediation`.
 
 Docs:
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)

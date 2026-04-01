@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from argparse import Namespace
@@ -318,7 +319,8 @@ def _clone_short_id_entry_payload(canonical_id: str) -> _CloneShortIdEntry:
             suffix=bucket,
         )
     alias = {"block": "blk", "segment": "seg"}.get(clone_kind, "clone")
-    token = "".join(hashes) if hashes else group_key
+    combined = "|".join(hashes) if hashes else group_key
+    token = hashlib.sha256(combined.encode()).hexdigest()
     return _CloneShortIdEntry(
         canonical_id=canonical_id,
         alias=alias,
@@ -343,6 +345,58 @@ def _disambiguated_clone_short_ids_payload(
     return {
         entry.canonical_id: entry.render(max_token_length) for entry in clone_entries
     }
+
+
+def _leaf_symbol_name_payload(value: object) -> str:
+    text = str(value).strip()
+    if not text:
+        return ""
+    if ":" in text:
+        text = text.rsplit(":", maxsplit=1)[-1]
+    if "." in text:
+        text = text.rsplit(".", maxsplit=1)[-1]
+    return text
+
+
+def _base_short_finding_id_payload(canonical_id: str) -> str:
+    prefix, _, remainder = canonical_id.partition(":")
+    if prefix == "clone":
+        return _clone_short_id_entry_payload(canonical_id).render(_SHORT_HASH_ID_LENGTH)
+    if prefix == "structural":
+        finding_kind, _, finding_key = remainder.partition(":")
+        return f"struct:{finding_kind}:{finding_key[:_SHORT_HASH_ID_LENGTH]}"
+    if prefix == "dead_code":
+        return f"dead:{_leaf_symbol_name_payload(remainder)}"
+    if prefix == "design":
+        category, _, subject_key = remainder.partition(":")
+        return f"design:{category}:{_leaf_symbol_name_payload(subject_key)}"
+    return canonical_id
+
+
+def _disambiguated_short_finding_id_payload(canonical_id: str) -> str:
+    prefix, _, remainder = canonical_id.partition(":")
+    if prefix == "clone":
+        return _clone_short_id_entry_payload(canonical_id).render(0)
+    if prefix == "structural":
+        return _partitioned_short_id("struct", remainder)
+    if prefix == "dead_code":
+        return f"dead:{remainder}"
+    if prefix == "design":
+        return _partitioned_short_id("design", remainder)
+    return canonical_id
+
+
+def _json_text_payload(
+    payload: object,
+    *,
+    sort_keys: bool = True,
+) -> str:
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=sort_keys,
+    )
 
 
 def _git_diff_lines_payload(
@@ -988,6 +1042,8 @@ class CodeCloneMCPService:
                 offset=offset,
                 limit=limit,
             )
+        if validated_section == "derived":
+            return self._derived_section_payload(record)
         payload = report_document.get(validated_section)
         if not isinstance(payload, Mapping):
             raise MCPServiceContractError(
@@ -1600,20 +1656,10 @@ class CodeCloneMCPService:
 
     def read_resource(self, uri: str) -> str:
         if uri == "codeclone://schema":
-            return json.dumps(
-                self._schema_resource_payload(),
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
+            return _json_text_payload(self._schema_resource_payload())
         if uri == "codeclone://latest/triage":
             latest = self._runs.get()
-            return json.dumps(
-                self.get_production_triage(run_id=latest.run_id),
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
+            return _json_text_payload(self.get_production_triage(run_id=latest.run_id))
         latest_prefix = "codeclone://latest/"
         run_prefix = "codeclone://runs/"
         if uri.startswith(latest_prefix):
@@ -1631,23 +1677,15 @@ class CodeCloneMCPService:
 
     def _render_resource(self, record: MCPRunRecord, suffix: str) -> str:
         if suffix == "summary":
-            return json.dumps(
-                self._summary_payload(record.summary, record=record),
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
+            return _json_text_payload(
+                self._summary_payload(record.summary, record=record)
             )
         if suffix == "triage":
             raise MCPServiceContractError(
                 "Production triage is exposed only as codeclone://latest/triage."
             )
         if suffix == "health":
-            return json.dumps(
-                self._summary_health_payload(record.summary),
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
+            return _json_text_payload(self._summary_health_payload(record.summary))
         if suffix == "gates":
             with self._state_lock:
                 gate_result = self._last_gate_results.get(record.run_id)
@@ -1655,51 +1693,26 @@ class CodeCloneMCPService:
                 raise MCPServiceContractError(
                     "No gate evaluation result is available in this MCP session."
                 )
-            return json.dumps(
-                gate_result,
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
+            return _json_text_payload(gate_result)
         if suffix == "changed":
             if record.changed_projection is None:
                 raise MCPServiceContractError(
                     "Changed-findings projection is not available in this run."
                 )
-            return json.dumps(
-                record.changed_projection,
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
+            return _json_text_payload(record.changed_projection)
         if suffix == "schema":
-            return json.dumps(
-                self._schema_resource_payload(),
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
+            return _json_text_payload(self._schema_resource_payload())
         if suffix == "report.json":
-            return json.dumps(
-                record.report_document,
-                ensure_ascii=False,
-                indent=2,
-            )
+            return _json_text_payload(record.report_document, sort_keys=False)
         if suffix == "overview":
-            return json.dumps(
-                self.list_hotspots(kind="highest_spread", run_id=record.run_id),
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
+            return _json_text_payload(
+                self.list_hotspots(kind="highest_spread", run_id=record.run_id)
             )
         finding_prefix = "findings/"
         if suffix.startswith(finding_prefix):
             finding_id = suffix[len(finding_prefix) :]
-            return json.dumps(
-                self.get_finding(run_id=record.run_id, finding_id=finding_id),
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
+            return _json_text_payload(
+                self.get_finding(run_id=record.run_id, finding_id=finding_id)
             )
         raise MCPServiceContractError(
             f"Unsupported CodeClone resource suffix '{suffix}'."
@@ -1814,7 +1827,8 @@ class CodeCloneMCPService:
             return health
         return {"available": False, "reason": "unavailable"}
 
-    def _short_run_id(self, run_id: str) -> str:
+    @staticmethod
+    def _short_run_id(run_id: str) -> str:
         return run_id[:_SHORT_RUN_ID_LENGTH]
 
     def _finding_id_maps(
@@ -1848,49 +1862,10 @@ class CodeCloneMCPService:
         return canonical_to_short, short_to_canonical
 
     def _base_short_finding_id(self, canonical_id: str) -> str:
-        prefix, _, remainder = canonical_id.partition(":")
-        if prefix == "clone":
-            clone_kind, _, group_key = remainder.partition(":")
-            hashes = [part for part in group_key.split("|") if part]
-            if clone_kind == "function":
-                fingerprint = hashes[0] if hashes else group_key
-                bucket = ""
-                if "|" in group_key:
-                    bucket = "|" + group_key.split("|")[-1]
-                return f"fn:{fingerprint[:_SHORT_HASH_ID_LENGTH]}{bucket}"
-            alias = {"block": "blk", "segment": "seg"}.get(clone_kind, "clone")
-            fingerprint = hashes[0] if hashes else group_key
-            return f"{alias}:{fingerprint[:_SHORT_HASH_ID_LENGTH]}|x{len(hashes) or 1}"
-        if prefix == "structural":
-            finding_kind, _, finding_key = remainder.partition(":")
-            return f"struct:{finding_kind}:{finding_key[:_SHORT_HASH_ID_LENGTH]}"
-        if prefix == "dead_code":
-            return f"dead:{self._leaf_symbol_name(remainder)}"
-        if prefix == "design":
-            category, _, subject_key = remainder.partition(":")
-            return f"design:{category}:{self._leaf_symbol_name(subject_key)}"
-        return canonical_id
+        return _base_short_finding_id_payload(canonical_id)
 
     def _disambiguated_short_finding_id(self, canonical_id: str) -> str:
-        prefix, _, remainder = canonical_id.partition(":")
-        if prefix == "clone":
-            clone_kind, _, group_key = remainder.partition(":")
-            hashes = [part for part in group_key.split("|") if part]
-            fingerprint = hashes[0] if hashes else group_key
-            if clone_kind == "function":
-                bucket = ""
-                if "|" in group_key:
-                    bucket = "|" + group_key.split("|")[-1]
-                return f"fn:{fingerprint}{bucket}"
-            alias = {"block": "blk", "segment": "seg"}.get(clone_kind, "clone")
-            return f"{alias}:{fingerprint}|x{len(hashes) or 1}"
-        if prefix == "structural":
-            return _partitioned_short_id("struct", remainder)
-        if prefix == "dead_code":
-            return f"dead:{remainder}"
-        if prefix == "design":
-            return _partitioned_short_id("design", remainder)
-        return canonical_id
+        return _disambiguated_short_finding_id_payload(canonical_id)
 
     def _disambiguated_short_finding_ids(
         self,
@@ -1935,17 +1910,10 @@ class CodeCloneMCPService:
         )
 
     def _leaf_symbol_name(self, value: object) -> str:
-        text = str(value).strip()
-        if not text:
-            return ""
-        if ":" in text:
-            text = text.rsplit(":", maxsplit=1)[-1]
-        if "." in text:
-            text = text.rsplit(".", maxsplit=1)[-1]
-        return text
+        return _leaf_symbol_name_payload(value)
 
+    @staticmethod
     def _comparison_settings(
-        self,
         *,
         args: Namespace,
         request: MCPAnalysisRequest,
@@ -1972,8 +1940,8 @@ class CodeCloneMCPService:
             ),
         )
 
+    @staticmethod
     def _comparison_scope(
-        self,
         *,
         before: MCPRunRecord,
         after: MCPRunRecord,
@@ -1995,7 +1963,8 @@ class CodeCloneMCPService:
             "reason": reason,
         }
 
-    def _severity_rank(self, severity: str) -> int:
+    @staticmethod
+    def _severity_rank(severity: str) -> int:
         return {
             SEVERITY_CRITICAL: 3,
             SEVERITY_WARNING: 2,
@@ -2025,8 +1994,8 @@ class CodeCloneMCPService:
                 previous = item
         return None
 
+    @staticmethod
     def _record_supports_analysis_mode(
-        self,
         record: MCPRunRecord,
         *,
         analysis_mode: AnalysisMode,
@@ -2352,7 +2321,8 @@ class CodeCloneMCPService:
             "severity": summary_card.get("severity"),
         }
 
-    def _finding_kind_label(self, finding: Mapping[str, object]) -> str:
+    @staticmethod
+    def _finding_kind_label(finding: Mapping[str, object]) -> str:
         family = str(finding.get("family", "")).strip()
         kind = str(finding.get("kind", finding.get("category", ""))).strip()
         if family == FAMILY_CLONE:
@@ -2364,7 +2334,8 @@ class CodeCloneMCPService:
             return "dead_code"
         return kind or family
 
-    def _summary_location_string(self, location: Mapping[str, object]) -> str:
+    @staticmethod
+    def _summary_location_string(location: Mapping[str, object]) -> str:
         path = str(location.get("file", "")).strip()
         line = _as_int(location.get("line", 0), 0)
         if not path:
@@ -2431,7 +2402,8 @@ class CodeCloneMCPService:
                 return True
         return False
 
-    def _path_matches(self, relative_path: str, changed_paths: Sequence[str]) -> bool:
+    @staticmethod
+    def _path_matches(relative_path: str, changed_paths: Sequence[str]) -> bool:
         for candidate in changed_paths:
             if relative_path == candidate or relative_path.startswith(candidate + "/"):
                 return True
@@ -2589,7 +2561,8 @@ class CodeCloneMCPService:
                 deduped.append(location)
         return deduped
 
-    def _suggestion_finding_id(self, suggestion: object) -> str:
+    @staticmethod
+    def _suggestion_finding_id(suggestion: object) -> str:
         return _suggestion_finding_id_payload(suggestion)
 
     def _remediation_for_finding(
@@ -2648,7 +2621,8 @@ class CodeCloneMCPService:
                 return suggestion
         return None
 
-    def _safe_refactor_shape(self, suggestion: object) -> str:
+    @staticmethod
+    def _safe_refactor_shape(suggestion: object) -> str:
         category = str(getattr(suggestion, "category", "")).strip()
         clone_type = str(getattr(suggestion, "clone_type", "")).strip()
         title = str(getattr(suggestion, "title", "")).strip()
@@ -2672,15 +2646,16 @@ class CodeCloneMCPService:
             return "Break the cycle by moving shared abstractions to a lower layer."
         return "Extract the repeated logic into a shared, named abstraction."
 
-    def _risk_level_for_effort(self, effort: str) -> str:
+    @staticmethod
+    def _risk_level_for_effort(effort: str) -> str:
         return {
             EFFORT_EASY: "low",
             EFFORT_MODERATE: "medium",
             EFFORT_HARD: "high",
         }.get(effort, "medium")
 
+    @staticmethod
     def _why_now_text(
-        self,
         *,
         title: str,
         severity: str,
@@ -2885,8 +2860,8 @@ class CodeCloneMCPService:
             payload["verdict"] = str(changed_projection.get("verdict", "stable"))
         return payload
 
+    @staticmethod
     def _changed_verdict(
-        self,
         *,
         changed_projection: Mapping[str, object],
         health_delta: int | None,
@@ -2924,8 +2899,8 @@ class CodeCloneMCPService:
             ]
         return {str(finding.get("id", "")): dict(finding) for finding in findings}
 
+    @staticmethod
     def _comparison_verdict(
-        self,
         *,
         regressions: int,
         improvements: int,
@@ -2945,8 +2920,8 @@ class CodeCloneMCPService:
             return "improved"
         return "stable"
 
+    @staticmethod
     def _comparison_summary_text(
-        self,
         *,
         comparable: bool,
         comparability_reason: str,
@@ -3088,7 +3063,8 @@ class CodeCloneMCPService:
             "items": bounded_items,
         }
 
-    def _normalized_source_kind(self, value: object) -> str:
+    @staticmethod
+    def _normalized_source_kind(value: object) -> str:
         normalized = str(value).strip().lower()
         if normalized in SOURCE_KIND_ORDER:
             return normalized
@@ -3143,7 +3119,32 @@ class CodeCloneMCPService:
             )
         return rows
 
-    def _schema_resource_payload(self) -> dict[str, object]:
+    def _derived_section_payload(self, record: MCPRunRecord) -> dict[str, object]:
+        derived = self._as_mapping(record.report_document.get("derived"))
+        if not derived:
+            raise MCPServiceContractError(
+                "Report section 'derived' is not available in this run."
+            )
+        suggestions = self._triage_suggestion_rows(record)
+        canonical_to_short, _ = self._finding_id_maps(record)
+        hotlists = self._as_mapping(derived.get("hotlists"))
+        projected_hotlists: dict[str, list[str]] = {}
+        for hotlist_key, hotlist_ids in hotlists.items():
+            projected_hotlists[hotlist_key] = [
+                canonical_to_short.get(
+                    str(finding_id),
+                    self._base_short_finding_id(str(finding_id)),
+                )
+                for finding_id in self._as_sequence(hotlist_ids)
+                if str(finding_id)
+            ]
+        return {
+            "suggestions": suggestions,
+            "hotlists": projected_hotlists,
+        }
+
+    @staticmethod
+    def _schema_resource_payload() -> dict[str, object]:
         return {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "CodeCloneCanonicalReport",
@@ -3187,8 +3188,8 @@ class CodeCloneMCPService:
                 "CodeClone MCP server. Use 'reuse' or 'off'."
             )
 
+    @staticmethod
     def _validate_choice(
-        self,
         name: str,
         value: str,
         allowed: Sequence[str] | frozenset[str],
@@ -3210,7 +3211,8 @@ class CodeCloneMCPService:
             return None
         return self._validate_choice(name, value, allowed)
 
-    def _resolve_root(self, root: str | None) -> Path:
+    @staticmethod
+    def _resolve_root(root: str | None) -> Path:
         cleaned_root = "" if root is None else str(root).strip()
         if not cleaned_root:
             raise MCPServiceContractError(
@@ -3355,7 +3357,8 @@ class CodeCloneMCPService:
                 self._resolve_optional_path(request.cache_path, root_path)
             )
 
-    def _resolve_optional_path(self, value: str, root_path: Path) -> Path:
+    @staticmethod
+    def _resolve_optional_path(value: str, root_path: Path) -> Path:
         candidate = Path(value).expanduser()
         resolved = candidate if candidate.is_absolute() else root_path / candidate
         try:
@@ -3394,7 +3397,8 @@ class CodeCloneMCPService:
             shared_baseline_payload,
         )
 
-    def _resolve_cache_path(self, *, root_path: Path, args: Namespace) -> Path:
+    @staticmethod
+    def _resolve_cache_path(*, root_path: Path, args: Namespace) -> Path:
         return resolve_cache_path(
             root_path=root_path,
             args=args,
@@ -3403,8 +3407,8 @@ class CodeCloneMCPService:
             console=_BufferConsole(),
         )
 
+    @staticmethod
     def _build_cache(
-        self,
         *,
         root_path: Path,
         args: Namespace,
@@ -3429,7 +3433,8 @@ class CodeCloneMCPService:
             cache.load()
         return cache
 
-    def _metrics_computed(self, analysis_mode: AnalysisMode) -> tuple[str, ...]:
+    @staticmethod
+    def _metrics_computed(analysis_mode: AnalysisMode) -> tuple[str, ...]:
         return (
             ()
             if analysis_mode == "clones_only"
@@ -3443,7 +3448,8 @@ class CodeCloneMCPService:
             )
         )
 
-    def _load_report_document(self, report_json: str) -> dict[str, object]:
+    @staticmethod
+    def _load_report_document(report_json: str) -> dict[str, object]:
         return _load_report_document_payload(report_json)
 
     def _report_digest(self, report_document: Mapping[str, object]) -> str:
@@ -3791,8 +3797,8 @@ class CodeCloneMCPService:
             return False
         return self._path_matches(path_value, (normalized_path,))
 
+    @staticmethod
     def _compact_metrics_item(
-        self,
         item: Mapping[str, object],
     ) -> dict[str, object]:
         compact: dict[str, object] = {}
@@ -3812,8 +3818,8 @@ class CodeCloneMCPService:
             compact[str(key)] = value
         return compact
 
+    @staticmethod
     def _metrics_diff_payload(
-        self,
         metrics_diff: MetricsDiff | None,
     ) -> dict[str, object] | None:
         if metrics_diff is None:

@@ -29,10 +29,16 @@ if TYPE_CHECKING:
 
 _SERVER_INSTRUCTIONS = (
     "CodeClone MCP is a deterministic, baseline-aware, read-only analysis server "
-    "for Python repositories. Use analyze_repository first, then query the latest "
-    "or a specific run with summary, finding, hotspot, gate, and report-section "
-    "tools. Pass an absolute repository root to analysis tools. This server "
-    "never updates baselines and never mutates source files."
+    "for Python repositories. Use analyze_repository first for full runs or "
+    "analyze_changed_paths for PR-style review, then prefer get_run_summary or "
+    "get_production_triage for the first pass. Use list_hotspots or focused "
+    "check_* tools before broader list_findings calls, then drill into one "
+    "finding with get_finding or get_remediation. Use "
+    "get_report_section(section='metrics_detail', family=..., limit=...) for "
+    "bounded metrics drill-down, and prefer generate_pr_summary(format='markdown') "
+    "unless machine JSON is required. Pass an absolute repository root to "
+    "analysis tools. This server never updates baselines and never mutates "
+    "source files."
 )
 _MCP_INSTALL_HINT = (
     "CodeClone MCP support requires the optional 'mcp' extra. "
@@ -115,8 +121,9 @@ def build_mcp_server(
         description=(
             "Run a deterministic CodeClone analysis for a repository and register "
             "the result as the latest MCP run. Pass an absolute repository root: "
-            "relative roots like '.' are rejected in MCP. Tip: set "
-            "cache_policy='off' to bypass cache and get fully fresh results."
+            "relative roots like '.' are rejected in MCP. Then prefer "
+            "get_run_summary or get_production_triage for the first pass. Tip: "
+            "set cache_policy='off' to bypass cache and get fully fresh results."
         ),
         annotations=session_tool,
         structured_output=True,
@@ -175,8 +182,10 @@ def build_mcp_server(
         description=(
             "Run a deterministic CodeClone analysis and return a changed-files "
             "projection using explicit paths or a git diff ref. Pass an absolute "
-            "repository root: relative roots like '.' are rejected in MCP. Tip: "
-            "set cache_policy='off' to bypass cache and get fully fresh results."
+            "repository root: relative roots like '.' are rejected in MCP. Then "
+            "prefer get_report_section(section='changed') or get_production_triage "
+            "before broader finding lists. Tip: set cache_policy='off' to bypass "
+            "cache and get fully fresh results."
         ),
         annotations=session_tool,
         structured_output=True,
@@ -233,7 +242,8 @@ def build_mcp_server(
     @tool(
         title="Get Run Summary",
         description=(
-            "Return the stored compact MCP summary for the latest or specified run."
+            "Return the stored compact MCP summary for the latest or specified "
+            "run. Start here when you want the cheapest run-level snapshot."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -246,7 +256,8 @@ def build_mcp_server(
         description=(
             "Return a production-first triage view over a stored run: health, "
             "cache freshness, production hotspots, and production suggestions, "
-            "while keeping global source-kind counters visible."
+            "while keeping global source-kind counters visible. Use this as the "
+            "default first-pass review on noisy repositories."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -302,9 +313,10 @@ def build_mcp_server(
         title="Get Report Section",
         description=(
             "Return a canonical CodeClone report section for the latest or "
-            "specified MCP run. The 'metrics' section returns only the "
-            "summary, while 'metrics_detail' returns paginated item slices or "
-            "summary+hint when unfiltered."
+            "specified MCP run. Prefer specific sections instead of 'all' unless "
+            "you truly need the full canonical report. The 'metrics' section "
+            "returns only the summary, while 'metrics_detail' returns paginated "
+            "item slices or summary+hint when unfiltered."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -330,7 +342,9 @@ def build_mcp_server(
         title="List Findings",
         description=(
             "List canonical finding groups with deterministic ordering, optional "
-            "filters, pagination, and compact summary cards by default."
+            "filters, pagination, and compact summary cards by default. Prefer "
+            "list_hotspots or focused check_* tools for first-pass triage; use "
+            "this when you need a broader filtered list."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -372,7 +386,9 @@ def build_mcp_server(
         title="Get Finding",
         description=(
             "Return a single canonical finding group by short or full id. "
-            "Normal detail is the default."
+            "Normal detail is the default. Use this after list_hotspots, "
+            "list_findings, or check_* instead of requesting larger lists at "
+            "higher detail."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -392,7 +408,8 @@ def build_mcp_server(
         title="Get Remediation",
         description=(
             "Return actionable remediation guidance for a single finding. "
-            "Normal detail is the default."
+            "Normal detail is the default. Use this when you need the fix packet "
+            "for one finding without pulling larger detail lists."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -412,7 +429,8 @@ def build_mcp_server(
         title="List Hotspots",
         description=(
             "Return one of the derived CodeClone hotlists for the latest or "
-            "specified MCP run, using compact summary cards by default."
+            "specified MCP run, using compact summary cards by default. Prefer "
+            "this for first-pass triage before broader list_findings calls."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -464,7 +482,9 @@ def build_mcp_server(
         description=(
             "Return complexity hotspots from a compatible stored run. "
             "Use analyze_repository first if no full run is available. When "
-            "filtering by root without run_id, pass an absolute root."
+            "filtering by root without run_id, pass an absolute root. Prefer "
+            "this narrower tool instead of list_findings when you only need "
+            "complexity hotspots."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -491,7 +511,9 @@ def build_mcp_server(
         description=(
             "Return clone findings from a compatible stored run. "
             "Use analyze_repository first if no compatible run is available. "
-            "When filtering by root without run_id, pass an absolute root."
+            "When filtering by root without run_id, pass an absolute root. "
+            "Prefer this narrower tool instead of list_findings when you only "
+            "need clone findings."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -520,7 +542,9 @@ def build_mcp_server(
         description=(
             "Return coupling hotspots from a compatible stored run. "
             "Use analyze_repository first if no full run is available. When "
-            "filtering by root without run_id, pass an absolute root."
+            "filtering by root without run_id, pass an absolute root. Prefer "
+            "this narrower tool instead of list_findings when you only need "
+            "coupling hotspots."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -545,7 +569,9 @@ def build_mcp_server(
         description=(
             "Return cohesion hotspots from a compatible stored run. "
             "Use analyze_repository first if no full run is available. When "
-            "filtering by root without run_id, pass an absolute root."
+            "filtering by root without run_id, pass an absolute root. Prefer "
+            "this narrower tool instead of list_findings when you only need "
+            "cohesion hotspots."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -570,7 +596,9 @@ def build_mcp_server(
         description=(
             "Return dead-code findings from a compatible stored run. "
             "Use analyze_repository first if no full run is available. When "
-            "filtering by root without run_id, pass an absolute root."
+            "filtering by root without run_id, pass an absolute root. Prefer "
+            "this narrower tool instead of list_findings when you only need "
+            "dead-code findings."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -594,7 +622,11 @@ def build_mcp_server(
 
     @tool(
         title="Generate PR Summary",
-        description="Generate a PR-friendly CodeClone summary for changed files.",
+        description=(
+            "Generate a PR-friendly CodeClone summary for changed files. Prefer "
+            "format='markdown' for compact LLM-facing output; use 'json' only "
+            "for machine post-processing."
+        ),
         annotations=read_only_tool,
         structured_output=True,
     )
