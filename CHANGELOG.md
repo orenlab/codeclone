@@ -7,26 +7,26 @@ coherent platform: canonical-report-first, agent-facing, CI-native, and product-
 
 ### Licensing & packaging
 
-Re-license source code to MPL-2.0 while keeping documentation under MIT. Ship dual `LICENSE` / `LICENSE-docs` files and
-sync SPDX headers.
+- Re-license source code to MPL-2.0 while keeping documentation under MIT.
+- Ship dual `LICENSE` / `LICENSE-docs` files and sync SPDX headers.
 
 ### MCP server (new)
 
-- Optional `codeclone[mcp]` extra with `codeclone-mcp` launcher (`stdio` and `streamable-http` transports).
-- 20 read-only tools + 7 fixed resources + 3 run-scoped URI templates: analysis, diff-aware changed-files, run
-  comparison, findings / hotspots / remediation, granular checks, gate preview, and in-memory-only review/session
-  markers.
-- Bounded run retention (`--history-limit`), `--allow-remote` guard, `cache_policy=refresh` rejected to preserve
+- Add optional `codeclone[mcp]` extra with `codeclone-mcp` launcher (`stdio` and `streamable-http`).
+- Introduce a read-only MCP surface with 20 tools, fixed resources, and run-scoped URIs for analysis, changed-files
+  review, run comparison, findings / hotspots / remediation, granular checks, and gate preview.
+- Add bounded run retention (`--history-limit`), `--allow-remote` guard, and reject `cache_policy=refresh` to preserve
   read-only semantics.
-- Agent-optimised payloads: short MCP run/finding ids, slim summary inventory, compact summary/default finding cards,
-  single-dimension `health` in `check_*`, bounded `metrics_detail`, and compact changed-files / compare-runs responses
-  — all without changing the canonical report contract.
-- `cache.freshness` marker and `get_production_triage` / `codeclone://latest/triage` for compact production-first
+- Optimize MCP payloads for agents with short ids, compact summaries/cards, bounded `metrics_detail`, and slim
+  changed-files / compare-runs responses — without changing the canonical report contract.
+- Make MCP explicitly triage-first and budget-aware: clients are guided toward summary/triage → hotspots / `check_*` →
+  single-finding drill-down instead of broad early listing.
+- Add `cache.freshness` marker and `get_production_triage` / `codeclone://latest/triage` for compact production-first
   overview.
-- Honest run comparison: `compare_runs` reports `mixed` / `incomparable` instead of misleading single verdicts;
-  `clones_only` runs surface `health: unavailable` instead of zeroed placeholders.
-- Safety hardening: MCP analysis now requires an absolute repository root and rejects relative roots like `.`, so the
-  server cannot silently analyze the wrong directory when its cwd differs from the client workspace.
+- Improve run-comparison honesty: `compare_runs` now reports `mixed` / `incomparable`, and `clones_only` runs surface
+  `health: unavailable` instead of placeholder values.
+- Harden repository safety: MCP analysis now requires an absolute repository root and rejects relative roots like `.`
+  to avoid analyzing the wrong directory.
 - Fix hotlist key resolution for `production_hotspots` and `test_fixture_hotspots`.
 - Bump cache schema to `2.3` (stale metric entries rebuilt, not reused).
 
@@ -34,27 +34,28 @@ sync SPDX headers.
 
 - Bump canonical report schema to `2.2`.
 - Add canonical `meta.analysis_thresholds.design_findings` provenance and move threshold-aware design findings fully
-  into the canonical report, so MCP/HTML read the same design-finding universe instead of re-synthesizing it.
+  into the canonical report, so MCP and HTML read the same design-finding universe.
 - Add `derived.overview.directory_hotspots` and render it in the HTML Overview tab as `Hotspots by Directory`.
 
 ### CLI
 
-- `--changed-only`, `--diff-against`, `--paths-from-git-diff` for changed-scope review and gating with first-class
-  summary output.
+- Add `--changed-only`, `--diff-against`, and `--paths-from-git-diff` for changed-scope review and gating with
+  first-class summary output.
 
 ### SARIF
 
-- Stable `primaryLocationLineHash` (line numbers excluded), run-unique `automationDetails.id` / `startTimeUtc`, explicit
-  `kind: "fail"`, ancillary fields moved to `properties`.
+- Stabilize `primaryLocationLineHash` (line numbers excluded), add run-unique `automationDetails.id` /
+  `startTimeUtc`, set explicit `kind: "fail"`, and move ancillary fields to `properties`.
 
 ### HTML report
 
-- IDE picker (PyCharm, IDEA, VS Code, Cursor, Fleet, Zed) with persistent selection; clickable file-path deep links
-  across all tabs; stable `finding-{id}` anchors.
+- Add `Hotspots by Directory` to the Overview tab, surfacing directory-level concentration for `all`, `clones`, and low-cohesion findings with scope-aware badges and compact counts.
+- Add IDE picker (PyCharm, IDEA, VS Code, Cursor, Fleet, Zed) with persistent selection.
+- Add clickable file-path deep links across all tabs and stable `finding-{id}` anchors.
 
 ### GitHub Action
 
-- Composite Action v2: configurable quality gates, SARIF upload to Code Scanning, PR summary comments.
+- Ship Composite Action v2 with configurable quality gates, SARIF upload to Code Scanning, and PR summary comments.
 
 ## [2.0.0b2]
 

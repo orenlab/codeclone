@@ -19,10 +19,9 @@
 ---
 
 CodeClone provides deterministic structural code quality analysis for Python.
-It detects architectural duplication via normalized AST and Control Flow Graphs,
-computes quality metrics, and enforces CI gates — all with **baseline-aware
+It detects architectural duplication, computes quality metrics, and enforces CI gates — all with **baseline-aware
 governance** that separates **known** technical debt from **new** regressions.
-An optional MCP interface exposes the same pipeline to AI agents and IDEs.
+An optional MCP interface exposes the same canonical analysis pipeline to AI agents and IDEs.
 
 Docs: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/) ·
 Live sample report:
@@ -41,10 +40,11 @@ Live sample report:
 - **Structural findings** — duplicated branch families, clone guard/exit divergence and clone-cohort drift (report-only)
 - **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, dead code, health
   score
-- **Baseline governance** — known debt stays accepted; CI blocks only new clones and metric regressions
+- **Baseline governance** — separates accepted **legacy** debt from **new regressions** and lets CI fail **only** on
+  what changed
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
-- **MCP server** — optional MCP surface for AI agents, IDEs, and MCP-capable clients; read-only with respect to repo and
-  persisted artifacts, budget-aware, and designed as a guided control surface for agentic development
+- **MCP server** — optional read-only MCP surface for AI agents and IDEs, designed as a budget-aware guided control
+  surface for agentic development
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Fast** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
 
@@ -167,13 +167,15 @@ codeclone-mcp --transport stdio
 codeclone-mcp --transport streamable-http --port 8000
 ```
 
-20 tools + 10 resources — deterministic, baseline-aware, and read-only. Never mutates source files, baselines, or repo
-state.
-Payloads are optimised for LLM context: compact summaries by default, full detail on demand.
+20 tools + 10 resources — deterministic, baseline-aware, and read-only.
+Never mutates source files, baselines, or repo state.
+
+Payloads are optimized for LLM context: compact summaries by default, full detail on demand.
 The cheapest useful path is also the most obvious path: first-pass triage stays compact, and deeper detail is explicit.
-Recommended budget-first flow for agents: `analyze_repository` or
-`analyze_changed_paths` → `get_run_summary` or `get_production_triage` →
-`list_hotspots` or `check_*` → `get_finding` → `get_remediation`.
+
+Recommended agent flow:
+`analyze_repository` or `analyze_changed_paths` → `get_run_summary` or `get_production_triage` →
+`list_hotspots` or `check_*` → `get_finding` → `get_remediation`
 
 Docs:
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
@@ -242,8 +244,7 @@ All report formats are rendered from one canonical JSON report document.
 - `--timestamped-report-paths` appends a UTC timestamp to default report filenames for bare report flags such as
   `--html` or `--json`. Explicit report paths are not rewritten.
 
-The published docs site also includes a live example HTML/JSON/SARIF report
-generated from the current `codeclone` repository during the docs build.
+The docs site also includes live example HTML/JSON/SARIF reports generated from the current `codeclone` repository.
 
 Structural findings include:
 
@@ -270,7 +271,7 @@ class Middleware:  # codeclone: ignore[dead-code]
 Dynamic/runtime false positives are resolved via explicit inline suppressions, not via broad heuristics.
 
 <details>
-<summary>JSON report shape (v2.2)</summary>
+<summary>Canonical JSON report shape (v2.2)</summary>
 
 ```json
 {
