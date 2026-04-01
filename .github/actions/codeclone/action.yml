@@ -16,7 +16,7 @@ inputs:
     default: "3.13"
 
   package-version:
-    description: "CodeClone version from PyPI (empty = latest stable)"
+    description: "CodeClone version from PyPI for remote installs (ignored when the action runs from the checked-out CodeClone repo)"
     required: false
     default: ""
 
@@ -138,17 +138,46 @@ runs:
         python-version: ${{ inputs.python-version }}
         cache: pip
 
-    - name: Install CodeClone
+    - name: Resolve CodeClone install target
+      id: resolve-install
       shell: bash
       env:
         CODECLONE_VERSION: ${{ inputs.package-version }}
       run: |
+        python - <<'PY'
+        import os
+        import sys
+
+        sys.path.insert(0, os.environ["GITHUB_ACTION_PATH"])
+
+        from _action_impl import resolve_install_target, write_outputs
+
+        target = resolve_install_target(
+            action_path=os.environ["GITHUB_ACTION_PATH"],
+            workspace=os.environ["GITHUB_WORKSPACE"],
+            package_version=os.environ.get("CODECLONE_VERSION", ""),
+        )
+        print(f"Resolved CodeClone install source: {target.source} ({target.requirement})")
+        github_output = os.environ.get("GITHUB_OUTPUT")
+        if github_output:
+            write_outputs(
+                github_output,
+                {
+                    "install-spec": target.requirement,
+                    "install-source": target.source,
+                },
+            )
+        PY
+
+    - name: Install CodeClone
+      shell: bash
+      env:
+        INSTALL_SPEC: ${{ steps.resolve-install.outputs.install-spec }}
+        INSTALL_SOURCE: ${{ steps.resolve-install.outputs.install-source }}
+      run: |
         python -m pip install --upgrade pip
-        if [ -n "${CODECLONE_VERSION}" ]; then
-          python -m pip install "codeclone==${CODECLONE_VERSION}"
-        else
-          python -m pip install codeclone
-        fi
+        echo "Installing CodeClone from ${INSTALL_SOURCE}: ${INSTALL_SPEC}"
+        python -m pip install "${INSTALL_SPEC}"
 
     - name: Verify baseline
       if: ${{ inputs.require-baseline == 'true' }}
@@ -270,4 +299,9 @@ runs:
       if: ${{ always() }}
       shell: bash
       run: |
-        exit "${{ steps.analysis.outputs.exit-code }}"
+        status="${{ steps.analysis.outputs.exit-code }}"
+        if [ -z "${status}" ]; then
+          echo "CodeClone analysis did not produce an exit code." >&2
+          exit 2
+        fi
+        exit "${status}"

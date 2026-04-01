@@ -27,7 +27,6 @@ jobs:
         uses: ./.github/actions/codeclone
         with:
           python-version: "3.13"
-          package-version: "2.0.0b3"
           fail-on-new: "true"
           fail-health: "60"
           sarif: "true"

@@ -16,12 +16,16 @@ and propagate the real gate result.
 The v2 action flow is:
 
 1. set up Python
-2. install `codeclone` from PyPI
+2. install `codeclone`
 3. optionally require a committed baseline
 4. run CodeClone with JSON + optional SARIF output
 5. optionally upload SARIF to GitHub Code Scanning
 6. optionally post or update a PR summary comment
 7. return the real CodeClone exit code as the job result
+
+When the action is used from the checked-out CodeClone repository itself
+(`uses: ./.github/actions/codeclone`), it installs CodeClone from the repo
+source under test. Remote consumers still install from PyPI.
 
 ## Basic usage
 
@@ -41,8 +45,8 @@ name: CodeClone
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
-    paths: ["**/*.py"]
+    types: [ opened, synchronize, reopened ]
+    paths: [ "**/*.py" ]
 
 permissions:
   contents: read
@@ -67,39 +71,39 @@ jobs:
 
 ## Inputs
 
-| Input | Default | Purpose |
-|-------|---------|---------|
-| `python-version` | `3.13` | Python version used to run the action |
-| `package-version` | `""` | CodeClone version from PyPI; empty means latest stable |
-| `path` | `.` | Project root to analyze |
-| `json-path` | `.cache/codeclone/report.json` | JSON report output path |
-| `sarif` | `true` | Generate SARIF and try to upload it |
-| `sarif-path` | `.cache/codeclone/report.sarif` | SARIF output path |
-| `pr-comment` | `true` | Post or update a PR summary comment |
-| `fail-on-new` | `true` | Fail if new clone groups are detected |
-| `fail-on-new-metrics` | `false` | Fail if metrics regress vs baseline |
-| `fail-threshold` | `-1` | Max allowed function+block clone groups |
-| `fail-complexity` | `-1` | Max cyclomatic complexity |
-| `fail-coupling` | `-1` | Max coupling CBO |
-| `fail-cohesion` | `-1` | Max cohesion LCOM4 |
-| `fail-cycles` | `false` | Fail on dependency cycles |
-| `fail-dead-code` | `false` | Fail on high-confidence dead code |
-| `fail-health` | `-1` | Minimum health score |
-| `require-baseline` | `true` | Fail early if the baseline file is missing |
-| `baseline-path` | `codeclone.baseline.json` | Baseline path passed to CodeClone |
-| `metrics-baseline-path` | `codeclone.baseline.json` | Metrics baseline path passed to CodeClone |
-| `extra-args` | `""` | Additional CodeClone CLI arguments |
-| `no-progress` | `true` | Disable progress output |
+| Input                   | Default                         | Purpose                                                                                                           |
+|-------------------------|---------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| `python-version`        | `3.13`                          | Python version used to run the action                                                                             |
+| `package-version`       | `""`                            | CodeClone version from PyPI for remote installs; ignored when the action runs from the checked-out CodeClone repo |
+| `path`                  | `.`                             | Project root to analyze                                                                                           |
+| `json-path`             | `.cache/codeclone/report.json`  | JSON report output path                                                                                           |
+| `sarif`                 | `true`                          | Generate SARIF and try to upload it                                                                               |
+| `sarif-path`            | `.cache/codeclone/report.sarif` | SARIF output path                                                                                                 |
+| `pr-comment`            | `true`                          | Post or update a PR summary comment                                                                               |
+| `fail-on-new`           | `true`                          | Fail if new clone groups are detected                                                                             |
+| `fail-on-new-metrics`   | `false`                         | Fail if metrics regress vs baseline                                                                               |
+| `fail-threshold`        | `-1`                            | Max allowed function+block clone groups                                                                           |
+| `fail-complexity`       | `-1`                            | Max cyclomatic complexity                                                                                         |
+| `fail-coupling`         | `-1`                            | Max coupling CBO                                                                                                  |
+| `fail-cohesion`         | `-1`                            | Max cohesion LCOM4                                                                                                |
+| `fail-cycles`           | `false`                         | Fail on dependency cycles                                                                                         |
+| `fail-dead-code`        | `false`                         | Fail on high-confidence dead code                                                                                 |
+| `fail-health`           | `-1`                            | Minimum health score                                                                                              |
+| `require-baseline`      | `true`                          | Fail early if the baseline file is missing                                                                        |
+| `baseline-path`         | `codeclone.baseline.json`       | Baseline path passed to CodeClone                                                                                 |
+| `metrics-baseline-path` | `codeclone.baseline.json`       | Metrics baseline path passed to CodeClone                                                                         |
+| `extra-args`            | `""`                            | Additional CodeClone CLI arguments                                                                                |
+| `no-progress`           | `true`                          | Disable progress output                                                                                           |
 
 For numeric gate inputs, `-1` means "disabled".
 
 ## Outputs
 
-| Output | Meaning |
-|--------|---------|
-| `exit-code` | CodeClone process exit code |
-| `json-path` | Resolved JSON report path |
-| `sarif-path` | Resolved SARIF report path |
+| Output          | Meaning                                                    |
+|-----------------|------------------------------------------------------------|
+| `exit-code`     | CodeClone process exit code                                |
+| `json-path`     | Resolved JSON report path                                  |
+| `sarif-path`    | Resolved SARIF report path                                 |
 | `pr-comment-id` | PR comment id when the action updated or created a comment |
 
 ## Exit behavior
@@ -147,6 +151,12 @@ Explicit prerelease:
 with:
   package-version: "2.0.0b3"
 ```
+
+Local/self-repo validation:
+
+- `uses: ./.github/actions/codeclone` installs CodeClone from the checked-out
+  repository source, so beta branches and unreleased commits do not depend on
+  PyPI publication.
 
 ## Notes and limitations
 

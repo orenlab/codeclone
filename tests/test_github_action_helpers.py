@@ -10,7 +10,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import cast
+from typing import Any, cast
 
 
 def _load_action_impl() -> ModuleType:
@@ -33,6 +33,20 @@ def _load_action_impl() -> ModuleType:
 def _assert_contains_all(text: str, expected_parts: tuple[str, ...]) -> None:
     for expected in expected_parts:
         assert expected in text
+
+
+def _resolve_install_target(
+    *,
+    action_path: Path,
+    workspace: Path,
+    package_version: str,
+) -> Any:
+    action_impl = _load_action_impl()
+    return action_impl.resolve_install_target(
+        action_path=str(action_path),
+        workspace=str(workspace),
+        package_version=package_version,
+    )
 
 
 def test_build_codeclone_args_includes_enabled_gates_and_paths() -> None:
@@ -129,4 +143,52 @@ def test_render_pr_comment_uses_canonical_report_summary() -> None:
             "Design: 3",
             "`2.0.0b3`",
         ),
+    )
+
+
+def test_resolve_install_target_uses_repo_source_for_local_action_checkout(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "codeclone"
+    action_path = repo_root / ".github" / "actions" / "codeclone"
+    action_path.mkdir(parents=True)
+
+    target = _resolve_install_target(
+        action_path=action_path,
+        workspace=repo_root,
+        package_version="2.0.0b3",
+    )
+
+    assert target.source == "repo"
+    assert target.requirement == str(repo_root.resolve())
+
+
+def test_resolve_install_target_uses_pypi_for_remote_checkout(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "consumer"
+    action_repo = tmp_path / "_actions" / "orenlab" / "codeclone" / "main"
+    action_path = action_repo / ".github" / "actions" / "codeclone"
+    action_path.mkdir(parents=True)
+    workspace_root.mkdir()
+
+    pinned = _resolve_install_target(
+        action_path=action_path,
+        workspace=workspace_root,
+        package_version="2.0.0b3",
+    )
+    latest = _resolve_install_target(
+        action_path=action_path,
+        workspace=workspace_root,
+        package_version="",
+    )
+
+    assert (
+        pinned.source,
+        pinned.requirement,
+        latest.source,
+        latest.requirement,
+    ) == (
+        "pypi-version",
+        "codeclone==2.0.0b3",
+        "pypi-latest",
+        "codeclone",
     )

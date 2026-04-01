@@ -11,6 +11,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 COMMENT_MARKER = "<!-- codeclone-report -->"
 
@@ -43,6 +44,12 @@ class RunResult:
     json_exists: bool
     sarif_path: str
     sarif_exists: bool
+
+
+@dataclass(frozen=True, slots=True)
+class InstallTarget:
+    requirement: str
+    source: Literal["repo", "pypi-version", "pypi-latest"]
 
 
 def parse_bool(value: str) -> bool:
@@ -97,6 +104,27 @@ def write_outputs(path: str, values: dict[str, str]) -> None:
     with open(path, "a", encoding="utf-8") as handle:
         for key, value in values.items():
             handle.write(f"{key}={value}\n")
+
+
+# codeclone: ignore[dead-code]
+def resolve_install_target(
+    *,
+    action_path: str,
+    workspace: str,
+    package_version: str,
+) -> InstallTarget:
+    action_root = Path(action_path).resolve().parents[2]
+    workspace_root = Path(workspace).resolve()
+    if action_root == workspace_root:
+        return InstallTarget(requirement=str(action_root), source="repo")
+
+    normalized_version = package_version.strip()
+    if normalized_version:
+        return InstallTarget(
+            requirement=f"codeclone=={normalized_version}",
+            source="pypi-version",
+        )
+    return InstallTarget(requirement="codeclone", source="pypi-latest")
 
 
 def run_codeclone(inputs: ActionInputs) -> RunResult:
