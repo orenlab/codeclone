@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 """Minimal HTML skeleton template for the report.
@@ -20,7 +23,7 @@ FONT_CSS_URL = (
 
 REPORT_TEMPLATE = Template(
     r"""<!doctype html>
-<html lang="en">
+<html lang="en" data-scan-root="${scan_root}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

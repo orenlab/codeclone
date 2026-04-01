@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 """Clones panel renderer — function/block/segment sections."""
@@ -21,6 +24,7 @@ from ...report.derived import (
     report_location_from_group_item,
 )
 from ...report.explain_contract import format_group_instance_compare_meta
+from ...report.json_contract import clone_group_id
 from ...report.suggestions import classify_clone_type
 from .._components import Tone, insight_block
 from .._icons import ICONS
@@ -381,7 +385,9 @@ def _render_group_items_html(
                 group_arity=group_arity,
                 peer_count=peer_count,
             )
-            compare_html = f'<div class="item-compare-meta">{compare_text}</div>'
+            compare_html = (
+                f'<div class="item-compare-meta">{_escape_html(compare_text)}</div>'
+            )
         rendered.append(
             f'<div class="item" data-qualname="{_escape_attr(qualname)}" '
             f'data-filepath="{_escape_attr(filepath)}" '
@@ -390,8 +396,10 @@ def _render_group_items_html(
             '<div class="item-header">'
             f'<div class="item-title" title="{_escape_attr(qualname)}">'
             f"{_escape_html(display_qualname)}</div>"
-            f'<div class="item-loc" title="{_escape_attr(filepath)}:{start_line}-{end_line}">'
-            f"{_escape_html(display_filepath)}:{start_line}-{end_line}</div></div>"
+            f'<div class="item-loc">'
+            f'<a class="ide-link" data-file="{_escape_attr(filepath)}" data-line="{start_line}" '
+            f'title="{_escape_attr(filepath)}:{start_line}-{end_line}">'
+            f"{_escape_html(display_filepath)}:{start_line}-{end_line}</a></div></div>"
             f"{compare_html}"
             f"{snippet.code_html}"
             "</div>"
@@ -411,6 +419,7 @@ def _render_group_html(
     section_novelty: Mapping[str, str],
 ) -> str:
     group_id = f"{section_id}-{group_index}"
+    finding_id = clone_group_id(_clone_kind_for_section(section_id), group_key)
     search_parts: list[str] = [str(group_key)]
     for item in items:
         search_parts.append(str(item.get("qualname", "")))
@@ -463,8 +472,10 @@ def _render_group_html(
     explanation_html = _render_group_explanation(block_meta) if block_meta else ""
 
     return (
-        f'<div class="group" data-group="{section_id}" '
+        f'<div class="group" id="finding-{_escape_attr(finding_id)}" '
+        f'data-group="{section_id}" '
         f'data-group-index="{group_index}" '
+        f'data-finding-id="{_escape_attr(finding_id)}" '
         f'data-group-key="{_escape_attr(group_key)}" '
         f'data-novelty="{_escape_attr(section_novelty.get(group_key, "all"))}" '
         f'data-search="{search_blob}"{_build_data_attrs(group_attrs)}>'

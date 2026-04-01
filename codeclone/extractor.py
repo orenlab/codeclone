@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ from dataclasses import dataclass, field
 from hashlib import sha1 as _sha1
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
-from .blockhash import stmt_hashes
+from . import qualnames as _qualnames
 from .blocks import extract_blocks, extract_segments
 from .cfg import CFGBuilder
 from .errors import ParseError
@@ -42,6 +45,7 @@ from .normalize import (
     AstNormalizer,
     NormalizationConfig,
     normalized_ast_dump_from_list,
+    stmt_hashes,
 )
 from .paths import is_test_filepath
 from .structural_findings import scan_function_structure
@@ -60,7 +64,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Unit",
-    "_QualnameCollector",
     "extract_units_and_stats_from_source",
 ]
 
@@ -75,8 +78,9 @@ class _ParseTimeoutError(Exception):
     pass
 
 
-FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
-_NamedDeclarationNode = FunctionNode | ast.ClassDef
+# Any named declaration: function, async function, or class.
+_NamedDeclarationNode = _qualnames.FunctionNode | ast.ClassDef
+# Unique key for a declaration's token index: (start_line, end_line, qualname).
 _DeclarationTokenIndexKey = tuple[int, int, str]
 
 
@@ -267,57 +271,13 @@ def _declaration_end_line(
     return _fallback_declaration_end_line(node, start_line=start_line)
 
 
-class _QualnameCollector(ast.NodeVisitor):
-    __slots__ = (
-        "class_count",
-        "class_nodes",
-        "funcs",
-        "function_count",
-        "method_count",
-        "stack",
-        "units",
-    )
-
-    def __init__(self) -> None:
-        self.stack: list[str] = []
-        self.units: list[tuple[str, FunctionNode]] = []
-        self.class_nodes: list[tuple[str, ast.ClassDef]] = []
-        self.funcs: dict[str, FunctionNode] = {}
-        self.class_count = 0
-        self.function_count = 0
-        self.method_count = 0
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        self.class_count += 1
-        class_qualname = ".".join([*self.stack, node.name]) if self.stack else node.name
-        self.class_nodes.append((class_qualname, node))
-        self.stack.append(node.name)
-        self.generic_visit(node)
-        self.stack.pop()
-
-    def _register_function(self, node: FunctionNode) -> None:
-        name = ".".join([*self.stack, node.name]) if self.stack else node.name
-        if self.stack:
-            self.method_count += 1
-        else:
-            self.function_count += 1
-        self.units.append((name, node))
-        self.funcs[name] = node
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._register_function(node)
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._register_function(node)
-
-
 # =========================
 # CFG fingerprinting
 # =========================
 
 
 def _cfg_fingerprint_and_complexity(
-    node: FunctionNode,
+    node: _qualnames.FunctionNode,
     cfg: NormalizationConfig,
     qualname: str,
 ) -> tuple[str, int]:
@@ -511,7 +471,7 @@ def _is_protocol_class(
     return False
 
 
-def _is_non_runtime_candidate(node: FunctionNode) -> bool:
+def _is_non_runtime_candidate(node: _qualnames.FunctionNode) -> bool:
     for decorator in node.decorator_list:
         name = _dotted_expr_name(decorator)
         if name is None:
@@ -530,13 +490,66 @@ def _node_line_span(node: ast.AST) -> tuple[int, int] | None:
     return start, end
 
 
+def _eligible_unit_shape(
+    node: _qualnames.FunctionNode,
+    *,
+    min_loc: int,
+    min_stmt: int,
+) -> tuple[int, int, int, int] | None:
+    span = _node_line_span(node)
+    if span is None:
+        return None
+    start, end = span
+    if end < start:
+        return None
+    loc = end - start + 1
+    stmt_count = _stmt_count(node)
+    if loc < min_loc or stmt_count < min_stmt:
+        return None
+    return start, end, loc, stmt_count
+
+
+def _class_metrics_for_node(
+    *,
+    module_name: str,
+    class_qualname: str,
+    class_node: ast.ClassDef,
+    filepath: str,
+    module_import_names: set[str],
+    module_class_names: set[str],
+) -> ClassMetrics | None:
+    span = _node_line_span(class_node)
+    if span is None:
+        return None
+    start, end = span
+    cbo, coupled_classes = compute_cbo(
+        class_node,
+        module_import_names=module_import_names,
+        module_class_names=module_class_names,
+    )
+    lcom4, method_count, instance_var_count = compute_lcom4(class_node)
+    return ClassMetrics(
+        qualname=f"{module_name}:{class_qualname}",
+        filepath=filepath,
+        start_line=start,
+        end_line=end,
+        cbo=cbo,
+        lcom4=lcom4,
+        method_count=method_count,
+        instance_var_count=instance_var_count,
+        risk_coupling=coupling_risk(cbo),
+        risk_cohesion=cohesion_risk(lcom4),
+        coupled_classes=coupled_classes,
+    )
+
+
 def _dead_candidate_kind(local_name: str) -> Literal["function", "method"]:
     return "method" if "." in local_name else "function"
 
 
 def _should_skip_dead_candidate(
     local_name: str,
-    node: FunctionNode,
+    node: _qualnames.FunctionNode,
     *,
     protocol_class_qualnames: set[str],
 ) -> bool:
@@ -584,7 +597,7 @@ def _dead_candidate_for_unit(
     *,
     module_name: str,
     local_name: str,
-    node: FunctionNode,
+    node: _qualnames.FunctionNode,
     filepath: str,
     suppression_index: Mapping[SuppressionTargetKey, tuple[str, ...]],
     protocol_class_qualnames: set[str],
@@ -628,7 +641,7 @@ def _collect_load_reference_node(
 def _resolve_referenced_qualnames(
     *,
     module_name: str,
-    collector: _QualnameCollector,
+    collector: _qualnames.QualnameCollector,
     state: _ModuleWalkState,
 ) -> frozenset[str]:
     top_level_class_by_name = {
@@ -649,18 +662,18 @@ def _resolve_referenced_qualnames(
 
     for attr_node in state.attr_nodes:
         base = attr_node.value
-        if not isinstance(base, ast.Name):
-            continue
-        imported_module = state.imported_module_aliases.get(base.id)
-        if imported_module is not None:
-            resolved.add(f"{imported_module}:{attr_node.attr}")
-            continue
-        class_qualname = top_level_class_by_name.get(base.id)
-        if class_qualname is None:
-            continue
-        local_method_qualname = f"{module_name}:{class_qualname}.{attr_node.attr}"
-        if local_method_qualname in local_method_qualnames:
-            resolved.add(local_method_qualname)
+        if isinstance(base, ast.Name):
+            imported_module = state.imported_module_aliases.get(base.id)
+            if imported_module is not None:
+                resolved.add(f"{imported_module}:{attr_node.attr}")
+            else:
+                class_qualname = top_level_class_by_name.get(base.id)
+                if class_qualname is not None:
+                    local_method_qualname = (
+                        f"{module_name}:{class_qualname}.{attr_node.attr}"
+                    )
+                    if local_method_qualname in local_method_qualnames:
+                        resolved.add(local_method_qualname)
 
     return frozenset(resolved)
 
@@ -678,7 +691,7 @@ def _collect_module_walk_data(
     *,
     tree: ast.AST,
     module_name: str,
-    collector: _QualnameCollector,
+    collector: _qualnames.QualnameCollector,
     collect_referenced_names: bool,
 ) -> _ModuleWalkResult:
     """Single ast.walk that collects imports, deps, names, qualnames & protocol aliases.
@@ -694,16 +707,14 @@ def _collect_module_walk_data(
                 state=state,
                 collect_referenced_names=collect_referenced_names,
             )
-            continue
-        if isinstance(node, ast.ImportFrom):
+        elif isinstance(node, ast.ImportFrom):
             _collect_import_from_node(
                 node=node,
                 module_name=module_name,
                 state=state,
                 collect_referenced_names=collect_referenced_names,
             )
-            continue
-        if collect_referenced_names:
+        elif collect_referenced_names:
             _collect_load_reference_node(node=node, state=state)
 
     deps_sorted = tuple(
@@ -736,7 +747,7 @@ def _collect_dead_candidates(
     *,
     filepath: str,
     module_name: str,
-    collector: _QualnameCollector,
+    collector: _qualnames.QualnameCollector,
     protocol_symbol_aliases: frozenset[str] = frozenset({"Protocol"}),
     protocol_module_aliases: frozenset[str] = frozenset(
         {"typing", "typing_extensions"}
@@ -767,27 +778,25 @@ def _collect_dead_candidates(
             suppression_index=suppression_index,
             protocol_class_qualnames=protocol_class_qualnames,
         )
-        if candidate is None:
-            continue
-        candidates.append(candidate)
+        if candidate is not None:
+            candidates.append(candidate)
 
     for class_qualname, class_node in collector.class_nodes:
         span = _node_line_span(class_node)
-        if span is None:
-            continue
-        start, end = span
-        candidates.append(
-            _build_dead_candidate(
-                module_name=module_name,
-                local_name=class_qualname,
-                node=class_node,
-                filepath=filepath,
-                kind="class",
-                suppression_index=suppression_index,
-                start_line=start,
-                end_line=end,
+        if span is not None:
+            start, end = span
+            candidates.append(
+                _build_dead_candidate(
+                    module_name=module_name,
+                    local_name=class_qualname,
+                    node=class_node,
+                    filepath=filepath,
+                    kind="class",
+                    suppression_index=suppression_index,
+                    start_line=start,
+                    end_line=end,
+                )
             )
-        )
 
     return tuple(
         sorted(
@@ -806,7 +815,7 @@ def _collect_declaration_targets(
     *,
     filepath: str,
     module_name: str,
-    collector: _QualnameCollector,
+    collector: _qualnames.QualnameCollector,
     source_tokens: tuple[tokenize.TokenInfo, ...] = (),
     source_token_index: Mapping[_DeclarationTokenIndexKey, int] | None = None,
     include_inline_lines: bool = False,
@@ -885,7 +894,7 @@ def _build_suppression_index_for_source(
     source: str,
     filepath: str,
     module_name: str,
-    collector: _QualnameCollector,
+    collector: _qualnames.QualnameCollector,
 ) -> Mapping[SuppressionTargetKey, tuple[str, ...]]:
     suppression_directives = extract_suppression_directives(source)
     if not suppression_directives:
@@ -947,7 +956,7 @@ def extract_units_and_stats_from_source(
     except SyntaxError as e:
         raise ParseError(f"Failed to parse {filepath}: {e}") from e
 
-    collector = _QualnameCollector()
+    collector = _qualnames.QualnameCollector()
     collector.visit(tree)
     source_lines = source.splitlines()
     source_line_count = len(source_lines)
@@ -985,17 +994,14 @@ def extract_units_and_stats_from_source(
     structural_findings: list[StructuralFindingGroup] = []
 
     for local_name, node in collector.units:
-        start = getattr(node, "lineno", None)
-        end = getattr(node, "end_lineno", None)
-
-        if not start or not end or end < start:
+        unit_shape = _eligible_unit_shape(
+            node,
+            min_loc=min_loc,
+            min_stmt=min_stmt,
+        )
+        if unit_shape is None:
             continue
-
-        loc = end - start + 1
-        stmt_count = _stmt_count(node)
-
-        if loc < min_loc or stmt_count < min_stmt:
-            continue
+        start, end, loc, stmt_count = unit_shape
 
         qualname = f"{module_name}:{local_name}"
         fingerprint, complexity = _cfg_fingerprint_and_complexity(node, cfg, qualname)
@@ -1009,7 +1015,6 @@ def extract_units_and_stats_from_source(
         risk = risk_level(complexity)
         raw_hash = _raw_source_hash_for_range(source_lines, start, end)
 
-        # Function-level unit (including __init__)
         units.append(
             Unit(
                 qualname=qualname,
@@ -1037,7 +1042,6 @@ def extract_units_and_stats_from_source(
             )
         )
 
-        # Block-level and segment-level units share statement hashes
         needs_blocks = (
             not local_name.endswith("__init__")
             and loc >= block_min_loc
@@ -1077,36 +1081,20 @@ def extract_units_and_stats_from_source(
                     )
                 )
 
-        # Structural findings extraction (report-only, no re-parse)
         if collect_structural_findings:
             structural_findings.extend(structure_facts.structural_findings)
 
     for class_qualname, class_node in collector.class_nodes:
-        start = int(getattr(class_node, "lineno", 0))
-        end = int(getattr(class_node, "end_lineno", 0))
-        if start <= 0 or end <= 0:
-            continue
-        cbo, coupled_classes = compute_cbo(
-            class_node,
+        class_metric = _class_metrics_for_node(
+            module_name=module_name,
+            class_qualname=class_qualname,
+            class_node=class_node,
+            filepath=filepath,
             module_import_names=module_import_names,
             module_class_names=module_class_names,
         )
-        lcom4, method_count, instance_var_count = compute_lcom4(class_node)
-        class_metrics.append(
-            ClassMetrics(
-                qualname=f"{module_name}:{class_qualname}",
-                filepath=filepath,
-                start_line=start,
-                end_line=end,
-                cbo=cbo,
-                lcom4=lcom4,
-                method_count=method_count,
-                instance_var_count=instance_var_count,
-                risk_coupling=coupling_risk(cbo),
-                risk_cohesion=cohesion_risk(lcom4),
-                coupled_classes=coupled_classes,
-            )
-        )
+        if class_metric is not None:
+            class_metrics.append(class_metric)
 
     dead_candidates = _collect_dead_candidates(
         filepath=filepath,

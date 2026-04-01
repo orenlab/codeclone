@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 """CodeClone — structural code quality analysis for Python.
@@ -228,35 +231,55 @@ def normalize_structural_findings(
     return tuple(normalized)
 
 
-def _summarize_branch(body: list[ast.stmt]) -> dict[str, str] | None:
-    """Build deterministic structural signature for a meaningful branch body."""
-    if not body or all(isinstance(stmt, ast.Pass) for stmt in body):
-        return None
+_TRY_STAR_TYPE = getattr(ast, "TryStar", None)
+_NESTED_SCOPE_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+_LOOP_TYPES = (ast.For, ast.While, ast.AsyncFor)
 
-    call_count = raise_count = 0
-    has_nested_if, has_loop, has_try = False, False, False
-    try_star = getattr(ast, "TryStar", None)
-    for node in ast.walk(ast.Module(body=body, type_ignores=[])):
+
+def _walk_branch_stats(body: Sequence[ast.stmt]) -> _BranchWalkStats:
+    """Collect branch body facts without descending into nested scopes."""
+    call_count = 0
+    raise_count = 0
+    has_nested_if = False
+    has_loop = False
+    has_try = False
+    stack: list[ast.AST] = [ast.Module(body=list(body), type_ignores=[])]
+
+    while stack:
+        node = stack.pop()
+        if isinstance(node, _NESTED_SCOPE_TYPES):
+            continue
+
         if isinstance(node, ast.Call):
             call_count += 1
         elif isinstance(node, ast.Raise):
             raise_count += 1
         elif isinstance(node, ast.If):
             has_nested_if = True
-        elif isinstance(node, (ast.For, ast.While, ast.AsyncFor)):
+        elif isinstance(node, _LOOP_TYPES):
             has_loop = True
         elif isinstance(node, ast.Try) or (
-            try_star is not None and isinstance(node, try_star)
+            _TRY_STAR_TYPE is not None and isinstance(node, _TRY_STAR_TYPE)
         ):
             has_try = True
 
-    stats = _BranchWalkStats(
+        stack.extend(reversed(list(ast.iter_child_nodes(node))))
+
+    return _BranchWalkStats(
         call_count=call_count,
         raise_count=raise_count,
         has_nested_if=has_nested_if,
         has_loop=has_loop,
         has_try=has_try,
     )
+
+
+def _summarize_branch(body: list[ast.stmt]) -> dict[str, str] | None:
+    """Build deterministic structural signature for a meaningful branch body."""
+    if not body or all(isinstance(stmt, ast.Pass) for stmt in body):
+        return None
+
+    stats = _walk_branch_stats(body)
     signature = {
         "stmt_seq": _stmt_type_sequence(body),
         "terminal": _terminal_kind(body),

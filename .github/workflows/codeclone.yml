@@ -1,0 +1,33 @@
+name: CodeClone
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths: ["**/*.py"]
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+concurrency:
+  group: codeclone-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeclone:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run CodeClone
+        uses: ./.github/actions/codeclone
+        with:
+          python-version: "3.13"
+          fail-on-new: "true"
+          fail-health: "60"
+          sarif: "true"
+          pr-comment: "true"

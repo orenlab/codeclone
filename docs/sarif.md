@@ -38,7 +38,10 @@ Current behavior:
 - `artifactLocation.uri` uses repository-relative paths
 - `artifactLocation.index` aligns locations with artifacts for stable linking
 - `run.invocations[*].workingDirectory` mirrors the scan root URI when available
-- `run.columnKind` is fixed to `utf16CodeUnits`
+- `run.invocations[*].startTimeUtc` is emitted when analysis start time is
+  available in canonical runtime meta
+- `run.automationDetails.id` is unique per run so code-scanning systems can
+  correlate uploads reliably
 
 This helps consumers resolve results back to workspace files consistently.
 
@@ -53,6 +56,10 @@ Current SARIF output includes:
   human-readable role labels such as `Representative occurrence`
 - `relatedLocations[*]` when the result has multiple relevant locations
 - `partialFingerprints.primaryLocationLineHash` for stable per-location identity
+  without encoding line numbers into the hash digest
+- result `properties` with stable identity/context fields such as primary path,
+  qualname, and region
+- explicit `kind: "fail"` on results
 
 For clone results, CodeClone also carries novelty-aware metadata when known:
 
@@ -68,6 +75,7 @@ Rule records are intentionally richer than a minimal SARIF export.
 They include:
 
 - stable rule IDs
+- stable rule names derived from `ruleId`
 - display name
 - help text / markdown
 - tags

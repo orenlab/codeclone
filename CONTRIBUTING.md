@@ -3,7 +3,7 @@
 Thank you for your interest in contributing to **CodeClone**.
 
 CodeClone provides **structural code quality analysis** for Python, including clone detection,
-quality metrics, and baseline-aware CI governance.
+quality metrics, baseline-aware CI governance, and an optional MCP agent interface.
 
 Contributions are welcome — especially those that improve **signal quality**, **CFG semantics**,
 and **real-world CI usability**.
@@ -31,8 +31,11 @@ We especially welcome contributions in the following areas:
 - Control Flow Graph (CFG) construction and semantics
 - AST normalization improvements
 - Segment-level clone detection and reporting
+- Quality metrics (complexity, coupling, cohesion, dead-code, dependencies)
 - False-positive reduction
 - HTML report UX improvements
+- MCP server tools and agent workflows
+- GitHub Action improvements
 - Performance optimizations
 - Documentation and real-world examples
 
@@ -51,6 +54,8 @@ When reporting issues related to clone detection, include:
     - AST-related,
     - CFG-related,
     - normalization-related,
+    - metrics-related,
+    - MCP-related,
     - reporting / UI-related.
 
 Screenshots alone are usually insufficient for analysis.
@@ -72,8 +77,6 @@ Well-argued false-positive reports are valuable and appreciated.
 ---
 
 ## CFG Semantics Discussions
-
-CFG behavior in CodeClone is intentionally conservative in the 1.x series.
 
 If proposing changes to CFG semantics, include:
 
@@ -98,15 +101,13 @@ Such changes often require design-level discussion and may be staged across vers
 
 ## Baseline & CI
 
-### Baseline contract (v1)
+### Baseline contract (v2)
 
-- The baseline schema is versioned (`meta.schema_version`).
+- The baseline schema is versioned (`meta.schema_version`, currently `2.0`).
 - Compatibility/trust gates include `schema_version`, `fingerprint_version`, `python_tag`,
   and `meta.generator.name`.
-- Integrity is tamper-evident via `meta.payload_sha256` over canonical payload:
-  `clones.functions`, `clones.blocks`, `meta.fingerprint_version`, `meta.python_tag`.
-  `meta.schema_version`, `meta.generator.name`, `meta.generator.version`, and `created_at`
-  are excluded from payload hashing.
+- Integrity is tamper-evident via `meta.payload_sha256` over canonical payload.
+- The baseline may embed a `metrics` section for metrics-baseline-aware CI gating.
 
 ### When baseline regeneration is required
 
@@ -131,12 +132,55 @@ Such changes often require design-level discussion and may be staged across vers
 
 ---
 
+## Versioned schemas
+
+CodeClone maintains several versioned schema contracts:
+
+| Schema           | Current version | Owner                               |
+|------------------|-----------------|-------------------------------------|
+| Baseline         | `2.0`           | `codeclone/baseline.py`             |
+| Report           | `2.1`           | `codeclone/report/json_contract.py` |
+| Cache            | `2.2`           | `codeclone/cache.py`                |
+| Metrics baseline | `1.0`           | `codeclone/metrics_baseline.py`     |
+
+Any change to schema shape or semantics requires version review, documentation, and tests.
+
+---
+
+## MCP Interface
+
+CodeClone includes an optional **read-only MCP server** (`codeclone[mcp]`) for AI agents.
+
+When contributing to MCP:
+
+- MCP must remain **read-only** — it must never mutate baselines, source files, or repo state.
+- Session-local review markers are the only allowed mutable state (in-memory, ephemeral).
+- MCP reuses pipeline/report contracts — do not create a second analysis truth path.
+- Tool names, resource URIs, and response shapes are public surfaces — changes require tests and docs.
+
+See `docs/mcp.md` and `docs/book/20-mcp-interface.md` for details.
+
+---
+
+## GitHub Action
+
+CodeClone ships a composite GitHub Action (`.github/actions/codeclone/`).
+
+When contributing to the Action:
+
+- Never inline `${{ inputs.* }}` in shell scripts — pass through `env:` variables.
+- Prefer major-tag pinning for actions (e.g., `actions/setup-python@v5`).
+- Add timeouts to all `subprocess.run` calls.
+
+---
+
 ## Development Setup
 
 ```bash
 git clone https://github.com/orenlab/codeclone.git
 cd codeclone
 uv sync --all-extras --dev
+uv run pre-commit install
 ```
 
 Run tests:
@@ -148,16 +192,26 @@ uv run pytest
 Static checks:
 
 ```bash
-uv run mypy .
-uv run ruff check .
-uv run ruff format .
+uv run pre-commit run --all-files
+```
+
+Build documentation (if you touched `docs/` or `mkdocs.yml`):
+
+```bash
+uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+```
+
+Run MCP tests (if you touched `mcp_service.py` or `mcp_server.py`):
+
+```bash
+uv run pytest -q tests/test_mcp_service.py tests/test_mcp_server.py
 ```
 
 ---
 
 ## Code Style
 
-- Python **3.10–3.14**
+- Python **3.10 – 3.14**
 - Type annotations are required
 - `Any` should be minimized; prefer precise types and small typed helpers
 - `mypy` must pass
@@ -182,5 +236,7 @@ and may require a `fingerprint_version` bump (and thus baseline regeneration).
 
 ## License
 
-By contributing to CodeClone, you agree that your contributions will be licensed
-under the **MIT License**.
+By contributing code to CodeClone, you agree that your contributions will be
+licensed under **MPL-2.0**.
+
+Documentation contributions are licensed under **MIT**.

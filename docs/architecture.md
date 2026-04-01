@@ -144,7 +144,7 @@ gating decisions.
 Detected findings can be rendered as:
 
 - interactive HTML (`--html`),
-- canonical JSON (`--json`, schema `2.1`),
+- canonical JSON (`--json`, schema `2.2`),
 - deterministic text projection (`--text`),
 - deterministic Markdown projection (`--md`),
 - deterministic SARIF projection (`--sarif`).
@@ -158,6 +158,7 @@ Reporting uses a layered model:
 Provenance is carried through `meta` and includes:
 
 - runtime/context (`codeclone_version`, `python_version`, `python_tag`, `analysis_mode`, `report_mode`)
+- analysis thresholds (`meta.analysis_thresholds.design_findings`)
 - baseline status block (`meta.baseline.*`)
 - cache status block (`meta.cache.*`)
 - metrics-baseline status block (`meta.metrics_baseline.*`)
@@ -168,6 +169,61 @@ Explainability contract (v1):
 - Explainability facts are produced only by Python core/report layer.
 - HTML/JS renderer is display-only and must not recalculate metrics or introduce new semantics.
 - UI can format, filter, and highlight facts, but cannot invent new hints.
+
+---
+
+## 9. MCP Agent Interface
+
+CodeClone also exposes an optional MCP layer for AI agents and MCP-capable
+clients.
+
+Current shape:
+
+- install via the optional `codeclone[mcp]` extra
+- launch via `codeclone-mcp`
+- transports:
+    - `stdio`
+    - `streamable-http`
+- semantics:
+    - read-only
+    - baseline-aware
+    - built on the same pipeline/report contracts as the CLI
+    - bounded in-memory run history
+
+Operational note:
+
+- `codeclone/mcp_server.py` is only a thin launcher/registration layer.
+- The optional MCP runtime is imported lazily so the base `codeclone` install
+  and normal CI paths do not require MCP packages.
+- `codeclone/mcp_service.py` is the in-process adapter over the existing
+  pipeline/report contracts.
+
+The MCP layer is intentionally thin. It does not add a separate analysis engine;
+it adapts the existing pipeline into tools/resources such as:
+
+- analyze repository
+- analyze changed paths
+- get run summary
+- compare runs
+- list findings
+- inspect one finding
+- project remediation payloads
+- list hotspots
+- generate PR summary
+- preview gate outcomes
+- keep session-local reviewed markers
+
+This keeps agent integrations deterministic and aligned with the same canonical
+report document used by JSON/HTML/SARIF.
+
+Security boundaries:
+
+- Read-only by design — no tool mutates source files, baselines, or repo state.
+- `--allow-remote` guard required for non-local transports; default is `stdio`.
+- `cache_policy=refresh` rejected to preserve read-only semantics.
+- Review markers are session-local in-memory state, never persisted.
+- Run history bounded by `--history-limit` to prevent unbounded memory growth.
+- `git_diff_ref` validated against strict regex to prevent injection.
 
 ---
 

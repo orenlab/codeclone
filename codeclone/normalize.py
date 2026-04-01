@@ -1,10 +1,14 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 from ast import AST
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
@@ -214,15 +218,33 @@ def normalized_ast_dump_from_list(
 ) -> str:
     """
     Dump a list of AST nodes after normalization.
-    WARNING: This modifies the AST nodes in-place for performance.
+
+    The normalizer works on deep-copied nodes so callers can safely reuse
+    the original AST for downstream metrics and reporting passes.
     """
     active_normalizer = normalizer or AstNormalizer(cfg)
     dumps: list[str] = []
 
     for node in nodes:
         # Fingerprints ignore location attributes, so we skip location repair.
-        new_node = active_normalizer.visit(node)
+        new_node = active_normalizer.visit(copy.deepcopy(node))
         assert isinstance(new_node, ast.AST)
         dumps.append(ast.dump(new_node, annotate_fields=True, include_attributes=False))
 
     return ";".join(dumps)
+
+
+def _normalized_stmt_dump(stmt: ast.stmt, normalizer: AstNormalizer) -> str:
+    normalized = normalizer.visit(stmt)
+    assert isinstance(normalized, ast.AST)
+    return ast.dump(normalized, annotate_fields=True, include_attributes=False)
+
+
+def stmt_hashes(statements: Sequence[ast.stmt], cfg: NormalizationConfig) -> list[str]:
+    normalizer = AstNormalizer(cfg)
+    return [
+        hashlib.sha1(
+            _normalized_stmt_dump(stmt, normalizer).encode("utf-8")
+        ).hexdigest()
+        for stmt in statements
+    ]

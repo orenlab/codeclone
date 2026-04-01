@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 """Shared UI components: insight banners, summary helpers, chip rows."""
@@ -8,12 +11,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal
 
-from .. import _coerce
+from .._coerce import as_int as _as_int
 from .._html_badges import _source_kind_badge_html
 from .._html_escape import _escape_attr, _escape_html
-
-_as_int = _coerce.as_int
-_as_mapping = _coerce.as_mapping
+from ._icons import section_icon_html
 
 Tone = Literal["ok", "warn", "risk", "info"]
 
@@ -49,52 +50,24 @@ def overview_cluster_header(title: str, subtitle: str | None = None) -> str:
     )
 
 
-_ICON_ALERT = (
-    '<svg class="summary-icon summary-icon--risk" width="16" height="16" '
-    'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-    'stroke-linecap="round" stroke-linejoin="round">'
-    '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86'
-    'a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/>'
-    '<line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
-)
-
-_ICON_PIE = (
-    '<svg class="summary-icon summary-icon--info" width="16" height="16" '
-    'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-    'stroke-linecap="round" stroke-linejoin="round">'
-    '<path d="M21.21 15.89A10 10 0 118 2.83"/>'
-    '<path d="M22 12A10 10 0 0012 2v10z"/></svg>'
-)
-
-_ICON_RADAR = (
-    '<svg class="summary-icon summary-icon--info" width="16" height="16" '
-    'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-    'stroke-linecap="round" stroke-linejoin="round">'
-    '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/>'
-    '<circle cx="12" cy="12" r="2"/>'
-    '<line x1="12" y1="2" x2="12" y2="6"/>'
-    '<line x1="12" y1="18" x2="12" y2="22"/></svg>'
-)
-
-_ICON_BAR = (
-    '<svg class="summary-icon summary-icon--info" width="16" height="16" '
-    'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-    'stroke-linecap="round" stroke-linejoin="round">'
-    '<rect x="3" y="3" width="18" height="4" rx="1"/>'
-    '<rect x="3" y="10" width="13" height="4" rx="1"/>'
-    '<rect x="3" y="17" width="8" height="4" rx="1"/></svg>'
-)
-
-_SUMMARY_ICONS: dict[str, str] = {
-    "top risks": _ICON_ALERT,
-    "source breakdown": _ICON_PIE,
-    "health profile": _ICON_RADAR,
-    "issue breakdown": _ICON_BAR,
+_SUMMARY_ICON_KEYS: dict[str, tuple[str, str]] = {
+    "top risks": ("top-risks", "summary-icon summary-icon--risk"),
+    "issue breakdown": ("issue-breakdown", "summary-icon summary-icon--info"),
+    "source breakdown": ("source-breakdown", "summary-icon summary-icon--info"),
+    "all findings": ("all-findings", "summary-icon summary-icon--info"),
+    "clone groups": ("clone-groups", "summary-icon summary-icon--info"),
+    "low cohesion": ("low-cohesion", "summary-icon summary-icon--info"),
+    "health profile": ("health-profile", "summary-icon summary-icon--info"),
 }
 
 
 def overview_summary_item_html(*, label: str, body_html: str) -> str:
-    icon = _SUMMARY_ICONS.get(label.lower(), "")
+    icon_key, icon_class = _SUMMARY_ICON_KEYS.get(label.lower(), ("", ""))
+    icon = (
+        section_icon_html(icon_key, class_name=icon_class)
+        if icon_key and icon_class
+        else ""
+    )
     return (
         '<article class="overview-summary-item">'
         '<div class="overview-summary-label">'

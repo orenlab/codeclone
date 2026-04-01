@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -6,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from .. import _coerce
+from .._coerce import as_float, as_int, as_mapping, as_sequence
 from ..domain.findings import FAMILY_CLONE, FAMILY_DEAD_CODE, FAMILY_STRUCTURAL
 from ._formatting import format_spread_text
 from .json_contract import build_report_document
@@ -18,6 +21,11 @@ if TYPE_CHECKING:
 MARKDOWN_SCHEMA_VERSION = "1.0"
 _MAX_FINDING_LOCATIONS = 5
 _MAX_METRIC_ITEMS = 10
+
+_as_int = as_int
+_as_float = as_float
+_as_mapping = as_mapping
+_as_sequence = as_sequence
 
 _ANCHORS: tuple[tuple[str, str, int], ...] = (
     ("overview", "Overview", 2),
@@ -40,11 +48,6 @@ _ANCHORS: tuple[tuple[str, str, int], ...] = (
     ("dead-code-suppressed", "Suppressed Dead Code", 3),
     ("integrity", "Integrity", 2),
 )
-
-_as_int = _coerce.as_int
-_as_float = _coerce.as_float
-_as_mapping = _coerce.as_mapping
-_as_sequence = _coerce.as_sequence
 
 
 def _text(value: object) -> str:

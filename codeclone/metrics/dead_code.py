@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -6,7 +9,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Literal
 
-from ..domain.findings import CLONE_KIND_FUNCTION, SYMBOL_KIND_METHOD
+from ..domain.findings import SYMBOL_KIND_FUNCTION, SYMBOL_KIND_METHOD
 from ..domain.quality import CONFIDENCE_HIGH, CONFIDENCE_MEDIUM
 from ..models import DeadCandidate, DeadItem
 from ..paths import is_test_filepath
@@ -104,7 +107,7 @@ def _is_non_actionable_candidate(symbol: DeadCandidate) -> bool:
         return True
 
     # Module-level dynamic hooks (PEP 562) are invoked by import/runtime lookup.
-    if symbol.kind == CLONE_KIND_FUNCTION:
+    if symbol.kind == SYMBOL_KIND_FUNCTION:
         return symbol.local_name in _MODULE_RUNTIME_HOOK_NAMES
     # Magic methods and visitor callbacks are invoked by runtime dispatch.
     if symbol.kind == SYMBOL_KIND_METHOD:

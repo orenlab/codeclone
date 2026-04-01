@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -7,6 +10,7 @@ import hashlib
 import hmac
 import json
 import os
+import tempfile
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -452,13 +456,21 @@ class MetricsBaseline:
 
 
 def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
-    tmp_path = path.with_name(f"{path.name}.tmp")
     data = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
-    with tmp_path.open("wb") as tmp_file:
-        tmp_file.write(data.encode("utf-8"))
-        tmp_file.flush()
-        os.fsync(tmp_file.fileno())
-    os.replace(tmp_path, path)
+    fd_num, tmp_name = tempfile.mkstemp(
+        dir=path.parent,
+        suffix=".tmp",
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd_num, "wb") as fd:
+            fd.write(data.encode("utf-8"))
+            fd.flush()
+            os.fsync(fd.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:

@@ -1,3 +1,9 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
 from __future__ import annotations
 
 import json
@@ -9,6 +15,7 @@ import pytest
 
 import codeclone.report.json_contract as json_contract_mod
 from codeclone import _coerce
+from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import (
     ReportLocation,
     StructuralFindingGroup,
@@ -59,10 +66,19 @@ from codeclone.report.sarif import (
     _partial_fingerprints as _sarif_partial_fingerprints,
 )
 from codeclone.report.sarif import (
+    _primary_location_properties as _sarif_primary_location_properties,
+)
+from codeclone.report.sarif import (
+    _result_entry as _sarif_result_entry,
+)
+from codeclone.report.sarif import (
     _result_message as _sarif_result_message,
 )
 from codeclone.report.sarif import (
     _result_properties as _sarif_result_properties,
+)
+from codeclone.report.sarif import (
+    _rule_name as _sarif_rule_name,
 )
 from codeclone.report.sarif import (
     _rule_spec as _sarif_rule_spec,
@@ -76,12 +92,10 @@ from codeclone.report.sarif import (
     to_sarif_report,
 )
 from codeclone.report.sarif import (
-    _slug as _sarif_slug,
-)
-from codeclone.report.sarif import (
     _text as _sarif_text,
 )
 from codeclone.report.serialize import (
+    _append_clone_section,
     _append_single_item_findings,
     _append_structural_findings,
     _append_suggestions,
@@ -476,6 +490,69 @@ def test_report_document_rich_invariants_and_renderers() -> None:
     design_groups = cast(list[dict[str, object]], design)
     categories = {str(item["category"]) for item in design_groups}
     assert {"complexity", "coupling", "cohesion", "dependency"}.issubset(categories)
+    design_thresholds = cast(
+        "dict[str, dict[str, object]]",
+        cast(
+            "dict[str, object]",
+            cast("dict[str, object]", payload["meta"])["analysis_thresholds"],
+        )["design_findings"],
+    )
+    assert design_thresholds["complexity"] == {
+        "metric": "cyclomatic_complexity",
+        "operator": ">",
+        "value": 20,
+    }
+    assert design_thresholds["coupling"] == {
+        "metric": "cbo",
+        "operator": ">",
+        "value": 10,
+    }
+    assert design_thresholds["cohesion"] == {
+        "metric": "lcom4",
+        "operator": ">=",
+        "value": 4,
+    }
+    directory_hotspots = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", payload["derived"])["overview"],
+    )["directory_hotspots"]
+    hotspot_buckets = cast("dict[str, object]", directory_hotspots)
+    assert set(hotspot_buckets) == {
+        "all",
+        "clones",
+        "structural",
+        "complexity",
+        "cohesion",
+        "coupling",
+        "dead_code",
+        "dependency",
+    }
+    all_rows = cast(
+        "list[dict[str, object]]",
+        cast("dict[str, object]", hotspot_buckets["all"])["items"],
+    )
+    assert {
+        "path": all_rows[0]["path"],
+        "finding_groups": all_rows[0]["finding_groups"],
+        "affected_items": all_rows[0]["affected_items"],
+        "files": all_rows[0]["files"],
+        "share_pct": all_rows[0]["share_pct"],
+    } == {
+        "path": "codeclone",
+        "finding_groups": 9,
+        "affected_items": 11,
+        "files": 3,
+        "share_pct": 68.8,
+    }
+    assert cast("dict[str, int]", all_rows[0]["kind_breakdown"]) == {
+        "clones": 3,
+        "structural": 1,
+        "dead_code": 1,
+        "complexity": 2,
+        "coupling": 1,
+        "cohesion": 1,
+        "dependency": 0,
+    }
 
     clones = cast(dict[str, object], groups["clones"])
     block_groups = cast(list[dict[str, object]], clones["blocks"])
@@ -499,6 +576,340 @@ def test_report_document_rich_invariants_and_renderers() -> None:
     assert any("relatedLocations" in result for result in run["results"])
     assert any("baselineState" in result for result in run["results"])
     assert all("help" in rule for rule in run["tool"]["driver"]["rules"])
+
+
+def test_report_document_design_thresholds_can_change_canonical_findings() -> None:
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={
+            "scan_root": "/repo/project",
+            "design_complexity_threshold": 30,
+            "design_coupling_threshold": 12,
+            "design_cohesion_threshold": 5,
+        },
+        metrics={
+            "complexity": {
+                "functions": [
+                    {
+                        "qualname": "pkg.mod:hot",
+                        "filepath": "/repo/project/pkg/mod.py",
+                        "start_line": 10,
+                        "end_line": 20,
+                        "cyclomatic_complexity": 25,
+                        "nesting_depth": 3,
+                        "risk": "medium",
+                    }
+                ]
+            },
+            "coupling": {
+                "classes": [
+                    {
+                        "qualname": "pkg.mod:Service",
+                        "filepath": "/repo/project/pkg/mod.py",
+                        "start_line": 30,
+                        "end_line": 60,
+                        "cbo": 11,
+                        "risk": "high",
+                        "coupled_classes": ["A", "B"],
+                    }
+                ]
+            },
+            "cohesion": {
+                "classes": [
+                    {
+                        "qualname": "pkg.mod:Service",
+                        "filepath": "/repo/project/pkg/mod.py",
+                        "start_line": 30,
+                        "end_line": 60,
+                        "lcom4": 4,
+                        "risk": "high",
+                        "method_count": 4,
+                        "instance_var_count": 1,
+                    }
+                ]
+            },
+            "dependencies": {
+                "cycles": [["pkg.alpha", "pkg.beta"]],
+            },
+        },
+    )
+    finding_groups = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", payload["findings"])["groups"],
+    )
+    design_groups = cast(
+        "list[dict[str, object]]",
+        cast("dict[str, object]", finding_groups["design"])["groups"],
+    )
+    assert [str(group["category"]) for group in design_groups] == ["dependency"]
+    thresholds = cast(
+        "dict[str, dict[str, object]]",
+        cast(
+            "dict[str, object]",
+            cast("dict[str, object]", payload["meta"])["analysis_thresholds"],
+        )["design_findings"],
+    )
+    assert thresholds["complexity"]["value"] == 30
+    assert thresholds["coupling"]["value"] == 12
+    assert thresholds["cohesion"]["value"] == 5
+
+
+def test_directory_hotspots_has_more_root_paths_and_stable_sort() -> None:
+    findings = {
+        "groups": {
+            "clones": {
+                "functions": [
+                    {
+                        "id": "clone:function:g1",
+                        "family": "clone",
+                        "category": "function",
+                        "items": [
+                            {"relative_path": "a.py"},
+                            {"relative_path": "a.py"},
+                        ],
+                    }
+                ],
+                "blocks": [],
+                "segments": [],
+            },
+            "structural": {"groups": []},
+            "dead_code": {
+                "groups": [
+                    {
+                        "id": f"dead:{index}",
+                        "family": "dead_code",
+                        "category": "function",
+                        "items": [
+                            {"relative_path": f"dir{index}/mod.py"},
+                        ],
+                    }
+                    for index in (5, 3, 1, 4, 2, 6)
+                ]
+            },
+            "design": {"groups": []},
+        }
+    }
+
+    hotspots = overview_mod.build_directory_hotspots(findings=findings)
+    clone_rows = cast(
+        "list[dict[str, object]]",
+        cast("dict[str, object]", hotspots["clones"])["items"],
+    )
+    assert clone_rows == [
+        {
+            "path": ".",
+            "finding_groups": 1,
+            "affected_items": 2,
+            "files": 1,
+            "share_pct": 100.0,
+            "source_scope": {
+                "dominant_kind": "production",
+                "breakdown": {
+                    "production": 2,
+                    "tests": 0,
+                    "fixtures": 0,
+                    "other": 0,
+                },
+                "impact_scope": "runtime",
+            },
+        }
+    ]
+    dead_code_bucket = cast("dict[str, object]", hotspots["dead_code"])
+    dead_code_rows = cast("list[dict[str, object]]", dead_code_bucket["items"])
+    assert dead_code_bucket["total_directories"] == 6
+    assert dead_code_bucket["returned"] == 5
+    assert dead_code_bucket["has_more"] is True
+    assert [str(row["path"]) for row in dead_code_rows] == [
+        "dir1",
+        "dir2",
+        "dir3",
+        "dir4",
+        "dir5",
+    ]
+
+
+def test_directory_hotspots_collapses_test_scope_roots_for_overview() -> None:
+    findings = {
+        "groups": {
+            "clones": {
+                "functions": [
+                    {
+                        "id": "clone:function:g1",
+                        "family": "clone",
+                        "category": "function",
+                        "items": [
+                            {"relative_path": "tests/fixtures/golden_project/alpha.py"},
+                            {"relative_path": "tests/fixtures/golden_project/beta.py"},
+                            {
+                                "relative_path": (
+                                    "tests/fixtures/golden_v2/"
+                                    "clone_metrics_cycle/pkg/a.py"
+                                )
+                            },
+                            {
+                                "relative_path": (
+                                    "tests/fixtures/golden_v2/"
+                                    "clone_metrics_cycle/pkg/b.py"
+                                )
+                            },
+                        ],
+                    }
+                ],
+                "blocks": [],
+                "segments": [],
+            },
+            "structural": {"groups": []},
+            "dead_code": {"groups": []},
+            "design": {
+                "groups": [
+                    {
+                        "id": "design:cohesion:tests.helper:Runner",
+                        "family": "design",
+                        "category": "cohesion",
+                        "items": [
+                            {"relative_path": "pkg/tests/unit/test_runner.py"},
+                        ],
+                    }
+                ]
+            },
+        }
+    }
+
+    hotspots = overview_mod.build_directory_hotspots(findings=findings)
+    all_rows = cast(
+        "list[dict[str, object]]",
+        cast("dict[str, object]", hotspots["all"])["items"],
+    )
+    assert all_rows == [
+        {
+            "path": "tests/fixtures",
+            "finding_groups": 1,
+            "affected_items": 4,
+            "files": 4,
+            "share_pct": 80.0,
+            "source_scope": {
+                "dominant_kind": "fixtures",
+                "breakdown": {
+                    "production": 0,
+                    "tests": 0,
+                    "fixtures": 4,
+                    "other": 0,
+                },
+                "impact_scope": "non_runtime",
+            },
+            "kind_breakdown": {
+                "clones": 1,
+                "structural": 0,
+                "dead_code": 0,
+                "complexity": 0,
+                "coupling": 0,
+                "cohesion": 0,
+                "dependency": 0,
+            },
+        },
+        {
+            "path": "pkg/tests",
+            "finding_groups": 1,
+            "affected_items": 1,
+            "files": 1,
+            "share_pct": 20.0,
+            "source_scope": {
+                "dominant_kind": "tests",
+                "breakdown": {
+                    "production": 0,
+                    "tests": 1,
+                    "fixtures": 0,
+                    "other": 0,
+                },
+                "impact_scope": "non_runtime",
+            },
+            "kind_breakdown": {
+                "clones": 0,
+                "structural": 0,
+                "dead_code": 0,
+                "complexity": 0,
+                "coupling": 0,
+                "cohesion": 1,
+                "dependency": 0,
+            },
+        },
+    ]
+
+
+def test_directory_hotspot_helpers_cover_fallback_paths() -> None:
+    assert overview_mod._directory_bucket_keys(
+        {"family": "other", "category": "x"}
+    ) == ("all",)
+    assert (
+        overview_mod._directory_kind_breakdown_key(
+            {"family": "design", "category": "unknown"}
+        )
+        is None
+    )
+    assert overview_mod._directory_relative_path({"module": "pkg.mod"}) == "pkg/mod.py"
+    assert overview_mod._directory_scope_root_label(".", source_kind="tests") is None
+    assert (
+        overview_mod._directory_scope_root_label(
+            "pkg/tests/unit/test_mod.py",
+            source_kind="production",
+        )
+        is None
+    )
+    assert overview_mod._directory_contributions({"items": [{}]}) == {}
+    assert (
+        overview_mod._directory_group_data({"items": [{"relative_path": "pkg/mod.py"}]})
+        is None
+    )
+    assert overview_mod._directory_group_data({"id": "g1", "items": [{}]}) is None
+
+    hotspots = overview_mod.build_directory_hotspots(
+        findings={
+            "groups": {
+                "clones": {"functions": [], "blocks": [], "segments": []},
+                "structural": {"groups": [{"family": "structural", "items": [{}]}]},
+                "dead_code": {"groups": []},
+                "design": {"groups": []},
+            }
+        }
+    )
+    assert cast("dict[str, object]", hotspots["all"]) == {
+        "total_directories": 0,
+        "returned": 0,
+        "has_more": False,
+        "items": [],
+    }
+    unknown_design_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "design",
+            "category": "unknown",
+            "severity": "info",
+            "confidence": "low",
+            "count": 1,
+            "source_scope": {"dominant_kind": "other"},
+            "spread": {"files": 1, "functions": 1},
+            "items": [{"relative_path": "pkg/mod.py", "start_line": 1, "end_line": 1}],
+            "facts": {},
+        }
+    )
+    assert unknown_design_card["title"] == "Finding"
+    assert unknown_design_card["summary"] == ""
+    unknown_family_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "other",
+            "category": "misc",
+            "severity": "info",
+            "confidence": "low",
+            "count": 1,
+            "source_scope": {"dominant_kind": "other"},
+            "spread": {"files": 1, "functions": 0},
+            "items": [{"relative_path": "pkg/mod.py"}],
+            "facts": {},
+        }
+    )
+    assert unknown_family_card["title"] == "Finding"
+    assert unknown_family_card["summary"] == ""
 
 
 def test_markdown_and_sarif_reuse_prebuilt_report_document() -> None:
@@ -1082,7 +1493,7 @@ def test_sarif_private_helper_family_dispatches() -> None:
                 "items": [{"relative_path": "pkg/mod.py"}],
             }
         )
-        == "Unused function with medium confidence: pkg/mod.py"
+        == "Unused function with medium confidence: pkg/mod.py."
     )
     assert "LCOM4=4" in _sarif_result_message(
         {
@@ -1210,14 +1621,30 @@ def test_sarif_private_helper_family_dispatches() -> None:
         group={"id": "design:cohesion:pkg.mod:Thing"},
         primary_item={"relative_path": "", "qualname": "", "start_line": 0},
     )
+    shifted_line_hash = _sarif_partial_fingerprints(
+        rule_id="CDESIGN002",
+        group={"id": "design:complexity:pkg.mod:run"},
+        primary_item={
+            "relative_path": "pkg/mod.py",
+            "qualname": "pkg.mod:run",
+            "start_line": 30,
+            "end_line": 34,
+        },
+    )
     assert "primaryLocationLineHash" in line_hash
     assert "primaryLocationLineHash" not in no_line_hash
+    assert set(line_hash) == {"primaryLocationLineHash"}
+    assert (
+        line_hash["primaryLocationLineHash"].split(":", 1)[0]
+        == shifted_line_hash["primaryLocationLineHash"].split(":", 1)[0]
+    )
 
 
 def test_sarif_private_helper_edge_branches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert _sarif_slug("Function /// clone   group") == "function-clone-group"
+    spec = _sarif_rule_spec({"family": "clone", "category": "function"})
+    assert _sarif_rule_name(spec) == "codeclone.CCLONE001"
     assert (
         _sarif_scan_root_uri({"meta": {"runtime": {"scan_root_absolute": "repo"}}})
         == ""
@@ -1249,7 +1676,7 @@ def test_sarif_private_helper_edge_branches(
 
 def test_render_sarif_report_document_without_srcroot_keeps_relative_payload() -> None:
     payload = {
-        "report_schema_version": "2.1",
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "meta": {
             "codeclone_version": "2.0.0b2",
             "analysis_mode": "ci",
@@ -1294,11 +1721,15 @@ def test_render_sarif_report_document_without_srcroot_keeps_relative_payload() -
     assert "originalUriBaseIds" not in run
     invocation = cast(dict[str, object], cast(list[object], run["invocations"])[0])
     assert "workingDirectory" not in invocation
+    assert "startTimeUtc" not in invocation
+    assert "columnKind" not in run
     result = cast(dict[str, object], cast(list[object], run["results"])[0])
     assert "baselineState" not in result
+    assert result["kind"] == "fail"
     primary_location = cast(list[object], result["locations"])[0]
     location_map = cast(dict[str, object], primary_location)
     assert cast(dict[str, object], location_map["message"])["text"] == "Cycle member"
+    assert cast(str, cast(dict[str, object], result["message"])["text"]).endswith(".")
 
 
 def test_collect_paths_from_metrics_covers_all_metric_families_and_skips_missing() -> (
@@ -1571,6 +2002,33 @@ def test_serialize_private_helpers_cover_structural_and_suppression_paths() -> N
     assert any("... and 1 more occurrences" in line for line in structural_lines)
     assert structural_lines[-1] != ""
 
+    clone_lines: list[str] = []
+    _append_clone_section(
+        clone_lines,
+        title="FUNCTION CLONES",
+        groups=[
+            {
+                "id": "clone:function:1",
+                "novelty": "new",
+                "clone_type": "Type-2",
+                "severity": "warning",
+                "count": 1,
+                "spread": {"files": 1, "functions": 1},
+                "source_scope": {
+                    "dominant_kind": "production",
+                    "impact_scope": "runtime",
+                },
+                "items": [],
+            }
+        ],
+        novelty="new",
+        metric_name="cyclomatic_complexity",
+    )
+    assert clone_lines[0] == "FUNCTION CLONES (NEW) (groups=1)"
+    assert not any(line.startswith("facts: ") for line in clone_lines)
+    assert not any(line.startswith("display_facts: ") for line in clone_lines)
+    assert clone_lines[-1] != ""
+
     finding_lines: list[str] = []
     _append_single_item_findings(
         finding_lines,
@@ -1638,6 +2096,136 @@ def test_serialize_private_helpers_cover_structural_and_suppression_paths() -> N
         ],
     )
     assert any("suppressed_by=(none)" in line for line in suppressed_none_lines)
+
+
+def test_sarif_and_serialize_helpers_cover_missing_primary_path_and_no_empty_tail() -> (
+    None
+):
+    assert _sarif_primary_location_properties(
+        {"qualname": "pkg.mod:fn", "start_line": 3, "end_line": 4}
+    ) == {
+        "primaryQualname": "pkg.mod:fn",
+        "primaryRegion": "3-4",
+    }
+    result = _sarif_result_entry(
+        group={"id": "clone:function:1", "severity": "warning", "items": []},
+        rule_id="codeclone.clone.function",
+        rule_index=0,
+        artifact_index_map={},
+        use_uri_base_id=False,
+    )
+    assert result["locations"] == []
+    assert "primaryPath" not in cast(dict[str, object], result["properties"])
+
+    class _NoEmptyList(list[str]):
+        def append(self, item: str) -> None:
+            if item != "":
+                super().append(item)
+
+    clone_lines: list[str] = _NoEmptyList()
+    _append_clone_section(
+        clone_lines,
+        title="BLOCK CLONES",
+        groups=[
+            {
+                "id": "clone:block:1",
+                "novelty": "known",
+                "clone_type": "Type-4",
+                "severity": "warning",
+                "count": 1,
+                "spread": {"files": 1, "functions": 1},
+                "source_scope": {
+                    "dominant_kind": "production",
+                    "impact_scope": "runtime",
+                },
+                "items": [
+                    {
+                        "qualname": "pkg.mod:fn",
+                        "relative_path": "pkg/mod.py",
+                        "start_line": 1,
+                        "end_line": 2,
+                    }
+                ],
+            }
+        ],
+        novelty="known",
+        metric_name="cyclomatic_complexity",
+    )
+    assert clone_lines[-1].startswith("- pkg.mod:fn")
+
+    structural_lines: list[str] = _NoEmptyList()
+    _append_structural_findings(
+        structural_lines,
+        [
+            {
+                "id": "structural:custom:2",
+                "kind": "custom_kind",
+                "severity": "info",
+                "confidence": "low",
+                "count": 1,
+                "spread": {"files": 1, "functions": 1},
+                "source_scope": {
+                    "dominant_kind": "production",
+                    "impact_scope": "runtime",
+                },
+                "signature": {"stable": {"family": "custom", "control_flow": {}}},
+                "items": [
+                    {
+                        "qualname": "pkg.mod:fn",
+                        "relative_path": "pkg/mod.py",
+                        "start_line": 1,
+                        "end_line": 1,
+                    }
+                ],
+            }
+        ],
+    )
+    assert structural_lines[-1].startswith("- pkg.mod:fn")
+
+    finding_lines: list[str] = _NoEmptyList()
+    _append_single_item_findings(
+        finding_lines,
+        title="DESIGN FINDINGS",
+        groups=[
+            {
+                "id": "design:coupling:pkg.mod:fn",
+                "category": "coupling",
+                "kind": "class_hotspot",
+                "severity": "warning",
+                "confidence": "medium",
+                "source_scope": {
+                    "dominant_kind": "production",
+                    "impact_scope": "runtime",
+                },
+                "items": [
+                    {
+                        "qualname": "pkg.mod:fn",
+                        "relative_path": "pkg/mod.py",
+                        "start_line": 10,
+                        "end_line": 11,
+                    }
+                ],
+            }
+        ],
+        fact_keys=("cbo",),
+    )
+    assert finding_lines[-1].startswith("- pkg.mod:fn")
+
+    suppressed_lines: list[str] = _NoEmptyList()
+    _append_suppressed_dead_code_items(
+        suppressed_lines,
+        items=[
+            {
+                "kind": "function",
+                "confidence": "high",
+                "relative_path": "pkg/mod.py",
+                "qualname": "pkg.mod:keep",
+                "start_line": 12,
+                "end_line": 13,
+            }
+        ],
+    )
+    assert suppressed_lines[-1].startswith("- pkg.mod:keep")
 
     suggestion_lines: list[str] = []
     _append_suggestions(

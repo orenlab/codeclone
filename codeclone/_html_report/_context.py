@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 """ReportContext — immutable shared state for all section renderers."""
@@ -9,7 +12,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .. import _coerce
+from .._coerce import as_mapping as _as_mapping
 from ..contracts import REPORT_SCHEMA_VERSION
 from ..report.overview import build_report_overview, materialize_report_overview
 
@@ -22,9 +25,6 @@ if TYPE_CHECKING:
         StructuralFindingGroup,
         Suggestion,
     )
-
-_as_mapping = _coerce.as_mapping
-_as_sequence = _coerce.as_sequence
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,5 +1,62 @@
 # Changelog
 
+## [2.0.0b3]
+
+2.0.0b3 is the release where CodeClone stops looking like "a strong analyzer with extras" and starts looking like a
+coherent platform: canonical-report-first, agent-facing, CI-native, and product-grade.
+
+### Licensing & packaging
+
+- Re-license source code to MPL-2.0 while keeping documentation under MIT.
+- Ship dual `LICENSE` / `LICENSE-docs` files and sync SPDX headers.
+
+### MCP server (new)
+
+- Add optional `codeclone[mcp]` extra with `codeclone-mcp` launcher (`stdio` and `streamable-http`).
+- Introduce a read-only MCP surface with 20 tools, fixed resources, and run-scoped URIs for analysis, changed-files
+  review, run comparison, findings / hotspots / remediation, granular checks, and gate preview.
+- Add bounded run retention (`--history-limit`), `--allow-remote` guard, and reject `cache_policy=refresh` to preserve
+  read-only semantics.
+- Optimize MCP payloads for agents with short ids, compact summaries/cards, bounded `metrics_detail`, and slim
+  changed-files / compare-runs responses — without changing the canonical report contract.
+- Make MCP explicitly triage-first and budget-aware: clients are guided toward summary/triage → hotspots / `check_*` →
+  single-finding drill-down instead of broad early listing.
+- Add `cache.freshness` marker and `get_production_triage` / `codeclone://latest/triage` for compact production-first
+  overview.
+- Improve run-comparison honesty: `compare_runs` now reports `mixed` / `incomparable`, and `clones_only` runs surface
+  `health: unavailable` instead of placeholder values.
+- Harden repository safety: MCP analysis now requires an absolute repository root and rejects relative roots like `.`
+  to avoid analyzing the wrong directory.
+- Fix hotlist key resolution for `production_hotspots` and `test_fixture_hotspots`.
+- Bump cache schema to `2.3` (stale metric entries rebuilt, not reused).
+
+### Report contract
+
+- Bump canonical report schema to `2.2`.
+- Add canonical `meta.analysis_thresholds.design_findings` provenance and move threshold-aware design findings fully
+  into the canonical report, so MCP and HTML read the same design-finding universe.
+- Add `derived.overview.directory_hotspots` and render it in the HTML Overview tab as `Hotspots by Directory`.
+
+### CLI
+
+- Add `--changed-only`, `--diff-against`, and `--paths-from-git-diff` for changed-scope review and gating with
+  first-class summary output.
+
+### SARIF
+
+- Stabilize `primaryLocationLineHash` (line numbers excluded), add run-unique `automationDetails.id` /
+  `startTimeUtc`, set explicit `kind: "fail"`, and move ancillary fields to `properties`.
+
+### HTML report
+
+- Add `Hotspots by Directory` to the Overview tab, surfacing directory-level concentration for `all`, `clones`, and low-cohesion findings with scope-aware badges and compact counts.
+- Add IDE picker (PyCharm, IDEA, VS Code, Cursor, Fleet, Zed) with persistent selection.
+- Add clickable file-path deep links across all tabs and stable `finding-{id}` anchors.
+
+### GitHub Action
+
+- Ship Composite Action v2 with configurable quality gates, SARIF upload to Code Scanning, and PR summary comments.
+
 ## [2.0.0b2]
 
 ### Dependencies

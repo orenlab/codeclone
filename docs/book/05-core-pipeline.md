@@ -33,6 +33,30 @@ Stages:
 6. Structural report findings:
     - duplicated branch families from per-function AST structure facts
     - clone cohort drift families built from existing function groups (no rescan)
+7. Metrics computation (full mode only):
+    - per-function cyclomatic complexity
+    - per-class coupling (CBO) and cohesion (LCOM4)
+    - dead-code analysis: declaration-only, qualname-based liveness
+    - dependency graph and cycle detection
+8. Health scoring:
+    - seven dimension scores: clones, complexity, coupling, cohesion,
+      dead code, dependencies, coverage
+    - weighted blend → composite score (0–100) and grade (A–F)
+9. Design finding extraction:
+    - threshold-aware findings for complexity, coupling, cohesion
+    - thresholds recorded in `meta.analysis_thresholds.design_findings`
+10. Suggestion generation:
+    - advisory cards from clone groups, structural findings, metric violations
+    - deterministic priority sort, never gates CI
+11. Derived overview and hotlists:
+    - overview families, top risks, source breakdown, health snapshot
+    - directory hotspots by category (`derived.overview.directory_hotspots`)
+    - hotlists: most actionable, highest spread, production/test-fixture hotspots
+12. Gate evaluation:
+    - clone-baseline diff (NEW vs KNOWN)
+    - metric threshold gates (`--fail-complexity`, `--fail-coupling`, etc.)
+    - metric regression gates (`--fail-on-new-metrics`)
+    - gate reasons emitted in deterministic order
 
 Refs:
 
@@ -40,6 +64,11 @@ Refs:
 - `codeclone/extractor.py:extract_units_and_stats_from_source`
 - `codeclone/report/blocks.py:prepare_block_report_groups`
 - `codeclone/report/segments.py:prepare_segment_report_groups`
+- `codeclone/metrics/health.py:compute_health`
+- `codeclone/report/json_contract.py:_build_design_groups`
+- `codeclone/report/suggestions.py:generate_suggestions`
+- `codeclone/report/overview.py:build_directory_hotspots`
+- `codeclone/pipeline.py:metric_gate_reasons`
 
 ## Contracts
 

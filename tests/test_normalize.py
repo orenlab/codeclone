@@ -1,3 +1,9 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
 import ast
 from typing import Any, cast
 
@@ -8,6 +14,7 @@ from codeclone.meta_markers import CFG_META_PREFIX
 from codeclone.normalize import (
     NormalizationConfig,
     normalized_ast_dump_from_list,
+    stmt_hashes,
 )
 from tests._assertions import assert_contains_all
 from tests._ast_helpers import fix_missing_single_function
@@ -70,6 +77,30 @@ def test_normalization_equivalent_sources(src1: str, src2: str) -> None:
     a1 = ast.parse(src1).body[0]
     a2 = ast.parse(src2).body[0]
     assert normalized_ast_dump(a1, cfg) == normalized_ast_dump(a2, cfg)
+
+
+def test_stmt_hashes_normalize_names() -> None:
+    cfg = NormalizationConfig()
+    s1 = ast.parse("a = b + 1").body[0]
+    s2 = ast.parse("x = y + 2").body[0]
+    assert stmt_hashes([s1], cfg)[0] == stmt_hashes([s2], cfg)[0]
+
+
+def test_normalized_ast_dump_does_not_mutate_input_ast() -> None:
+    cfg = NormalizationConfig()
+    node = ast.parse(
+        """
+def f(x: int) -> int:
+    value = x + 1
+    return value
+"""
+    ).body[0]
+    before = ast.dump(node, annotate_fields=True, include_attributes=False)
+
+    normalized_ast_dump(node, cfg)
+
+    after = ast.dump(node, annotate_fields=True, include_attributes=False)
+    assert after == before
 
 
 @pytest.mark.parametrize(

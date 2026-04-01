@@ -21,6 +21,8 @@ Suggestion shape:
 - `severity`: `critical|warning|info`
 - `category`:
   `clone|structural|complexity|coupling|cohesion|dead_code|dependency`
+- `source_kind`: source classification of the primary location
+  (`production` / `tests` / `fixtures` / `other`)
 - `title`, `location`, `steps`, `effort`, `priority`
 
 Clone typing:
@@ -93,7 +95,7 @@ Refs:
 - `tests/test_report_suggestions.py::test_classify_clone_type_all_modes`
 - `tests/test_report_suggestions.py::test_generate_suggestions_covers_clone_metrics_and_dependency_categories`
 - `tests/test_report_suggestions.py::test_generate_suggestions_covers_skip_branches_for_optional_rules`
-- `tests/test_html_report.py::test_html_report_suggestions_headers_include_help_tips`
+- `tests/test_html_report.py::test_html_report_suggestions_cards_split_facts_assessment_and_action`
 
 ## Non-guarantees
 

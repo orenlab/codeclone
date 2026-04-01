@@ -1,3 +1,9 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
 from __future__ import annotations
 
 import json
@@ -1869,16 +1875,37 @@ def test_cli_too_large_baseline_fails_in_ci(
     _assert_report_baseline_meta(payload, status="too_large", loaded=False)
 
 
+@pytest.mark.parametrize(
+    ("mutator", "expected_message", "expected_status", "expected_schema_version"),
+    [
+        (
+            lambda data: data.__setitem__("sig", "bad"),
+            "signature",
+            "integrity_failed",
+            CACHE_VERSION,
+        ),
+        (
+            lambda data: data.__setitem__("v", "2.2"),
+            "Cache version mismatch",
+            "version_mismatch",
+            "2.2",
+        ),
+    ],
+)
 def test_cli_reports_cache_used_false_on_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    mutator: Callable[[dict[str, object]], None],
+    expected_message: str,
+    expected_status: str,
+    expected_schema_version: object,
 ) -> None:
     src, cache_path, cache = _prepare_single_source_cache(tmp_path)
     cache.put_file_entry(str(src), {"mtime_ns": 1, "size": 10}, [], [], [])
     cache.save()
     data = json.loads(cache_path.read_text("utf-8"))
-    data["sig"] = "bad"
+    mutator(data)
     cache_path.write_text(json.dumps(data), "utf-8")
 
     baseline_path = _write_current_python_baseline(tmp_path / "baseline.json")
@@ -1893,12 +1920,12 @@ def test_cli_reports_cache_used_false_on_warning(
         ],
     )
     out = capsys.readouterr().out
-    assert "signature" in out
+    assert expected_message in out
     _assert_report_cache_meta(
         payload,
         used=False,
-        status="integrity_failed",
-        schema_version=CACHE_VERSION,
+        status=expected_status,
+        schema_version=expected_schema_version,
     )
 
 

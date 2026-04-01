@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -65,16 +68,14 @@ def compute_lcom4(class_node: ast.ClassDef) -> tuple[int, int, int]:
     components = 0
 
     for method_name in method_names:
-        if method_name in visited:
-            continue
-        components += 1
-        stack = [method_name]
-        while stack:
-            current = stack.pop()
-            if current in visited:
-                continue
-            visited.add(current)
-            stack.extend(sorted(adjacency[current] - visited))
+        if method_name not in visited:
+            components += 1
+            stack = [method_name]
+            while stack:
+                current = stack.pop()
+                if current not in visited:
+                    visited.add(current)
+                    stack.extend(sorted(adjacency[current] - visited))
 
     instance_vars = set().union(*method_to_attrs.values()) if method_to_attrs else set()
     return components, len(method_names), len(instance_vars)

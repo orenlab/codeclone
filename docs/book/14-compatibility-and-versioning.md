@@ -12,6 +12,7 @@ compatibility is enforced.
 - Metrics baseline compatibility checks: `codeclone/metrics_baseline.py:MetricsBaseline.verify_compatibility`
 - Cache compatibility checks: `codeclone/cache.py:Cache.load`
 - Report schema assignment: `codeclone/report/json_contract.py:build_report_document`
+- MCP public surface: `codeclone/mcp_server.py`, `codeclone/mcp_service.py`
 
 ## Data model
 
@@ -19,8 +20,8 @@ Current contract versions:
 
 - `BASELINE_SCHEMA_VERSION = "2.0"`
 - `BASELINE_FINGERPRINT_VERSION = "1"`
-- `CACHE_VERSION = "2.2"`
-- `REPORT_SCHEMA_VERSION = "2.1"`
+- `CACHE_VERSION = "2.3"`
+- `REPORT_SCHEMA_VERSION = "2.2"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.0"` (standalone metrics-baseline file)
 
 Refs:
@@ -33,10 +34,29 @@ Version bump rules:
 
 - Bump **baseline schema** only for baseline JSON layout/type changes.
 - Bump **fingerprint version** when clone key semantics change.
-- Bump **cache schema** for cache wire-format/validation changes.
+- Bump **cache schema** for cache wire-format/validation changes and for
+  cached-analysis semantic changes that would otherwise leave stale cache
+  entries looking compatible to runtime validation.
 - Bump **report schema** for canonical report document contract changes
   (`report_schema_version`, consumed by JSON/TXT/Markdown/SARIF and HTML provenance/view).
 - Bump **metrics-baseline schema** only for standalone metrics-baseline payload changes.
+- MCP does not currently define a separate schema/version constant; tool names,
+  resource shapes, and documented request/response semantics are therefore
+  package-versioned public surface and must be documented/tested when changed.
+- Slimming or splitting MCP-only projections (for example, summary payloads or
+  `metrics` vs `metrics_detail`) does not change `report_schema_version` as long
+  as the canonical report document and finding identities remain unchanged.
+- The same rule applies to finding-level MCP projection changes such as
+  short MCP ids, slim summary locations, or omitting `priority_factors`
+  outside `detail_level="full"`.
+- Additive MCP-only convenience fields/projections such as
+  `cache.freshness` or production-first triage also do not change
+  `report_schema_version` when they are derived from unchanged canonical report
+  and summary data.
+- Canonical report changes such as `meta.analysis_thresholds.design_findings`
+  or threshold-aware design finding materialization do change
+  `report_schema_version` because they alter canonical report semantics and
+  integrity payload.
 
 Baseline compatibility rules:
 
@@ -84,8 +104,8 @@ Refs:
 
 ## Locked by tests
 
-- `tests/test_baseline.py::test_baseline_verify_schema_too_new`
-- `tests/test_baseline.py::test_baseline_verify_schema_major_mismatch`
+- `tests/test_baseline.py::test_baseline_verify_schema_incompatibilities[schema_too_new]`
+- `tests/test_baseline.py::test_baseline_verify_schema_incompatibilities[schema_major_mismatch]`
 - `tests/test_baseline.py::test_baseline_verify_fingerprint_mismatch`
 - `tests/test_cache.py::test_cache_v_field_version_mismatch_warns`
 - `tests/test_report.py::test_report_json_compact_v21_contract`

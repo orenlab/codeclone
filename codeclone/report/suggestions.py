@@ -1,11 +1,14 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from .. import _coerce
+from .._coerce import as_int, as_str
 from ..domain.findings import (
     CATEGORY_CLONE,
     CATEGORY_COHESION,
@@ -75,8 +78,8 @@ SuggestionCategory = Literal[
     "dependency",
 ]
 
-_as_int = _coerce.as_int
-_as_str = _coerce.as_str
+_as_int = as_int
+_as_str = as_str
 
 
 def _priority(severity: Severity, effort: Effort) -> float:

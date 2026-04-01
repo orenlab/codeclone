@@ -1,3 +1,9 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
 from __future__ import annotations
 
 from argparse import Namespace
@@ -26,6 +32,7 @@ from codeclone.cache import (
     _is_dead_candidate_dict,
     build_segment_report_projection,
 )
+from codeclone.cache_segments import decode_segment_report_projection
 from codeclone.errors import CacheError
 from codeclone.grouping import build_segment_groups
 from codeclone.models import (
@@ -413,29 +420,41 @@ def test_cache_segment_report_projection_filters_invalid_items(tmp_path: Path) -
 def test_cache_decode_segment_projection_invalid_shapes(tmp_path: Path) -> None:
     cache = Cache(tmp_path / "cache.json", root=tmp_path.resolve())
     assert (
-        cache._decode_segment_report_projection({"d": "x", "s": 0, "g": "bad"}) is None
-    )
-    assert (
-        cache._decode_segment_report_projection({"d": "x", "s": 0, "g": [["k"]]})
-        is None
-    )
-    assert (
-        cache._decode_segment_report_projection({"d": "x", "s": 0, "g": [[1, []]]})
-        is None
-    )
-    assert (
-        cache._decode_segment_report_projection(
-            {"d": "x", "s": 0, "g": [["k", ["bad-item"]]]}
+        decode_segment_report_projection(
+            {"d": "x", "s": 0, "g": "bad"},
+            root=cache.root,
         )
         is None
     )
     assert (
-        cache._decode_segment_report_projection(
+        decode_segment_report_projection(
+            {"d": "x", "s": 0, "g": [["k"]]},
+            root=cache.root,
+        )
+        is None
+    )
+    assert (
+        decode_segment_report_projection(
+            {"d": "x", "s": 0, "g": [[1, []]]},
+            root=cache.root,
+        )
+        is None
+    )
+    assert (
+        decode_segment_report_projection(
+            {"d": "x", "s": 0, "g": [["k", ["bad-item"]]]},
+            root=cache.root,
+        )
+        is None
+    )
+    assert (
+        decode_segment_report_projection(
             {
                 "d": "x",
                 "s": 0,
                 "g": [["k", [["a.py", "q", 1, 2, 3, "h", None]]]],
-            }
+            },
+            root=cache.root,
         )
         is None
     )

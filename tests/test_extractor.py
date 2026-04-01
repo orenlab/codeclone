@@ -1,3 +1,9 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
 import ast
 import os
 import signal
@@ -9,11 +15,12 @@ from typing import cast
 
 import pytest
 
-from codeclone import extractor
+from codeclone import extractor, qualnames
 from codeclone.errors import ParseError
 from codeclone.metrics import find_unused
-from codeclone.models import BlockUnit, ModuleDep, SegmentUnit
+from codeclone.models import BlockUnit, ClassMetrics, ModuleDep, SegmentUnit
 from codeclone.normalize import NormalizationConfig
+from codeclone.qualnames import FunctionNode, QualnameCollector
 
 
 def extract_units_from_source(
@@ -52,9 +59,9 @@ def extract_units_from_source(
 
 def _parse_tree_and_collector(
     source: str,
-) -> tuple[ast.Module, extractor._QualnameCollector]:
+) -> tuple[ast.Module, QualnameCollector]:
     tree = ast.parse(source)
-    collector = extractor._QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(tree)
     return tree, collector
 
@@ -64,7 +71,7 @@ def _collect_module_walk(
     *,
     module_name: str = "pkg.mod",
     collect_referenced_names: bool = True,
-) -> tuple[ast.Module, extractor._QualnameCollector, extractor._ModuleWalkResult]:
+) -> tuple[ast.Module, QualnameCollector, extractor._ModuleWalkResult]:
     tree, collector = _parse_tree_and_collector(source)
     walk = extractor._collect_module_walk_data(
         tree=tree,
@@ -134,6 +141,75 @@ def test_declaration_token_index_uses_prebuilt_index() -> None:
     )
 
 
+def test_declaration_helpers_cover_async_found_tokens_and_eof_scan() -> None:
+    async_node = ast.parse(
+        """
+async def demo():
+    return 1
+"""
+    ).body[0]
+    assert isinstance(async_node, ast.AsyncFunctionDef)
+    assert extractor._declaration_token_name(async_node) == "async"
+
+    tokens = extractor._source_tokens("def demo():\n    return 1\n")
+    assert (
+        extractor._declaration_token_index(
+            source_tokens=tokens,
+            start_line=1,
+            start_col=0,
+            declaration_token="def",
+        )
+        == 0
+    )
+
+    nested_tokens = extractor._source_tokens(
+        "def demo(arg: tuple[int, int]) -> tuple[int, int]:\n    return arg\n"
+    )
+    assert (
+        extractor._scan_declaration_colon_line(
+            source_tokens=nested_tokens,
+            start_index=0,
+        )
+        == 1
+    )
+
+    default_tokens = extractor._source_tokens(
+        "def demo(arg=(1, [2])):\n    return arg\n"
+    )
+    assert (
+        extractor._scan_declaration_colon_line(
+            source_tokens=default_tokens,
+            start_index=0,
+        )
+        == 1
+    )
+
+    eof_tokens = (
+        tokenize.TokenInfo(tokenize.NAME, "def", (1, 0), (1, 3), "def demo("),
+        tokenize.TokenInfo(tokenize.NAME, "demo", (1, 4), (1, 8), "def demo("),
+        tokenize.TokenInfo(tokenize.OP, "(", (1, 8), (1, 9), "def demo("),
+    )
+    assert (
+        extractor._scan_declaration_colon_line(
+            source_tokens=eof_tokens,
+            start_index=0,
+        )
+        is None
+    )
+
+    unmatched_close_tokens = (
+        tokenize.TokenInfo(tokenize.NAME, "def", (1, 0), (1, 3), "def demo)"),
+        tokenize.TokenInfo(tokenize.OP, ")", (1, 8), (1, 9), "def demo)"),
+    )
+    assert (
+        extractor._scan_declaration_colon_line(
+            source_tokens=unmatched_close_tokens,
+            start_index=0,
+        )
+        is None
+    )
+
+
 def test_scan_declaration_colon_line_returns_none_when_header_is_incomplete() -> None:
     tokens = extractor._source_tokens("def broken\n")
     assert (
@@ -166,6 +242,40 @@ def broken():
     assert isinstance(node, ast.FunctionDef)
     node.lineno = 0
     assert extractor._declaration_end_line(node, source_tokens=()) == 0
+
+
+def test_declaration_fallback_helpers_cover_empty_and_same_line_bodies() -> None:
+    empty_body_node = ast.parse(
+        """
+def demo():
+    return 1
+"""
+    ).body[0]
+    assert isinstance(empty_body_node, ast.FunctionDef)
+    empty_body_node.body = []
+    assert extractor._fallback_declaration_end_line(empty_body_node, start_line=2) == 2
+
+    inline_body_node = ast.parse(
+        """
+def demo():
+    return 1
+"""
+    ).body[0]
+    assert isinstance(inline_body_node, ast.FunctionDef)
+    inline_body_node.body[0].lineno = 2
+    assert extractor._fallback_declaration_end_line(inline_body_node, start_line=2) == 2
+
+    no_colon_tokens = (
+        tokenize.TokenInfo(tokenize.NAME, "def", (2, 0), (2, 3), "def demo"),
+        tokenize.TokenInfo(tokenize.NAME, "demo", (2, 4), (2, 8), "def demo"),
+    )
+    assert (
+        extractor._declaration_end_line(
+            inline_body_node,
+            source_tokens=no_colon_tokens,
+        )
+        == 2
+    )
 
 
 def test_init_function_is_ignored_for_blocks() -> None:
@@ -557,7 +667,7 @@ foo()
 obj.method()
 """.strip()
     )
-    collector = extractor._QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(tree)
     walk = extractor._collect_module_walk_data(
         tree=tree,
@@ -597,7 +707,7 @@ obj.method()
 
 def test_collect_module_walk_data_edge_branches() -> None:
     tree = ast.parse("from .... import parent")
-    collector = extractor._QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(tree)
     walk = extractor._collect_module_walk_data(
         tree=tree,
@@ -610,7 +720,7 @@ def test_collect_module_walk_data_edge_branches() -> None:
     assert walk.referenced_names == frozenset()
 
     lambda_call_tree = ast.parse("(lambda x: x)(1)")
-    lambda_collector = extractor._QualnameCollector()
+    lambda_collector = QualnameCollector()
     lambda_collector.visit(lambda_call_tree)
     lambda_walk = extractor._collect_module_walk_data(
         tree=lambda_call_tree,
@@ -629,7 +739,7 @@ from .pkg import utils
 from .... import parent
 """.strip()
     )
-    collector = extractor._QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(tree)
     walk = extractor._collect_module_walk_data(
         tree=tree,
@@ -725,7 +835,7 @@ class B(te.Protocol[int]):
     pass
 """.strip()
     )
-    collector = extractor._QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(tree)
     walk = extractor._collect_module_walk_data(
         tree=tree,
@@ -828,6 +938,92 @@ handler = Service.hook
     assert "pkg.helpers:decorate" not in walk.referenced_qualnames
 
 
+def test_extractor_private_helper_branches_cover_invalid_protocol_and_declarations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expr = ast.Attribute(
+        value=ast.Call(
+            func=ast.Name(id="factory", ctx=ast.Load()),
+            args=[],
+            keywords=[],
+        ),
+        attr="method",
+        ctx=ast.Load(),
+    )
+    assert extractor._dotted_expr_name(expr) is None
+
+    protocol_class = ast.parse(
+        """
+class Demo(Unknown, alias.Protocol):
+    pass
+"""
+    ).body[0]
+    assert isinstance(protocol_class, ast.ClassDef)
+    assert (
+        extractor._is_protocol_class(
+            protocol_class,
+            protocol_symbol_aliases=frozenset({"Protocol"}),
+            protocol_module_aliases=frozenset({"typing"}),
+        )
+        is False
+    )
+
+    bad_span_node = ast.parse(
+        """
+def demo():
+    return 1
+"""
+    ).body[0]
+    assert isinstance(bad_span_node, ast.FunctionDef)
+    bad_span_node.lineno = 3
+    bad_span_node.end_lineno = 2
+    assert extractor._eligible_unit_shape(bad_span_node, min_loc=1, min_stmt=1) is None
+
+    _, missing_method_collector, missing_method_walk = _collect_module_walk(
+        """
+class Service:
+    def real(self) -> int:
+        return 1
+
+handler = Service.missing
+"""
+    )
+    assert "pkg.mod:Service.missing" not in missing_method_walk.referenced_qualnames
+    assert missing_method_collector.class_nodes[0][0] == "Service"
+
+    _, declaration_collector = _parse_tree_and_collector(
+        """
+class Demo:
+    def work(self) -> int:
+        return 1
+"""
+    )
+    declaration_collector.units[0][1].end_lineno = 0
+    declaration_collector.class_nodes[0][1].end_lineno = 0
+    assert (
+        extractor._collect_declaration_targets(
+            filepath="pkg/mod.py",
+            module_name="pkg.mod",
+            collector=declaration_collector,
+        )
+        == ()
+    )
+
+    suppression_source = """
+def demo():  # codeclone: ignore[dead-code]
+    return 1
+"""
+    _, suppression_collector = _parse_tree_and_collector(suppression_source)
+    monkeypatch.setattr(extractor, "_source_tokens", lambda _source: ())
+    suppression_index = extractor._build_suppression_index_for_source(
+        source=suppression_source,
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        collector=suppression_collector,
+    )
+    assert tuple(suppression_index.values()) == (("dead-code",),)
+
+
 def test_extract_stats_drops_referenced_names_for_test_filepaths() -> None:
     src = """
 from pkg.mod import live
@@ -853,6 +1049,55 @@ live()
 
     assert test_metrics.referenced_names == frozenset()
     assert "live" in regular_metrics.referenced_names
+
+
+def test_extract_stats_keeps_class_cohesion_metrics_after_unit_fingerprinting() -> None:
+    src = """
+class Service:
+    def __init__(self):
+        self.path = "x"
+        self.data = {}
+
+    def load(self):
+        if self.path:
+            return self.data
+        return {}
+
+    def save(self):
+        if self.path:
+            self.data["saved"] = True
+        return self.data
+
+    def verify(self):
+        return bool(self.path) and bool(self.data)
+
+    @staticmethod
+    def make():
+        return Service()
+"""
+    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+        source=src,
+        filepath="pkg/service.py",
+        module_name="pkg.service",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert file_metrics.class_metrics == (
+        ClassMetrics(
+            qualname="pkg.service:Service",
+            filepath="pkg/service.py",
+            start_line=2,
+            end_line=22,
+            cbo=0,
+            lcom4=2,
+            method_count=5,
+            instance_var_count=2,
+            risk_coupling="low",
+            risk_cohesion="medium",
+        ),
+    )
 
 
 def test_dead_code_marks_symbol_dead_when_referenced_only_by_tests() -> None:
@@ -1042,7 +1287,7 @@ class Settings:  # codeclone: ignore[dead-code]
 def test_collect_dead_candidates_and_extract_skip_classes_without_lineno(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    collector = extractor._QualnameCollector()
+    collector = QualnameCollector()
     collector.visit(
         ast.parse(
             """
@@ -1070,7 +1315,7 @@ def used():
 
     class _CollectorNoClassMetrics:
         def __init__(self) -> None:
-            self.units: list[tuple[str, extractor.FunctionNode]] = []
+            self.units: list[tuple[str, FunctionNode]] = []
             self.class_nodes = [("Broken", broken_class)]
             self.function_count = 0
             self.method_count = 0
@@ -1079,7 +1324,7 @@ def used():
         def visit(self, _tree: ast.AST) -> None:
             return None
 
-    monkeypatch.setattr(extractor, "_QualnameCollector", _CollectorNoClassMetrics)
+    monkeypatch.setattr(qualnames, "QualnameCollector", _CollectorNoClassMetrics)
     _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
         source="class Broken:\n    pass\n",
         filepath="pkg/mod.py",

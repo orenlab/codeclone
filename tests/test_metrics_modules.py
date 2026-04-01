@@ -1,3 +1,9 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
 from __future__ import annotations
 
 import ast
@@ -95,6 +101,20 @@ async def worker(items, value):
         "worker",
     )
     assert nesting_depth(func) == 4
+
+
+def test_nesting_depth_counts_if_else_branches() -> None:
+    func = _parse_function(
+        """
+def choose(flag):
+    if flag:
+        return 1
+    else:
+        return 2
+""".strip(),
+        "choose",
+    )
+    assert nesting_depth(func) == 1
 
 
 def test_iter_nested_statement_lists_try_and_empty_match() -> None:

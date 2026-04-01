@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 """Generic table renderer for metric/finding tables."""
@@ -103,7 +106,9 @@ def render_rows_table(
         if h in _PATH_HEADERS and ctx is not None:
             short = ctx.relative_path(cell)
             return (
-                f'<td{cls_attr} title="{_escape_attr(cell)}">{_escape_html(short)}</td>'
+                f'<td{cls_attr} title="{_escape_attr(cell)}">'
+                f'<a class="ide-link" data-file="{_escape_attr(cell)}" data-line="1">'
+                f"{_escape_html(short)}</a></td>"
             )
         return f"<td{cls_attr}>{_escape_html(cell)}</td>"
 

@@ -1,3 +1,9 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
 from __future__ import annotations
 
 import json
@@ -11,6 +17,8 @@ import pytest
 import codeclone.cache as cache_mod
 from codeclone.blocks import BlockUnit, SegmentUnit
 from codeclone.cache import Cache, CacheStatus
+from codeclone.cache_io import sign_cache_payload
+from codeclone.cache_paths import runtime_filepath_from_wire, wire_filepath_from_runtime
 from codeclone.errors import CacheError
 from codeclone.extractor import Unit
 
@@ -161,7 +169,7 @@ def test_cache_load_normalizes_stale_structural_findings(tmp_path: Path) -> None
         cache,
         files={"x.py": cache_mod._encode_wire_file_entry(entry)},
     )
-    signature = cache._sign_data(payload)
+    signature = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
         "utf-8",
@@ -289,7 +297,7 @@ def test_cache_v13_missing_optional_sections_default_empty(tmp_path: Path) -> No
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={"x.py": {"st": [1, 2]}})
-    signature = cache._sign_data(payload)
+    signature = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
         "utf-8",
@@ -393,9 +401,8 @@ def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
 
 def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
     data = {"version": "0.0", "files": {}}
-    signature = cache._sign_data(data)
+    signature = sign_cache_payload(data)
     cache_path.write_text(
         json.dumps({**data, "_signature": signature}, ensure_ascii=False, indent=2),
         "utf-8",
@@ -411,13 +418,14 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     assert loaded.cache_schema_version == "0.0"
 
 
-def test_cache_v_field_version_mismatch_warns(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version", ["0.0", "2.2"])
+def test_cache_v_field_version_mismatch_warns(tmp_path: Path, version: str) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={})
-    signature = cache._sign_data(payload)
+    signature = sign_cache_payload(payload)
     cache_path.write_text(
-        json.dumps({"v": "0.0", "payload": payload, "sig": signature}), "utf-8"
+        json.dumps({"v": version, "payload": payload, "sig": signature}), "utf-8"
     )
 
     loaded = Cache(cache_path)
@@ -426,7 +434,7 @@ def test_cache_v_field_version_mismatch_warns(tmp_path: Path) -> None:
     assert "version mismatch" in loaded.load_warning
     assert loaded.data["files"] == {}
     assert loaded.load_status == CacheStatus.VERSION_MISMATCH
-    assert loaded.cache_schema_version == "0.0"
+    assert loaded.cache_schema_version == version
 
 
 def test_cache_too_large_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -737,7 +745,7 @@ def test_cache_load_invalid_files_type(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files=[])
-    signature = cache._sign_data(payload)
+    signature = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
         "utf-8",
@@ -838,7 +846,7 @@ def test_cache_load_missing_v_field(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={})
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(json.dumps({"payload": payload, "sig": sig}), "utf-8")
     cache.load()
     assert cache.load_warning is not None
@@ -871,7 +879,7 @@ def test_cache_load_rejects_missing_required_payload_fields(
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = payload_factory(cache)
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -889,7 +897,7 @@ def test_cache_load_python_tag_mismatch(tmp_path: Path) -> None:
         "ap": cache.data["analysis_profile"],
         "files": {},
     }
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -907,7 +915,7 @@ def test_cache_load_fingerprint_version_mismatch(tmp_path: Path) -> None:
         "ap": cache.data["analysis_profile"],
         "files": {},
     }
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -940,7 +948,7 @@ def test_cache_load_missing_analysis_profile_in_payload(tmp_path: Path) -> None:
         "fp": cache.data["fingerprint_version"],
         "files": {},
     }
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -971,7 +979,7 @@ def test_cache_load_invalid_analysis_profile_payload(
         "ap": bad_analysis_profile,
         "files": {},
     }
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -988,7 +996,7 @@ def test_cache_load_invalid_wire_file_entry(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
     payload = _analysis_payload(cache, files={"x.py": {"st": "bad"}})
-    sig = cache._sign_data(payload)
+    sig = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
     )
@@ -1028,7 +1036,9 @@ def test_wire_filepath_outside_root_falls_back_to_runtime_path(tmp_path: Path) -
     root.mkdir()
     cache = Cache(tmp_path / "cache.json", root=root)
     outside = tmp_path / "outside.py"
-    assert cache._wire_filepath_from_runtime(str(outside)) == outside.as_posix()
+    assert (
+        wire_filepath_from_runtime(str(outside), root=cache.root) == outside.as_posix()
+    )
 
 
 def test_wire_filepath_resolve_oserror_falls_back_to_runtime_path(
@@ -1046,7 +1056,9 @@ def test_wire_filepath_resolve_oserror_falls_back_to_runtime_path(
         return original_resolve(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _resolve_with_error)
-    assert cache._wire_filepath_from_runtime(str(runtime)) == runtime.as_posix()
+    assert (
+        wire_filepath_from_runtime(str(runtime), root=cache.root) == runtime.as_posix()
+    )
 
 
 def test_wire_filepath_resolve_relative_success_path(
@@ -1067,7 +1079,7 @@ def test_wire_filepath_resolve_relative_success_path(
         return original_resolve(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _resolve_with_mapping)
-    assert cache._wire_filepath_from_runtime(str(runtime)) == "pkg/module.py"
+    assert wire_filepath_from_runtime(str(runtime), root=cache.root) == "pkg/module.py"
 
 
 def test_runtime_filepath_from_wire_resolve_oserror(
@@ -1085,7 +1097,7 @@ def test_runtime_filepath_from_wire_resolve_oserror(
         return original_resolve(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _resolve_with_error)
-    assert cache._runtime_filepath_from_wire("pkg/module.py") == str(combined)
+    assert runtime_filepath_from_wire("pkg/module.py", root=cache.root) == str(combined)
 
 
 def test_as_str_dict_rejects_non_string_keys() -> None:
@@ -1263,6 +1275,73 @@ def test_decode_wire_file_entry_optional_source_stats() -> None:
     assert (
         cache_mod._decode_optional_wire_source_stats(obj={"ss": [1, 2, -1, 0]}) is None
     )
+
+
+def test_cache_helpers_cover_invalid_analysis_profile_and_source_stats_shapes() -> None:
+    assert (
+        cache_mod._decode_wire_qualname_span_size(["pkg.mod:fn", 1, 2, "bad"]) is None
+    )
+    assert cache_mod._decode_wire_qualname_span_size([None, 1, 2, 4]) is None
+    assert (
+        cache_mod._as_analysis_profile(
+            {
+                "min_loc": 1,
+                "min_stmt": 1,
+                "block_min_loc": 2,
+                "block_min_stmt": "bad",
+                "segment_min_loc": 3,
+                "segment_min_stmt": 4,
+            }
+        )
+        is None
+    )
+    assert (
+        cache_mod._decode_optional_wire_source_stats(obj={"ss": [1, 2, "bad", 0]})
+        is None
+    )
+
+
+def test_canonicalize_cache_entry_skips_invalid_dead_candidate_suppression_shape() -> (
+    None
+):
+    normalized = cache_mod._canonicalize_cache_entry(
+        cast(
+            Any,
+            {
+                "stat": {"mtime_ns": 1, "size": 2},
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "class_metrics": [],
+                "module_deps": [],
+                "dead_candidates": [
+                    {
+                        "qualname": "pkg.mod:unused",
+                        "local_name": "unused",
+                        "filepath": "pkg/mod.py",
+                        "start_line": 1,
+                        "end_line": 2,
+                        "kind": "function",
+                        "suppressed_rules": "dead-code",
+                    }
+                ],
+                "referenced_names": [],
+                "referenced_qualnames": [],
+                "import_names": [],
+                "class_names": [],
+            },
+        )
+    )
+    assert normalized["dead_candidates"] == [
+        {
+            "qualname": "pkg.mod:unused",
+            "local_name": "unused",
+            "filepath": "pkg/mod.py",
+            "start_line": 1,
+            "end_line": 2,
+            "kind": "function",
+        }
+    ]
 
 
 def test_decode_optional_wire_coupled_classes_rejects_non_string_qualname() -> None:
@@ -1550,6 +1629,18 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
     assert cache_mod._is_class_metrics_dict([]) is False
     assert cache_mod._is_module_dep_dict([]) is False
     assert cache_mod._is_dead_candidate_dict([]) is False
+    assert (
+        cache_mod._is_dead_candidate_dict(
+            {
+                "qualname": "pkg.mod:broken",
+                "local_name": "broken",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 2,
+            }
+        )
+        is False
+    )
     assert (
         cache_mod._is_dead_candidate_dict(
             {

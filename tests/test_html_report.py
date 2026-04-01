@@ -1,12 +1,24 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
 import importlib
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
-from codeclone.contracts import CACHE_VERSION, DOCS_URL, ISSUES_URL, REPOSITORY_URL
+from codeclone.contracts import (
+    CACHE_VERSION,
+    DOCS_URL,
+    ISSUES_URL,
+    REPORT_SCHEMA_VERSION,
+    REPOSITORY_URL,
+)
 from codeclone.errors import FileProcessingError
 from codeclone.html_report import (
     _FileCache,
@@ -23,7 +35,11 @@ from codeclone.models import (
     Suggestion,
 )
 from codeclone.report import build_block_group_facts
-from codeclone.report.json_contract import build_report_document
+from codeclone.report.json_contract import (
+    build_report_document,
+    clone_group_id,
+    structural_group_id,
+)
 from codeclone.report.serialize import render_json_report_document
 from tests._report_fixtures import (
     REPEATED_ASSERT_SOURCE,
@@ -552,6 +568,78 @@ def test_html_report_structural_findings_why_modal_renders_examples(
         assert needle in html
 
 
+def test_html_report_finding_cards_expose_stable_anchor_ids(tmp_path: Path) -> None:
+    f1 = tmp_path / "a.py"
+    f2 = tmp_path / "b.py"
+    f1.write_text("def alpha():\n    return 1\n", "utf-8")
+    f2.write_text("def beta():\n    return 1\n", "utf-8")
+    clone_key = "pkg.mod:dup"
+    finding_key = "anchor-key"
+    html = build_html_report(
+        func_groups={
+            clone_key: [
+                {
+                    "qualname": "pkg.mod:alpha",
+                    "filepath": str(f1),
+                    "start_line": 1,
+                    "end_line": 2,
+                },
+                {
+                    "qualname": "pkg.mod:beta",
+                    "filepath": str(f2),
+                    "start_line": 1,
+                    "end_line": 2,
+                },
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        structural_findings=[
+            StructuralFindingGroup(
+                finding_kind="duplicated_branches",
+                finding_key=finding_key,
+                signature={
+                    "calls": "1",
+                    "has_loop": "0",
+                    "has_try": "0",
+                    "nested_if": "0",
+                    "raises": "0",
+                    "stmt_seq": "Expr,Return",
+                    "terminal": "return_const",
+                },
+                items=(
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key=finding_key,
+                        file_path=str(f1),
+                        qualname="pkg.mod:alpha",
+                        start=1,
+                        end=2,
+                        signature={"stmt_seq": "Expr,Return"},
+                    ),
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key=finding_key,
+                        file_path=str(f2),
+                        qualname="pkg.mod:beta",
+                        start=1,
+                        end=2,
+                        signature={"stmt_seq": "Expr,Return"},
+                    ),
+                ),
+            )
+        ],
+    )
+    clone_id = clone_group_id("function", clone_key)
+    finding_id = structural_group_id("duplicated_branches", finding_key)
+    _assert_html_contains(
+        html,
+        f'id="finding-{clone_id}"',
+        f'id="finding-{finding_id}"',
+        f'data-finding-id="{finding_id}"',
+    )
+
+
 def test_html_report_block_group_includes_match_basis_and_compact_key() -> None:
     group_key = _REPEATED_BLOCK_GROUP_KEY
     html = build_html_report(
@@ -875,7 +963,7 @@ def test_html_report_provenance_summary_uses_card_like_badges(
         'class="prov-badge prov-badge--neutral"',
         '<span class="prov-badge-val">verified</span>',
         '<span class="prov-badge-lbl">Baseline</span>',
-        '<span class="prov-badge-val">2.1</span>',
+        f'<span class="prov-badge-val">{REPORT_SCHEMA_VERSION}</span>',
         '<span class="prov-badge-lbl">Schema</span>',
         '<span class="prov-badge-val">1</span>',
         '<span class="prov-badge-lbl">Fingerprint</span>',
@@ -1530,7 +1618,12 @@ def test_html_report_metrics_risk_branches() -> None:
     assert 'stroke="var(--error)"' in html
     assert "Cycles: 1; max dependency depth: 4." in html
     assert "5 candidates total; 2 high-confidence items; 0 suppressed." in html
-    assert 'Dead Code<span class="tab-count">2</span>' in html
+    assert '<button class="main-tab" role="tab" data-tab="dead-code"' in html
+    assert '<svg class="main-tab-icon"' in html
+    assert (
+        '<span class="main-tab-label">Dead Code</span><span class="tab-count">2</span>'
+        in html
+    )
 
 
 def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
@@ -1559,6 +1652,141 @@ def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
     assert "High Complexity" in html
     assert '<span class="kpi-micro-val">2.5</span>' in html
     assert '<span class="kpi-micro-lbl">avg</span>' in html
+
+
+def test_html_report_renders_directory_hotspots_from_canonical_report() -> None:
+    report_document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo/project", "project_name": "project"},
+        metrics={
+            "dead_code": {
+                "summary": {"count": 6, "critical": 6},
+                "items": [
+                    {
+                        "qualname": f"pkg.dir{index}:unused",
+                        "filepath": f"/repo/project/dir{index}/mod.py",
+                        "start_line": 1,
+                        "end_line": 2,
+                        "kind": "function",
+                        "confidence": "high",
+                    }
+                    for index in range(1, 7)
+                ],
+            }
+        },
+    )
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta=cast("dict[str, Any]", report_document["meta"]),
+        metrics=cast("dict[str, Any]", report_document["metrics"]),
+        report_document=report_document,
+    )
+    _assert_html_contains(
+        html,
+        "Hotspots by Directory",
+        "top 5 of 6 directories",
+        "<code>dir1</code>",
+        "<code>dir5</code>",
+    )
+
+
+def test_html_report_direct_path_skips_directory_hotspots_cluster() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=_metrics_payload(
+            health_score=70,
+            health_grade="B",
+            complexity_max=1,
+            complexity_high_risk=0,
+            coupling_high_risk=0,
+            cohesion_low=0,
+            dep_cycles=[],
+            dep_max_depth=0,
+            dead_total=0,
+            dead_critical=0,
+        ),
+    )
+    assert "Hotspots by Directory" not in html
+
+
+def test_html_report_directory_hotspots_use_test_scope_roots() -> None:
+    report_document = build_report_document(
+        func_groups={
+            "fixture-clone": [
+                {
+                    "qualname": "tests.fixtures.golden_project.alpha:render_alpha",
+                    "filepath": "/repo/project/tests/fixtures/golden_project/alpha.py",
+                    "start_line": 1,
+                    "end_line": 5,
+                    "loc": 5,
+                    "stmt_count": 4,
+                    "fingerprint": "fixture-fp",
+                    "loc_bucket": "0-19",
+                },
+                {
+                    "qualname": "tests.fixtures.golden_project.beta:render_beta",
+                    "filepath": "/repo/project/tests/fixtures/golden_project/beta.py",
+                    "start_line": 1,
+                    "end_line": 5,
+                    "loc": 5,
+                    "stmt_count": 4,
+                    "fingerprint": "fixture-fp",
+                    "loc_bucket": "0-19",
+                },
+                {
+                    "qualname": "tests.fixtures.golden_v2.pkg.a:render_a",
+                    "filepath": (
+                        "/repo/project/tests/fixtures/golden_v2/"
+                        "clone_metrics_cycle/pkg/a.py"
+                    ),
+                    "start_line": 1,
+                    "end_line": 5,
+                    "loc": 5,
+                    "stmt_count": 4,
+                    "fingerprint": "fixture-fp",
+                    "loc_bucket": "0-19",
+                },
+                {
+                    "qualname": "tests.fixtures.golden_v2.pkg.b:render_b",
+                    "filepath": (
+                        "/repo/project/tests/fixtures/golden_v2/"
+                        "clone_metrics_cycle/pkg/b.py"
+                    ),
+                    "start_line": 1,
+                    "end_line": 5,
+                    "loc": 5,
+                    "stmt_count": 4,
+                    "fingerprint": "fixture-fp",
+                    "loc_bucket": "0-19",
+                },
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo/project", "project_name": "project"},
+    )
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta=cast("dict[str, Any]", report_document["meta"]),
+        metrics=cast("dict[str, Any]", report_document["metrics"]),
+        report_document=report_document,
+    )
+    _assert_html_contains(
+        html,
+        "Hotspots by Directory",
+        "<code>tests/<wbr>fixtures</code>",
+    )
+    assert "golden_project" not in html
+    assert "clone_metrics_cycle" not in html
 
 
 def test_html_report_metrics_bad_health_score_and_dead_code_ok_tone() -> None:

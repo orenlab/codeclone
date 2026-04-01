@@ -1,13 +1,16 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .blockhash import stmt_hashes
 from .fingerprint import sha1
 from .models import BlockUnit, SegmentUnit
+from .normalize import stmt_hashes
 
 if TYPE_CHECKING:
     import ast
@@ -49,10 +52,11 @@ def extract_blocks(
     for i in range(len(stmt_hash_rows) - block_size + 1):
         start = getattr(body[i], "lineno", None)
         end = getattr(body[i + block_size - 1], "end_lineno", None)
-        if not start or not end:
-            continue
-
-        if last_start is not None and start - last_start < min_line_distance:
+        if (
+            not start
+            or not end
+            or (last_start is not None and start - last_start < min_line_distance)
+        ):
             continue
 
         bh = "|".join(stmt_hash_rows[i : i + block_size])

@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -9,6 +12,7 @@ CLONE_KIND_FUNCTION: Final = "function"
 CLONE_KIND_BLOCK: Final = "block"
 CLONE_KIND_SEGMENT: Final = "segment"
 
+SYMBOL_KIND_FUNCTION: Final = "function"
 SYMBOL_KIND_CLASS: Final = "class"
 SYMBOL_KIND_METHOD: Final = "method"
 SYMBOL_KIND_IMPORT: Final = "import"
@@ -69,6 +73,7 @@ __all__ = [
     "STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE",
     "STRUCTURAL_KIND_DUPLICATED_BRANCHES",
     "SYMBOL_KIND_CLASS",
+    "SYMBOL_KIND_FUNCTION",
     "SYMBOL_KIND_IMPORT",
     "SYMBOL_KIND_METHOD",
 ]

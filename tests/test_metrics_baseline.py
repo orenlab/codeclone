@@ -1,8 +1,15 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -172,6 +179,18 @@ def test_metrics_baseline_load_size_and_shape_validation(tmp_path: Path) -> None
         baseline.load()
 
 
+def test_metrics_baseline_load_rejects_non_object_preloaded_payload(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "metrics-baseline.json"
+    _write_json(path, _valid_payload())
+    baseline = MetricsBaseline(path)
+
+    with pytest.raises(BaselineValidationError, match="must be an object") as exc:
+        baseline.load(preloaded_payload=cast(Any, []))
+    assert exc.value.status == MetricsBaselineStatus.INVALID_TYPE
+
+
 def test_metrics_baseline_load_stat_error_after_exists_true(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -238,6 +257,26 @@ def test_metrics_baseline_save_with_existing_plain_payload_rewrites_plain(
     payload = json.loads(path.read_text("utf-8"))
     assert "clones" not in payload
     assert baseline.is_embedded_in_clone_baseline is False
+
+
+def test_metrics_baseline_atomic_write_json_cleans_up_temp_file_on_replace_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "metrics-baseline.json"
+    payload = _valid_payload()
+    temp_holder: dict[str, Path] = {}
+
+    def _boom_replace(src: str | Path, dst: str | Path) -> None:
+        temp_holder["path"] = Path(src)
+        raise OSError("replace failed")
+
+    monkeypatch.setattr("codeclone.metrics_baseline.os.replace", _boom_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        mb_mod._atomic_write_json(path, payload)
+
+    assert temp_holder["path"].exists() is False
 
 
 def test_metrics_baseline_save_rejects_corrupted_existing_payload(

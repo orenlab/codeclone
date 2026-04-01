@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define cache schema v2.2, integrity verification, and fail-open behavior.
+Define cache schema v2.3, integrity verification, and fail-open behavior.
 
 ## Public surface
 
@@ -13,7 +13,7 @@ Define cache schema v2.2, integrity verification, and fail-open behavior.
 
 ## Data model
 
-On-disk schema (`v == "2.2"`):
+On-disk schema (`v == "2.3"`):
 
 - Top-level: `v`, `payload`, `sig`
 - `payload` keys: `py`, `fp`, `ap`, `files`, optional `sr`
@@ -58,6 +58,9 @@ Refs:
       (`min_loc`, `min_stmt`, `block_min_loc`, `block_min_stmt`,
       `segment_min_loc`, `segment_min_stmt`)
     - `sig` equals deterministic hash of canonical payload
+- Cache schema must also be bumped when cached analysis semantics change in a
+  way that could leave syntactically valid but semantically stale per-file
+  entries accepted by runtime compatibility checks.
 
 Refs:
 

@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -10,12 +13,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from .. import _coerce
+from .._coerce import as_float as _as_float
+from .._coerce import as_int as _as_int
+from .._coerce import as_mapping as _as_mapping
+from .._coerce import as_sequence as _as_sequence
 from ..contracts import DOCS_URL, REPOSITORY_URL
 from ..domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
     CATEGORY_COUPLING,
+    CATEGORY_DEPENDENCY,
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
     FAMILY_CLONE,
@@ -32,6 +39,7 @@ from ..domain.findings import (
     STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
     STRUCTURAL_KIND_DUPLICATED_BRANCHES,
     SYMBOL_KIND_CLASS,
+    SYMBOL_KIND_FUNCTION,
     SYMBOL_KIND_METHOD,
 )
 from ..domain.quality import (
@@ -63,12 +71,6 @@ class _RuleSpec:
     precision: str
 
 
-_as_int = _coerce.as_int
-_as_float = _coerce.as_float
-_as_mapping = _coerce.as_mapping
-_as_sequence = _coerce.as_sequence
-
-
 def _text(value: object) -> str:
     if value is None:
         return ""
@@ -79,26 +81,12 @@ def _severity_to_level(severity: str) -> str:
     if severity == SEVERITY_CRITICAL:
         return "error"
     if severity == SEVERITY_WARNING:
-        return SEVERITY_WARNING
+        return "warning"
     return "note"
 
 
-def _slug(text: str) -> str:
-    slug_chars: list[str] = []
-    prev_dash = False
-    for char in text.lower():
-        if char.isalnum():
-            slug_chars.append(char)
-            prev_dash = False
-            continue
-        if not prev_dash:
-            slug_chars.append("-")
-            prev_dash = True
-    return "".join(slug_chars).strip("-") or "finding"
-
-
 def _rule_name(spec: _RuleSpec) -> str:
-    return f"codeclone.{_slug(spec.short_description)}"
+    return f"codeclone.{spec.rule_id}"
 
 
 def _rule_remediation(spec: _RuleSpec) -> str:
@@ -285,7 +273,7 @@ def _structural_rule_spec(kind: str) -> _RuleSpec:
 
 
 def _dead_code_rule_spec(category: str) -> _RuleSpec:
-    if category == CLONE_KIND_FUNCTION:
+    if category == SYMBOL_KIND_FUNCTION:
         return _RuleSpec(
             "CDEAD001",
             "Unused function",
@@ -416,7 +404,7 @@ def _structural_result_message(
         )
     if signature_family == STRUCTURAL_KIND_CLONE_COHORT_DRIFT:
         drift_fields = _as_sequence(signature.get("drift_fields"))
-        drift_label = ",".join(_text(item) for item in drift_fields) or "profile"
+        drift_label = ", ".join(_text(item) for item in drift_fields) or "profile"
         cohort_id = _text(signature.get("cohort_id"))
         return (
             f"Clone cohort drift ({drift_label}), "
@@ -439,7 +427,7 @@ def _dead_code_result_message(
 ) -> str:
     confidence = _text(group.get("confidence")) or "reported"
     target = qualname or relative_path
-    return f"Unused {category} with {confidence} confidence: {target}"
+    return f"Unused {category} with {confidence} confidence: {target}."
 
 
 def _design_result_message(
@@ -451,15 +439,15 @@ def _design_result_message(
 ) -> str:
     if category == CATEGORY_COHESION:
         lcom4 = _as_int(facts.get("lcom4"))
-        return f"Low cohesion class (LCOM4={lcom4}): {qualname}"
+        return f"Low cohesion class (LCOM4={lcom4}): {qualname}."
     if category == CATEGORY_COMPLEXITY:
         cc = _as_int(facts.get("cyclomatic_complexity"))
-        return f"High complexity function (CC={cc}): {qualname}"
+        return f"High complexity function (CC={cc}): {qualname}."
     if category == CATEGORY_COUPLING:
         cbo = _as_int(facts.get("cbo"))
-        return f"High coupling class (CBO={cbo}): {qualname}"
+        return f"High coupling class (CBO={cbo}): {qualname}."
     modules = [_text(item.get("module")) for item in items if _text(item.get("module"))]
-    return f"Dependency cycle ({len(modules)} modules): {' -> '.join(modules)}"
+    return f"Dependency cycle ({len(modules)} modules): {' -> '.join(modules)}."
 
 
 def _result_message(group: Mapping[str, object]) -> str:
@@ -515,13 +503,7 @@ def _location_message(
 ) -> str:
     family = _text(group.get("family"))
     category = _text(group.get("category"))
-    if family == FAMILY_CLONE:
-        return (
-            "Representative occurrence"
-            if related_id is None
-            else f"Related occurrence #{related_id}"
-        )
-    if family == FAMILY_STRUCTURAL:
+    if family in {FAMILY_CLONE, FAMILY_STRUCTURAL}:
         return (
             "Representative occurrence"
             if related_id is None
@@ -533,7 +515,7 @@ def _location_message(
             if related_id is None
             else f"Related declaration #{related_id}"
         )
-    if category == "dependency":
+    if category == CATEGORY_DEPENDENCY:
         return (
             "Cycle member"
             if related_id is None
@@ -688,8 +670,6 @@ def _result_properties(group: Mapping[str, object]) -> dict[str, object]:
             props,
             facts=_as_mapping(group.get("facts")),
         )
-    if family == FAMILY_DEAD_CODE:
-        props["confidence"] = _text(group.get("confidence"))
     return props
 
 
@@ -703,15 +683,6 @@ def _partial_fingerprints(
     path = _text(primary_item.get("relative_path"))
     qualname = _text(primary_item.get("qualname"))
     start_line = _as_int(primary_item.get("start_line"))
-    end_line = _as_int(primary_item.get("end_line"))
-    fingerprints = {
-        "rule": rule_id,
-        "path": path,
-    }
-    if qualname:
-        fingerprints["qualname"] = qualname
-    if start_line > 0:
-        fingerprints["region"] = f"{start_line}-{end_line or start_line}"
     if path and start_line > 0:
         fingerprint_material = "\0".join(
             (
@@ -719,16 +690,32 @@ def _partial_fingerprints(
                 finding_id,
                 path,
                 qualname,
-                str(start_line),
-                str(end_line or start_line),
             )
         )
-        fingerprints["primaryLocationLineHash"] = (
-            f"{hashlib.sha256(fingerprint_material.encode('utf-8')).hexdigest()[:16]}"
-            f":{start_line}"
-        )
-    fingerprints["finding"] = finding_id
-    return fingerprints
+        return {
+            "primaryLocationLineHash": (
+                f"{hashlib.sha256(fingerprint_material.encode('utf-8')).hexdigest()[:16]}"
+                f":{start_line}"
+            )
+        }
+    return {}
+
+
+def _primary_location_properties(
+    primary_item: Mapping[str, object],
+) -> dict[str, object]:
+    path = _text(primary_item.get("relative_path"))
+    qualname = _text(primary_item.get("qualname"))
+    start_line = _as_int(primary_item.get("start_line"))
+    end_line = _as_int(primary_item.get("end_line"))
+    props: dict[str, object] = {}
+    if path:
+        props["primaryPath"] = path
+    if qualname:
+        props["primaryQualname"] = qualname
+    if start_line > 0:
+        props["primaryRegion"] = f"{start_line}-{end_line or start_line}"
+    return props
 
 
 def _baseline_state(group: Mapping[str, object]) -> str:
@@ -763,6 +750,7 @@ def _result_entry(
     result: dict[str, object] = {
         "ruleId": rule_id,
         "ruleIndex": rule_index,
+        "kind": "fail",
         "level": _severity_to_level(_text(group.get("severity"))),
         "message": {
             "text": _result_message(group),
@@ -778,6 +766,9 @@ def _result_entry(
         ),
         "properties": _result_properties(group),
     }
+    if primary_item:
+        properties = cast(dict[str, object], result["properties"])
+        properties.update(_primary_location_properties(primary_item))
     baseline_state = _baseline_state(group)
     if baseline_state:
         result["baselineState"] = baseline_state
@@ -802,6 +793,7 @@ def _result_entry(
 def render_sarif_report_document(payload: Mapping[str, object]) -> str:
     meta = _as_mapping(payload.get("meta"))
     runtime = _as_mapping(meta.get("runtime"))
+    analysis_started_at = _text(runtime.get("analysis_started_at_utc"))
     generated_at = _text(runtime.get("report_generated_at_utc"))
     analysis_mode = _text(meta.get("analysis_mode")) or "full"
     findings = sorted(
@@ -837,6 +829,7 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
     ]
     invocation: dict[str, object] = {
         "executionSuccessful": True,
+        **({"startTimeUtc": analysis_started_at} if analysis_started_at else {}),
         **({"endTimeUtc": generated_at} if generated_at else {}),
     }
     if scan_root_uri:
@@ -846,7 +839,6 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
             "driver": {
                 "name": "codeclone",
                 "version": _text(meta.get("codeclone_version")),
-                "semanticVersion": _text(meta.get("codeclone_version")),
                 "informationUri": REPOSITORY_URL,
                 "rules": [
                     {
@@ -869,7 +861,20 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
             }
         },
         "automationDetails": {
-            "id": f"codeclone/{analysis_mode}",
+            "id": "/".join(
+                part
+                for part in (
+                    "codeclone",
+                    analysis_mode,
+                    generated_at
+                    or _text(
+                        _as_mapping(
+                            _as_mapping(payload.get("integrity")).get("digest")
+                        ).get("value")
+                    )[:12],
+                )
+                if part
+            ),
         },
         **(
             {
@@ -898,7 +903,6 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
             ),
             **({"reportGeneratedAtUtc": generated_at} if generated_at else {}),
         },
-        "columnKind": "utf16CodeUnits",
     }
     return json.dumps(
         {

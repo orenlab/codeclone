@@ -1,3 +1,9 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
 import ast
 import json
 from collections.abc import Callable, Collection, Mapping, Sequence
@@ -8,9 +14,11 @@ from typing import cast
 import pytest
 
 import codeclone.report as report_mod
+import codeclone.report.findings as report_findings_mod
 import codeclone.report.merge as merge_mod
 import codeclone.report.overview as overview_mod
 import codeclone.report.serialize as serialize_mod
+from codeclone._html_snippets import _FileCache
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.models import (
     StructuralFindingGroup,
@@ -437,16 +445,17 @@ def test_report_output_formats(
     assert sarif_payload["$schema"].endswith("sarif-2.1.0.json")
     assert sarif_payload["version"] == "2.1.0"
     assert run["tool"]["driver"]["name"] == "codeclone"
-    assert run["automationDetails"]["id"] == "codeclone/full"
+    assert run["automationDetails"]["id"] == "codeclone/full/2026-03-10T12:00:00Z"
     assert run["properties"]["reportSchemaVersion"] == REPORT_SCHEMA_VERSION
     assert run["properties"]["reportGeneratedAtUtc"] == "2026-03-10T12:00:00Z"
-    assert run["columnKind"] == "utf16CodeUnits"
+    assert "columnKind" not in run
     assert run["originalUriBaseIds"]["%SRCROOT%"]["uri"] == "file:///repo/"
     assert run["artifacts"]
     assert run["invocations"][0]["workingDirectory"]["uri"] == "file:///repo/"
+    assert "semanticVersion" not in run["tool"]["driver"]
     assert any(rule["id"] == "CCLONE001" for rule in run["tool"]["driver"]["rules"])
     first_rule = run["tool"]["driver"]["rules"][0]
-    assert first_rule["name"].startswith("codeclone.")
+    assert first_rule["name"] == "codeclone.CCLONE001"
     assert "help" in first_rule
     assert "markdown" in first_rule["help"]
     assert first_rule["properties"]["tags"]
@@ -522,7 +531,13 @@ def test_report_sarif_uses_representative_and_related_locations() -> None:
     assert result["relatedLocations"][0]["message"]["text"] == "Related occurrence #1"
     assert result["properties"]["cloneType"] == "Type-2"
     assert result["properties"]["groupArity"] == 2
-    assert "primaryLocationLineHash" in result["partialFingerprints"]
+    assert result["kind"] == "fail"
+    assert set(result["partialFingerprints"]) == {"primaryLocationLineHash"}
+    assert (
+        result["properties"]["primaryPath"] == "tests/fixtures/golden_project/alpha.py"
+    )
+    assert result["properties"]["primaryQualname"] == "pkg.alpha:transform_alpha"
+    assert result["properties"]["primaryRegion"] == "1-10"
 
 
 def test_report_json_deterministic_group_order() -> None:
@@ -810,6 +825,12 @@ def test_report_json_serializes_rich_suggestions_and_overview() -> None:
     overview = payload["derived"]["overview"]
     assert overview["families"]["clones"] == 0
     assert overview["source_scope_breakdown"] == {}
+    assert overview["directory_hotspots"]["all"] == {
+        "total_directories": 0,
+        "returned": 0,
+        "has_more": False,
+        "items": [],
+    }
     assert payload["derived"]["hotlists"]["most_actionable_ids"] == []
 
 
@@ -1632,6 +1653,81 @@ def test_report_overview_serialize_finding_group_card_covers_families() -> None:
     assert dependency_card["title"] == "Break circular dependency"
     assert dependency_card["summary"] == "3 modules participate in this cycle"
     assert dependency_card["location"] == "pkg.a -> pkg.b -> pkg.c"
+
+    fallback_dependency_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "design",
+            "category": "dependency",
+            "severity": "warning",
+            "confidence": "medium",
+            "count": 2,
+            "source_scope": {"dominant_kind": "production"},
+            "spread": {"files": 2, "functions": 0},
+            "items": [{"module": ""}],
+            "facts": {},
+        }
+    )
+    assert (
+        fallback_dependency_card["location"]
+        == "2 occurrences across 2 files / 0 functions"
+    )
+
+    unknown_design_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "design",
+            "category": "unknown",
+            "severity": "info",
+            "confidence": "low",
+            "count": 1,
+            "source_scope": {"dominant_kind": "other"},
+            "spread": {"files": 1, "functions": 1},
+            "items": [{"relative_path": "pkg/mod.py", "start_line": 1, "end_line": 1}],
+            "facts": {},
+        }
+    )
+    assert unknown_design_card["title"] == "Finding"
+    assert unknown_design_card["summary"] == ""
+
+
+def test_report_findings_template_html_covers_custom_kind_fallback(
+    tmp_path: Path,
+) -> None:
+    snippet_path = tmp_path / "custom.py"
+    snippet_path.write_text("value = 1\nvalue = 2\n", encoding="utf-8")
+    items = (
+        StructuralFindingOccurrence(
+            finding_kind="custom_kind",
+            finding_key="custom:1",
+            file_path=str(snippet_path),
+            qualname="pkg.mod:fn",
+            start=1,
+            end=1,
+            signature={"stmt_seq": "Assign", "terminal": "fallthrough"},
+        ),
+        StructuralFindingOccurrence(
+            finding_kind="custom_kind",
+            finding_key="custom:1",
+            file_path=str(snippet_path),
+            qualname="pkg.mod:fn",
+            start=2,
+            end=2,
+            signature={"stmt_seq": "Assign", "terminal": "fallthrough"},
+        ),
+    )
+    html = report_findings_mod._finding_why_template_html(
+        StructuralFindingGroup(
+            finding_kind="custom_kind",
+            finding_key="custom:1",
+            signature={"stmt_seq": "Assign", "terminal": "fallthrough"},
+            items=items,
+        ),
+        items,
+        file_cache=_FileCache(),
+        context_lines=0,
+        max_snippet_lines=10,
+    )
+    assert "structurally matching branch bodies" in html
+    assert "Showing the first 2 matching branches" in html
 
 
 def test_report_overview_materialize_preserves_existing_cards_and_breakdown() -> None:

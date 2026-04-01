@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -10,7 +13,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
-from . import _coerce
+from ._coerce import as_int, as_str
 from .cache import (
     Cache,
     CacheEntry,
@@ -74,6 +77,10 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 DEFAULT_BATCH_SIZE = 100
 PARALLEL_MIN_FILES_PER_WORKER = 8
 PARALLEL_MIN_FILES_FLOOR = 16
+DEFAULT_RUNTIME_PROCESSES = 4
+
+_as_int = as_int
+_as_str = as_str
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +197,7 @@ class ReportArtifacts:
     text: str | None = None
     md: str | None = None
     sarif: str | None = None
+    report_document: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,10 +209,6 @@ class MetricGateConfig:
     fail_dead_code: bool
     fail_health: int
     fail_on_new_metrics: bool
-
-
-_as_int = _coerce.as_int
-_as_str = _coerce.as_str
 
 
 def _as_sorted_str_tuple(value: object) -> tuple[str, ...]:
@@ -336,6 +340,12 @@ def _segment_to_group_item(segment: SegmentUnit) -> GroupItem:
 
 def _parallel_min_files(processes: int) -> int:
     return max(PARALLEL_MIN_FILES_FLOOR, processes * PARALLEL_MIN_FILES_PER_WORKER)
+
+
+def _resolve_process_count(processes: object) -> int:
+    if processes is None:
+        return DEFAULT_RUNTIME_PROCESSES
+    return max(1, _as_int(processes, DEFAULT_RUNTIME_PROCESSES))
 
 
 def _should_collect_structural_findings(output_paths: OutputPaths) -> bool:
@@ -816,7 +826,9 @@ def process(
     failed_files: list[str] = []
     source_read_failures: list[str] = []
     root_str = str(boot.root)
-    processes = max(1, int(boot.args.processes))
+    # Keep process-count fallback in the core runtime so non-CLI callers such as
+    # the MCP service do not need to guess or mirror parallelism policy.
+    processes = _resolve_process_count(boot.args.processes)
     min_loc = int(boot.args.min_loc)
     min_stmt = int(boot.args.min_stmt)
     block_min_loc = int(boot.args.block_min_loc)
@@ -1428,6 +1440,18 @@ def analyze(
     )
 
 
+def _load_markdown_report_renderer() -> Callable[..., str]:
+    from .report.markdown import to_markdown_report
+
+    return to_markdown_report
+
+
+def _load_sarif_report_renderer() -> Callable[..., str]:
+    from .report.sarif import to_sarif_report
+
+    return to_sarif_report
+
+
 def report(
     *,
     boot: BootstrapResult,
@@ -1439,6 +1463,7 @@ def report(
     new_block: Collection[str],
     html_builder: Callable[..., str] | None = None,
     metrics_diff: object | None = None,
+    include_report_document: bool = False,
 ) -> ReportArtifacts:
     contents: dict[str, str | None] = {
         "html": None,
@@ -1466,13 +1491,17 @@ def report(
         "file_list": list(discovery.all_file_paths),
     }
     report_document: dict[str, object] | None = None
-    needs_report_document = boot.output_paths.html is not None or any(
-        path is not None
-        for path in (
-            boot.output_paths.json,
-            boot.output_paths.md,
-            boot.output_paths.sarif,
-            boot.output_paths.text,
+    needs_report_document = (
+        include_report_document
+        or boot.output_paths.html is not None
+        or any(
+            path is not None
+            for path in (
+                boot.output_paths.json,
+                boot.output_paths.md,
+                boot.output_paths.sarif,
+                boot.output_paths.text,
+            )
         )
     )
 
@@ -1525,10 +1554,11 @@ def report(
     if boot.output_paths.json and report_document is not None:
         contents["json"] = render_json_report_document(report_document)
 
-    if boot.output_paths.md and report_document is not None:
-        from .report.markdown import to_markdown_report
-
-        contents["md"] = to_markdown_report(
+    def _render_projection_artifact(
+        renderer: Callable[..., str],
+    ) -> str:
+        assert report_document is not None
+        return renderer(
             report_document=report_document,
             meta=report_meta,
             inventory=report_inventory,
@@ -1544,24 +1574,12 @@ def report(
             structural_findings=sf,
         )
 
-    if boot.output_paths.sarif and report_document is not None:
-        from .report.sarif import to_sarif_report
-
-        contents["sarif"] = to_sarif_report(
-            report_document=report_document,
-            meta=report_meta,
-            inventory=report_inventory,
-            func_groups=analysis.func_groups,
-            block_groups=analysis.block_groups_report,
-            segment_groups=analysis.segment_groups,
-            block_facts=analysis.block_group_facts,
-            new_function_group_keys=new_func,
-            new_block_group_keys=new_block,
-            new_segment_group_keys=set(analysis.segment_groups.keys()),
-            metrics=analysis.metrics_payload,
-            suggestions=analysis.suggestions,
-            structural_findings=sf,
-        )
+    for key, output_path, loader in (
+        ("md", boot.output_paths.md, _load_markdown_report_renderer),
+        ("sarif", boot.output_paths.sarif, _load_sarif_report_renderer),
+    ):
+        if output_path and report_document is not None:
+            contents[key] = _render_projection_artifact(loader())
 
     if boot.output_paths.text and report_document is not None:
         contents["text"] = render_text_report_document(report_document)
@@ -1572,6 +1590,7 @@ def report(
         md=contents["md"],
         sarif=contents["sarif"],
         text=contents["text"],
+        report_document=report_document,
     )
 
 

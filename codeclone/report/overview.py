@@ -1,13 +1,19 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, cast
 
-from .. import _coerce
+from .._coerce import as_int as _as_int
+from .._coerce import as_mapping as _as_mapping
+from .._coerce import as_sequence as _as_sequence
 from ..domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
@@ -17,6 +23,7 @@ from ..domain.findings import (
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
     CLONE_KIND_SEGMENT,
+    FAMILY_CLONE,
     FAMILY_CLONES,
     FAMILY_DEAD_CODE,
     FAMILY_DESIGN,
@@ -36,20 +43,21 @@ from ..report.explain_contract import (
     BLOCK_HINT_ASSERT_ONLY,
     BLOCK_PATTERN_REPEATED_STMT_HASH,
 )
-from .derived import format_spread_location_label
+from .derived import (
+    classify_source_kind,
+    format_spread_location_label,
+    source_scope_from_locations,
+)
 
 if TYPE_CHECKING:
     from ..models import Suggestion
 
 __all__ = [
+    "build_directory_hotspots",
     "build_report_overview",
     "materialize_report_overview",
     "serialize_suggestion_card",
 ]
-
-_as_int = _coerce.as_int
-_as_mapping = _coerce.as_mapping
-_as_sequence = _coerce.as_sequence
 
 
 def serialize_suggestion_card(suggestion: Suggestion) -> dict[str, object]:
@@ -92,6 +100,260 @@ def _flatten_findings(findings: Mapping[str, object]) -> list[Mapping[str, objec
             _as_sequence(_as_mapping(groups.get(FAMILY_DESIGN)).get("groups")),
         ),
     ]
+
+
+_DIRECTORY_HOTSPOT_BUCKETS: tuple[str, ...] = (
+    "all",
+    "clones",
+    "structural",
+    CATEGORY_COMPLEXITY,
+    CATEGORY_COHESION,
+    CATEGORY_COUPLING,
+    CATEGORY_DEAD_CODE,
+    CATEGORY_DEPENDENCY,
+)
+_DIRECTORY_KIND_BREAKDOWN_KEYS: tuple[str, ...] = (
+    "clones",
+    "structural",
+    CATEGORY_DEAD_CODE,
+    CATEGORY_COMPLEXITY,
+    CATEGORY_COUPLING,
+    CATEGORY_COHESION,
+    CATEGORY_DEPENDENCY,
+)
+
+
+def _directory_bucket_keys(group: Mapping[str, object]) -> tuple[str, ...]:
+    family = str(group.get("family", "")).strip()
+    category = str(group.get("category", "")).strip()
+    if family == FAMILY_CLONE:
+        return ("all", "clones")
+    if family == FAMILY_STRUCTURAL:
+        return ("all", "structural")
+    if family == FAMILY_DEAD_CODE:
+        return ("all", CATEGORY_DEAD_CODE)
+    if family == FAMILY_DESIGN and category in {
+        CATEGORY_COMPLEXITY,
+        CATEGORY_COUPLING,
+        CATEGORY_COHESION,
+        CATEGORY_DEPENDENCY,
+    }:
+        return ("all", category)
+    return ("all",)
+
+
+def _directory_kind_breakdown_key(group: Mapping[str, object]) -> str | None:
+    family = str(group.get("family", "")).strip()
+    category = str(group.get("category", "")).strip()
+    if family == FAMILY_CLONE:
+        return "clones"
+    if family == FAMILY_STRUCTURAL:
+        return "structural"
+    if family == FAMILY_DEAD_CODE:
+        return CATEGORY_DEAD_CODE
+    if family == FAMILY_DESIGN and category in {
+        CATEGORY_COMPLEXITY,
+        CATEGORY_COUPLING,
+        CATEGORY_COHESION,
+        CATEGORY_DEPENDENCY,
+    }:
+        return category
+    return None
+
+
+def _directory_relative_path(item: Mapping[str, object]) -> str | None:
+    relative_path = str(item.get("relative_path", "")).replace("\\", "/").strip()
+    if not relative_path:
+        module = str(item.get("module", "")).strip()
+        if module:
+            relative_path = module.replace(".", "/") + ".py"
+    return relative_path or None
+
+
+def _directory_path_label(relative_path: str) -> str:
+    parent = PurePosixPath(relative_path).parent.as_posix()
+    return parent if parent not in {"", "/"} else "."
+
+
+def _directory_scope_root_label(
+    relative_path: str,
+    *,
+    source_kind: str,
+) -> str | None:
+    parts = tuple(
+        part for part in PurePosixPath(relative_path).parts if part not in {"", "."}
+    )
+    if not parts:
+        return None
+    tests_idx = next(
+        (index for index, part in enumerate(parts) if part == SOURCE_KIND_TESTS),
+        None,
+    )
+    if tests_idx is None:
+        return None
+    if (
+        source_kind == SOURCE_KIND_FIXTURES
+        and tests_idx + 1 < len(parts)
+        and parts[tests_idx + 1] == SOURCE_KIND_FIXTURES
+    ):
+        return "/".join(parts[: tests_idx + 2])
+    if source_kind == SOURCE_KIND_TESTS:
+        return "/".join(parts[: tests_idx + 1])
+    return None
+
+
+def _overview_directory_label(
+    relative_path: str,
+    *,
+    source_kind: str,
+) -> str:
+    scope_root = _directory_scope_root_label(
+        relative_path,
+        source_kind=source_kind,
+    )
+    if scope_root:
+        return scope_root
+    return _directory_path_label(relative_path)
+
+
+def _directory_contributions(
+    group: Mapping[str, object],
+) -> dict[str, dict[str, object]]:
+    contributions: dict[str, dict[str, object]] = {}
+    for item in map(_as_mapping, _as_sequence(group.get("items"))):
+        relative_path = _directory_relative_path(item)
+        if relative_path is None:
+            continue
+        source_kind = str(item.get("source_kind", "")).strip() or classify_source_kind(
+            relative_path
+        )
+        directory = _overview_directory_label(relative_path, source_kind=source_kind)
+        entry = contributions.setdefault(
+            directory,
+            {
+                "affected_items": 0,
+                "files": set(),
+                "locations": [],
+            },
+        )
+        entry["affected_items"] = _as_int(entry.get("affected_items")) + 1
+        cast(set[str], entry["files"]).add(relative_path)
+        cast(list[dict[str, object]], entry["locations"]).append(
+            {"source_kind": source_kind}
+        )
+    return contributions
+
+
+def _directory_group_data(
+    group: Mapping[str, object],
+) -> tuple[str, dict[str, dict[str, object]]] | None:
+    group_id = str(group.get("id", "")).strip()
+    if not group_id:
+        return None
+    contributions = _directory_contributions(group)
+    if not contributions:
+        return None
+    return group_id, contributions
+
+
+def build_directory_hotspots(
+    *,
+    findings: Mapping[str, object],
+    limit: int = 5,
+) -> dict[str, object]:
+    normalized_limit = max(1, _as_int(limit, 5))
+    bucket_rows: dict[str, dict[str, dict[str, object]]] = {
+        bucket: {} for bucket in _DIRECTORY_HOTSPOT_BUCKETS
+    }
+    bucket_totals: Counter[str] = Counter()
+
+    for group in _flatten_findings(findings):
+        group_data = _directory_group_data(group)
+        if group_data is None:
+            continue
+        group_id, contributions = group_data
+        bucket_keys = _directory_bucket_keys(group)
+        kind_key = _directory_kind_breakdown_key(group)
+        for bucket in bucket_keys:
+            rows = bucket_rows[bucket]
+            for directory, contribution in contributions.items():
+                row = rows.setdefault(
+                    directory,
+                    {
+                        "path": directory,
+                        "finding_ids": set(),
+                        "affected_items": 0,
+                        "files": set(),
+                        "locations": [],
+                        "kind_breakdown_ids": {
+                            key: set() for key in _DIRECTORY_KIND_BREAKDOWN_KEYS
+                        },
+                    },
+                )
+                cast(set[str], row["finding_ids"]).add(group_id)
+                row["affected_items"] = _as_int(row.get("affected_items")) + _as_int(
+                    contribution.get("affected_items")
+                )
+                cast(set[str], row["files"]).update(
+                    cast(set[str], contribution["files"])
+                )
+                cast(list[dict[str, object]], row["locations"]).extend(
+                    cast(list[dict[str, object]], contribution["locations"])
+                )
+                if bucket == "all" and kind_key is not None:
+                    kind_rows = cast(
+                        dict[str, set[str]],
+                        row["kind_breakdown_ids"],
+                    )
+                    kind_rows[kind_key].add(group_id)
+                bucket_totals[bucket] += _as_int(contribution.get("affected_items"))
+
+    def _row_sort_key(row: Mapping[str, object]) -> tuple[int, int, int, str]:
+        return (
+            -len(cast(set[str], row["finding_ids"])),
+            -_as_int(row.get("affected_items")),
+            -len(cast(set[str], row["files"])),
+            str(row.get("path", "")),
+        )
+
+    hotspots: dict[str, object] = {}
+    for bucket in _DIRECTORY_HOTSPOT_BUCKETS:
+        bucket_items = sorted(bucket_rows[bucket].values(), key=_row_sort_key)
+        total_directories = len(bucket_items)
+        total_affected_items = bucket_totals[bucket]
+        items: list[dict[str, object]] = []
+        for row in bucket_items[:normalized_limit]:
+            finding_groups = len(cast(set[str], row["finding_ids"]))
+            affected_items = _as_int(row.get("affected_items"))
+            files = len(cast(set[str], row["files"]))
+            item = {
+                "path": str(row.get("path", ".")),
+                "finding_groups": finding_groups,
+                "affected_items": affected_items,
+                "files": files,
+                "share_pct": round(
+                    (affected_items / total_affected_items) * 100.0,
+                    1,
+                )
+                if total_affected_items > 0
+                else 0.0,
+                "source_scope": source_scope_from_locations(
+                    cast(list[dict[str, object]], row["locations"])
+                ),
+            }
+            if bucket == "all":
+                item["kind_breakdown"] = {
+                    key: len(cast(dict[str, set[str]], row["kind_breakdown_ids"])[key])
+                    for key in _DIRECTORY_KIND_BREAKDOWN_KEYS
+                }
+            items.append(item)
+        hotspots[bucket] = {
+            "total_directories": total_directories,
+            "returned": len(items),
+            "has_more": total_directories > len(items),
+            "items": items,
+        }
+    return hotspots
 
 
 def _clone_fact_kind(kind: str) -> str:

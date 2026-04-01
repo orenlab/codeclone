@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -129,6 +132,23 @@ def build_parser(version: str) -> _ArgumentParser:
         type=int,
         default=DEFAULT_PROCESSES,
         help=ui.HELP_PROCESSES,
+    )
+    _add_bool_optional_argument(
+        analysis_group,
+        flag="--changed-only",
+        help_text=ui.HELP_CHANGED_ONLY,
+    )
+    analysis_group.add_argument(
+        "--diff-against",
+        default=None,
+        metavar="GIT_REF",
+        help=ui.HELP_DIFF_AGAINST,
+    )
+    analysis_group.add_argument(
+        "--paths-from-git-diff",
+        default=None,
+        metavar="GIT_REF",
+        help=ui.HELP_PATHS_FROM_GIT_DIFF,
     )
     _add_optional_path_argument(
         analysis_group,

@@ -10,6 +10,7 @@ Describe implemented protections and explicit security boundaries.
 - File read limits and parser limits: `codeclone/cli.py:process_file`, `codeclone/extractor.py:_parse_limits`
 - Baseline/cache validation: `codeclone/baseline.py`, `codeclone/cache.py`
 - HTML escaping: `codeclone/_html_escape.py`, `codeclone/html_report.py`
+- MCP read-only enforcement: `codeclone/mcp_service.py`, `codeclone/mcp_server.py`
 
 ## Data model
 
@@ -25,6 +26,17 @@ Security-relevant input classes:
 - Sensitive root directories are blocked by scanner policy.
 - Symlink traversal outside root is skipped.
 - HTML report escapes text and attribute contexts before embedding.
+- MCP server is read-only by design: no tool mutates source files, baselines,
+  cache, or report artifacts.
+- `--allow-remote` guard must be passed explicitly for non-local transports;
+  default is local-only (`stdio`).
+- `cache_policy=refresh` is rejected — MCP cannot trigger cache invalidation.
+- Review markers (`mark_finding_reviewed`) are session-local in-memory state;
+  they are never persisted to disk or leaked into baselines/reports.
+- `git_diff_ref` parameter is validated against a strict regex to prevent
+  command injection via shell-interpreted git arguments.
+- Run history is bounded by `--history-limit` (default 10) to prevent
+  unbounded memory growth.
 
 Refs:
 
@@ -54,6 +66,9 @@ Refs:
 | Oversized baseline                       | Baseline rejected |
 | Oversized cache                          | Cache ignored     |
 | HTML-injected payload in metadata/source | Escaped output    |
+| `--allow-remote` not passed for HTTP     | Transport rejected |
+| `cache_policy=refresh` requested         | Policy rejected    |
+| `git_diff_ref` fails regex               | Parameter rejected |
 
 ## Determinism / canonicalization
 
@@ -74,6 +89,8 @@ Refs:
 - `tests/test_security.py::test_html_report_escapes_user_content`
 - `tests/test_html_report.py::test_html_report_escapes_script_breakout_payload`
 - `tests/test_cache.py::test_cache_too_large_warns`
+- `tests/test_mcp_service.py::test_cache_policy_refresh_rejected`
+- `tests/test_mcp_server.py::test_allow_remote_guard`
 
 ## Non-guarantees
 

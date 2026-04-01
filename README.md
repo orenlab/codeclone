@@ -12,19 +12,27 @@
   <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main&style=flat-square" alt="Tests"></a>
   <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml/badge.svg?style=flat-square" alt="Benchmark"></a>
   <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone.svg?style=flat-square" alt="Python"></a>
-  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-81%20(B)-green" alt="codeclone 81 (B)"></a>
-  <a href="https://github.com/orenlab/codeclone/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/codeclone.svg?style=flat-square" alt="License"></a>
+  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-85%20(B)-green" alt="codeclone 85 (B)"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-MPL--2.0-brightgreen?style=flat-square" alt="License"></a>
 </p>
 
 ---
 
-CodeClone provides comprehensive structural code quality analysis for Python. It detects architectural
-duplication via normalized AST and Control Flow Graphs, computes quality metrics, and enforces CI gates —
-all with baseline-aware governance that separates **known** technical debt from **new** regressions.
+CodeClone provides deterministic structural code quality analysis for Python.
+It detects architectural duplication, computes quality metrics, and enforces CI gates — all with **baseline-aware
+governance** that separates **known** technical debt from **new** regressions.
+An optional MCP interface exposes the same canonical analysis pipeline to AI agents and IDEs.
 
 Docs: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/) ·
 Live sample report:
 [orenlab.github.io/codeclone/examples/report/](https://orenlab.github.io/codeclone/examples/report/)
+
+> [!NOTE]
+> This README and docs site track the in-development `v2.0.x` line from `main`.
+> For the latest stable CodeClone documentation (`v1.4.4`), see the
+> [`v1.4.4` README](https://github.com/orenlab/codeclone/blob/v1.4.4/README.md)
+> and the
+> [`v1.4.4` docs tree](https://github.com/orenlab/codeclone/tree/v1.4.4/docs).
 
 ## Features
 
@@ -32,23 +40,41 @@ Live sample report:
 - **Structural findings** — duplicated branch families, clone guard/exit divergence and clone-cohort drift (report-only)
 - **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, dead code, health
   score
-- **Baseline governance** — known debt stays accepted; CI blocks only new clones and metric regressions
+- **Baseline governance** — separates accepted **legacy** debt from **new regressions** and lets CI fail **only** on
+  what changed
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
+- **MCP server** — optional read-only MCP surface for AI agents and IDEs, designed as a budget-aware guided control
+  surface for agentic development
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
-- **Fast*** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
+- **Fast** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
 
 ## Quick Start
 
 ```bash
-pip install codeclone        # or: uv tool install codeclone
+pip install codeclone          # or: uv tool install codeclone
 
-codeclone .                  # analyze current directory
-codeclone . --html           # generate HTML report
-codeclone . --html --open-html-report   # generate and open HTML report
-codeclone . --json --md --sarif --text   # generate machine-readable reports
-codeclone . --html --json --timestamped-report-paths   # keep timestamped report snapshots
-codeclone . --ci             # CI mode (--fail-on-new --no-color --quiet)
+codeclone .                    # analyze
+codeclone . --html             # HTML report
+codeclone . --html --open-html-report  # open in browser
+codeclone . --json --md --sarif --text # all formats
+codeclone . --ci               # CI mode
 ```
+
+<details>
+<summary>More examples</summary>
+
+```bash
+# timestamped report snapshots
+codeclone . --html --json --timestamped-report-paths
+
+# changed-scope gating against git diff
+codeclone . --changed-only --diff-against main
+
+# shorthand: diff source for changed-scope review
+codeclone . --paths-from-git-diff HEAD~1
+```
+
+</details>
 
 <details>
 <summary>Run without install</summary>
@@ -69,9 +95,34 @@ codeclone . --update-baseline
 codeclone . --ci
 ```
 
-The `--ci` preset equals `--fail-on-new --no-color --quiet`.
+<details>
+<summary>What <code>--ci</code> enables</summary>
+The <code>--ci</code> preset equals <code>--fail-on-new --no-color --quiet</code>.
 When a trusted metrics baseline is loaded, CI mode also enables
-`--fail-on-new-metrics`.
+<code>--fail-on-new-metrics</code>.
+</details>
+
+### GitHub Action
+
+CodeClone also ships a composite GitHub Action for PR and CI workflows:
+
+```yaml
+- uses: orenlab/codeclone/.github/actions/codeclone@main
+  with:
+    fail-on-new: "true"
+    sarif: "true"
+    pr-comment: "true"
+```
+
+It can:
+
+- run baseline-aware gating
+- generate JSON and SARIF reports
+- upload SARIF to GitHub Code Scanning
+- post or update a PR summary comment
+
+Action docs:
+[.github/actions/codeclone/README.md](https://github.com/orenlab/codeclone/blob/main/.github/actions/codeclone/README.md)
 
 ### Quality Gates
 
@@ -100,6 +151,36 @@ repos:
         args: [ ".", "--ci" ]
         types: [ python ]
 ```
+
+## MCP Server
+
+CodeClone ships an optional read-only MCP server for AI agents and IDE clients.
+
+```bash
+# install the MCP extra
+pip install "codeclone[mcp]"
+
+# local agents (Claude Code, Codex, Copilot, Gemini CLI)
+codeclone-mcp --transport stdio
+
+# remote / HTTP-only clients
+codeclone-mcp --transport streamable-http --port 8000
+```
+
+20 tools + 10 resources — deterministic, baseline-aware, and read-only.
+Never mutates source files, baselines, or repo state.
+
+Payloads are optimized for LLM context: compact summaries by default, full detail on demand.
+The cheapest useful path is also the most obvious path: first-pass triage stays compact, and deeper detail is explicit.
+
+Recommended agent flow:
+`analyze_repository` or `analyze_changed_paths` → `get_run_summary` or `get_production_triage` →
+`list_hotspots` or `check_*` → `get_finding` → `get_remediation`
+
+Docs:
+[MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
+·
+[MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
 
 ## Configuration
 
@@ -163,8 +244,7 @@ All report formats are rendered from one canonical JSON report document.
 - `--timestamped-report-paths` appends a UTC timestamp to default report filenames for bare report flags such as
   `--html` or `--json`. Explicit report paths are not rewritten.
 
-The published docs site also includes a live example HTML/JSON/SARIF report
-generated from the current `codeclone` repository during the docs build.
+The docs site also includes live example HTML/JSON/SARIF reports generated from the current `codeclone` repository.
 
 Structural findings include:
 
@@ -191,16 +271,21 @@ class Middleware:  # codeclone: ignore[dead-code]
 Dynamic/runtime false positives are resolved via explicit inline suppressions, not via broad heuristics.
 
 <details>
-<summary>JSON report shape (v2.1)</summary>
+<summary>Canonical JSON report shape (v2.2)</summary>
 
 ```json
 {
-  "report_schema_version": "2.1",
+  "report_schema_version": "2.2",
   "meta": {
-    "codeclone_version": "2.0.0b2",
+    "codeclone_version": "2.0.0b3",
     "project_name": "...",
     "scan_root": ".",
     "report_mode": "full",
+    "analysis_thresholds": {
+      "design_findings": {
+        "...": "..."
+      }
+    },
     "baseline": {
       "...": "..."
     },
@@ -211,6 +296,7 @@ Dynamic/runtime false positives are resolved via explicit inline suppressions, n
       "...": "..."
     },
     "runtime": {
+      "analysis_started_at_utc": "...",
       "report_generated_at_utc": "..."
     }
   },
@@ -257,7 +343,8 @@ Dynamic/runtime false positives are resolved via explicit inline suppressions, n
       "families": {},
       "top_risks": [],
       "source_scope_breakdown": {},
-      "health_snapshot": {}
+      "health_snapshot": {},
+      "directory_hotspots": {}
     },
     "hotlists": {
       "most_actionable_ids": [],
@@ -300,20 +387,20 @@ CFG semantics: [CFG semantics](https://orenlab.github.io/codeclone/cfg/)
 
 ## Documentation
 
-| Topic                      | Link                                                                                               |
-|----------------------------|----------------------------------------------------------------------------------------------------|
-| Contract book (start here) | [Contracts and guarantees](https://orenlab.github.io/codeclone/book/00-intro/)                    |
-| Exit codes                 | [Exit codes and failure policy](https://orenlab.github.io/codeclone/book/03-contracts-exit-codes/) |
-| Configuration              | [Config and defaults](https://orenlab.github.io/codeclone/book/04-config-and-defaults/)           |
-| Baseline contract          | [Baseline contract](https://orenlab.github.io/codeclone/book/06-baseline/)                        |
-| Cache contract             | [Cache contract](https://orenlab.github.io/codeclone/book/07-cache/)                              |
-| Report contract            | [Report contract](https://orenlab.github.io/codeclone/book/08-report/)                            |
+| Topic                      | Link                                                                                                |
+|----------------------------|-----------------------------------------------------------------------------------------------------|
+| Contract book (start here) | [Contracts and guarantees](https://orenlab.github.io/codeclone/book/00-intro/)                      |
+| Exit codes                 | [Exit codes and failure policy](https://orenlab.github.io/codeclone/book/03-contracts-exit-codes/)  |
+| Configuration              | [Config and defaults](https://orenlab.github.io/codeclone/book/04-config-and-defaults/)             |
+| Baseline contract          | [Baseline contract](https://orenlab.github.io/codeclone/book/06-baseline/)                          |
+| Cache contract             | [Cache contract](https://orenlab.github.io/codeclone/book/07-cache/)                                |
+| Report contract            | [Report contract](https://orenlab.github.io/codeclone/book/08-report/)                              |
 | Metrics & quality gates    | [Metrics and quality gates](https://orenlab.github.io/codeclone/book/15-metrics-and-quality-gates/) |
-| Dead code                  | [Dead-code contract](https://orenlab.github.io/codeclone/book/16-dead-code-contract/)             |
-| Docker benchmark contract  | [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmarking/)                |
-| Determinism                | [Determinism policy](https://orenlab.github.io/codeclone/book/12-determinism/)                    |
+| Dead code                  | [Dead-code contract](https://orenlab.github.io/codeclone/book/16-dead-code-contract/)               |
+| Docker benchmark contract  | [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmarking/)                  |
+| Determinism                | [Determinism policy](https://orenlab.github.io/codeclone/book/12-determinism/)                      |
 
-## * Benchmarking
+## Benchmarking Notes
 
 <details>
 <summary>Reproducible Docker Benchmark</summary>
@@ -337,8 +424,15 @@ in [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmark
 
 </details>
 
+## License
+
+- **Code:** MPL-2.0
+- **Documentation:** MIT
+
+Versions released before this change remain under their original license terms.
+
 ## Links
 
 - **Issues:** <https://github.com/orenlab/codeclone/issues>
 - **PyPI:** <https://pypi.org/project/codeclone/>
-- **License:** MIT
+- **Licenses:** [MPL-2.0](LICENSE) · [MIT docs](LICENSE-docs)

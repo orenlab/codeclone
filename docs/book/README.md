@@ -29,6 +29,7 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 ### Interfaces
 
 - [09-cli.md](09-cli.md)
+- [20-mcp-interface.md](20-mcp-interface.md)
 - [10-html-render.md](10-html-render.md)
 
 ### System properties

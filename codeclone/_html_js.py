@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 """JavaScript for the HTML report — modular IIFE with feature blocks."""
@@ -567,6 +570,105 @@ function updateCloneScopeCounters(){
 
 _LAZY_HIGHLIGHT = ""
 
+# ---------------------------------------------------------------------------
+# IDE links
+# ---------------------------------------------------------------------------
+
+_IDE_LINKS = r"""
+(function initIdeLinks(){
+  const KEY='codeclone-ide';
+  const root=document.documentElement;
+  var scanRoot=root.getAttribute('data-scan-root')||'';
+  var projectName=scanRoot.replace(/\/$/,'').split('/').pop()||'';
+
+  function relPath(abs){
+    var r=scanRoot.replace(/\/$/,'')+'/';
+    if(abs.indexOf(r)===0)return abs.substring(r.length);
+    return abs;
+  }
+
+  const SCHEMES={
+    pycharm:{label:'PyCharm',
+      url:function(f,l){return 'jetbrains://pycharm/navigate/reference?project='+encodeURIComponent(projectName)+'&path='+encodeURIComponent(relPath(f))+':'+l}},
+    idea:{label:'IntelliJ IDEA',
+      url:function(f,l){return 'jetbrains://idea/navigate/reference?project='+encodeURIComponent(projectName)+'&path='+encodeURIComponent(relPath(f))+':'+l}},
+    vscode:{label:'VS Code',
+      url:function(f,l){return 'vscode://file'+f+':'+l}},
+    cursor:{label:'Cursor',
+      url:function(f,l){return 'cursor://file'+f+':'+l}},
+    fleet:{label:'Fleet',
+      url:function(f,l){return 'fleet://open?file='+encodeURIComponent(f)+'&line='+l}},
+    zed:{label:'Zed',
+      url:function(f,l){return 'zed://file'+f+':'+l}},
+    '': {label:'None',url:null}
+  };
+
+  var current=localStorage.getItem(KEY)||'';
+  root.setAttribute('data-ide',current);
+
+  const btn=$('.ide-picker-btn');
+  const menu=$('.ide-menu');
+  const label=$('.ide-picker-label');
+  if(!btn||!menu)return;
+
+  function updateLabel(){
+    if(!label)return;
+    var s=SCHEMES[current];
+    label.textContent=s&&current?s.label:'IDE';
+  }
+
+  function setChecked(){
+    menu.querySelectorAll('button').forEach(function(b){
+      b.setAttribute('aria-checked',b.dataset.ide===current?'true':'false');
+    });
+  }
+
+  function applyHrefs(){
+    var s=SCHEMES[current];
+    $$('.ide-link[data-file]').forEach(function(a){
+      if(!current||!s||!s.url){a.removeAttribute('href');return}
+      var f=a.getAttribute('data-file'),l=a.getAttribute('data-line')||'1';
+      if(!f)return;
+      a.setAttribute('href',s.url(f,l));
+    });
+  }
+
+  setChecked();
+  updateLabel();
+  applyHrefs();
+
+  // Reapply hrefs when new content becomes visible (tab switch)
+  var mo=new MutationObserver(function(){applyHrefs()});
+  document.querySelectorAll('.tab-panel').forEach(function(p){
+    mo.observe(p,{attributes:true,attributeFilter:['class']});
+  });
+
+  btn.addEventListener('click',function(e){
+    e.stopPropagation();
+    var open=menu.hasAttribute('data-open');
+    if(open){menu.removeAttribute('data-open');btn.setAttribute('aria-expanded','false')}
+    else{menu.setAttribute('data-open','');btn.setAttribute('aria-expanded','true')}
+  });
+
+  document.addEventListener('click',function(){
+    menu.removeAttribute('data-open');btn.setAttribute('aria-expanded','false');
+  });
+
+  menu.addEventListener('click',function(e){
+    e.stopPropagation();
+    var b=e.target.closest('button[data-ide]');
+    if(!b)return;
+    current=b.dataset.ide;
+    localStorage.setItem(KEY,current);
+    root.setAttribute('data-ide',current);
+    setChecked();
+    updateLabel();
+    applyHrefs();
+    menu.removeAttribute('data-open');btn.setAttribute('aria-expanded','false');
+  });
+
+})();
+"""
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -589,6 +691,7 @@ _ALL_MODULES = (
     _TABLE_SORT,
     _SCOPE_COUNTERS,
     _LAZY_HIGHLIGHT,
+    _IDE_LINKS,
 )
 
 

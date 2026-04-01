@@ -44,10 +44,23 @@ Refs:
     - KPI cards with baseline-aware tone (`✓ baselined` / `+N` regression)
     - Health gauge with baseline delta arc (improvement/degradation)
     - Executive Summary: issue breakdown (sorted bars) + source breakdown
+    - Hotspots by Directory: render-only view over `derived.overview.directory_hotspots`
     - Health Profile: full-width radar chart of dimension scores
     - Get Badge modal: grade-only / score+grade variants with shields.io embed
 - Dead-code UI is a single top-level `Dead Code` tab with deterministic split
   sub-tabs: `Active` and `Suppressed`.
+- IDE deep links:
+    - An IDE picker in the topbar lets users choose their IDE. The selection is
+      persisted in `localStorage` (key `codeclone-ide`).
+    - Supported IDEs: PyCharm, IntelliJ IDEA, VS Code, Cursor, Fleet, Zed.
+    - File paths across Clones, Quality, Suggestions, Dead Code, and Findings
+      tabs are rendered as `<a class="ide-link">` elements with `data-file`
+      (absolute path) and `data-line` attributes.
+    - JetBrains IDEs use `jetbrains://` protocol (requires Toolbox); others use
+      native URL schemes (`vscode://`, `cursor://`, `fleet://`, `zed://`).
+    - The scan root is embedded as `data-scan-root` on `<html>` so that
+      JetBrains links can derive the project name and relative path.
+    - When no IDE is selected, links are inert (no `href`, default cursor).
 
 Refs:
 
@@ -55,6 +68,8 @@ Refs:
 - `codeclone/report/overview.py:materialize_report_overview`
 - `codeclone/_html_report/_sections/_clones.py:_render_group_explanation`
 - `codeclone/_html_report/_sections/_meta.py:render_meta_panel`
+- `codeclone/_html_js.py:_IDE_LINKS`
+- `codeclone/_html_report/_assemble.py` (IDE picker topbar widget)
 
 ## Invariants (MUST)
 
@@ -63,12 +78,16 @@ Refs:
 - Novelty controls reflect baseline trust split note and per-group novelty flags.
 - Suppressed dead-code rows are rendered only from report dead-code suppression
   payloads and do not become active dead-code findings in UI tables.
+- IDE link `data-file` and `data-line` attributes are escaped via
+  `_escape_attr` before insertion into HTML.
 
 Refs:
 
 - `codeclone/_html_escape.py:_escape_attr`
 - `codeclone/_html_snippets.py:_render_code_block`
 - `codeclone/_html_report/_sections/_clones.py:render_clones_panel`
+- `codeclone/_html_report/_tables.py` (path cell IDE links)
+- `codeclone/report/findings.py` (structural findings IDE links)
 
 ## Failure modes
 
@@ -104,7 +123,12 @@ Refs:
 ## Non-guarantees
 
 - CSS/visual system and interaction details may evolve without schema bump.
-- HTML-only interaction affordances (theme toggle, provenance modal, badge
-  modal, radar chart) are not baseline/cache/report contracts.
+- HTML-only interaction affordances (theme toggle, IDE picker, provenance modal,
+  badge modal, radar chart) are not baseline/cache/report contracts.
+- IDE deep link behavior depends on the user's local IDE installation and
+  protocol handler registration (e.g. JetBrains Toolbox for `jetbrains://`).
 - Overview layout (KPI grid, executive summary, analytics) is a pure view
   concern; only the underlying data identity and ordering are contract-sensitive.
+- Direct `build_html_report(...)` compatibility paths without a canonical
+  `report_document` may omit `directory_hotspots`; HTML must not approximate
+  directory aggregates from suggestion cards.

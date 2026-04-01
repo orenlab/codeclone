@@ -3,6 +3,13 @@
 This site is built with MkDocs and published to
 [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/).
 
+!!! note "Version Notice"
+    This site currently documents the in-development `v2.0.x` line from `main`.
+    For the latest stable CodeClone documentation (`v1.4.4`), see the
+    [`v1.4.4` README](https://github.com/orenlab/codeclone/blob/v1.4.4/README.md)
+    and the
+    [`v1.4.4` docs tree](https://github.com/orenlab/codeclone/tree/v1.4.4/docs).
+
 It has two documentation layers:
 
 - [Contracts Book](book/README.md): **contract-first** documentation. This is the canonical
@@ -31,12 +38,13 @@ repository build:
 - [Config and defaults](book/04-config-and-defaults.md)
 - [Core pipeline and invariants](book/05-core-pipeline.md)
 - [Baseline contract (schema v2.0)](book/06-baseline.md)
-- [Cache contract (schema v2.2)](book/07-cache.md)
-- [Report contract (schema v2.1)](book/08-report.md)
+- [Cache contract (schema v2.3)](book/07-cache.md)
+- [Report contract (schema v2.2)](book/08-report.md)
 
 ## Interfaces
 
 - [CLI behavior, modes, and UX](book/09-cli.md)
+- [MCP interface contract](book/20-mcp-interface.md)
 - [HTML report rendering contract](book/10-html-render.md)
 
 ## System Properties
@@ -58,6 +66,7 @@ repository build:
 
 - [Architecture narrative](architecture.md)
 - [CFG design and semantics](cfg.md)
+- [MCP integration for AI agents and clients](mcp.md)
 - [SARIF integration for IDE/code-scanning use](sarif.md)
 - [Docs publishing and Pages workflow](publishing.md)
 

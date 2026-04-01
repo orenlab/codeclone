@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
@@ -41,34 +44,28 @@ def compute_cbo(
     """
     couplings: set[str] = set()
 
-    for base in class_node.bases:
-        candidate = _annotation_name(base)
+    def _add_annotation_coupling(node: ast.AST | None) -> None:
+        if node is None:
+            return
+        candidate = _annotation_name(node)
         if candidate:
             couplings.add(candidate)
+
+    for base in class_node.bases:
+        _add_annotation_coupling(base)
 
     for node in ast.walk(class_node):
         if isinstance(node, ast.Name):
             couplings.add(node.id)
-            continue
-        if isinstance(node, ast.Attribute):
-            if isinstance(node.value, ast.Name) and node.value.id in {"self", "cls"}:
-                continue
-            couplings.add(node.attr)
-            continue
-        if isinstance(node, ast.Call):
-            candidate = _annotation_name(node.func)
-            if candidate:
-                couplings.add(candidate)
-            continue
-        if isinstance(node, ast.AnnAssign) and node.annotation is not None:
-            candidate = _annotation_name(node.annotation)
-            if candidate:
-                couplings.add(candidate)
-            continue
-        if isinstance(node, ast.arg) and node.annotation is not None:
-            candidate = _annotation_name(node.annotation)
-            if candidate:
-                couplings.add(candidate)
+        elif isinstance(node, ast.Attribute):
+            if not (
+                isinstance(node.value, ast.Name) and node.value.id in {"self", "cls"}
+            ):
+                couplings.add(node.attr)
+        elif isinstance(node, ast.Call):
+            _add_annotation_coupling(node.func)
+        elif isinstance(node, (ast.AnnAssign, ast.arg)):
+            _add_annotation_coupling(node.annotation)
 
     filtered = {
         name

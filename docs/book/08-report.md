@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define report contracts in `2.0.0b2`: canonical JSON (`report_schema_version=2.1`)
+Define report contracts in `2.0.0b3`: canonical JSON (`report_schema_version=2.2`)
 plus deterministic TXT/Markdown/SARIF projections.
 
 ## Public surface
@@ -16,7 +16,7 @@ plus deterministic TXT/Markdown/SARIF projections.
 
 ## Data model
 
-JSON report top-level (v2.1):
+JSON report top-level (v2.2):
 
 - `report_schema_version`
 - `meta`
@@ -25,6 +25,12 @@ JSON report top-level (v2.1):
 - `metrics`
 - `derived`
 - `integrity`
+
+Canonical provenance additions:
+
+- `meta.analysis_thresholds.design_findings` records the effective report-level
+  thresholds used to materialize canonical design findings for that run
+  (`complexity > N`, `coupling > N`, `cohesion >= N`).
 
 Canonical vs non-canonical split:
 
@@ -41,6 +47,7 @@ Derived projection layer:
     - `top_risks`
     - `source_scope_breakdown`
     - `health_snapshot`
+    - `directory_hotspots`
 - `derived.hotlists` — deterministic lists of canonical finding IDs:
     - `most_actionable_ids`
     - `highest_spread_ids`
@@ -73,19 +80,34 @@ Per-group common axes (family-specific fields may extend):
 
 - JSON is source of truth for report semantics.
 - Markdown and SARIF are deterministic projections from the same report document.
+- MCP summary/finding/hotlist/report-section queries are deterministic views over
+  the same canonical report document.
 - SARIF is an IDE/code-scanning-oriented projection:
     - repo-relative result paths are anchored via `%SRCROOT%`
     - referenced files are listed under `run.artifacts`
     - clone results carry `baselineState` when clone novelty is known
 - Derived layer (`suggestions`, `overview`, `hotlists`) does not replace canonical
   findings/metrics.
+- Design findings are built once in the canonical report using the effective
+  threshold policy recorded in `meta.analysis_thresholds.design_findings`; MCP
+  and HTML must not re-synthesize them post-hoc from raw metric rows.
 - HTML overview cards are materialized from canonical findings plus
   `derived.overview` + `derived.hotlists`; pre-expanded overview card payloads are
   not part of the report contract.
+- `derived.overview.directory_hotspots` is a deterministic report-layer
+  aggregation over canonical findings; HTML must render it as-is or omit it on
+  compatibility paths without a canonical report document.
+- `derived.overview.directory_hotspots[*].path` is an overview-oriented
+  directory key: runtime findings keep their parent directory, while test-only
+  and fixture-only findings collapse to the corresponding source-scope roots
+  (`.../tests` or `.../tests/fixtures`) to avoid duplicating the same hotspot
+  across leaf fixture paths.
 - Overview hotspot/source-breakdown sections must resolve from canonical report
   data or deterministic derived IDs; HTML must not silently substitute stale
   placeholders such as `n/a` or empty-state cards when canonical data exists.
-- `report_generated_at_utc` is carried in `meta.runtime` and reused by UI/renderers.
+- `analysis_started_at_utc` and `report_generated_at_utc` are carried in
+  `meta.runtime`; renderers/projections may use them for provenance but must not
+  reinterpret them as semantic analysis data.
 - Canonical `meta.scan_root` is normalized to `"."`; absolute runtime paths are
   exposed under `meta.runtime.*_absolute`.
 - `clone_type` and `novelty` are group-level properties inside clone groups.
@@ -148,6 +170,7 @@ Refs:
 - [07-cache.md](07-cache.md)
 - [09-cli.md](09-cli.md)
 - [10-html-render.md](10-html-render.md)
+- [20-mcp-interface.md](20-mcp-interface.md)
 - [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)
 - [../sarif.md](../sarif.md)
 - [../examples/report.md](../examples/report.md)

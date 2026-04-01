@@ -8,26 +8,28 @@ Document current module boundaries and ownership in CodeClone v2.x.
 
 Main ownership layers:
 
-- Core detection pipeline: `scanner` -> `extractor` -> `cfg/normalize` -> `grouping`.
+- Core detection pipeline: `scanner` -> `extractor` -> `cfg/normalize/blocks` -> `grouping`.
 - Quality metrics pipeline: complexity/coupling/cohesion/dependencies/dead-code/health.
 - Contracts and persistence: baseline, metrics baseline, cache, exit semantics.
-- Report model and serialization: deterministic JSON/TXT + explainability facts.
+- Report model and projections: canonical JSON + deterministic TXT/Markdown/SARIF + explainability facts.
+- MCP agent surface: read-only server layer over the same pipeline/report contracts.
 - Render layer: HTML rendering and template assets.
 
 ## Data model
 
-| Layer                 | Modules                                                                                                                                                                                            | Responsibility                                                                       |
-|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
-| Contracts             | `codeclone/contracts.py`, `codeclone/errors.py`                                                                                                                                                    | Shared schema versions, URLs, exit-code enum, typed exceptions                       |
-| Domain models         | `codeclone/models.py`, `codeclone/domain/*.py`                                                                                                                                                     | Typed dataclasses/enums plus centralized finding/scope/severity taxonomies           |
-| Discovery + parsing   | `codeclone/scanner.py`, `codeclone/extractor.py`                                                                                                                                                   | Enumerate files, parse AST, extract function/block/segment units                     |
-| Structural analysis   | `codeclone/cfg.py`, `codeclone/normalize.py`, `codeclone/blockhash.py`, `codeclone/fingerprint.py`, `codeclone/blocks.py`                                                                          | CFG, normalization, statement hashes, block/segment windows                          |
-| Grouping              | `codeclone/grouping.py`                                                                                                                                                                            | Build function/block/segment groups                                                  |
-| Metrics               | `codeclone/metrics/*`                                                                                                                                                                              | Compute complexity/coupling/cohesion/dependency/dead-code/health signals             |
-| Report core           | `codeclone/report/*`, `codeclone/_cli_meta.py`                                                                                                                                                     | Merge windows, explainability facts, deterministic JSON/TXT schema + shared metadata |
-| Persistence           | `codeclone/baseline.py`, `codeclone/metrics_baseline.py`, `codeclone/cache.py`                                                                                                                     | Baseline/cache trust/compat/integrity and atomic persistence                         |
-| Runtime orchestration | `codeclone/pipeline.py`, `codeclone/cli.py`, `codeclone/_cli_args.py`, `codeclone/_cli_paths.py`, `codeclone/_cli_summary.py`, `codeclone/_cli_config.py`, `codeclone/ui_messages.py`              | CLI UX, stage orchestration, status handling, outputs, error markers                 |
-| Rendering             | `codeclone/html_report.py`, `codeclone/_html_report/*`, `codeclone/_html_badges.py`, `codeclone/_html_js.py`, `codeclone/_html_escape.py`, `codeclone/_html_snippets.py`, `codeclone/templates.py` | HTML-only view layer over report data                                                |
+| Layer                 | Modules                                                                                                                                                                                            | Responsibility                                                                                  |
+|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| Contracts             | `codeclone/contracts.py`, `codeclone/errors.py`                                                                                                                                                    | Shared schema versions, URLs, exit-code enum, typed exceptions                                  |
+| Domain models         | `codeclone/models.py`, `codeclone/domain/*.py`                                                                                                                                                     | Typed dataclasses/enums plus centralized finding/scope/severity taxonomies                      |
+| Discovery + parsing   | `codeclone/scanner.py`, `codeclone/extractor.py`                                                                                                                                                   | Enumerate files, parse AST, extract function/block/segment units                                |
+| Structural analysis   | `codeclone/cfg.py`, `codeclone/normalize.py`, `codeclone/fingerprint.py`, `codeclone/blocks.py`                                                                                                    | CFG, normalization, statement hashes, block/segment windows                                     |
+| Grouping              | `codeclone/grouping.py`                                                                                                                                                                            | Build function/block/segment groups                                                             |
+| Metrics               | `codeclone/metrics/*`                                                                                                                                                                              | Compute complexity/coupling/cohesion/dependency/dead-code/health signals                        |
+| Report core           | `codeclone/report/*`, `codeclone/_cli_meta.py`                                                                                                                                                     | Canonical report building, deterministic projections, explainability facts, and shared metadata |
+| Persistence           | `codeclone/baseline.py`, `codeclone/metrics_baseline.py`, `codeclone/cache.py`                                                                                                                     | Baseline/cache trust/compat/integrity and atomic persistence                                    |
+| Runtime orchestration | `codeclone/pipeline.py`, `codeclone/cli.py`, `codeclone/_cli_args.py`, `codeclone/_cli_paths.py`, `codeclone/_cli_summary.py`, `codeclone/_cli_config.py`, `codeclone/ui_messages.py`              | CLI UX, stage orchestration, status handling, outputs, error markers                            |
+| MCP agent interface   | `codeclone/mcp_service.py`, `codeclone/mcp_server.py`                                                                                                                                              | Read-only MCP tools/resources over canonical analysis and report layers                         |
+| Rendering             | `codeclone/html_report.py`, `codeclone/_html_report/*`, `codeclone/_html_badges.py`, `codeclone/_html_js.py`, `codeclone/_html_escape.py`, `codeclone/_html_snippets.py`, `codeclone/templates.py` | HTML-only view layer over report data                                                           |
 
 Refs:
 
@@ -39,6 +41,17 @@ Refs:
 - Core analysis modules do not depend on render/UI modules.
 - HTML renderer receives already-computed report data/facts and does not
   recompute detection semantics.
+- MCP layer reuses current pipeline/report semantics and must not introduce a
+  separate analysis truth path.
+- MCP may ship task-specific slim projections (for example, summary-only metrics
+  or inventory counts) as long as canonical report data remains the source of
+  truth and richer detail stays reachable through dedicated tools/sections.
+- The same rule applies to summary cache convenience fields such as
+  `freshness` and to production-first triage projections built from
+  canonical hotlists/suggestions.
+- MCP finding lists may also expose short run/finding ids and slimmer relative
+  location projections, while keeping `get_finding(detail_level="full")` as the
+  richer per-finding inspection path.
 - Baseline, metrics baseline, and cache are validated before being trusted.
 
 Refs:
@@ -106,6 +119,7 @@ Refs:
 | Clone baseline trust/compat/integrity | [06-baseline.md](06-baseline.md)                                                                                 |
 | Cache trust and fail-open behavior    | [07-cache.md](07-cache.md)                                                                                       |
 | Report schema and provenance          | [08-report.md](08-report.md), [10-html-render.md](10-html-render.md)                                             |
+| MCP agent surface                     | [20-mcp-interface.md](20-mcp-interface.md)                                                                       |
 | Metrics gates and metrics baseline    | [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)                                               |
 | Dead-code liveness policy             | [16-dead-code-contract.md](16-dead-code-contract.md)                                                             |
 | Suggestions and clone typing          | [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)                                         |

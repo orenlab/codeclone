@@ -1,16 +1,21 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
-from . import __version__
+from . import __version__, _coerce
 from . import ui_messages as ui
 from ._cli_args import build_parser
 from ._cli_baselines import (
@@ -80,10 +85,22 @@ from ._cli_runtime import (
 from ._cli_runtime import (
     validate_numeric_args as _validate_numeric_args_impl,
 )
-from ._cli_summary import MetricsSnapshot, _print_metrics, _print_summary
+from ._cli_summary import (
+    ChangedScopeSnapshot,
+    MetricsSnapshot,
+    _print_changed_scope,
+    _print_metrics,
+    _print_summary,
+)
 from .baseline import Baseline
 from .cache import Cache, CacheStatus, build_segment_report_projection
-from .contracts import ISSUES_URL, ExitCode
+from .contracts import (
+    DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+    DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+    DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+    ISSUES_URL,
+    ExitCode,
+)
 from .errors import CacheError
 
 if TYPE_CHECKING:
@@ -132,6 +149,8 @@ __all__ = [
     "report",
 ]
 
+# Lazy singleton for pipeline module — deferred import to keep CLI startup fast.
+# Tests monkeypatch this via _pipeline_module() to inject mocks.
 _PIPELINE_MODULE: ModuleType | None = None
 
 
@@ -169,6 +188,214 @@ class ProcessingResult:
     error_kind: str | None = None
     file_metrics: object | None = None
     structural_findings: list[object] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ChangedCloneGate:
+    changed_paths: tuple[str, ...]
+    new_func: frozenset[str]
+    new_block: frozenset[str]
+    total_clone_groups: int
+    findings_total: int
+    findings_new: int
+    findings_known: int
+
+
+_as_mapping = _coerce.as_mapping
+_as_sequence = _coerce.as_sequence
+
+
+def _validate_changed_scope_args(*, args: Namespace) -> str | None:
+    if args.diff_against and args.paths_from_git_diff:
+        console.print(
+            ui.fmt_contract_error(
+                "Use --diff-against or --paths-from-git-diff, not both."
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if args.paths_from_git_diff:
+        args.changed_only = True
+        return str(args.paths_from_git_diff)
+    if args.diff_against and not args.changed_only:
+        console.print(ui.fmt_contract_error("--diff-against requires --changed-only."))
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if args.changed_only and not args.diff_against:
+        console.print(
+            ui.fmt_contract_error(
+                "--changed-only requires --diff-against or --paths-from-git-diff."
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    return str(args.diff_against) if args.diff_against else None
+
+
+def _normalize_changed_paths(
+    *,
+    root_path: Path,
+    paths: Sequence[str],
+) -> tuple[str, ...]:
+    normalized: set[str] = set()
+    for raw_path in paths:
+        candidate = raw_path.strip()
+        if not candidate:
+            continue
+        candidate_path = Path(candidate)
+        try:
+            absolute_path = (
+                candidate_path.resolve()
+                if candidate_path.is_absolute()
+                else (root_path / candidate_path).resolve()
+            )
+        except OSError as exc:
+            console.print(
+                ui.fmt_contract_error(
+                    f"Unable to resolve changed path '{candidate}': {exc}"
+                )
+            )
+            sys.exit(ExitCode.CONTRACT_ERROR)
+        try:
+            relative_path = absolute_path.relative_to(root_path)
+        except ValueError:
+            console.print(
+                ui.fmt_contract_error(
+                    f"Changed path '{candidate}' is outside the scan root."
+                )
+            )
+            sys.exit(ExitCode.CONTRACT_ERROR)
+        cleaned = str(relative_path).replace("\\", "/").strip("/")
+        if cleaned:
+            normalized.add(cleaned)
+    return tuple(sorted(normalized))
+
+
+def _git_diff_changed_paths(*, root_path: Path, git_diff_ref: str) -> tuple[str, ...]:
+    if git_diff_ref.startswith("-"):
+        console.print(
+            ui.fmt_contract_error(
+                f"Invalid git diff ref '{git_diff_ref}': must not start with '-'."
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    try:
+        completed = subprocess.run(
+            ["git", "diff", "--name-only", git_diff_ref, "--"],
+            cwd=str(root_path),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (
+        FileNotFoundError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ) as exc:
+        console.print(
+            ui.fmt_contract_error(
+                "Unable to resolve changed files from git diff ref "
+                f"'{git_diff_ref}': {exc}"
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    return _normalize_changed_paths(root_path=root_path, paths=lines)
+
+
+def _path_matches(relative_path: str, changed_paths: Sequence[str]) -> bool:
+    return any(
+        relative_path == candidate or relative_path.startswith(candidate + "/")
+        for candidate in changed_paths
+    )
+
+
+def _flatten_report_findings(
+    report_document: Mapping[str, object],
+) -> list[dict[str, object]]:
+    findings = _as_mapping(report_document.get("findings"))
+    groups = _as_mapping(findings.get("groups"))
+    clone_groups = _as_mapping(groups.get("clones"))
+    return [
+        *[
+            dict(_as_mapping(item))
+            for item in _as_sequence(clone_groups.get("functions"))
+        ],
+        *[dict(_as_mapping(item)) for item in _as_sequence(clone_groups.get("blocks"))],
+        *[
+            dict(_as_mapping(item))
+            for item in _as_sequence(clone_groups.get("segments"))
+        ],
+        *[
+            dict(_as_mapping(item))
+            for item in _as_sequence(
+                _as_mapping(groups.get("structural")).get("groups")
+            )
+        ],
+        *[
+            dict(_as_mapping(item))
+            for item in _as_sequence(_as_mapping(groups.get("dead_code")).get("groups"))
+        ],
+        *[
+            dict(_as_mapping(item))
+            for item in _as_sequence(_as_mapping(groups.get("design")).get("groups"))
+        ],
+    ]
+
+
+def _finding_touches_changed_paths(
+    finding: Mapping[str, object],
+    *,
+    changed_paths: Sequence[str],
+) -> bool:
+    for item in _as_sequence(finding.get("items")):
+        relative_path = str(_as_mapping(item).get("relative_path", "")).strip()
+        if relative_path and _path_matches(relative_path, changed_paths):
+            return True
+    return False
+
+
+def _changed_clone_gate_from_report(
+    report_document: Mapping[str, object],
+    *,
+    changed_paths: Sequence[str],
+) -> ChangedCloneGate:
+    findings = [
+        finding
+        for finding in _flatten_report_findings(report_document)
+        if _finding_touches_changed_paths(finding, changed_paths=changed_paths)
+    ]
+    clone_findings = [
+        finding
+        for finding in findings
+        if str(finding.get("family", "")).strip() == "clone"
+        and str(finding.get("category", "")).strip() in {"function", "block"}
+    ]
+    new_func = frozenset(
+        str(finding.get("id", ""))
+        for finding in clone_findings
+        if str(finding.get("category", "")).strip() == "function"
+        and str(finding.get("novelty", "")).strip() == "new"
+    )
+    new_block = frozenset(
+        str(finding.get("id", ""))
+        for finding in clone_findings
+        if str(finding.get("category", "")).strip() == "block"
+        and str(finding.get("novelty", "")).strip() == "new"
+    )
+    findings_new = sum(
+        1 for finding in findings if str(finding.get("novelty", "")).strip() == "new"
+    )
+    findings_known = sum(
+        1 for finding in findings if str(finding.get("novelty", "")).strip() == "known"
+    )
+    return ChangedCloneGate(
+        changed_paths=tuple(changed_paths),
+        new_func=new_func,
+        new_block=new_block,
+        total_clone_groups=len(clone_findings),
+        findings_total=len(findings),
+        findings_new=findings_new,
+        findings_known=findings_known,
+    )
 
 
 def process_file(
@@ -262,6 +489,7 @@ def report(
     new_block: set[str],
     html_builder: Callable[..., str] | None = None,
     metrics_diff: MetricsDiff | None = None,
+    include_report_document: bool = False,
 ) -> ReportArtifacts:
     return cast(
         "ReportArtifacts",
@@ -275,6 +503,7 @@ def report(
             new_block=new_block,
             html_builder=html_builder,
             metrics_diff=metrics_diff,
+            include_report_document=include_report_document,
         ),
     )
 
@@ -757,6 +986,7 @@ def _enforce_gating(
     new_block: set[str],
     metrics_diff: MetricsDiff | None,
     html_report_path: str | None,
+    clone_threshold_total: int | None = None,
 ) -> None:
     if source_read_contract_failure:
         console.print(
@@ -791,6 +1021,25 @@ def _enforce_gating(
         new_block=new_block,
         metrics_diff=metrics_diff,
     )
+    if clone_threshold_total is not None:
+        reasons = [
+            reason
+            for reason in gate_result.reasons
+            if not reason.startswith("clone:threshold:")
+        ]
+        if 0 <= args.fail_threshold < clone_threshold_total:
+            reasons.append(
+                f"clone:threshold:{clone_threshold_total}:{args.fail_threshold}"
+            )
+        gate_result = cast(
+            "GatingResult",
+            _pipeline_module().GatingResult(
+                exit_code=(
+                    int(ExitCode.GATING_FAILURE) if reasons else int(ExitCode.SUCCESS)
+                ),
+                reasons=tuple(reasons),
+            ),
+        )
 
     metric_reasons = [
         reason[len("metric:") :]
@@ -867,6 +1116,7 @@ def _main_impl() -> None:
     run_started_at = time.monotonic()
     from ._cli_meta import _build_report_meta, _current_report_timestamp_utc
 
+    analysis_started_at_utc = _current_report_timestamp_utc()
     ap = build_parser(__version__)
 
     def _prepare_run_inputs() -> tuple[
@@ -879,6 +1129,8 @@ def _main_impl() -> None:
         OutputPaths,
         Path,
         dict[str, object] | None,
+        tuple[str, ...],
+        str,
         str,
     ]:
         global console
@@ -919,6 +1171,12 @@ def _main_impl() -> None:
             args=args,
             config_values=pyproject_config,
             explicit_cli_dests=explicit_cli_dests,
+        )
+        git_diff_ref = _validate_changed_scope_args(args=args)
+        changed_paths = (
+            _git_diff_changed_paths(root_path=root_path, git_diff_ref=git_diff_ref)
+            if git_diff_ref is not None
+            else ()
         )
         if args.debug:
             os.environ["CODECLONE_DEBUG"] = "1"
@@ -1028,6 +1286,8 @@ def _main_impl() -> None:
             output_paths,
             cache_path,
             shared_baseline_payload,
+            changed_paths,
+            analysis_started_at_utc,
             report_generated_at_utc,
         )
 
@@ -1041,6 +1301,8 @@ def _main_impl() -> None:
         output_paths,
         cache_path,
         shared_baseline_payload,
+        changed_paths,
+        analysis_started_at_utc,
         report_generated_at_utc,
     ) = _prepare_run_inputs()
 
@@ -1142,6 +1404,10 @@ def _main_impl() -> None:
         ),
         analysis_mode=("clones_only" if args.skip_metrics else "full"),
         metrics_computed=_metrics_computed(args),
+        design_complexity_threshold=DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+        design_coupling_threshold=DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+        design_cohesion_threshold=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+        analysis_started_at_utc=analysis_started_at_utc,
         report_generated_at_utc=report_generated_at_utc,
     )
 
@@ -1214,7 +1480,27 @@ def _main_impl() -> None:
         new_block=new_block,
         html_builder=build_html_report,
         metrics_diff=metrics_diff,
+        include_report_document=bool(changed_paths),
     )
+    changed_clone_gate = (
+        _changed_clone_gate_from_report(
+            report_artifacts.report_document or {},
+            changed_paths=changed_paths,
+        )
+        if args.changed_only and report_artifacts.report_document is not None
+        else None
+    )
+    if changed_clone_gate is not None:
+        _print_changed_scope(
+            console=cast("_PrinterLike", console),
+            quiet=args.quiet,
+            changed_scope=ChangedScopeSnapshot(
+                paths_count=len(changed_clone_gate.changed_paths),
+                findings_total=changed_clone_gate.findings_total,
+                findings_new=changed_clone_gate.findings_new,
+                findings_known=changed_clone_gate.findings_known,
+            ),
+        )
     html_report_path = _write_report_outputs(
         args=args,
         output_paths=output_paths,
@@ -1230,13 +1516,27 @@ def _main_impl() -> None:
         source_read_contract_failure=source_read_contract_failure,
         baseline_failure_code=baseline_state.failure_code,
         metrics_baseline_failure_code=metrics_baseline_state.failure_code,
-        new_func=new_func,
-        new_block=new_block,
+        new_func=set(changed_clone_gate.new_func) if changed_clone_gate else new_func,
+        new_block=(
+            set(changed_clone_gate.new_block) if changed_clone_gate else new_block
+        ),
         metrics_diff=metrics_diff,
         html_report_path=html_report_path,
+        clone_threshold_total=(
+            changed_clone_gate.total_clone_groups if changed_clone_gate else None
+        ),
     )
 
-    if not args.update_baseline and not args.fail_on_new and new_clones_count > 0:
+    notice_new_clones_count = (
+        len(changed_clone_gate.new_func) + len(changed_clone_gate.new_block)
+        if changed_clone_gate is not None
+        else new_clones_count
+    )
+    if (
+        not args.update_baseline
+        and not args.fail_on_new
+        and notice_new_clones_count > 0
+    ):
         console.print(ui.WARN_NEW_CLONES_WITHOUT_FAIL)
 
     if not args.quiet:

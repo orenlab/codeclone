@@ -29,14 +29,14 @@ Test classes by role:
 
 The following matrix is treated as executable contract:
 
-| Contract                                   | Tests                                                                                                         |
-|--------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| Baseline schema/integrity/compat gates     | `tests/test_baseline.py`                                                                                      |
-| Cache v2.2 fail-open + status mapping      | `tests/test_cache.py`, `tests/test_cli_inprocess.py::test_cli_reports_cache_too_large_respects_max_size_flag` |
-| Exit code categories and markers           | `tests/test_cli_unit.py`, `tests/test_cli_inprocess.py`                                                       |
-| Report schema v2.1 canonical/derived/integrity + JSON/TXT/MD/SARIF projections | `tests/test_report.py`, `tests/test_report_contract_coverage.py`, `tests/test_report_branch_invariants.py` |
-| HTML render-only explainability + escaping | `tests/test_html_report.py`                                                                                   |
-| Scanner traversal safety                   | `tests/test_scanner_extra.py`, `tests/test_security.py`                                                       |
+| Contract                                                                       | Tests                                                                                                         |
+|--------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| Baseline schema/integrity/compat gates                                         | `tests/test_baseline.py`                                                                                      |
+| Cache v2.3 fail-open + status mapping                                          | `tests/test_cache.py`, `tests/test_cli_inprocess.py::test_cli_reports_cache_too_large_respects_max_size_flag` |
+| Exit code categories and markers                                               | `tests/test_cli_unit.py`, `tests/test_cli_inprocess.py`                                                       |
+| Report schema v2.2 canonical/derived/integrity + JSON/TXT/MD/SARIF projections | `tests/test_report.py`, `tests/test_report_contract_coverage.py`, `tests/test_report_branch_invariants.py`    |
+| HTML render-only explainability + escaping                                     | `tests/test_html_report.py`                                                                                   |
+| Scanner traversal safety                                                       | `tests/test_scanner_extra.py`, `tests/test_security.py`                                                       |
 
 ## Invariants (MUST)
 

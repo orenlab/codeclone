@@ -1,4 +1,7 @@
-# SPDX-License-Identifier: MIT
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
 """Unit tests for codeclone.structural_findings (Phase 1: duplicated_branches)."""
@@ -7,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import sys
+from typing import Any, cast
 
 import pytest
 
@@ -676,6 +680,26 @@ def test_private_member_decoding_and_majority_defaults() -> None:
     assert sf._member_profile_value(member, "unknown-field") == ""
 
 
+def test_summarize_branch_does_not_descend_into_nested_scopes() -> None:
+    body = ast.parse(
+        """
+if cond:
+    def inner():
+        while True:
+            helper()
+    class Inner:
+        def method(self):
+            raise RuntimeError("boom")
+    value = 1
+""",
+    ).body
+    signature = sf._summarize_branch(body)
+    assert signature is not None
+    assert signature["calls"] == "0"
+    assert signature["raises"] == "0"
+    assert signature["has_loop"] == "0"
+
+
 def test_clone_cohort_builders_cover_early_exit_paths() -> None:
     base_member = sf._CloneCohortMember(
         file_path="pkg/a.py",
@@ -822,3 +846,106 @@ def fn(x):
         collect_findings=False,
     )
     assert match_facts.structural_findings == ()
+
+
+def test_structural_helper_branches_cover_empty_if_chain_and_bool_defaults() -> None:
+    if_chain = ast.parse("if flag:\n    pass\n").body[0]
+    assert isinstance(if_chain, ast.If)
+    assert sf._collect_if_branch_bodies(if_chain) == []
+    assert sf._as_item_bool("maybe", default=True) is True
+    assert sf._as_item_bool(object(), default=True) is True
+    assert sf._group_item_sort_key(
+        {
+            "filepath": "pkg/mod.py",
+            "qualname": "pkg.mod:fn",
+            "start_line": 3,
+            "end_line": 4,
+        }
+    ) == ("pkg/mod.py", "pkg.mod:fn", 3, 4)
+
+
+def test_clone_cohort_findings_skip_invalid_filtered_members() -> None:
+    member = {
+        "filepath": "pkg/mod.py",
+        "qualname": "pkg.mod:fn",
+        "start_line": 10,
+        "end_line": 12,
+        "entry_guard_count": 1,
+        "entry_guard_terminal_profile": "return_const",
+        "entry_guard_has_side_effect_before": False,
+        "terminal_kind": "return_const",
+        "try_finally_profile": "none",
+        "side_effect_order_profile": "guard_then_effect",
+    }
+    findings = sf.build_clone_cohort_structural_findings(
+        func_groups={
+            "cohort-a": (
+                member,
+                {**member, "qualname": "pkg.mod:fn2", "start_line": 0},
+                {**member, "qualname": "pkg.mod:fn3", "end_line": 0},
+            )
+        }
+    )
+    assert findings == ()
+
+
+def test_clone_cohort_guard_and_drift_defensive_none_branches() -> None:
+    class _FlakyGuardMember:
+        def __init__(self, first_count: int, *, qualname: str) -> None:
+            self.file_path = "pkg/mod.py"
+            self.qualname = qualname
+            self.start = 1
+            self.end = 2
+            self.entry_guard_terminal_profile = "return_const"
+            self.entry_guard_has_side_effect_before = False
+            self.terminal_kind = "return_const"
+            self.try_finally_profile = "none"
+            self.side_effect_order_profile = "guard_then_effect"
+            self._first_count = first_count
+            self._reads = 0
+
+        @property
+        def entry_guard_count(self) -> int:
+            self._reads += 1
+            return self._first_count if self._reads == 1 else 2
+
+    guard_members = (
+        cast(Any, _FlakyGuardMember(1, qualname="pkg.mod:a")),
+        cast(Any, _FlakyGuardMember(2, qualname="pkg.mod:b")),
+        cast(Any, _FlakyGuardMember(2, qualname="pkg.mod:c")),
+    )
+    assert sf._clone_guard_exit_divergence("cohort-guard", guard_members) is None
+
+    class _FlakyDriftMember:
+        def __init__(self, first_terminal: str, *, qualname: str) -> None:
+            self.file_path = "pkg/mod.py"
+            self.qualname = qualname
+            self.start = 1
+            self.end = 2
+            self.entry_guard_count = 1
+            self.entry_guard_terminal_profile = "return_const"
+            self.entry_guard_has_side_effect_before = False
+            self.try_finally_profile = "none"
+            self.side_effect_order_profile = "guard_then_effect"
+            self._first_terminal = first_terminal
+            self._reads = 0
+
+        @property
+        def terminal_kind(self) -> str:
+            self._reads += 1
+            return self._first_terminal if self._reads == 1 else "return_const"
+
+        @property
+        def guard_exit_profile(self) -> str:
+            return "1x:return_const"
+
+    drift_members = (
+        cast(Any, _FlakyDriftMember("raise", qualname="pkg.mod:a")),
+        cast(Any, _FlakyDriftMember("return_const", qualname="pkg.mod:b")),
+        cast(Any, _FlakyDriftMember("return_const", qualname="pkg.mod:c")),
+    )
+    assert sf._clone_cohort_drift("cohort-drift", drift_members) is None
+
+
+def test_collect_if_branch_bodies_returns_empty_for_none_like_input() -> None:
+    assert sf._collect_if_branch_bodies(cast(Any, None)) == []
