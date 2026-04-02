@@ -102,12 +102,14 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "prefer get_run_summary or get_production_triage" in str(server.instructions)
     assert "Use list_hotspots or focused check_* tools" in str(server.instructions)
     assert "prefer generate_pr_summary(format='markdown')" in str(server.instructions)
+    assert "Use help(topic=...)" in str(server.instructions)
 
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert set(tools) == {
         "analyze_repository",
         "analyze_changed_paths",
         "clear_session_runs",
+        "help",
         "get_run_summary",
         "get_production_triage",
         "evaluate_gates",
@@ -138,6 +140,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "check_dead_code",
                 "get_run_summary",
                 "get_production_triage",
+                "help",
                 "get_report_section",
                 "list_findings",
                 "get_finding",
@@ -165,6 +168,8 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "default first-pass review" in str(
         tools["get_production_triage"].description
     )
+    assert "bounded guidance, not a full manual" in str(tools["help"].description)
+    assert "workflow, suppressions, baseline" in str(tools["help"].description)
     assert "Prefer list_hotspots or focused check_* tools" in str(
         tools["list_findings"].description
     )
@@ -243,6 +248,19 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         "functions",
         "classes",
     }
+
+    help_payload = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "help",
+                {"topic": "changed_scope", "detail": "normal"},
+            )
+        )
+    )
+    assert help_payload["topic"] == "changed_scope"
+    assert help_payload["detail"] == "normal"
+    assert "warnings" in help_payload
+    assert "recommended_tools" in help_payload
 
     findings_result = _structured_tool_result(
         asyncio.run(

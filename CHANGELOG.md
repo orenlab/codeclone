@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.0b4]
+
+In development.
+
+### MCP server
+
+- Add bounded MCP `help(topic=...)` as an uncertainty-recovery tool for workflow, baseline, suppressions, latest-run semantics, review state, and changed-scope routing.
+
 ## [2.0.0b3]
 
 2.0.0b3 is the release where CodeClone stops looking like "a strong analyzer with extras" and starts looking like a

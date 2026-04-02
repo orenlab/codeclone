@@ -46,6 +46,10 @@ Refs:
 - MCP may ship task-specific slim projections (for example, summary-only metrics
   or inventory counts) as long as canonical report data remains the source of
   truth and richer detail stays reachable through dedicated tools/sections.
+- The same rule applies to bounded semantic routing tools such as
+  `help(topic=...)`: they explain contract meaning and route agents to the
+  safest next step, but they do not introduce a second documentation or truth
+  model.
 - The same rule applies to summary cache convenience fields such as
   `freshness` and to production-first triage projections built from
   canonical hotlists/suggestions.

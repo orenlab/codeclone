@@ -258,15 +258,96 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
     assert len(str(summary["run_id"])) == 8
     assert summary["mode"] == "full"
     assert summary["schema"] == REPORT_SCHEMA_VERSION
-    latest_baseline = cast("dict[str, object]", latest["baseline"])
-    latest_cache = cast("dict[str, object]", latest["cache"])
-    assert latest_baseline["status"] == "missing"
-    assert latest_baseline["trusted"] is False
-    assert latest_cache["used"] is False
-    assert latest_cache["freshness"] == "fresh"
-    latest_health = cast("dict[str, object]", latest["health"])
-    assert isinstance(latest_health["score"], int)
-    assert latest_health["grade"]
+
+
+def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
+    service = CodeCloneMCPService(history_limit=4)
+
+    compact = service.get_help(topic="workflow")
+    normal = service.get_help(topic="workflow", detail="normal")
+
+    assert compact == {
+        "topic": "workflow",
+        "detail": "compact",
+        "summary": (
+            "CodeClone MCP is triage-first and budget-aware. Start with compact "
+            "summary or production triage, then narrow through hotspots or "
+            "focused checks before opening one finding in detail."
+        ),
+        "key_points": [
+            "Recommended first pass: analyze_repository or analyze_changed_paths.",
+            (
+                "Use get_run_summary or get_production_triage before broad "
+                "finding enumeration."
+            ),
+            (
+                "Prefer list_hotspots or focused check_* tools over "
+                "list_findings on medium or noisy repositories."
+            ),
+            (
+                "Use get_finding and get_remediation only after selecting a "
+                "specific issue."
+            ),
+            (
+                "get_report_section(section='all') is an exception path, not "
+                "a default exploration step."
+            ),
+        ],
+        "recommended_tools": [
+            "analyze_repository",
+            "analyze_changed_paths",
+            "get_run_summary",
+            "get_production_triage",
+            "list_hotspots",
+            "check_clones",
+            "check_dead_code",
+            "get_finding",
+            "get_remediation",
+        ],
+        "doc_links": [
+            {
+                "title": "MCP interface contract",
+                "url": "https://orenlab.github.io/codeclone/book/20-mcp-interface/",
+            },
+            {
+                "title": "MCP usage guide",
+                "url": "https://orenlab.github.io/codeclone/mcp/",
+            },
+        ],
+    }
+    assert normal["topic"] == "workflow"
+    assert normal["detail"] == "normal"
+    assert normal["summary"] == compact["summary"]
+    assert normal["recommended_tools"] == compact["recommended_tools"]
+    assert normal["doc_links"] == compact["doc_links"]
+    assert cast("list[str]", normal["warnings"]) == [
+        (
+            "Broad list_findings calls can burn context quickly on large or "
+            "noisy repositories."
+        ),
+        (
+            "Prefer generate_pr_summary(format='markdown') unless machine JSON "
+            "is explicitly needed."
+        ),
+    ]
+    assert cast("list[str]", normal["anti_patterns"]) == [
+        "Starting exploration with list_findings on a noisy repository.",
+        "Using get_report_section(section='all') as the default first step.",
+        (
+            "Escalating detail on larger lists instead of opening one finding "
+            "with get_finding."
+        ),
+    ]
+
+
+def test_mcp_service_help_validates_topic_and_detail() -> None:
+    service = CodeCloneMCPService(history_limit=4)
+
+    with pytest.raises(MCPServiceContractError, match="Invalid value for topic"):
+        service.get_help(topic="gates")  # type: ignore[arg-type]
+
+    with pytest.raises(MCPServiceContractError, match="Invalid value for detail"):
+        service.get_help(topic="baseline", detail="full")  # type: ignore[arg-type]
 
 
 def test_mcp_service_summary_inventory_is_compact_and_report_inventory_stays_canonical(

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define report contracts in `2.0.0b3`: canonical JSON (`report_schema_version=2.2`)
+Define report contracts in `2.0.0b4`: canonical JSON (`report_schema_version=2.2`)
 plus deterministic TXT/Markdown/SARIF projections.
 
 ## Public surface

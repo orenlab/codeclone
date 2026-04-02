@@ -167,7 +167,7 @@ codeclone-mcp --transport stdio
 codeclone-mcp --transport streamable-http --port 8000
 ```
 
-20 tools + 10 resources — deterministic, baseline-aware, and read-only.
+21 tools + 10 resources — deterministic, baseline-aware, and read-only.
 Never mutates source files, baselines, or repo state.
 
 Payloads are optimized for LLM context: compact summaries by default, full detail on demand.
@@ -176,6 +176,9 @@ The cheapest useful path is also the most obvious path: first-pass triage stays 
 Recommended agent flow:
 `analyze_repository` or `analyze_changed_paths` → `get_run_summary` or `get_production_triage` →
 `list_hotspots` or `check_*` → `get_finding` → `get_remediation`
+
+If workflow or contract meaning is unclear, `help(topic=...)` returns a compact
+semantic guide with the safest next step and canonical doc links.
 
 Docs:
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
@@ -277,7 +280,7 @@ Dynamic/runtime false positives are resolved via explicit inline suppressions, n
 {
   "report_schema_version": "2.2",
   "meta": {
-    "codeclone_version": "2.0.0b3",
+    "codeclone_version": "2.0.0b4",
     "project_name": "...",
     "scan_root": ".",
     "report_mode": "full",

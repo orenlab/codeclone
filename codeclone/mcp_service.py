@@ -51,6 +51,7 @@ from .contracts import (
     DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+    DOCS_URL,
     REPORT_SCHEMA_VERSION,
     ExitCode,
 )
@@ -123,6 +124,15 @@ FindingSort = Literal["default", "priority", "severity", "spread"]
 DetailLevel = Literal["summary", "normal", "full"]
 ComparisonFocus = Literal["all", "clones", "structural", "metrics"]
 PRSummaryFormat = Literal["markdown", "json"]
+HelpTopic = Literal[
+    "workflow",
+    "suppressions",
+    "baseline",
+    "latest_runs",
+    "review_state",
+    "changed_scope",
+]
+HelpDetail = Literal["compact", "normal"]
 MetricsDetailFamily = Literal[
     "complexity",
     "coupling",
@@ -203,6 +213,17 @@ _VALID_FINDING_SORT = frozenset({"default", "priority", "severity", "spread"})
 _VALID_DETAIL_LEVELS = frozenset({"summary", "normal", "full"})
 _VALID_COMPARISON_FOCUS = frozenset({"all", "clones", "structural", "metrics"})
 _VALID_PR_SUMMARY_FORMATS = frozenset({"markdown", "json"})
+_VALID_HELP_TOPICS = frozenset(
+    {
+        "workflow",
+        "suppressions",
+        "baseline",
+        "latest_runs",
+        "review_state",
+        "changed_scope",
+    }
+)
+_VALID_HELP_DETAILS = frozenset({"compact", "normal"})
 DEFAULT_MCP_HISTORY_LIMIT = 4
 MAX_MCP_HISTORY_LIMIT = 10
 _VALID_REPORT_SECTIONS = frozenset(
@@ -260,6 +281,278 @@ _VALID_METRICS_DETAIL_FAMILIES = frozenset(
 )
 _SHORT_RUN_ID_LENGTH = 8
 _SHORT_HASH_ID_LENGTH = 6
+
+
+@dataclass(frozen=True)
+class MCPHelpTopicSpec:
+    summary: str
+    key_points: tuple[str, ...]
+    recommended_tools: tuple[str, ...]
+    doc_links: tuple[tuple[str, str], ...]
+    warnings: tuple[str, ...] = ()
+    anti_patterns: tuple[str, ...] = ()
+
+
+_MCP_BOOK_URL: Final = f"{DOCS_URL}book/"
+_MCP_GUIDE_URL: Final = f"{DOCS_URL}mcp/"
+_MCP_INTERFACE_DOC_LINK: Final[tuple[str, str]] = (
+    "MCP interface contract",
+    f"{_MCP_BOOK_URL}20-mcp-interface/",
+)
+_BASELINE_DOC_LINK: Final[tuple[str, str]] = (
+    "Baseline contract",
+    f"{_MCP_BOOK_URL}06-baseline/",
+)
+_SUPPRESSIONS_DOC_LINK: Final[tuple[str, str]] = (
+    "Inline suppressions contract",
+    f"{_MCP_BOOK_URL}19-inline-suppressions/",
+)
+_MCP_GUIDE_DOC_LINK: Final[tuple[str, str]] = ("MCP usage guide", _MCP_GUIDE_URL)
+_HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
+    "workflow": MCPHelpTopicSpec(
+        summary=(
+            "CodeClone MCP is triage-first and budget-aware. Start with compact "
+            "summary or production triage, then narrow through hotspots or "
+            "focused checks before opening one finding in detail."
+        ),
+        key_points=(
+            "Recommended first pass: analyze_repository or analyze_changed_paths.",
+            (
+                "Use get_run_summary or get_production_triage before broad "
+                "finding enumeration."
+            ),
+            (
+                "Prefer list_hotspots or focused check_* tools over "
+                "list_findings on medium or noisy repositories."
+            ),
+            (
+                "Use get_finding and get_remediation only after selecting a "
+                "specific issue."
+            ),
+            (
+                "get_report_section(section='all') is an exception path, not "
+                "a default exploration step."
+            ),
+        ),
+        recommended_tools=(
+            "analyze_repository",
+            "analyze_changed_paths",
+            "get_run_summary",
+            "get_production_triage",
+            "list_hotspots",
+            "check_clones",
+            "check_dead_code",
+            "get_finding",
+            "get_remediation",
+        ),
+        doc_links=(_MCP_INTERFACE_DOC_LINK, _MCP_GUIDE_DOC_LINK),
+        warnings=(
+            (
+                "Broad list_findings calls can burn context quickly on large "
+                "or noisy repositories."
+            ),
+            (
+                "Prefer generate_pr_summary(format='markdown') unless machine "
+                "JSON is explicitly needed."
+            ),
+        ),
+        anti_patterns=(
+            "Starting exploration with list_findings on a noisy repository.",
+            "Using get_report_section(section='all') as the default first step.",
+            (
+                "Escalating detail on larger lists instead of opening one "
+                "finding with get_finding."
+            ),
+        ),
+    ),
+    "suppressions": MCPHelpTopicSpec(
+        summary=(
+            "CodeClone supports explicit inline suppressions for selected findings. "
+            "Suppressions are local policy, not analysis truth, and should stay "
+            "narrow and declaration-scoped."
+        ),
+        key_points=(
+            "Current syntax uses codeclone: ignore[rule-id,...].",
+            "Binding is declaration-scoped: def, async def, or class.",
+            (
+                "Supported placement is the previous line or inline on the "
+                "declaration line/header."
+            ),
+            (
+                "Suppressions are target-specific and do not imply file-wide "
+                "or cascading scope."
+            ),
+            (
+                "Use suppressions for accepted dynamic or runtime false "
+                "positives, not to hide broad classes of debt."
+            ),
+        ),
+        recommended_tools=("get_finding", "get_remediation"),
+        doc_links=(_SUPPRESSIONS_DOC_LINK, _MCP_INTERFACE_DOC_LINK),
+        warnings=(
+            (
+                "MCP explains suppression semantics but never creates or "
+                "updates suppressions."
+            ),
+        ),
+        anti_patterns=(
+            "Treating suppressions as file-wide or inherited state.",
+            (
+                "Using suppressions to hide broad structural debt instead of "
+                "accepted false positives."
+            ),
+        ),
+    ),
+    "baseline": MCPHelpTopicSpec(
+        summary=(
+            "A baseline is CodeClone's accepted comparison snapshot for clone and "
+            "optional metrics state. It separates known debt from new regressions "
+            "and is trust-checked before use."
+        ),
+        key_points=(
+            (
+                "Canonical baseline schema is v2.0 with meta and clone keys; "
+                "metrics may be embedded for unified flows."
+            ),
+            (
+                "Compatibility depends on generator identity, supported "
+                "schema version, fingerprint version, python tag, and payload "
+                "integrity."
+            ),
+            (
+                "Known means already present in the trusted baseline; new "
+                "means not accepted by baseline."
+            ),
+            (
+                "In CI and gating contexts, untrusted baseline states are "
+                "contract errors rather than soft warnings."
+            ),
+            "MCP is read-only and does not update or rewrite baselines.",
+        ),
+        recommended_tools=("get_run_summary", "evaluate_gates", "compare_runs"),
+        doc_links=(_BASELINE_DOC_LINK,),
+        warnings=(
+            "Baseline trust semantics directly affect new-vs-known classification.",
+        ),
+        anti_patterns=(
+            "Treating baseline as mutable MCP session state.",
+            "Assuming an untrusted baseline is only a cosmetic warning in CI contexts.",
+        ),
+    ),
+    "latest_runs": MCPHelpTopicSpec(
+        summary=(
+            "latest/* resources point to the most recent analysis run stored in "
+            "the current MCP session. They are convenience handles, not "
+            "persistent truth anchors."
+        ),
+        key_points=(
+            "Run history is in-memory only and bounded by history-limit.",
+            "The latest pointer moves when a newer analyze_* call registers a run.",
+            "A fresh repository state requires a fresh analyze run.",
+            (
+                "Short run ids are convenience handles derived from canonical "
+                "run identity."
+            ),
+            (
+                "Do not assume latest/* is globally current outside the "
+                "active MCP session."
+            ),
+        ),
+        recommended_tools=(
+            "analyze_repository",
+            "analyze_changed_paths",
+            "get_run_summary",
+            "compare_runs",
+        ),
+        doc_links=(_MCP_INTERFACE_DOC_LINK, _MCP_GUIDE_DOC_LINK),
+        warnings=(
+            (
+                "latest/* can point at a different repository after a later "
+                "analyze call in the same session."
+            ),
+        ),
+        anti_patterns=(
+            (
+                "Assuming latest/* remains tied to one repository across the "
+                "whole client session."
+            ),
+            (
+                "Using latest/* as a substitute for starting a fresh run when "
+                "freshness matters."
+            ),
+        ),
+    ),
+    "review_state": MCPHelpTopicSpec(
+        summary=(
+            "Reviewed state in MCP is session-local workflow state. It helps long "
+            "agent sessions track what has already been inspected, but it does "
+            "not modify canonical findings, baseline, or persisted artifacts."
+        ),
+        key_points=(
+            "Review markers are in-memory only.",
+            "They do not change report truth, finding identity, or CI semantics.",
+            "They are useful for triage workflows across long sessions.",
+            (
+                "They should not be interpreted as acceptance, suppression, "
+                "or baseline update."
+            ),
+        ),
+        recommended_tools=(
+            "list_hotspots",
+            "get_finding",
+            "mark_finding_reviewed",
+            "list_reviewed_findings",
+        ),
+        doc_links=(_MCP_INTERFACE_DOC_LINK, _MCP_GUIDE_DOC_LINK),
+        warnings=(
+            "Reviewed markers disappear when the MCP session is cleared or restarted.",
+        ),
+        anti_patterns=(
+            "Treating reviewed state as a persistent acceptance signal.",
+            "Assuming reviewed findings are removed from canonical report truth.",
+        ),
+    ),
+    "changed_scope": MCPHelpTopicSpec(
+        summary=(
+            "Changed-scope analysis narrows review to findings that touch a "
+            "selected change set. It is intended for PR and patch review, not "
+            "as a replacement for full canonical analysis."
+        ),
+        key_points=(
+            (
+                "Use analyze_changed_paths with explicit changed_paths or "
+                "git_diff_ref for review-focused runs."
+            ),
+            (
+                "Changed-scope is best for asking what new issues touch "
+                "modified files and whether anything should block CI."
+            ),
+            "Prefer production triage and hotspot views before broad finding listing.",
+            "If repository-wide truth is needed, run full analysis first.",
+        ),
+        recommended_tools=(
+            "analyze_changed_paths",
+            "get_run_summary",
+            "get_production_triage",
+            "evaluate_gates",
+            "generate_pr_summary",
+        ),
+        doc_links=(_MCP_INTERFACE_DOC_LINK, _MCP_GUIDE_DOC_LINK),
+        warnings=(
+            (
+                "Changed-scope narrows review focus; it does not replace the "
+                "full canonical report for repository-wide truth."
+            ),
+        ),
+        anti_patterns=(
+            "Using changed-scope as if it were the only source of repository truth.",
+            (
+                "Starting changed-files review with broad listing instead of "
+                "compact triage."
+            ),
+        ),
+    ),
+}
 
 
 def _suggestion_finding_id_payload(suggestion: object) -> str:
@@ -1297,6 +1590,38 @@ class CodeCloneMCPService:
             },
         }
 
+    def get_help(
+        self,
+        *,
+        topic: HelpTopic,
+        detail: HelpDetail = "compact",
+    ) -> dict[str, object]:
+        validated_topic = cast(
+            "HelpTopic",
+            self._validate_choice("topic", topic, _VALID_HELP_TOPICS),
+        )
+        validated_detail = cast(
+            "HelpDetail",
+            self._validate_choice("detail", detail, _VALID_HELP_DETAILS),
+        )
+        spec = _HELP_TOPIC_SPECS[validated_topic]
+        payload: dict[str, object] = {
+            "topic": validated_topic,
+            "detail": validated_detail,
+            "summary": spec.summary,
+            "key_points": list(spec.key_points),
+            "recommended_tools": list(spec.recommended_tools),
+            "doc_links": [
+                {"title": title, "url": url} for title, url in spec.doc_links
+            ],
+        }
+        if validated_detail == "normal":
+            if spec.warnings:
+                payload["warnings"] = list(spec.warnings)
+            if spec.anti_patterns:
+                payload["anti_patterns"] = list(spec.anti_patterns)
+        return payload
+
     def generate_pr_summary(
         self,
         *,
@@ -1861,10 +2186,12 @@ class CodeCloneMCPService:
                 short_to_canonical[disambiguated] = canonical_id
         return canonical_to_short, short_to_canonical
 
-    def _base_short_finding_id(self, canonical_id: str) -> str:
+    @staticmethod
+    def _base_short_finding_id(canonical_id: str) -> str:
         return _base_short_finding_id_payload(canonical_id)
 
-    def _disambiguated_short_finding_id(self, canonical_id: str) -> str:
+    @staticmethod
+    def _disambiguated_short_finding_id(canonical_id: str) -> str:
         return _disambiguated_short_finding_id_payload(canonical_id)
 
     def _disambiguated_short_finding_ids(

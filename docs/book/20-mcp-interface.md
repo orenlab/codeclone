@@ -72,6 +72,8 @@ Current server characteristics:
     - the cheapest useful path is designed to be the most obvious path:
       `get_run_summary` / `get_production_triage` first, then `list_hotspots`
       or `check_*`, then `get_finding` / `get_remediation`
+    - `help(topic=...)` is a bounded semantic routing tool for contract/workflow
+      uncertainty; it is not a second manual or docs proxy
 - finding-list payloads:
     - MCP finding ids are compact projection ids; canonical report ids are unchanged
     - `detail_level="summary"` is the default for list/check/hotspot tools
@@ -87,7 +89,7 @@ produced by the report contract.
 
 ## Tools
 
-Current tool set:
+Current tool set (`21` tools):
 
 | Tool                     | Key parameters                                                                                                                                         | Purpose / notes                                                                                                                                                                                                                                                                                  |
 |--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -95,6 +97,7 @@ Current tool set:
 | `analyze_changed_paths`  | absolute `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, inline thresholds                                                                 | Diff-aware fast path: analyze a repo, attach a changed-files projection, and return a compact changed-files snapshot. The intended next step is `get_report_section(section="changed")` or `get_production_triage`                                                                               |
 | `get_run_summary`        | `run_id`                                                                                                                                               | Return the stored summary for the latest or specified run, with slim inventory counts instead of the full file registry; this is the cheapest run-level snapshot and `health` becomes explicit `available=false` when metrics were skipped                                                       |
 | `get_production_triage`  | `run_id`, `max_hotspots`, `max_suggestions`                                                                                                            | Return a compact production-first MCP projection: health, cache `freshness`, production hotspots, production suggestions, and global source-kind counters. This is the default first-pass view for large or noisy repositories                                                                   |
+| `help`                   | `topic`, `detail`                                                                                                                                      | Return a bounded semantic guide for a small set of MCP topics (`workflow`, `suppressions`, `baseline`, `latest_runs`, `review_state`, `changed_scope`) with next-step routing and canonical doc links. This is for uncertainty recovery, not full manual access                                 |
 | `compare_runs`           | `run_id_before`, `run_id_after`, `focus`                                                                                                               | Compare two registered runs by finding ids and run-to-run health delta; MCP returns short run ids, compact regression/improvement cards, `mixed` for conflicting signals, and `incomparable` with top-level `reason`, empty comparison cards, and `health_delta=null` when roots/settings differ |
 | `evaluate_gates`         | `run_id`, gate thresholds/booleans                                                                                                                     | Evaluate CI/gating conditions against an existing run without exiting the process                                                                                                                                                                                                                |
 | `get_report_section`     | `run_id`, `section`, `family`, `path`, `offset`, `limit`                                                                                               | Return a canonical report section. Prefer targeted sections instead of `section="all"` unless the client truly needs the full canonical report. `metrics` is summary-only; `metrics_detail` is paginated/bounded and falls back to summary+hint when unfiltered                                  |
@@ -124,6 +127,7 @@ sessionful and may populate or reuse in-memory run state. The granular
 Budget-aware workflow is intentional:
 
 - first pass: `get_run_summary` or `get_production_triage`
+- semantic clarification: `help(topic=...)` when contract or workflow meaning is unclear
 - targeted triage: `list_hotspots` or the relevant `check_*`
 - single-finding drill-down: `get_finding`, then `get_remediation`
 - bounded metrics drill-down: `get_report_section(section="metrics_detail", family=..., limit=...)`

@@ -53,6 +53,10 @@ Version bump rules:
   `cache.freshness` or production-first triage also do not change
   `report_schema_version` when they are derived from unchanged canonical report
   and summary data.
+- The same rule applies to bounded MCP semantic guidance such as
+  `help(topic=...)`: package-versioned wording and routing may evolve, but they
+  do not change `report_schema_version` as long as canonical report semantics
+  and finding identities remain unchanged.
 - Canonical report changes such as `meta.analysis_thresholds.design_findings`
   or threshold-aware design finding materialization do change
   `report_schema_version` because they alter canonical report semantics and

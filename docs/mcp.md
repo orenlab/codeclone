@@ -44,6 +44,9 @@ Run retention is bounded: default `4`, max `10` (`--history-limit`).
 If a tool request omits `processes`, MCP defers process-count policy to the
 core CodeClone runtime.
 
+Current `b4` MCP surface: `21` tools, `7` fixed resources, and `3`
+run-scoped URI templates.
+
 ## Tool surface
 
 | Tool                     | Purpose                                                                                                                                                                                                                                 |
@@ -52,6 +55,7 @@ core CodeClone runtime.
 | `analyze_changed_paths`  | Diff-aware analysis with `changed_paths` or `git_diff_ref`; returns a compact changed-files snapshot; then prefer `get_report_section(section="changed")` or `get_production_triage` before broader list calls                          |
 | `get_run_summary`        | Cheapest run-level snapshot: compact health/findings/baseline summary with slim inventory counts; `health` is explicit `available=false` when metrics were skipped                                                                      |
 | `get_production_triage`  | Compact production-first view: health, cache freshness, production hotspots, production suggestions; best default first pass on noisy repos                                                                                             |
+| `help`                   | Compact semantic/orientation tool for supported topics like workflow, baseline, suppressions, latest-runs semantics, review state, and changed-scope routing; use when MCP meaning or the safest next step is unclear                 |
 | `compare_runs`           | Regressions, improvements, and run-to-run health delta between comparable runs; returns `mixed` for conflicting signals and `incomparable` when roots/settings differ, with empty comparison cards and `health_delta=null` in that case |
 | `list_findings`          | Filtered, paginated finding groups with compact summary payloads by default; use after hotspots or `check_*` when you need a broader filtered list                                                                                      |
 | `get_finding`            | Deep inspection of one finding by id; defaults to normal detail and accepts `detail_level`; use after `list_hotspots`, `list_findings`, or `check_*`                                                                                    |
@@ -82,6 +86,9 @@ Inline design-threshold parameters on `analyze_repository` /
 `analyze_changed_paths` become part of the canonical run: they are recorded in
 `meta.analysis_thresholds.design_findings` and define that run's canonical
 design findings.
+`help(topic=...)` is intentionally static and bounded: it explains meaning,
+flags common anti-patterns, suggests a safe next step, and points to canonical
+docs without turning MCP into a documentation proxy.
 
 Run ids in MCP payloads are short session handles (first 8 hex chars of the
 canonical digest). MCP tools and run-scoped resources accept both short and full
@@ -128,6 +135,12 @@ state. They never touch source files, baselines, cache, or report artifacts.
 ```
 analyze_repository → get_run_summary or get_production_triage
 → list_hotspots or check_* → get_finding → get_remediation
+```
+
+### Semantic uncertainty recovery
+
+```
+help(topic="workflow" | "baseline" | "suppressions" | "latest_runs" | "review_state" | "changed_scope")
 ```
 
 ### Full repository review
@@ -217,6 +230,8 @@ Show regressions, resolved findings, and health delta.
 - Use `analyze_changed_paths` for PRs, not full analysis.
 - Prefer `get_run_summary` or `get_production_triage` for the first pass on a
   new run.
+- Use `help(topic=...)` when the safest next step or contract meaning is
+  unclear; it is a bounded semantic guide, not a docs dump.
 - Prefer `list_hotspots` or the narrow `check_*` tools before broad
   `list_findings` calls.
 - Use `get_finding` / `get_remediation` for one finding instead of raising

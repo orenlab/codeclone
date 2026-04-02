@@ -34,6 +34,7 @@ _SERVER_INSTRUCTIONS = (
     "get_production_triage for the first pass. Use list_hotspots or focused "
     "check_* tools before broader list_findings calls, then drill into one "
     "finding with get_finding or get_remediation. Use "
+    "help(topic=...) when workflow or contract semantics are unclear. Use "
     "get_report_section(section='metrics_detail', family=..., limit=...) for "
     "bounded metrics drill-down, and prefer generate_pr_summary(format='markdown') "
     "unless machine JSON is required. Pass an absolute repository root to "
@@ -271,6 +272,27 @@ def build_mcp_server(
             run_id=run_id,
             max_hotspots=max_hotspots,
             max_suggestions=max_suggestions,
+        )
+
+    @tool(
+        title="Help",
+        description=(
+            "Return a compact semantic guide for a supported CodeClone topic, "
+            "with next-step routing and canonical doc links. Use this when "
+            "workflow or contract meaning is unclear. This is bounded guidance, "
+            "not a full manual. Supported topics: workflow, suppressions, "
+            "baseline, latest_runs, review_state, changed_scope."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def help(
+        topic: str,
+        detail: str = "compact",
+    ) -> dict[str, object]:
+        return service.get_help(
+            topic=topic,  # type: ignore[arg-type]
+            detail=detail,  # type: ignore[arg-type]
         )
 
     @tool(
