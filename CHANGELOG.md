@@ -34,6 +34,11 @@ static.
 - Explicitly document that future releases may lower a repository score because the scoring model becomes broader or
   stricter, not only because the code became worse.
 
+### IDE integration
+
+- Add a preview VS Code extension as a native, read-only control surface over `codeclone-mcp`, with baseline-aware,
+  triage-first review flow, guided source-first drill-down, and explicit setup/session semantics.
+
 ## [2.0.0b3] - 20260401
 
 2.0.0b3 is the release where CodeClone stops looking like "a strong analyzer with extras" and starts looking like a

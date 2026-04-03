@@ -1,0 +1,6 @@
+.vscode/**
+.DS_Store
+DESIGN.md
+media/.thumb/**
+media/icon-source.svg
+*.vsix

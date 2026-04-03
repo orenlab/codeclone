@@ -45,6 +45,7 @@ repository build:
 
 - [CLI behavior, modes, and UX](book/09-cli.md)
 - [MCP interface contract](book/20-mcp-interface.md)
+- [VS Code extension contract](book/21-vscode-extension.md)
 - [HTML report rendering contract](book/10-html-render.md)
 
 ## System Properties
@@ -68,6 +69,7 @@ repository build:
 - [Architecture narrative](architecture.md)
 - [CFG design and semantics](cfg.md)
 - [MCP integration for AI agents and clients](mcp.md)
+- [VS Code extension usage guide](vscode-extension.md)
 - [SARIF integration for IDE/code-scanning use](sarif.md)
 - [Docs publishing and Pages workflow](publishing.md)
 

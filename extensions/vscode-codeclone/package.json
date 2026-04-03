@@ -1,0 +1,430 @@
+{
+  "name": "codeclone",
+  "displayName": "CodeClone",
+  "description": "Baseline-aware, triage-first structural review for Python, powered by CodeClone MCP.",
+  "version": "0.2.0",
+  "preview": true,
+  "publisher": "orenlab",
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/orenlab/codeclone.git"
+  },
+  "homepage": "https://orenlab.github.io/codeclone/",
+  "bugs": {
+    "url": "https://github.com/orenlab/codeclone/issues"
+  },
+  "icon": "media/icon.png",
+  "keywords": [
+    "python",
+    "code-quality",
+    "structural-analysis",
+    "mcp",
+    "ai-agents",
+    "baseline",
+    "refactoring"
+  ],
+  "markdown": "github",
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "CodeClone starts local structural analysis and should run only in trusted workspaces."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "CodeClone requires local filesystem and git access for repository analysis."
+    }
+  },
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "scripts": {
+    "check": "node --check src/mcpClient.js && node --check src/extension.js"
+  },
+  "categories": [
+    "Linters",
+    "Testing",
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:codeclone.overview",
+    "onView:codeclone.hotspots",
+    "onView:codeclone.session",
+    "onCommand:codeclone.connectMcp",
+    "onCommand:codeclone.analyzeWorkspace",
+    "onCommand:codeclone.analyzeChangedFiles",
+    "onCommand:codeclone.refreshCurrentRun",
+    "onCommand:codeclone.openProductionTriage",
+    "onCommand:codeclone.showHelpTopic",
+    "onCommand:codeclone.openSetupHelp"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codeclone",
+          "title": "CodeClone",
+          "icon": "media/codeclone.svg"
+        }
+      ]
+    },
+    "views": {
+      "codeclone": [
+        {
+          "id": "codeclone.overview",
+          "name": "Overview",
+          "type": "tree"
+        },
+        {
+          "id": "codeclone.hotspots",
+          "name": "Hotspots",
+          "type": "tree"
+        },
+        {
+          "id": "codeclone.session",
+          "name": "Runs & Session",
+          "type": "tree"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "codeclone.overview",
+        "when": "!codeclone.connected && !codeclone.hasRun",
+        "contents": "Start with [Analyze Workspace](command:codeclone.analyzeWorkspace) to connect to CodeClone and create the first run.\n\nUse [Review Changes](command:codeclone.analyzeChangedFiles) for a review-focused pass.\n\nNeed local setup steps? Open [Setup Help](command:codeclone.openSetupHelp).\n\nUse [Verify Local Server](command:codeclone.connectMcp) only if you want to check the launcher manually."
+      },
+      {
+        "view": "codeclone.overview",
+        "when": "codeclone.connected && !codeclone.hasRun",
+        "contents": "CodeClone is ready. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) or [Review Changes](command:codeclone.analyzeChangedFiles).\n\nNeed a quick orientation? Open [workflow help](command:codeclone.showHelpTopic)."
+      },
+      {
+        "view": "codeclone.hotspots",
+        "when": "!codeclone.hasRun",
+        "contents": "Hotspots appear after a run. Start with [Analyze Workspace](command:codeclone.analyzeWorkspace) or [Review Changes](command:codeclone.analyzeChangedFiles)."
+      },
+      {
+        "view": "codeclone.session",
+        "when": "!codeclone.connected",
+        "contents": "Session state appears after the first connection. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) to connect automatically, or [Verify Local Server](command:codeclone.connectMcp) to check the local launcher.\n\nIf CodeClone is not installed yet, open [Setup Help](command:codeclone.openSetupHelp)."
+      },
+      {
+        "view": "codeclone.session",
+        "when": "codeclone.connected && !codeclone.hasRun",
+        "contents": "The local CodeClone server is ready. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) to create the first run."
+      }
+    ],
+    "commands": [
+      {
+        "command": "codeclone.connectMcp",
+        "title": "Verify Local Server",
+        "category": "CodeClone",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "codeclone.analyzeWorkspace",
+        "title": "Analyze Workspace",
+        "category": "CodeClone",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "codeclone.analyzeChangedFiles",
+        "title": "Review Changes",
+        "category": "CodeClone",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "codeclone.refreshCurrentRun",
+        "title": "Refresh",
+        "category": "CodeClone",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codeclone.openProductionTriage",
+        "title": "Open Triage",
+        "category": "CodeClone",
+        "icon": "$(inspect)"
+      },
+      {
+        "command": "codeclone.reviewPriorityQueue",
+        "title": "Review Priorities",
+        "category": "CodeClone",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "codeclone.openFinding",
+        "title": "Open Finding",
+        "category": "CodeClone",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "codeclone.showRemediation",
+        "title": "Show Remediation",
+        "category": "CodeClone",
+        "icon": "$(wrench)"
+      },
+      {
+        "command": "codeclone.markFindingReviewed",
+        "title": "Mark Reviewed",
+        "category": "CodeClone",
+        "icon": "$(pass)"
+      },
+      {
+        "command": "codeclone.copyFindingId",
+        "title": "Copy Finding Id",
+        "category": "CodeClone",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "codeclone.revealFindingSource",
+        "title": "Reveal Source",
+        "category": "CodeClone",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "codeclone.showHelpTopic",
+        "title": "Open Help Topic",
+        "category": "CodeClone",
+        "icon": "$(question)"
+      },
+      {
+        "command": "codeclone.openSetupHelp",
+        "title": "Setup Help",
+        "category": "CodeClone",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "codeclone.openGodModule",
+        "title": "Open Candidate Detail",
+        "category": "CodeClone",
+        "icon": "$(symbol-module)"
+      },
+      {
+        "command": "codeclone.openOverview",
+        "title": "Open Overview",
+        "category": "CodeClone"
+      },
+      {
+        "command": "codeclone.clearSessionState",
+        "title": "Clear Session",
+        "category": "CodeClone",
+        "icon": "$(clear-all)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "codeclone.openFinding",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.showRemediation",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.markFindingReviewed",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.copyFindingId",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.revealFindingSource",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.openGodModule",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "codeclone.analyzeWorkspace",
+          "when": "view == codeclone.overview",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.analyzeChangedFiles",
+          "when": "view == codeclone.overview",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codeclone.reviewPriorityQueue",
+          "when": "view == codeclone.overview && codeclone.hasRun",
+          "group": "navigation@3"
+        },
+        {
+          "command": "codeclone.refreshCurrentRun",
+          "when": "view == codeclone.overview && codeclone.hasRun",
+          "group": "navigation@4"
+        },
+        {
+          "command": "codeclone.connectMcp",
+          "when": "view == codeclone.overview && !codeclone.connected",
+          "group": "navigation@5"
+        },
+        {
+          "command": "codeclone.reviewPriorityQueue",
+          "when": "view == codeclone.hotspots && codeclone.hasRun",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.refreshCurrentRun",
+          "when": "view == codeclone.hotspots && codeclone.hasRun",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codeclone.openProductionTriage",
+          "when": "view == codeclone.hotspots && codeclone.hasRun",
+          "group": "navigation@3"
+        },
+        {
+          "command": "codeclone.analyzeWorkspace",
+          "when": "view == codeclone.hotspots && !codeclone.hasRun",
+          "group": "navigation@4"
+        },
+        {
+          "command": "codeclone.analyzeChangedFiles",
+          "when": "view == codeclone.hotspots",
+          "group": "navigation@5"
+        },
+        {
+          "command": "codeclone.connectMcp",
+          "when": "view == codeclone.session && !codeclone.connected",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.openSetupHelp",
+          "when": "view == codeclone.session && !codeclone.connected",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codeclone.clearSessionState",
+          "when": "view == codeclone.session && codeclone.hasRun",
+          "group": "navigation@3"
+        },
+        {
+          "command": "codeclone.showHelpTopic",
+          "when": "view == codeclone.session",
+          "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codeclone.revealFindingSource",
+          "when": "viewItem == codeclone.finding",
+          "group": "inline@1"
+        },
+        {
+          "command": "codeclone.showRemediation",
+          "when": "viewItem == codeclone.finding",
+          "group": "inline@2"
+        },
+        {
+          "command": "codeclone.openFinding",
+          "when": "viewItem == codeclone.finding",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.markFindingReviewed",
+          "when": "viewItem == codeclone.finding",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codeclone.copyFindingId",
+          "when": "viewItem == codeclone.finding",
+          "group": "navigation@3"
+        },
+        {
+          "command": "codeclone.showHelpTopic",
+          "when": "viewItem == codeclone.helpTopic",
+          "group": "inline@1"
+        },
+        {
+          "command": "codeclone.openGodModule",
+          "when": "viewItem == codeclone.godModule",
+          "group": "inline@1"
+        }
+      ]
+    },
+    "walkthroughs": [
+      {
+        "id": "codeclone.gettingStarted",
+        "title": "Get started with CodeClone",
+        "description": "Run your first structural analysis, review priorities, and inspect changed files.",
+        "steps": [
+          {
+            "id": "codeclone.analyzeWorkspace",
+            "title": "Analyze the current workspace",
+            "description": "Create a fresh CodeClone run for the selected workspace folder.",
+            "media": {
+              "path": "media/codeclone.svg",
+              "altText": "CodeClone icon"
+            },
+            "completionEvents": [
+              "onCommand:codeclone.analyzeWorkspace"
+            ]
+          },
+          {
+            "id": "codeclone.reviewPriorities",
+            "title": "Review the next best hotspot",
+            "description": "Use the guided priority queue instead of broad listing.",
+            "completionEvents": [
+              "onCommand:codeclone.reviewPriorityQueue"
+            ]
+          },
+          {
+            "id": "codeclone.reviewChanged",
+            "title": "Review changed files",
+            "description": "Run changed-files analysis against HEAD and inspect touched findings only.",
+            "completionEvents": [
+              "onCommand:codeclone.analyzeChangedFiles"
+            ]
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "CodeClone",
+      "properties": {
+        "codeclone.mcp.command": {
+          "type": "string",
+          "default": "auto",
+          "description": "Command used to launch the local CodeClone MCP server. Use 'auto' to detect a sensible local default."
+        },
+        "codeclone.mcp.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional command-line arguments passed to the CodeClone MCP launcher."
+        },
+        "codeclone.analysis.cachePolicy": {
+          "type": "string",
+          "enum": [
+            "reuse",
+            "off"
+          ],
+          "default": "reuse",
+          "description": "Default cache policy for workspace analysis requests."
+        },
+        "codeclone.analysis.changedDiffRef": {
+          "type": "string",
+          "default": "HEAD",
+          "description": "Git revision used for changed-files analysis."
+        },
+        "codeclone.ui.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a single workspace-level CodeClone status bar item."
+        }
+      }
+    }
+  }
+}

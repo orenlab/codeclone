@@ -38,13 +38,16 @@ Live sample report:
 
 - **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
 - **Structural findings** — duplicated branch families, clone guard/exit divergence and clone-cohort drift (report-only)
-- **Quality metrics** — cyclomatic complexity, coupling (`CBO`), cohesion (`LCOM4`), dependency cycles, dead code, health
+- **Quality metrics** — cyclomatic complexity, coupling (`CBO`), cohesion (`LCOM4`), dependency cycles, dead code,
+  health
   score, and report-only `God Modules` profiling
 - **Baseline governance** — separates accepted **legacy** debt from **new regressions** and lets CI fail **only** on
   what changed
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
 - **MCP server** — optional read-only MCP surface for AI agents and IDEs, designed as a budget-aware guided control
   surface for agentic development
+- **VS Code extension** — preview native client for CodeClone MCP with baseline-aware, triage-first structural
+  review inside the editor
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Fast** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
 
@@ -184,6 +187,19 @@ Docs:
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
 ·
 [MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
+
+### VS Code Extension
+
+The repository also ships a preview VS Code extension in
+[`extensions/vscode-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/vscode-codeclone).
+
+It is:
+
+- native VS Code first
+- baseline-aware
+- triage-first
+- read-only with respect to repository state
+- powered by the same `codeclone-mcp` contract surface
 
 ## Configuration
 

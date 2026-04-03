@@ -71,6 +71,7 @@ nav:
       - Interfaces:
           - CLI: book/09-cli.md
           - MCP Interface: book/20-mcp-interface.md
+          - VS Code Extension: book/21-vscode-extension.md
           - HTML Render: book/10-html-render.md
       - System Properties:
           - Security Model: book/11-security-model.md
@@ -92,6 +93,7 @@ nav:
       - Architecture Narrative: architecture.md
       - CFG Semantics: cfg.md
       - MCP for AI Agents: mcp.md
+      - VS Code Extension: vscode-extension.md
       - SARIF for IDEs: sarif.md
       - Publishing and Docs Site: publishing.md
   - Examples:
