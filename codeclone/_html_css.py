@@ -635,6 +635,7 @@ _OVERVIEW = """\
 /* Summary grid */
 .overview-summary-grid{display:grid;gap:var(--sp-3);margin-bottom:var(--sp-3)}
 .overview-summary-grid--2col{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.overview-summary-grid--3col{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
 .overview-summary-item{background:var(--bg-surface);border:1px solid var(--border);
   border-radius:var(--radius-lg);padding:var(--sp-4)}
 .overview-summary-label{display:flex;align-items:center;gap:var(--sp-2);
@@ -649,6 +650,13 @@ _OVERVIEW = """\
   padding-left:var(--sp-3);position:relative;line-height:1.5}
 .overview-summary-list li::before{content:"\\2022";position:absolute;left:0;color:var(--text-muted)}
 .overview-summary-value{font-size:.85rem;color:var(--text-muted)}
+.overview-fact-list{display:flex;flex-direction:column;gap:var(--sp-2);margin-top:var(--sp-3)}
+.overview-fact-row{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-3);
+  font-size:.76rem;border-bottom:1px solid color-mix(in srgb,var(--border) 45%,transparent);padding-bottom:6px}
+.overview-fact-row:last-child{border-bottom:none;padding-bottom:0}
+.overview-fact-label{color:var(--text-muted)}
+.overview-fact-value{color:var(--text-secondary);font-weight:600;font-variant-numeric:tabular-nums;
+  text-align:right}
 /* Source breakdown bars */
 .breakdown-list{display:flex;flex-direction:column;gap:var(--sp-2)}
 .breakdown-row{display:grid;grid-template-columns:6.5rem 2rem 1fr;align-items:center;gap:var(--sp-2)}
@@ -675,6 +683,23 @@ _OVERVIEW = """\
 .dir-hotspot-meta{display:flex;flex-wrap:wrap;gap:6px;font-size:.68rem;color:var(--text-muted)}
 .dir-hotspot-meta span{font-variant-numeric:tabular-nums}
 .dir-hotspot-meta-sep{opacity:.3}
+.god-module-list{display:flex;flex-direction:column;gap:0}
+.god-module-entry{padding:var(--sp-2) 0;border-bottom:1px solid color-mix(in srgb,var(--border) 50%,transparent)}
+.god-module-entry:last-child{border-bottom:none;padding-bottom:0}
+.god-module-entry:first-child{padding-top:0}
+.god-module-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-2);margin-bottom:4px}
+.god-module-title{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sp-2);min-width:0}
+.god-module-title code{font-size:.78rem;font-weight:600;color:var(--text-primary);line-height:1.35}
+.god-module-score{flex-shrink:0;font-size:.72rem;font-weight:700;font-variant-numeric:tabular-nums;
+  color:var(--accent-primary);background:var(--accent-muted);border-radius:999px;padding:2px 8px}
+.god-module-metrics{display:flex;flex-wrap:wrap;gap:6px;font-size:.68rem;color:var(--text-muted)}
+.god-module-metrics span{font-variant-numeric:tabular-nums}
+.god-module-reasons,.god-module-signal-list{display:flex;flex-wrap:wrap;gap:var(--sp-1);margin-top:var(--sp-2)}
+.god-module-reason-chip,.god-module-signal-pill{display:inline-flex;align-items:center;gap:5px;
+  font-size:.68rem;font-weight:500;color:var(--text-secondary);background:var(--bg-raised);
+  border:1px solid color-mix(in srgb,var(--border) 60%,transparent);border-radius:999px;
+  padding:2px 8px}
+.god-module-signal-count{font-variant-numeric:tabular-nums;color:var(--text-muted)}
 /* Health radar chart */
 .health-radar{display:flex;justify-content:center;padding:var(--sp-3) 0}
 .health-radar svg{width:100%;max-width:520px;height:auto;overflow:visible}
@@ -882,6 +907,11 @@ _STRUCTURAL = """\
 .sf-body{padding:0 var(--sp-4) var(--sp-3);display:flex;flex-direction:column;gap:var(--sp-2)}
 .sf-chips{display:flex;flex-wrap:wrap;gap:var(--sp-1)}
 .sf-scope-text{font-size:.8rem;font-family:var(--font-mono);color:var(--text-secondary)}
+.sf-inline-action{display:flex;align-items:flex-start;gap:var(--sp-2);padding:var(--sp-2) var(--sp-3);
+  border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-raised)}
+.sf-inline-action-label{font-size:.72rem;font-weight:600;letter-spacing:.02em;text-transform:uppercase;
+  color:var(--accent-primary);white-space:nowrap}
+.sf-inline-action-text{font-size:.8rem;color:var(--text-secondary);line-height:1.45}
 
 /* Expandable occurrences */
 .sf-details{border-top:1px solid var(--border)}

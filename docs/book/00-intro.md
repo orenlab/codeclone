@@ -90,6 +90,7 @@ Refs:
   [09-cli.md](09-cli.md)
 - Metrics governance path:
   [04-config-and-defaults.md](04-config-and-defaults.md) ->
+  [15-health-score.md](15-health-score.md) ->
   [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md) ->
   [16-dead-code-contract.md](16-dead-code-contract.md) ->
   [19-inline-suppressions.md](19-inline-suppressions.md) ->

@@ -77,11 +77,11 @@ Notes:
 - `u` row decoder accepts both legacy 11-column rows and canonical 17-column rows
   (legacy rows map new structural fields to neutral defaults).
 
-## Report schema (`2.2`)
+## Report schema (`2.3`)
 
 ```json
 {
-  "report_schema_version": "2.2",
+  "report_schema_version": "2.3",
   "meta": {
     "codeclone_version": "2.0.0b4",
     "project_name": "codeclone",
@@ -165,6 +165,13 @@ Notes:
         "total": 0,
         "high_confidence": 0,
         "suppressed": 1
+      },
+      "god_modules": {
+        "total": 0,
+        "candidates": 0,
+        "population_status": "limited",
+        "top_score": 0.0,
+        "average_score": 0.0
       }
     },
     "families": {
@@ -184,6 +191,21 @@ Notes:
             "...": "..."
           }
         ]
+      },
+      "god_modules": {
+        "summary": {
+          "total": 0,
+          "candidates": 0,
+          "population_status": "limited",
+          "top_score": 0.0,
+          "average_score": 0.0
+        },
+        "detection": {
+          "version": "1",
+          "scope": "report_only",
+          "strategy": "project_relative_composite"
+        },
+        "items": []
       },
       "health": {}
     }
@@ -244,7 +266,7 @@ Notes:
 ```text
 # CodeClone Report
 - Markdown schema: 1.0
-- Source report schema: 2.2
+- Source report schema: 2.3
 ...
 ## Overview
 ## Inventory
@@ -330,7 +352,7 @@ Notes:
       ],
       "properties": {
         "profileVersion": "1.0",
-        "reportSchemaVersion": "2.2"
+        "reportSchemaVersion": "2.3"
       },
       "results": [
         {

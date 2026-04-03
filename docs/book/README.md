@@ -41,6 +41,7 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 
 ### Quality and recommendations
 
+- [15-health-score.md](15-health-score.md)
 - [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
 - [16-dead-code-contract.md](16-dead-code-contract.md)
 - [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)

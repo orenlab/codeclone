@@ -493,6 +493,8 @@ def test_html_report_structural_findings_tab_uses_normalized_groups() -> None:
         ">1</span>",
         "Repeated non-overlapping branch-body shapes",
         "1 function",
+        "Suggested action",
+        "Review whether the repeated local branch can be simplified in place.",
     )
     assert "stmt seq" in html and "Expr,For" in html
     assert "stmt_seq=Expr</span>" not in html
@@ -1566,6 +1568,31 @@ def _metrics_payload(
             "grade": health_grade,
             "dimensions": {"coverage": 99},
         },
+        "god_modules": {
+            "summary": {
+                "total": 1,
+                "candidates": 0,
+                "population_status": "limited",
+                "top_score": 0.0,
+                "average_score": 0.0,
+                "candidate_score_cutoff": 0.0,
+            },
+            "items": [],
+            "detection": {
+                "version": "1",
+                "scope": "report_only",
+                "strategy": "project_relative_composite",
+                "minimum_population": 20,
+                "size_signals": ["loc", "callable_count", "complexity_total"],
+                "dependency_signals": [
+                    "fan_in",
+                    "fan_out",
+                    "total_deps",
+                    "import_edges",
+                ],
+                "shape_signals": ["hub_balance", "reimport_ratio"],
+            },
+        },
     }
 
 
@@ -1623,6 +1650,143 @@ def test_html_report_metrics_risk_branches() -> None:
     assert (
         '<span class="main-tab-label">Dead Code</span><span class="tab-count">2</span>'
         in html
+    )
+
+
+def test_html_report_renders_god_modules_in_quality_and_overview() -> None:
+    payload = _metrics_payload(
+        health_score=72,
+        health_grade="B",
+        complexity_max=25,
+        complexity_high_risk=1,
+        coupling_high_risk=1,
+        cohesion_low=1,
+        dep_cycles=[],
+        dep_max_depth=4,
+        dead_total=1,
+        dead_critical=1,
+    )
+    god_modules = payload["god_modules"]
+    assert isinstance(god_modules, dict)
+    god_modules["summary"] = {
+        "total": 3,
+        "candidates": 1,
+        "population_status": "ok",
+        "top_score": 0.93,
+        "average_score": 0.42,
+        "candidate_score_cutoff": 0.88,
+    }
+    god_modules["items"] = [
+        {
+            "module": "pkg.hub",
+            "relative_path": "pkg/hub.py",
+            "source_kind": "production",
+            "loc": 420,
+            "functions": 5,
+            "methods": 2,
+            "classes": 1,
+            "callable_count": 7,
+            "complexity_total": 31,
+            "complexity_max": 12,
+            "fan_in": 4,
+            "fan_out": 7,
+            "total_deps": 11,
+            "import_edges": 9,
+            "reimport_edges": 2,
+            "reimport_ratio": 0.2222,
+            "instability": 0.6364,
+            "hub_balance": 0.7273,
+            "size_score": 0.95,
+            "dependency_score": 0.91,
+            "shape_score": 0.8,
+            "score": 0.93,
+            "candidate_status": "candidate",
+            "candidate_reasons": [
+                "size_pressure",
+                "dependency_pressure",
+                "hub_like_shape",
+            ],
+        }
+    ]
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=payload,
+    )
+
+    _assert_html_contains(
+        html,
+        "God Modules",
+        "pkg.hub",
+        "Candidate profile",
+        "0.93",
+        "hub-like shape",
+        "god-modules",
+    )
+    assert "Candidate cutoff" not in html
+    assert "Ranked modules" not in html
+
+
+def test_html_report_renders_run_snapshot_from_canonical_inventory() -> None:
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    report_document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo/project", "project_name": "project"},
+        metrics=metrics,
+        inventory={
+            "files": {
+                "total_found": 158,
+                "analyzed": 120,
+                "cached": 38,
+                "skipped": 2,
+                "source_io_skipped": 1,
+            },
+            "code": {
+                "parsed_lines": 22320,
+                "functions": 180,
+                "methods": 40,
+                "classes": 12,
+            },
+            "file_list": [
+                "/repo/project/pkg/a.py",
+                "/repo/project/pkg/b.py",
+            ],
+        },
+    )
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta=report_document["meta"],
+        metrics=report_document["metrics"],
+        report_document=report_document,
+    )
+
+    _assert_html_contains(
+        html,
+        "Scan scope",
+        "Parsed lines",
+        "Callables",
+        "Cached files",
+        "22,320",
+        "158 found · 120 analyzed · 38 cached · 3 skipped",
     )
 
 

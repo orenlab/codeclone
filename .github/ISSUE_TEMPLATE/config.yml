@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: CodeClone Docs
+    url: https://orenlab.github.io/codeclone/
+    about: Read the contracts book, MCP guide, and interface docs before opening a generic usage question.

@@ -38,8 +38,8 @@ Live sample report:
 
 - **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
 - **Structural findings** — duplicated branch families, clone guard/exit divergence and clone-cohort drift (report-only)
-- **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, dead code, health
-  score
+- **Quality metrics** — cyclomatic complexity, coupling (`CBO`), cohesion (`LCOM4`), dependency cycles, dead code, health
+  score, and report-only `God Modules` profiling
 - **Baseline governance** — separates accepted **legacy** debt from **new regressions** and lets CI fail **only** on
   what changed
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report

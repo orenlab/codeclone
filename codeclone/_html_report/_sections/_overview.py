@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -60,6 +61,12 @@ _DIRECTORY_KIND_LABELS: dict[str, str] = {
     "cohesion": "cohesion",
     "coupling": "coupling",
     "dependency": "dependency",
+}
+_GOD_MODULE_REASON_LABELS: dict[str, str] = {
+    "size_pressure": "size pressure",
+    "dependency_pressure": "dependency pressure",
+    "hub_like_shape": "hub-like shape",
+    "repeated_import_pressure": "repeated import pressure",
 }
 
 
@@ -385,6 +392,77 @@ def _dir_meta_span(val: int, label: str) -> str:
 _DIR_META_SEP = '<span class="dir-hotspot-meta-sep">\u00b7</span>'
 
 
+def _format_count(value: int | float) -> str:
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    return f"{int(value):,}"
+
+
+def _overview_fact_rows_html(facts: list[tuple[str, str]]) -> str:
+    if not facts:
+        return ""
+    return (
+        '<div class="overview-fact-list">'
+        + "".join(
+            '<div class="overview-fact-row">'
+            f'<span class="overview-fact-label">{_escape_html(label)}</span>'
+            f'<span class="overview-fact-value">{_escape_html(value)}</span>'
+            "</div>"
+            for label, value in facts
+        )
+        + "</div>"
+    )
+
+
+def _mb(*pairs: tuple[str, object]) -> str:
+    """Render compact micro-badges for stat-card detail rows."""
+    return "".join(
+        f'<span class="kpi-micro">'
+        f'<span class="kpi-micro-val">{_escape_html(str(v))}</span>'
+        f'<span class="kpi-micro-lbl">{_escape_html(label)}</span></span>'
+        for label, v in pairs
+        if v is not None and str(v) != "n/a"
+    )
+
+
+def _run_snapshot_section(ctx: ReportContext) -> str:
+    inventory = _as_mapping(getattr(ctx, "inventory_map", {}))
+    if not inventory:
+        return ""
+
+    files = _as_mapping(inventory.get("files"))
+    code = _as_mapping(inventory.get("code"))
+    total_found = _as_int(files.get("total_found"))
+    analyzed = _as_int(files.get("analyzed"))
+    cached = _as_int(files.get("cached"))
+    skipped = _as_int(files.get("skipped"))
+    source_io_skipped = _as_int(files.get("source_io_skipped"))
+    parsed_lines = _as_int(code.get("parsed_lines"))
+    functions = _as_int(code.get("functions"))
+    methods = _as_int(code.get("methods"))
+    classes = _as_int(code.get("classes"))
+    callable_total = functions + methods
+
+    summary_parts = [
+        f"{_format_count(total_found)} found",
+        f"{_format_count(analyzed)} analyzed",
+        f"{_format_count(cached)} cached",
+        f"{_format_count(skipped + source_io_skipped)} skipped",
+    ]
+    facts = [
+        ("Cached files", _format_count(cached)),
+        ("Skipped files", _format_count(skipped + source_io_skipped)),
+        ("Parsed lines", _format_count(parsed_lines)),
+        ("Callables", _format_count(callable_total)),
+        ("Classes", _format_count(classes)),
+    ]
+    return (
+        '<div class="overview-summary-value">'
+        f"{' · '.join(summary_parts)}"
+        "</div>" + _overview_fact_rows_html(facts)
+    )
+
+
 def _directory_kind_meta_parts(
     kind_breakdown: Mapping[str, object],
     *,
@@ -502,6 +580,121 @@ def _directory_hotspots_section(ctx: ReportContext) -> str:
     )
 
 
+def _god_modules_section(ctx: ReportContext) -> str:
+    god_modules = _as_mapping(getattr(ctx, "god_modules_map", {}))
+    if not god_modules:
+        return ""
+    summary = _as_mapping(god_modules.get("summary"))
+    candidates = _as_int(summary.get("candidates"))
+    if candidates <= 0:
+        return ""
+    candidate_rows = [
+        _as_mapping(item)
+        for item in _as_sequence(god_modules.get("items"))
+        if str(_as_mapping(item).get("candidate_status", "")).strip() == "candidate"
+    ][:5]
+    if not candidate_rows:
+        return ""
+
+    top_rows = candidate_rows[:4]
+    rows_html: list[str] = []
+    reason_counts: Counter[str] = Counter()
+    for row in candidate_rows:
+        for reason in _as_sequence(row.get("candidate_reasons")):
+            if str(reason).strip():
+                reason_counts[str(reason)] += 1
+
+    signal_pills = "".join(
+        '<span class="god-module-signal-pill">'
+        f"{_escape_html(_GOD_MODULE_REASON_LABELS.get(reason, reason.replace('_', ' ')))}"
+        f'<span class="god-module-signal-count">{count}</span>'
+        "</span>"
+        for reason, count in sorted(
+            reason_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[:4]
+    )
+
+    for row in top_rows:
+        score = _as_float(row.get("score"))
+        reason_labels = [
+            _GOD_MODULE_REASON_LABELS.get(str(reason), str(reason).replace("_", " "))
+            for reason in _as_sequence(row.get("candidate_reasons"))
+            if str(reason).strip()
+        ]
+        relative_path = str(row.get("relative_path", "")).strip()
+        if not relative_path:
+            relative_path = str(row.get("module", "")).replace(".", "/") + ".py"
+        fan_summary = f"{_as_int(row.get('fan_in'))}/{_as_int(row.get('fan_out'))}"
+        reason_html = (
+            '<div class="god-module-reasons">'
+            + "".join(
+                f'<span class="god-module-reason-chip">{_escape_html(label)}</span>'
+                for label in reason_labels[:3]
+            )
+            + "</div>"
+            if reason_labels
+            else ""
+        )
+        rows_html.append(
+            '<div class="god-module-entry">'
+            '<div class="god-module-head">'
+            '<div class="god-module-title">'
+            f"<code>{_escape_html(relative_path)}</code>"
+            f"{_source_kind_badge_html(str(row.get('source_kind', 'other')))}"
+            "</div>"
+            f'<span class="god-module-score">{score:.2f}</span>'
+            "</div>"
+            '<div class="god-module-metrics">'
+            f"<span>{_escape_html(_format_count(_as_int(row.get('loc'))))} LOC</span>"
+            f"{_DIR_META_SEP}"
+            f"<span>fan-in/out {_escape_html(fan_summary)}</span>"
+            f"{_DIR_META_SEP}"
+            f"<span>complexity {_escape_html(str(_as_int(row.get('complexity_total'))))}</span>"
+            "</div>"
+            f"{reason_html}"
+            "</div>"
+        )
+
+    profile_facts = [("Top score", f"{_as_float(summary.get('top_score')):.2f}")]
+    average_score = _as_float(summary.get("average_score"))
+    if average_score > 0:
+        profile_facts.append(("Average score", f"{average_score:.2f}"))
+    population_status = str(summary.get("population_status", "")).strip()
+    if population_status:
+        profile_facts.append(("Population", population_status.replace("_", " ")))
+
+    profile_html = (
+        '<div class="overview-summary-value">'
+        f"{candidates} candidate{'s' if candidates != 1 else ''} "
+        f"across {_as_int(summary.get('total'))} ranked module{'s' if _as_int(summary.get('total')) != 1 else ''}."
+        "</div>"
+        + _overview_fact_rows_html(profile_facts)
+        + (
+            f'<div class="god-module-signal-list">{signal_pills}</div>'
+            if signal_pills
+            else ""
+        )
+    )
+    return (
+        '<section class="overview-cluster">'
+        + overview_cluster_header(
+            "God Modules",
+            "Report-only module hotspots derived from project-relative implementation burden and dependency pressure.",
+        )
+        + '<div class="overview-summary-grid overview-summary-grid--2col">'
+        + overview_summary_item_html(
+            label="Top candidates",
+            body_html='<div class="god-module-list">' + "".join(rows_html) + "</div>",
+        )
+        + overview_summary_item_html(
+            label="Candidate profile",
+            body_html=profile_html,
+        )
+        + "</div></section>"
+    )
+
+
 def render_overview_panel(ctx: ReportContext) -> str:
     """Build the Overview tab panel HTML."""
     complexity_summary = _as_mapping(ctx.complexity_map.get("summary"))
@@ -582,16 +775,6 @@ def render_overview_panel(ctx: ReportContext) -> str:
         _new_clones = sum(
             1 for gk, _ in ctx.func_sorted if gk in ctx.new_func_keys
         ) + sum(1 for gk, _ in ctx.block_sorted if gk in ctx.new_block_keys)
-
-    def _mb(*pairs: tuple[str, object]) -> str:
-        """Render micro-badges: [label value] [label value] ..."""
-        return "".join(
-            f'<span class="kpi-micro">'
-            f'<span class="kpi-micro-val">{_escape_html(str(v))}</span>'
-            f'<span class="kpi-micro-lbl">{_escape_html(label)}</span></span>'
-            for label, v in pairs
-            if v is not None and str(v) != "n/a"
-        )
 
     _baseline_ok = (
         '<span class="kpi-micro kpi-micro--baselined">\u2713 baselined</span>'
@@ -746,7 +929,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
             "Executive Summary",
             "Project-wide context derived from the full scanned root.",
         )
-        + '<div class="overview-summary-grid overview-summary-grid--2col">'
+        + '<div class="overview-summary-grid overview-summary-grid--3col">'
         + overview_summary_item_html(
             label="Issue breakdown",
             body_html=_issue_breakdown_html(ctx, deltas=_issue_deltas),
@@ -756,6 +939,10 @@ def render_overview_panel(ctx: ReportContext) -> str:
             body_html=overview_source_breakdown_html(
                 _as_mapping(ctx.overview_data.get("source_breakdown"))
             ),
+        )
+        + overview_summary_item_html(
+            label="Scan scope",
+            body_html=_run_snapshot_section(ctx),
         )
         + "</div></section>"
     )
@@ -778,6 +965,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
         + "</div>"
         + executive
         + _directory_hotspots_section(ctx)
+        + _god_modules_section(ctx)
         + _analytics_section(ctx)
     )
 

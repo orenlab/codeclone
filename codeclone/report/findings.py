@@ -31,6 +31,10 @@ from .derived import (
     report_location_from_structural_occurrence,
 )
 from .json_contract import structural_group_id
+from .suggestions import (
+    structural_action_steps,
+    structural_has_separate_suggestion,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -302,8 +306,8 @@ def _finding_matters_html(
             terminal,
             (
                 f"This group reports {count} branches with the same local shape "
-                f"({stmt_seq or 'unknown signature'}). Review whether the shared "
-                "branch body should stay duplicated or become a helper."
+                f"({stmt_seq or 'unknown signature'}). Review whether the local "
+                "branch logic should stay duplicated or be simplified in place."
             ),
         )
     return _finding_matters_paragraph(message)
@@ -334,6 +338,30 @@ def _finding_example_card_html(
         f"{_escape_html(_short_path(item.file_path))}:{item.start}\u2013{item.end}</span>"
         "</div>"
         f"{snippet.code_html}"
+        "</div>"
+    )
+
+
+def _finding_inline_action_html(
+    group: StructuralFindingGroup,
+    *,
+    occurrence_count: int,
+    spread_functions: int,
+) -> str:
+    if structural_has_separate_suggestion(
+        group,
+        occurrence_count=occurrence_count,
+        spread_functions=spread_functions,
+    ):
+        return ""
+    action_steps = structural_action_steps(group)
+    if not action_steps:
+        return ""
+    primary_action = action_steps[0]
+    return (
+        '<div class="sf-inline-action">'
+        '<span class="sf-inline-action-label">Suggested action</span>'
+        f'<span class="sf-inline-action-text">{_escape_html(primary_action)}</span>'
         "</div>"
     )
 
@@ -431,6 +459,11 @@ def _render_finding_card(
         deduped_items, scan_root=scan_root, already_deduped=True
     )
     count = len(deduped_items)
+    inline_action_html = _finding_inline_action_html(
+        g,
+        occurrence_count=count,
+        spread_functions=spread_functions,
+    )
 
     why_template_id = f"finding-why-template-{g.finding_key}"
     why_template_html = _finding_why_template_html(
@@ -483,6 +516,7 @@ def _render_finding_card(
         f'<div class="suggestion-context">{ctx_chips}</div>'
         f'<div class="sf-chips">{chips_html}</div>'
         f'<div class="sf-scope-text">{_escape_html(scope_text)}</div>'
+        f"{inline_action_html}"
         "</div>"
         # -- expandable occurrences --
         '<details class="sf-details">'

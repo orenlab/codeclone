@@ -409,3 +409,42 @@ def test_structural_suggestions_raise_clone_cohort_drift_to_warning() -> None:
     )
     assert len(suggestions) == 1
     assert suggestions[0].severity == "warning"
+
+
+def test_structural_info_hints_stay_in_findings_without_separate_suggestion() -> None:
+    suggestions = suggestions_mod._structural_suggestions(
+        (
+            StructuralFindingGroup(
+                finding_kind="duplicated_branches",
+                finding_key="structural:duplicated_branches:1",
+                signature={
+                    "stmt_seq": "Expr,Return",
+                    "terminal": "return",
+                    "raises": "0",
+                    "has_loop": "0",
+                },
+                items=(
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key="structural:duplicated_branches:1",
+                        file_path="/repo/pkg/a.py",
+                        qualname="pkg.a:alpha",
+                        start=10,
+                        end=12,
+                        signature={},
+                    ),
+                    StructuralFindingOccurrence(
+                        finding_kind="duplicated_branches",
+                        finding_key="structural:duplicated_branches:1",
+                        file_path="/repo/pkg/a.py",
+                        qualname="pkg.a:alpha",
+                        start=20,
+                        end=22,
+                        signature={},
+                    ),
+                ),
+            ),
+        ),
+        scan_root="/repo",
+    )
+    assert suggestions == []

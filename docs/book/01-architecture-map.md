@@ -124,6 +124,7 @@ Refs:
 | Cache trust and fail-open behavior    | [07-cache.md](07-cache.md)                                                                                       |
 | Report schema and provenance          | [08-report.md](08-report.md), [10-html-render.md](10-html-render.md)                                             |
 | MCP agent surface                     | [20-mcp-interface.md](20-mcp-interface.md)                                                                       |
+| Health score model                    | [15-health-score.md](15-health-score.md)                                                                         |
 | Metrics gates and metrics baseline    | [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)                                               |
 | Dead-code liveness policy             | [16-dead-code-contract.md](16-dead-code-contract.md)                                                             |
 | Suggestions and clone typing          | [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)                                         |

@@ -867,6 +867,7 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
         "cohesion",
         "dependencies",
         "dead_code",
+        "god_modules",
         "health",
     }
     assert "families" not in metrics_summary
@@ -874,6 +875,26 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
     assert set(metrics_detail) == {"summary", "_hint"}
     assert "family" in metrics_detail_page
     assert cast("list[dict[str, object]]", metrics_detail_page["items"])
+    god_modules_page = service.get_report_section(
+        run_id=run_id,
+        section="metrics_detail",
+        family="god_modules",
+        limit=5,
+    )
+    assert god_modules_page["family"] == "god_modules"
+    god_modules_items = cast("list[dict[str, object]]", god_modules_page["items"])
+    assert god_modules_items
+    report_record = service._runs.get(run_id)
+    assert report_record is not None
+    report_document = report_record.report_document
+    metrics_map = cast("dict[str, object]", report_document["metrics"])
+    families_map = cast("dict[str, object]", metrics_map["families"])
+    god_modules_family = cast("dict[str, object]", families_map["god_modules"])
+    god_modules_report_items = cast(
+        "list[dict[str, object]]",
+        god_modules_family["items"],
+    )
+    assert god_modules_items[0]["path"] == god_modules_report_items[0]["relative_path"]
 
 
 def test_mcp_service_evaluate_gates_on_existing_run(tmp_path: Path) -> None:
@@ -3211,6 +3232,56 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
                 "qualname": "pkg.mod:run",
                 "score": 10,
             }
+        ],
+    }
+    god_modules_payload = service._metrics_detail_payload(
+        metrics={
+            "summary": {},
+            "families": {
+                "god_modules": {
+                    "items": [
+                        {
+                            "relative_path": "zeta.py",
+                            "module": "pkg.zeta",
+                            "score": 0.99,
+                            "candidate_status": "candidate",
+                        },
+                        {
+                            "relative_path": "alpha.py",
+                            "module": "pkg.alpha",
+                            "score": 0.12,
+                            "candidate_status": "non_candidate",
+                        },
+                    ]
+                }
+            },
+        },
+        family="god_modules",
+        path=None,
+        offset=0,
+        limit=5,
+    )
+    assert god_modules_payload == {
+        "family": "god_modules",
+        "path": None,
+        "offset": 0,
+        "limit": 5,
+        "returned": 2,
+        "total": 2,
+        "has_more": False,
+        "items": [
+            {
+                "path": "zeta.py",
+                "module": "pkg.zeta",
+                "score": 0.99,
+                "candidate_status": "candidate",
+            },
+            {
+                "path": "alpha.py",
+                "module": "pkg.alpha",
+                "score": 0.12,
+                "candidate_status": "non_candidate",
+            },
         ],
     }
     assert service._compact_metrics_item(

@@ -34,6 +34,7 @@ from .grouping import build_block_groups, build_groups, build_segment_groups
 from .metrics import (
     HealthInputs,
     build_dep_graph,
+    build_god_modules_payload,
     compute_health,
     find_suppressed_unused,
     find_unused,
@@ -123,6 +124,7 @@ class DiscoveryResult:
     cached_functions: int = 0
     cached_methods: int = 0
     cached_classes: int = 0
+    cached_source_stats_by_file: tuple[tuple[str, int, int, int, int], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +164,7 @@ class ProcessingResult:
     source_read_failures: tuple[str, ...]
     referenced_qualnames: frozenset[str] = frozenset()
     structural_findings: tuple[StructuralFindingGroup, ...] = ()
+    source_stats_by_file: tuple[tuple[str, int, int, int, int], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -585,6 +588,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         skipped_warnings,
     ) = _new_discovery_buffers()
     cached_sf: list[StructuralFindingGroup] = []
+    cached_source_stats_by_file: list[tuple[str, int, int, int, int]] = []
     cached_lines = 0
     cached_functions = 0
     cached_methods = 0
@@ -618,6 +622,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
             cached_functions += functions
             cached_methods += methods
             cached_classes += classes
+            cached_source_stats_by_file.append(
+                (filepath, lines, functions, methods, classes)
+            )
             cached_units.extend(cast("list[GroupItem]", cast(object, cached["units"])))
             cached_blocks.extend(
                 cast("list[GroupItem]", cast(object, cached["blocks"]))
@@ -673,6 +680,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         cached_functions=cached_functions,
         cached_methods=cached_methods,
         cached_classes=cached_classes,
+        cached_source_stats_by_file=tuple(
+            sorted(cached_source_stats_by_file, key=lambda row: row[0])
+        ),
     )
 
 
@@ -801,6 +811,7 @@ def process(
             failed_files=(),
             source_read_failures=(),
             structural_findings=discovery.cached_structural_findings,
+            source_stats_by_file=discovery.cached_source_stats_by_file,
         )
 
     all_units: list[GroupItem] = list(discovery.cached_units)
@@ -823,6 +834,12 @@ def process(
     all_structural_findings: list[StructuralFindingGroup] = list(
         discovery.cached_structural_findings
     )
+    source_stats_by_file: dict[str, tuple[int, int, int, int]] = {
+        filepath: (lines, functions, methods, classes)
+        for filepath, lines, functions, methods, classes in (
+            discovery.cached_source_stats_by_file
+        )
+    }
     failed_files: list[str] = []
     source_read_failures: list[str] = []
     root_str = str(boot.root)
@@ -883,6 +900,12 @@ def process(
             analyzed_functions += result.functions
             analyzed_methods += result.methods
             analyzed_classes += result.classes
+            source_stats_by_file[result.filepath] = (
+                result.lines,
+                result.functions,
+                result.methods,
+                result.classes,
+            )
 
             if result.units:
                 all_units.extend(_unit_to_group_item(unit) for unit in result.units)
@@ -995,6 +1018,10 @@ def process(
         failed_files=tuple(sorted(failed_files)),
         source_read_failures=tuple(sorted(source_read_failures)),
         structural_findings=tuple(all_structural_findings),
+        source_stats_by_file=tuple(
+            (filepath, *stats)
+            for filepath, stats in sorted(source_stats_by_file.items())
+        ),
     )
 
 
@@ -1166,9 +1193,12 @@ def compute_suggestions(
 
 def build_metrics_report_payload(
     *,
+    scan_root: str = "",
     project_metrics: ProjectMetrics,
     units: Sequence[GroupItemLike],
     class_metrics: Sequence[ClassMetrics],
+    module_deps: Sequence[ModuleDep] = (),
+    source_stats_by_file: Sequence[tuple[str, int, int, int, int]] = (),
     suppressed_dead_code: Sequence[DeadItem] = (),
 ) -> dict[str, object]:
     sorted_units = sorted(
@@ -1319,6 +1349,13 @@ def build_metrics_report_payload(
             "grade": project_metrics.health.grade,
             "dimensions": dict(project_metrics.health.dimensions),
         },
+        "god_modules": build_god_modules_payload(
+            scan_root=scan_root,
+            source_stats_by_file=source_stats_by_file,
+            units=units,
+            class_metrics=class_metrics,
+            module_deps=module_deps,
+        ),
     }
 
 
@@ -1414,9 +1451,12 @@ def analyze(
             scan_root=str(boot.root),
         )
         metrics_payload = build_metrics_report_payload(
+            scan_root=str(boot.root),
             project_metrics=project_metrics,
             units=processing.units,
             class_metrics=processing.class_metrics,
+            module_deps=processing.module_deps,
+            source_stats_by_file=processing.source_stats_by_file,
             suppressed_dead_code=suppressed_dead_items,
         )
 

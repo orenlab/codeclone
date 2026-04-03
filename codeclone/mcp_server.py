@@ -277,11 +277,12 @@ def build_mcp_server(
     @tool(
         title="Help",
         description=(
-            "Return a compact semantic guide for a supported CodeClone topic, "
-            "with next-step routing and canonical doc links. Use this when "
-            "workflow or contract meaning is unclear. This is bounded guidance, "
-            "not a full manual. Supported topics: workflow, suppressions, "
-            "baseline, latest_runs, review_state, changed_scope."
+            "Explain a supported CodeClone workflow or contract topic and "
+            "suggest the safest next step. Return compact semantic guidance "
+            "with canonical doc links. Use this when workflow or contract "
+            "meaning is unclear. This is bounded guidance, not a full manual. "
+            "Supported topics: workflow, suppressions, baseline, latest_runs, "
+            "review_state, changed_scope."
         ),
         annotations=read_only_tool,
         structured_output=True,

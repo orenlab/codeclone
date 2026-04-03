@@ -15,15 +15,27 @@ body:
     id: version
     attributes:
       label: CodeClone version
-      placeholder: "1.1.0"
+      placeholder: "2.0.0b4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: family
+    attributes:
+      label: Detection family
+      options:
+        - Function clone
+        - Block clone
+        - Segment clone (report-only)
+        - Structural finding
     validations:
       required: true
 
   - type: textarea
     id: code
     attributes:
-      label: Code snippets detected as clones
-      description: Paste both snippets or a reduced example
+      label: Minimal reproduction
+      description: Paste both snippets, the reduced example, or the relevant finding evidence
       render: python
     validations:
       required: true
@@ -38,9 +50,11 @@ body:
     validations:
       required: true
 
-  - type: checkbox
+  - type: checkboxes
     id: cfg_related
     attributes:
-      label: CFG-related?
+      label: Additional signals
       options:
         - label: Control flow structure differs meaningfully
+        - label: Side effects or runtime behavior differ meaningfully
+        - label: The issue appears only in tests / fixtures

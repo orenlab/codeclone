@@ -2,13 +2,39 @@
 
 ## [2.0.0b4]
 
-In development.
+2.0.0b4 deepens the platform model introduced in b3: MCP becomes more self-guiding, report-only analysis expands with
+module-level hotspot ranking, findings and suggestions are separated more cleanly by role, and Health Score
+documentation now formalizes how new signal families can be introduced gradually without pretending the scoring model is
+static.
 
 ### MCP server
 
-- Add bounded MCP `help(topic=...)` as an uncertainty-recovery tool for workflow, baseline, suppressions, latest-run semantics, review state, and changed-scope routing.
+- Add bounded MCP `help(topic=...)` as a compact uncertainty-recovery and semantic-routing tool for workflow, baseline,
+  suppressions, latest-run semantics, review state, and changed-scope routing.
 
-## [2.0.0b3]
+### Report contract
+
+- Bump canonical report schema to `2.3` and add `metrics.families.god_modules` as a project-relative, report-only
+  module-hotspot layer.
+- Surface `God Modules` consistently across canonical JSON, text/markdown, HTML Overview + Quality projections, and
+  bounded MCP `metrics_detail` access without changing findings, health, gates, baseline semantics, or SARIF.
+- Tighten the findings/suggestions role split: low-signal local structural `info` hints remain canonical findings,
+  while separate suggestion cards are reserved for action-surplus cases and structural findings can render compact
+  inline suggested action in HTML.
+
+### CLI and HTML
+
+- Align CLI and HTML scope summaries with canonical report-wide inventory totals.
+- Polish `God Modules` presentation so report-only module-hotspot summaries read consistently across surfaces.
+
+### Documentation
+
+- Add a dedicated Health Score chapter documenting current scoring inputs, report-only / non-scoring layers, and the
+  phased policy for future health-model expansion.
+- Explicitly document that future releases may lower a repository score because the scoring model becomes broader or
+  stricter, not only because the code became worse.
+
+## [2.0.0b3] - 20260401
 
 2.0.0b3 is the release where CodeClone stops looking like "a strong analyzer with extras" and starts looking like a
 coherent platform: canonical-report-first, agent-facing, CI-native, and product-grade.
@@ -57,7 +83,8 @@ coherent platform: canonical-report-first, agent-facing, CI-native, and product-
 
 ### HTML report
 
-- Add `Hotspots by Directory` to the Overview tab, surfacing directory-level concentration for `all`, `clones`, and low-cohesion findings with scope-aware badges and compact counts.
+- Add `Hotspots by Directory` to the Overview tab, surfacing directory-level concentration for `all`, `clones`, and
+  low-cohesion findings with scope-aware badges and compact counts.
 - Add IDE picker (PyCharm, IDEA, VS Code, Cursor, Fleet, Zed) with persistent selection.
 - Add clickable file-path deep links across all tabs and stable `finding-{id}` anchors.
 
@@ -65,7 +92,7 @@ coherent platform: canonical-report-first, agent-facing, CI-native, and product-
 
 - Ship Composite Action v2 with configurable quality gates, SARIF upload to Code Scanning, and PR summary comments.
 
-## [2.0.0b2]
+## [2.0.0b2] - 20260328
 
 ### Dependencies
 

@@ -61,7 +61,7 @@ run-scoped URI templates.
 | `get_finding`            | Deep inspection of one finding by id; defaults to normal detail and accepts `detail_level`; use after `list_hotspots`, `list_findings`, or `check_*`                                                                                    |
 | `get_remediation`        | Structured remediation payload for one finding; defaults to normal detail; use when you only need the fix packet for a single finding                                                                                                   |
 | `list_hotspots`          | Derived views: highest priority, production hotspots, spread, etc., with compact summary cards; preferred first-pass triage before broader listing                                                                                      |
-| `get_report_section`     | Read canonical report sections; prefer specific sections over `section="all"`; `metrics` is summary-only, `metrics_detail` is paginated/bounded                                                                                         |
+| `get_report_section`     | Read canonical report sections; prefer specific sections over `section="all"`; `metrics` is summary-only, `metrics_detail` is paginated/bounded and can expose report-only families such as `god_modules`                               |
 | `evaluate_gates`         | Preview CI/gating decisions without exiting                                                                                                                                                                                             |
 | `check_clones`           | Clone findings from a stored run; cheaper and narrower than `list_findings` when you only need clone debt                                                                                                                               |
 | `check_complexity`       | Complexity hotspots from a stored run; cheaper and narrower than `list_findings` when you only need complexity                                                                                                                          |
@@ -78,6 +78,8 @@ run-scoped URI templates.
 
 `check_*` responses keep `health.score` and `health.grade`, but slim
 `health.dimensions` down to the one dimension relevant to that tool.
+`metrics_detail(family="god_modules")` exposes the canonical report-only
+module-hotspot layer without turning it into findings, hotlists, or gate data.
 List-style finding responses now use short MCP finding ids and compact relative
 locations by default; `normal` keeps structured `{path, line, end_line, symbol}`
 locations, while `full` keeps the richer compatibility payload including `uri`.

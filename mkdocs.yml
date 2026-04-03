@@ -78,6 +78,7 @@ nav:
           - Testing as Spec: book/13-testing-as-spec.md
           - Compatibility and Versioning: book/14-compatibility-and-versioning.md
       - Quality:
+          - Health Score: book/15-health-score.md
           - Metrics and Gates: book/15-metrics-and-quality-gates.md
           - Dead Code: book/16-dead-code-contract.md
           - Suggestions and Clone Typing: book/17-suggestions-and-clone-typing.md

@@ -139,6 +139,7 @@ MetricsDetailFamily = Literal[
     "cohesion",
     "dependencies",
     "dead_code",
+    "god_modules",
     "health",
 ]
 ReportSection = Literal[
@@ -276,6 +277,7 @@ _VALID_METRICS_DETAIL_FAMILIES = frozenset(
         "cohesion",
         "dependencies",
         "dead_code",
+        "god_modules",
         "health",
     }
 )
@@ -4089,14 +4091,15 @@ class CodeCloneMCPService:
                 if family is None:
                     compact_item = {"family": family_name, **compact_item}
                 items.append(compact_item)
-        items.sort(
-            key=lambda item: (
-                str(item.get("family", family or "")),
-                str(item.get("path", "")),
-                str(item.get("qualname", "")),
-                _as_int(item.get("start_line", 0), 0),
+        if family is None:
+            items.sort(
+                key=lambda item: (
+                    str(item.get("family", "")),
+                    str(item.get("path", "")),
+                    str(item.get("qualname", "")),
+                    _as_int(item.get("start_line", 0), 0),
+                )
             )
-        )
         page = items[normalized_offset : normalized_offset + normalized_limit]
         return {
             "family": family,

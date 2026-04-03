@@ -910,9 +910,10 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
             dead=1,
             health=85,
             grade="B",
+            god_modules=3,
         )
         == "Metrics  cc=2.8/21  cbo=0.6/8  lcom4=1.2/4"
-        "  cycles=0  dead_code=1  health=85(B)"
+        "  cycles=0  dead_code=1  health=85(B)  god_modules=3"
     )
 
 
@@ -923,8 +924,7 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
     parsed = ui.fmt_summary_parsed(lines=1200, functions=3, methods=2, classes=1)
     assert parsed is not None
     assert "1,200" in parsed
-    assert "[bold cyan]3[/bold cyan] functions" in parsed
-    assert "[bold cyan]2[/bold cyan] methods" in parsed
+    assert "[bold cyan]5[/bold cyan] callables" in parsed
     assert "[bold cyan]1[/bold cyan] classes" in parsed
 
     clones = ui.fmt_summary_clones(
@@ -944,6 +944,24 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
     clean_with_suppressed = ui.fmt_metrics_dead_code(0, suppressed=9)
     assert "✔ clean" in clean_with_suppressed
     assert "(9 suppressed)" in clean_with_suppressed
+    god_modules = ui.fmt_metrics_god_modules(
+        candidates=4,
+        total=158,
+        population_status="ok",
+        top_score=0.98,
+    )
+    assert all(
+        fragment in god_modules
+        for fragment in ("4", "max score 0.98", "158 ranked", "(report-only)")
+    )
+    limited_god_modules = ui.fmt_metrics_god_modules(
+        candidates=0,
+        total=12,
+        population_status="limited",
+        top_score=0.0,
+    )
+    assert "12 ranked" in limited_god_modules
+    assert "report-only; limited population" in limited_god_modules
     changed_paths = ui.fmt_changed_scope_paths(count=45)
     assert "45" in changed_paths
     assert "from git diff" in changed_paths
@@ -1003,6 +1021,35 @@ def test_print_changed_scope_uses_compact_line_in_quiet_mode(
     assert "findings=7" in out
     assert "new=2" in out
     assert "known=5" in out
+
+
+def test_print_metrics_in_quiet_mode_includes_god_modules(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    cli_summary._print_metrics(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=True,
+        metrics=cli_summary.MetricsSnapshot(
+            complexity_avg=2.8,
+            complexity_max=20,
+            high_risk_count=0,
+            coupling_avg=0.5,
+            coupling_max=9,
+            cohesion_avg=1.2,
+            cohesion_max=4,
+            cycles_count=0,
+            dead_code_count=0,
+            health_total=85,
+            health_grade="B",
+            god_modules_candidates=3,
+            god_modules_total=158,
+            god_modules_population_status="ok",
+            god_modules_top_score=0.98,
+        ),
+    )
+    out = capsys.readouterr().out
+    assert "god_modules=3" in out
 
 
 def test_configure_metrics_mode_rejects_skip_metrics_with_metrics_flags(

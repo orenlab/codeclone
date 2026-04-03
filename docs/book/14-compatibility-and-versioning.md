@@ -21,8 +21,9 @@ Current contract versions:
 - `BASELINE_SCHEMA_VERSION = "2.0"`
 - `BASELINE_FINGERPRINT_VERSION = "1"`
 - `CACHE_VERSION = "2.3"`
-- `REPORT_SCHEMA_VERSION = "2.2"`
-- `METRICS_BASELINE_SCHEMA_VERSION = "1.0"` (standalone metrics-baseline file)
+- `REPORT_SCHEMA_VERSION = "2.3"`
+- `METRICS_BASELINE_SCHEMA_VERSION = "1.0"` (used only when metrics are stored
+  in a dedicated metrics-baseline file instead of the default unified baseline)
 
 Refs:
 
@@ -39,7 +40,12 @@ Version bump rules:
   entries looking compatible to runtime validation.
 - Bump **report schema** for canonical report document contract changes
   (`report_schema_version`, consumed by JSON/TXT/Markdown/SARIF and HTML provenance/view).
-- Bump **metrics-baseline schema** only for standalone metrics-baseline payload changes.
+- Bump **metrics-baseline schema** only for dedicated metrics-baseline payload
+  changes.
+- This schema does **not** imply that metrics normally live in a separate file:
+  the default runtime path is still the unified baseline file, and the
+  standalone metrics-baseline schema applies only when users opt into a
+  different metrics-baseline path.
 - MCP does not currently define a separate schema/version constant; tool names,
   resource shapes, and documented request/response semantics are therefore
   package-versioned public surface and must be documented/tested when changed.
@@ -61,6 +67,13 @@ Version bump rules:
   or threshold-aware design finding materialization do change
   `report_schema_version` because they alter canonical report semantics and
   integrity payload.
+- The same is true for additive canonical metrics families such as
+  `metrics.families.god_modules`: even though the layer is report-only and does
+  not affect health/gates/findings, it still changes canonical report schema
+  and integrity payload, so it requires a report-schema bump.
+- CodeClone does not currently define a separate health-model version constant.
+  Health-score semantics are package-versioned and must be documented in the
+  Health Score chapter and release notes when they change.
 
 Baseline compatibility rules:
 
@@ -73,6 +86,33 @@ Baseline regeneration rules:
 - Required when `fingerprint_version` changes.
 - Required when `python_tag` changes.
 - Not required for package patch/minor updates if compatibility gates still pass.
+
+## Health model evolution
+
+Health Score is stable within a given scoring model, but the scoring model may
+evolve across releases.
+
+New signal families may first appear as report-only or experimental layers.
+After validation and contract hardening, selected layers may later be promoted
+into scoring.
+
+Future CodeClone releases may expand the Health Score formula with additional
+validated signal families. As a result, a repository's score may decrease after
+upgrade even if the code itself did not become worse. In such cases, the change
+reflects an evolved scoring model rather than a retroactive decline in code
+quality.
+
+Short operational reminder:
+
+> A lower score after upgrade may reflect a broader health model, not only
+> worse code.
+
+Contract consequence:
+
+- health-model expansion does not necessarily require a baseline/cache/report
+  schema bump;
+- but it **does** require explicit documentation and release-note coverage,
+  because it changes user-visible scoring semantics.
 
 ## Invariants (MUST)
 
@@ -93,7 +133,7 @@ Refs:
 | Fingerprint bump             | clone IDs change; baseline regeneration required                      |
 | Cache schema bump            | old caches are ignored and rebuilt automatically                      |
 | Report schema bump           | downstream report consumers must update                               |
-| Metrics-baseline schema bump | standalone metrics baseline must be regenerated                       |
+| Metrics-baseline schema bump | dedicated metrics-baseline files must be regenerated                  |
 
 ## Determinism / canonicalization
 
@@ -118,3 +158,5 @@ Refs:
 
 - Backward compatibility is not guaranteed across incompatible schema/fingerprint
   bumps.
+- Health Score is not frozen forever as a mathematical formula; what is frozen
+  is the obligation to document scoring-model changes and present them honestly.

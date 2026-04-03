@@ -17,11 +17,13 @@ from .dependencies import (
     longest_chains,
     max_depth,
 )
+from .god_modules import build_god_modules_payload
 from .health import HealthInputs, compute_health
 
 __all__ = [
     "HealthInputs",
     "build_dep_graph",
+    "build_god_modules_payload",
     "build_import_graph",
     "cohesion_risk",
     "compute_cbo",

@@ -15,7 +15,7 @@ body:
     id: version
     attributes:
       label: CodeClone version
-      placeholder: "1.1.0"
+      placeholder: "2.0.0b4"
 
   - type: textarea
     id: scenario

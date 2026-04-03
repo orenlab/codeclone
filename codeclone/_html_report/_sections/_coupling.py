@@ -53,10 +53,12 @@ def render_quality_panel(ctx: ReportContext) -> str:
     coupling_summary = _as_mapping(ctx.coupling_map.get("summary"))
     cohesion_summary = _as_mapping(ctx.cohesion_map.get("summary"))
     complexity_summary = _as_mapping(ctx.complexity_map.get("summary"))
+    god_modules_summary = _as_mapping(ctx.god_modules_map.get("summary"))
 
     coupling_high_risk = _as_int(coupling_summary.get("high_risk"))
     cohesion_low = _as_int(cohesion_summary.get("low_cohesion"))
     complexity_high_risk = _as_int(complexity_summary.get("high_risk"))
+    god_module_candidates = _as_int(god_modules_summary.get("candidates"))
     cc_max = _as_int(complexity_summary.get("max"))
 
     # Insight
@@ -70,11 +72,12 @@ def render_quality_panel(ctx: ReportContext) -> str:
             f"High-complexity: {complexity_high_risk}; "
             f"high-coupling: {coupling_high_risk}; "
             f"low-cohesion: {cohesion_low}; "
+            f"god modules: {god_module_candidates}; "
             f"max CC {cc_max}; "
             f"max CBO {coupling_summary.get('max', 'n/a')}; "
             f"max LCOM4 {cohesion_summary.get('max', 'n/a')}."
         )
-        if coupling_high_risk > 0 and cohesion_low > 0:
+        if god_module_candidates > 0 or (coupling_high_risk > 0 and cohesion_low > 0):
             tone = "risk"
         elif coupling_high_risk > 0 or cohesion_low > 0 or complexity_high_risk > 0:
             tone = "warn"
@@ -149,10 +152,43 @@ def render_quality_panel(ctx: ReportContext) -> str:
         ctx=ctx,
     )
 
+    gm_rows_data = _as_sequence(ctx.god_modules_map.get("items"))
+    gm_rows = [
+        (
+            str(_as_mapping(r).get("module", "")),
+            str(
+                _as_mapping(r).get("relative_path")
+                or _as_mapping(r).get("filepath")
+                or ""
+            ),
+            str(_as_mapping(r).get("score", "")),
+            str(_as_mapping(r).get("candidate_status", "")),
+            str(_as_mapping(r).get("loc", "")),
+            f"{_as_mapping(r).get('fan_in', '')}/{_as_mapping(r).get('fan_out', '')}",
+            str(_as_mapping(r).get("complexity_total", "")),
+        )
+        for r in gm_rows_data[:50]
+    ]
+    gm_panel = render_rows_table(
+        headers=(
+            "Module",
+            "File",
+            "Score",
+            "Status",
+            "LOC",
+            "Fan-in/out",
+            "Complexity total",
+        ),
+        rows=gm_rows,
+        empty_message="God-module profiling is not available.",
+        ctx=ctx,
+    )
+
     sub_tabs: list[tuple[str, str, int, str]] = [
         ("complexity", "Complexity", complexity_high_risk, cx_panel),
         ("coupling", "Coupling (CBO)", coupling_high_risk, cp_panel),
         ("cohesion", "Cohesion (LCOM4)", cohesion_low, ch_panel),
+        ("god-modules", "God Modules", god_module_candidates, gm_panel),
     ]
 
     return insight_block(

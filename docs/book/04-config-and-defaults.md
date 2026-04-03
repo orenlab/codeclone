@@ -71,6 +71,9 @@ Metrics baseline path selection contract:
 - If `metrics_baseline` in `pyproject.toml` differs from parser default, that
   configured path is used even without explicit CLI flag.
 - Otherwise, metrics baseline defaults to the clone baseline path.
+- In other words, metrics do **not** live in a separate file by default:
+  the default unified flow uses the same `codeclone.baseline.json` path for
+  clone and metrics comparison state.
 
 Refs:
 

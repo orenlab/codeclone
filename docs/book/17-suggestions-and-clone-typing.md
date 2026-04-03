@@ -44,6 +44,10 @@ Refs:
 - Suggestions are generated only in full metrics mode
   (`skip_metrics=false`).
 - Suggestions are advisory only and never directly control exit code.
+- Suggestions are not a one-to-one mirror of findings. They should exist only
+  when they add action structure beyond the canonical finding itself.
+- Low-signal local structural `info` hints stay in `findings` and do not emit a
+  separate suggestion card.
 - SARIF projection is finding-driven and does not consume suggestion cards.
 - JSON report stores clone typing at group level:
     - `findings.groups.clones.<kind>[*].clone_type`
@@ -60,6 +64,8 @@ Refs:
 
 - Suggestion priority formula is stable:
   `severity_weight / effort_weight`.
+- For structural findings, separate suggestion cards are emitted only for the
+  actionable subset; low-signal local `info` hints remain finding-only.
 - Suggestion output is sorted by:
   `(-priority, severity, category, source_kind, location, title, subject_key)`.
 - Derived suggestion serialization in report JSON applies deterministic ordering by

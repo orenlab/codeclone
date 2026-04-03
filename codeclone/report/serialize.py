@@ -600,6 +600,7 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         "complexity",
         "coupling",
         "cohesion",
+        "god_modules",
         "dependencies",
         "dead_code",
         "health",
@@ -613,11 +614,49 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
                 keys = ("total", "average", "max", "low_cohesion")
             case "dependencies":
                 keys = ("modules", "edges", "cycles", "max_depth")
+            case "god_modules":
+                keys = (
+                    "total",
+                    "candidates",
+                    "population_status",
+                    "top_score",
+                    "average_score",
+                )
             case "dead_code":
                 keys = ("total", "high_confidence", "suppressed")
             case _:
                 keys = ("score", "grade")
         lines.append(f"{family_name}: {_format_key_values(family_summary, keys)}")
+
+    god_modules_family = _as_mapping(metrics_families.get("god_modules"))
+    god_module_items = _as_sequence(god_modules_family.get("items"))
+    lines.extend(
+        [
+            "",
+            "GOD MODULES (top 10)",
+        ]
+    )
+    if not god_module_items:
+        lines.append("(none)")
+    else:
+        lines.extend(
+            "- "
+            + _format_key_values(
+                item,
+                (
+                    "module",
+                    "relative_path",
+                    "source_kind",
+                    "score",
+                    "candidate_status",
+                    "loc",
+                    "fan_in",
+                    "fan_out",
+                    "complexity_total",
+                ),
+            )
+            for item in map(_as_mapping, god_module_items[:10])
+        )
 
     lines.append("")
     _append_overview(lines, overview, hotlists)

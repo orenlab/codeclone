@@ -39,7 +39,7 @@ repository build:
 - [Core pipeline and invariants](book/05-core-pipeline.md)
 - [Baseline contract (schema v2.0)](book/06-baseline.md)
 - [Cache contract (schema v2.3)](book/07-cache.md)
-- [Report contract (schema v2.2)](book/08-report.md)
+- [Report contract (schema v2.3)](book/08-report.md)
 
 ## Interfaces
 
@@ -56,6 +56,7 @@ repository build:
 
 ## Quality Contracts
 
+- [Health Score model and evolution policy](book/15-health-score.md)
 - [Metrics mode and quality gates](book/15-metrics-and-quality-gates.md)
 - [Dead-code contract and test-boundary policy](book/16-dead-code-contract.md)
 - [Suggestions and clone typing contract](book/17-suggestions-and-clone-typing.md)

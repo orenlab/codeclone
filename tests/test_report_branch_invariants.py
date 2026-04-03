@@ -32,8 +32,8 @@ from codeclone.report.sarif import _result_properties
 from codeclone.report.suggestions import (
     _clone_steps,
     _clone_summary,
-    _structural_steps,
     _structural_summary,
+    structural_action_steps,
 )
 from tests._assertions import assert_contains_all
 
@@ -135,6 +135,11 @@ def test_structural_summary_and_steps_cover_all_terminal_paths() -> None:
         signature={"cohort_id": "fp|20-49"},
         items=(_occurrence(qualname="pkg:a", start=14, end=15),),
     )
+    continue_group = _group(
+        key="continue",
+        signature={"terminal": "fallthrough", "stmt_seq": "Continue"},
+        items=(_occurrence(qualname="pkg:a", start=16, end=16),) * 2,
+    )
 
     assert _structural_summary(raise_group)[1] == (
         "same repeated guard/validation branch"
@@ -148,17 +153,20 @@ def test_structural_summary_and_steps_cover_all_terminal_paths() -> None:
     assert _structural_summary(guard_div_group)[0] == "Clone guard/exit divergence"
     assert _structural_summary(drift_group)[0] == "Clone cohort drift"
 
-    assert _structural_steps(raise_group)[0].startswith(
+    assert structural_action_steps(raise_group)[0].startswith(
         "Factor the repeated validation/guard path"
     )
-    assert _structural_steps(return_group)[0].startswith(
+    assert structural_action_steps(return_group)[0].startswith(
         "Consolidate the repeated return-path logic"
     )
-    assert _structural_steps(guard_div_group)[0].startswith(
+    assert structural_action_steps(guard_div_group)[0].startswith(
         "Compare divergent clone members"
     )
-    assert _structural_steps(drift_group)[0].startswith(
+    assert structural_action_steps(drift_group)[0].startswith(
         "Review whether cohort drift is intentional"
+    )
+    assert structural_action_steps(continue_group)[0].startswith(
+        "Review whether the repeated continue guard can be merged"
     )
 
 

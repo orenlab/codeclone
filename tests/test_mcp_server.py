@@ -369,7 +369,27 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             )
         )
     )
+    god_modules_page = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_report_section",
+                {"section": "metrics_detail", "family": "god_modules", "limit": 5},
+            )
+        )
+    )
     assert cast("list[dict[str, object]]", metrics_detail_page["items"])
+    assert god_modules_page["family"] == "god_modules"
+    report_metrics = cast("dict[str, object]", report_payload["metrics"])
+    report_families = cast("dict[str, object]", report_metrics["families"])
+    report_god_modules = cast("dict[str, object]", report_families["god_modules"])
+    report_god_module_items = cast(
+        "list[dict[str, object]]",
+        report_god_modules["items"],
+    )
+    assert (
+        cast("list[dict[str, object]]", god_modules_page["items"])[0]["path"]
+        == report_god_module_items[0]["relative_path"]
+    )
     changed_section = _structured_tool_result(
         asyncio.run(server.call_tool("get_report_section", {"section": "changed"}))
     )
