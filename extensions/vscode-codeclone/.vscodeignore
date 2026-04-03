@@ -4,3 +4,4 @@ DESIGN.md
 media/.thumb/**
 media/icon-source.svg
 *.vsix
+test/**

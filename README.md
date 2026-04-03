@@ -200,6 +200,16 @@ It is:
 - triage-first
 - read-only with respect to repository state
 - powered by the same `codeclone-mcp` contract surface
+- limited in Restricted Mode until workspace trust is granted
+
+It focuses on source-first structural review inside the editor: overview,
+hotspots, review loop, changed-files pass, and explicit drill-down into finding,
+remediation, or local HTML report when needed.
+
+Docs:
+[VS Code extension guide](https://orenlab.github.io/codeclone/vscode-extension/)
+·
+[VS Code extension contract](https://orenlab.github.io/codeclone/book/21-vscode-extension/)
 
 ## Configuration
 

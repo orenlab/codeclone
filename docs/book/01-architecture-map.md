@@ -13,7 +13,8 @@ Main ownership layers:
 - Contracts and persistence: baseline, metrics baseline, cache, exit semantics.
 - Report model and projections: canonical JSON + deterministic TXT/Markdown/SARIF + explainability facts.
 - MCP agent surface: read-only server layer over the same pipeline/report contracts.
-- VS Code extension surface: native IDE client over the MCP layer and the same canonical report semantics.
+- VS Code extension surface: native IDE client over the MCP layer and the same canonical report semantics, with
+  limited Restricted Mode and source-first review flow.
 - Render layer: HTML rendering and template assets.
 
 ## Data model
@@ -30,7 +31,7 @@ Main ownership layers:
 | Persistence           | `codeclone/baseline.py`, `codeclone/metrics_baseline.py`, `codeclone/cache.py`                                                                                                                     | Baseline/cache trust/compat/integrity and atomic persistence                                    |
 | Runtime orchestration | `codeclone/pipeline.py`, `codeclone/cli.py`, `codeclone/_cli_args.py`, `codeclone/_cli_paths.py`, `codeclone/_cli_summary.py`, `codeclone/_cli_config.py`, `codeclone/ui_messages.py`              | CLI UX, stage orchestration, status handling, outputs, error markers                            |
 | MCP agent interface   | `codeclone/mcp_service.py`, `codeclone/mcp_server.py`                                                                                                                                              | Read-only MCP tools/resources over canonical analysis and report layers                         |
-| VS Code extension     | `extensions/vscode-codeclone/*`                                                                                                                                                                    | Native VS Code control surface over MCP, with triage-first review and source-first drill-down   |
+| VS Code extension     | `extensions/vscode-codeclone/*`                                                                                                                                                                    | Native VS Code control surface over MCP, with limited Restricted Mode, triage-first review, and source-first drill-down |
 | Rendering             | `codeclone/html_report.py`, `codeclone/_html_report/*`, `codeclone/_html_badges.py`, `codeclone/_html_js.py`, `codeclone/_html_escape.py`, `codeclone/_html_snippets.py`, `codeclone/templates.py` | HTML-only view layer over report data                                                           |
 
 Refs:

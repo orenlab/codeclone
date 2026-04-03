@@ -3,7 +3,12 @@
 const { spawn } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
+const { trimTail } = require("./support");
+
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+const MAX_STDOUT_BUFFER_CHARS = 4 * 1024 * 1024;
+const MAX_STDERR_BUFFER_CHARS = 256 * 1024;
+const MAX_LOG_LINE_CHARS = 4096;
 
 class MCPClientError extends Error {
   constructor(message) {
@@ -240,7 +245,12 @@ class CodeCloneMcpClient extends EventEmitter {
   }
 
   _handleStdout(chunk) {
-    this.stdoutBuffer += chunk;
+    this.stdoutBuffer = this._appendBoundedChunk(
+      this.stdoutBuffer,
+      chunk,
+      MAX_STDOUT_BUFFER_CHARS,
+      "stdout"
+    );
     const lines = this.stdoutBuffer.split(/\r?\n/);
     this.stdoutBuffer = lines.pop() || "";
     for (const rawLine of lines) {
@@ -252,7 +262,9 @@ class CodeCloneMcpClient extends EventEmitter {
       try {
         message = JSON.parse(line);
       } catch {
-        this.outputChannel.appendLine(`[codeclone] stdout: ${line}`);
+        this.outputChannel.appendLine(
+          `[codeclone] stdout: ${trimTail(line, MAX_LOG_LINE_CHARS)}`
+        );
         continue;
       }
       if (
@@ -290,14 +302,21 @@ class CodeCloneMcpClient extends EventEmitter {
   }
 
   _handleStderr(chunk) {
-    this.stderrBuffer += chunk;
+    this.stderrBuffer = this._appendBoundedChunk(
+      this.stderrBuffer,
+      chunk,
+      MAX_STDERR_BUFFER_CHARS,
+      "stderr"
+    );
     const lines = this.stderrBuffer.split(/\r?\n/);
     this.stderrBuffer = lines.pop() || "";
     for (const rawLine of lines) {
       const line = rawLine.trim();
       if (line) {
         this._rememberDiagnostic(line);
-        this.outputChannel.appendLine(`[codeclone] stderr: ${line}`);
+        this.outputChannel.appendLine(
+          `[codeclone] stderr: ${trimTail(line, MAX_LOG_LINE_CHARS)}`
+        );
       }
     }
   }
@@ -324,10 +343,25 @@ class CodeCloneMcpClient extends EventEmitter {
   }
 
   _rememberDiagnostic(line) {
-    this.diagnostics.push(line);
+    this.diagnostics.push(trimTail(line, MAX_LOG_LINE_CHARS));
     if (this.diagnostics.length > 10) {
       this.diagnostics.shift();
     }
+  }
+
+  _appendBoundedChunk(current, chunk, maxChars, streamName) {
+    const combined = `${current}${chunk}`;
+    if (combined.length <= maxChars) {
+      return combined;
+    }
+    const truncated = trimTail(combined, maxChars);
+    this._rememberDiagnostic(
+      `CodeClone MCP ${streamName} buffer exceeded ${maxChars} characters and was truncated.`
+    );
+    this.outputChannel.appendLine(
+      `[codeclone] ${streamName} buffer exceeded ${maxChars} characters; keeping the most recent output.`
+    );
+    return truncated;
   }
 
   _sameLaunchSpec(left, right) {

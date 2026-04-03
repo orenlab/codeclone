@@ -30,8 +30,12 @@
   ],
   "capabilities": {
     "untrustedWorkspaces": {
-      "supported": false,
-      "description": "CodeClone starts local structural analysis and should run only in trusted workspaces."
+      "supported": "limited",
+      "description": "CodeClone exposes setup and onboarding in Restricted Mode, but starts local analysis and MCP only in trusted workspaces.",
+      "restrictedConfigurations": [
+        "codeclone.mcp.command",
+        "codeclone.mcp.args"
+      ]
     },
     "virtualWorkspaces": {
       "supported": false,
@@ -42,7 +46,9 @@
     "vscode": "^1.100.0"
   },
   "scripts": {
-    "check": "node --check src/mcpClient.js && node --check src/extension.js"
+    "check": "node --check src/support.js && node --check src/mcpClient.js && node --check src/extension.js",
+    "test": "node --test test/*.test.js",
+    "test:host": "node test/runExtensionHost.js"
   },
   "categories": [
     "Linters",
@@ -58,8 +64,18 @@
     "onCommand:codeclone.analyzeChangedFiles",
     "onCommand:codeclone.refreshCurrentRun",
     "onCommand:codeclone.openProductionTriage",
+    "onCommand:codeclone.reviewPriorityQueue",
+    "onCommand:codeclone.nextReviewItem",
+    "onCommand:codeclone.previousReviewItem",
+    "onCommand:codeclone.setHotspotFocusMode",
+    "onCommand:codeclone.showRemediation",
+    "onCommand:codeclone.markFindingReviewed",
     "onCommand:codeclone.showHelpTopic",
-    "onCommand:codeclone.openSetupHelp"
+    "onCommand:codeclone.openSetupHelp",
+    "onCommand:codeclone.openGodModule",
+    "onCommand:codeclone.copyGodModuleBrief"
+    ,
+    "onCommand:codeclone.manageWorkspaceTrust"
   ],
   "main": "./src/extension.js",
   "contributes": {
@@ -94,28 +110,43 @@
     "viewsWelcome": [
       {
         "view": "codeclone.overview",
-        "when": "!codeclone.connected && !codeclone.hasRun",
-        "contents": "Start with [Analyze Workspace](command:codeclone.analyzeWorkspace) to connect to CodeClone and create the first run.\n\nUse [Review Changes](command:codeclone.analyzeChangedFiles) for a review-focused pass.\n\nNeed local setup steps? Open [Setup Help](command:codeclone.openSetupHelp).\n\nUse [Verify Local Server](command:codeclone.connectMcp) only if you want to check the launcher manually."
+        "when": "!isWorkspaceTrusted",
+        "contents": "CodeClone is in Restricted Mode for this workspace. Grant trust to run local structural analysis and the local MCP server.\n\nOpen [Manage Workspace Trust](command:codeclone.manageWorkspaceTrust) to continue, or [Setup Help](command:codeclone.openSetupHelp) if you want to review the local requirements first."
       },
       {
         "view": "codeclone.overview",
-        "when": "codeclone.connected && !codeclone.hasRun",
-        "contents": "CodeClone is ready. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) or [Review Changes](command:codeclone.analyzeChangedFiles).\n\nNeed a quick orientation? Open [workflow help](command:codeclone.showHelpTopic)."
+        "when": "isWorkspaceTrusted && !codeclone.connected && !codeclone.hasRun",
+        "contents": "Start with [Analyze Workspace](command:codeclone.analyzeWorkspace) to create the first structural run for this workspace.\n\nUse [Review Changes](command:codeclone.analyzeChangedFiles) when you want a diff-focused pass.\n\nNeed local setup? Open [Setup Help](command:codeclone.openSetupHelp).\n\nUse [Verify Local Server](command:codeclone.connectMcp) only when you want to check the launcher manually."
+      },
+      {
+        "view": "codeclone.overview",
+        "when": "isWorkspaceTrusted && codeclone.connected && !codeclone.hasRun",
+        "contents": "CodeClone is ready for this workspace. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) for a full structural pass, or [Review Changes](command:codeclone.analyzeChangedFiles) for a diff-focused review.\n\nNeed a quick mental model? Open [workflow help](command:codeclone.showHelpTopic)."
       },
       {
         "view": "codeclone.hotspots",
-        "when": "!codeclone.hasRun",
-        "contents": "Hotspots appear after a run. Start with [Analyze Workspace](command:codeclone.analyzeWorkspace) or [Review Changes](command:codeclone.analyzeChangedFiles)."
+        "when": "!isWorkspaceTrusted",
+        "contents": "Hotspots stay unavailable in Restricted Mode because CodeClone does not start local analysis for untrusted workspaces.\n\nOpen [Manage Workspace Trust](command:codeclone.manageWorkspaceTrust) when you want to enable analysis."
+      },
+      {
+        "view": "codeclone.hotspots",
+        "when": "isWorkspaceTrusted && !codeclone.hasRun",
+        "contents": "Hotspots appear after the first run. Start with [Analyze Workspace](command:codeclone.analyzeWorkspace), or use [Review Changes](command:codeclone.analyzeChangedFiles) when you want a diff-focused pass."
       },
       {
         "view": "codeclone.session",
-        "when": "!codeclone.connected",
-        "contents": "Session state appears after the first connection. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) to connect automatically, or [Verify Local Server](command:codeclone.connectMcp) to check the local launcher.\n\nIf CodeClone is not installed yet, open [Setup Help](command:codeclone.openSetupHelp)."
+        "when": "!isWorkspaceTrusted",
+        "contents": "Restricted Mode keeps the local CodeClone server offline for this workspace.\n\nOpen [Manage Workspace Trust](command:codeclone.manageWorkspaceTrust) to enable local MCP, or [Setup Help](command:codeclone.openSetupHelp) to review installation steps."
       },
       {
         "view": "codeclone.session",
-        "when": "codeclone.connected && !codeclone.hasRun",
-        "contents": "The local CodeClone server is ready. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) to create the first run."
+        "when": "isWorkspaceTrusted && !codeclone.connected",
+        "contents": "Runs and reviewed findings appear after the first successful connection. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) to connect automatically, or [Verify Local Server](command:codeclone.connectMcp) to check the local launcher.\n\nIf CodeClone is not installed yet, open [Setup Help](command:codeclone.openSetupHelp)."
+      },
+      {
+        "view": "codeclone.session",
+        "when": "isWorkspaceTrusted && codeclone.connected && !codeclone.hasRun",
+        "contents": "The local CodeClone server is ready. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) or [Review Changes](command:codeclone.analyzeChangedFiles) to create the first run."
       }
     ],
     "commands": [
@@ -156,10 +187,39 @@
         "icon": "$(list-selection)"
       },
       {
+        "command": "codeclone.focusHotspots",
+        "title": "Open Hotspots",
+        "category": "CodeClone"
+      },
+      {
+        "command": "codeclone.nextReviewItem",
+        "title": "Next Hotspot",
+        "category": "CodeClone",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "codeclone.previousReviewItem",
+        "title": "Previous Hotspot",
+        "category": "CodeClone",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "codeclone.setHotspotFocusMode",
+        "title": "Set Hotspot Focus",
+        "category": "CodeClone",
+        "icon": "$(filter)"
+      },
+      {
         "command": "codeclone.openFinding",
         "title": "Open Finding",
         "category": "CodeClone",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "codeclone.peekFindingLocations",
+        "title": "Peek Occurrences",
+        "category": "CodeClone",
+        "icon": "$(references)"
       },
       {
         "command": "codeclone.showRemediation",
@@ -180,6 +240,24 @@
         "icon": "$(copy)"
       },
       {
+        "command": "codeclone.copyFindingContext",
+        "title": "Copy Finding Context",
+        "category": "CodeClone",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "codeclone.copyRefactorBrief",
+        "title": "Copy Refactor Brief",
+        "category": "CodeClone",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "codeclone.openInHtmlReport",
+        "title": "Open in HTML Report",
+        "category": "CodeClone",
+        "icon": "$(link-external)"
+      },
+      {
         "command": "codeclone.revealFindingSource",
         "title": "Reveal Source",
         "category": "CodeClone",
@@ -198,10 +276,22 @@
         "icon": "$(tools)"
       },
       {
+        "command": "codeclone.manageWorkspaceTrust",
+        "title": "Manage Workspace Trust",
+        "category": "CodeClone",
+        "icon": "$(shield)"
+      },
+      {
         "command": "codeclone.openGodModule",
         "title": "Open Candidate Detail",
         "category": "CodeClone",
         "icon": "$(symbol-module)"
+      },
+      {
+        "command": "codeclone.copyGodModuleBrief",
+        "title": "Copy Report-only Brief",
+        "category": "CodeClone",
+        "icon": "$(copy)"
       },
       {
         "command": "codeclone.openOverview",
@@ -218,7 +308,19 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "codeclone.focusHotspots",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.reviewFinding",
+          "when": "false"
+        },
+        {
           "command": "codeclone.openFinding",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.peekFindingLocations",
           "when": "false"
         },
         {
@@ -231,6 +333,18 @@
         },
         {
           "command": "codeclone.copyFindingId",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.copyFindingContext",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.copyRefactorBrief",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.openInHtmlReport",
           "when": "false"
         },
         {
@@ -240,105 +354,158 @@
         {
           "command": "codeclone.openGodModule",
           "when": "false"
+        },
+        {
+          "command": "codeclone.copyGodModuleBrief",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.reviewGodModule",
+          "when": "false"
         }
       ],
       "view/title": [
         {
           "command": "codeclone.analyzeWorkspace",
-          "when": "view == codeclone.overview",
+          "when": "view == codeclone.overview && isWorkspaceTrusted",
           "group": "navigation@1"
         },
         {
           "command": "codeclone.analyzeChangedFiles",
-          "when": "view == codeclone.overview",
+          "when": "view == codeclone.overview && isWorkspaceTrusted",
           "group": "navigation@2"
         },
         {
-          "command": "codeclone.reviewPriorityQueue",
-          "when": "view == codeclone.overview && codeclone.hasRun",
+          "command": "codeclone.refreshCurrentRun",
+          "when": "view == codeclone.overview && isWorkspaceTrusted && codeclone.hasRun",
           "group": "navigation@3"
         },
         {
-          "command": "codeclone.refreshCurrentRun",
-          "when": "view == codeclone.overview && codeclone.hasRun",
-          "group": "navigation@4"
-        },
-        {
-          "command": "codeclone.connectMcp",
-          "when": "view == codeclone.overview && !codeclone.connected",
-          "group": "navigation@5"
-        },
-        {
           "command": "codeclone.reviewPriorityQueue",
-          "when": "view == codeclone.hotspots && codeclone.hasRun",
-          "group": "navigation@1"
-        },
-        {
-          "command": "codeclone.refreshCurrentRun",
-          "when": "view == codeclone.hotspots && codeclone.hasRun",
-          "group": "navigation@2"
-        },
-        {
-          "command": "codeclone.openProductionTriage",
-          "when": "view == codeclone.hotspots && codeclone.hasRun",
-          "group": "navigation@3"
-        },
-        {
-          "command": "codeclone.analyzeWorkspace",
-          "when": "view == codeclone.hotspots && !codeclone.hasRun",
-          "group": "navigation@4"
-        },
-        {
-          "command": "codeclone.analyzeChangedFiles",
-          "when": "view == codeclone.hotspots",
-          "group": "navigation@5"
+          "when": "view == codeclone.overview && isWorkspaceTrusted && codeclone.hasRun",
+          "group": "secondary@1"
         },
         {
           "command": "codeclone.connectMcp",
-          "when": "view == codeclone.session && !codeclone.connected",
+          "when": "view == codeclone.overview && isWorkspaceTrusted && !codeclone.connected",
+          "group": "secondary@2"
+        },
+        {
+          "command": "codeclone.manageWorkspaceTrust",
+          "when": "view == codeclone.overview && !isWorkspaceTrusted",
           "group": "navigation@1"
         },
         {
           "command": "codeclone.openSetupHelp",
-          "when": "view == codeclone.session && !codeclone.connected",
+          "when": "view == codeclone.overview && !isWorkspaceTrusted",
+          "group": "secondary@1"
+        },
+        {
+          "command": "codeclone.reviewPriorityQueue",
+          "when": "view == codeclone.hotspots && isWorkspaceTrusted && codeclone.hasRun",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.setHotspotFocusMode",
+          "when": "view == codeclone.hotspots && isWorkspaceTrusted && codeclone.hasRun",
           "group": "navigation@2"
         },
         {
-          "command": "codeclone.clearSessionState",
-          "when": "view == codeclone.session && codeclone.hasRun",
+          "command": "codeclone.refreshCurrentRun",
+          "when": "view == codeclone.hotspots && isWorkspaceTrusted && codeclone.hasRun",
           "group": "navigation@3"
         },
         {
+          "command": "codeclone.analyzeChangedFiles",
+          "when": "view == codeclone.hotspots && isWorkspaceTrusted && codeclone.hasRun",
+          "group": "secondary@1"
+        },
+        {
+          "command": "codeclone.openProductionTriage",
+          "when": "view == codeclone.hotspots && isWorkspaceTrusted && codeclone.hasRun",
+          "group": "secondary@2"
+        },
+        {
+          "command": "codeclone.analyzeWorkspace",
+          "when": "view == codeclone.hotspots && isWorkspaceTrusted && !codeclone.hasRun",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.manageWorkspaceTrust",
+          "when": "view == codeclone.hotspots && !isWorkspaceTrusted",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.connectMcp",
+          "when": "view == codeclone.session && isWorkspaceTrusted && !codeclone.connected",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.manageWorkspaceTrust",
+          "when": "view == codeclone.session && !isWorkspaceTrusted",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.clearSessionState",
+          "when": "view == codeclone.session && isWorkspaceTrusted && codeclone.hasRun",
+          "group": "navigation@2"
+        },
+        {
           "command": "codeclone.showHelpTopic",
-          "when": "view == codeclone.session",
-          "group": "navigation@4"
+          "when": "view == codeclone.session && isWorkspaceTrusted",
+          "group": "secondary@1"
+        },
+        {
+          "command": "codeclone.openSetupHelp",
+          "when": "view == codeclone.session && (!isWorkspaceTrusted || !codeclone.connected)",
+          "group": "secondary@2"
         }
       ],
       "view/item/context": [
         {
           "command": "codeclone.revealFindingSource",
-          "when": "viewItem == codeclone.finding",
+          "when": "viewItem == codeclone.finding || viewItem == codeclone.reviewedFinding",
           "group": "inline@1"
+        },
+        {
+          "command": "codeclone.peekFindingLocations",
+          "when": "viewItem == codeclone.finding || viewItem == codeclone.reviewedFinding",
+          "group": "inline@2"
         },
         {
           "command": "codeclone.showRemediation",
           "when": "viewItem == codeclone.finding",
-          "group": "inline@2"
+          "group": "navigation@1"
         },
         {
           "command": "codeclone.openFinding",
-          "when": "viewItem == codeclone.finding",
-          "group": "navigation@1"
+          "when": "viewItem == codeclone.finding || viewItem == codeclone.reviewedFinding",
+          "group": "navigation@2"
         },
         {
           "command": "codeclone.markFindingReviewed",
           "when": "viewItem == codeclone.finding",
-          "group": "navigation@2"
+          "group": "navigation@3"
+        },
+        {
+          "command": "codeclone.copyRefactorBrief",
+          "when": "viewItem == codeclone.finding || viewItem == codeclone.reviewedFinding",
+          "group": "navigation@4"
+        },
+        {
+          "command": "codeclone.openInHtmlReport",
+          "when": "viewItem == codeclone.finding || viewItem == codeclone.reviewedFinding",
+          "group": "navigation@5"
+        },
+        {
+          "command": "codeclone.copyFindingContext",
+          "when": "viewItem == codeclone.finding || viewItem == codeclone.reviewedFinding",
+          "group": "navigation@6"
         },
         {
           "command": "codeclone.copyFindingId",
-          "when": "viewItem == codeclone.finding",
-          "group": "navigation@3"
+          "when": "viewItem == codeclone.finding || viewItem == codeclone.reviewedFinding",
+          "group": "navigation@7"
         },
         {
           "command": "codeclone.showHelpTopic",
@@ -349,6 +516,48 @@
           "command": "codeclone.openGodModule",
           "when": "viewItem == codeclone.godModule",
           "group": "inline@1"
+        },
+        {
+          "command": "codeclone.copyGodModuleBrief",
+          "when": "viewItem == codeclone.godModule",
+          "group": "navigation@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "codeclone.previousReviewItem",
+          "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.nextReviewItem",
+          "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codeclone.showRemediation",
+          "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsFinding",
+          "group": "navigation@3"
+        },
+        {
+          "command": "codeclone.markFindingReviewed",
+          "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsFinding && !codeclone.activeReviewTargetIsReviewed",
+          "group": "navigation@4"
+        },
+        {
+          "command": "codeclone.copyRefactorBrief",
+          "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsFinding",
+          "group": "secondary@1"
+        },
+        {
+          "command": "codeclone.openInHtmlReport",
+          "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsFinding",
+          "group": "secondary@2"
+        },
+        {
+          "command": "codeclone.copyGodModuleBrief",
+          "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsGodModule",
+          "group": "secondary@1"
         }
       ]
     },

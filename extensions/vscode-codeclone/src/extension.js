@@ -1,10 +1,23 @@
 "use strict";
 
+const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { promisify } = require("node:util");
 const vscode = require("vscode");
 
 const { CodeCloneMcpClient, MCPClientError } = require("./mcpClient");
+const {
+  STALE_REASON_EDITOR,
+  STALE_REASON_WORKSPACE,
+  normalizedLaunchSpec,
+  parseUtcTimestamp,
+  resolveWorkspacePath,
+  signedInteger,
+  staleMessage,
+} = require("./support");
+
+const execFileAsync = promisify(execFile);
 
 const HELP_TOPICS = [
   "workflow",
@@ -21,6 +34,69 @@ const HOTSPOT_GROUPS = [
   { id: "changedFiles", label: "Changed Files", icon: "git-commit" },
   { id: "godModules", label: "God Modules", icon: "symbol-module" },
 ];
+
+const HOTSPOT_FOCUS_MODES = [
+  {
+    id: "recommended",
+    label: "Recommended",
+    description: "Show the highest-signal review surfaces for the current run.",
+  },
+  {
+    id: "new",
+    label: "New Regressions",
+    description: "Focus only on baseline-new findings.",
+  },
+  {
+    id: "production",
+    label: "Production",
+    description: "Focus only on production hotspots.",
+  },
+  {
+    id: "changed",
+    label: "Changed Files",
+    description: "Focus only on findings touching the selected diff.",
+  },
+  {
+    id: "reportOnly",
+    label: "Report-only",
+    description: "Focus only on report-only God Module candidates.",
+  },
+  {
+    id: "all",
+    label: "All Groups",
+    description: "Show every hotspot group, including empty ones.",
+  },
+];
+
+const HOTSPOT_GROUPS_BY_MODE = {
+  recommended: HOTSPOT_GROUPS.map((group) => group.id),
+  new: ["newRegressions"],
+  production: ["productionHotspots"],
+  changed: ["changedFiles"],
+  reportOnly: ["godModules"],
+  all: HOTSPOT_GROUPS.map((group) => group.id),
+};
+
+const REVIEW_DECORATION_THEMES = {
+  new: {
+    badge: "N",
+    color: "problemsErrorIcon.foreground",
+    tooltip: "CodeClone new regression",
+  },
+  production: {
+    badge: "P",
+    color: "problemsWarningIcon.foreground",
+    tooltip: "CodeClone production hotspot",
+  },
+  changed: {
+    badge: "C",
+    color: "charts.blue",
+    tooltip: "CodeClone changed-files review item",
+  },
+};
+
+const WORKSPACE_STATE_HOTSPOT_FOCUS_MODE = "codeclone.hotspotFocusMode";
+const WORKSPACE_STATE_LAST_HELP_TOPIC = "codeclone.lastHelpTopic";
 
 function number(value) {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -96,6 +172,18 @@ function sameLaunchSpec(left, right) {
   );
 }
 
+function normalizeRelativePath(value) {
+  return String(value || "").replace(/\\/g, "/");
+}
+
+function workspaceRelativePath(folder, fsPath) {
+  return normalizeRelativePath(path.relative(folder.uri.fsPath, fsPath));
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
 function formatSeverity(value) {
   return capitalize(String(value || "info"));
 }
@@ -128,6 +216,30 @@ function formatKind(value) {
   }
 }
 
+function focusModeSpec(modeId) {
+  return (
+    HOTSPOT_FOCUS_MODES.find((entry) => entry.id === modeId) ||
+    HOTSPOT_FOCUS_MODES[0]
+  );
+}
+
+function isSpecificFocusMode(modeId) {
+  return modeId !== "recommended" && modeId !== "all";
+}
+
+function reviewTargetKey(target) {
+  if (!target || typeof target !== "object") {
+    return "";
+  }
+  if (target.nodeType === "godModule" && safeObject(target.item).path) {
+    return `god:${String(target.item.path)}`;
+  }
+  if (target.findingId) {
+    return `finding:${String(target.findingId)}`;
+  }
+  return "";
+}
+
 function findingIcon(severity) {
   switch (String(severity || "").toLowerCase()) {
     case "critical":
@@ -154,6 +266,15 @@ function safeArray(value) {
 
 function safeObject(value) {
   return value && typeof value === "object" ? value : {};
+}
+
+function emptyReviewArtifacts() {
+  return {
+    newRegressions: [],
+    productionHotspots: [],
+    changedFiles: [],
+    godModules: [],
+  };
 }
 
 function normalizeLocations(value) {
@@ -191,11 +312,76 @@ function firstLocation(value) {
   return locations.length > 0 ? locations[0] : null;
 }
 
+function normalizeFindingLocations(folder, value) {
+  return normalizeLocations(value)
+    .filter((location) => location.path)
+    .map((location) => {
+      const relativePath = normalizeRelativePath(location.path);
+      const absolutePath = resolveWorkspacePath(folder.uri.fsPath, relativePath);
+      if (!absolutePath) {
+        return null;
+      }
+      return {
+        ...location,
+        path: relativePath,
+        absolutePath,
+      };
+    })
+    .filter(Boolean);
+}
+
+function firstNormalizedLocation(folder, value) {
+  const locations = normalizeFindingLocations(folder, value);
+  return locations.length > 0 ? locations[0] : null;
+}
+
+async function gitStdout(cwd, args) {
+  try {
+    const result = await execFileAsync("git", args, {
+      cwd,
+      maxBuffer: 1024 * 1024,
+    });
+    return String(result.stdout || "").trim();
+  } catch {
+    return null;
+  }
+}
+
+async function captureWorkspaceGitSnapshot(folder) {
+  const cwd = folder.uri.fsPath;
+  const [head, status] = await Promise.all([
+    gitStdout(cwd, ["rev-parse", "HEAD"]),
+    gitStdout(cwd, ["status", "--porcelain=v1", "--untracked-files=normal"]),
+  ]);
+  return {
+    head,
+    dirtySignature: status || "",
+  };
+}
+
+function sameGitSnapshot(left, right) {
+  return (
+    safeObject(left).head === safeObject(right).head &&
+    safeObject(left).dirtySignature === safeObject(right).dirtySignature
+  );
+}
+
 function looksLikeCodeCloneRepo(folderPath) {
   return (
     fs.existsSync(path.join(folderPath, "pyproject.toml")) &&
     fs.existsSync(path.join(folderPath, "codeclone", "mcp_server.py"))
   );
+}
+
+function readFileHead(filePath, maxBytes = 16384) {
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(maxBytes);
+    const bytesRead = fs.readSync(fd, buffer, 0, maxBytes, 0);
+    return buffer.toString("utf8", 0, bytesRead);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 function markdownBulletList(values) {
@@ -265,6 +451,28 @@ function renderSetupMarkdown() {
     "- MCP support installed, not only the base `codeclone` package.",
     "",
     "Once that is ready, run `Analyze Workspace` again.",
+  ].join("\n");
+}
+
+function renderRestrictedModeMarkdown(topic) {
+  return [
+    `# CodeClone: Restricted Mode`,
+    "",
+    `The workspace is not trusted, so CodeClone keeps local analysis and the local MCP server offline.`,
+    "",
+    topic
+      ? `Live MCP help for \`${topic}\` becomes available after workspace trust is granted.`
+      : "Live MCP help topics become available after workspace trust is granted.",
+    "",
+    "## What you can do safely right now",
+    "",
+    "- Review installation and setup guidance.",
+    "- Inspect the extension surface and onboarding text.",
+    "- Grant workspace trust when you are ready to enable local analysis.",
+    "",
+    "## Next step",
+    "",
+    "Run `Manage Workspace Trust`, then open the help topic again.",
   ].join("\n");
 }
 
@@ -417,6 +625,16 @@ function renderGodModuleMarkdown(item) {
   return lines.join("\n");
 }
 
+function treeAccessibilityInformation(node) {
+  const label = String(node?.label || "").trim();
+  const description = String(node?.description || "").trim();
+  if (!label && !description) {
+    return undefined;
+  }
+  const spoken = description ? `${label}, ${description}` : label;
+  return { label: spoken };
+}
+
 class WorkspaceState {
   constructor(folder) {
     this.folder = folder;
@@ -429,6 +647,11 @@ class WorkspaceState {
     this.lastScope = "workspace";
     this.lastUpdatedAt = null;
     this.groupCache = new Map();
+    this.reviewArtifacts = emptyReviewArtifacts();
+    this.gitSnapshot = null;
+    this.stale = false;
+    this.staleReason = null;
+    this.lastStaleCheckAt = 0;
   }
 }
 
@@ -478,12 +701,62 @@ class SessionTreeProvider extends BaseTreeProvider {
   }
 }
 
+class ReviewCodeLensProvider {
+  constructor(controller) {
+    this.controller = controller;
+    this.emitter = new vscode.EventEmitter();
+    this.onDidChangeCodeLenses = this.emitter.event;
+  }
+
+  refresh() {
+    this.emitter.fire(undefined);
+  }
+
+  provideCodeLenses(document) {
+    return this.controller.provideReviewCodeLenses(document);
+  }
+
+  dispose() {
+    this.emitter.dispose();
+  }
+}
+
+class ReviewFileDecorationProvider {
+  constructor(controller) {
+    this.controller = controller;
+    this.emitter = new vscode.EventEmitter();
+    this.onDidChangeFileDecorations = this.emitter.event;
+  }
+
+  refresh(uri) {
+    this.emitter.fire(uri);
+  }
+
+  provideFileDecoration(uri) {
+    return this.controller.provideFileDecoration(uri);
+  }
+
+  dispose() {
+    this.emitter.dispose();
+  }
+}
+
 class CodeCloneController {
   constructor(context) {
     this.context = context;
     this.outputChannel = vscode.window.createOutputChannel("CodeClone");
     this.client = new CodeCloneMcpClient(this.outputChannel);
     this.states = new Map();
+    this.hotspotFocusMode = this.loadHotspotFocusMode();
+    const storedHelpTopic = this.context.workspaceState.get(
+      WORKSPACE_STATE_LAST_HELP_TOPIC,
+      HELP_TOPICS[0]
+    );
+    this.lastHelpTopic = HELP_TOPICS.includes(storedHelpTopic)
+      ? storedHelpTopic
+      : HELP_TOPICS[0];
+    this.activeReviewTarget = null;
+    this.fileDecorations = new Map();
     this.revealDecoration = vscode.window.createTextEditorDecorationType({
       isWholeLine: true,
       borderWidth: "1px",
@@ -505,10 +778,13 @@ class CodeCloneController {
       vscode.StatusBarAlignment.Left,
       10
     );
+    this.statusBar.name = "CodeClone";
     this.statusBar.command = "codeclone.openOverview";
     this.overviewProvider = new OverviewTreeProvider(this);
     this.hotspotsProvider = new HotspotsTreeProvider(this);
     this.sessionProvider = new SessionTreeProvider(this);
+    this.reviewCodeLensProvider = new ReviewCodeLensProvider(this);
+    this.reviewFileDecorationProvider = new ReviewFileDecorationProvider(this);
     this.overviewView = vscode.window.createTreeView("codeclone.overview", {
       treeDataProvider: this.overviewProvider,
       showCollapseAll: false,
@@ -538,7 +814,7 @@ class CodeCloneController {
     });
     this.client.on("exit", async () => {
       await vscode.window.showWarningMessage(
-        "The local CodeClone server disconnected. Run Analyze Workspace to reconnect and refresh the current workspace."
+        "The local CodeClone server disconnected. Run Analyze Workspace or Review Changes to reconnect."
       );
     });
     context.subscriptions.push(
@@ -548,9 +824,33 @@ class CodeCloneController {
       this.overviewProvider,
       this.hotspotsProvider,
       this.sessionProvider,
+      this.reviewCodeLensProvider,
+      this.reviewFileDecorationProvider,
       this.overviewView,
       this.hotspotsView,
       this.sessionView,
+      vscode.languages.registerCodeLensProvider(
+        { scheme: "file" },
+        this.reviewCodeLensProvider
+      ),
+      vscode.window.registerFileDecorationProvider(
+        this.reviewFileDecorationProvider
+      ),
+      vscode.workspace.onDidChangeTextDocument((event) =>
+        this.handleTextDocumentChanged(event)
+      ),
+      vscode.workspace.onDidSaveTextDocument((document) =>
+        this.handleTextDocumentSaved(document)
+      ),
+      vscode.window.onDidChangeActiveTextEditor(() =>
+        this.handleActiveEditorChanged()
+      ),
+      vscode.window.onDidChangeWindowState((state) =>
+        this.handleWindowStateChanged(state)
+      ),
+      vscode.workspace.onDidGrantWorkspaceTrust(() =>
+        this.handleWorkspaceTrustGranted()
+      ),
       {
         dispose: () => {
           void this.client.dispose();
@@ -565,6 +865,9 @@ class CodeCloneController {
 
   registerCommands() {
     const subscriptions = [
+      vscode.commands.registerCommand("codeclone.manageWorkspaceTrust", () =>
+        this.manageWorkspaceTrust()
+      ),
       vscode.commands.registerCommand("codeclone.connectMcp", () =>
         this.connectMcp()
       ),
@@ -583,11 +886,26 @@ class CodeCloneController {
       vscode.commands.registerCommand("codeclone.reviewPriorityQueue", () =>
         this.reviewPriorityQueue()
       ),
+      vscode.commands.registerCommand("codeclone.focusHotspots", () =>
+        this.focusHotspots()
+      ),
+      vscode.commands.registerCommand("codeclone.nextReviewItem", () =>
+        this.moveReviewCursor(1)
+      ),
+      vscode.commands.registerCommand("codeclone.previousReviewItem", () =>
+        this.moveReviewCursor(-1)
+      ),
+      vscode.commands.registerCommand("codeclone.setHotspotFocusMode", () =>
+        this.setHotspotFocusMode()
+      ),
       vscode.commands.registerCommand("codeclone.reviewFinding", (node) =>
         this.reviewFinding(node)
       ),
       vscode.commands.registerCommand("codeclone.openFinding", (node) =>
         this.openFinding(node)
+      ),
+      vscode.commands.registerCommand("codeclone.peekFindingLocations", (node) =>
+        this.peekFindingLocations(node)
       ),
       vscode.commands.registerCommand("codeclone.showRemediation", (node) =>
         this.showRemediation(node)
@@ -597,6 +915,15 @@ class CodeCloneController {
       ),
       vscode.commands.registerCommand("codeclone.copyFindingId", (node) =>
         this.copyFindingId(node)
+      ),
+      vscode.commands.registerCommand("codeclone.copyFindingContext", (node) =>
+        this.copyFindingContext(node)
+      ),
+      vscode.commands.registerCommand("codeclone.copyRefactorBrief", (node) =>
+        this.copyRefactorBrief(node)
+      ),
+      vscode.commands.registerCommand("codeclone.openInHtmlReport", (node) =>
+        this.openInHtmlReport(node)
       ),
       vscode.commands.registerCommand("codeclone.revealFindingSource", (node) =>
         this.revealFindingSource(node)
@@ -615,6 +942,9 @@ class CodeCloneController {
       ),
       vscode.commands.registerCommand("codeclone.openGodModule", (node) =>
         this.openGodModule(node)
+      ),
+      vscode.commands.registerCommand("codeclone.copyGodModuleBrief", (node) =>
+        this.copyGodModuleBrief(node)
       ),
       vscode.commands.registerCommand("codeclone.reviewGodModule", (node) =>
         this.reviewGodModule(node)
@@ -656,7 +986,61 @@ class CodeCloneController {
     return vscode.workspace.workspaceFolders?.[0] || null;
   }
 
+  async ensureWorkspaceTrust() {
+    if (vscode.workspace.isTrusted) {
+      return true;
+    }
+    const choice = await vscode.window.showWarningMessage(
+      "CodeClone requires a trusted workspace before it starts local analysis or a local MCP server.",
+      "Manage Workspace Trust"
+    );
+    if (choice === "Manage Workspace Trust") {
+      await vscode.commands.executeCommand("workbench.trust.manage");
+    }
+    return false;
+  }
+
+  loadHotspotFocusMode() {
+    const stored = this.context.workspaceState.get(
+      WORKSPACE_STATE_HOTSPOT_FOCUS_MODE,
+      "recommended"
+    );
+    const allowed = new Set(HOTSPOT_FOCUS_MODES.map((entry) => entry.id));
+    return allowed.has(stored) ? stored : "recommended";
+  }
+
+  async persistHotspotFocusMode() {
+    await this.context.workspaceState.update(
+      WORKSPACE_STATE_HOTSPOT_FOCUS_MODE,
+      this.hotspotFocusMode
+    );
+  }
+
+  async persistLastHelpTopic(topic) {
+    this.lastHelpTopic = HELP_TOPICS.includes(topic) ? topic : HELP_TOPICS[0];
+    await this.context.workspaceState.update(
+      WORKSPACE_STATE_LAST_HELP_TOPIC,
+      this.lastHelpTopic
+    );
+  }
+
+  async manageWorkspaceTrust() {
+    await vscode.commands.executeCommand("workbench.trust.manage");
+  }
+
+  handleWorkspaceTrustGranted() {
+    this.updateContextKeys();
+    this.updateStatusBar();
+    this.refreshAllViews();
+    void vscode.window.showInformationMessage(
+      "Workspace trust granted. CodeClone analysis is now available."
+    );
+  }
+
   async pickWorkspaceFolder(placeHolder) {
+    if (!(await this.ensureWorkspaceTrust())) {
+      return null;
+    }
     const folders = vscode.workspace.workspaceFolders || [];
     if (folders.length === 0) {
       await vscode.window.showErrorMessage(
@@ -687,29 +1071,82 @@ class CodeCloneController {
     return this.pickWorkspaceFolder(prompt);
   }
 
+  stateForDocument(document) {
+    if (!document || !document.uri) {
+      return null;
+    }
+    const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+    if (!folder) {
+      return null;
+    }
+    return this.states.get(folder.uri.toString()) || null;
+  }
+
+  handleTextDocumentChanged(event) {
+    const state = this.stateForDocument(event.document);
+    if (!state || !state.latestSummary) {
+      return;
+    }
+    state.stale = true;
+    state.staleReason = STALE_REASON_EDITOR;
+    this.updateContextKeys();
+    this.updateStatusBar();
+    this.refreshAllViews();
+  }
+
+  async handleTextDocumentSaved(document) {
+    const state = this.stateForDocument(document);
+    if (!state || !state.latestSummary) {
+      return;
+    }
+    await this.refreshStaleState(state);
+  }
+
+  async handleActiveEditorChanged() {
+    this.reviewCodeLensProvider.refresh();
+    this.updateContextKeys();
+    const state = this.getPrimaryState();
+    if (!state || !state.latestSummary) {
+      return;
+    }
+    await this.refreshStaleState(state);
+  }
+
+  async handleWindowStateChanged(windowState) {
+    if (!windowState.focused) {
+      return;
+    }
+    const state = this.getPrimaryState();
+    if (!state || !state.latestSummary) {
+      return;
+    }
+    await this.refreshStaleState(state);
+  }
+
   resolveLaunchSpec(folder) {
     const config = vscode.workspace.getConfiguration("codeclone", folder.uri);
     const configuredCommand = config.get("mcp.command", "auto");
     const configuredArgs = config.get("mcp.args", []);
     if (configuredCommand && configuredCommand !== "auto") {
-      return {
+      return normalizedLaunchSpec({
         command: configuredCommand,
         args: Array.isArray(configuredArgs) ? configuredArgs : [],
         cwd: folder.uri.fsPath,
-      };
+      });
     }
-    return {
+    const primary = normalizedLaunchSpec({
       command: "codeclone-mcp",
       args: Array.isArray(configuredArgs) ? configuredArgs : [],
       cwd: folder.uri.fsPath,
-      fallback: looksLikeCodeCloneRepo(folder.uri.fsPath)
-        ? {
-            command: "uv",
-            args: ["run", "codeclone-mcp"],
-            cwd: folder.uri.fsPath,
-          }
-        : null,
-    };
+    });
+    primary.fallback = looksLikeCodeCloneRepo(folder.uri.fsPath)
+      ? normalizedLaunchSpec({
+          command: "uv",
+          args: ["run", "codeclone-mcp"],
+          cwd: folder.uri.fsPath,
+        })
+      : null;
+    return primary;
   }
 
   async ensureConnected(folder) {
@@ -774,6 +1211,178 @@ class CodeCloneController {
     } catch (error) {
       this.handleError(error, "Could not connect to CodeClone MCP.");
     }
+  }
+
+  async refreshStaleState(state) {
+    if (!state || !state.latestSummary) {
+      return;
+    }
+    const now = Date.now();
+    if (now - Number(state.lastStaleCheckAt || 0) < 750) {
+      return;
+    }
+    state.lastStaleCheckAt = now;
+    const hasDirtyEditors = vscode.workspace.textDocuments.some((document) => {
+      if (!document.isDirty) {
+        return false;
+      }
+      const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+      return Boolean(folder && folder.uri.toString() === state.folder.uri.toString());
+    });
+    if (hasDirtyEditors) {
+      state.stale = true;
+      state.staleReason = STALE_REASON_EDITOR;
+      this.updateContextKeys();
+      this.updateStatusBar();
+      this.refreshAllViews();
+      return;
+    }
+    const snapshot = await captureWorkspaceGitSnapshot(state.folder);
+    if (!sameGitSnapshot(snapshot, state.gitSnapshot)) {
+      state.stale = true;
+      state.staleReason = STALE_REASON_WORKSPACE;
+    } else {
+      state.stale = false;
+      state.staleReason = null;
+    }
+    this.updateContextKeys();
+    this.updateStatusBar();
+    this.refreshAllViews();
+  }
+
+  async refreshReviewArtifacts(state) {
+    if (!state || !state.currentRunId) {
+      if (state) {
+        state.reviewArtifacts = emptyReviewArtifacts();
+        state.groupCache.clear();
+      }
+      this.rebuildFileDecorations();
+      return;
+    }
+    const runId = state.currentRunId;
+    const diffRef = vscode.workspace
+      .getConfiguration("codeclone", state.folder.uri)
+      .get("analysis.changedDiffRef", "HEAD");
+    const [
+      newRegressionsResponse,
+      productionHotspotsResponse,
+      changedFilesResponse,
+      godModulesResponse,
+    ] = await Promise.all([
+      this.client.callTool("list_findings", {
+        run_id: runId,
+        novelty: "new",
+        detail_level: "summary",
+        sort_by: "priority",
+        limit: 200,
+        exclude_reviewed: true,
+      }),
+      this.client.callTool("list_hotspots", {
+        run_id: runId,
+        kind: "production_hotspots",
+        detail_level: "summary",
+        limit: 100,
+        exclude_reviewed: true,
+      }),
+      state.changedSummary
+        ? this.client.callTool("list_findings", {
+            run_id: runId,
+            git_diff_ref: diffRef,
+            novelty: "new",
+            detail_level: "summary",
+            sort_by: "priority",
+            limit: 200,
+            exclude_reviewed: true,
+          })
+        : Promise.resolve({ items: [] }),
+      this.client.callTool("get_report_section", {
+        run_id: runId,
+        section: "metrics_detail",
+        family: "god_modules",
+        limit: 25,
+      }),
+    ]);
+    state.reviewArtifacts = {
+      newRegressions: safeArray(newRegressionsResponse.items),
+      productionHotspots: safeArray(productionHotspotsResponse.items),
+      changedFiles: safeArray(changedFilesResponse.items),
+      godModules: safeArray(godModulesResponse.items),
+    };
+    state.groupCache.clear();
+    this.rebuildFileDecorations();
+  }
+
+  rebuildFileDecorations() {
+    this.fileDecorations.clear();
+    for (const state of this.states.values()) {
+      if (!state.latestSummary) {
+        continue;
+      }
+      const artifacts = safeObject(state.reviewArtifacts);
+      this.addFileDecorationRows(
+        state,
+        safeArray(artifacts.newRegressions),
+        "new"
+      );
+      this.addFileDecorationRows(
+        state,
+        safeArray(artifacts.productionHotspots),
+        "production"
+      );
+      this.addFileDecorationRows(
+        state,
+        safeArray(artifacts.changedFiles),
+        "changed"
+      );
+    }
+    this.reviewFileDecorationProvider.refresh(undefined);
+  }
+
+  addFileDecorationRows(state, rows, kind) {
+    for (const row of rows) {
+      for (const location of normalizeFindingLocations(state.folder, row.locations)) {
+        const key = vscode.Uri.file(location.absolutePath).toString();
+        const entry =
+          this.fileDecorations.get(key) || {
+            kinds: new Set(),
+            findingIds: new Set(),
+          };
+        entry.kinds.add(kind);
+        if (row.id) {
+          entry.findingIds.add(String(row.id));
+        }
+        this.fileDecorations.set(key, entry);
+      }
+    }
+  }
+
+  provideFileDecoration(uri) {
+    const entry = this.fileDecorations.get(uri.toString());
+    if (!entry) {
+      return undefined;
+    }
+    const kinds = entry.kinds;
+    const theme = kinds.has("new")
+      ? REVIEW_DECORATION_THEMES.new
+      : kinds.has("production")
+        ? REVIEW_DECORATION_THEMES.production
+        : REVIEW_DECORATION_THEMES.changed;
+    const labels = [];
+    if (kinds.has("new")) {
+      labels.push("new regressions");
+    }
+    if (kinds.has("production")) {
+      labels.push("production hotspots");
+    }
+    if (kinds.has("changed")) {
+      labels.push("changed-files review items");
+    }
+    return {
+      badge: theme.badge,
+      color: new vscode.ThemeColor(theme.color),
+      tooltip: `CodeClone: ${labels.join(" · ")}`,
+      propagate: kinds.has("new") || kinds.has("production"),
+    };
   }
 
   async analyzeWorkspace(arg) {
@@ -852,6 +1461,7 @@ class CodeCloneController {
           const reviewed = await this.client.callTool("list_reviewed_findings", {
             run_id: runId,
           });
+          const gitSnapshot = await captureWorkspaceGitSnapshot(folder);
           state.currentRunId = runId;
           state.latestSummary = summary;
           state.latestTriage = triage;
@@ -860,9 +1470,15 @@ class CodeCloneController {
           state.reviewed = safeArray(reviewed.items);
           state.lastScope = changedMode ? "changed" : "workspace";
           state.lastUpdatedAt = new Date();
+          state.gitSnapshot = gitSnapshot;
+          state.stale = false;
+          state.staleReason = null;
+          state.lastStaleCheckAt = Date.now();
           state.groupCache.clear();
+          await this.refreshReviewArtifacts(state);
         }
       );
+      this.clearActiveReviewTarget();
       this.updateContextKeys();
       this.updateStatusBar();
       this.refreshAllViews();
@@ -892,27 +1508,374 @@ class CodeCloneController {
     const state = this.getPrimaryState();
     if (!state || !state.latestTriage) {
       await vscode.window.showInformationMessage(
-        "Run Analyze Workspace first to open production triage."
+        "Start with Analyze Workspace or Review Changes before opening triage."
       );
       return;
     }
     await this.showMarkdownDocument(renderTriageMarkdown(state));
   }
 
+  setActiveReviewTarget(target) {
+    this.activeReviewTarget = target || null;
+    this.updateContextKeys();
+    this.reviewCodeLensProvider.refresh();
+  }
+
+  clearActiveReviewTarget() {
+    this.setActiveReviewTarget(null);
+  }
+
+  activeFindingTarget(node) {
+    const candidate = node || this.activeReviewTarget;
+    if (!candidate || candidate.nodeType === "godModule" || !candidate.findingId) {
+      return null;
+    }
+    return candidate;
+  }
+
+  activeGodModuleTarget(node) {
+    const candidate = node || this.activeReviewTarget;
+    if (!candidate || candidate.nodeType !== "godModule" || !safeObject(candidate.item).path) {
+      return null;
+    }
+    return candidate;
+  }
+
+  isTargetVisibleInEditor(target, editor = vscode.window.activeTextEditor) {
+    if (!target || !editor || !editor.document) {
+      return false;
+    }
+    const fsPath = editor.document.uri.fsPath;
+    if (target.nodeType === "godModule") {
+      const state = this.states.get(target.workspaceKey);
+      if (!state) {
+        return false;
+      }
+      return workspaceRelativePath(state.folder, fsPath) === normalizeRelativePath(target.item.path);
+    }
+    return safeArray(target.locations).some(
+      (location) => location.absolutePath === fsPath
+    );
+  }
+
+  async resolveFindingNode(node) {
+    const activeNode = this.activeFindingTarget(node);
+    if (!activeNode || !activeNode.findingId || !activeNode.runId) {
+      return null;
+    }
+    const state = this.states.get(activeNode.workspaceKey);
+    if (!state) {
+      return null;
+    }
+    let locations = normalizeFindingLocations(state.folder, activeNode.locations);
+    let detailPayload = null;
+    if (locations.length === 0) {
+      await this.ensureConnected(state.folder);
+      detailPayload = await this.client.callTool("get_finding", {
+        run_id: activeNode.runId,
+        finding_id: activeNode.findingId,
+        detail_level: "normal",
+      });
+      locations = normalizeFindingLocations(state.folder, detailPayload.locations);
+    }
+    const resolved = {
+      ...activeNode,
+      nodeType: "finding",
+      workspaceKey: state.folder.uri.toString(),
+      runId: activeNode.runId,
+      findingId: activeNode.findingId,
+      locations,
+      detailPayload,
+      reviewed: Boolean(activeNode.reviewed),
+    };
+    this.setActiveReviewTarget(resolved);
+    return resolved;
+  }
+
+  reviewArtifactItems(state, groupId) {
+    if (!state) {
+      return [];
+    }
+    const artifacts = safeObject(state.reviewArtifacts);
+    switch (groupId) {
+      case "newRegressions":
+        return safeArray(artifacts.newRegressions);
+      case "productionHotspots":
+        return safeArray(artifacts.productionHotspots);
+      case "changedFiles":
+        return safeArray(artifacts.changedFiles);
+      case "godModules":
+        return safeArray(artifacts.godModules);
+      default:
+        return [];
+    }
+  }
+
+  reviewArtifactCount(state, groupId) {
+    return this.reviewArtifactItems(state, groupId).length;
+  }
+
+  activeHotspotGroupIds(state) {
+    const requested =
+      HOTSPOT_GROUPS_BY_MODE[this.hotspotFocusMode] ||
+      HOTSPOT_GROUPS_BY_MODE.recommended;
+    if (this.hotspotFocusMode === "all") {
+      return requested;
+    }
+    return requested.filter((groupId) => this.shouldShowGroup(groupId, state));
+  }
+
+  baselineDrift(state) {
+    if (!state || !state.latestSummary) {
+      return {
+        cloneTrusted: false,
+        metricsTrusted: false,
+        newFindings: null,
+        newClones: null,
+        healthDelta: null,
+      };
+    }
+    const summary = safeObject(state.latestSummary);
+    const baseline = safeObject(summary.baseline);
+    const metricsBaseline = safeObject(summary.metrics_baseline);
+    const diff = safeObject(summary.diff);
+    return {
+      cloneTrusted: Boolean(baseline.trusted),
+      metricsTrusted: Boolean(metricsBaseline.trusted),
+      newFindings: Boolean(baseline.trusted)
+        ? Number(safeObject(summary.findings).new || 0)
+        : null,
+      newClones: Boolean(baseline.trusted)
+        ? Number(diff.new_clones || 0)
+        : null,
+      healthDelta:
+        Boolean(metricsBaseline.trusted) &&
+        typeof diff.health_delta === "number"
+          ? Number(diff.health_delta)
+          : null,
+    };
+  }
+
+  baselineDriftSummary(state) {
+    const drift = this.baselineDrift(state);
+    const parts = [];
+    if (drift.newFindings !== null) {
+      parts.push(`${drift.newFindings} new`);
+    }
+    if (drift.newClones !== null) {
+      parts.push(`${signedInteger(drift.newClones)} clones`);
+    }
+    if (drift.healthDelta !== null) {
+      parts.push(`${signedInteger(drift.healthDelta)} health`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : "baseline unavailable";
+  }
+
+  async inspectLocalHtmlReport(state) {
+    const htmlPath = path.join(
+      state.folder.uri.fsPath,
+      ".cache",
+      "codeclone",
+      "report.html"
+    );
+    if (!fs.existsSync(htmlPath)) {
+      return {
+        htmlPath,
+        exists: false,
+        stale: false,
+        reason: "missing",
+        generatedAtUtc: null,
+      };
+    }
+    const stat = fs.statSync(htmlPath);
+    let generatedAtUtc = null;
+    try {
+      const html = readFileHead(htmlPath);
+      const match = html.match(/data-report-generated-at-utc="([^"]+)"/);
+      generatedAtUtc = match ? match[1] : null;
+    } catch {
+      generatedAtUtc = null;
+    }
+    const generatedAtMs =
+      parseUtcTimestamp(generatedAtUtc) ?? Number(stat.mtimeMs || 0);
+    const runUpdatedMs = state.lastUpdatedAt ? state.lastUpdatedAt.getTime() : null;
+    const staleBecauseOlderThanRun =
+      runUpdatedMs !== null && generatedAtMs > 0 && generatedAtMs + 1500 < runUpdatedMs;
+    const staleBecauseWorkspaceChanged = Boolean(state.stale);
+    const stale = staleBecauseOlderThanRun || staleBecauseWorkspaceChanged;
+    let reason = null;
+    if (staleBecauseWorkspaceChanged) {
+      reason = "workspace-changed";
+    } else if (staleBecauseOlderThanRun) {
+      reason = "older-than-run";
+    }
+    return {
+      htmlPath,
+      exists: true,
+      stale,
+      reason,
+      generatedAtUtc,
+    };
+  }
+
+  toGodModuleNodes(state, items) {
+    return items.map((item) => this.buildGodModuleNode(state, item));
+  }
+
+  buildGodModuleNode(state, item) {
+    return {
+      nodeType: "godModule",
+      workspaceKey: state.folder.uri.toString(),
+      runId: state.currentRunId,
+      item,
+      label: item.path,
+      description: `${decimal(item.score)} · ${item.source_kind} · report-only`,
+      tooltip: `${item.module} · ${number(item.loc)} LOC · ${item.total_deps} deps`,
+      icon: new vscode.ThemeIcon("symbol-module"),
+      contextValue: "codeclone.godModule",
+      command: {
+        command: "codeclone.reviewGodModule",
+        title: "Review God Module",
+        arguments: [
+          {
+            workspaceKey: state.folder.uri.toString(),
+            runId: state.currentRunId,
+            item,
+            nodeType: "godModule",
+          },
+        ],
+      },
+    };
+  }
+
+  currentPriorityQueue(state) {
+    const artifacts = safeObject(state.reviewArtifacts);
+    const groupIds =
+      this.hotspotFocusMode === "recommended"
+        ? ["changedFiles", "newRegressions", "productionHotspots"]
+        : this.hotspotFocusMode === "all"
+          ? ["changedFiles", "newRegressions", "productionHotspots", "godModules"]
+        : this.activeHotspotGroupIds(state);
+    const queue = [];
+    const seen = new Set();
+    for (const groupId of groupIds) {
+      if (groupId === "godModules") {
+        for (const node of this.toGodModuleNodes(
+          state,
+          safeArray(artifacts.godModules)
+        )) {
+          const key = reviewTargetKey(node);
+          if (!key || seen.has(key)) {
+            continue;
+          }
+          seen.add(key);
+          queue.push(node);
+        }
+        continue;
+      }
+      for (const node of this.toFindingNodes(
+        state,
+        this.reviewArtifactItems(state, groupId)
+      )) {
+        const key = reviewTargetKey(node);
+        if (!key || seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        queue.push(node);
+      }
+    }
+    if (
+      this.hotspotFocusMode === "recommended" &&
+      queue.length === 0 &&
+      safeArray(artifacts.godModules).length > 0
+    ) {
+      return this.toGodModuleNodes(state, safeArray(artifacts.godModules));
+    }
+    return queue;
+  }
+
+  async moveReviewCursor(step) {
+    const state = this.getPrimaryState();
+    if (!state || !state.currentRunId) {
+      await vscode.window.showInformationMessage(
+        "Start with Analyze Workspace or Review Changes before starting a review loop."
+      );
+      return;
+    }
+    await this.ensureConnected(state.folder);
+    await this.refreshReviewArtifacts(state);
+    const queue = this.currentPriorityQueue(state);
+    if (queue.length === 0) {
+      await vscode.window.showInformationMessage(
+        "No review-ready items are visible in the current run."
+      );
+      return;
+    }
+    const currentKey = reviewTargetKey(this.activeReviewTarget);
+    const currentIndex = queue.findIndex(
+      (node) => reviewTargetKey(node) === currentKey
+    );
+    const nextIndex =
+      currentIndex < 0
+        ? step > 0
+          ? 0
+          : queue.length - 1
+        : currentIndex + step;
+    if (nextIndex < 0 || nextIndex >= queue.length) {
+      await vscode.window.showInformationMessage(
+        step > 0
+          ? "Already at the last hotspot in the current priority queue."
+          : "Already at the first hotspot in the current priority queue."
+      );
+      return;
+    }
+    const nextNode = queue[nextIndex];
+    if (nextNode.nodeType === "godModule") {
+      await this.revealGodModuleSource(nextNode);
+      return;
+    }
+    await this.revealFindingSource(nextNode);
+  }
+
+  async setHotspotFocusMode() {
+    const picked = await vscode.window.showQuickPick(
+      HOTSPOT_FOCUS_MODES.map((entry) => ({
+        label: entry.label,
+        description:
+          entry.id === this.hotspotFocusMode ? "Current" : undefined,
+        detail: entry.description,
+        modeId: entry.id,
+      })),
+      {
+        placeHolder: "Select which hotspot groups CodeClone should emphasize",
+        matchOnDetail: true,
+      }
+    );
+    if (!picked) {
+      return;
+    }
+    this.hotspotFocusMode = picked.modeId;
+    await this.persistHotspotFocusMode();
+    this.updateContextKeys();
+    this.refreshAllViews();
+  }
+
   async reviewPriorityQueue() {
     const state = this.getPrimaryState();
     if (!state || !state.currentRunId) {
       await vscode.window.showInformationMessage(
-        "Run Analyze Workspace first to review CodeClone priorities."
+        "Start with Analyze Workspace or Review Changes before opening review priorities."
       );
       return;
     }
     try {
       await this.ensureConnected(state.folder);
-      const queue = await this.getPriorityQueueNodes(state);
+      await this.refreshReviewArtifacts(state);
+      const queue = this.currentPriorityQueue(state);
       if (queue.length === 0) {
         await vscode.window.showInformationMessage(
-          "No new or production hotspots need review in the current run."
+          "No review-ready hotspots are visible in the current run."
         );
         return;
       }
@@ -924,12 +1887,16 @@ class CodeCloneController {
           node,
         })),
         {
-          placeHolder: "Select the next CodeClone hotspot to review",
+          placeHolder: "Select the next CodeClone review item",
           matchOnDetail: true,
         }
       );
       if (picked) {
-        await this.reviewFinding(picked.node);
+        if (picked.node.nodeType === "godModule") {
+          await this.reviewGodModule(picked.node);
+        } else {
+          await this.reviewFinding(picked.node);
+        }
       }
     } catch (error) {
       this.handleError(error, "Could not load the CodeClone review queue.");
@@ -940,12 +1907,21 @@ class CodeCloneController {
     if (!node || !node.findingId || !node.runId) {
       return;
     }
+    const resolved = await this.resolveFindingNode(node);
+    if (!resolved) {
+      return;
+    }
     const picked = await vscode.window.showQuickPick(
       [
         {
           label: "Reveal source",
           description: "Recommended",
           action: "reveal",
+        },
+        {
+          label: "Peek occurrences",
+          description: "Inspect all reported locations",
+          action: "peek",
         },
         {
           label: "Open finding detail",
@@ -958,137 +1934,361 @@ class CodeCloneController {
           action: "remediation",
         },
         {
+          label: "Copy refactor brief",
+          description: "AI handoff",
+          action: "brief",
+        },
+        {
+          label: "Open in HTML report",
+          description: "If a local HTML report exists",
+          action: "html",
+        },
+        {
           label: "Mark as reviewed",
           description: "Hide from review-focused lists",
           action: "reviewed",
         },
       ],
       {
-        placeHolder: `What do you want to do with ${node.findingId}?`,
+        placeHolder: `What do you want to do with ${resolved.findingId}?`,
       }
     );
     if (!picked) {
       return;
     }
     if (picked.action === "reveal") {
-      await this.revealFindingSource(node);
+      await this.revealFindingSource(resolved);
+      return;
+    }
+    if (picked.action === "peek") {
+      await this.peekFindingLocations(resolved);
       return;
     }
     if (picked.action === "detail") {
-      await this.openFinding(node);
+      await this.openFinding(resolved);
       return;
     }
     if (picked.action === "remediation") {
-      await this.showRemediation(node);
+      await this.showRemediation(resolved);
+      return;
+    }
+    if (picked.action === "brief") {
+      await this.copyRefactorBrief(resolved);
+      return;
+    }
+    if (picked.action === "html") {
+      await this.openInHtmlReport(resolved);
       return;
     }
     if (picked.action === "reviewed") {
-      await this.markFindingReviewed(node);
+      await this.markFindingReviewed(resolved);
     }
   }
 
   async openFinding(node) {
-    if (!node || !node.findingId || !node.runId) {
+    const resolved = await this.resolveFindingNode(node);
+    if (!resolved) {
       return;
     }
-    const state = this.states.get(node.workspaceKey);
-    if (!state) {
-      return;
-    }
+    const state = this.states.get(resolved.workspaceKey);
     try {
       await this.ensureConnected(state.folder);
-      const payload = await this.client.callTool("get_finding", {
-        run_id: node.runId,
-        finding_id: node.findingId,
-        detail_level: "normal",
-      });
+      const payload =
+        resolved.detailPayload ||
+        (await this.client.callTool("get_finding", {
+          run_id: resolved.runId,
+          finding_id: resolved.findingId,
+          detail_level: "normal",
+        }));
       await this.showMarkdownDocument(renderFindingMarkdown(payload));
     } catch (error) {
-      this.handleError(error, `Could not open finding ${node.findingId}.`);
+      this.handleError(error, `Could not open finding ${resolved.findingId}.`);
+    }
+  }
+
+  async peekFindingLocations(node) {
+    const resolved = await this.resolveFindingNode(node);
+    if (!resolved) {
+      return;
+    }
+    const state = this.states.get(resolved.workspaceKey);
+    const locations = safeArray(resolved.locations)
+      .map((location) => {
+        const uri = vscode.Uri.file(location.absolutePath);
+        const startLine = Math.max(Number(location.line || 1) - 1, 0);
+        const endLine = Math.max(
+          Number(location.end_line || location.line || 1) - 1,
+          startLine
+        );
+        const start = new vscode.Position(startLine, 0);
+        const end = new vscode.Position(endLine, 0);
+        return new vscode.Location(uri, new vscode.Range(start, end));
+      })
+      .filter((entry) => fs.existsSync(entry.uri.fsPath));
+    if (locations.length === 0) {
+      await vscode.window.showInformationMessage(
+        "This finding does not expose source locations for Peek."
+      );
+      return;
+    }
+    const primary = locations[0];
+    try {
+      const document = await vscode.workspace.openTextDocument(primary.uri);
+      await vscode.window.showTextDocument(document, { preview: true });
+      await vscode.commands.executeCommand(
+        "editor.action.peekLocations",
+        primary.uri,
+        primary.range.start,
+        locations,
+        "peek"
+      );
+    } catch (error) {
+      this.handleError(error, `Could not peek locations for ${resolved.findingId}.`);
     }
   }
 
   async showRemediation(node) {
-    if (!node || !node.findingId || !node.runId) {
+    const resolved = await this.resolveFindingNode(node);
+    if (!resolved) {
       return;
     }
-    const state = this.states.get(node.workspaceKey);
-    if (!state) {
-      return;
-    }
+    const state = this.states.get(resolved.workspaceKey);
     try {
       await this.ensureConnected(state.folder);
       const payload = await this.client.callTool("get_remediation", {
-        run_id: node.runId,
-        finding_id: node.findingId,
+        run_id: resolved.runId,
+        finding_id: resolved.findingId,
         detail_level: "normal",
       });
       await this.showMarkdownDocument(renderRemediationMarkdown(payload));
     } catch (error) {
-      this.handleError(error, `Could not load remediation for ${node.findingId}.`);
+      this.handleError(error, `Could not load remediation for ${resolved.findingId}.`);
     }
   }
 
   async markFindingReviewed(node) {
-    if (!node || !node.findingId || !node.runId) {
+    const resolved = await this.resolveFindingNode(node);
+    if (!resolved) {
       return;
     }
-    const state = this.states.get(node.workspaceKey);
-    if (!state) {
-      return;
-    }
+    const state = this.states.get(resolved.workspaceKey);
     try {
       await this.ensureConnected(state.folder);
       await this.client.callTool("mark_finding_reviewed", {
-        run_id: node.runId,
-        finding_id: node.findingId,
+        run_id: resolved.runId,
+        finding_id: resolved.findingId,
       });
       const reviewed = await this.client.callTool("list_reviewed_findings", {
-        run_id: node.runId,
+        run_id: resolved.runId,
       });
       state.reviewed = safeArray(reviewed.items);
+      this.setActiveReviewTarget({
+        ...resolved,
+        reviewed: true,
+      });
+      await this.refreshReviewArtifacts(state);
       this.sessionProvider.refresh();
+      this.refreshAllViews();
       await vscode.window.showInformationMessage(
-        `Marked ${node.findingId} as reviewed.`
+        `Marked ${resolved.findingId} as reviewed.`
       );
     } catch (error) {
-      this.handleError(error, `Could not mark ${node.findingId} as reviewed.`);
+      this.handleError(error, `Could not mark ${resolved.findingId} as reviewed.`);
     }
   }
 
   async copyFindingId(node) {
-    if (!node || !node.findingId) {
+    const activeNode = this.activeFindingTarget(node);
+    if (!activeNode || !activeNode.findingId) {
       return;
     }
-    await vscode.env.clipboard.writeText(String(node.findingId));
+    await vscode.env.clipboard.writeText(String(activeNode.findingId));
     await vscode.window.showInformationMessage(
-      `Copied finding id: ${node.findingId}`
+      `Copied finding id ${activeNode.findingId}.`
     );
   }
 
-  async revealFindingSource(node) {
-    if (!node) {
+  async copyFindingContext(node) {
+    const resolved = await this.resolveFindingNode(node);
+    if (!resolved) {
       return;
     }
-    const state = this.states.get(node.workspaceKey);
-    if (!state) {
-      return;
-    }
-    let location = firstLocation(node.locations);
-    if (!location && node.findingId && node.runId) {
-      try {
-        await this.ensureConnected(state.folder);
-        const payload = await this.client.callTool("get_finding", {
-          run_id: node.runId,
-          finding_id: node.findingId,
+    const state = this.states.get(resolved.workspaceKey);
+    try {
+      await this.ensureConnected(state.folder);
+      const payload =
+        resolved.detailPayload ||
+        (await this.client.callTool("get_finding", {
+          run_id: resolved.runId,
+          finding_id: resolved.findingId,
           detail_level: "normal",
-        });
-        location = firstLocation(payload.locations);
-      } catch (error) {
-        this.handleError(error, "Could not resolve finding location.");
+        }));
+      const spread = safeObject(payload.spread);
+      const locations = normalizeFindingLocations(state.folder, payload.locations);
+      const lines = [
+        "# CodeClone Finding Context",
+        "",
+        `- Workspace: ${state.folder.name}`,
+        `- Run: ${resolved.runId}`,
+        `- Finding id: ${payload.id}`,
+        `- Kind: ${formatKind(payload.kind)}`,
+        `- Severity: ${formatSeverity(payload.severity)}`,
+        `- Scope: ${payload.scope || "unknown"}`,
+        `- Priority: ${compactDecimal(payload.priority)}`,
+        `- Spread: ${spread.files || 0} files / ${spread.functions || 0} functions`,
+      ];
+      if (locations.length > 0) {
+        lines.push(
+          "",
+          "## Locations",
+          markdownBulletList(
+            locations.map((location) => {
+              const lineText =
+                location.line !== null && location.end_line !== null
+                  ? `${location.line}-${location.end_line}`
+                  : location.line !== null
+                    ? `${location.line}`
+                    : "?";
+              return `\`${location.path}:${lineText}\``;
+            })
+          )
+        );
+      }
+      await vscode.env.clipboard.writeText(lines.join("\n"));
+      await vscode.window.showInformationMessage(
+        `Copied finding context for ${resolved.findingId}.`
+      );
+    } catch (error) {
+      this.handleError(error, `Could not copy context for ${resolved.findingId}.`);
+    }
+  }
+
+  async copyRefactorBrief(node) {
+    const resolved = await this.resolveFindingNode(node);
+    if (!resolved) {
+      return;
+    }
+    const state = this.states.get(resolved.workspaceKey);
+    try {
+      await this.ensureConnected(state.folder);
+      const [finding, remediation] = await Promise.all([
+        resolved.detailPayload ||
+          this.client.callTool("get_finding", {
+            run_id: resolved.runId,
+            finding_id: resolved.findingId,
+            detail_level: "normal",
+          }),
+        this.client.callTool("get_remediation", {
+          run_id: resolved.runId,
+          finding_id: resolved.findingId,
+          detail_level: "normal",
+        }),
+      ]);
+      const steps = safeArray(safeObject(remediation.remediation).steps);
+      const lines = [
+        "# CodeClone Refactor Brief",
+        "",
+        `Repository: ${state.folder.name}`,
+        `Finding: ${finding.id} (${formatKind(finding.kind)})`,
+        `Severity: ${formatSeverity(finding.severity)} · Scope: ${finding.scope || "unknown"} · Priority: ${compactDecimal(finding.priority)}`,
+        "",
+        "Treat the CodeClone finding and remediation as the canonical source of truth.",
+        "Keep behavior unchanged unless the remediation explicitly requires a behavioral shift.",
+        "",
+        "## Suggested shape",
+        safeObject(remediation.remediation).shape || "Use a minimal, behavior-preserving refactor.",
+      ];
+      if (safeObject(remediation.remediation).why_now) {
+        lines.push("", `Why now: ${safeObject(remediation.remediation).why_now}`);
+      }
+      if (steps.length > 0) {
+        lines.push("", "## Steps", markdownBulletList(steps));
+      }
+      await vscode.env.clipboard.writeText(lines.join("\n"));
+      await vscode.window.showInformationMessage(
+        `Copied refactor brief for ${resolved.findingId}.`
+      );
+    } catch (error) {
+      this.handleError(error, `Could not build a refactor brief for ${resolved.findingId}.`);
+    }
+  }
+
+  async openInHtmlReport(node) {
+    const resolved = await this.resolveFindingNode(node);
+    if (!resolved) {
+      return;
+    }
+    const state = this.states.get(resolved.workspaceKey);
+    const htmlState = await this.inspectLocalHtmlReport(state);
+    if (!htmlState.exists) {
+      const choice = await vscode.window.showInformationMessage(
+        "No local HTML report is available for this workspace yet.",
+        "Open finding detail",
+        "Reveal source"
+      );
+      if (choice === "Open finding detail") {
+        await this.openFinding(resolved);
+      } else if (choice === "Reveal source") {
+        await this.revealFindingSource(resolved);
+      }
+      return;
+    }
+    let anchor = `finding-${resolved.findingId}`;
+    try {
+      await this.ensureConnected(state.folder);
+      const payload =
+        resolved.detailPayload ||
+        (await this.client.callTool("get_finding", {
+          run_id: resolved.runId,
+          finding_id: resolved.findingId,
+          detail_level: "normal",
+        }));
+      if (payload && payload.html_anchor) {
+        anchor = String(payload.html_anchor);
+      }
+    } catch {
+      // Keep the deterministic fallback anchor when detail lookup fails.
+    }
+    if (htmlState.stale) {
+      const staleWarning =
+        htmlState.reason === "workspace-changed"
+          ? "The local HTML report may be stale because the workspace changed after this run."
+          : "The local HTML report looks older than the current CodeClone run.";
+      const generatedSuffix = htmlState.generatedAtUtc
+        ? ` Report generated at ${htmlState.generatedAtUtc}.`
+        : "";
+      const choice = await vscode.window.showWarningMessage(
+        `${staleWarning}${generatedSuffix}`,
+        "Open anyway",
+        "Open finding detail",
+        "Reveal source"
+      );
+      if (choice === "Open anyway") {
+        const uri = vscode.Uri.file(htmlState.htmlPath).with({ fragment: anchor });
+        await vscode.env.openExternal(uri);
         return;
       }
+      if (choice === "Open finding detail") {
+        await this.openFinding(resolved);
+        return;
+      }
+      if (choice === "Reveal source") {
+        await this.revealFindingSource(resolved);
+        return;
+      }
+      return;
     }
+    const uri = vscode.Uri.file(htmlState.htmlPath).with({ fragment: anchor });
+    await vscode.env.openExternal(uri);
+  }
+
+  async revealFindingSource(node) {
+    const resolved = await this.resolveFindingNode(node);
+    if (!resolved) {
+      return;
+    }
+    const state = this.states.get(resolved.workspaceKey);
+    const location = firstNormalizedLocation(state.folder, resolved.locations);
     if (!location || !location.path) {
       await vscode.window.showInformationMessage(
         "This item does not expose a source location."
@@ -1103,8 +2303,32 @@ class CodeCloneController {
     );
   }
 
+  async revealGodModuleSource(node) {
+    const activeNode = this.activeGodModuleTarget(node);
+    if (!activeNode) {
+      return;
+    }
+    const state = this.states.get(activeNode.workspaceKey);
+    if (!state) {
+      return;
+    }
+    const resolved = {
+      ...activeNode,
+      nodeType: "godModule",
+    };
+    this.setActiveReviewTarget(resolved);
+    await this.revealWorkspacePath(state.folder, activeNode.item.path);
+  }
+
   async revealWorkspacePath(folder, relativePath, line = null, endLine = null) {
-    const fileUri = vscode.Uri.file(path.join(folder.uri.fsPath, relativePath));
+    const absolutePath = resolveWorkspacePath(folder.uri.fsPath, relativePath);
+    if (!absolutePath) {
+      await vscode.window.showWarningMessage(
+        "CodeClone ignored a source path outside the workspace root."
+      );
+      return;
+    }
+    const fileUri = vscode.Uri.file(absolutePath);
     try {
       const document = await vscode.workspace.openTextDocument(fileUri);
       const editor = await vscode.window.showTextDocument(document, {
@@ -1161,6 +2385,11 @@ class CodeCloneController {
     if (!topic) {
       return;
     }
+    await this.persistLastHelpTopic(topic);
+    if (!vscode.workspace.isTrusted) {
+      await this.showMarkdownDocument(renderRestrictedModeMarkdown(topic));
+      return;
+    }
     try {
       await this.ensureConnected(folder);
       const payload = await this.client.callTool("help", {
@@ -1178,16 +2407,20 @@ class CodeCloneController {
   }
 
   async openGodModule(node) {
-    if (!node || !node.item) {
+    const activeNode = this.activeGodModuleTarget(node);
+    if (!activeNode) {
       return;
     }
-    await this.showMarkdownDocument(renderGodModuleMarkdown(node.item));
+    this.setActiveReviewTarget(activeNode);
+    await this.showMarkdownDocument(renderGodModuleMarkdown(activeNode.item));
   }
 
   async reviewGodModule(node) {
-    if (!node || !node.item || !node.workspaceKey) {
+    const activeNode = this.activeGodModuleTarget(node);
+    if (!activeNode) {
       return;
     }
+    this.setActiveReviewTarget(activeNode);
     const picked = await vscode.window.showQuickPick(
       [
         {
@@ -1200,23 +2433,72 @@ class CodeCloneController {
           description: "Open God Module summary",
           action: "detail",
         },
+        {
+          label: "Copy report-only brief",
+          description: "AI handoff",
+          action: "brief",
+        },
       ],
       {
-        placeHolder: `What do you want to do with ${node.item.path}?`,
+        placeHolder: `What do you want to do with ${activeNode.item.path}?`,
       }
     );
     if (!picked) {
       return;
     }
     if (picked.action === "reveal") {
-      const state = this.states.get(node.workspaceKey);
-      if (!state) {
-        return;
-      }
-      await this.revealWorkspacePath(state.folder, node.item.path);
+      await this.revealGodModuleSource(activeNode);
       return;
     }
-    await this.openGodModule(node);
+    if (picked.action === "brief") {
+      await this.copyGodModuleBrief(activeNode);
+      return;
+    }
+    await this.openGodModule(activeNode);
+  }
+
+  async copyGodModuleBrief(node) {
+    const activeNode = this.activeGodModuleTarget(node);
+    if (!activeNode) {
+      return;
+    }
+    this.setActiveReviewTarget(activeNode);
+    const item = activeNode.item;
+    const reasons = safeArray(item.candidate_reasons);
+    const lines = [
+      "# CodeClone Report-only Module Brief",
+      "",
+      `Repository: ${this.states.get(activeNode.workspaceKey)?.folder.name || "unknown"}`,
+      `Module: ${item.module}`,
+      `Path: ${item.path}`,
+      `Source kind: ${item.source_kind || "unknown"}`,
+      `Candidate score: ${decimal(item.score)}`,
+      "",
+      "Treat this as a report-only structural signal, not as a blocking finding or gate result.",
+      "Focus on responsibility overload and dependency pressure before touching behavior.",
+      "",
+      "## Module profile",
+      `- LOC: ${number(item.loc)}`,
+      `- Callables: ${item.callable_count || 0}`,
+      `- Complexity total / max: ${item.complexity_total || 0} / ${item.complexity_max || 0}`,
+      `- Fan-in / fan-out: ${item.fan_in || 0} / ${item.fan_out || 0}`,
+      `- Total dependencies: ${item.total_deps || 0}`,
+      `- Import edges / reimport edges: ${item.import_edges || 0} / ${item.reimport_edges || 0}`,
+      `- Reimport ratio: ${decimal(item.reimport_ratio)}`,
+      `- Instability: ${decimal(item.instability)}`,
+      `- Hub balance: ${decimal(item.hub_balance)}`,
+    ];
+    if (reasons.length > 0) {
+      lines.push(
+        "",
+        "## Why CodeClone highlighted this module",
+        markdownBulletList(reasons)
+      );
+    }
+    await vscode.env.clipboard.writeText(lines.join("\n"));
+    await vscode.window.showInformationMessage(
+      `Copied report-only brief for ${item.path}.`
+    );
   }
 
   async clearSessionState() {
@@ -1234,8 +2516,14 @@ class CodeCloneController {
         state.latestTriage = null;
         state.changedSummary = null;
         state.reviewed = [];
+        state.reviewArtifacts = emptyReviewArtifacts();
+        state.gitSnapshot = null;
+        state.stale = false;
+        state.staleReason = null;
         state.groupCache.clear();
       }
+      this.clearActiveReviewTarget();
+      this.rebuildFileDecorations();
       this.updateContextKeys();
       this.updateStatusBar();
       this.refreshAllViews();
@@ -1251,7 +2539,8 @@ class CodeCloneController {
     const picked = await vscode.window.showQuickPick(
       HELP_TOPICS.map((topic) => ({
         label: topic,
-        description: "CodeClone MCP help topic",
+        description:
+          topic === this.lastHelpTopic ? "Last opened" : "CodeClone MCP help topic",
       })),
       {
         placeHolder: "Select a CodeClone MCP help topic",
@@ -1270,32 +2559,126 @@ class CodeCloneController {
     });
   }
 
+  provideReviewCodeLenses(document) {
+    const target = this.activeReviewTarget;
+    if (!target) {
+      return [];
+    }
+    if (target.nodeType === "godModule") {
+      const state = this.states.get(target.workspaceKey);
+      if (!state) {
+        return [];
+      }
+      const relativePath = workspaceRelativePath(state.folder, document.uri.fsPath);
+      if (relativePath !== normalizeRelativePath(target.item.path)) {
+        return [];
+      }
+      const range = new vscode.Range(0, 0, 0, 0);
+      return [
+        new vscode.CodeLens(range, {
+          command: "codeclone.previousReviewItem",
+          title: "$(arrow-up) Previous hotspot",
+        }),
+        new vscode.CodeLens(range, {
+          command: "codeclone.nextReviewItem",
+          title: "$(arrow-down) Next hotspot",
+        }),
+        new vscode.CodeLens(range, {
+          command: "codeclone.openGodModule",
+          title: "$(symbol-module) Report-only detail",
+          arguments: [target],
+        }),
+        new vscode.CodeLens(range, {
+          command: "codeclone.copyGodModuleBrief",
+          title: "$(copy) Copy report-only brief",
+          arguments: [target],
+        }),
+      ];
+    }
+    const state = this.states.get(target.workspaceKey);
+    if (!state) {
+      return [];
+    }
+    const matchingLocations = safeArray(target.locations).filter(
+      (location) => location.absolutePath === document.uri.fsPath
+    );
+    if (matchingLocations.length === 0) {
+      return [];
+    }
+    const primaryLocation = matchingLocations[0];
+    const startLine = Math.max(Number(primaryLocation.line || 1) - 1, 0);
+    const range = new vscode.Range(startLine, 0, startLine, 0);
+    return [
+      new vscode.CodeLens(range, {
+        command: "codeclone.previousReviewItem",
+        title: "$(arrow-up) Previous hotspot",
+      }),
+      new vscode.CodeLens(range, {
+        command: "codeclone.nextReviewItem",
+        title: "$(arrow-down) Next hotspot",
+      }),
+      new vscode.CodeLens(range, {
+        command: "codeclone.peekFindingLocations",
+        title: "$(references) Peek occurrences",
+        arguments: [target],
+      }),
+      new vscode.CodeLens(range, {
+        command: "codeclone.showRemediation",
+        title: "$(wrench) Remediation",
+        arguments: [target],
+      }),
+      ...(!target.reviewed
+        ? [
+            new vscode.CodeLens(range, {
+              command: "codeclone.markFindingReviewed",
+              title: "$(pass) Mark reviewed",
+              arguments: [target],
+            }),
+          ]
+        : []),
+    ];
+  }
+
   async getOverviewChildren(node) {
     const state = this.getPrimaryState();
     if (!state || !state.latestSummary) {
       return [];
     }
+    const reviewCounts = {
+      changed: this.reviewArtifactCount(state, "changedFiles"),
+      new: this.reviewArtifactCount(state, "newRegressions"),
+      production: this.reviewArtifactCount(state, "productionHotspots"),
+      godModules: this.reviewArtifactCount(state, "godModules"),
+    };
+    const baselineDrift = this.baselineDrift(state);
     if (!node) {
       const sections = [
         {
           nodeType: "section",
           id: "overview.health",
           label: "Structural Health",
-          description: `${state.latestSummary.health.score}/${state.latestSummary.health.grade}`,
+          description:
+            baselineDrift.healthDelta !== null
+              ? `${state.latestSummary.health.score}/${state.latestSummary.health.grade} · ${signedInteger(
+                  baselineDrift.healthDelta
+                )} vs baseline`
+              : `${state.latestSummary.health.score}/${state.latestSummary.health.grade}`,
           icon: new vscode.ThemeIcon("heart"),
         },
         {
           nodeType: "section",
           id: "overview.run",
           label: "Current Run",
-          description: `${state.currentRunId} · ${state.latestSummary.cache.freshness}`,
+          description: state.stale
+            ? `${state.currentRunId} · stale`
+            : `${state.currentRunId} · ${state.latestSummary.cache.freshness}`,
           icon: new vscode.ThemeIcon("pulse"),
         },
         {
           nodeType: "section",
           id: "overview.triage",
           label: "Priority Review",
-          description: `${state.latestSummary.findings.production} production · ${state.latestSummary.findings.new} new`,
+          description: `${reviewCounts.production} production · ${reviewCounts.new} new`,
           icon: new vscode.ThemeIcon("inspect"),
           command: {
             command: "codeclone.openProductionTriage",
@@ -1335,13 +2718,23 @@ class CodeCloneController {
         this.detailNode("Dead code", number(dimensions.dead_code)),
         this.detailNode("Dependencies", number(dimensions.dependencies)),
         this.detailNode("Coverage", number(dimensions.coverage)),
+        this.detailNode(
+          "Health delta",
+          baselineDrift.healthDelta !== null
+            ? `${signedInteger(baselineDrift.healthDelta)} vs metrics baseline`
+            : "metrics baseline unavailable"
+        ),
       ];
     }
     if (node.id === "overview.run") {
       const inventory = safeObject(state.latestSummary.inventory);
       return [
         this.detailNode("Workspace", state.folder.name),
-        this.detailNode("Run id", state.currentRunId),
+        this.detailNode("Run ID", state.currentRunId),
+        this.detailNode(
+          "Freshness",
+          state.stale ? `stale · ${state.staleReason}` : "current"
+        ),
         this.detailNode("Files", number(inventory.files)),
         this.detailNode("Parsed lines", number(inventory.lines)),
         this.detailNode("Callables", number(inventory.functions)),
@@ -1351,27 +2744,34 @@ class CodeCloneController {
           "Metrics baseline",
           formatBaselineState(state.latestSummary.metrics_baseline)
         ),
+        this.detailNode("Baseline drift", this.baselineDriftSummary(state)),
         this.detailNode("Cache", formatCacheSummary(state.latestSummary.cache)),
       ];
     }
     if (node.id === "overview.triage") {
       const triage = safeObject(state.latestTriage);
-      const findings = safeObject(triage.findings);
       const nextAction = this.describeNextBestAction(state);
       return [
         this.detailNode("Next best action", nextAction.label, {
           command: nextAction.command,
           title: nextAction.title,
         }),
-        this.detailNode("New regressions", number(state.latestSummary.findings.new)),
-        this.detailNode("Production hotspots", number(state.latestSummary.findings.production)),
-        this.detailNode("Outside focus", number(findings.outside_focus)),
+        this.detailNode("Focus mode", focusModeSpec(this.hotspotFocusMode).label),
+        this.detailNode("New regressions", number(reviewCounts.new)),
+        this.detailNode("Production hotspots", number(reviewCounts.production)),
+        this.detailNode(
+          "New clones",
+          baselineDrift.newClones !== null
+            ? `${signedInteger(baselineDrift.newClones)} vs clone baseline`
+            : "baseline unavailable"
+        ),
         this.detailNode(
           "Changed files",
           state.changedSummary
-            ? `${number(state.changedSummary.changed_files)} · ${state.changedSummary.verdict}`
+            ? `${number(reviewCounts.changed)} visible · ${state.changedSummary.verdict}`
             : "not analyzed"
         ),
+        this.detailNode("Reviewed hidden", number(state.reviewed.length)),
       ];
     }
     if (node.id === "overview.changed") {
@@ -1396,6 +2796,10 @@ class CodeCloneController {
         this.detailNode("Top score", decimal(godModules.top_score)),
         this.detailNode("Average score", decimal(godModules.average_score)),
         this.detailNode("Population", String(godModules.population_status)),
+        this.detailNode(
+          "Review surface",
+          `${number(reviewCounts.godModules)} visible in Hotspots`
+        ),
       ];
     }
     return [];
@@ -1407,15 +2811,20 @@ class CodeCloneController {
       return [];
     }
     if (!node) {
-      const groups = HOTSPOT_GROUPS.filter((group) =>
-        this.shouldShowGroup(group.id, state)
-      );
+      const groups = this.activeHotspotGroupIds(state).map((groupId) =>
+        HOTSPOT_GROUPS.find((group) => group.id === groupId)
+      ).filter(Boolean);
       if (groups.length === 0) {
         return [
           {
             nodeType: "message",
-            label: "No new or production hotspots need review in the current run.",
-            icon: new vscode.ThemeIcon("circle-slash"),
+            label:
+              this.hotspotFocusMode === "recommended"
+                ? "Nothing needs review in the current run."
+                : `No items are visible in ${focusModeSpec(this.hotspotFocusMode).label} focus.`,
+            icon: new vscode.ThemeIcon(
+              state.stale ? "warning" : "circle-slash"
+            ),
           },
         ];
       }
@@ -1442,14 +2851,17 @@ class CodeCloneController {
           nodeType: "section",
           id: "session.server",
           label: "Local Server",
-          description: this.connectionInfo.connected ? "ready" : "unavailable",
+          description: this.connectionInfo.connected ? "ready" : "not connected",
           icon: new vscode.ThemeIcon("plug"),
         },
         {
           nodeType: "section",
           id: "session.run",
           label: "Current Run",
-          description: state && state.currentRunId ? state.currentRunId : "none",
+          description:
+            state && state.currentRunId
+              ? `${state.currentRunId}${state.stale ? " · stale" : ""}`
+              : "none",
           icon: new vscode.ThemeIcon("pulse"),
         },
         {
@@ -1485,13 +2897,22 @@ class CodeCloneController {
     }
     if (node.id === "session.run") {
       if (!state || !state.latestSummary) {
-        return [this.detailNode("Run", "No run available yet.")];
+        return [
+          this.detailNode(
+            "Run",
+            "Run Analyze Workspace or Review Changes to create the first run."
+          ),
+        ];
       }
       return [
         this.detailNode("Workspace", state.folder.name),
-        this.detailNode("Run id", state.currentRunId),
+        this.detailNode("Run ID", state.currentRunId),
         this.detailNode("Scope", formatRunScope(state.lastScope)),
         this.detailNode("Mode", state.latestSummary.mode),
+        this.detailNode(
+          "Freshness",
+          state.stale ? `stale · ${state.staleReason}` : "current"
+        ),
         this.detailNode("Cache freshness", state.latestSummary.cache.freshness),
         this.detailNode("Updated", state.lastUpdatedAt ? state.lastUpdatedAt.toLocaleString() : "unknown"),
       ];
@@ -1501,7 +2922,7 @@ class CodeCloneController {
         return [
           {
             nodeType: "message",
-            label: "No reviewed findings in this MCP session.",
+            label: "Nothing has been marked reviewed in this session yet.",
             icon: new vscode.ThemeIcon("circle-slash"),
           },
         ];
@@ -1535,43 +2956,21 @@ class CodeCloneController {
     }
     try {
       await this.ensureConnected(state.folder);
-      const runId = state.currentRunId;
-      if (!runId) {
+      if (!state.currentRunId) {
         return [];
       }
-      let nodes;
+      let nodes = [];
       switch (groupId) {
         case "newRegressions":
           nodes = this.toFindingNodes(
             state,
-            safeArray(
-              (
-                await this.client.callTool("list_findings", {
-                  run_id: runId,
-                  novelty: "new",
-                  detail_level: "summary",
-                  sort_by: "priority",
-                  limit: 20,
-                  exclude_reviewed: true,
-                })
-              ).items
-            )
+            this.reviewArtifactItems(state, "newRegressions")
           );
           break;
         case "productionHotspots":
           nodes = this.toFindingNodes(
             state,
-            safeArray(
-              (
-                await this.client.callTool("list_hotspots", {
-                  run_id: runId,
-                  kind: "production_hotspots",
-                  detail_level: "summary",
-                  limit: 10,
-                  exclude_reviewed: true,
-                })
-              ).items
-            )
+            this.reviewArtifactItems(state, "productionHotspots")
           );
           break;
         case "changedFiles":
@@ -1587,47 +2986,15 @@ class CodeCloneController {
           }
           nodes = this.toFindingNodes(
             state,
-            safeArray(
-              (
-                await this.client.callTool("list_findings", {
-                  run_id: runId,
-                  git_diff_ref: vscode.workspace
-                    .getConfiguration("codeclone", state.folder.uri)
-                    .get("analysis.changedDiffRef", "HEAD"),
-                  novelty: "new",
-                  detail_level: "summary",
-                  sort_by: "priority",
-                  limit: 20,
-                  exclude_reviewed: true,
-                })
-              ).items
-            )
+            this.reviewArtifactItems(state, "changedFiles")
           );
           break;
-        case "godModules": {
-          const response = await this.client.callTool("get_report_section", {
-            run_id: runId,
-            section: "metrics_detail",
-            family: "god_modules",
-            limit: 15,
-          });
-          nodes = safeArray(response.items).map((item) => ({
-            nodeType: "godModule",
-            workspaceKey: state.folder.uri.toString(),
-            runId,
-            item,
-            label: item.path,
-            description: `${decimal(item.score)} · ${item.source_kind}`,
-            tooltip: `${item.module} · ${number(item.loc)} LOC · ${item.total_deps} deps`,
-            icon: new vscode.ThemeIcon("symbol-module"),
-            command: {
-              command: "codeclone.reviewGodModule",
-              title: "Review God Module",
-              arguments: [{ workspaceKey: state.folder.uri.toString(), runId, item }],
-            },
-          }));
+        case "godModules":
+          nodes = this.toGodModuleNodes(
+            state,
+            this.reviewArtifactItems(state, "godModules")
+          );
           break;
-        }
         default:
           nodes = [];
       }
@@ -1659,74 +3026,6 @@ class CodeCloneController {
     );
   }
 
-  async getPriorityQueueNodes(state) {
-    const runId = state.currentRunId;
-    if (!runId) {
-      return [];
-    }
-    const diffRef = vscode.workspace
-      .getConfiguration("codeclone", state.folder.uri)
-      .get("analysis.changedDiffRef", "HEAD");
-    const buckets = [];
-    if (state.changedSummary) {
-      buckets.push(
-        safeArray(
-          (
-            await this.client.callTool("list_findings", {
-              run_id: runId,
-              git_diff_ref: diffRef,
-              novelty: "new",
-              detail_level: "summary",
-              sort_by: "priority",
-              limit: 12,
-              exclude_reviewed: true,
-            })
-          ).items
-        )
-      );
-    }
-    buckets.push(
-      safeArray(
-        (
-          await this.client.callTool("list_hotspots", {
-            run_id: runId,
-            kind: "production_hotspots",
-            detail_level: "summary",
-            limit: 12,
-            exclude_reviewed: true,
-          })
-        ).items
-      )
-    );
-    buckets.push(
-      safeArray(
-        (
-          await this.client.callTool("list_findings", {
-            run_id: runId,
-            novelty: "new",
-            detail_level: "summary",
-            sort_by: "priority",
-            limit: 12,
-            exclude_reviewed: true,
-          })
-        ).items
-      )
-    );
-    const deduped = [];
-    const seen = new Set();
-    for (const bucket of buckets) {
-      for (const item of bucket) {
-        const id = String(item.id || "");
-        if (!id || seen.has(id)) {
-          continue;
-        }
-        seen.add(id);
-        deduped.push(item);
-      }
-    }
-    return this.toFindingNodes(state, deduped);
-  }
-
   buildFindingNode(state, findingId, item, note, reviewed) {
     const spread = safeObject(item.spread);
     const novelty = formatNovelty(item.novelty);
@@ -1750,7 +3049,7 @@ class CodeCloneController {
         (note ? `\nNote: ${note}` : ""),
       icon: findingIcon(item.severity),
       locations: item.locations || [],
-      contextValue: "codeclone.finding",
+      contextValue: reviewed ? "codeclone.reviewedFinding" : "codeclone.finding",
       reviewed,
       command: {
         command: "codeclone.reviewFinding",
@@ -1769,20 +3068,17 @@ class CodeCloneController {
   }
 
   describeGroup(groupId, state) {
-    const summary = safeObject(state.latestSummary);
-    const findings = safeObject(summary.findings);
-    const metrics = safeObject(state.metricsSummary);
     switch (groupId) {
       case "newRegressions":
-        return `${findings.new || 0} new`;
+        return `${this.reviewArtifactCount(state, "newRegressions")} new`;
       case "productionHotspots":
-        return `${safeObject(state.latestTriage).top_hotspots?.available || 0} prod`;
+        return `${this.reviewArtifactCount(state, "productionHotspots")} production`;
       case "changedFiles":
         return state.changedSummary
-          ? `${state.changedSummary.new_findings} new · ${state.changedSummary.verdict}`
+          ? `${this.reviewArtifactCount(state, "changedFiles")} visible · ${state.changedSummary.verdict}`
           : "not analyzed";
       case "godModules":
-        return `${safeObject(metrics.god_modules).candidates || 0} report-only`;
+        return `${this.reviewArtifactCount(state, "godModules")} report-only`;
       default:
         return "";
     }
@@ -1791,59 +3087,82 @@ class CodeCloneController {
   emptyGroupMessage(groupId) {
     switch (groupId) {
       case "newRegressions":
-        return "No new regressions in the current run.";
+        return "No baseline-new regressions are visible.";
       case "productionHotspots":
-        return "No production hotspots need review.";
+        return "No production hotspots are visible.";
       case "changedFiles":
-        return "No new findings touch the changed files.";
+        return "No findings touching changed files are visible.";
       case "godModules":
         return "No report-only God Module candidates are visible.";
       default:
-        return "No items in this category.";
+        return "Nothing is visible in this category.";
     }
   }
 
   shouldShowGroup(groupId, state) {
-    const summary = safeObject(state.latestSummary);
-    const findings = safeObject(summary.findings);
-    const metrics = safeObject(state.metricsSummary);
+    const specificMode = isSpecificFocusMode(this.hotspotFocusMode);
+    if (specificMode) {
+      const allowed =
+        HOTSPOT_GROUPS_BY_MODE[this.hotspotFocusMode] || HOTSPOT_GROUPS_BY_MODE.recommended;
+      if (!allowed.includes(groupId)) {
+        return false;
+      }
+    }
     switch (groupId) {
       case "newRegressions":
-        return Number(findings.new || 0) > 0;
+        return specificMode || this.reviewArtifactCount(state, "newRegressions") > 0;
       case "productionHotspots":
-        return Number(safeObject(state.latestTriage).top_hotspots?.available || 0) > 0;
+        return (
+          specificMode || this.reviewArtifactCount(state, "productionHotspots") > 0
+        );
       case "changedFiles":
-        return Boolean(state.changedSummary);
+        if (!state.changedSummary) {
+          return this.hotspotFocusMode === "changed";
+        }
+        return specificMode || this.reviewArtifactCount(state, "changedFiles") > 0;
       case "godModules":
-        return Number(safeObject(metrics.god_modules).candidates || 0) > 0;
+        return specificMode || this.reviewArtifactCount(state, "godModules") > 0;
       default:
         return false;
     }
   }
 
   describeNextBestAction(state) {
-    if (Number(state.latestSummary.findings.new || 0) > 0) {
+    if (state.stale) {
+      return {
+        label: state.lastScope === "changed" ? "Review changes again" : "Refresh stale run",
+        command:
+          state.lastScope === "changed"
+            ? "codeclone.analyzeChangedFiles"
+            : "codeclone.refreshCurrentRun",
+        title:
+          state.lastScope === "changed"
+            ? "Review changes again"
+            : "Refresh stale run",
+      };
+    }
+    if (this.reviewArtifactCount(state, "changedFiles") > 0) {
+      return {
+        label: "Review changed-files hotspots",
+        command: "codeclone.reviewPriorityQueue",
+        title: "Review changed-files hotspots",
+      };
+    }
+    if (this.reviewArtifactCount(state, "newRegressions") > 0) {
       return {
         label: "Review new regressions",
         command: "codeclone.reviewPriorityQueue",
         title: "Review new regressions",
       };
     }
-    if (Number(state.latestSummary.findings.production || 0) > 0) {
+    if (this.reviewArtifactCount(state, "productionHotspots") > 0) {
       return {
         label: "Review production hotspots",
         command: "codeclone.reviewPriorityQueue",
         title: "Review production hotspots",
       };
     }
-    if (state.changedSummary) {
-      return {
-        label: "Inspect changed-files review",
-        command: "codeclone.focusHotspots",
-        title: "Inspect changed-files review",
-      };
-    }
-    if (Number(safeObject(state.metricsSummary).god_modules?.candidates || 0) > 0) {
+    if (this.reviewArtifactCount(state, "godModules") > 0) {
       return {
         label: "Inspect report-only God Modules",
         command: "codeclone.focusHotspots",
@@ -1868,9 +3187,10 @@ class CodeCloneController {
   }
 
   createTreeItem(node) {
+    let item;
     switch (node.nodeType) {
       case "section": {
-        const item = new vscode.TreeItem(
+        item = new vscode.TreeItem(
           node.label,
           vscode.TreeItemCollapsibleState.Expanded
         );
@@ -1878,32 +3198,32 @@ class CodeCloneController {
         item.description = node.description;
         item.iconPath = node.icon;
         item.command = node.command;
-        return item;
+        break;
       }
       case "group": {
-        const item = new vscode.TreeItem(
+        item = new vscode.TreeItem(
           node.label,
           vscode.TreeItemCollapsibleState.Collapsed
         );
         item.id = `${node.workspaceKey}:${node.groupId}`;
         item.description = node.description;
         item.iconPath = node.icon;
-        return item;
+        break;
       }
       case "finding": {
-        const item = new vscode.TreeItem(
+        item = new vscode.TreeItem(
           node.label,
           vscode.TreeItemCollapsibleState.None
         );
         item.description = node.description;
         item.tooltip = node.tooltip;
         item.iconPath = node.icon;
-        item.contextValue = "codeclone.finding";
+        item.contextValue = node.contextValue || "codeclone.finding";
         item.command = node.command;
-        return item;
+        break;
       }
       case "godModule": {
-        const item = new vscode.TreeItem(
+        item = new vscode.TreeItem(
           node.label,
           vscode.TreeItemCollapsibleState.None
         );
@@ -1912,10 +3232,10 @@ class CodeCloneController {
         item.iconPath = node.icon;
         item.contextValue = "codeclone.godModule";
         item.command = node.command;
-        return item;
+        break;
       }
       case "helpTopic": {
-        const item = new vscode.TreeItem(
+        item = new vscode.TreeItem(
           node.label,
           vscode.TreeItemCollapsibleState.None
         );
@@ -1927,35 +3247,38 @@ class CodeCloneController {
           title: "Show Help Topic",
           arguments: [node.topic],
         };
-        return item;
+        break;
       }
       case "detail": {
-        const item = new vscode.TreeItem(
+        item = new vscode.TreeItem(
           node.label,
           vscode.TreeItemCollapsibleState.None
         );
         item.description = node.description;
         item.iconPath = node.icon;
         item.command = node.command;
-        return item;
+        break;
       }
       case "message":
       default: {
-        const item = new vscode.TreeItem(
+        item = new vscode.TreeItem(
           node.label,
           vscode.TreeItemCollapsibleState.None
         );
         item.iconPath = node.icon || new vscode.ThemeIcon("info");
         item.description = node.description;
-        return item;
+        break;
       }
     }
+    item.accessibilityInformation = treeAccessibilityInformation(node);
+    return item;
   }
 
   refreshAllViews() {
     this.overviewProvider.refresh();
     this.hotspotsProvider.refresh();
     this.sessionProvider.refresh();
+    this.reviewCodeLensProvider.refresh();
     this.updateViewChrome();
   }
 
@@ -1963,39 +3286,77 @@ class CodeCloneController {
     const state = this.getPrimaryState();
     if (this.overviewView) {
       this.overviewView.badge = undefined;
+      this.overviewView.description = state?.stale ? "Stale" : undefined;
     }
     if (this.hotspotsView) {
+      this.hotspotsView.description = focusModeSpec(this.hotspotFocusMode).label;
+      this.hotspotsView.message =
+        state && state.stale ? staleMessage(state.staleReason) : undefined;
       const newCount = Number(
-        safeObject(state?.latestSummary).findings?.new || 0
+        this.reviewArtifactCount(state, "newRegressions")
       );
       const productionCount = Number(
-        safeObject(state?.latestSummary).findings?.production || 0
+        this.reviewArtifactCount(state, "productionHotspots")
       );
-      const changedCount = Number(state?.changedSummary?.new_findings || 0);
-      const actionableCount = Math.max(newCount + productionCount, changedCount);
+      const changedCount = Number(this.reviewArtifactCount(state, "changedFiles"));
+      const actionableCount = Math.max(
+        newCount + productionCount,
+        changedCount
+      );
       const godModuleCount = Number(
-        safeObject(state?.metricsSummary).god_modules?.candidates || 0
+        this.reviewArtifactCount(state, "godModules")
       );
+      let badgeValue = 0;
+      let badgeTooltip = "";
+      switch (this.hotspotFocusMode) {
+        case "new":
+          badgeValue = newCount;
+          badgeTooltip = `${newCount} new regressions are visible in Hotspots`;
+          break;
+        case "production":
+          badgeValue = productionCount;
+          badgeTooltip = `${productionCount} production hotspots are visible in Hotspots`;
+          break;
+        case "changed":
+          badgeValue = changedCount;
+          badgeTooltip = `${changedCount} changed-files review items are visible in Hotspots`;
+          break;
+        case "reportOnly":
+          badgeValue = godModuleCount;
+          badgeTooltip = `${godModuleCount} report-only God Module candidates are visible in Hotspots`;
+          break;
+        default:
+          badgeValue = actionableCount > 0 ? actionableCount : godModuleCount;
+          badgeTooltip =
+            actionableCount > 0
+              ? `${actionableCount} review items need attention`
+              : `${godModuleCount} report-only God Module candidates are visible in Hotspots`;
+          break;
+      }
       this.hotspotsView.badge =
-        actionableCount > 0
+        badgeValue > 0
           ? {
-              value: actionableCount,
-              tooltip: `${actionableCount} review items need attention`,
+              value: badgeValue,
+              tooltip: badgeTooltip,
             }
-          : godModuleCount > 0
-            ? {
-                value: godModuleCount,
-                tooltip: `${godModuleCount} report-only God Module candidates are visible in Hotspots`,
-              }
-            : undefined;
+          : undefined;
     }
     if (this.sessionView) {
       this.sessionView.badge = undefined;
+      this.sessionView.description =
+        state && state.reviewed.length > 0 ? `${state.reviewed.length} reviewed` : undefined;
     }
   }
 
   updateContextKeys() {
     const state = this.getPrimaryState();
+    const activeTarget = this.activeReviewTarget;
+    const targetVisibleInEditor = this.isTargetVisibleInEditor(activeTarget);
+    void vscode.commands.executeCommand(
+      "setContext",
+      "codeclone.workspaceTrusted",
+      vscode.workspace.isTrusted
+    );
     void vscode.commands.executeCommand(
       "setContext",
       "codeclone.connected",
@@ -2005,6 +3366,41 @@ class CodeCloneController {
       "setContext",
       "codeclone.hasRun",
       Boolean(state && state.latestSummary)
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "codeclone.runStale",
+      Boolean(state && state.stale)
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "codeclone.hasActiveReviewTarget",
+      Boolean(activeTarget)
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "codeclone.activeReviewTargetVisibleInEditor",
+      Boolean(targetVisibleInEditor)
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "codeclone.activeReviewTargetIsFinding",
+      Boolean(activeTarget && activeTarget.nodeType !== "godModule")
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "codeclone.activeReviewTargetIsReviewed",
+      Boolean(activeTarget && activeTarget.reviewed)
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "codeclone.activeReviewTargetIsGodModule",
+      Boolean(activeTarget && activeTarget.nodeType === "godModule")
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "codeclone.hotspotFocusMode",
+      this.hotspotFocusMode
     );
   }
 
@@ -2016,11 +3412,26 @@ class CodeCloneController {
       this.statusBar.hide();
       return;
     }
+    if (!vscode.workspace.isTrusted) {
+      this.statusBar.text = "CodeClone restricted";
+      this.statusBar.tooltip =
+        "Restricted Mode is active. Grant workspace trust to enable local CodeClone analysis and the local MCP server.";
+      this.statusBar.accessibilityInformation = {
+        label:
+          "CodeClone restricted. Grant workspace trust to enable local analysis.",
+      };
+      this.statusBar.command = "codeclone.manageWorkspaceTrust";
+      this.statusBar.show();
+      return;
+    }
     const state = this.getPrimaryState();
     if (!this.connectionInfo.connected) {
       this.statusBar.text = "CodeClone setup";
       this.statusBar.tooltip =
-        "Run Analyze Workspace to start CodeClone and create the first run. Use Verify Local Server only if you want to check the launcher manually.";
+        "CodeClone needs a local MCP launcher. Analyze Workspace usually connects automatically. Use Verify Local Server only when you want to check the launcher manually.";
+      this.statusBar.accessibilityInformation = {
+        label: "CodeClone setup. Local launcher verification is required.",
+      };
       this.statusBar.command = "codeclone.analyzeWorkspace";
       this.statusBar.show();
       return;
@@ -2028,15 +3439,32 @@ class CodeCloneController {
     if (!state || !state.latestSummary) {
       this.statusBar.text = "CodeClone ready";
       this.statusBar.tooltip =
-        "The local CodeClone server is ready. Run Analyze Workspace or Review Changes.";
+        "The local CodeClone server is ready. Start with Analyze Workspace or Review Changes.";
+      this.statusBar.accessibilityInformation = {
+        label: "CodeClone ready. Start with Analyze Workspace or Review Changes.",
+      };
       this.statusBar.command = "codeclone.analyzeWorkspace";
       this.statusBar.show();
       return;
     }
-    this.statusBar.text = `CodeClone ${state.latestSummary.health.score}/${state.latestSummary.health.grade}`;
+    this.statusBar.text = state.stale
+      ? `CodeClone ${state.latestSummary.health.score}/${state.latestSummary.health.grade} · stale`
+      : `CodeClone ${state.latestSummary.health.score}/${state.latestSummary.health.grade}`;
     this.statusBar.command = "codeclone.openOverview";
+    const drift = this.baselineDrift(state);
+    const driftLine =
+      drift.newFindings !== null || drift.healthDelta !== null || drift.newClones !== null
+        ? `\nBaseline drift: ${this.baselineDriftSummary(state)}`
+        : "";
     this.statusBar.tooltip =
-      `${state.folder.name}\nRun ${state.currentRunId}\n${state.latestSummary.findings.total} findings`;
+      `${state.folder.name}\nRun ${state.currentRunId}\n${state.latestSummary.findings.total} findings` +
+      driftLine +
+      (state.stale ? `\nFreshness: stale · ${state.staleReason}` : "");
+    this.statusBar.accessibilityInformation = {
+      label: state.stale
+        ? `CodeClone ${state.latestSummary.health.score} slash ${state.latestSummary.health.grade}, stale.`
+        : `CodeClone ${state.latestSummary.health.score} slash ${state.latestSummary.health.grade}.`,
+    };
     this.statusBar.show();
   }
 
@@ -2078,7 +3506,7 @@ class CodeCloneController {
     if (choice === "Copy install command") {
       await vscode.env.clipboard.writeText('pip install --pre "codeclone[mcp]"');
       await vscode.window.showInformationMessage(
-        'Copied: pip install --pre "codeclone[mcp]"'
+        "Copied the recommended install command."
       );
       return;
     }

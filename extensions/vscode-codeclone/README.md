@@ -18,6 +18,7 @@ CodeClone inside VS Code is designed for:
 - changed-files review against the current diff
 - baseline-aware distinction between known debt and new regressions
 - guided drill-down from hotspot to source, finding detail, and remediation
+- lightweight code navigation without turning the sidebar into a second report app
 
 It is not a generic linter panel and it does not try to duplicate the HTML
 report inside the sidebar.
@@ -70,7 +71,8 @@ palette.
 
 ### Overview
 
-Compact repository health, current run state, and next-best review action.
+Compact repository health, current run state, baseline drift, and next-best
+review action.
 
 ### Hotspots
 
@@ -80,6 +82,10 @@ The main operational view. It focuses on:
 - production hotspots
 - changed-files findings
 - report-only God Module candidates
+
+Focus mode is explicit and persisted per workspace. The extension favors
+`Recommended` by default and keeps report-only candidates visually separate from
+findings.
 
 ### Runs & Session
 
@@ -93,6 +99,16 @@ Bounded MCP session state:
 Reviewed markers are session-local only and do not mutate the repository or the
 canonical report.
 
+### Editor interaction
+
+- `Reveal Source` is the default review action for findings
+- active review targets can be stepped with `Next Hotspot` / `Previous Hotspot`
+- review-relevant files receive lightweight Explorer decorations
+- CodeLens and editor-title actions appear only when the current editor matches
+  the active review target
+- `Open in HTML Report` is available as an explicit bridge, not as the primary
+  review surface
+
 ## Interaction model
 
 The extension is intentionally code-centered:
@@ -100,12 +116,35 @@ The extension is intentionally code-centered:
 - findings prefer `Reveal Source` as the default review action
 - source locations are opened in the editor and softly highlighted
 - deeper actions stay explicit:
-    - `Open Finding`
-    - `Show Remediation`
-    - `Mark Reviewed`
+  - `Open Finding`
+  - `Show Remediation`
+  - `Mark Reviewed`
 
 This keeps the extension focused on review and refactoring flow instead of
 opening raw JSON-like details by default.
+
+## Product decisions
+
+- **Native VS Code first**: tree views, status bar, file decorations, and
+  editor actions come before any richer custom surface.
+- **No second truth model**: health, findings, and drift come from CodeClone
+  MCP and canonical report semantics only.
+- **Source-first**: review should move you to code before it opens deeper
+  detail.
+- **Report-only separation**: `God Modules` are visible but intentionally kept
+  outside findings, gates, and health.
+- **Limited Restricted Mode**: the extension keeps setup/onboarding available in
+  untrusted workspaces, but local analysis and MCP stay disabled until trust is
+  granted.
+
+## Current limits
+
+- The extension does not run background analysis on every save.
+- It does not populate VS Code Problems or try to behave like a linter.
+- Reviewed markers are session-local only.
+- `Open in HTML Report` only uses a local `report.html` when one already exists
+  and looks fresh enough for the current run.
+- Virtual workspaces are not supported.
 
 ## Settings
 
@@ -135,7 +174,7 @@ Show or hide the workspace-level status bar item.
 This extension runs structural analysis against the current repository and uses
 local filesystem and git state. For that reason:
 
-- untrusted workspaces are not supported
+- untrusted workspaces are supported only in a limited onboarding/setup mode
 - virtual workspaces are not supported
 - the extension runs as a workspace extension
 
@@ -164,6 +203,9 @@ Host.
 Useful local checks:
 
 ```bash
+node --check src/support.js
 node --check src/mcpClient.js
 node --check src/extension.js
+node --test test/*.test.js
+node test/runExtensionHost.js
 ```

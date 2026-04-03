@@ -92,8 +92,11 @@ uv run pytest -q tests/test_mcp_service.py tests/test_mcp_server.py
 If you touched the VS Code extension surface, also run:
 
 ```bash
+node --check extensions/vscode-codeclone/src/support.js
 node --check extensions/vscode-codeclone/src/mcpClient.js
 node --check extensions/vscode-codeclone/src/extension.js
+node --test extensions/vscode-codeclone/test/*.test.js
+node extensions/vscode-codeclone/test/runExtensionHost.js
 ```
 
 If you touched VS Code extension packaging metadata (`package.json`,
@@ -102,7 +105,7 @@ smoke:
 
 ```bash
 cd extensions/vscode-codeclone
-NPM_CONFIG_CACHE=/tmp/codeclone-vsce-cache npx @vscode/vsce package --pre-release --out /tmp/codeclone.vsix
+vsce package --pre-release --out /tmp/codeclone.vsix
 ```
 
 ---
@@ -458,7 +461,7 @@ If you change a contract-sensitive zone, route docs/tests/approval deliberately.
 | Fingerprint-adjacent analysis (`extractor/cfg/normalize/grouping`)                                                                  | `docs/book/05-core-pipeline.md`, `docs/cfg.md`, `docs/book/14-compatibility-and-versioning.md`, `CHANGELOG.md`                                                      | `tests/test_fingerprint.py`, `tests/test_extractor.py`, `tests/test_cfg.py`, golden tests (`tests/test_detector_golden.py`, `tests/test_golden_v2.py`)              | always (see Section 1.6)                                                                     | clone identity / NEW-vs-KNOWN / fingerprint inputs change                                     |
 | Suppression semantics/reporting (`suppressions`, extractor dead-code wiring, report/UI counters)                                    | `docs/book/19-inline-suppressions.md`, `docs/book/16-dead-code-contract.md`, `docs/book/08-report.md`, and interface docs if surfaced (`09-cli`, `10-html-render`)  | `tests/test_suppressions.py`, `tests/test_extractor.py`, `tests/test_metrics_modules.py`, `tests/test_pipeline_metrics.py`, report/html/cli tests                   | declaration scope semantics, rule effect, or contract-visible counters/fields change         | suppression changes alter active finding output or contract-visible report payload            |
 | MCP interface (`codeclone/mcp_service.py`, `codeclone/mcp_server.py`, packaging extra/launcher)                                     | `README.md`, `docs/book/20-mcp-interface.md`, `docs/mcp.md`, `docs/book/01-architecture-map.md`, `docs/book/14-compatibility-and-versioning.md`, `CHANGELOG.md`     | `tests/test_mcp_service.py`, `tests/test_mcp_server.py`, plus CLI/package tests if launcher/install semantics change                                                | tool/resource shapes, read-only semantics, optional-dependency packaging behavior change     | public MCP tool names, resource URIs, launcher/install behavior, or response semantics change |
-| VS Code extension surface (`extensions/vscode-codeclone/*`)                                                                         | `README.md`, `docs/book/21-vscode-extension.md`, `docs/vscode-extension.md`, `docs/book/01-architecture-map.md`, `docs/README.md`, `CHANGELOG.md`                   | `node --check extensions/vscode-codeclone/src/mcpClient.js`, `node --check extensions/vscode-codeclone/src/extension.js`; package smoke when manifest/assets change | command/view UX, trust/runtime model, source-first review flow, or packaging metadata change | documented commands/views/setup/trust behavior, packaged assets, or publish metadata change   |
+| VS Code extension surface (`extensions/vscode-codeclone/*`)                                                                         | `README.md`, `docs/book/21-vscode-extension.md`, `docs/vscode-extension.md`, `docs/book/01-architecture-map.md`, `docs/README.md`, `CHANGELOG.md`                   | `node --check extensions/vscode-codeclone/src/support.js`, `node --check extensions/vscode-codeclone/src/mcpClient.js`, `node --check extensions/vscode-codeclone/src/extension.js`, `node --test extensions/vscode-codeclone/test/*.test.js`, plus local extension-host smoke and package smoke when surface/manifest/assets change | command/view UX, trust/runtime model, source-first review flow, or packaging metadata change | documented commands/views/setup/trust behavior, packaged assets, or publish metadata change   |
 | Docs site / sample report publication (`docs/`, `mkdocs.yml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py`) | `docs/README.md`, `docs/publishing.md`, `docs/examples/report.md`, and any contract pages surfaced by the change, `CHANGELOG.md` when user-visible behavior changes | `mkdocs build --strict`, sample-report generation smoke path, and relevant report/html tests if generated examples or embeds change                                 | published docs navigation, sample-report generation, or Pages workflow semantics change      | published documentation behavior or sample-report generation contract changes                 |
 
 Golden rule: do not “fix” failures by snapshot refresh unless the underlying contract change is intentional, documented,
