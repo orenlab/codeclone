@@ -15,6 +15,7 @@ const {
   resolveWorkspacePath,
   signedInteger,
   staleMessage,
+  workspaceLocalLauncherCandidates,
 } = require("./support");
 
 const execFileAsync = promisify(execFile);
@@ -1130,6 +1131,16 @@ class CodeCloneController {
     if (configuredCommand && configuredCommand !== "auto") {
       return normalizedLaunchSpec({
         command: configuredCommand,
+        args: Array.isArray(configuredArgs) ? configuredArgs : [],
+        cwd: folder.uri.fsPath,
+      });
+    }
+    const localLauncher = workspaceLocalLauncherCandidates(folder.uri.fsPath).find(
+      (candidate) => fs.existsSync(candidate)
+    );
+    if (localLauncher) {
+      return normalizedLaunchSpec({
+        command: localLauncher,
         args: Array.isArray(configuredArgs) ? configuredArgs : [],
         cwd: folder.uri.fsPath,
       });

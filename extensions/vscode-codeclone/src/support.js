@@ -70,6 +70,29 @@ function resolveWorkspacePath(rootPath, relativePath) {
   return null;
 }
 
+function workspaceLocalLauncherCandidates(
+  rootPath,
+  platform = process.platform
+) {
+  const root = String(rootPath || "").trim();
+  if (!root) {
+    return [];
+  }
+  const platformPath = platform === "win32" ? path.win32 : path.posix;
+  if (platform === "win32") {
+    return [
+      platformPath.join(root, ".venv", "Scripts", "codeclone-mcp.exe"),
+      platformPath.join(root, ".venv", "Scripts", "codeclone-mcp.cmd"),
+      platformPath.join(root, "venv", "Scripts", "codeclone-mcp.exe"),
+      platformPath.join(root, "venv", "Scripts", "codeclone-mcp.cmd"),
+    ];
+  }
+  return [
+    platformPath.join(root, ".venv", "bin", "codeclone-mcp"),
+    platformPath.join(root, "venv", "bin", "codeclone-mcp"),
+  ];
+}
+
 module.exports = {
   STALE_REASON_EDITOR,
   STALE_REASON_WORKSPACE,
@@ -79,4 +102,5 @@ module.exports = {
   signedInteger,
   staleMessage,
   trimTail,
+  workspaceLocalLauncherCandidates,
 };

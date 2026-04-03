@@ -12,6 +12,7 @@ const {
   signedInteger,
   staleMessage,
   trimTail,
+  workspaceLocalLauncherCandidates,
 } = require("../src/support");
 
 test("signedInteger formats positive, zero, and negative values", () => {
@@ -82,4 +83,17 @@ test("trimTail keeps the newest part of long strings", () => {
   assert.equal(trimTail("abcdef", 4), "cdef");
   assert.equal(trimTail("abc", 10), "abc");
   assert.equal(trimTail("abc", 0), "");
+});
+
+test("workspaceLocalLauncherCandidates prefer workspace virtual environments", () => {
+  assert.deepEqual(workspaceLocalLauncherCandidates("/workspace/repo", "linux"), [
+    "/workspace/repo/.venv/bin/codeclone-mcp",
+    "/workspace/repo/venv/bin/codeclone-mcp",
+  ]);
+  assert.deepEqual(workspaceLocalLauncherCandidates("C:\\repo", "win32"), [
+    "C:\\repo\\.venv\\Scripts\\codeclone-mcp.exe",
+    "C:\\repo\\.venv\\Scripts\\codeclone-mcp.cmd",
+    "C:\\repo\\venv\\Scripts\\codeclone-mcp.exe",
+    "C:\\repo\\venv\\Scripts\\codeclone-mcp.cmd",
+  ]);
 });

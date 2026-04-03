@@ -210,6 +210,11 @@
         "icon": "$(filter)"
       },
       {
+        "command": "codeclone.reviewFinding",
+        "title": "Review Finding",
+        "category": "CodeClone"
+      },
+      {
         "command": "codeclone.openFinding",
         "title": "Open Finding",
         "category": "CodeClone",
@@ -286,6 +291,11 @@
         "title": "Open Candidate Detail",
         "category": "CodeClone",
         "icon": "$(symbol-module)"
+      },
+      {
+        "command": "codeclone.reviewGodModule",
+        "title": "Review Candidate",
+        "category": "CodeClone"
       },
       {
         "command": "codeclone.copyGodModuleBrief",
