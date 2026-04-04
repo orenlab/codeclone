@@ -49,3 +49,38 @@ test("diagnostics trim very long lines to the supported maximum", () => {
   assert.equal(client.diagnostics.length, 1);
   assert.equal(client.diagnostics[0].length, 4096);
 });
+
+test("concurrent connect calls with the same launch spec share one in-flight connection", async () => {
+  const client = new CodeCloneMcpClient(outputChannelStub());
+  const launchSpec = { command: "codeclone-mcp", args: [], cwd: "/tmp/workspace" };
+  let spawnCalls = 0;
+  const requestMethods = [];
+
+  client._spawn = async (spec) => {
+    spawnCalls += 1;
+    client.process = /** @type {any} */ ({});
+    client.launchSpec = { ...spec };
+  };
+  client.request = async (method) => {
+    requestMethods.push(method);
+    if (method === "initialize") {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { serverInfo: { name: "CodeClone MCP" } };
+    }
+    if (method === "tools/list") {
+      return { tools: [{ name: "analyze_repository" }] };
+    }
+    throw new Error(`Unexpected method ${method}`);
+  };
+  client._write = () => {};
+
+  const [first, second] = await Promise.all([
+    client.connect(launchSpec),
+    client.connect(launchSpec),
+  ]);
+
+  assert.equal(spawnCalls, 1);
+  assert.deepEqual(requestMethods, ["initialize", "tools/list"]);
+  assert.deepEqual(first, second);
+  assert.equal(client.isConnected(), true);
+});

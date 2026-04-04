@@ -16,6 +16,7 @@ CodeClone inside VS Code is designed for:
 
 - triage-first structural review
 - changed-files review against the current diff
+- conservative first-pass analysis with an explicit deeper-review follow-up
 - baseline-aware distinction between known debt and new regressions
 - guided drill-down from hotspot to source, finding detail, and remediation
 - lightweight code navigation without turning the sidebar into a second report app
@@ -63,6 +64,8 @@ codeclone-mcp --help
 2. Open the `CodeClone` view container.
 3. Run `Analyze Workspace`.
 4. Use `Review Priorities` or `Review Changes` as the first pass.
+5. If the first pass looks clean but you want smaller repeated units, open
+   `Analysis Depth`.
 
 If the local launcher is missing, use `Setup Help` from the view or command
 palette.
@@ -164,6 +167,16 @@ Default cache policy for analysis requests.
 ### `codeclone.analysis.changedDiffRef`
 
 Git revision used by `Review Changes`.
+
+### `codeclone.analysis.profile`
+
+Keeps the default conservative pass explicit and exposes `Deeper review` or
+`Custom` only as deliberate higher-sensitivity follow-ups.
+
+### `codeclone.analysis.minLoc` and related threshold settings
+
+Function, block, and segment thresholds used only when
+`codeclone.analysis.profile` is set to `custom`.
 
 ### `codeclone.ui.showStatusBar`
 

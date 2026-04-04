@@ -4,6 +4,30 @@ const path = require("node:path");
 
 const STALE_REASON_EDITOR = "unsaved editor changes";
 const STALE_REASON_WORKSPACE = "workspace changed after this run";
+const ANALYSIS_PROFILE_DEFAULTS = "defaults";
+const ANALYSIS_PROFILE_DEEPER_REVIEW = "deeperReview";
+const ANALYSIS_PROFILE_CUSTOM = "custom";
+const ANALYSIS_PROFILE_IDS = new Set([
+  ANALYSIS_PROFILE_DEFAULTS,
+  ANALYSIS_PROFILE_DEEPER_REVIEW,
+  ANALYSIS_PROFILE_CUSTOM,
+]);
+const DEFAULT_ANALYSIS_THRESHOLDS = Object.freeze({
+  minLoc: 10,
+  minStmt: 6,
+  blockMinLoc: 20,
+  blockMinStmt: 8,
+  segmentMinLoc: 20,
+  segmentMinStmt: 10,
+});
+const DEEP_REVIEW_ANALYSIS_THRESHOLDS = Object.freeze({
+  minLoc: 5,
+  minStmt: 2,
+  blockMinLoc: 5,
+  blockMinStmt: 2,
+  segmentMinLoc: 5,
+  segmentMinStmt: 2,
+});
 
 function signedInteger(value) {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -93,12 +117,127 @@ function workspaceLocalLauncherCandidates(
   ];
 }
 
+function normalizeAnalysisProfile(value) {
+  const profileId = String(value || "").trim();
+  return ANALYSIS_PROFILE_IDS.has(profileId)
+    ? profileId
+    : ANALYSIS_PROFILE_DEFAULTS;
+}
+
+function nonNegativeInteger(value, fallback) {
+  const parsed =
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.trunc(value)
+      : Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function customAnalysisThresholds(value = {}) {
+  return {
+    minLoc: nonNegativeInteger(value.minLoc, DEFAULT_ANALYSIS_THRESHOLDS.minLoc),
+    minStmt: nonNegativeInteger(
+      value.minStmt,
+      DEFAULT_ANALYSIS_THRESHOLDS.minStmt
+    ),
+    blockMinLoc: nonNegativeInteger(
+      value.blockMinLoc,
+      DEFAULT_ANALYSIS_THRESHOLDS.blockMinLoc
+    ),
+    blockMinStmt: nonNegativeInteger(
+      value.blockMinStmt,
+      DEFAULT_ANALYSIS_THRESHOLDS.blockMinStmt
+    ),
+    segmentMinLoc: nonNegativeInteger(
+      value.segmentMinLoc,
+      DEFAULT_ANALYSIS_THRESHOLDS.segmentMinLoc
+    ),
+    segmentMinStmt: nonNegativeInteger(
+      value.segmentMinStmt,
+      DEFAULT_ANALYSIS_THRESHOLDS.segmentMinStmt
+    ),
+  };
+}
+
+function analysisThresholdOverrides(thresholds) {
+  return {
+    min_loc: thresholds.minLoc,
+    min_stmt: thresholds.minStmt,
+    block_min_loc: thresholds.blockMinLoc,
+    block_min_stmt: thresholds.blockMinStmt,
+    segment_min_loc: thresholds.segmentMinLoc,
+    segment_min_stmt: thresholds.segmentMinStmt,
+  };
+}
+
+function formatAnalysisThresholdSummary(profileId, thresholds) {
+  switch (profileId) {
+    case ANALYSIS_PROFILE_DEFAULTS:
+      return "Repo defaults / pyproject";
+    case ANALYSIS_PROFILE_DEEPER_REVIEW:
+      return "5/2 across functions, blocks, and segments";
+    default:
+      return (
+        `func ${thresholds.minLoc}/${thresholds.minStmt} · ` +
+        `block ${thresholds.blockMinLoc}/${thresholds.blockMinStmt} · ` +
+        `seg ${thresholds.segmentMinLoc}/${thresholds.segmentMinStmt}`
+      );
+  }
+}
+
+function resolveAnalysisSettings(value = {}) {
+  const profileId = normalizeAnalysisProfile(value.profile);
+  const thresholds =
+    profileId === ANALYSIS_PROFILE_DEEPER_REVIEW
+      ? { ...DEEP_REVIEW_ANALYSIS_THRESHOLDS }
+      : customAnalysisThresholds(value);
+  const label =
+    profileId === ANALYSIS_PROFILE_DEFAULTS
+      ? "Conservative"
+      : profileId === ANALYSIS_PROFILE_DEEPER_REVIEW
+        ? "Deeper review"
+        : "Custom";
+  const detail =
+    profileId === ANALYSIS_PROFILE_DEFAULTS
+      ? "Use repo defaults or pyproject for the first pass."
+      : profileId === ANALYSIS_PROFILE_DEEPER_REVIEW
+        ? "Lower thresholds for a deliberate second pass on smaller units."
+        : "Use the explicit threshold settings from this workspace.";
+  return {
+    profileId,
+    label,
+    detail,
+    thresholds,
+    thresholdSummary: formatAnalysisThresholdSummary(profileId, thresholds),
+    overrides:
+      profileId === ANALYSIS_PROFILE_DEFAULTS
+        ? {}
+        : analysisThresholdOverrides(thresholds),
+  };
+}
+
+function sameAnalysisSettings(left, right) {
+  if (!left || !right) {
+    return false;
+  }
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 module.exports = {
+  ANALYSIS_PROFILE_CUSTOM,
+  ANALYSIS_PROFILE_DEEPER_REVIEW,
+  ANALYSIS_PROFILE_DEFAULTS,
+  DEFAULT_ANALYSIS_THRESHOLDS,
+  DEEP_REVIEW_ANALYSIS_THRESHOLDS,
   STALE_REASON_EDITOR,
   STALE_REASON_WORKSPACE,
+  analysisThresholdOverrides,
+  customAnalysisThresholds,
   normalizedLaunchSpec,
+  normalizeAnalysisProfile,
   parseUtcTimestamp,
   resolveWorkspacePath,
+  resolveAnalysisSettings,
+  sameAnalysisSettings,
   signedInteger,
   staleMessage,
   trimTail,

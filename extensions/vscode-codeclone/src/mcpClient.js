@@ -34,6 +34,8 @@ class CodeCloneMcpClient extends EventEmitter {
     this.launchSpec = null;
     this.serverInfo = null;
     this.toolNames = [];
+    this.connectPromise = null;
+    this.connectLaunchSpec = null;
   }
 
   isConnected() {
@@ -56,16 +58,36 @@ class CodeCloneMcpClient extends EventEmitter {
   }
 
   async connect(launchSpec) {
-    if (
-      this.process !== null &&
-      this.connected &&
-      this._sameLaunchSpec(launchSpec, this.launchSpec)
-    ) {
-      return {
-        serverInfo: this.serverInfo,
-        toolNames: [...this.toolNames],
-      };
+    if (this._sameLaunchSpec(launchSpec, this.launchSpec) && this.connected) {
+      return this._connectionResult();
     }
+    if (this.connectPromise) {
+      if (this._sameLaunchSpec(launchSpec, this.connectLaunchSpec)) {
+        return this.connectPromise;
+      }
+      try {
+        await this.connectPromise;
+      } catch {
+        // Ignore the previous attempt here; the new launch spec gets its own try.
+      }
+      if (this._sameLaunchSpec(launchSpec, this.launchSpec) && this.connected) {
+        return this._connectionResult();
+      }
+    }
+    const attempt = this._connectInternal(launchSpec);
+    this.connectPromise = attempt;
+    this.connectLaunchSpec = { ...launchSpec };
+    try {
+      return await attempt;
+    } finally {
+      if (this.connectPromise === attempt) {
+        this.connectPromise = null;
+        this.connectLaunchSpec = null;
+      }
+    }
+  }
+
+  async _connectInternal(launchSpec) {
     if (this.process !== null || this.connected || this.initialized) {
       await this.dispose({ emitState: false });
     }
@@ -97,10 +119,7 @@ class CodeCloneMcpClient extends EventEmitter {
         toolNames: [...this.toolNames],
         launchSpec: this.getConnectionSnapshot().launchSpec,
       });
-      return {
-        serverInfo: this.serverInfo,
-        toolNames: [...this.toolNames],
-      };
+      return this._connectionResult();
     } catch (error) {
       await this.dispose({ emitState: false });
       throw error;
@@ -140,6 +159,8 @@ class CodeCloneMcpClient extends EventEmitter {
 
   async dispose(options = {}) {
     const emitState = options.emitState !== false;
+    this.connectPromise = null;
+    this.connectLaunchSpec = null;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(new MCPClientError("CodeClone MCP connection closed."));
@@ -375,6 +396,13 @@ class CodeCloneMcpClient extends EventEmitter {
       left.cwd === right.cwd &&
       JSON.stringify(left.args) === JSON.stringify(right.args)
     );
+  }
+
+  _connectionResult() {
+    return {
+      serverInfo: this.serverInfo,
+      toolNames: [...this.toolNames],
+    };
   }
 }
 

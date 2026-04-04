@@ -12,6 +12,8 @@ The extension helps you:
 
 - analyze the current workspace
 - review changed files against a git diff
+- start with a conservative first pass and lower thresholds only when you need
+  a more sensitive follow-up
 - focus on new regressions and production hotspots first
 - jump directly to source locations
 - open canonical finding or remediation detail only when needed
@@ -85,7 +87,9 @@ not as the primary IDE workflow.
 1. Open the `CodeClone` view container.
 2. Run `Analyze Workspace`.
 3. Use `Review Priorities` or `Review Changes`.
-4. Reveal source before opening deeper detail.
+4. If the first pass looks clean but you want smaller repeated units, open
+   `Analysis Depth`.
+5. Reveal source before opening deeper detail.
 
 If the launcher is missing, use `Setup Help` from the extension.
 
@@ -106,6 +110,7 @@ the local MCP launcher.
 
 - native VS Code views first, not a custom report dashboard
 - baseline-aware review instead of broad lint-style listing
+- conservative first pass by default; deeper sensitivity must stay explicit
 - report-only layers stay visually separate from findings and health
 - repository truth stays in CodeClone MCP and canonical report semantics
 
@@ -116,6 +121,19 @@ the local MCP launcher.
 - no persistent reviewed markers across MCP sessions
 - `Open in HTML Report` opens a local HTML report only when it exists and looks
   fresh enough for the current run
+
+## Settings that shape analysis depth
+
+- `codeclone.analysis.profile` keeps the default conservative first pass
+  explicit and exposes `Deeper review` and `Custom` as deliberate follow-ups
+- `codeclone.analysis.minLoc`
+- `codeclone.analysis.minStmt`
+- `codeclone.analysis.blockMinLoc`
+- `codeclone.analysis.blockMinStmt`
+- `codeclone.analysis.segmentMinLoc`
+- `codeclone.analysis.segmentMinStmt`
+
+Custom thresholds apply only when the profile is set to `custom`.
 
 ## Source of truth
 

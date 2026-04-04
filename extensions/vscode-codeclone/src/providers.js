@@ -19,6 +19,7 @@ class WorkspaceState {
     this.metricsSummary = null;
     this.latestTriage = null;
     this.changedSummary = null;
+    this.analysisSettings = null;
     this.reviewed = [];
     this.lastScope = "workspace";
     this.lastUpdatedAt = null;

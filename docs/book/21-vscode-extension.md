@@ -61,8 +61,9 @@ The intended IDE path mirrors CodeClone MCP:
 1. `Analyze Workspace` or `Review Changes`
 2. compact overview and priority review
 3. review new regressions or production hotspots
-4. reveal source
-5. open canonical finding or remediation only when needed
+4. use `Analysis Depth` only when you need a higher-sensitivity follow-up
+5. reveal source
+6. open canonical finding or remediation only when needed
 
 This is deliberately different from a lint-list model. The extension should
 prefer guided review over broad enumeration.
@@ -73,6 +74,8 @@ The extension currently supports:
 
 - full-workspace analysis
 - changed-files analysis against a configured git diff reference
+- conservative default analysis with an explicit deeper-review or custom-threshold
+  follow-up profile
 - compact overview of structural health, current run state, and baseline drift
 - review queues for new regressions, production hotspots, changed-scope
   findings, and report-only `Overloaded Modules`
@@ -127,6 +130,9 @@ For this reason:
 
 - **Native VS Code first**: tree views, status bar, Quick Pick, CodeLens, and
   file decorations before any custom UI.
+- **Conservative by default**: the extension starts with repo defaults or
+  `pyproject`-resolved thresholds and treats lower-threshold analysis as an
+  explicit exploratory follow-up.
 - **Source-first**: findings prefer `Reveal Source` over detail panels;
   canonical detail and HTML report bridge are opt-in.
 - **Report-only separation**: Overloaded Modules stay visually distinct from

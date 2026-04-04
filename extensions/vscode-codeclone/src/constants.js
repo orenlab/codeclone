@@ -2,6 +2,7 @@
 
 const HELP_TOPICS = [
   "workflow",
+  "analysis_profile",
   "suppressions",
   "baseline",
   "latest_runs",
@@ -58,6 +59,28 @@ const HOTSPOT_GROUPS_BY_MODE = {
   all: HOTSPOT_GROUPS.map((group) => group.id),
 };
 
+const ANALYSIS_PROFILE_OPTIONS = [
+  {
+    id: "defaults",
+    label: "Conservative",
+    description: "Recommended",
+    detail: "Use repo defaults or pyproject for the first pass.",
+  },
+  {
+    id: "deeperReview",
+    label: "Deeper review",
+    description: "Higher sensitivity",
+    detail:
+      "Lower thresholds for a deliberate second pass on smaller repeated units.",
+  },
+  {
+    id: "custom",
+    label: "Custom",
+    description: "Workspace settings",
+    detail: "Use the explicit function, block, and segment thresholds in settings.",
+  },
+];
+
 const REVIEW_DECORATION_THEMES = {
   new: {
     badge: "N",
@@ -81,6 +104,7 @@ const WORKSPACE_STATE_LAST_HELP_TOPIC = "codeclone.lastHelpTopic";
 
 module.exports = {
   HELP_TOPICS,
+  ANALYSIS_PROFILE_OPTIONS,
   HOTSPOT_GROUPS,
   HOTSPOT_FOCUS_MODES,
   HOTSPOT_GROUPS_BY_MODE,

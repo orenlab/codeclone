@@ -66,6 +66,7 @@
     "onCommand:codeclone.connectMcp",
     "onCommand:codeclone.analyzeWorkspace",
     "onCommand:codeclone.analyzeChangedFiles",
+    "onCommand:codeclone.setAnalysisProfile",
     "onCommand:codeclone.refreshCurrentRun",
     "onCommand:codeclone.openProductionTriage",
     "onCommand:codeclone.reviewPriorityQueue",
@@ -119,12 +120,12 @@
       {
         "view": "codeclone.overview",
         "when": "isWorkspaceTrusted && !codeclone.connected && !codeclone.hasRun",
-        "contents": "Start with [Analyze Workspace](command:codeclone.analyzeWorkspace) to create the first structural run for this workspace.\n\nUse [Review Changes](command:codeclone.analyzeChangedFiles) when you want a diff-focused pass.\n\nNeed local setup? Open [Setup Help](command:codeclone.openSetupHelp).\n\nUse [Verify Local Server](command:codeclone.connectMcp) only when you want to check the launcher manually."
+        "contents": "Start with [Analyze Workspace](command:codeclone.analyzeWorkspace) for a conservative first structural pass.\n\nUse [Review Changes](command:codeclone.analyzeChangedFiles) when you want a diff-focused pass, and [Analysis Depth](command:codeclone.setAnalysisProfile) only when you need a higher-sensitivity follow-up.\n\nNeed local setup? Open [Setup Help](command:codeclone.openSetupHelp).\n\nUse [Verify Local Server](command:codeclone.connectMcp) only when you want to check the launcher manually."
       },
       {
         "view": "codeclone.overview",
         "when": "isWorkspaceTrusted && codeclone.connected && !codeclone.hasRun",
-        "contents": "CodeClone is ready for this workspace. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) for a full structural pass, or [Review Changes](command:codeclone.analyzeChangedFiles) for a diff-focused review.\n\nNeed a quick mental model? Open [workflow help](command:codeclone.showHelpTopic)."
+        "contents": "CodeClone is ready for this workspace. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) for a conservative full pass, or [Review Changes](command:codeclone.analyzeChangedFiles) for a diff-focused review.\n\nIf the first pass looks clean but you want smaller units, open [Analysis Depth](command:codeclone.setAnalysisProfile).\n\nNeed a quick mental model? Open [workflow help](command:codeclone.showHelpTopic)."
       },
       {
         "view": "codeclone.hotspots",
@@ -170,6 +171,12 @@
         "title": "Review Changes",
         "category": "CodeClone",
         "icon": "$(git-commit)"
+      },
+      {
+        "command": "codeclone.setAnalysisProfile",
+        "title": "Analysis Depth",
+        "category": "CodeClone",
+        "icon": "$(settings-gear)"
       },
       {
         "command": "codeclone.refreshCurrentRun",
@@ -394,14 +401,19 @@
           "group": "navigation@3"
         },
         {
+          "command": "codeclone.setAnalysisProfile",
+          "when": "view == codeclone.overview && isWorkspaceTrusted",
+          "group": "secondary@1"
+        },
+        {
           "command": "codeclone.reviewPriorityQueue",
           "when": "view == codeclone.overview && isWorkspaceTrusted && codeclone.hasRun",
-          "group": "secondary@1"
+          "group": "secondary@2"
         },
         {
           "command": "codeclone.connectMcp",
           "when": "view == codeclone.overview && isWorkspaceTrusted && !codeclone.connected",
-          "group": "secondary@2"
+          "group": "secondary@3"
         },
         {
           "command": "codeclone.manageWorkspaceTrust",
@@ -429,14 +441,19 @@
           "group": "navigation@3"
         },
         {
+          "command": "codeclone.setAnalysisProfile",
+          "when": "view == codeclone.hotspots && isWorkspaceTrusted",
+          "group": "secondary@1"
+        },
+        {
           "command": "codeclone.analyzeChangedFiles",
           "when": "view == codeclone.hotspots && isWorkspaceTrusted && codeclone.hasRun",
-          "group": "secondary@1"
+          "group": "secondary@2"
         },
         {
           "command": "codeclone.openProductionTriage",
           "when": "view == codeclone.hotspots && isWorkspaceTrusted && codeclone.hasRun",
-          "group": "secondary@2"
+          "group": "secondary@3"
         },
         {
           "command": "codeclone.analyzeWorkspace",
@@ -640,6 +657,52 @@
           "type": "string",
           "default": "HEAD",
           "description": "Git revision used for changed-files analysis."
+        },
+        "codeclone.analysis.profile": {
+          "type": "string",
+          "enum": [
+            "defaults",
+            "deeperReview",
+            "custom"
+          ],
+          "default": "defaults",
+          "description": "Analysis sensitivity profile. Start with conservative defaults, then lower thresholds only for an explicit deeper pass."
+        },
+        "codeclone.analysis.minLoc": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 0,
+          "description": "Custom function minimum LOC. Used only when analysis.profile is set to custom."
+        },
+        "codeclone.analysis.minStmt": {
+          "type": "integer",
+          "default": 6,
+          "minimum": 0,
+          "description": "Custom function minimum statement count. Used only when analysis.profile is set to custom."
+        },
+        "codeclone.analysis.blockMinLoc": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 0,
+          "description": "Custom block minimum LOC. Used only when analysis.profile is set to custom."
+        },
+        "codeclone.analysis.blockMinStmt": {
+          "type": "integer",
+          "default": 8,
+          "minimum": 0,
+          "description": "Custom block minimum statement count. Used only when analysis.profile is set to custom."
+        },
+        "codeclone.analysis.segmentMinLoc": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 0,
+          "description": "Custom segment minimum LOC. Used only when analysis.profile is set to custom."
+        },
+        "codeclone.analysis.segmentMinStmt": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 0,
+          "description": "Custom segment minimum statement count. Used only when analysis.profile is set to custom."
         },
         "codeclone.ui.showStatusBar": {
           "type": "boolean",

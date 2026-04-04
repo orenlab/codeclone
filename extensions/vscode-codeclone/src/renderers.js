@@ -18,8 +18,9 @@ function markdownBulletList(values) {
 }
 
 function renderHelpMarkdown(topic, payload) {
+  const titleTopic = String(topic || "").replace(/_/g, " ");
   const lines = [
-    `# CodeClone MCP Help: ${topic}`,
+    `# CodeClone MCP Help: ${titleTopic}`,
     "",
     payload.summary || "",
     "",

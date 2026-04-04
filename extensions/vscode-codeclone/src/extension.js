@@ -6,6 +6,7 @@ const path = require("node:path");
 const vscode = require("vscode");
 
 const {
+  ANALYSIS_PROFILE_OPTIONS,
   HELP_TOPICS,
   HOTSPOT_GROUPS,
   HOTSPOT_FOCUS_MODES,
@@ -68,8 +69,12 @@ const {
   sameGitSnapshot,
 } = require("./runtime");
 const {
+  ANALYSIS_PROFILE_CUSTOM,
+  ANALYSIS_PROFILE_DEFAULTS,
   STALE_REASON_EDITOR,
   STALE_REASON_WORKSPACE,
+  resolveAnalysisSettings,
+  sameAnalysisSettings,
   normalizedLaunchSpec,
   parseUtcTimestamp,
   resolveWorkspacePath,
@@ -81,6 +86,7 @@ const {
 class CodeCloneController {
   constructor(context) {
     this.context = context;
+    this.disposed = false;
     this.outputChannel = vscode.window.createOutputChannel("CodeClone");
     this.client = new CodeCloneMcpClient(this.outputChannel);
     this.states = new Map();
@@ -134,7 +140,10 @@ class CodeCloneController {
       treeDataProvider: this.sessionProvider,
       showCollapseAll: false,
     });
-    this.client.on("state", (state) => {
+    this.onClientState = (state) => {
+      if (this.disposed) {
+        return;
+      }
       this.connectionInfo.connected = Boolean(state.connected);
       this.connectionInfo.serverInfo = state.connected
         ? state.serverInfo || null
@@ -148,12 +157,17 @@ class CodeCloneController {
       this.updateContextKeys();
       this.updateStatusBar();
       this.refreshAllViews();
-    });
-    this.client.on("exit", async () => {
+    };
+    this.onClientExit = async () => {
+      if (this.disposed) {
+        return;
+      }
       await vscode.window.showWarningMessage(
         "The local CodeClone server disconnected. Run Analyze Workspace or Review Changes to reconnect."
       );
-    });
+    };
+    this.client.on("state", this.onClientState);
+    this.client.on("exit", this.onClientExit);
     context.subscriptions.push(
       this.outputChannel,
       this.statusBar,
@@ -185,12 +199,15 @@ class CodeCloneController {
       vscode.window.onDidChangeWindowState((state) =>
         this.handleWindowStateChanged(state)
       ),
+      vscode.workspace.onDidChangeWorkspaceFolders((event) =>
+        this.handleWorkspaceFoldersChanged(event)
+      ),
       vscode.workspace.onDidGrantWorkspaceTrust(() =>
         this.handleWorkspaceTrustGranted()
       ),
       {
         dispose: () => {
-          void this.client.dispose();
+          void this.dispose();
         },
       }
     );
@@ -198,6 +215,23 @@ class CodeCloneController {
     this.updateContextKeys();
     this.updateStatusBar();
     this.updateViewChrome();
+  }
+
+  async dispose() {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    if (this.revealDecorationTimeout) {
+      clearTimeout(this.revealDecorationTimeout);
+      this.revealDecorationTimeout = null;
+    }
+    this.client.off("state", this.onClientState);
+    this.client.off("exit", this.onClientExit);
+    this.activeReviewTarget = null;
+    this.fileDecorations.clear();
+    this.states.clear();
+    await this.client.dispose({ emitState: false });
   }
 
   registerCommands() {
@@ -213,6 +247,9 @@ class CodeCloneController {
       ),
       vscode.commands.registerCommand("codeclone.analyzeChangedFiles", (arg) =>
         this.analyzeChangedFiles(arg)
+      ),
+      vscode.commands.registerCommand("codeclone.setAnalysisProfile", (arg) =>
+        this.setAnalysisProfile(arg)
       ),
       vscode.commands.registerCommand("codeclone.refreshCurrentRun", () =>
         this.refreshCurrentRun()
@@ -408,6 +445,40 @@ class CodeCloneController {
     return this.pickWorkspaceFolder(prompt);
   }
 
+  async resolvePreferredFolderFromArg(arg, prompt) {
+    if (arg && arg.workspaceKey && this.states.has(arg.workspaceKey)) {
+      return this.states.get(arg.workspaceKey).folder;
+    }
+    const preferred = this.getPreferredFolder();
+    if (preferred) {
+      return preferred;
+    }
+    const primaryState = this.getPrimaryState();
+    if (primaryState) {
+      return primaryState.folder;
+    }
+    return this.pickWorkspaceFolder(prompt);
+  }
+
+  configurationTarget() {
+    return (vscode.workspace.workspaceFolders || []).length > 1
+      ? vscode.ConfigurationTarget.WorkspaceFolder
+      : vscode.ConfigurationTarget.Workspace;
+  }
+
+  configuredAnalysisSettings(folder) {
+    const config = vscode.workspace.getConfiguration("codeclone", folder.uri);
+    return resolveAnalysisSettings({
+      profile: config.get("analysis.profile", "defaults"),
+      minLoc: config.get("analysis.minLoc", 10),
+      minStmt: config.get("analysis.minStmt", 6),
+      blockMinLoc: config.get("analysis.blockMinLoc", 20),
+      blockMinStmt: config.get("analysis.blockMinStmt", 8),
+      segmentMinLoc: config.get("analysis.segmentMinLoc", 20),
+      segmentMinStmt: config.get("analysis.segmentMinStmt", 10),
+    });
+  }
+
   stateForDocument(document) {
     if (!document || !document.uri) {
       return null;
@@ -458,6 +529,32 @@ class CodeCloneController {
       return;
     }
     await this.refreshStaleState(state);
+  }
+
+  handleWorkspaceFoldersChanged(event) {
+    if (this.disposed || !event.removed.length) {
+      return;
+    }
+    const removedKeys = new Set(
+      event.removed.map((folder) => folder.uri.toString())
+    );
+    let changed = false;
+    for (const key of removedKeys) {
+      changed = this.states.delete(key) || changed;
+    }
+    if (!changed) {
+      return;
+    }
+    if (
+      this.activeReviewTarget &&
+      removedKeys.has(this.activeReviewTarget.workspaceKey)
+    ) {
+      this.activeReviewTarget = null;
+    }
+    this.rebuildFileDecorations();
+    this.updateContextKeys();
+    this.updateStatusBar();
+    this.refreshAllViews();
   }
 
   async resolveLaunchSpec(folder) {
@@ -566,7 +663,7 @@ class CodeCloneController {
   }
 
   async refreshStaleState(state) {
-    if (!state || !state.latestSummary) {
+    if (this.disposed || !state || !state.latestSummary) {
       return;
     }
     const now = Date.now();
@@ -590,6 +687,9 @@ class CodeCloneController {
       return;
     }
     const snapshot = await captureWorkspaceGitSnapshot(state.folder);
+    if (this.disposed) {
+      return;
+    }
     if (!sameGitSnapshot(snapshot, state.gitSnapshot)) {
       state.stale = true;
       state.staleReason = STALE_REASON_WORKSPACE;
@@ -603,7 +703,7 @@ class CodeCloneController {
   }
 
   async refreshReviewArtifacts(state) {
-    if (!state || !state.currentRunId) {
+    if (this.disposed || !state || !state.currentRunId) {
       if (state) {
         state.reviewArtifacts = emptyReviewArtifacts();
         state.groupCache.clear();
@@ -654,6 +754,9 @@ class CodeCloneController {
         limit: 25,
       }),
     ]);
+    if (this.disposed) {
+      return;
+    }
     state.reviewArtifacts = {
       newRegressions: safeArray(newRegressionsResponse.items),
       productionHotspots: safeArray(productionHotspotsResponse.items),
@@ -665,6 +768,9 @@ class CodeCloneController {
   }
 
   rebuildFileDecorations() {
+    if (this.disposed) {
+      return;
+    }
     this.fileDecorations.clear();
     for (const state of this.states.values()) {
       if (!state.latestSummary) {
@@ -759,6 +865,84 @@ class CodeCloneController {
     await this.runAnalysis(folder, true);
   }
 
+  async setAnalysisProfile(arg) {
+    const folder = await this.resolvePreferredFolderFromArg(
+      arg,
+      "Select a workspace for CodeClone analysis settings"
+    );
+    if (!folder) {
+      return;
+    }
+    const currentSettings = this.configuredAnalysisSettings(folder);
+    const state = this.getWorkspaceState(folder);
+    const picked = await vscode.window.showQuickPick(
+      ANALYSIS_PROFILE_OPTIONS.map((entry) => ({
+        label: entry.label,
+        description:
+          entry.id === currentSettings.profileId
+            ? "Selected for next run"
+            : entry.description,
+        detail: entry.detail,
+        profileId: entry.id,
+      })),
+      {
+        placeHolder:
+          "Select how sensitive CodeClone should be on the next analysis run",
+        matchOnDetail: true,
+      }
+    );
+    if (!picked) {
+      return;
+    }
+
+    const config = vscode.workspace.getConfiguration("codeclone", folder.uri);
+    await config.update(
+      "analysis.profile",
+      picked.profileId,
+      this.configurationTarget()
+    );
+
+    const nextSettings = this.configuredAnalysisSettings(folder);
+    this.refreshAllViews();
+    this.updateStatusBar();
+    this.updateViewChrome();
+
+    const rerunActions =
+      picked.profileId === ANALYSIS_PROFILE_CUSTOM
+        ? state && state.latestSummary
+          ? state.lastScope === "changed"
+            ? ["Open Settings", "Review Changes", "Analyze Workspace", "Later"]
+            : ["Open Settings", "Analyze Workspace", "Review Changes", "Later"]
+          : ["Open Settings", "Later"]
+        : state && state.latestSummary
+          ? state.lastScope === "changed"
+            ? ["Review Changes", "Analyze Workspace", "Later"]
+            : ["Analyze Workspace", "Review Changes", "Later"]
+          : ["Analyze Workspace", "Later"];
+    const message = `CodeClone analysis depth set to ${nextSettings.label}.`;
+    const choice = await vscode.window.showInformationMessage(
+      picked.profileId === ANALYSIS_PROFILE_CUSTOM
+        ? `${message} Update the workspace thresholds if you want custom values before the next run.`
+        : `${message} Re-run analysis when you want the new profile to take effect.`,
+      ...rerunActions
+    );
+
+    if (choice === "Analyze Workspace") {
+      await this.runAnalysis(folder, false);
+      return;
+    }
+    if (choice === "Review Changes") {
+      await this.runAnalysis(folder, true);
+      return;
+    }
+    if (choice === "Open Settings") {
+      await vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        "@ext:orenlab.codeclone codeclone.analysis"
+      );
+    }
+  }
+
   async refreshCurrentRun() {
     const state = this.getPrimaryState();
     if (!state) {
@@ -769,13 +953,21 @@ class CodeCloneController {
   }
 
   async runAnalysis(folder, changedMode) {
+    if (this.disposed) {
+      return;
+    }
     const state = this.getWorkspaceState(folder);
     const config = vscode.workspace.getConfiguration("codeclone", folder.uri);
     const cachePolicy = config.get("analysis.cachePolicy", "reuse");
     const diffRef = config.get("analysis.changedDiffRef", "HEAD");
+    const analysisSettings = this.configuredAnalysisSettings(folder);
     const title = changedMode
       ? `CodeClone: Analyzing changed files in ${folder.name}`
       : `CodeClone: Analyzing ${folder.name}`;
+    const profileTitleSuffix =
+      analysisSettings.profileId === ANALYSIS_PROFILE_DEFAULTS
+        ? ""
+        : ` (${analysisSettings.label})`;
     const previousText = this.statusBar.text;
     this.statusBar.text = "$(loading~spin) CodeClone analyzing";
     this.statusBar.show();
@@ -783,7 +975,7 @@ class CodeCloneController {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title,
+          title: `${title}${profileTitleSuffix}`,
         },
         async () => {
           await this.ensureConnected(folder);
@@ -792,10 +984,12 @@ class CodeCloneController {
                 root: folder.uri.fsPath,
                 git_diff_ref: diffRef,
                 cache_policy: cachePolicy,
+                ...analysisSettings.overrides,
               })
             : await this.client.callTool("analyze_repository", {
                 root: folder.uri.fsPath,
                 cache_policy: cachePolicy,
+                ...analysisSettings.overrides,
               });
           const runId = String(analysisPayload.run_id);
           const summary = await this.client.callTool("get_run_summary", {
@@ -819,6 +1013,7 @@ class CodeCloneController {
           state.latestTriage = triage;
           state.metricsSummary = metrics.summary || metrics;
           state.changedSummary = changedMode ? analysisPayload : null;
+          state.analysisSettings = analysisSettings;
           state.reviewed = safeArray(reviewed.items);
           state.lastScope = changedMode ? "changed" : "workspace";
           state.lastUpdatedAt = new Date();
@@ -831,13 +1026,21 @@ class CodeCloneController {
         }
       );
       this.clearActiveReviewTarget();
+      if (this.disposed) {
+        return;
+      }
       this.updateContextKeys();
       this.updateStatusBar();
       this.refreshAllViews();
       await this.openOverview();
     } catch (error) {
-      this.handleError(error, "CodeClone analysis failed.");
+      if (!this.disposed) {
+        this.handleError(error, "CodeClone analysis failed.");
+      }
     } finally {
+      if (this.disposed) {
+        return;
+      }
       if (!this.connectionInfo.connected) {
         this.statusBar.text = "CodeClone disconnected";
       } else if (previousText) {
@@ -1888,6 +2091,7 @@ class CodeCloneController {
         state.metricsSummary = null;
         state.latestTriage = null;
         state.changedSummary = null;
+        state.analysisSettings = null;
         state.reviewed = [];
         state.reviewArtifacts = emptyReviewArtifacts();
         state.gitSnapshot = null;
@@ -1911,15 +2115,16 @@ class CodeCloneController {
   async pickHelpTopic() {
     const picked = await vscode.window.showQuickPick(
       HELP_TOPICS.map((topic) => ({
-        label: topic,
+        label: topic.replace(/_/g, " "),
         description:
           topic === this.lastHelpTopic ? "Last opened" : "CodeClone MCP help topic",
+        topic,
       })),
       {
         placeHolder: "Select a CodeClone MCP help topic",
       }
     );
-    return picked ? picked.label : null;
+    return picked ? picked.topic : null;
   }
 
   async showMarkdownDocument(markdown) {
@@ -2012,11 +2217,36 @@ class CodeCloneController {
     ];
   }
 
+  currentAnalysisSettings(state) {
+    if (!state) {
+      return null;
+    }
+    return state.analysisSettings || this.configuredAnalysisSettings(state.folder);
+  }
+
+  pendingAnalysisSettings(state) {
+    if (!state) {
+      return null;
+    }
+    const currentSettings = this.currentAnalysisSettings(state);
+    const configuredSettings = this.configuredAnalysisSettings(state.folder);
+    return sameAnalysisSettings(currentSettings, configuredSettings)
+      ? null
+      : configuredSettings;
+  }
+
   async getOverviewChildren(node) {
     const state = this.getPrimaryState();
     if (!state || !state.latestSummary) {
       return [];
     }
+    const currentAnalysisSettings = this.currentAnalysisSettings(state);
+    const pendingAnalysisSettings = this.pendingAnalysisSettings(state);
+    const analysisCommand = {
+      command: "codeclone.setAnalysisProfile",
+      title: "Set analysis depth",
+      arguments: [{ workspaceKey: state.folder.uri.toString() }],
+    };
     const reviewCounts = {
       changed: this.reviewArtifactCount(state, "changedFiles"),
       new: this.reviewArtifactCount(state, "newRegressions"),
@@ -2044,7 +2274,9 @@ class CodeCloneController {
           label: "Current Run",
           description: state.stale
             ? `${state.currentRunId} · stale`
-            : `${state.currentRunId} · ${state.latestSummary.cache.freshness}`,
+            : currentAnalysisSettings
+              ? `${state.currentRunId} · ${currentAnalysisSettings.label.toLowerCase()}`
+              : `${state.currentRunId} · ${state.latestSummary.cache.freshness}`,
           icon: new vscode.ThemeIcon("pulse"),
         },
         {
@@ -2105,6 +2337,27 @@ class CodeCloneController {
         this.detailNode("Workspace", state.folder.name),
         this.detailNode("Run ID", state.currentRunId),
         this.detailNode(
+          "Analysis depth",
+          currentAnalysisSettings ? currentAnalysisSettings.label : "unknown",
+          analysisCommand
+        ),
+        this.detailNode(
+          "Threshold profile",
+          currentAnalysisSettings
+            ? currentAnalysisSettings.thresholdSummary
+            : "unknown",
+          analysisCommand
+        ),
+        ...(pendingAnalysisSettings
+          ? [
+              this.detailNode(
+                "Next run",
+                `${pendingAnalysisSettings.label} · pending`,
+                analysisCommand
+              ),
+            ]
+          : []),
+        this.detailNode(
           "Freshness",
           state.stale ? `stale · ${state.staleReason}` : "current"
         ),
@@ -2122,7 +2375,6 @@ class CodeCloneController {
       ];
     }
     if (node.id === "overview.triage") {
-      const triage = safeObject(state.latestTriage);
       const nextAction = this.describeNextBestAction(state);
       return [
         this.detailNode("Next best action", nextAction.label, {
@@ -2130,6 +2382,11 @@ class CodeCloneController {
           title: nextAction.title,
         }),
         this.detailNode("Focus mode", focusModeSpec(this.hotspotFocusMode).label),
+        this.detailNode(
+          "Analysis depth",
+          currentAnalysisSettings ? currentAnalysisSettings.label : "unknown",
+          analysisCommand
+        ),
         this.detailNode("New regressions", number(reviewCounts.new)),
         this.detailNode("Production hotspots", number(reviewCounts.production)),
         this.detailNode(
@@ -2277,11 +2534,32 @@ class CodeCloneController {
           ),
         ];
       }
+      const currentAnalysisSettings = this.currentAnalysisSettings(state);
+      const pendingAnalysisSettings = this.pendingAnalysisSettings(state);
+      const analysisCommand = {
+        command: "codeclone.setAnalysisProfile",
+        title: "Set analysis depth",
+        arguments: [{ workspaceKey: state.folder.uri.toString() }],
+      };
       return [
         this.detailNode("Workspace", state.folder.name),
         this.detailNode("Run ID", state.currentRunId),
         this.detailNode("Scope", formatRunScope(state.lastScope)),
         this.detailNode("Mode", state.latestSummary.mode),
+        this.detailNode(
+          "Analysis depth",
+          currentAnalysisSettings ? currentAnalysisSettings.label : "unknown",
+          analysisCommand
+        ),
+        ...(pendingAnalysisSettings
+          ? [
+              this.detailNode(
+                "Next run",
+                `${pendingAnalysisSettings.label} · pending`,
+                analysisCommand
+              ),
+            ]
+          : []),
         this.detailNode(
           "Freshness",
           state.stale ? `stale · ${state.staleReason}` : "current"
@@ -2502,6 +2780,7 @@ class CodeCloneController {
   }
 
   describeNextBestAction(state) {
+    const analysisSettings = this.currentAnalysisSettings(state);
     if (state.stale) {
       return {
         label: state.lastScope === "changed" ? "Review changes again" : "Refresh stale run",
@@ -2541,6 +2820,16 @@ class CodeCloneController {
         label: "Inspect report-only Overloaded Modules",
         command: "codeclone.focusHotspots",
         title: "Inspect report-only Overloaded Modules",
+      };
+    }
+    if (
+      analysisSettings &&
+      analysisSettings.profileId === ANALYSIS_PROFILE_DEFAULTS
+    ) {
+      return {
+        label: "Adjust analysis depth",
+        command: "codeclone.setAnalysisProfile",
+        title: "Adjust analysis depth",
       };
     }
     return {
@@ -2649,6 +2938,9 @@ class CodeCloneController {
   }
 
   refreshAllViews() {
+    if (this.disposed) {
+      return;
+    }
     this.overviewProvider.refresh();
     this.hotspotsProvider.refresh();
     this.sessionProvider.refresh();
@@ -2657,6 +2949,9 @@ class CodeCloneController {
   }
 
   updateViewChrome() {
+    if (this.disposed) {
+      return;
+    }
     const state = this.getPrimaryState();
     if (this.overviewView) {
       this.overviewView.badge = undefined;
@@ -2723,6 +3018,9 @@ class CodeCloneController {
   }
 
   updateContextKeys() {
+    if (this.disposed) {
+      return;
+    }
     const state = this.getPrimaryState();
     const activeTarget = this.activeReviewTarget;
     const targetVisibleInEditor = this.isTargetVisibleInEditor(activeTarget);
@@ -2779,6 +3077,9 @@ class CodeCloneController {
   }
 
   updateStatusBar() {
+    if (this.disposed) {
+      return;
+    }
     const showStatusBar = vscode.workspace
       .getConfiguration("codeclone")
       .get("ui.showStatusBar", true);
@@ -2826,12 +3127,18 @@ class CodeCloneController {
       : `CodeClone ${state.latestSummary.health.score}/${state.latestSummary.health.grade}`;
     this.statusBar.command = "codeclone.openOverview";
     const drift = this.baselineDrift(state);
+    const analysisSettings = this.currentAnalysisSettings(state);
+    const pendingAnalysisSettings = this.pendingAnalysisSettings(state);
     const driftLine =
       drift.newFindings !== null || drift.healthDelta !== null || drift.newClones !== null
         ? `\nBaseline drift: ${this.baselineDriftSummary(state)}`
         : "";
     this.statusBar.tooltip =
       `${state.folder.name}\nRun ${state.currentRunId}\n${state.latestSummary.findings.total} findings` +
+      (analysisSettings ? `\nAnalysis depth: ${analysisSettings.label}` : "") +
+      (pendingAnalysisSettings
+        ? `\nNext run: ${pendingAnalysisSettings.label} · pending`
+        : "") +
       driftLine +
       (state.stale ? `\nFreshness: stale · ${state.staleReason}` : "");
     this.statusBar.accessibilityInformation = {
@@ -2899,7 +3206,13 @@ function activate(context) {
   controller = new CodeCloneController(context);
 }
 
-function deactivate() {
+async function deactivate() {
+  if (controller) {
+    const activeController = controller;
+    controller = null;
+    await activeController.dispose();
+    return;
+  }
   controller = null;
 }
 

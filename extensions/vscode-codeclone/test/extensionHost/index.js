@@ -44,6 +44,10 @@ async function run() {
   ]);
 
   await vscode.commands.executeCommand("codeclone.openOverview");
+
+  if (typeof extension.exports?.deactivate === "function") {
+    await extension.exports.deactivate();
+  }
 }
 
 module.exports = { run };

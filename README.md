@@ -182,6 +182,8 @@ A preview VS Code extension ships in
 [`extensions/vscode-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/vscode-codeclone).
 It connects to `codeclone-mcp` and provides triage-first structural review inside the editor:
 overview, hotspots, review loop, and drill-down into findings or the HTML report.
+It starts with a conservative first pass and can switch to an explicit
+higher-sensitivity analysis profile for deeper local review.
 
 Docs:
 [VS Code extension guide](https://orenlab.github.io/codeclone/vscode-extension/)
