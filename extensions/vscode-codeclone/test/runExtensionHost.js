@@ -11,7 +11,11 @@ function resolveVsCodeCli() {
     "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
     "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code",
   ].filter(Boolean);
-  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+  return (
+    candidates.find(
+      (candidate) => typeof candidate === "string" && fs.existsSync(candidate)
+    ) || null
+  );
 }
 
 async function main() {
@@ -52,7 +56,7 @@ async function main() {
     child.once("error", reject);
     child.once("exit", (code) => {
       if (code === 0) {
-        resolve();
+        resolve(undefined);
         return;
       }
       reject(new Error(`VS Code extension host tests exited with code ${code}.`));

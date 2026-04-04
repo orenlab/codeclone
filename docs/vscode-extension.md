@@ -15,7 +15,7 @@ The extension helps you:
 - focus on new regressions and production hotspots first
 - jump directly to source locations
 - open canonical finding or remediation detail only when needed
-- inspect report-only God Module candidates without treating them like findings
+- inspect report-only Overloaded Module candidates without treating them like findings
 
 It does not create a second truth model and it does not mutate the repository.
 
@@ -54,7 +54,7 @@ Primary operational view for:
 - new regressions
 - production hotspots
 - changed-files findings
-- report-only God Module candidates
+- report-only Overloaded Module candidates
 
 ### Runs & Session
 

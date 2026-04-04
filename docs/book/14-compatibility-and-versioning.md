@@ -68,7 +68,7 @@ Version bump rules:
   `report_schema_version` because they alter canonical report semantics and
   integrity payload.
 - The same is true for additive canonical metrics families such as
-  `metrics.families.god_modules`: even though the layer is report-only and does
+  `metrics.families.overloaded_modules`: even though the layer is report-only and does
   not affect health/gates/findings, it still changes canonical report schema
   and integrity payload, so it requires a report-schema bump.
 - CodeClone does not currently define a separate health-model version constant.

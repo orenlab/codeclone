@@ -1568,7 +1568,7 @@ def _metrics_payload(
             "grade": health_grade,
             "dimensions": {"coverage": 99},
         },
-        "god_modules": {
+        "overloaded_modules": {
             "summary": {
                 "total": 1,
                 "candidates": 0,
@@ -1653,7 +1653,7 @@ def test_html_report_metrics_risk_branches() -> None:
     )
 
 
-def test_html_report_renders_god_modules_in_quality_and_overview() -> None:
+def test_html_report_renders_overloaded_modules_in_quality_and_overview() -> None:
     payload = _metrics_payload(
         health_score=72,
         health_grade="B",
@@ -1666,9 +1666,9 @@ def test_html_report_renders_god_modules_in_quality_and_overview() -> None:
         dead_total=1,
         dead_critical=1,
     )
-    god_modules = payload["god_modules"]
-    assert isinstance(god_modules, dict)
-    god_modules["summary"] = {
+    overloaded_modules = payload["overloaded_modules"]
+    assert isinstance(overloaded_modules, dict)
+    overloaded_modules["summary"] = {
         "total": 3,
         "candidates": 1,
         "population_status": "ok",
@@ -1676,7 +1676,7 @@ def test_html_report_renders_god_modules_in_quality_and_overview() -> None:
         "average_score": 0.42,
         "candidate_score_cutoff": 0.88,
     }
-    god_modules["items"] = [
+    overloaded_modules["items"] = [
         {
             "module": "pkg.hub",
             "relative_path": "pkg/hub.py",
@@ -1719,15 +1719,42 @@ def test_html_report_renders_god_modules_in_quality_and_overview() -> None:
 
     _assert_html_contains(
         html,
-        "God Modules",
+        "Overloaded Modules",
         "pkg.hub",
-        "Candidate profile",
+        "Top candidates",
         "0.93",
-        "hub-like shape",
-        "god-modules",
+        "overloaded-modules",
     )
+    assert "hub-like shape" not in html
     assert "Candidate cutoff" not in html
     assert "Ranked modules" not in html
+
+
+def test_html_report_renders_overloaded_modules_from_legacy_god_modules_key() -> None:
+    payload = _metrics_payload(
+        health_score=72,
+        health_grade="B",
+        complexity_max=25,
+        complexity_high_risk=1,
+        coupling_high_risk=1,
+        cohesion_low=1,
+        dep_cycles=[],
+        dep_max_depth=4,
+        dead_total=1,
+        dead_critical=1,
+    )
+    legacy_overloaded_modules = payload.pop("overloaded_modules")
+    payload["god_modules"] = legacy_overloaded_modules
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=payload,
+    )
+
+    _assert_html_contains(html, "Overloaded Modules")
 
 
 def test_html_report_renders_run_snapshot_from_canonical_inventory() -> None:
@@ -1779,15 +1806,26 @@ def test_html_report_renders_run_snapshot_from_canonical_inventory() -> None:
         report_document=report_document,
     )
 
+    inventory = cast(dict[str, object], report_document["inventory"])
+    files_inventory = cast(dict[str, object], inventory["files"])
+    code_inventory = cast(dict[str, object], inventory["code"])
+    total_found = cast(int, files_inventory["total_found"])
+    parsed_lines = cast(int, code_inventory["parsed_lines"])
+    functions = cast(int, code_inventory["functions"])
+    methods = cast(int, code_inventory["methods"])
+    classes = cast(int, code_inventory["classes"])
+    expected_summary = (
+        f"{total_found} files \u00b7 "
+        f"{parsed_lines:,} lines \u00b7 "
+        f"{functions + methods} callables \u00b7 "
+        f"{classes} classes"
+    )
     _assert_html_contains(
         html,
-        "Scan scope",
-        "Parsed lines",
-        "Callables",
-        "Cached files",
-        "22,320",
-        "158 found · 120 analyzed · 38 cached · 3 skipped",
+        "Executive Summary",
+        expected_summary,
     )
+    assert "Scan scope" not in html
 
 
 def test_html_report_metrics_without_health_score_uses_info_overview() -> None:

@@ -3308,7 +3308,7 @@ def test_cli_summary_format_stable(
     assert "Summary" in out
     assert out.count("Summary") == 1
     assert "Metrics" in out
-    assert "God Modules" in out
+    assert "Overloaded" in out
     assert "callables" in out
     assert "Files parsed" not in out
     assert "Input" not in out

@@ -1464,10 +1464,10 @@ def _main_impl() -> None:
 
     if analysis_result.project_metrics is not None:
         pm = analysis_result.project_metrics
-        god_modules_summary = _as_mapping(
-            _as_mapping(analysis_result.metrics_payload).get("god_modules")
+        overloaded_modules_summary = _as_mapping(
+            _as_mapping(analysis_result.metrics_payload).get("overloaded_modules")
         ).get("summary")
-        god_modules_summary_map = _as_mapping(god_modules_summary)
+        overloaded_modules_summary_map = _as_mapping(overloaded_modules_summary)
         _print_metrics(
             console=cast("_PrinterLike", console),
             quiet=args.quiet,
@@ -1484,15 +1484,17 @@ def _main_impl() -> None:
                 health_total=pm.health.total,
                 health_grade=pm.health.grade,
                 suppressed_dead_code_count=analysis_result.suppressed_dead_code_items,
-                god_modules_candidates=_as_int(
-                    god_modules_summary_map.get("candidates")
+                overloaded_modules_candidates=_as_int(
+                    overloaded_modules_summary_map.get("candidates")
                 ),
-                god_modules_total=_as_int(god_modules_summary_map.get("total")),
-                god_modules_population_status=str(
-                    god_modules_summary_map.get("population_status", "")
+                overloaded_modules_total=_as_int(
+                    overloaded_modules_summary_map.get("total")
                 ),
-                god_modules_top_score=_coerce.as_float(
-                    god_modules_summary_map.get("top_score")
+                overloaded_modules_population_status=str(
+                    overloaded_modules_summary_map.get("population_status", "")
+                ),
+                overloaded_modules_top_score=_coerce.as_float(
+                    overloaded_modules_summary_map.get("top_score")
                 ),
             ),
         )

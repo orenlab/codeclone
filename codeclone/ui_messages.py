@@ -178,7 +178,7 @@ SUMMARY_COMPACT_CLONES = (
 SUMMARY_COMPACT_METRICS = (
     "Metrics  cc={cc_avg}/{cc_max}  cbo={cbo_avg}/{cbo_max}"
     "  lcom4={lcom_avg}/{lcom_max}  cycles={cycles}  dead_code={dead}"
-    "  health={health}({grade})  god_modules={god_modules}"
+    "  health={health}({grade})  overloaded_modules={overloaded_modules}"
 )
 SUMMARY_COMPACT_CHANGED_SCOPE = (
     "Changed  paths={paths}  findings={findings}  new={new}  known={known}"
@@ -397,7 +397,7 @@ def fmt_summary_compact_metrics(
     dead: int,
     health: int,
     grade: str,
-    god_modules: int,
+    overloaded_modules: int,
 ) -> str:
     return SUMMARY_COMPACT_METRICS.format(
         cc_avg=f"{cc_avg:.1f}",
@@ -410,7 +410,7 @@ def fmt_summary_compact_metrics(
         dead=dead,
         health=health,
         grade=grade,
-        god_modules=god_modules,
+        overloaded_modules=overloaded_modules,
     )
 
 
@@ -536,7 +536,7 @@ def fmt_metrics_dead_code(count: int, *, suppressed: int = 0) -> str:
             )
 
 
-def fmt_metrics_god_modules(
+def fmt_metrics_overloaded_modules(
     *,
     candidates: int,
     total: int,
@@ -551,7 +551,7 @@ def fmt_metrics_god_modules(
     note = "report-only"
     if population_status and population_status != "ok":
         note = f"{note}; {population_status.replace('_', ' ')} population"
-    return f"  {'God Modules':<{_L}}{summary} [dim]({note})[/dim]"
+    return f"  {'Overloaded':<{_L}}{summary} [dim]({note})[/dim]"
 
 
 def fmt_changed_scope_paths(*, count: int) -> str:

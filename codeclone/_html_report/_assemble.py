@@ -111,7 +111,9 @@ def build_html_report(
         _as_int(_as_mapping(ctx.complexity_map.get("summary")).get("high_risk"))
         + _as_int(_as_mapping(ctx.coupling_map.get("summary")).get("high_risk"))
         + _as_int(_as_mapping(ctx.cohesion_map.get("summary")).get("low_cohesion"))
-        + _as_int(_as_mapping(ctx.god_modules_map.get("summary")).get("candidates"))
+        + _as_int(
+            _as_mapping(ctx.overloaded_modules_map.get("summary")).get("candidates")
+        )
     )
 
     def _tab_badge(count: int) -> str:

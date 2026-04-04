@@ -140,6 +140,7 @@ MetricsDetailFamily = Literal[
     "dependencies",
     "dead_code",
     "god_modules",
+    "overloaded_modules",
     "health",
 ]
 ReportSection = Literal[
@@ -278,9 +279,13 @@ _VALID_METRICS_DETAIL_FAMILIES = frozenset(
         "dependencies",
         "dead_code",
         "god_modules",
+        "overloaded_modules",
         "health",
     }
 )
+_METRICS_DETAIL_FAMILY_ALIASES: Final[dict[str, str]] = {
+    "god_modules": "overloaded_modules",
+}
 _SHORT_RUN_ID_LENGTH = 8
 _SHORT_HASH_ID_LENGTH = 6
 
@@ -1322,14 +1327,20 @@ class CodeCloneMCPService:
                 raise MCPServiceContractError(
                     "Report section 'metrics_detail' is not available in this run."
                 )
-            validated_family = cast(
-                "MetricsDetailFamily | None",
-                self._validate_optional_choice(
-                    "family",
-                    family,
-                    _VALID_METRICS_DETAIL_FAMILIES,
-                ),
+            validated_family_input = self._validate_optional_choice(
+                "family",
+                family,
+                _VALID_METRICS_DETAIL_FAMILIES,
             )
+            normalized_family = (
+                _METRICS_DETAIL_FAMILY_ALIASES.get(
+                    str(validated_family_input),
+                    str(validated_family_input),
+                )
+                if validated_family_input is not None
+                else None
+            )
+            validated_family = cast("MetricsDetailFamily | None", normalized_family)
             return self._metrics_detail_payload(
                 metrics=metrics,
                 family=validated_family,

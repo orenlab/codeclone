@@ -166,7 +166,7 @@ Notes:
         "high_confidence": 0,
         "suppressed": 1
       },
-      "god_modules": {
+      "overloaded_modules": {
         "total": 0,
         "candidates": 0,
         "population_status": "limited",
@@ -192,7 +192,7 @@ Notes:
           }
         ]
       },
-      "god_modules": {
+      "overloaded_modules": {
         "summary": {
           "total": 0,
           "candidates": 0,

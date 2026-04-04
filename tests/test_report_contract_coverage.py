@@ -354,7 +354,7 @@ def _rich_report_document() -> dict[str, object]:
                 },
             }
         },
-        "god_modules": {
+        "overloaded_modules": {
             "summary": {
                 "total": 2,
                 "candidates": 1,
@@ -1202,30 +1202,30 @@ def test_markdown_render_long_list_branches() -> None:
     assert "... and 2 more item(s)" in markdown
 
 
-def test_report_contract_renderers_include_god_modules_section() -> None:
+def test_report_contract_renderers_include_overloaded_modules_section() -> None:
     payload = _rich_report_document()
 
     text = render_text_report_document(payload)
     markdown = render_markdown_report_document(payload)
 
-    assert "GOD MODULES (top 10)" in text
+    assert "OVERLOADED MODULES (top 10)" in text
     assert "module=codeclone.alpha" in text
-    assert '<a id="god-modules"></a>' in markdown
-    assert "### God Modules" in markdown
+    assert '<a id="overloaded-modules"></a>' in markdown
+    assert "### Overloaded Modules" in markdown
     assert "candidate_status=candidate" in markdown
 
 
-def test_report_contract_includes_canonical_god_modules_family() -> None:
+def test_report_contract_includes_canonical_overloaded_modules_family() -> None:
     payload = _rich_report_document()
 
     metrics = cast(dict[str, object], payload["metrics"])
     summary = cast(dict[str, object], metrics["summary"])
     families = cast(dict[str, object], metrics["families"])
-    god_modules = cast(dict[str, object], families["god_modules"])
-    god_summary = cast(dict[str, object], god_modules["summary"])
+    overloaded_modules = cast(dict[str, object], families["overloaded_modules"])
+    overloaded_summary = cast(dict[str, object], overloaded_modules["summary"])
 
-    assert summary["god_modules"] == god_summary
-    assert god_summary == {
+    assert summary["overloaded_modules"] == overloaded_summary
+    assert overloaded_summary == {
         "total": 2,
         "candidates": 1,
         "population_status": "ok",
@@ -1233,7 +1233,7 @@ def test_report_contract_includes_canonical_god_modules_family() -> None:
         "average_score": 0.58,
         "candidate_score_cutoff": 0.91,
     }
-    first = cast(list[dict[str, object]], god_modules["items"])[0]
+    first = cast(list[dict[str, object]], overloaded_modules["items"])[0]
     assert first["module"] == "codeclone.alpha"
     assert first["relative_path"] == "codeclone/alpha.py"
     assert first["candidate_status"] == "candidate"
@@ -1889,7 +1889,7 @@ def test_collect_paths_from_metrics_covers_all_metric_families_and_skips_missing
                 {"filepath": None},
             ],
         },
-        "god_modules": {
+        "overloaded_modules": {
             "items": [
                 {"filepath": "/repo/god.py"},
                 {"filepath": ""},

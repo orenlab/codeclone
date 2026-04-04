@@ -1,16 +1,11 @@
 # MCP Usage Guide
 
 CodeClone MCP is a **read-only, baseline-aware** analysis server for AI agents
-and MCP-capable clients. It exposes the existing deterministic pipeline without
-mutating source files, baselines, cache, or on-disk report artifacts. Only
-session-local review/run state is mutable in memory.
-It is not only bounded in payload shape — it actively guides agents toward
-low-cost, high-signal workflows.
+and MCP-capable clients. It exposes the deterministic pipeline without mutating
+source files, baselines, cache, or report artifacts. Session-local review/run
+state is mutable in memory only.
 
-MCP is a **client integration surface**, not a model-specific feature. It works
-with any MCP-capable client regardless of the backend model.
-In practice, the cheapest useful path is also the most obvious one: summary or
-triage first, then hotspots or focused checks, then single-finding drill-down.
+Works with any MCP-capable client regardless of backend model.
 
 ## Install
 
@@ -49,55 +44,43 @@ run-scoped URI templates.
 
 ## Tool surface
 
-| Tool                     | Purpose                                                                                                                                                                                                                                 |
-|--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `analyze_repository`     | Full analysis → register as latest run and return a compact MCP summary; then prefer `get_run_summary` or `get_production_triage` for the first pass                                                                                    |
-| `analyze_changed_paths`  | Diff-aware analysis with `changed_paths` or `git_diff_ref`; returns a compact changed-files snapshot; then prefer `get_report_section(section="changed")` or `get_production_triage` before broader list calls                          |
-| `get_run_summary`        | Cheapest run-level snapshot: compact health/findings/baseline summary with slim inventory counts; `health` is explicit `available=false` when metrics were skipped                                                                      |
-| `get_production_triage`  | Compact production-first view: health, cache freshness, production hotspots, production suggestions; best default first pass on noisy repos                                                                                             |
-| `help`                   | Compact semantic/orientation tool for supported topics like workflow, baseline, suppressions, latest-runs semantics, review state, and changed-scope routing; use when MCP meaning or the safest next step is unclear                 |
-| `compare_runs`           | Regressions, improvements, and run-to-run health delta between comparable runs; returns `mixed` for conflicting signals and `incomparable` when roots/settings differ, with empty comparison cards and `health_delta=null` in that case |
-| `list_findings`          | Filtered, paginated finding groups with compact summary payloads by default; use after hotspots or `check_*` when you need a broader filtered list                                                                                      |
-| `get_finding`            | Deep inspection of one finding by id; defaults to normal detail and accepts `detail_level`; use after `list_hotspots`, `list_findings`, or `check_*`                                                                                    |
-| `get_remediation`        | Structured remediation payload for one finding; defaults to normal detail; use when you only need the fix packet for a single finding                                                                                                   |
-| `list_hotspots`          | Derived views: highest priority, production hotspots, spread, etc., with compact summary cards; preferred first-pass triage before broader listing                                                                                      |
-| `get_report_section`     | Read canonical report sections; prefer specific sections over `section="all"`; `metrics` is summary-only, `metrics_detail` is paginated/bounded and can expose report-only families such as `god_modules`                               |
-| `evaluate_gates`         | Preview CI/gating decisions without exiting                                                                                                                                                                                             |
-| `check_clones`           | Clone findings from a stored run; cheaper and narrower than `list_findings` when you only need clone debt                                                                                                                               |
-| `check_complexity`       | Complexity hotspots from a stored run; cheaper and narrower than `list_findings` when you only need complexity                                                                                                                          |
-| `check_coupling`         | Coupling hotspots from a stored run; cheaper and narrower than `list_findings` when you only need coupling                                                                                                                              |
-| `check_cohesion`         | Cohesion hotspots from a stored run; cheaper and narrower than `list_findings` when you only need cohesion                                                                                                                              |
-| `check_dead_code`        | Dead-code findings from a stored run; cheaper and narrower than `list_findings` when you only need dead code                                                                                                                            |
-| `generate_pr_summary`    | PR-friendly markdown or JSON summary; prefer `markdown` for compact LLM-facing output and `json` for machine post-processing                                                                                                            |
-| `mark_finding_reviewed`  | Session-local review marker (in-memory only)                                                                                                                                                                                            |
-| `list_reviewed_findings` | List reviewed findings for a run                                                                                                                                                                                                        |
-| `clear_session_runs`     | Reset all in-memory runs and session caches                                                                                                                                                                                             |
+| Tool                     | Purpose                                                                                             |
+|--------------------------|-----------------------------------------------------------------------------------------------------|
+| `analyze_repository`     | Full analysis → compact summary; use `get_run_summary` or `get_production_triage` as the first pass |
+| `analyze_changed_paths`  | Diff-aware analysis via `changed_paths` or `git_diff_ref`; compact changed-files snapshot           |
+| `get_run_summary`        | Cheapest run snapshot: health, findings, baseline, inventory                                        |
+| `get_production_triage`  | Production-first view: health, hotspots, suggestions; best first pass for noisy repos               |
+| `help`                   | Semantic guide for workflow, baseline, suppressions, review state, changed-scope routing            |
+| `compare_runs`           | Run-to-run delta: regressions, improvements, health change                                          |
+| `list_findings`          | Filtered, paginated findings; use after hotspots or `check_*`                                       |
+| `get_finding`            | Single finding detail by id; defaults to `normal` detail level                                      |
+| `get_remediation`        | Remediation payload for one finding                                                                 |
+| `list_hotspots`          | Priority-ranked hotspot views; preferred before broad listing                                       |
+| `get_report_section`     | Read report sections; `metrics_detail` is paginated with family/path filters                        |
+| `evaluate_gates`         | Preview CI gating decisions                                                                         |
+| `check_clones`           | Clone findings only; narrower than `list_findings`                                                  |
+| `check_complexity`       | Complexity hotspots only                                                                            |
+| `check_coupling`         | Coupling hotspots only                                                                              |
+| `check_cohesion`         | Cohesion hotspots only                                                                              |
+| `check_dead_code`        | Dead-code findings only                                                                             |
+| `generate_pr_summary`    | PR-friendly markdown or JSON summary                                                                |
+| `mark_finding_reviewed`  | Session-local review marker (in-memory)                                                             |
+| `list_reviewed_findings` | List reviewed findings for a run                                                                    |
+| `clear_session_runs`     | Reset in-memory runs and session state                                                              |
 
 > `check_*` tools query stored runs only. Call `analyze_repository` or
 > `analyze_changed_paths` first.
 
-`check_*` responses keep `health.score` and `health.grade`, but slim
-`health.dimensions` down to the one dimension relevant to that tool.
-`metrics_detail(family="god_modules")` exposes the canonical report-only
-module-hotspot layer without turning it into findings, hotlists, or gate data.
-List-style finding responses now use short MCP finding ids and compact relative
-locations by default; `normal` keeps structured `{path, line, end_line, symbol}`
-locations, while `full` keeps the richer compatibility payload including `uri`.
-Summary-style MCP cache payloads expose `freshness` (`fresh`, `mixed`, `reused`).
-Inline design-threshold parameters on `analyze_repository` /
-`analyze_changed_paths` become part of the canonical run: they are recorded in
-`meta.analysis_thresholds.design_findings` and define that run's canonical
-design findings.
-`help(topic=...)` is intentionally static and bounded: it explains meaning,
-flags common anti-patterns, suggests a safe next step, and points to canonical
-docs without turning MCP into a documentation proxy.
+**Payload conventions:**
 
-Run ids in MCP payloads are short session handles (first 8 hex chars of the
-canonical digest). MCP tools and run-scoped resources accept both short and full
-run ids. Finding ids follow the same rule: MCP responses use compact ids, while
-the canonical `report.json` keeps full finding ids unchanged. When a short
-finding id would collide within a run, MCP lengthens it just enough to keep it
-unique.
+- `check_*` responses include only the relevant health dimension.
+- Finding responses use short MCP IDs and relative paths by default;
+  `detail_level=full` restores the compatibility payload with URIs.
+- Run IDs are 8-char hex handles; finding IDs are short prefixed forms.
+  Both accept the full canonical form as input.
+- `metrics_detail(family="overloaded_modules")` exposes the report-only
+  module-hotspot layer without turning it into findings or gate data.
+- `help(topic=...)` is static: meaning, anti-patterns, next step, doc links.
 
 ## Resource surface
 

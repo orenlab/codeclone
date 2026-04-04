@@ -910,10 +910,10 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
             dead=1,
             health=85,
             grade="B",
-            god_modules=3,
+            overloaded_modules=3,
         )
         == "Metrics  cc=2.8/21  cbo=0.6/8  lcom4=1.2/4"
-        "  cycles=0  dead_code=1  health=85(B)  god_modules=3"
+        "  cycles=0  dead_code=1  health=85(B)  overloaded_modules=3"
     )
 
 
@@ -944,24 +944,24 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
     clean_with_suppressed = ui.fmt_metrics_dead_code(0, suppressed=9)
     assert "✔ clean" in clean_with_suppressed
     assert "(9 suppressed)" in clean_with_suppressed
-    god_modules = ui.fmt_metrics_god_modules(
+    overloaded_modules = ui.fmt_metrics_overloaded_modules(
         candidates=4,
         total=158,
         population_status="ok",
         top_score=0.98,
     )
     assert all(
-        fragment in god_modules
+        fragment in overloaded_modules
         for fragment in ("4", "max score 0.98", "158 ranked", "(report-only)")
     )
-    limited_god_modules = ui.fmt_metrics_god_modules(
+    limited_overloaded_modules = ui.fmt_metrics_overloaded_modules(
         candidates=0,
         total=12,
         population_status="limited",
         top_score=0.0,
     )
-    assert "12 ranked" in limited_god_modules
-    assert "report-only; limited population" in limited_god_modules
+    assert "12 ranked" in limited_overloaded_modules
+    assert "report-only; limited population" in limited_overloaded_modules
     changed_paths = ui.fmt_changed_scope_paths(count=45)
     assert "45" in changed_paths
     assert "from git diff" in changed_paths
@@ -1023,7 +1023,7 @@ def test_print_changed_scope_uses_compact_line_in_quiet_mode(
     assert "known=5" in out
 
 
-def test_print_metrics_in_quiet_mode_includes_god_modules(
+def test_print_metrics_in_quiet_mode_includes_overloaded_modules(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
@@ -1042,14 +1042,14 @@ def test_print_metrics_in_quiet_mode_includes_god_modules(
             dead_code_count=0,
             health_total=85,
             health_grade="B",
-            god_modules_candidates=3,
-            god_modules_total=158,
-            god_modules_population_status="ok",
-            god_modules_top_score=0.98,
+            overloaded_modules_candidates=3,
+            overloaded_modules_total=158,
+            overloaded_modules_population_status="ok",
+            overloaded_modules_top_score=0.98,
         ),
     )
     out = capsys.readouterr().out
-    assert "god_modules=3" in out
+    assert "overloaded_modules=3" in out
 
 
 def test_configure_metrics_mode_rejects_skip_metrics_with_metrics_flags(

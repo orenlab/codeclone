@@ -18,3 +18,4 @@ docs
 codeclone.egg-info
 .pre-commit-config.yaml
 uv.lock
+extensions

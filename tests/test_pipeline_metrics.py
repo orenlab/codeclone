@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from codeclone.cache import CacheEntry
-from codeclone.metrics import build_god_modules_payload
+from codeclone.metrics import build_overloaded_modules_payload
 from codeclone.models import (
     ClassMetrics,
     DeadCandidate,
@@ -179,9 +179,7 @@ def test_build_metrics_report_payload_includes_suppressed_dead_code_items() -> N
     ]
 
 
-def test_build_metrics_report_payload_includes_god_modules_for_small_population() -> (
-    None
-):
+def test_metrics_payload_includes_overloaded_modules_for_small_population() -> None:
     payload = build_metrics_report_payload(
         scan_root="/repo",
         project_metrics=_project_metrics(dead_confidence="high"),
@@ -213,16 +211,16 @@ def test_build_metrics_report_payload_includes_god_modules_for_small_population(
         suppressed_dead_code=(),
     )
 
-    god_modules = payload["god_modules"]
-    assert isinstance(god_modules, dict)
-    summary = god_modules["summary"]
+    overloaded_modules = payload["overloaded_modules"]
+    assert isinstance(overloaded_modules, dict)
+    summary = overloaded_modules["summary"]
     assert summary["total"] == 2
     assert summary["candidates"] == 0
     assert summary["population_status"] == "limited"
     assert summary["top_score"] >= summary["average_score"] >= 0.0
     assert summary["candidate_score_cutoff"] <= 1.0
     assert summary["candidate_score_cutoff"] >= summary["top_score"]
-    items = god_modules["items"]
+    items = overloaded_modules["items"]
     assert [item["module"] for item in items] == ["pkg.alpha", "tests.test_beta"]
     assert items[0]["candidate_status"] == "ranked_only"
     assert items[0]["candidate_reasons"] == ["size_pressure", "dependency_pressure"]
@@ -232,7 +230,7 @@ def test_build_metrics_report_payload_includes_god_modules_for_small_population(
     assert items[1]["source_kind"] == "tests"
 
 
-def test_build_god_modules_payload_flags_project_relative_candidates() -> None:
+def test_build_overloaded_modules_payload_flags_project_relative_candidates() -> None:
     scan_root = "/repo"
     source_stats = [
         (f"{scan_root}/pkg/core.py", 2000, 24, 4, 2),
@@ -277,7 +275,7 @@ def test_build_god_modules_payload_flags_project_relative_candidates() -> None:
         ),
     ]
 
-    payload = build_god_modules_payload(
+    payload = build_overloaded_modules_payload(
         scan_root=scan_root,
         source_stats_by_file=source_stats,
         units=units,

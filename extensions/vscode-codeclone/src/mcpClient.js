@@ -3,8 +3,10 @@
 const { spawn } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
+const { version: EXTENSION_VERSION } = require("../package.json");
 const { trimTail } = require("./support");
 
+const MCP_PROTOCOL_VERSION = "2025-03-26";
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_STDOUT_BUFFER_CHARS = 4 * 1024 * 1024;
 const MAX_STDERR_BUFFER_CHARS = 256 * 1024;
@@ -70,11 +72,11 @@ class CodeCloneMcpClient extends EventEmitter {
     await this._spawn(launchSpec);
     try {
       const initializeResult = await this.request("initialize", {
-        protocolVersion: "2025-03-26",
+        protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: {},
         clientInfo: {
           name: "CodeClone VS Code",
-          version: "0.0.1",
+          version: EXTENSION_VERSION,
         },
       });
       this._write({
@@ -214,7 +216,7 @@ class CodeCloneMcpClient extends EventEmitter {
             " "
           )}`.trim()
         );
-        resolve();
+        resolve(undefined);
       });
       child.on("exit", (code, signal) => {
         this.outputChannel.appendLine(

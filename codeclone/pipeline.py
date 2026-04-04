@@ -34,7 +34,7 @@ from .grouping import build_block_groups, build_groups, build_segment_groups
 from .metrics import (
     HealthInputs,
     build_dep_graph,
-    build_god_modules_payload,
+    build_overloaded_modules_payload,
     compute_health,
     find_suppressed_unused,
     find_unused,
@@ -1349,7 +1349,7 @@ def build_metrics_report_payload(
             "grade": project_metrics.health.grade,
             "dimensions": dict(project_metrics.health.dimensions),
         },
-        "god_modules": build_god_modules_payload(
+        "overloaded_modules": build_overloaded_modules_payload(
             scan_root=scan_root,
             source_stats_by_file=source_stats_by_file,
             units=units,

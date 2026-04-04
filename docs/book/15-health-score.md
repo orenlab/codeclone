@@ -74,26 +74,18 @@ The current health model is deterministic and explainable by design:
 The following layers are visible today but do **not** currently affect Health
 Score:
 
-### God Modules
+### Overloaded Modules
 
-`God Modules` is currently a report-only experimental layer.
+`Overloaded Modules` is currently a report-only experimental layer.
 
 - It surfaces module-level hotspots derived from implementation burden and
   dependency pressure.
-- It is visible in `metrics.families.god_modules`, HTML, Markdown/TXT, and MCP
-  `metrics_detail(family="god_modules")`.
+- It is visible in `metrics.families.overloaded_modules`, HTML, Markdown/TXT, and MCP
+  `metrics_detail(family="overloaded_modules")`.
 - It does not currently affect Health Score, gates, baseline novelty, or SARIF.
-- It is **not** a restatement of cyclomatic complexity:
-  complexity highlights local control-flow hotspots in functions and methods,
-  while `God Modules` highlights module-level responsibility overload and
-  dependency pressure.
-
-Suggested interpretation:
-
-> Complexity highlights local control-flow hotspots in functions and methods.
-> God Modules highlights module-level responsibility overload and dependency
-> pressure. Complexity may contribute to the signal, but God Modules is not a
-> restatement of cyclomatic complexity.
+- It is **not** a restatement of cyclomatic complexity: complexity highlights
+  local control-flow hotspots, while Overloaded Modules highlights module-level
+  responsibility overload and dependency pressure.
 
 ### Other visible non-scoring layers
 
@@ -140,7 +132,7 @@ Current versioning note:
 
 - `tests/test_metrics_modules.py::test_health_helpers_and_compute_health_boundaries`
 - `tests/test_pipeline_metrics.py::test_compute_project_metrics_respects_skip_flags`
-- `tests/test_report_contract_coverage.py::test_report_contract_includes_canonical_god_modules_family`
+- `tests/test_report_contract_coverage.py::test_report_contract_includes_canonical_overloaded_modules_family`
 - `tests/test_report_contract_coverage.py::test_overview_health_snapshot_handles_non_mapping_dimensions`
 
 ## See also

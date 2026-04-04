@@ -39,15 +39,13 @@ Live sample report:
 - **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
 - **Structural findings** — duplicated branch families, clone guard/exit divergence and clone-cohort drift (report-only)
 - **Quality metrics** — cyclomatic complexity, coupling (`CBO`), cohesion (`LCOM4`), dependency cycles, dead code,
-  health
-  score, and report-only `God Modules` profiling
+  health score, and report-only `Overloaded Modules` profiling
 - **Baseline governance** — separates accepted **legacy** debt from **new regressions** and lets CI fail **only** on
   what changed
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
-- **MCP server** — optional read-only MCP surface for AI agents and IDEs, designed as a budget-aware guided control
+- **MCP server** — optional read-only surface for AI agents and IDEs, designed as a budget-aware guided control
   surface for agentic development
-- **VS Code extension** — preview native client for CodeClone MCP with baseline-aware, triage-first structural
-  review inside the editor
+- **VS Code extension** — preview native client for CodeClone MCP with triage-first structural review
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Fast** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
 
@@ -170,18 +168,8 @@ codeclone-mcp --transport stdio
 codeclone-mcp --transport streamable-http --port 8000
 ```
 
-21 tools + 10 resources — deterministic, baseline-aware, and read-only.
-Never mutates source files, baselines, or repo state.
-
-Payloads are optimized for LLM context: compact summaries by default, full detail on demand.
-The cheapest useful path is also the most obvious path: first-pass triage stays compact, and deeper detail is explicit.
-
-Recommended agent flow:
-`analyze_repository` or `analyze_changed_paths` → `get_run_summary` or `get_production_triage` →
-`list_hotspots` or `check_*` → `get_finding` → `get_remediation`
-
-If workflow or contract meaning is unclear, `help(topic=...)` returns a compact
-semantic guide with the safest next step and canonical doc links.
+21 tools + 10 resources. Read-only — never mutates source, baselines, or repo state.
+Payloads are optimized for LLM context: compact summaries by default, full detail on drill-down.
 
 Docs:
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
@@ -190,21 +178,10 @@ Docs:
 
 ### VS Code Extension
 
-The repository also ships a preview VS Code extension in
+A preview VS Code extension ships in
 [`extensions/vscode-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/vscode-codeclone).
-
-It is:
-
-- native VS Code first
-- baseline-aware
-- triage-first
-- read-only with respect to repository state
-- powered by the same `codeclone-mcp` contract surface
-- limited in Restricted Mode until workspace trust is granted
-
-It focuses on source-first structural review inside the editor: overview,
-hotspots, review loop, changed-files pass, and explicit drill-down into finding,
-remediation, or local HTML report when needed.
+It connects to `codeclone-mcp` and provides triage-first structural review inside the editor:
+overview, hotspots, review loop, and drill-down into findings or the HTML report.
 
 Docs:
 [VS Code extension guide](https://orenlab.github.io/codeclone/vscode-extension/)
@@ -300,11 +277,11 @@ class Middleware:  # codeclone: ignore[dead-code]
 Dynamic/runtime false positives are resolved via explicit inline suppressions, not via broad heuristics.
 
 <details>
-<summary>Canonical JSON report shape (v2.2)</summary>
+<summary>Canonical JSON report shape (v2.3)</summary>
 
 ```json
 {
-  "report_schema_version": "2.2",
+  "report_schema_version": "2.3",
   "meta": {
     "codeclone_version": "2.0.0b4",
     "project_name": "...",

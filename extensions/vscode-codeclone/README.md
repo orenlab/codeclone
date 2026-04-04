@@ -81,7 +81,7 @@ The main operational view. It focuses on:
 - new regressions
 - production hotspots
 - changed-files findings
-- report-only God Module candidates
+- report-only Overloaded Module candidates
 
 Focus mode is explicit and persisted per workspace. The extension favors
 `Recommended` by default and keeps report-only candidates visually separate from
@@ -131,7 +131,7 @@ opening raw JSON-like details by default.
   MCP and canonical report semantics only.
 - **Source-first**: review should move you to code before it opens deeper
   detail.
-- **Report-only separation**: `God Modules` are visible but intentionally kept
+- **Report-only separation**: `Overloaded Modules` are visible but intentionally kept
   outside findings, gates, and health.
 - **Limited Restricted Mode**: the extension keeps setup/onboarding available in
   untrusted workspaces, but local analysis and MCP stay disabled until trust is

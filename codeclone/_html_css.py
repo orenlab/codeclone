@@ -683,23 +683,23 @@ _OVERVIEW = """\
 .dir-hotspot-meta{display:flex;flex-wrap:wrap;gap:6px;font-size:.68rem;color:var(--text-muted)}
 .dir-hotspot-meta span{font-variant-numeric:tabular-nums}
 .dir-hotspot-meta-sep{opacity:.3}
-.god-module-list{display:flex;flex-direction:column;gap:0}
-.god-module-entry{padding:var(--sp-2) 0;border-bottom:1px solid color-mix(in srgb,var(--border) 50%,transparent)}
-.god-module-entry:last-child{border-bottom:none;padding-bottom:0}
-.god-module-entry:first-child{padding-top:0}
-.god-module-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-2);margin-bottom:4px}
-.god-module-title{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sp-2);min-width:0}
-.god-module-title code{font-size:.78rem;font-weight:600;color:var(--text-primary);line-height:1.35}
-.god-module-score{flex-shrink:0;font-size:.72rem;font-weight:700;font-variant-numeric:tabular-nums;
+.overloaded-module-list{display:flex;flex-direction:column;gap:0}
+.overloaded-module-entry{padding:var(--sp-2) 0;border-bottom:1px solid color-mix(in srgb,var(--border) 50%,transparent)}
+.overloaded-module-entry:last-child{border-bottom:none;padding-bottom:0}
+.overloaded-module-entry:first-child{padding-top:0}
+.overloaded-module-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-2);margin-bottom:4px}
+.overloaded-module-title{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sp-2);min-width:0}
+.overloaded-module-title code{font-size:.78rem;font-weight:600;color:var(--text-primary);line-height:1.35}
+.overloaded-module-score{flex-shrink:0;font-size:.72rem;font-weight:700;font-variant-numeric:tabular-nums;
   color:var(--accent-primary);background:var(--accent-muted);border-radius:999px;padding:2px 8px}
-.god-module-metrics{display:flex;flex-wrap:wrap;gap:6px;font-size:.68rem;color:var(--text-muted)}
-.god-module-metrics span{font-variant-numeric:tabular-nums}
-.god-module-reasons,.god-module-signal-list{display:flex;flex-wrap:wrap;gap:var(--sp-1);margin-top:var(--sp-2)}
-.god-module-reason-chip,.god-module-signal-pill{display:inline-flex;align-items:center;gap:5px;
+.overloaded-module-metrics{display:flex;flex-wrap:wrap;gap:6px;font-size:.68rem;color:var(--text-muted)}
+.overloaded-module-metrics span{font-variant-numeric:tabular-nums}
+.overloaded-module-reasons,.overloaded-module-signal-list{display:flex;flex-wrap:wrap;gap:var(--sp-1);margin-top:var(--sp-2)}
+.overloaded-module-reason-chip,.overloaded-module-signal-pill{display:inline-flex;align-items:center;gap:5px;
   font-size:.68rem;font-weight:500;color:var(--text-secondary);background:var(--bg-raised);
   border:1px solid color-mix(in srgb,var(--border) 60%,transparent);border-radius:999px;
   padding:2px 8px}
-.god-module-signal-count{font-variant-numeric:tabular-nums;color:var(--text-muted)}
+.overloaded-module-signal-count{font-variant-numeric:tabular-nums;color:var(--text-muted)}
 /* Health radar chart */
 .health-radar{display:flex;justify-content:center;padding:var(--sp-3) 0}
 .health-radar svg{width:100%;max-width:520px;height:auto;overflow:visible}

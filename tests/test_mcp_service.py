@@ -867,7 +867,7 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
         "cohesion",
         "dependencies",
         "dead_code",
-        "god_modules",
+        "overloaded_modules",
         "health",
     }
     assert "families" not in metrics_summary
@@ -875,26 +875,44 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
     assert set(metrics_detail) == {"summary", "_hint"}
     assert "family" in metrics_detail_page
     assert cast("list[dict[str, object]]", metrics_detail_page["items"])
-    god_modules_page = service.get_report_section(
+    overloaded_modules_page = service.get_report_section(
+        run_id=run_id,
+        section="metrics_detail",
+        family="overloaded_modules",
+        limit=5,
+    )
+    assert overloaded_modules_page["family"] == "overloaded_modules"
+    overloaded_modules_items = cast(
+        "list[dict[str, object]]", overloaded_modules_page["items"]
+    )
+    assert overloaded_modules_items
+    overloaded_modules_alias_page = service.get_report_section(
         run_id=run_id,
         section="metrics_detail",
         family="god_modules",
         limit=5,
     )
-    assert god_modules_page["family"] == "god_modules"
-    god_modules_items = cast("list[dict[str, object]]", god_modules_page["items"])
-    assert god_modules_items
+    assert overloaded_modules_alias_page["family"] == "overloaded_modules"
+    assert (
+        cast("list[dict[str, object]]", overloaded_modules_alias_page["items"])
+        == overloaded_modules_items
+    )
     report_record = service._runs.get(run_id)
     assert report_record is not None
     report_document = report_record.report_document
     metrics_map = cast("dict[str, object]", report_document["metrics"])
     families_map = cast("dict[str, object]", metrics_map["families"])
-    god_modules_family = cast("dict[str, object]", families_map["god_modules"])
-    god_modules_report_items = cast(
-        "list[dict[str, object]]",
-        god_modules_family["items"],
+    overloaded_modules_family = cast(
+        "dict[str, object]", families_map["overloaded_modules"]
     )
-    assert god_modules_items[0]["path"] == god_modules_report_items[0]["relative_path"]
+    overloaded_modules_report_items = cast(
+        "list[dict[str, object]]",
+        overloaded_modules_family["items"],
+    )
+    assert (
+        overloaded_modules_items[0]["path"]
+        == overloaded_modules_report_items[0]["relative_path"]
+    )
 
 
 def test_mcp_service_evaluate_gates_on_existing_run(tmp_path: Path) -> None:
@@ -3234,11 +3252,11 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
             }
         ],
     }
-    god_modules_payload = service._metrics_detail_payload(
+    overloaded_modules_payload = service._metrics_detail_payload(
         metrics={
             "summary": {},
             "families": {
-                "god_modules": {
+                "overloaded_modules": {
                     "items": [
                         {
                             "relative_path": "zeta.py",
@@ -3256,13 +3274,13 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
                 }
             },
         },
-        family="god_modules",
+        family="overloaded_modules",
         path=None,
         offset=0,
         limit=5,
     )
-    assert god_modules_payload == {
-        "family": "god_modules",
+    assert overloaded_modules_payload == {
+        "family": "overloaded_modules",
         "path": None,
         "offset": 0,
         "limit": 5,

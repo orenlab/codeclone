@@ -35,7 +35,7 @@ Define terms exactly as used by code and tests.
 - **health score**: weighted blend of seven dimension scores (0–100).
   Dimensions: clones 25%, complexity 20%, cohesion 15%, coupling 10%,
   dead code 10%, dependencies 10%, coverage 10%.
-  Report-only layers such as `God Modules` do not currently affect the score.
+  Report-only layers such as `Overloaded Modules` do not currently affect the score.
   Grade bands: A ≥90, B ≥75, C ≥60, D ≥40, F <40.
 - **design finding**: metric-driven finding (complexity/coupling/cohesion)
   emitted by the canonical report builder when a class or function exceeds

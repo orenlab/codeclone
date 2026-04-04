@@ -97,7 +97,7 @@ __all__ = [
     "structural_group_id",
 ]
 
-_GOD_MODULES_FAMILY = "god_modules"
+_OVERLOADED_MODULES_FAMILY = "overloaded_modules"
 
 
 def _optional_str(value: object) -> str | None:
@@ -354,8 +354,8 @@ def _collect_paths_from_metrics(metrics: Mapping[str, object]) -> set[str]:
         filepath = _optional_str(item_map.get("filepath"))
         if filepath is not None:
             paths.add(filepath)
-    god_modules = _as_mapping(metrics.get(_GOD_MODULES_FAMILY))
-    for item in _as_sequence(god_modules.get("items")):
+    overloaded_modules = _as_mapping(metrics.get(_OVERLOADED_MODULES_FAMILY))
+    for item in _as_sequence(overloaded_modules.get("items")):
         item_map = _as_mapping(item)
         filepath = _optional_str(item_map.get("filepath"))
         if filepath is not None:
@@ -640,9 +640,9 @@ def _normalize_metrics_families(
         str(key): _as_int(value)
         for key, value in sorted(_as_mapping(health.get("dimensions")).items())
     }
-    god_modules = _as_mapping(metrics_map.get(_GOD_MODULES_FAMILY))
-    god_detection = _as_mapping(god_modules.get("detection"))
-    god_items = sorted(
+    overloaded_modules = _as_mapping(metrics_map.get(_OVERLOADED_MODULES_FAMILY))
+    overloaded_modules_detection = _as_mapping(overloaded_modules.get("detection"))
+    overloaded_module_items = sorted(
         (
             {
                 "module": str(item_map.get("module", "")).strip(),
@@ -686,7 +686,7 @@ def _normalize_metrics_families(
                     if str(reason).strip()
                 ],
             }
-            for item in _as_sequence(god_modules.get("items"))
+            for item in _as_sequence(overloaded_modules.get("items"))
             for item_map in (_as_mapping(item),)
         ),
         key=lambda item: (
@@ -706,7 +706,7 @@ def _normalize_metrics_families(
     coupling_summary = _as_mapping(coupling.get("summary"))
     cohesion_summary = _as_mapping(cohesion.get("summary"))
     dead_code_summary = _as_mapping(dead_code.get("summary"))
-    god_summary = _as_mapping(god_modules.get("summary"))
+    overloaded_modules_summary = _as_mapping(overloaded_modules.get("summary"))
     dead_high_confidence = sum(
         1
         for item in dead_items
@@ -782,49 +782,61 @@ def _normalize_metrics_families(
             "items": [],
             "items_truncated": False,
         },
-        _GOD_MODULES_FAMILY: {
+        _OVERLOADED_MODULES_FAMILY: {
             "summary": {
-                "total": len(god_items),
-                "candidates": _as_int(god_summary.get("candidates")),
+                "total": len(overloaded_module_items),
+                "candidates": _as_int(overloaded_modules_summary.get("candidates")),
                 "population_status": str(
-                    god_summary.get("population_status", "limited")
+                    overloaded_modules_summary.get("population_status", "limited")
                 ),
-                "top_score": round(_as_float(god_summary.get("top_score")), 4),
+                "top_score": round(
+                    _as_float(overloaded_modules_summary.get("top_score")),
+                    4,
+                ),
                 "average_score": round(
-                    _as_float(god_summary.get("average_score")),
+                    _as_float(overloaded_modules_summary.get("average_score")),
                     4,
                 ),
                 "candidate_score_cutoff": round(
-                    _as_float(god_summary.get("candidate_score_cutoff")),
+                    _as_float(overloaded_modules_summary.get("candidate_score_cutoff")),
                     4,
                 ),
             },
             "detection": {
-                "version": str(god_detection.get("version", "1")),
-                "scope": str(god_detection.get("scope", "report_only")),
+                "version": str(overloaded_modules_detection.get("version", "1")),
+                "scope": str(overloaded_modules_detection.get("scope", "report_only")),
                 "strategy": str(
-                    god_detection.get("strategy", "project_relative_composite")
+                    overloaded_modules_detection.get(
+                        "strategy",
+                        "project_relative_composite",
+                    )
                 ),
                 "minimum_population": _as_int(
-                    god_detection.get("minimum_population"),
+                    overloaded_modules_detection.get("minimum_population"),
                 ),
                 "size_signals": [
                     str(signal)
-                    for signal in _as_sequence(god_detection.get("size_signals"))
+                    for signal in _as_sequence(
+                        overloaded_modules_detection.get("size_signals")
+                    )
                     if str(signal).strip()
                 ],
                 "dependency_signals": [
                     str(signal)
-                    for signal in _as_sequence(god_detection.get("dependency_signals"))
+                    for signal in _as_sequence(
+                        overloaded_modules_detection.get("dependency_signals")
+                    )
                     if str(signal).strip()
                 ],
                 "shape_signals": [
                     str(signal)
-                    for signal in _as_sequence(god_detection.get("shape_signals"))
+                    for signal in _as_sequence(
+                        overloaded_modules_detection.get("shape_signals")
+                    )
                     if str(signal).strip()
                 ],
             },
-            "items": god_items,
+            "items": overloaded_module_items,
             "items_truncated": False,
         },
     }

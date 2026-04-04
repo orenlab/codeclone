@@ -369,7 +369,19 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             )
         )
     )
-    god_modules_page = _structured_tool_result(
+    overloaded_modules_page = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_report_section",
+                {
+                    "section": "metrics_detail",
+                    "family": "overloaded_modules",
+                    "limit": 5,
+                },
+            )
+        )
+    )
+    overloaded_modules_alias_page = _structured_tool_result(
         asyncio.run(
             server.call_tool(
                 "get_report_section",
@@ -378,17 +390,21 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         )
     )
     assert cast("list[dict[str, object]]", metrics_detail_page["items"])
-    assert god_modules_page["family"] == "god_modules"
+    assert overloaded_modules_page["family"] == "overloaded_modules"
+    assert overloaded_modules_alias_page["family"] == "overloaded_modules"
+    assert overloaded_modules_alias_page["items"] == overloaded_modules_page["items"]
     report_metrics = cast("dict[str, object]", report_payload["metrics"])
     report_families = cast("dict[str, object]", report_metrics["families"])
-    report_god_modules = cast("dict[str, object]", report_families["god_modules"])
-    report_god_module_items = cast(
+    report_overloaded_modules = cast(
+        "dict[str, object]", report_families["overloaded_modules"]
+    )
+    report_overloaded_module_items = cast(
         "list[dict[str, object]]",
-        report_god_modules["items"],
+        report_overloaded_modules["items"],
     )
     assert (
-        cast("list[dict[str, object]]", god_modules_page["items"])[0]["path"]
-        == report_god_module_items[0]["relative_path"]
+        cast("list[dict[str, object]]", overloaded_modules_page["items"])[0]["path"]
+        == report_overloaded_module_items[0]["relative_path"]
     )
     changed_section = _structured_tool_result(
         asyncio.run(server.call_tool("get_report_section", {"section": "changed"}))

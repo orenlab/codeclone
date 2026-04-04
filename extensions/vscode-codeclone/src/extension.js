@@ -1,12 +1,72 @@
 "use strict";
 
-const { execFile } = require("node:child_process");
-const fs = require("node:fs");
+const fs = require("node:fs/promises");
 const path = require("node:path");
-const { promisify } = require("node:util");
+/** @type {any} */
 const vscode = require("vscode");
 
+const {
+  HELP_TOPICS,
+  HOTSPOT_GROUPS,
+  HOTSPOT_FOCUS_MODES,
+  HOTSPOT_GROUPS_BY_MODE,
+  REVIEW_DECORATION_THEMES,
+  WORKSPACE_STATE_HOTSPOT_FOCUS_MODE,
+  WORKSPACE_STATE_LAST_HELP_TOPIC,
+} = require("./constants");
+const {
+  capitalize,
+  compactDecimal,
+  decimal,
+  emptyReviewArtifacts,
+  findingIcon,
+  firstNormalizedLocation,
+  focusModeSpec,
+  formatBaselineState,
+  formatBooleanWord,
+  formatCacheSummary,
+  formatKind,
+  formatNovelty,
+  formatRunScope,
+  formatSeverity,
+  formatSourceKindSummary,
+  isSpecificFocusMode,
+  normalizeFindingLocations,
+  normalizeRelativePath,
+  number,
+  reviewTargetKey,
+  safeArray,
+  safeObject,
+  sameLaunchSpec,
+  treeAccessibilityInformation,
+  workspaceRelativePath,
+} = require("./formatters");
 const { CodeCloneMcpClient, MCPClientError } = require("./mcpClient");
+const {
+  markdownBulletList,
+  renderFindingMarkdown,
+  renderOverloadedModuleMarkdown,
+  renderHelpMarkdown,
+  renderRemediationMarkdown,
+  renderRestrictedModeMarkdown,
+  renderSetupMarkdown,
+  renderTriageMarkdown,
+} = require("./renderers");
+const {
+  HotspotsTreeProvider,
+  OverviewTreeProvider,
+  ReviewCodeLensProvider,
+  ReviewFileDecorationProvider,
+  SessionTreeProvider,
+  WorkspaceState,
+} = require("./providers");
+const {
+  captureWorkspaceGitSnapshot,
+  looksLikeCodeCloneRepo,
+  pathExists,
+  readFileHead,
+  sameGitSnapshot,
+} = require("./runtime");
 const {
   STALE_REASON_EDITOR,
   STALE_REASON_WORKSPACE,
@@ -17,730 +77,6 @@ const {
   staleMessage,
   workspaceLocalLauncherCandidates,
 } = require("./support");
-
-const execFileAsync = promisify(execFile);
-
-const HELP_TOPICS = [
-  "workflow",
-  "suppressions",
-  "baseline",
-  "latest_runs",
-  "review_state",
-  "changed_scope",
-];
-
-const HOTSPOT_GROUPS = [
-  { id: "newRegressions", label: "New Regressions", icon: "diff-added" },
-  { id: "productionHotspots", label: "Production Hotspots", icon: "target" },
-  { id: "changedFiles", label: "Changed Files", icon: "git-commit" },
-  { id: "godModules", label: "God Modules", icon: "symbol-module" },
-];
-
-const HOTSPOT_FOCUS_MODES = [
-  {
-    id: "recommended",
-    label: "Recommended",
-    description: "Show the highest-signal review surfaces for the current run.",
-  },
-  {
-    id: "new",
-    label: "New Regressions",
-    description: "Focus only on baseline-new findings.",
-  },
-  {
-    id: "production",
-    label: "Production",
-    description: "Focus only on production hotspots.",
-  },
-  {
-    id: "changed",
-    label: "Changed Files",
-    description: "Focus only on findings touching the selected diff.",
-  },
-  {
-    id: "reportOnly",
-    label: "Report-only",
-    description: "Focus only on report-only God Module candidates.",
-  },
-  {
-    id: "all",
-    label: "All Groups",
-    description: "Show every hotspot group, including empty ones.",
-  },
-];
-
-const HOTSPOT_GROUPS_BY_MODE = {
-  recommended: HOTSPOT_GROUPS.map((group) => group.id),
-  new: ["newRegressions"],
-  production: ["productionHotspots"],
-  changed: ["changedFiles"],
-  reportOnly: ["godModules"],
-  all: HOTSPOT_GROUPS.map((group) => group.id),
-};
-
-const REVIEW_DECORATION_THEMES = {
-  new: {
-    badge: "N",
-    color: "problemsErrorIcon.foreground",
-    tooltip: "CodeClone new regression",
-  },
-  production: {
-    badge: "P",
-    color: "problemsWarningIcon.foreground",
-    tooltip: "CodeClone production hotspot",
-  },
-  changed: {
-    badge: "C",
-    color: "charts.blue",
-    tooltip: "CodeClone changed-files review item",
-  },
-};
-
-const WORKSPACE_STATE_HOTSPOT_FOCUS_MODE = "codeclone.hotspotFocusMode";
-const WORKSPACE_STATE_LAST_HELP_TOPIC = "codeclone.lastHelpTopic";
-
-function number(value) {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return "0";
-  }
-  return value.toLocaleString("en-US");
-}
-
-function decimal(value, digits = 2) {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return "0.00";
-  }
-  return value.toFixed(digits);
-}
-
-function compactDecimal(value) {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return "0";
-  }
-  return value.toFixed(2).replace(/\.?0+$/, "");
-}
-
-function capitalize(value) {
-  if (!value) {
-    return "";
-  }
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function formatBooleanWord(value) {
-  return value ? "yes" : "no";
-}
-
-function formatBaselineState(payload) {
-  const entry = safeObject(payload);
-  const status = String(entry.status || "unknown");
-  return entry.trusted ? `${status} · trusted` : `${status} · untrusted`;
-}
-
-function formatCacheSummary(payload) {
-  const entry = safeObject(payload);
-  const usage = entry.used ? "used" : "fresh";
-  const freshness = entry.freshness ? String(entry.freshness) : "unknown";
-  return `${usage} · ${freshness}`;
-}
-
-function formatRunScope(value) {
-  return value === "changed" ? "changed files" : "workspace";
-}
-
-function formatSourceKindSummary(value) {
-  const entries = Object.entries(safeObject(value))
-    .filter(([, count]) => typeof count === "number" && count > 0)
-    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey));
-  if (entries.length === 0) {
-    return "No production findings by source kind.";
-  }
-  return entries
-    .map(([key, count]) => `${capitalize(key)} ${count}`)
-    .join(" · ");
-}
-
-function sameLaunchSpec(left, right) {
-  if (!left || !right) {
-    return false;
-  }
-  const leftArgs = Array.isArray(left.args) ? left.args : [];
-  const rightArgs = Array.isArray(right.args) ? right.args : [];
-  return (
-    left.command === right.command &&
-    left.cwd === right.cwd &&
-    JSON.stringify(leftArgs) === JSON.stringify(rightArgs)
-  );
-}
-
-function normalizeRelativePath(value) {
-  return String(value || "").replace(/\\/g, "/");
-}
-
-function workspaceRelativePath(folder, fsPath) {
-  return normalizeRelativePath(path.relative(folder.uri.fsPath, fsPath));
-}
-
-function uniqueStrings(values) {
-  return [...new Set(values.filter(Boolean))];
-}
-
-function formatSeverity(value) {
-  return capitalize(String(value || "info"));
-}
-
-function formatNovelty(value) {
-  const novelty = String(value || "").trim();
-  if (!novelty) {
-    return "";
-  }
-  return capitalize(novelty);
-}
-
-function formatKind(value) {
-  const kind = String(value || "");
-  switch (kind) {
-    case "function_clone":
-      return "Function clone";
-    case "block_clone":
-      return "Block clone";
-    case "segment_clone":
-      return "Segment clone";
-    case "class_hotspot":
-      return "Class hotspot";
-    case "module_hotspot":
-      return "Module hotspot";
-    case "duplicated_branches":
-      return "Duplicated branches";
-    default:
-      return capitalize(kind.replace(/_/g, " "));
-  }
-}
-
-function focusModeSpec(modeId) {
-  return (
-    HOTSPOT_FOCUS_MODES.find((entry) => entry.id === modeId) ||
-    HOTSPOT_FOCUS_MODES[0]
-  );
-}
-
-function isSpecificFocusMode(modeId) {
-  return modeId !== "recommended" && modeId !== "all";
-}
-
-function reviewTargetKey(target) {
-  if (!target || typeof target !== "object") {
-    return "";
-  }
-  if (target.nodeType === "godModule" && safeObject(target.item).path) {
-    return `god:${String(target.item.path)}`;
-  }
-  if (target.findingId) {
-    return `finding:${String(target.findingId)}`;
-  }
-  return "";
-}
-
-function findingIcon(severity) {
-  switch (String(severity || "").toLowerCase()) {
-    case "critical":
-      return new vscode.ThemeIcon(
-        "error",
-        new vscode.ThemeColor("problemsErrorIcon.foreground")
-      );
-    case "warning":
-      return new vscode.ThemeIcon(
-        "warning",
-        new vscode.ThemeColor("problemsWarningIcon.foreground")
-      );
-    default:
-      return new vscode.ThemeIcon(
-        "info",
-        new vscode.ThemeColor("problemsInfoIcon.foreground")
-      );
-  }
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function safeObject(value) {
-  return value && typeof value === "object" ? value : {};
-}
-
-function emptyReviewArtifacts() {
-  return {
-    newRegressions: [],
-    productionHotspots: [],
-    changedFiles: [],
-    godModules: [],
-  };
-}
-
-function normalizeLocations(value) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map((entry) => {
-      if (typeof entry === "string") {
-        const match = entry.match(/^(.+):(\d+)$/);
-        return {
-          path: match ? match[1] : entry,
-          line: match ? Number(match[2]) : null,
-          end_line: null,
-          symbol: null,
-        };
-      }
-      if (entry && typeof entry === "object") {
-        return {
-          path: entry.path ? String(entry.path) : "",
-          line:
-            typeof entry.line === "number" ? entry.line : null,
-          end_line:
-            typeof entry.end_line === "number" ? entry.end_line : null,
-          symbol: entry.symbol ? String(entry.symbol) : null,
-        };
-      }
-      return null;
-    })
-    .filter(Boolean);
-}
-
-function firstLocation(value) {
-  const locations = normalizeLocations(value);
-  return locations.length > 0 ? locations[0] : null;
-}
-
-function normalizeFindingLocations(folder, value) {
-  return normalizeLocations(value)
-    .filter((location) => location.path)
-    .map((location) => {
-      const relativePath = normalizeRelativePath(location.path);
-      const absolutePath = resolveWorkspacePath(folder.uri.fsPath, relativePath);
-      if (!absolutePath) {
-        return null;
-      }
-      return {
-        ...location,
-        path: relativePath,
-        absolutePath,
-      };
-    })
-    .filter(Boolean);
-}
-
-function firstNormalizedLocation(folder, value) {
-  const locations = normalizeFindingLocations(folder, value);
-  return locations.length > 0 ? locations[0] : null;
-}
-
-async function gitStdout(cwd, args) {
-  try {
-    const result = await execFileAsync("git", args, {
-      cwd,
-      maxBuffer: 1024 * 1024,
-    });
-    return String(result.stdout || "").trim();
-  } catch {
-    return null;
-  }
-}
-
-async function captureWorkspaceGitSnapshot(folder) {
-  const cwd = folder.uri.fsPath;
-  const [head, status] = await Promise.all([
-    gitStdout(cwd, ["rev-parse", "HEAD"]),
-    gitStdout(cwd, ["status", "--porcelain=v1", "--untracked-files=normal"]),
-  ]);
-  return {
-    head,
-    dirtySignature: status || "",
-  };
-}
-
-function sameGitSnapshot(left, right) {
-  return (
-    safeObject(left).head === safeObject(right).head &&
-    safeObject(left).dirtySignature === safeObject(right).dirtySignature
-  );
-}
-
-function looksLikeCodeCloneRepo(folderPath) {
-  return (
-    fs.existsSync(path.join(folderPath, "pyproject.toml")) &&
-    fs.existsSync(path.join(folderPath, "codeclone", "mcp_server.py"))
-  );
-}
-
-function readFileHead(filePath, maxBytes = 16384) {
-  const fd = fs.openSync(filePath, "r");
-  try {
-    const buffer = Buffer.allocUnsafe(maxBytes);
-    const bytesRead = fs.readSync(fd, buffer, 0, maxBytes, 0);
-    return buffer.toString("utf8", 0, bytesRead);
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
-function markdownBulletList(values) {
-  return values.map((value) => `- ${value}`).join("\n");
-}
-
-function renderHelpMarkdown(topic, payload) {
-  const lines = [
-    `# CodeClone MCP Help: ${topic}`,
-    "",
-    payload.summary || "",
-    "",
-    "## Key points",
-    markdownBulletList(safeArray(payload.key_points)),
-    "",
-    "## Recommended tools",
-    markdownBulletList(safeArray(payload.recommended_tools).map((tool) => `\`${tool}\``)),
-  ];
-  const warnings = safeArray(payload.warnings);
-  if (warnings.length > 0) {
-    lines.push("", "## Warnings", markdownBulletList(warnings));
-  }
-  const antiPatterns = safeArray(payload.anti_patterns);
-  if (antiPatterns.length > 0) {
-    lines.push("", "## Anti-patterns", markdownBulletList(antiPatterns));
-  }
-  const docLinks = safeArray(payload.doc_links);
-  if (docLinks.length > 0) {
-    lines.push(
-      "",
-      "## Docs",
-      markdownBulletList(
-        docLinks.map((entry) => `[${entry.title}](${entry.url})`)
-      )
-    );
-  }
-  return lines.join("\n");
-}
-
-function renderSetupMarkdown() {
-  return [
-    "# Set Up CodeClone MCP",
-    "",
-    "The VS Code extension needs a local `codeclone-mcp` launcher.",
-    "",
-    "## Recommended install for the preview extension",
-    "",
-    "```bash",
-    "pip install --pre \"codeclone[mcp]\"",
-    "```",
-    "",
-    "## Verify the launcher",
-    "",
-    "```bash",
-    "codeclone-mcp --help",
-    "```",
-    "",
-    "## If CodeClone lives in a custom environment",
-    "",
-    "- Set `codeclone.mcp.command` to the launcher you want VS Code to use.",
-    "- Set `codeclone.mcp.args` if that launcher needs extra arguments.",
-    "- In the CodeClone repository itself, the extension can also fall back to `uv run codeclone-mcp`.",
-    "",
-    "## What the extension expects",
-    "",
-    "- A local `codeclone-mcp` command, or an explicit custom launcher in settings.",
-    "- MCP support installed, not only the base `codeclone` package.",
-    "",
-    "Once that is ready, run `Analyze Workspace` again.",
-  ].join("\n");
-}
-
-function renderRestrictedModeMarkdown(topic) {
-  return [
-    `# CodeClone: Restricted Mode`,
-    "",
-    `The workspace is not trusted, so CodeClone keeps local analysis and the local MCP server offline.`,
-    "",
-    topic
-      ? `Live MCP help for \`${topic}\` becomes available after workspace trust is granted.`
-      : "Live MCP help topics become available after workspace trust is granted.",
-    "",
-    "## What you can do safely right now",
-    "",
-    "- Review installation and setup guidance.",
-    "- Inspect the extension surface and onboarding text.",
-    "- Grant workspace trust when you are ready to enable local analysis.",
-    "",
-    "## Next step",
-    "",
-    "Run `Manage Workspace Trust`, then open the help topic again.",
-  ].join("\n");
-}
-
-function renderFindingMarkdown(payload) {
-  const remediation = safeObject(payload.remediation);
-  const locations = normalizeLocations(payload.locations);
-  const spread = safeObject(payload.spread);
-  const lines = [
-    `# ${formatKind(payload.kind)}`,
-    "",
-    `- Finding id: \`${payload.id}\``,
-    `- Severity: ${formatSeverity(payload.severity)}`,
-    `- Scope: ${payload.scope || "unknown"}`,
-    `- Priority: ${compactDecimal(payload.priority)}`,
-    `- Count: ${payload.count || 0}`,
-    `- Spread: ${spread.files || 0} files / ${spread.functions || 0} functions`,
-  ];
-  if (locations.length > 0) {
-    lines.push(
-      "",
-      "## Locations",
-      markdownBulletList(
-        locations.map((location) => {
-          const range =
-            location.line !== null && location.end_line !== null
-              ? `${location.line}-${location.end_line}`
-              : location.line !== null
-                ? `${location.line}`
-                : "?";
-          const symbol = location.symbol ? ` — \`${location.symbol}\`` : "";
-          return `\`${location.path}:${range}\`${symbol}`;
-        })
-      )
-    );
-  }
-  if (Object.keys(remediation).length > 0) {
-    lines.push("", "## Remediation");
-    if (remediation.shape) {
-      lines.push("", remediation.shape);
-    }
-    if (remediation.why_now) {
-      lines.push("", `Why now: ${remediation.why_now}`);
-    }
-    if (remediation.effort || remediation.risk) {
-      lines.push(
-        "",
-        `Effort: ${remediation.effort || "unknown"} · Risk: ${remediation.risk || "unknown"}`
-      );
-    }
-    const steps = safeArray(remediation.steps);
-    if (steps.length > 0) {
-      lines.push("", "### Steps", markdownBulletList(steps));
-    }
-  }
-  return lines.join("\n");
-}
-
-function renderRemediationMarkdown(payload) {
-  const remediation = safeObject(payload.remediation);
-  const lines = [
-    `# Remediation: \`${payload.finding_id}\``,
-    "",
-  ];
-  if (remediation.shape) {
-    lines.push(remediation.shape, "");
-  }
-  lines.push(
-    `- Effort: ${remediation.effort || "unknown"}`,
-    `- Risk: ${remediation.risk || "unknown"}`
-  );
-  if (remediation.why_now) {
-    lines.push("", `Why now: ${remediation.why_now}`);
-  }
-  const steps = safeArray(remediation.steps);
-  if (steps.length > 0) {
-    lines.push("", "## Steps", markdownBulletList(steps));
-  }
-  return lines.join("\n");
-}
-
-function renderTriageMarkdown(state) {
-  const summary = safeObject(state.latestSummary);
-  const triage = safeObject(state.latestTriage);
-  const health = safeObject(summary.health);
-  const findings = safeObject(summary.findings);
-  const triageFindings = safeObject(triage.findings);
-  const topHotspots = safeObject(triage.top_hotspots);
-  const topSuggestions = safeObject(triage.top_suggestions);
-  const items = safeArray(topHotspots.items);
-  const suggestions = safeArray(topSuggestions.items);
-  const lines = [
-    `# CodeClone Production Triage`,
-    "",
-    `- Run: \`${state.currentRunId || "n/a"}\``,
-    `- Workspace: \`${state.folder.name}\``,
-    `- Health: ${health.score || 0}/${health.grade || "?"}`,
-    `- Findings: ${findings.total || 0} total · ${findings.production || 0} production`,
-    `- Source kinds: ${formatSourceKindSummary(triageFindings.by_source_kind)}`,
-  ];
-  if (items.length > 0) {
-    lines.push(
-      "",
-      "## Top production hotspots",
-      markdownBulletList(
-        items.map(
-          (item) =>
-            `\`${item.id}\` — ${formatKind(item.kind)} · ${formatSeverity(
-              item.severity
-            )} · ${item.scope || "unknown"} · priority ${compactDecimal(item.priority)}`
-        )
-      )
-    );
-  } else {
-    lines.push("", "## Top production hotspots", "", "None.");
-  }
-  if (suggestions.length > 0) {
-    lines.push(
-      "",
-      "## Top suggestions",
-      markdownBulletList(
-        suggestions.map((item) => `\`${item.id}\` — ${item.summary || "Suggestion"}`)
-      )
-    );
-  }
-  return lines.join("\n");
-}
-
-function renderGodModuleMarkdown(item) {
-  const reasons = safeArray(item.candidate_reasons);
-  const lines = [
-    `# God Module Candidate`,
-    "",
-    `- Path: \`${item.path}\``,
-    `- Module: \`${item.module}\``,
-    `- Source kind: ${item.source_kind || "unknown"}`,
-    `- Score: ${decimal(item.score)}`,
-    `- LOC: ${number(item.loc)}`,
-    `- Callables: ${item.callable_count || 0}`,
-    `- Complexity total / max: ${item.complexity_total || 0} / ${item.complexity_max || 0}`,
-    `- Fan-in / fan-out: ${item.fan_in || 0} / ${item.fan_out || 0}`,
-    `- Total dependencies: ${item.total_deps || 0}`,
-    `- Import edges / reimport edges: ${item.import_edges || 0} / ${item.reimport_edges || 0}`,
-    `- Reimport ratio: ${decimal(item.reimport_ratio)}`,
-    `- Instability: ${decimal(item.instability)}`,
-    `- Hub balance: ${decimal(item.hub_balance)}`,
-  ];
-  if (reasons.length > 0) {
-    lines.push("", "## Candidate reasons", markdownBulletList(reasons));
-  }
-  return lines.join("\n");
-}
-
-function treeAccessibilityInformation(node) {
-  const label = String(node?.label || "").trim();
-  const description = String(node?.description || "").trim();
-  if (!label && !description) {
-    return undefined;
-  }
-  const spoken = description ? `${label}, ${description}` : label;
-  return { label: spoken };
-}
-
-class WorkspaceState {
-  constructor(folder) {
-    this.folder = folder;
-    this.currentRunId = null;
-    this.latestSummary = null;
-    this.metricsSummary = null;
-    this.latestTriage = null;
-    this.changedSummary = null;
-    this.reviewed = [];
-    this.lastScope = "workspace";
-    this.lastUpdatedAt = null;
-    this.groupCache = new Map();
-    this.reviewArtifacts = emptyReviewArtifacts();
-    this.gitSnapshot = null;
-    this.stale = false;
-    this.staleReason = null;
-    this.lastStaleCheckAt = 0;
-  }
-}
-
-class BaseTreeProvider {
-  constructor(controller) {
-    this.controller = controller;
-    this.emitter = new vscode.EventEmitter();
-    this.onDidChangeTreeData = this.emitter.event;
-  }
-
-  refresh() {
-    this.emitter.fire(undefined);
-  }
-
-  dispose() {
-    this.emitter.dispose();
-  }
-}
-
-class OverviewTreeProvider extends BaseTreeProvider {
-  async getTreeItem(node) {
-    return this.controller.createTreeItem(node);
-  }
-
-  async getChildren(node) {
-    return this.controller.getOverviewChildren(node);
-  }
-}
-
-class HotspotsTreeProvider extends BaseTreeProvider {
-  async getTreeItem(node) {
-    return this.controller.createTreeItem(node);
-  }
-
-  async getChildren(node) {
-    return this.controller.getHotspotsChildren(node);
-  }
-}
-
-class SessionTreeProvider extends BaseTreeProvider {
-  async getTreeItem(node) {
-    return this.controller.createTreeItem(node);
-  }
-
-  async getChildren(node) {
-    return this.controller.getSessionChildren(node);
-  }
-}
-
-class ReviewCodeLensProvider {
-  constructor(controller) {
-    this.controller = controller;
-    this.emitter = new vscode.EventEmitter();
-    this.onDidChangeCodeLenses = this.emitter.event;
-  }
-
-  refresh() {
-    this.emitter.fire(undefined);
-  }
-
-  provideCodeLenses(document) {
-    return this.controller.provideReviewCodeLenses(document);
-  }
-
-  dispose() {
-    this.emitter.dispose();
-  }
-}
-
-class ReviewFileDecorationProvider {
-  constructor(controller) {
-    this.controller = controller;
-    this.emitter = new vscode.EventEmitter();
-    this.onDidChangeFileDecorations = this.emitter.event;
-  }
-
-  refresh(uri) {
-    this.emitter.fire(uri);
-  }
-
-  provideFileDecoration(uri) {
-    return this.controller.provideFileDecoration(uri);
-  }
-
-  dispose() {
-    this.emitter.dispose();
-  }
-}
 
 class CodeCloneController {
   constructor(context) {
@@ -768,12 +104,12 @@ class CodeCloneController {
       ),
     });
     this.revealDecorationTimeout = null;
-    this.connectionInfo = {
+    this.connectionInfo = /** @type {any} */ ({
       connected: false,
       serverInfo: null,
       toolCount: 0,
       launchSpec: null,
-    };
+    });
     this.statusBar = vscode.window.createStatusBarItem(
       "codeclone.status",
       vscode.StatusBarAlignment.Left,
@@ -941,14 +277,14 @@ class CodeCloneController {
       vscode.commands.registerCommand("codeclone.clearSessionState", () =>
         this.clearSessionState()
       ),
-      vscode.commands.registerCommand("codeclone.openGodModule", (node) =>
-        this.openGodModule(node)
+      vscode.commands.registerCommand("codeclone.openOverloadedModule", (node) =>
+        this.openOverloadedModule(node)
       ),
-      vscode.commands.registerCommand("codeclone.copyGodModuleBrief", (node) =>
-        this.copyGodModuleBrief(node)
+      vscode.commands.registerCommand("codeclone.copyOverloadedModuleBrief", (node) =>
+        this.copyOverloadedModuleBrief(node)
       ),
-      vscode.commands.registerCommand("codeclone.reviewGodModule", (node) =>
-        this.reviewGodModule(node)
+      vscode.commands.registerCommand("codeclone.reviewOverloadedModule", (node) =>
+        this.reviewOverloadedModule(node)
       ),
     ];
     this.context.subscriptions.push(...subscriptions);
@@ -1124,7 +460,7 @@ class CodeCloneController {
     await this.refreshStaleState(state);
   }
 
-  resolveLaunchSpec(folder) {
+  async resolveLaunchSpec(folder) {
     const config = vscode.workspace.getConfiguration("codeclone", folder.uri);
     const configuredCommand = config.get("mcp.command", "auto");
     const configuredArgs = config.get("mcp.args", []);
@@ -1135,9 +471,14 @@ class CodeCloneController {
         cwd: folder.uri.fsPath,
       });
     }
-    const localLauncher = workspaceLocalLauncherCandidates(folder.uri.fsPath).find(
-      (candidate) => fs.existsSync(candidate)
+    const candidates = workspaceLocalLauncherCandidates(folder.uri.fsPath);
+    const candidateChecks = await Promise.all(
+      candidates.map(async (candidate) => ({
+        candidate,
+        exists: await pathExists(candidate),
+      }))
     );
+    const localLauncher = candidateChecks.find((entry) => entry.exists)?.candidate;
     if (localLauncher) {
       return normalizedLaunchSpec({
         command: localLauncher,
@@ -1145,12 +486,12 @@ class CodeCloneController {
         cwd: folder.uri.fsPath,
       });
     }
-    const primary = normalizedLaunchSpec({
+    const primary = /** @type {any} */ (normalizedLaunchSpec({
       command: "codeclone-mcp",
       args: Array.isArray(configuredArgs) ? configuredArgs : [],
       cwd: folder.uri.fsPath,
-    });
-    primary.fallback = looksLikeCodeCloneRepo(folder.uri.fsPath)
+    }));
+    primary.fallback = (await looksLikeCodeCloneRepo(folder.uri.fsPath))
       ? normalizedLaunchSpec({
           command: "uv",
           args: ["run", "codeclone-mcp"],
@@ -1161,7 +502,7 @@ class CodeCloneController {
   }
 
   async ensureConnected(folder) {
-    const launchSpec = this.resolveLaunchSpec(folder);
+    const launchSpec = await this.resolveLaunchSpec(folder);
     if (this.client.isConnected() && this.connectionInfo.launchSpec) {
       const activeLaunchSpec = this.connectionInfo.launchSpec;
       if (
@@ -1278,7 +619,7 @@ class CodeCloneController {
       newRegressionsResponse,
       productionHotspotsResponse,
       changedFilesResponse,
-      godModulesResponse,
+      overloadedModulesResponse,
     ] = await Promise.all([
       this.client.callTool("list_findings", {
         run_id: runId,
@@ -1309,7 +650,7 @@ class CodeCloneController {
       this.client.callTool("get_report_section", {
         run_id: runId,
         section: "metrics_detail",
-        family: "god_modules",
+        family: "overloaded_modules",
         limit: 25,
       }),
     ]);
@@ -1317,7 +658,7 @@ class CodeCloneController {
       newRegressions: safeArray(newRegressionsResponse.items),
       productionHotspots: safeArray(productionHotspotsResponse.items),
       changedFiles: safeArray(changedFilesResponse.items),
-      godModules: safeArray(godModulesResponse.items),
+      overloadedModules: safeArray(overloadedModulesResponse.items),
     };
     state.groupCache.clear();
     this.rebuildFileDecorations();
@@ -1538,15 +879,23 @@ class CodeCloneController {
 
   activeFindingTarget(node) {
     const candidate = node || this.activeReviewTarget;
-    if (!candidate || candidate.nodeType === "godModule" || !candidate.findingId) {
+    if (
+      !candidate ||
+      candidate.nodeType === "overloadedModule" ||
+      !candidate.findingId
+    ) {
       return null;
     }
     return candidate;
   }
 
-  activeGodModuleTarget(node) {
+  activeOverloadedModuleTarget(node) {
     const candidate = node || this.activeReviewTarget;
-    if (!candidate || candidate.nodeType !== "godModule" || !safeObject(candidate.item).path) {
+    if (
+      !candidate ||
+      candidate.nodeType !== "overloadedModule" ||
+      !safeObject(candidate.item).path
+    ) {
       return null;
     }
     return candidate;
@@ -1557,7 +906,7 @@ class CodeCloneController {
       return false;
     }
     const fsPath = editor.document.uri.fsPath;
-    if (target.nodeType === "godModule") {
+    if (target.nodeType === "overloadedModule") {
       const state = this.states.get(target.workspaceKey);
       if (!state) {
         return false;
@@ -1615,8 +964,8 @@ class CodeCloneController {
         return safeArray(artifacts.productionHotspots);
       case "changedFiles":
         return safeArray(artifacts.changedFiles);
-      case "godModules":
-        return safeArray(artifacts.godModules);
+      case "overloadedModules":
+        return safeArray(artifacts.overloadedModules);
       default:
         return [];
     }
@@ -1628,7 +977,7 @@ class CodeCloneController {
 
   activeHotspotGroupIds(state) {
     const requested =
-      HOTSPOT_GROUPS_BY_MODE[this.hotspotFocusMode] ||
+      /** @type {any} */ (HOTSPOT_GROUPS_BY_MODE)[this.hotspotFocusMode] ||
       HOTSPOT_GROUPS_BY_MODE.recommended;
     if (this.hotspotFocusMode === "all") {
       return requested;
@@ -1689,7 +1038,7 @@ class CodeCloneController {
       "codeclone",
       "report.html"
     );
-    if (!fs.existsSync(htmlPath)) {
+    if (!(await pathExists(htmlPath))) {
       return {
         htmlPath,
         exists: false,
@@ -1698,10 +1047,10 @@ class CodeCloneController {
         generatedAtUtc: null,
       };
     }
-    const stat = fs.statSync(htmlPath);
+    const stat = await fs.stat(htmlPath);
     let generatedAtUtc = null;
     try {
-      const html = readFileHead(htmlPath);
+      const html = await readFileHead(htmlPath);
       const match = html.match(/data-report-generated-at-utc="([^"]+)"/);
       generatedAtUtc = match ? match[1] : null;
     } catch {
@@ -1729,13 +1078,13 @@ class CodeCloneController {
     };
   }
 
-  toGodModuleNodes(state, items) {
-    return items.map((item) => this.buildGodModuleNode(state, item));
+  toOverloadedModuleNodes(state, items) {
+    return items.map((item) => this.buildOverloadedModuleNode(state, item));
   }
 
-  buildGodModuleNode(state, item) {
+  buildOverloadedModuleNode(state, item) {
     return {
-      nodeType: "godModule",
+      nodeType: "overloadedModule",
       workspaceKey: state.folder.uri.toString(),
       runId: state.currentRunId,
       item,
@@ -1743,16 +1092,16 @@ class CodeCloneController {
       description: `${decimal(item.score)} · ${item.source_kind} · report-only`,
       tooltip: `${item.module} · ${number(item.loc)} LOC · ${item.total_deps} deps`,
       icon: new vscode.ThemeIcon("symbol-module"),
-      contextValue: "codeclone.godModule",
+      contextValue: "codeclone.overloadedModule",
       command: {
-        command: "codeclone.reviewGodModule",
-        title: "Review God Module",
+        command: "codeclone.reviewOverloadedModule",
+        title: "Review Overloaded Module",
         arguments: [
           {
             workspaceKey: state.folder.uri.toString(),
             runId: state.currentRunId,
             item,
-            nodeType: "godModule",
+            nodeType: "overloadedModule",
           },
         ],
       },
@@ -1765,15 +1114,15 @@ class CodeCloneController {
       this.hotspotFocusMode === "recommended"
         ? ["changedFiles", "newRegressions", "productionHotspots"]
         : this.hotspotFocusMode === "all"
-          ? ["changedFiles", "newRegressions", "productionHotspots", "godModules"]
+          ? ["changedFiles", "newRegressions", "productionHotspots", "overloadedModules"]
         : this.activeHotspotGroupIds(state);
     const queue = [];
     const seen = new Set();
     for (const groupId of groupIds) {
-      if (groupId === "godModules") {
-        for (const node of this.toGodModuleNodes(
+      if (groupId === "overloadedModules") {
+        for (const node of this.toOverloadedModuleNodes(
           state,
-          safeArray(artifacts.godModules)
+          safeArray(artifacts.overloadedModules)
         )) {
           const key = reviewTargetKey(node);
           if (!key || seen.has(key)) {
@@ -1799,9 +1148,9 @@ class CodeCloneController {
     if (
       this.hotspotFocusMode === "recommended" &&
       queue.length === 0 &&
-      safeArray(artifacts.godModules).length > 0
+      safeArray(artifacts.overloadedModules).length > 0
     ) {
-      return this.toGodModuleNodes(state, safeArray(artifacts.godModules));
+      return this.toOverloadedModuleNodes(state, safeArray(artifacts.overloadedModules));
     }
     return queue;
   }
@@ -1842,8 +1191,8 @@ class CodeCloneController {
       return;
     }
     const nextNode = queue[nextIndex];
-    if (nextNode.nodeType === "godModule") {
-      await this.revealGodModuleSource(nextNode);
+    if (nextNode.nodeType === "overloadedModule") {
+      await this.revealOverloadedModuleSource(nextNode);
       return;
     }
     await this.revealFindingSource(nextNode);
@@ -1903,8 +1252,8 @@ class CodeCloneController {
         }
       );
       if (picked) {
-        if (picked.node.nodeType === "godModule") {
-          await this.reviewGodModule(picked.node);
+        if (picked.node.nodeType === "overloadedModule") {
+          await this.reviewOverloadedModule(picked.node);
         } else {
           await this.reviewFinding(picked.node);
         }
@@ -2022,9 +1371,7 @@ class CodeCloneController {
     if (!resolved) {
       return;
     }
-    const state = this.states.get(resolved.workspaceKey);
-    const locations = safeArray(resolved.locations)
-      .map((location) => {
+    const locationCandidates = safeArray(resolved.locations).map((location) => {
         const uri = vscode.Uri.file(location.absolutePath);
         const startLine = Math.max(Number(location.line || 1) - 1, 0);
         const endLine = Math.max(
@@ -2034,8 +1381,17 @@ class CodeCloneController {
         const start = new vscode.Position(startLine, 0);
         const end = new vscode.Position(endLine, 0);
         return new vscode.Location(uri, new vscode.Range(start, end));
-      })
-      .filter((entry) => fs.existsSync(entry.uri.fsPath));
+      });
+    const locations = (
+      await Promise.all(
+        locationCandidates.map(async (entry) => ({
+          entry,
+          exists: await pathExists(entry.uri.fsPath),
+        }))
+      )
+    )
+      .filter((entry) => entry.exists)
+      .map((entry) => entry.entry);
     if (locations.length === 0) {
       await vscode.window.showInformationMessage(
         "This finding does not expose source locations for Peek."
@@ -2309,13 +1665,13 @@ class CodeCloneController {
     await this.revealWorkspacePath(
       state.folder,
       location.path,
-      location.line,
-      location.end_line
+      location.line ?? undefined,
+      location.end_line ?? undefined
     );
   }
 
-  async revealGodModuleSource(node) {
-    const activeNode = this.activeGodModuleTarget(node);
+  async revealOverloadedModuleSource(node) {
+    const activeNode = this.activeOverloadedModuleTarget(node);
     if (!activeNode) {
       return;
     }
@@ -2325,13 +1681,19 @@ class CodeCloneController {
     }
     const resolved = {
       ...activeNode,
-      nodeType: "godModule",
+      nodeType: "overloadedModule",
     };
     this.setActiveReviewTarget(resolved);
     await this.revealWorkspacePath(state.folder, activeNode.item.path);
   }
 
-  async revealWorkspacePath(folder, relativePath, line = null, endLine = null) {
+  /**
+   * @param {any} folder
+   * @param {string} relativePath
+   * @param {number | undefined} [line]
+   * @param {number | undefined} [endLine]
+   */
+  async revealWorkspacePath(folder, relativePath, line = undefined, endLine = undefined) {
     const absolutePath = resolveWorkspacePath(folder.uri.fsPath, relativePath);
     if (!absolutePath) {
       await vscode.window.showWarningMessage(
@@ -2417,17 +1779,17 @@ class CodeCloneController {
     await this.showMarkdownDocument(renderSetupMarkdown());
   }
 
-  async openGodModule(node) {
-    const activeNode = this.activeGodModuleTarget(node);
+  async openOverloadedModule(node) {
+    const activeNode = this.activeOverloadedModuleTarget(node);
     if (!activeNode) {
       return;
     }
     this.setActiveReviewTarget(activeNode);
-    await this.showMarkdownDocument(renderGodModuleMarkdown(activeNode.item));
+    await this.showMarkdownDocument(renderOverloadedModuleMarkdown(activeNode.item));
   }
 
-  async reviewGodModule(node) {
-    const activeNode = this.activeGodModuleTarget(node);
+  async reviewOverloadedModule(node) {
+    const activeNode = this.activeOverloadedModuleTarget(node);
     if (!activeNode) {
       return;
     }
@@ -2441,7 +1803,7 @@ class CodeCloneController {
         },
         {
           label: "Show report-only detail",
-          description: "Open God Module summary",
+          description: "Open Overloaded Module summary",
           action: "detail",
         },
         {
@@ -2458,18 +1820,18 @@ class CodeCloneController {
       return;
     }
     if (picked.action === "reveal") {
-      await this.revealGodModuleSource(activeNode);
+      await this.revealOverloadedModuleSource(activeNode);
       return;
     }
     if (picked.action === "brief") {
-      await this.copyGodModuleBrief(activeNode);
+      await this.copyOverloadedModuleBrief(activeNode);
       return;
     }
-    await this.openGodModule(activeNode);
+    await this.openOverloadedModule(activeNode);
   }
 
-  async copyGodModuleBrief(node) {
-    const activeNode = this.activeGodModuleTarget(node);
+  async copyOverloadedModuleBrief(node) {
+    const activeNode = this.activeOverloadedModuleTarget(node);
     if (!activeNode) {
       return;
     }
@@ -2575,7 +1937,7 @@ class CodeCloneController {
     if (!target) {
       return [];
     }
-    if (target.nodeType === "godModule") {
+    if (target.nodeType === "overloadedModule") {
       const state = this.states.get(target.workspaceKey);
       if (!state) {
         return [];
@@ -2595,12 +1957,12 @@ class CodeCloneController {
           title: "$(arrow-down) Next hotspot",
         }),
         new vscode.CodeLens(range, {
-          command: "codeclone.openGodModule",
+          command: "codeclone.openOverloadedModule",
           title: "$(symbol-module) Report-only detail",
           arguments: [target],
         }),
         new vscode.CodeLens(range, {
-          command: "codeclone.copyGodModuleBrief",
+          command: "codeclone.copyOverloadedModuleBrief",
           title: "$(copy) Copy report-only brief",
           arguments: [target],
         }),
@@ -2659,7 +2021,7 @@ class CodeCloneController {
       changed: this.reviewArtifactCount(state, "changedFiles"),
       new: this.reviewArtifactCount(state, "newRegressions"),
       production: this.reviewArtifactCount(state, "productionHotspots"),
-      godModules: this.reviewArtifactCount(state, "godModules"),
+      overloadedModules: this.reviewArtifactCount(state, "overloadedModules"),
     };
     const baselineDrift = this.baselineDrift(state);
     if (!node) {
@@ -2706,13 +2068,13 @@ class CodeCloneController {
           icon: new vscode.ThemeIcon("git-commit"),
         });
       }
-      if (safeObject(state.metricsSummary).god_modules) {
-        const godModules = safeObject(state.metricsSummary).god_modules;
+      if (safeObject(state.metricsSummary).overloaded_modules) {
+        const overloadedModules = safeObject(state.metricsSummary).overloaded_modules;
         sections.push({
           nodeType: "section",
           id: "overview.god",
-          label: "God Modules",
-          description: `${godModules.candidates} candidates · top ${decimal(godModules.top_score)} (report-only)`,
+          label: "Overloaded Modules",
+          description: `${overloadedModules.candidates} candidates · top ${decimal(overloadedModules.top_score)} (report-only)`,
           icon: new vscode.ThemeIcon("symbol-module"),
         });
       }
@@ -2800,16 +2162,16 @@ class CodeCloneController {
       ];
     }
     if (node.id === "overview.god") {
-      const godModules = safeObject(state.metricsSummary).god_modules;
+      const overloadedModules = safeObject(state.metricsSummary).overloaded_modules;
       return [
-        this.detailNode("Candidates", number(godModules.candidates)),
-        this.detailNode("Ranked modules", number(godModules.total)),
-        this.detailNode("Top score", decimal(godModules.top_score)),
-        this.detailNode("Average score", decimal(godModules.average_score)),
-        this.detailNode("Population", String(godModules.population_status)),
+        this.detailNode("Candidates", number(overloadedModules.candidates)),
+        this.detailNode("Ranked modules", number(overloadedModules.total)),
+        this.detailNode("Top score", decimal(overloadedModules.top_score)),
+        this.detailNode("Average score", decimal(overloadedModules.average_score)),
+        this.detailNode("Population", String(overloadedModules.population_status)),
         this.detailNode(
           "Review surface",
-          `${number(reviewCounts.godModules)} visible in Hotspots`
+          `${number(reviewCounts.overloadedModules)} visible in Hotspots`
         ),
       ];
     }
@@ -3000,10 +2362,10 @@ class CodeCloneController {
             this.reviewArtifactItems(state, "changedFiles")
           );
           break;
-        case "godModules":
-          nodes = this.toGodModuleNodes(
+        case "overloadedModules":
+          nodes = this.toOverloadedModuleNodes(
             state,
-            this.reviewArtifactItems(state, "godModules")
+            this.reviewArtifactItems(state, "overloadedModules")
           );
           break;
         default:
@@ -3088,8 +2450,8 @@ class CodeCloneController {
         return state.changedSummary
           ? `${this.reviewArtifactCount(state, "changedFiles")} visible · ${state.changedSummary.verdict}`
           : "not analyzed";
-      case "godModules":
-        return `${this.reviewArtifactCount(state, "godModules")} report-only`;
+      case "overloadedModules":
+        return `${this.reviewArtifactCount(state, "overloadedModules")} report-only`;
       default:
         return "";
     }
@@ -3103,8 +2465,8 @@ class CodeCloneController {
         return "No production hotspots are visible.";
       case "changedFiles":
         return "No findings touching changed files are visible.";
-      case "godModules":
-        return "No report-only God Module candidates are visible.";
+      case "overloadedModules":
+        return "No report-only Overloaded Module candidates are visible.";
       default:
         return "Nothing is visible in this category.";
     }
@@ -3114,7 +2476,8 @@ class CodeCloneController {
     const specificMode = isSpecificFocusMode(this.hotspotFocusMode);
     if (specificMode) {
       const allowed =
-        HOTSPOT_GROUPS_BY_MODE[this.hotspotFocusMode] || HOTSPOT_GROUPS_BY_MODE.recommended;
+        /** @type {any} */ (HOTSPOT_GROUPS_BY_MODE)[this.hotspotFocusMode] ||
+        HOTSPOT_GROUPS_BY_MODE.recommended;
       if (!allowed.includes(groupId)) {
         return false;
       }
@@ -3131,8 +2494,8 @@ class CodeCloneController {
           return this.hotspotFocusMode === "changed";
         }
         return specificMode || this.reviewArtifactCount(state, "changedFiles") > 0;
-      case "godModules":
-        return specificMode || this.reviewArtifactCount(state, "godModules") > 0;
+      case "overloadedModules":
+        return specificMode || this.reviewArtifactCount(state, "overloadedModules") > 0;
       default:
         return false;
     }
@@ -3173,11 +2536,11 @@ class CodeCloneController {
         title: "Review production hotspots",
       };
     }
-    if (this.reviewArtifactCount(state, "godModules") > 0) {
+    if (this.reviewArtifactCount(state, "overloadedModules") > 0) {
       return {
-        label: "Inspect report-only God Modules",
+        label: "Inspect report-only Overloaded Modules",
         command: "codeclone.focusHotspots",
-        title: "Inspect report-only God Modules",
+        title: "Inspect report-only Overloaded Modules",
       };
     }
     return {
@@ -3233,7 +2596,7 @@ class CodeCloneController {
         item.command = node.command;
         break;
       }
-      case "godModule": {
+      case "overloadedModule": {
         item = new vscode.TreeItem(
           node.label,
           vscode.TreeItemCollapsibleState.None
@@ -3241,7 +2604,7 @@ class CodeCloneController {
         item.description = node.description;
         item.tooltip = node.tooltip;
         item.iconPath = node.icon;
-        item.contextValue = "codeclone.godModule";
+        item.contextValue = "codeclone.overloadedModule";
         item.command = node.command;
         break;
       }
@@ -3314,8 +2677,8 @@ class CodeCloneController {
         newCount + productionCount,
         changedCount
       );
-      const godModuleCount = Number(
-        this.reviewArtifactCount(state, "godModules")
+      const overloadedModuleCount = Number(
+        this.reviewArtifactCount(state, "overloadedModules")
       );
       let badgeValue = 0;
       let badgeTooltip = "";
@@ -3333,15 +2696,15 @@ class CodeCloneController {
           badgeTooltip = `${changedCount} changed-files review items are visible in Hotspots`;
           break;
         case "reportOnly":
-          badgeValue = godModuleCount;
-          badgeTooltip = `${godModuleCount} report-only God Module candidates are visible in Hotspots`;
+          badgeValue = overloadedModuleCount;
+          badgeTooltip = `${overloadedModuleCount} report-only Overloaded Module candidates are visible in Hotspots`;
           break;
         default:
-          badgeValue = actionableCount > 0 ? actionableCount : godModuleCount;
+          badgeValue = actionableCount > 0 ? actionableCount : overloadedModuleCount;
           badgeTooltip =
             actionableCount > 0
               ? `${actionableCount} review items need attention`
-              : `${godModuleCount} report-only God Module candidates are visible in Hotspots`;
+              : `${overloadedModuleCount} report-only Overloaded Module candidates are visible in Hotspots`;
           break;
       }
       this.hotspotsView.badge =
@@ -3396,7 +2759,7 @@ class CodeCloneController {
     void vscode.commands.executeCommand(
       "setContext",
       "codeclone.activeReviewTargetIsFinding",
-      Boolean(activeTarget && activeTarget.nodeType !== "godModule")
+      Boolean(activeTarget && activeTarget.nodeType !== "overloadedModule")
     );
     void vscode.commands.executeCommand(
       "setContext",
@@ -3405,8 +2768,8 @@ class CodeCloneController {
     );
     void vscode.commands.executeCommand(
       "setContext",
-      "codeclone.activeReviewTargetIsGodModule",
-      Boolean(activeTarget && activeTarget.nodeType === "godModule")
+      "codeclone.activeReviewTargetIsOverloadedModule",
+      Boolean(activeTarget && activeTarget.nodeType === "overloadedModule")
     );
     void vscode.commands.executeCommand(
       "setContext",
@@ -3536,10 +2899,8 @@ function activate(context) {
   controller = new CodeCloneController(context);
 }
 
-async function deactivate() {
-  if (controller) {
-    await controller.client.dispose();
-  }
+function deactivate() {
+  controller = null;
 }
 
 module.exports = {

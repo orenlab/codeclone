@@ -46,9 +46,13 @@
     "vscode": "^1.100.0"
   },
   "scripts": {
-    "check": "node --check src/support.js && node --check src/mcpClient.js && node --check src/extension.js",
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "typecheck": "tsc -p jsconfig.json --noEmit",
+    "check": "npm run build && npm run typecheck && node --check src/constants.js && node --check src/formatters.js && node --check src/runtime.js && node --check src/renderers.js && node --check src/providers.js && node --check src/support.js && node --check src/mcpClient.js && node --check src/extension.js",
     "test": "node --test test/*.test.js",
-    "test:host": "node test/runExtensionHost.js"
+    "test:host": "npm run build && node test/runExtensionHost.js",
+    "vscode:prepublish": "npm run build"
   },
   "categories": [
     "Linters",
@@ -72,12 +76,11 @@
     "onCommand:codeclone.markFindingReviewed",
     "onCommand:codeclone.showHelpTopic",
     "onCommand:codeclone.openSetupHelp",
-    "onCommand:codeclone.openGodModule",
-    "onCommand:codeclone.copyGodModuleBrief"
-    ,
+    "onCommand:codeclone.openOverloadedModule",
+    "onCommand:codeclone.copyOverloadedModuleBrief",
     "onCommand:codeclone.manageWorkspaceTrust"
   ],
-  "main": "./src/extension.js",
+  "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -287,18 +290,18 @@
         "icon": "$(shield)"
       },
       {
-        "command": "codeclone.openGodModule",
+        "command": "codeclone.openOverloadedModule",
         "title": "Open Candidate Detail",
         "category": "CodeClone",
         "icon": "$(symbol-module)"
       },
       {
-        "command": "codeclone.reviewGodModule",
+        "command": "codeclone.reviewOverloadedModule",
         "title": "Review Candidate",
         "category": "CodeClone"
       },
       {
-        "command": "codeclone.copyGodModuleBrief",
+        "command": "codeclone.copyOverloadedModuleBrief",
         "title": "Copy Report-only Brief",
         "category": "CodeClone",
         "icon": "$(copy)"
@@ -362,15 +365,15 @@
           "when": "false"
         },
         {
-          "command": "codeclone.openGodModule",
+          "command": "codeclone.openOverloadedModule",
           "when": "false"
         },
         {
-          "command": "codeclone.copyGodModuleBrief",
+          "command": "codeclone.copyOverloadedModuleBrief",
           "when": "false"
         },
         {
-          "command": "codeclone.reviewGodModule",
+          "command": "codeclone.reviewOverloadedModule",
           "when": "false"
         }
       ],
@@ -523,13 +526,13 @@
           "group": "inline@1"
         },
         {
-          "command": "codeclone.openGodModule",
-          "when": "viewItem == codeclone.godModule",
+          "command": "codeclone.openOverloadedModule",
+          "when": "viewItem == codeclone.overloadedModule",
           "group": "inline@1"
         },
         {
-          "command": "codeclone.copyGodModuleBrief",
-          "when": "viewItem == codeclone.godModule",
+          "command": "codeclone.copyOverloadedModuleBrief",
+          "when": "viewItem == codeclone.overloadedModule",
           "group": "navigation@1"
         }
       ],
@@ -565,8 +568,8 @@
           "group": "secondary@2"
         },
         {
-          "command": "codeclone.copyGodModuleBrief",
-          "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsGodModule",
+          "command": "codeclone.copyOverloadedModuleBrief",
+          "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsOverloadedModule",
           "group": "secondary@1"
         }
       ]
@@ -645,5 +648,12 @@
         }
       }
     }
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "@types/vscode": "1.100.0",
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.28.0",
+    "typescript": "^6.0.2"
   }
 }

@@ -574,7 +574,7 @@ Use modern syntax when it stays compatible with 3.10+:
 Prefer these rules:
 
 - **Domain / contracts / enums** live near the domain owner (baseline statuses in baseline domain).
-- If a module becomes a “god module”, split by:
+- If a module becomes an “overloaded module”, split by:
     - model (types)
     - io/serialization
     - rules/validation

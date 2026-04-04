@@ -51,7 +51,6 @@ def overview_cluster_header(title: str, subtitle: str | None = None) -> str:
 
 
 _SUMMARY_ICON_KEYS: dict[str, tuple[str, str]] = {
-    "scan scope": ("overview", "summary-icon summary-icon--info"),
     "top risks": ("top-risks", "summary-icon summary-icon--risk"),
     "issue breakdown": ("issue-breakdown", "summary-icon summary-icon--info"),
     "source breakdown": ("source-breakdown", "summary-icon summary-icon--info"),
@@ -59,7 +58,7 @@ _SUMMARY_ICON_KEYS: dict[str, tuple[str, str]] = {
     "clone groups": ("clone-groups", "summary-icon summary-icon--info"),
     "low cohesion": ("low-cohesion", "summary-icon summary-icon--info"),
     "top candidates": ("quality", "summary-icon summary-icon--info"),
-    "candidate profile": ("quality", "summary-icon summary-icon--info"),
+    "more candidates": ("quality", "summary-icon summary-icon--info"),
     "health profile": ("health-profile", "summary-icon summary-icon--info"),
 }
 

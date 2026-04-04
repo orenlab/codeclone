@@ -92,7 +92,7 @@ def _round_score(value: float) -> float:
     return round(float(value), 4)
 
 
-def build_god_modules_payload(
+def build_overloaded_modules_payload(
     *,
     scan_root: str,
     source_stats_by_file: Sequence[tuple[str, int, int, int, int]],

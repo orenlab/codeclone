@@ -2,46 +2,35 @@
 
 ## [2.0.0b4]
 
-2.0.0b4 deepens the platform model introduced in b3: MCP becomes more self-guiding, report-only analysis expands with
-module-level hotspot ranking, findings and suggestions are separated more cleanly by role, Health Score documentation
-now formalizes phased score-model evolution, and CodeClone gains its first native IDE surface in preview.
-
 ### MCP server
 
-- Add bounded MCP `help(topic=...)` as a compact uncertainty-recovery and semantic-routing tool for workflow, baseline,
-  suppressions, latest-run semantics, review state, and changed-scope routing.
+- Add `help(topic=...)` tool for workflow guidance, baseline semantics, and review-state routing.
+- Optimize MCP payloads: short finding IDs (sha256-based for block clones), compact `derived` section projection,
+  bounded `metrics_detail` with pagination.
 
 ### Report contract
 
-- Bump canonical report schema to `2.3` and add `metrics.families.god_modules` as a project-relative, report-only
-  module-hotspot layer.
-- Surface `God Modules` consistently across canonical JSON, text/markdown, HTML Overview + Quality projections, and
-  bounded MCP `metrics_detail` access without changing findings, health, gates, baseline semantics, or SARIF.
-- Tighten the findings/suggestions role split: low-signal local structural `info` hints remain canonical findings,
-  while separate suggestion cards are reserved for action-surplus cases and structural findings can render compact
-  inline suggested action in HTML.
+- Bump canonical report schema to `2.3`.
+- Add `metrics.overloaded_modules` — report-only module-hotspot ranking by size, complexity, and coupling pressure.
+- Surface Overloaded Modules across JSON, text/markdown, HTML, and MCP without affecting findings, health, or gates.
+- Normalize the canonical family name and MCP/report output to `overloaded_modules`; `god_modules` remains accepted as a read-only MCP input alias during transition.
 
 ### CLI and HTML
 
-- Align CLI and HTML scope summaries with canonical report-wide inventory totals.
-- Polish `God Modules` presentation so report-only module-hotspot summaries read consistently across surfaces.
+- Align CLI and HTML scope summaries with canonical inventory totals.
+- Redesign Overview tab: Executive Summary becomes 2-column (Issue Breakdown + Source Breakdown) with scan scope in
+  the section subtitle; Overloaded Modules section replaces the earlier stretched module-hotspot layout.
 
 ### Documentation
 
-- Add a dedicated Health Score chapter documenting current scoring inputs, report-only / non-scoring layers, and the
-  phased policy for future health-model expansion.
-- Explicitly document that future releases may lower a repository score because the scoring model becomes broader or
-  stricter, not only because the code became worse.
+- Add Health Score chapter: scoring inputs, report-only layers, phased expansion policy.
+- Document that future releases may lower scores due to broader scoring model, not only worse code.
 
-### IDE integration
+### IDE integration (preview)
 
-- Add a preview VS Code extension as the first native IDE surface for `codeclone-mcp`, bringing baseline-aware,
-  triage-first structural review and guided source-first drill-down into the editor.
-- Establish the initial extension interaction model, including explicit setup/session semantics, review-loop navigation,
-  hotspot focus persistence, lightweight Explorer decorations, safe HTML-report bridging, and accessibility/status
-  polish.
-- Add extension-side regression coverage with Node unit tests, local extension-host smoke, and validated preview `.vsix`
-  packaging.
+- Add VS Code extension (`codeclone-mcp` client) with baseline-aware triage, source drill-down, Explorer decorations,
+  and HTML-report bridging.
+- Add Node unit tests, extension-host smoke tests, and `.vsix` packaging.
 
 ## [2.0.0b3] - 20260401
 

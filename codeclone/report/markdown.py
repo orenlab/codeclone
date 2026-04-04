@@ -43,7 +43,7 @@ _ANCHORS: tuple[tuple[str, str, int], ...] = (
     ("complexity", "Complexity", 3),
     ("coupling", "Coupling", 3),
     ("cohesion", "Cohesion", 3),
-    ("god-modules", "God Modules", 3),
+    ("overloaded-modules", "Overloaded Modules", 3),
     ("dependencies", "Dependencies", 3),
     ("dead-code-metrics", "Dead Code", 3),
     ("dead-code-suppressed", "Suppressed Dead Code", 3),
@@ -435,8 +435,8 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             ("lcom4", "method_count", "instance_var_count", "risk"),
         ),
         (
-            "god-modules",
-            "God Modules",
+            "overloaded-modules",
+            "Overloaded Modules",
             (
                 "total",
                 "candidates",
@@ -470,9 +470,13 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         family_key = (
             "dead_code"
             if anchor_id == "dead-code-metrics"
-            else ("god_modules" if anchor_id == "god-modules" else anchor_id)
+            else (
+                "overloaded_modules" if anchor_id == "overloaded-modules" else anchor_id
+            )
         )
         family_payload = _as_mapping(metrics_families.get(family_key))
+        if not family_payload and family_key == "overloaded_modules":
+            family_payload = _as_mapping(metrics_families.get("god_modules"))
         family_summary_map = _as_mapping(family_payload.get("summary"))
         _append_anchor(lines, anchor_id, title, 3)
         _append_kv_bullets(

@@ -50,7 +50,7 @@ It also provides:
 - command palette entry points for analysis and review
 - one onboarding walkthrough
 - markdown detail panels for findings, remediation, help topics, setup help,
-  restricted-mode guidance, and report-only God Module detail
+  restricted-mode guidance, and report-only Overloaded Module detail
 - lightweight Explorer file decorations for review-relevant files
 - editor-local CodeLens and title actions for the active review target
 
@@ -75,7 +75,7 @@ The extension currently supports:
 - changed-files analysis against a configured git diff reference
 - compact overview of structural health, current run state, and baseline drift
 - review queues for new regressions, production hotspots, changed-scope
-  findings, and report-only `God Modules`
+  findings, and report-only `Overloaded Modules`
 - source reveal, peek, canonical finding detail, remediation detail, and
   session-local reviewed markers
 - bounded MCP help topics inside the IDE
@@ -123,39 +123,22 @@ For this reason:
 - local analysis and local MCP startup remain disabled until trust is granted
 - virtual workspaces are unsupported
 
-## Design decisions
-
-The extension follows these implementation rules:
+## Design rules
 
 - **Native VS Code first**: tree views, status bar, Quick Pick, CodeLens, and
-  file decorations come before any richer custom UI.
-- **Source-first review**: findings prefer `Reveal Source` over immediate
-  detail panels.
-- **Explicit deepening**: canonical finding detail, remediation, and HTML
-  report bridges remain opt-in actions.
-- **Report-only separation**: `God Modules` stay clearly outside findings,
-  gates, and health dimensions.
-- **Safe local HTML bridge**: `Open in HTML Report` must verify that a local
-  `report.html` exists and is not obviously older than the current run.
-- **Session-local workflow state**: reviewed markers may shape the review UX
-  but must not leak into repository truth.
-
-## UX rules
-
-The extension should preserve these product rules:
-
-- The cheapest useful path should be the most obvious path.
-- First-run UX should lead to `Analyze Workspace`, not transport setup detail.
-- Review actions should prefer opening source before opening deeper structured
-  detail.
-- Report-only layers such as `God Modules` must remain visually distinct from
-  findings, gates, and health dimensions.
-- The extension should minimize noise and avoid duplicating the HTML report in
-  the sidebar.
-- Restricted Mode should still explain what the extension needs, without
-  pretending local analysis is available before trust is granted.
-- Accessibility labels should stay meaningful on tree items and status
-  surfaces.
+  file decorations before any custom UI.
+- **Source-first**: findings prefer `Reveal Source` over detail panels;
+  canonical detail and HTML report bridge are opt-in.
+- **Report-only separation**: Overloaded Modules stay visually distinct from
+  findings, gates, and health.
+- **Safe HTML bridge**: `Open in HTML Report` verifies the local file exists
+  and is not older than the current run.
+- **Session-local state**: reviewed markers shape review UX but never leak
+  into repository truth.
+- **First-run clarity**: onboarding leads to `Analyze Workspace`, not
+  transport setup.
+- **Restricted Mode honesty**: explain requirements without pretending
+  analysis is available before trust is granted.
 
 ## Relationship to other interfaces
 

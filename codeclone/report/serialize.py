@@ -600,7 +600,7 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         "complexity",
         "coupling",
         "cohesion",
-        "god_modules",
+        "overloaded_modules",
         "dependencies",
         "dead_code",
         "health",
@@ -614,7 +614,7 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
                 keys = ("total", "average", "max", "low_cohesion")
             case "dependencies":
                 keys = ("modules", "edges", "cycles", "max_depth")
-            case "god_modules":
+            case "overloaded_modules":
                 keys = (
                     "total",
                     "candidates",
@@ -628,15 +628,17 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
                 keys = ("score", "grade")
         lines.append(f"{family_name}: {_format_key_values(family_summary, keys)}")
 
-    god_modules_family = _as_mapping(metrics_families.get("god_modules"))
-    god_module_items = _as_sequence(god_modules_family.get("items"))
+    overloaded_modules_family = _as_mapping(metrics_families.get("overloaded_modules"))
+    if not overloaded_modules_family:
+        overloaded_modules_family = _as_mapping(metrics_families.get("god_modules"))
+    overloaded_module_items = _as_sequence(overloaded_modules_family.get("items"))
     lines.extend(
         [
             "",
-            "GOD MODULES (top 10)",
+            "OVERLOADED MODULES (top 10)",
         ]
     )
-    if not god_module_items:
+    if not overloaded_module_items:
         lines.append("(none)")
     else:
         lines.extend(
@@ -655,7 +657,7 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
                     "complexity_total",
                 ),
             )
-            for item in map(_as_mapping, god_module_items[:10])
+            for item in map(_as_mapping, overloaded_module_items[:10])
         )
 
     lines.append("")

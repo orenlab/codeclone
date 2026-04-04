@@ -34,15 +34,15 @@ Canonical provenance additions:
 
 Canonical report-only metrics additions:
 
-- `metrics.families.god_modules` records project-relative module hotspot
-  profiles and candidate classification for `God Modules`
+- `metrics.families.overloaded_modules` records project-relative module hotspot
+  profiles and candidate classification for `Overloaded Modules`
 - the family is canonical report truth, but it does **not** participate in
   findings totals, health, gates, baseline NEW/KNOWN semantics, or SARIF in
   `b4`
-- `God Modules` is a report-only experimental layer rather than a second
+- `Overloaded Modules` is a report-only experimental layer rather than a second
   complexity metric:
     - complexity reports local control-flow hotspots in functions and methods
-    - `God Modules` reports module-level responsibility overload and dependency
+    - `Overloaded Modules` reports module-level responsibility overload and dependency
       pressure
     - the layer may later become scoring only after validation and explicit
       health-model documentation updates

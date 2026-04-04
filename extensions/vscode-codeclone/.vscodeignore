@@ -1,7 +1,11 @@
 .vscode/**
 .DS_Store
 DESIGN.md
+esbuild.config.mjs
+jsconfig.json
 media/.thumb/**
 media/icon-source.svg
 *.vsix
+src/**
 test/**
+node_modules
