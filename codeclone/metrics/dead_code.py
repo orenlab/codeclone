@@ -40,18 +40,12 @@ def find_unused(
 ) -> tuple[DeadItem, ...]:
     items: list[DeadItem] = []
     for symbol in definitions:
-        if DEAD_CODE_RULE_ID in symbol.suppressed_rules:
+        if _should_skip_dead_candidate(
+            symbol,
+            referenced_names=referenced_names,
+            referenced_qualnames=referenced_qualnames,
+        ):
             continue
-        if _is_non_actionable_candidate(symbol):
-            continue
-        if symbol.qualname in referenced_qualnames:
-            continue
-        if symbol.local_name in referenced_names:
-            continue
-
-        confidence: Literal["high", "medium"] = CONFIDENCE_HIGH
-        if symbol.qualname.split(":", 1)[-1] in referenced_names:
-            confidence = CONFIDENCE_MEDIUM
 
         items.append(
             DeadItem(
@@ -60,7 +54,10 @@ def find_unused(
                 start_line=symbol.start_line,
                 end_line=symbol.end_line,
                 kind=symbol.kind,
-                confidence=confidence,
+                confidence=_dead_item_confidence(
+                    symbol,
+                    referenced_names=referenced_names,
+                ),
             )
         )
 
@@ -117,6 +114,30 @@ def _is_non_actionable_candidate(symbol: DeadCandidate) -> bool:
             or symbol.local_name in _DYNAMIC_HOOK_NAMES
         )
     return False
+
+
+def _should_skip_dead_candidate(
+    symbol: DeadCandidate,
+    *,
+    referenced_names: frozenset[str],
+    referenced_qualnames: frozenset[str],
+) -> bool:
+    return (
+        DEAD_CODE_RULE_ID in symbol.suppressed_rules
+        or _is_non_actionable_candidate(symbol)
+        or symbol.qualname in referenced_qualnames
+        or symbol.local_name in referenced_names
+    )
+
+
+def _dead_item_confidence(
+    symbol: DeadCandidate,
+    *,
+    referenced_names: frozenset[str],
+) -> Literal["high", "medium"]:
+    if symbol.qualname.split(":", 1)[-1] in referenced_names:
+        return CONFIDENCE_MEDIUM
+    return CONFIDENCE_HIGH
 
 
 def _is_dunder(name: str) -> bool:

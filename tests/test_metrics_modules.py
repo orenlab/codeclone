@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import ast
 
+import pytest
+
 from codeclone.cfg_model import CFG
 from codeclone.metrics import (
     HealthInputs,
@@ -34,28 +36,18 @@ from codeclone.models import DeadCandidate, DeadItem, ModuleDep
 from codeclone.paths import is_test_filepath
 
 
-def _parse_class(source: str, name: str) -> ast.ClassDef:
+def _parse_named_node(
+    source: str,
+    name: str,
+) -> ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef:
     module = ast.parse(source)
     for node in module.body:
-        if isinstance(node, ast.ClassDef) and node.name == name:
+        if (
+            isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == name
+        ):
             return node
-    raise AssertionError(f"class {name!r} not found")
-
-
-def _parse_function(source: str, name: str) -> ast.FunctionDef:
-    module = ast.parse(source)
-    for node in module.body:
-        if isinstance(node, ast.FunctionDef) and node.name == name:
-            return node
-    raise AssertionError(f"function {name!r} not found")
-
-
-def _parse_async_function(source: str, name: str) -> ast.AsyncFunctionDef:
-    module = ast.parse(source)
-    for node in module.body:
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == name:
-            return node
-    raise AssertionError(f"async function {name!r} not found")
+    raise AssertionError(f"top-level node {name!r} not found")
 
 
 def test_cyclomatic_complexity_floor_and_nontrivial_graph() -> None:
@@ -70,9 +62,11 @@ def test_cyclomatic_complexity_floor_and_nontrivial_graph() -> None:
     assert cyclomatic_complexity(cfg) == 2
 
 
-def test_nesting_depth_covers_control_flow_and_generic_body_nodes() -> None:
-    func = _parse_function(
-        """
+@pytest.mark.parametrize(
+    ("source", "name", "expected_depth"),
+    [
+        pytest.param(
+            """
 def f(x):
     if x:
         for i in range(3):
@@ -82,14 +76,12 @@ def f(x):
         def method(self):
             pass
 """.strip(),
-        "f",
-    )
-    assert nesting_depth(func) == 3
-
-
-def test_nesting_depth_handles_async_and_match_nodes() -> None:
-    func = _parse_async_function(
-        """
+            "f",
+            3,
+            id="control_flow_and_generic_body",
+        ),
+        pytest.param(
+            """
 async def worker(items, value):
     async for item in items:
         async with item:
@@ -98,23 +90,32 @@ async def worker(items, value):
                     while False:
                         pass
 """.strip(),
-        "worker",
-    )
-    assert nesting_depth(func) == 4
-
-
-def test_nesting_depth_counts_if_else_branches() -> None:
-    func = _parse_function(
-        """
+            "worker",
+            4,
+            id="async_and_match",
+        ),
+        pytest.param(
+            """
 def choose(flag):
     if flag:
         return 1
     else:
         return 2
 """.strip(),
-        "choose",
-    )
-    assert nesting_depth(func) == 1
+            "choose",
+            1,
+            id="if_else_counts_as_one_level",
+        ),
+    ],
+)
+def test_nesting_depth_examples(
+    source: str,
+    name: str,
+    expected_depth: int,
+) -> None:
+    func = _parse_named_node(source, name)
+    assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
+    assert nesting_depth(func) == expected_depth
 
 
 def test_iter_nested_statement_lists_try_and_empty_match() -> None:
@@ -179,7 +180,7 @@ def test_annotation_name_variants() -> None:
 
 
 def test_compute_cbo_filters_builtins_and_self_references() -> None:
-    class_node = _parse_class(
+    class_node = _parse_named_node(
         """
 from ext import External, Helper
 
@@ -198,6 +199,7 @@ class Sample(External):
 """.strip(),
         "Sample",
     )
+    assert isinstance(class_node, ast.ClassDef)
     cbo, resolved = compute_cbo(
         class_node,
         module_import_names={"External", "Helper"},
@@ -223,7 +225,7 @@ def test_compute_cbo_handles_non_symbolic_variants() -> None:
     assert cbo == 0
     assert resolved == ()
 
-    class_node = _parse_class(
+    class_node = _parse_named_node(
         """
 class DynamicCalls:
     def run(self, value: "str") -> None:
@@ -231,6 +233,7 @@ class DynamicCalls:
 """.strip(),
         "DynamicCalls",
     )
+    assert isinstance(class_node, ast.ClassDef)
     cbo_dynamic, resolved_dynamic = compute_cbo(
         class_node,
         module_import_names={"External"},
@@ -247,17 +250,17 @@ def test_coupling_risk_boundaries() -> None:
 
 
 def test_compute_lcom4_for_empty_and_partially_connected_class() -> None:
-    empty_class = _parse_class(
-        """
+    cases = (
+        (
+            """
 class Empty:
     value = 1
 """.strip(),
-        "Empty",
-    )
-    assert compute_lcom4(empty_class) == (1, 0, 0)
-
-    class_node = _parse_class(
-        """
+            "Empty",
+            (1, 0, 0),
+        ),
+        (
+            """
 class Service:
     def first(self) -> None:
         self.counter = 1
@@ -269,12 +272,11 @@ class Service:
     def third(self) -> int:
         return 1
 """.strip(),
-        "Service",
-    )
-    assert compute_lcom4(class_node) == (2, 3, 2)
-
-    recursive = _parse_class(
-        """
+            "Service",
+            (2, 3, 2),
+        ),
+        (
+            """
 class Recursive:
     def left(self) -> None:
         self.right()
@@ -282,12 +284,11 @@ class Recursive:
     def right(self) -> None:
         self.left()
 """.strip(),
-        "Recursive",
-    )
-    assert compute_lcom4(recursive) == (1, 2, 2)
-
-    triangle = _parse_class(
-        """
+            "Recursive",
+            (1, 2, 2),
+        ),
+        (
+            """
 class Triangle:
     def a(self) -> None:
         self.shared = 1
@@ -301,13 +302,18 @@ class Triangle:
         self.shared = 3
         self.a()
 """.strip(),
-        "Triangle",
+            "Triangle",
+            (1, 3, 4),
+        ),
     )
-    assert compute_lcom4(triangle) == (1, 3, 4)
+    for source, name, expected in cases:
+        class_node = _parse_named_node(source, name)
+        assert isinstance(class_node, ast.ClassDef)
+        assert compute_lcom4(class_node) == expected
 
 
 def test_compute_lcom4_ignores_unknown_self_calls() -> None:
-    class_node = _parse_class(
+    class_node = _parse_named_node(
         """
 class UnknownCall:
     def first(self) -> None:
@@ -318,6 +324,7 @@ class UnknownCall:
 """.strip(),
         "UnknownCall",
     )
+    assert isinstance(class_node, ast.ClassDef)
     assert compute_lcom4(class_node) == (2, 2, 1)
 
 

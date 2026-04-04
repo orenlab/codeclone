@@ -13,7 +13,7 @@ from typing import Literal
 
 from .._coerce import as_int as _as_int
 from .._html_badges import _source_kind_badge_html
-from .._html_escape import _escape_attr, _escape_html
+from .._html_escape import _escape_html
 from ._icons import section_icon_html
 
 Tone = Literal["ok", "warn", "risk", "info"]
@@ -29,7 +29,7 @@ _EMPTY_ICON = (
 
 def insight_block(*, question: str, answer: str, tone: Tone = "info") -> str:
     return (
-        f'<div class="insight-banner insight-{_escape_attr(tone)}">'
+        f'<div class="insight-banner insight-{_escape_html(tone)}">'
         f'<div class="insight-question">{_escape_html(question)}</div>'
         f'<div class="insight-answer">{_escape_html(answer)}</div>'
         "</div>"

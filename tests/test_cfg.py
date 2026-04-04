@@ -93,6 +93,13 @@ def _single_return_block(cfg: CFG) -> Block:
     return return_blocks[0]
 
 
+def _cfg_contains_statement(cfg: CFG, stmt_type: type[ast.stmt]) -> bool:
+    return any(
+        any(isinstance(stmt, stmt_type) for stmt in block.statements)
+        for block in cfg.blocks
+    )
+
+
 def _handler_predecessors_from_source(source: str) -> list[Block]:
     cfg = build_cfg_from_source(source)
     handler_blocks = [
@@ -159,14 +166,16 @@ Block 5 -> [2, 3]
     assert cfg_str.strip() == dedent(expected).strip()
 
 
-def test_cfg_while_with_boolop_or() -> None:
-    source = """
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            """
     def f(a, b):
         while a or b:
             x = 1
-    """
-    cfg_str = cfg_to_str(build_cfg_from_source(source))
-    expected = """
+    """,
+            """
 Block 0 -> [2]
 Block 1 -> []
 Block 2 -> [3, 5]
@@ -176,18 +185,16 @@ Block 3 -> [2]
 Block 4 -> [1]
 Block 5 -> [3, 4]
   Expr(value=Name(id='b', ctx=Load()))
-"""
-    assert cfg_str.strip() == dedent(expected).strip()
-
-
-def test_cfg_while_loop() -> None:
-    source = """
+""",
+            id="while_boolop_or",
+        ),
+        pytest.param(
+            """
     def f():
         while True:
             a = 1
-    """
-    cfg_str = cfg_to_str(build_cfg_from_source(source))
-    expected = """
+    """,
+            """
 Block 0 -> [2]
 Block 1 -> []
 Block 2 -> [3, 4]
@@ -195,18 +202,16 @@ Block 2 -> [3, 4]
 Block 3 -> [2]
   Assign(targets=[Name(id='a', ctx=Store())], value=Constant(value=1))
 Block 4 -> [1]
-"""
-    assert cfg_str.strip() == dedent(expected).strip()
-
-
-def test_cfg_for_loop() -> None:
-    source = """
+""",
+            id="while_loop",
+        ),
+        pytest.param(
+            """
     def f():
         for i in range(10):
             a = 1
-    """
-    cfg_str = cfg_to_str(build_cfg_from_source(source))
-    expected = """
+    """,
+            """
 Block 0 -> [2]
 Block 1 -> []
 Block 2 -> [3, 4]
@@ -214,7 +219,13 @@ Block 2 -> [3, 4]
 Block 3 -> [2]
   Assign(targets=[Name(id='a', ctx=Store())], value=Constant(value=1))
 Block 4 -> [1]
-"""
+""",
+            id="for_loop",
+        ),
+    ],
+)
+def test_cfg_loop_shapes(source: str, expected: str) -> None:
+    cfg_str = cfg_to_str(build_cfg_from_source(source))
     assert cfg_str.strip() == dedent(expected).strip()
 
 
@@ -266,20 +277,6 @@ def test_cfg_break_continue() -> None:
         assert isinstance(block.successors, set)
 
 
-def test_cfg_if_with_return() -> None:
-    source = """
-    def f(x):
-        if x > 0:
-            return 1
-        return 2
-    """
-    cfg = build_cfg_from_source(source)
-    assert any(
-        any(isinstance(stmt, ast.Return) for stmt in block.statements)
-        for block in cfg.blocks
-    )
-
-
 def test_cfg_raise_statement() -> None:
     source = """
     def f():
@@ -291,16 +288,6 @@ def test_cfg_raise_statement() -> None:
         b for b in cfg.blocks if any(isinstance(s, ast.Raise) for s in b.statements)
     ]
     assert len(exits) == 1
-
-
-def test_cfg_async_for() -> None:
-    source = """
-    async def f():
-        async for i in a:
-            x = i
-    """
-    cfg = build_cfg_from_source(source)
-    assert len(cfg.blocks) >= 4
 
 
 def test_cfg_try_finally() -> None:
@@ -340,8 +327,20 @@ def test_cfg_try_else() -> None:
     assert has_else_assign
 
 
-def test_cfg_try_else_return_terminates() -> None:
-    source = """
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(
+            """
+    def f(x):
+        if x > 0:
+            return 1
+        return 2
+    """,
+            id="if_return",
+        ),
+        pytest.param(
+            """
     def f():
         try:
             x = 1
@@ -349,106 +348,99 @@ def test_cfg_try_else_return_terminates() -> None:
             pass
         else:
             return 1
-    """
-    cfg = build_cfg_from_source(source)
-    assert any(
-        any(isinstance(stmt, ast.Return) for stmt in block.statements)
-        for block in cfg.blocks
-    )
-
-
-def test_cfg_try_return_in_body() -> None:
-    source = """
+    """,
+            id="try_else_return",
+        ),
+        pytest.param(
+            """
     def f():
         try:
             return 1
         except ValueError:
             pass
-    """
-    cfg = build_cfg_from_source(source)
-    assert any(
-        any(isinstance(stmt, ast.Return) for stmt in block.statements)
-        for block in cfg.blocks
-    )
-
-
-def test_cfg_if_else_returns() -> None:
-    source = """
+    """,
+            id="try_body_return",
+        ),
+        pytest.param(
+            """
     def f(x):
         if x:
             return 1
         else:
             return 2
-    """
-    cfg = build_cfg_from_source(source)
-    assert any(
-        any(isinstance(stmt, ast.Return) for stmt in block.statements)
-        for block in cfg.blocks
-    )
-
-
-def test_cfg_while_return() -> None:
-    source = """
+    """,
+            id="if_else_return",
+        ),
+        pytest.param(
+            """
     def f():
         while True:
             return 1
-    """
-    cfg = build_cfg_from_source(source)
-    assert any(
-        any(isinstance(stmt, ast.Return) for stmt in block.statements)
-        for block in cfg.blocks
-    )
-
-
-def test_cfg_for_return() -> None:
-    source = """
+    """,
+            id="while_return",
+        ),
+        pytest.param(
+            """
     def f():
         for i in range(3):
             return i
-    """
-    cfg = build_cfg_from_source(source)
-    assert any(
-        any(isinstance(stmt, ast.Return) for stmt in block.statements)
-        for block in cfg.blocks
-    )
-
-
-def test_cfg_with_return() -> None:
-    source = """
+    """,
+            id="for_return",
+        ),
+        pytest.param(
+            """
     def f():
         with open(\"x\", \"w\") as f:
             return 1
-    """
-    cfg = build_cfg_from_source(source)
-    assert any(
-        any(isinstance(stmt, ast.Return) for stmt in block.statements)
-        for block in cfg.blocks
-    )
-
-
-def test_cfg_try_handler_no_type() -> None:
-    source = """
+    """,
+            id="with_return",
+        ),
+        pytest.param(
+            """
     def f():
         try:
             x = 1
         except:
             return 2
-    """
+    """,
+            id="bare_except_return",
+        ),
+    ],
+)
+def test_cfg_detects_return_blocks(source: str) -> None:
     cfg = build_cfg_from_source(source)
-    assert any(
-        any(isinstance(stmt, ast.Return) for stmt in block.statements)
-        for block in cfg.blocks
-    )
+    assert _cfg_contains_statement(cfg, ast.Return)
 
 
-def test_cfg_with() -> None:
-    source = """
+@pytest.mark.parametrize(
+    ("source", "minimum_blocks"),
+    [
+        pytest.param(
+            """
+    async def f():
+        async for i in a:
+            x = i
+    """,
+            4,
+            id="async_for",
+        ),
+        pytest.param(
+            """
     def f():
         with open("x") as f:
             read()
-    """
+    """,
+            3,
+            id="with",
+        ),
+    ],
+)
+def test_cfg_constructs_produce_expected_minimum_blocks(
+    source: str,
+    minimum_blocks: int,
+) -> None:
     cfg = build_cfg_from_source(source)
-    assert len(cfg.blocks) >= 3
+    assert len(cfg.blocks) >= minimum_blocks
 
 
 def test_cfg_match() -> None:

@@ -55,10 +55,10 @@ _DIRECTORY_BUCKET_ORDER: tuple[str, ...] = (
 _DIRECTORY_KIND_LABELS: dict[str, str] = {
     "clones": "clones",
     "structural": "structural",
-    "dead_code": "dead code",
     "complexity": "complexity",
     "cohesion": "cohesion",
     "coupling": "coupling",
+    "dead_code": "dead code",
     "dependency": "dependency",
 }
 
@@ -385,6 +385,27 @@ def _dir_meta_span(val: int, label: str) -> str:
 _DIR_META_SEP = '<span class="dir-hotspot-meta-sep">\u00b7</span>'
 
 
+def _directory_kind_meta_parts(
+    kind_breakdown: Mapping[str, object],
+    *,
+    total_groups: int,
+) -> list[str]:
+    kind_rows = [
+        (str(kind), _as_int(count))
+        for kind, count in kind_breakdown.items()
+        if _as_int(count) > 0
+    ]
+    kind_rows.sort(key=lambda item: (-item[1], item[0]))
+    if len(kind_rows) <= 1:
+        return []
+    if kind_rows[0][1] >= total_groups:
+        return []
+    return [
+        _dir_meta_span(count, _DIRECTORY_KIND_LABELS.get(kind, kind))
+        for kind, count in kind_rows[:2]
+    ]
+
+
 def _format_count(value: int | float) -> str:
     if isinstance(value, float):
         return f"{value:,.2f}"
@@ -423,25 +444,6 @@ def _scan_scope_subtitle(ctx: ReportContext) -> str:
         f"{_format_count(callable_total)} callables \u00b7 "
         f"{_format_count(classes)} classes"
     )
-
-
-def _directory_kind_meta_parts(
-    kind_breakdown: Mapping[str, object],
-    *,
-    total_groups: int,
-) -> list[str]:
-    kind_rows = [
-        (str(kind), _as_int(count))
-        for kind, count in kind_breakdown.items()
-        if _as_int(count) > 0
-    ]
-    kind_rows.sort(key=lambda item: (-item[1], item[0]))
-    if len(kind_rows) <= 1:
-        return []
-    parts: list[str] = []
-    for kind, count in kind_rows[:2]:
-        parts.append(_dir_meta_span(count, _DIRECTORY_KIND_LABELS.get(kind, kind)))
-    return parts
 
 
 def _directory_hotspot_bucket_body(bucket: str, payload: Mapping[str, object]) -> str:
@@ -484,7 +486,7 @@ def _directory_hotspot_bucket_body(bucket: str, payload: Mapping[str, object]) -
                 )
             )
 
-        path_html = _escape_html(path).replace("/", "/<wbr>")
+        path_escaped = _escape_html(path)
 
         prev_pct = min(cumulative, 100.0)
         cur_pct = min(share_pct, 100.0 - prev_pct)
@@ -499,14 +501,14 @@ def _directory_hotspot_bucket_body(bucket: str, payload: Mapping[str, object]) -
 
         rows.append(
             '<div class="dir-hotspot-entry">'
-            '<div class="dir-hotspot-path">'
-            f"<code>{path_html}</code>"
+            '<div class="dir-hotspot-head">'
+            f'<code class="dir-hotspot-path" title="{path_escaped}">{path_escaped}</code>'
             f" {_source_kind_badge_html(dominant_kind)}"
             "</div>"
-            f'<div class="dir-hotspot-bar-row">{bar_html}'
+            f'<div class="dir-hotspot-detail">{bar_html}'
             f'<span class="dir-hotspot-pct">{share_pct:.1f}%</span>'
-            "</div>"
             f'<div class="dir-hotspot-meta">{_DIR_META_SEP.join(meta_parts)}</div>'
+            "</div>"
             "</div>"
         )
     return subtitle_html + '<div class="dir-hotspot-list">' + "".join(rows) + "</div>"

@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from ._html_escape import _escape_attr
+from ._html_escape import _escape_html
 
 __all__ = ["_build_data_attrs"]
 
@@ -26,5 +26,5 @@ def _build_data_attrs(attrs: dict[str, object | None]) -> str:
         if val is None:
             continue
         s = str(val)
-        parts.append(f'{key}="{_escape_attr(s)}"')
+        parts.append(f'{key}="{_escape_html(s)}"')
     return f" {' '.join(parts)}" if parts else ""

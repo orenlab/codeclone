@@ -142,11 +142,8 @@ def _group_sort_key(items: Collection[object]) -> tuple[int]:
 
 def _meta_pick(*values: object) -> object | None:
     for value in values:
-        if value is None:
-            continue
-        if isinstance(value, str) and not value.strip():
-            continue
-        return value
+        if value is not None and (not isinstance(value, str) or value.strip()):
+            return value
     return None
 
 

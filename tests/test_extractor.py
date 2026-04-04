@@ -82,6 +82,28 @@ def _collect_module_walk(
     return tree, collector, walk
 
 
+def _dead_qualnames_from_source(
+    source: str,
+    *,
+    filepath: str = "pkg/mod.py",
+    module_name: str = "pkg.mod",
+) -> tuple[str, ...]:
+    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+        source=source,
+        filepath=filepath,
+        module_name=module_name,
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    dead = find_unused(
+        definitions=file_metrics.dead_candidates,
+        referenced_names=file_metrics.referenced_names,
+        referenced_qualnames=file_metrics.referenced_qualnames,
+    )
+    return tuple(item.qualname for item in dead)
+
+
 def test_extracts_function_unit() -> None:
     src = """
 
@@ -302,53 +324,42 @@ class A:
     assert segments == []
 
 
-def test_extract_units_skips_suppression_tokenization_without_directives(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        extractor,
-        "_source_tokens",
-        lambda _source: (_ for _ in ()).throw(
-            AssertionError("_source_tokens should not be called")
-        ),
-    )
-
-    units, blocks, segments = extract_units_from_source(
-        source="""
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(
+            """
 def foo():
     a = 1
     return a
 """,
-        filepath="x.py",
-        module_name="mod",
-        cfg=NormalizationConfig(),
-        min_loc=1,
-        min_stmt=1,
-    )
-
-    assert len(units) == 1
-    assert blocks == []
-    assert segments == []
-
-
-def test_extract_units_skips_suppression_tokenization_for_leading_only_directives(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        extractor,
-        "_source_tokens",
-        lambda _source: (_ for _ in ()).throw(
-            AssertionError("_source_tokens should not be called")
+            id="without_directives",
         ),
-    )
-
-    units, blocks, segments = extract_units_from_source(
-        source="""
+        pytest.param(
+            """
 # codeclone: ignore[dead-code]
 def foo():
     a = 1
     return a
 """,
+            id="leading_only_directive",
+        ),
+    ],
+)
+def test_extract_units_skips_suppression_tokenization_without_inline_directives(
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    monkeypatch.setattr(
+        extractor,
+        "_source_tokens",
+        lambda _source: (_ for _ in ()).throw(
+            AssertionError("_source_tokens should not be called")
+        ),
+    )
+
+    units, blocks, segments = extract_units_from_source(
+        source=source,
         filepath="x.py",
         module_name="mod",
         cfg=NormalizationConfig(),
@@ -1138,8 +1149,11 @@ def test_orphan_usage():
     assert dead and dead[0].qualname == "pkg.mod:orphan"
 
 
-def test_dead_code_skips_module_pep562_hooks() -> None:
-    src = """
+@pytest.mark.parametrize(
+    ("source", "expected_dead"),
+    [
+        pytest.param(
+            """
 def __getattr__(name: str):
     raise AttributeError(name)
 
@@ -1148,50 +1162,24 @@ def __dir__():
 
 def orphan():
     return 1
-"""
-    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
-        source=src,
-        filepath="pkg/mod.py",
-        module_name="pkg.mod",
-        cfg=NormalizationConfig(),
-        min_loc=1,
-        min_stmt=1,
-    )
-    dead = find_unused(
-        definitions=file_metrics.dead_candidates,
-        referenced_names=file_metrics.referenced_names,
-        referenced_qualnames=file_metrics.referenced_qualnames,
-    )
-    assert tuple(item.qualname for item in dead) == ("pkg.mod:orphan",)
-
-
-def test_dead_code_applies_inline_suppression_per_declaration() -> None:
-    src = """
+""",
+            ("pkg.mod:orphan",),
+            id="skip_pep562_hooks",
+        ),
+        pytest.param(
+            """
 # codeclone: ignore[dead-code]
 def runtime_hook():
     return 1
 
 def orphan():
     return 2
-"""
-    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
-        source=src,
-        filepath="pkg/mod.py",
-        module_name="pkg.mod",
-        cfg=NormalizationConfig(),
-        min_loc=1,
-        min_stmt=1,
-    )
-    dead = find_unused(
-        definitions=file_metrics.dead_candidates,
-        referenced_names=file_metrics.referenced_names,
-        referenced_qualnames=file_metrics.referenced_qualnames,
-    )
-    assert tuple(item.qualname for item in dead) == ("pkg.mod:orphan",)
-
-
-def test_dead_code_suppression_binding_is_scoped_to_target_symbol() -> None:
-    src = """
+""",
+            ("pkg.mod:orphan",),
+            id="inline_suppression_per_declaration",
+        ),
+        pytest.param(
+            """
 class Service:  # codeclone: ignore[dead-code]
     # codeclone: ignore[dead-code]
     def hook(self):
@@ -1199,25 +1187,12 @@ class Service:  # codeclone: ignore[dead-code]
 
     def alive(self):
         return 2
-"""
-    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
-        source=src,
-        filepath="pkg/mod.py",
-        module_name="pkg.mod",
-        cfg=NormalizationConfig(),
-        min_loc=1,
-        min_stmt=1,
-    )
-    dead = find_unused(
-        definitions=file_metrics.dead_candidates,
-        referenced_names=file_metrics.referenced_names,
-        referenced_qualnames=file_metrics.referenced_qualnames,
-    )
-    assert tuple(item.qualname for item in dead) == ("pkg.mod:Service.alive",)
-
-
-def test_dead_code_binds_inline_suppression_on_multiline_decorated_method() -> None:
-    src = """
+""",
+            ("pkg.mod:Service.alive",),
+            id="suppression_binding_scoped_to_target",
+        ),
+        pytest.param(
+            """
 class Settings:  # codeclone: ignore[dead-code]
     @validator("field")
     @classmethod
@@ -1229,25 +1204,12 @@ class Settings:  # codeclone: ignore[dead-code]
 
     def orphan(self) -> int:
         return 1
-"""
-    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
-        source=src,
-        filepath="pkg/mod.py",
-        module_name="pkg.mod",
-        cfg=NormalizationConfig(),
-        min_loc=1,
-        min_stmt=1,
-    )
-    dead = find_unused(
-        definitions=file_metrics.dead_candidates,
-        referenced_names=file_metrics.referenced_names,
-        referenced_qualnames=file_metrics.referenced_qualnames,
-    )
-    assert tuple(item.qualname for item in dead) == ("pkg.mod:Settings.orphan",)
-
-
-def test_dead_code_binds_inline_suppression_on_multiline_header_start_line() -> None:
-    src = """
+""",
+            ("pkg.mod:Settings.orphan",),
+            id="decorated_method_end_line",
+        ),
+        pytest.param(
+            """
 class Settings:  # codeclone: ignore[dead-code]
     @field_validator("trusted_proxy_ips", "additional_telegram_ip_ranges")
     @classmethod
@@ -1267,21 +1229,17 @@ class Settings:  # codeclone: ignore[dead-code]
 
     def orphan(self) -> int:
         return 1
-"""
-    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
-        source=src,
-        filepath="pkg/mod.py",
-        module_name="pkg.mod",
-        cfg=NormalizationConfig(),
-        min_loc=1,
-        min_stmt=1,
-    )
-    dead = find_unused(
-        definitions=file_metrics.dead_candidates,
-        referenced_names=file_metrics.referenced_names,
-        referenced_qualnames=file_metrics.referenced_qualnames,
-    )
-    assert tuple(item.qualname for item in dead) == ("pkg.mod:Settings.orphan",)
+""",
+            ("pkg.mod:Settings.orphan",),
+            id="multiline_header_start_line",
+        ),
+    ],
+)
+def test_dead_code_respects_runtime_hooks_and_inline_suppressions(
+    source: str,
+    expected_dead: tuple[str, ...],
+) -> None:
+    assert _dead_qualnames_from_source(source) == expected_dead
 
 
 def test_collect_dead_candidates_and_extract_skip_classes_without_lineno(
@@ -1551,173 +1509,130 @@ class TestAdmissionThresholdBoundaries:
             lines.extend([""] * (lines_per_stmt - 1))
         return "\n".join(lines)
 
+    def _extract_with_thresholds(
+        self,
+        *,
+        stmt_count: int,
+        lines_per_stmt: int,
+        **thresholds: int,
+    ) -> tuple[list[extractor.Unit], list[BlockUnit], list[SegmentUnit]]:
+        return extract_units_from_source(
+            source=self._make_func(
+                stmt_count=stmt_count,
+                lines_per_stmt=lines_per_stmt,
+            ),
+            filepath="x.py",
+            module_name="m",
+            cfg=NormalizationConfig(),
+            min_loc=thresholds.get("min_loc", 1),
+            min_stmt=thresholds.get("min_stmt", 1),
+            block_min_loc=thresholds.get("block_min_loc", 20),
+            block_min_stmt=thresholds.get("block_min_stmt", 8),
+            segment_min_loc=thresholds.get("segment_min_loc", 20),
+            segment_min_stmt=thresholds.get("segment_min_stmt", 10),
+        )
+
     # -- function-level: min_loc boundary --
 
-    def test_function_excluded_below_min_loc(self) -> None:
-        src = self._make_func(stmt_count=6, lines_per_stmt=1)  # 7 lines
-        units, _, _ = extract_units_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="m",
-            cfg=NormalizationConfig(),
-            min_loc=10,
-            min_stmt=1,
+    @pytest.mark.parametrize(
+        ("stmt_count", "lines_per_stmt", "thresholds", "expected_count"),
+        [
+            pytest.param(6, 1, {"min_loc": 10}, 0, id="excluded_below_min_loc"),
+            pytest.param(6, 2, {"min_loc": 10}, 1, id="included_at_min_loc"),
+            pytest.param(5, 3, {"min_stmt": 6}, 0, id="excluded_below_min_stmt"),
+            pytest.param(6, 3, {"min_stmt": 6}, 1, id="included_at_min_stmt"),
+        ],
+    )
+    def test_function_admission_thresholds(
+        self,
+        stmt_count: int,
+        lines_per_stmt: int,
+        thresholds: dict[str, int],
+        expected_count: int,
+    ) -> None:
+        units, _, _ = self._extract_with_thresholds(
+            stmt_count=stmt_count,
+            lines_per_stmt=lines_per_stmt,
+            **thresholds,
         )
-        assert units == []
-
-    def test_function_included_at_min_loc(self) -> None:
-        src = self._make_func(stmt_count=6, lines_per_stmt=2)  # 13 lines
-        units, _, _ = extract_units_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="m",
-            cfg=NormalizationConfig(),
-            min_loc=10,
-            min_stmt=1,
-        )
-        assert len(units) == 1
-
-    # -- function-level: min_stmt boundary --
-
-    def test_function_excluded_below_min_stmt(self) -> None:
-        src = self._make_func(stmt_count=5, lines_per_stmt=3)  # 16 lines, 5 stmts
-        units, _, _ = extract_units_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="m",
-            cfg=NormalizationConfig(),
-            min_loc=1,
-            min_stmt=6,
-        )
-        assert units == []
-
-    def test_function_included_at_min_stmt(self) -> None:
-        src = self._make_func(stmt_count=6, lines_per_stmt=3)  # 19 lines, 6 stmts
-        units, _, _ = extract_units_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="m",
-            cfg=NormalizationConfig(),
-            min_loc=1,
-            min_stmt=6,
-        )
-        assert len(units) == 1
+        assert len(units) == expected_count
 
     # -- block gate boundary --
 
-    def test_blocks_excluded_below_block_min_loc(self) -> None:
-        src = self._make_func(stmt_count=10, lines_per_stmt=1)  # 11 lines, 10 stmts
-        _, blocks, _ = extract_units_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="m",
-            cfg=NormalizationConfig(),
-            min_loc=1,
-            min_stmt=1,
-            block_min_loc=20,
-            block_min_stmt=8,
+    @pytest.mark.parametrize(
+        ("kind", "stmt_count", "lines_per_stmt", "expected_present"),
+        [
+            pytest.param(
+                "blocks",
+                10,
+                1,
+                False,
+                id="excluded_below_block_min_loc",
+            ),
+            pytest.param(
+                "blocks",
+                10,
+                2,
+                True,
+                id="included_at_block_min_loc",
+            ),
+            pytest.param(
+                "blocks",
+                7,
+                4,
+                False,
+                id="excluded_below_block_min_stmt",
+            ),
+            pytest.param(
+                "blocks",
+                8,
+                3,
+                True,
+                id="included_at_block_min_stmt",
+            ),
+            pytest.param(
+                "segments",
+                12,
+                1,
+                False,
+                id="excluded_below_segment_min_loc",
+            ),
+            pytest.param(
+                "segments",
+                12,
+                2,
+                True,
+                id="included_at_segment_min_loc",
+            ),
+            pytest.param(
+                "segments",
+                9,
+                3,
+                False,
+                id="excluded_below_segment_min_stmt",
+            ),
+            pytest.param(
+                "segments",
+                10,
+                3,
+                True,
+                id="included_at_segment_min_stmt",
+            ),
+        ],
+    )
+    def test_non_function_admission_thresholds(
+        self,
+        kind: str,
+        stmt_count: int,
+        lines_per_stmt: int,
+        expected_present: bool,
+    ) -> None:
+        _, blocks, segments = self._extract_with_thresholds(
+            stmt_count=stmt_count,
+            lines_per_stmt=lines_per_stmt,
         )
-        assert blocks == []
-
-    def test_blocks_included_at_block_min_loc(self) -> None:
-        src = self._make_func(stmt_count=10, lines_per_stmt=2)  # 21 lines, 10 stmts
-        _, blocks, _ = extract_units_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="m",
-            cfg=NormalizationConfig(),
-            min_loc=1,
-            min_stmt=1,
-            block_min_loc=20,
-            block_min_stmt=8,
-        )
-        assert blocks
-
-    def test_blocks_excluded_below_block_min_stmt(self) -> None:
-        src = self._make_func(stmt_count=7, lines_per_stmt=4)  # 29 lines, 7 stmts
-        _, blocks, _ = extract_units_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="m",
-            cfg=NormalizationConfig(),
-            min_loc=1,
-            min_stmt=1,
-            block_min_loc=20,
-            block_min_stmt=8,
-        )
-        assert blocks == []
-
-    def test_blocks_included_at_block_min_stmt(self) -> None:
-        src = self._make_func(stmt_count=8, lines_per_stmt=3)  # 25 lines, 8 stmts
-        _, blocks, _ = extract_units_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="m",
-            cfg=NormalizationConfig(),
-            min_loc=1,
-            min_stmt=1,
-            block_min_loc=20,
-            block_min_stmt=8,
-        )
-        assert blocks
-
-    # -- segment gate boundary --
-
-    def test_segments_excluded_below_segment_min_loc(self) -> None:
-        src = self._make_func(stmt_count=12, lines_per_stmt=1)  # 13 lines, 12 stmts
-        _, _, segments = extract_units_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="m",
-            cfg=NormalizationConfig(),
-            min_loc=1,
-            min_stmt=1,
-            segment_min_loc=20,
-            segment_min_stmt=10,
-        )
-        assert segments == []
-
-    def test_segments_included_at_segment_min_loc(self) -> None:
-        src = self._make_func(stmt_count=12, lines_per_stmt=2)  # 25 lines, 12 stmts
-        _, _, segments = extract_units_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="m",
-            cfg=NormalizationConfig(),
-            min_loc=1,
-            min_stmt=1,
-            segment_min_loc=20,
-            segment_min_stmt=10,
-        )
-        assert segments
-
-    def test_segments_excluded_below_segment_min_stmt(self) -> None:
-        src = self._make_func(stmt_count=9, lines_per_stmt=3)  # 28 lines, 9 stmts
-        _, _, segments = extract_units_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="m",
-            cfg=NormalizationConfig(),
-            min_loc=1,
-            min_stmt=1,
-            segment_min_loc=20,
-            segment_min_stmt=10,
-        )
-        assert segments == []
-
-    def test_segments_included_at_segment_min_stmt(self) -> None:
-        src = self._make_func(stmt_count=10, lines_per_stmt=3)  # 31 lines, 10 stmts
-        _, _, segments = extract_units_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="m",
-            cfg=NormalizationConfig(),
-            min_loc=1,
-            min_stmt=1,
-            segment_min_loc=20,
-            segment_min_stmt=10,
-        )
-        assert segments
+        extracted = blocks if kind == "blocks" else segments
+        assert bool(extracted) is expected_present
 
     # -- boilerplate still excluded --
 

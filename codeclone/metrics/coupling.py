@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import ast
 import builtins
-from typing import Literal
 
 from ..contracts import COUPLING_RISK_LOW_MAX, COUPLING_RISK_MEDIUM_MAX
+from ._risk import RiskLevel, threshold_risk
 
 _BUILTIN_NAMES = frozenset(dir(builtins))
 
@@ -82,9 +82,9 @@ def compute_cbo(
     return len(resolved), resolved
 
 
-def coupling_risk(cbo: int) -> Literal["low", "medium", "high"]:
-    if cbo <= COUPLING_RISK_LOW_MAX:
-        return "low"
-    if cbo <= COUPLING_RISK_MEDIUM_MAX:
-        return "medium"
-    return "high"
+def coupling_risk(cbo: int) -> RiskLevel:
+    return threshold_risk(
+        cbo,
+        low_max=COUPLING_RISK_LOW_MAX,
+        medium_max=COUPLING_RISK_MEDIUM_MAX,
+    )

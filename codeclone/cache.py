@@ -338,13 +338,12 @@ class Cache:
         return None
 
     def _set_load_warning(self, message: str | None) -> None:
-        if message is None:
-            self.load_warning = self.legacy_secret_warning
-            return
-        if self.legacy_secret_warning:
-            self.load_warning = f"{message}\n{self.legacy_secret_warning}"
-            return
-        self.load_warning = message
+        warning = message
+        if warning is None:
+            warning = self.legacy_secret_warning
+        elif self.legacy_secret_warning:
+            warning = f"{warning}\n{self.legacy_secret_warning}"
+        self.load_warning = warning
 
     def _ignore_cache(
         self,

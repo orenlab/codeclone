@@ -15,6 +15,31 @@ pip install "codeclone[mcp]"        # add MCP extra
 uv tool install "codeclone[mcp]"    # install as a standalone tool
 ```
 
+## Quick client setup
+
+If `codeclone-mcp` is already on your `PATH`, both Claude Code and Codex can
+register it directly as a local stdio server.
+
+### Claude Code
+
+```bash
+claude mcp add codeclone -- codeclone-mcp --transport stdio
+claude mcp list
+```
+
+Use `--scope project` if you want Claude Code to store the shared config in
+`.mcp.json` for the repository instead of your local user state.
+
+### Codex
+
+```bash
+codex mcp add codeclone -- codeclone-mcp --transport stdio
+codex mcp list
+```
+
+If you installed CodeClone into a project virtual environment rather than a
+global tool path, use the full launcher path instead of bare `codeclone-mcp`.
+
 ## Start the server
 
 **Local agents** (Claude Code, Codex, Copilot Chat, Gemini CLI):
@@ -35,6 +60,11 @@ codeclone-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 ```
 
 Non-loopback hosts require `--allow-remote` (no built-in auth).
+When `--allow-remote` is enabled, any reachable network client can trigger
+CPU-intensive analysis, read results, and probe repository-relative paths
+through MCP request parameters. Use it only on trusted networks. For anything
+production-adjacent, put the server behind a firewall or a reverse proxy with
+authentication.
 Run retention is bounded: default `4`, max `10` (`--history-limit`).
 If a tool request omits `processes`, MCP defers process-count policy to the
 core CodeClone runtime.
@@ -50,7 +80,7 @@ run-scoped URI templates.
 | `analyze_changed_paths`  | Diff-aware analysis via `changed_paths` or `git_diff_ref`; compact changed-files snapshot           |
 | `get_run_summary`        | Cheapest run snapshot: health, findings, baseline, inventory                                        |
 | `get_production_triage`  | Production-first view: health, hotspots, suggestions; best first pass for noisy repos               |
-| `help`                   | Semantic guide for workflow, baseline, suppressions, review state, changed-scope routing            |
+| `help`                   | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope  |
 | `compare_runs`           | Run-to-run delta: regressions, improvements, health change                                          |
 | `list_findings`          | Filtered, paginated findings; use after hotspots or `check_*`                                       |
 | `get_finding`            | Single finding detail by id; defaults to `normal` detail level                                      |
@@ -81,6 +111,8 @@ run-scoped URI templates.
 - `metrics_detail(family="overloaded_modules")` exposes the report-only
   module-hotspot layer without turning it into findings or gate data.
 - `help(topic=...)` is static: meaning, anti-patterns, next step, doc links.
+- Start with repo defaults or `pyproject`-resolved thresholds, then lower them
+  only for an explicit higher-sensitivity exploratory pass.
 
 ## Resource surface
 
@@ -125,7 +157,7 @@ analyze_repository → get_run_summary or get_production_triage
 ### Semantic uncertainty recovery
 
 ```
-help(topic="workflow" | "baseline" | "suppressions" | "latest_runs" | "review_state" | "changed_scope")
+help(topic="workflow" | "analysis_profile" | "baseline" | "suppressions" | "latest_runs" | "review_state" | "changed_scope")
 ```
 
 ### Full repository review
@@ -133,6 +165,15 @@ help(topic="workflow" | "baseline" | "suppressions" | "latest_runs" | "review_st
 ```
 analyze_repository → get_production_triage
 → list_hotspots(kind="highest_priority") → get_finding → evaluate_gates
+```
+
+### Conservative first pass, then deeper review
+
+```
+analyze_repository
+→ help(topic="analysis_profile") when you need finer-grained local review
+→ analyze_repository(min_loc=..., min_stmt=..., ...) as an explicit higher-sensitivity pass
+→ compare_runs
 ```
 
 ### Changed-files review (PR / patch)
@@ -215,6 +256,8 @@ Show regressions, resolved findings, and health delta.
 - Use `analyze_changed_paths` for PRs, not full analysis.
 - Prefer `get_run_summary` or `get_production_triage` for the first pass on a
   new run.
+- Treat lowered thresholds as exploratory analysis, not as a silent replacement
+  for the conservative default profile.
 - Use `help(topic=...)` when the safest next step or contract meaning is
   unclear; it is a bounded semantic guide, not a docs dump.
 - Prefer `list_hotspots` or the narrow `check_*` tools before broad

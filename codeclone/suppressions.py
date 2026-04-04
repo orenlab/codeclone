@@ -104,14 +104,24 @@ def _parse_rule_ids(
     parsed: tuple[str, ...] = ()
     for token in raw.split(","):
         rule_id = token.strip()
-        if not rule_id:
-            continue
-        if _RULE_ID_PATTERN.fullmatch(rule_id) is None:
-            continue
-        if rule_id not in supported_rules:
-            continue
-        parsed = _merge_rules(parsed, (rule_id,))
+        if (
+            rule_id
+            and _RULE_ID_PATTERN.fullmatch(rule_id) is not None
+            and rule_id in supported_rules
+        ):
+            parsed = _merge_rules(parsed, (rule_id,))
     return parsed
+
+
+def _parse_comment_rules(
+    comment: str,
+    *,
+    supported_rules: frozenset[str],
+) -> tuple[str, ...]:
+    match = _SUPPRESSION_DIRECTIVE_PATTERN.fullmatch(comment)
+    if match is None:
+        return ()
+    return _parse_rule_ids(match.group("rules"), supported_rules=supported_rules)
 
 
 def extract_suppression_directives(
@@ -130,31 +140,25 @@ def extract_suppression_directives(
     try:
         tokens = tokenize.generate_tokens(io.StringIO(source).readline)
         for token in tokens:
-            if token.type != tokenize.COMMENT:
-                continue
-            match = _SUPPRESSION_DIRECTIVE_PATTERN.fullmatch(token.string)
-            if match is None:
-                continue
-            parsed_rules = _parse_rule_ids(
-                match.group("rules"),
-                supported_rules=supported_rules,
-            )
-            if not parsed_rules:
-                continue
-
-            line_no = token.start[0]
-            col_no = token.start[1]
-            line_text = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
-            binding: DirectiveBindingKind = (
-                "inline" if line_text[:col_no].strip() else "leading"
-            )
-            directives.append(
-                SuppressionDirective(
-                    line=line_no,
-                    binding=binding,
-                    rules=parsed_rules,
+            if token.type == tokenize.COMMENT:
+                parsed_rules = _parse_comment_rules(
+                    token.string,
+                    supported_rules=supported_rules,
                 )
-            )
+                if parsed_rules:
+                    line_no = token.start[0]
+                    col_no = token.start[1]
+                    line_text = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
+                    binding: DirectiveBindingKind = (
+                        "inline" if line_text[:col_no].strip() else "leading"
+                    )
+                    directives.append(
+                        SuppressionDirective(
+                            line=line_no,
+                            binding=binding,
+                            rules=parsed_rules,
+                        )
+                    )
     except tokenize.TokenError:
         return ()
 

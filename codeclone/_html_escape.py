@@ -16,13 +16,6 @@ def _escape_html(v: object) -> str:
     return text
 
 
-def _escape_attr(v: object) -> str:
-    text = html.escape("" if v is None else str(v), quote=True)
-    text = text.replace("`", "&#96;")
-    text = text.replace("\u2028", "&#8232;").replace("\u2029", "&#8233;")
-    return text
-
-
 def _meta_display(v: object) -> str:
     if isinstance(v, bool):
         return "true" if v else "false"

@@ -8,15 +8,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
-import os
-import tempfile
 from datetime import datetime, timezone
 from enum import Enum
+from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
+import orjson
+
 from . import __version__
+from ._json_io import read_json_object as _read_json_object
+from ._json_io import write_json_document_atomically as _write_json_document_atomically
 from ._schema_validation import validate_top_level_structure
 from .baseline import current_python_tag
 from .contracts import BASELINE_SCHEMA_VERSION, METRICS_BASELINE_SCHEMA_VERSION
@@ -118,12 +120,7 @@ def snapshot_from_project_metrics(project_metrics: ProjectMetrics) -> MetricsSna
 
 
 def _canonical_json(payload: object) -> str:
-    return json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
+    return orjson.dumps(payload, option=orjson.OPT_SORT_KEYS).decode("utf-8")
 
 
 def _snapshot_payload(snapshot: MetricsSnapshot) -> dict[str, object]:
@@ -456,44 +453,32 @@ class MetricsBaseline:
 
 
 def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
-    data = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
-    fd_num, tmp_name = tempfile.mkstemp(
-        dir=path.parent,
-        suffix=".tmp",
+    _write_json_document_atomically(
+        path,
+        payload,
+        indent=True,
+        trailing_newline=True,
     )
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd_num, "wb") as fd:
-            fd.write(data.encode("utf-8"))
-            fd.flush()
-            os.fsync(fd.fileno())
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:
     try:
-        raw = path.read_text("utf-8")
+        return _read_json_object(path)
     except OSError as e:
         raise BaselineValidationError(
             f"Cannot read metrics baseline file at {path}: {e}",
             status=MetricsBaselineStatus.INVALID_JSON,
         ) from e
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
+    except JSONDecodeError as e:
         raise BaselineValidationError(
             f"Corrupted metrics baseline file at {path}: {e}",
             status=MetricsBaselineStatus.INVALID_JSON,
         ) from e
-    if not isinstance(data, dict):
+    except TypeError:
         raise BaselineValidationError(
             f"Metrics baseline payload must be an object at {path}",
             status=MetricsBaselineStatus.INVALID_TYPE,
-        )
-    return data
+        ) from None
 
 
 def _validate_top_level_structure(payload: dict[str, Any], *, path: Path) -> None:

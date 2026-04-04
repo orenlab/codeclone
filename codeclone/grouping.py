@@ -12,6 +12,29 @@ if TYPE_CHECKING:
     from .models import GroupItemsLike, GroupMap
 
 
+def _group_items_by_key(
+    items: GroupItemsLike,
+    *,
+    key_name: str,
+) -> GroupMap:
+    grouped: GroupMap = {}
+    for item in items:
+        grouped.setdefault(str(item[key_name]), []).append(dict(item))
+    return grouped
+
+
+def _filter_groups_by_size(
+    groups: GroupMap,
+    *,
+    min_occurrences: int,
+) -> GroupMap:
+    return {
+        group_key: grouped_items
+        for group_key, grouped_items in groups.items()
+        if len(grouped_items) >= min_occurrences
+    }
+
+
 def build_groups(units: GroupItemsLike) -> GroupMap:
     groups: GroupMap = {}
     for unit in units:
@@ -39,26 +62,19 @@ def build_block_groups(blocks: GroupItemsLike, min_functions: int = 2) -> GroupM
 def build_segment_groups(
     segments: GroupItemsLike, min_occurrences: int = 2
 ) -> GroupMap:
-    signature_groups: GroupMap = {}
-    for segment in segments:
-        signature_groups.setdefault(
-            str(segment["segment_sig"]),
-            [],
-        ).append(dict(segment))
+    signature_groups = _filter_groups_by_size(
+        _group_items_by_key(segments, key_name="segment_sig"),
+        min_occurrences=min_occurrences,
+    )
 
     confirmed: GroupMap = {}
     for items in signature_groups.values():
-        if len(items) < min_occurrences:
-            continue
-
-        hash_groups: GroupMap = {}
-        for item in items:
-            hash_groups.setdefault(str(item["segment_hash"]), []).append(dict(item))
+        hash_groups = _filter_groups_by_size(
+            _group_items_by_key(items, key_name="segment_hash"),
+            min_occurrences=min_occurrences,
+        )
 
         for segment_hash, hash_items in hash_groups.items():
-            if len(hash_items) < min_occurrences:
-                continue
-
             by_function: GroupMap = {}
             for item in hash_items:
                 by_function.setdefault(str(item["qualname"]), []).append(item)

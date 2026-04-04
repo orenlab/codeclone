@@ -408,18 +408,27 @@ class CFGBuilder:
         self.current = current
 
     def _visit_break(self, stmt: ast.Break) -> None:
-        self.current.statements.append(stmt)
-        self.current.is_terminated = True
-        if self._loop_stack:
-            self.current.add_successor(self._loop_stack[-1].break_target)
-            return
-        self.current.add_successor(self.cfg.exit)
+        self._visit_loop_exit(stmt, target_kind="break")
 
     def _visit_continue(self, stmt: ast.Continue) -> None:
+        self._visit_loop_exit(stmt, target_kind="continue")
+
+    def _visit_loop_exit(
+        self,
+        stmt: ast.Break | ast.Continue,
+        *,
+        target_kind: str,
+    ) -> None:
         self.current.statements.append(stmt)
         self.current.is_terminated = True
         if self._loop_stack:
-            self.current.add_successor(self._loop_stack[-1].continue_target)
+            loop_frame = self._loop_stack[-1]
+            target = (
+                loop_frame.break_target
+                if target_kind == "break"
+                else loop_frame.continue_target
+            )
+            self.current.add_successor(target)
             return
         self.current.add_successor(self.cfg.exit)
 

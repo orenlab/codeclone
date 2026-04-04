@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from dataclasses import dataclass
+from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
+
+import orjson
 
 from . import ui_messages as ui
 from .baseline import (
@@ -101,8 +103,8 @@ def probe_metrics_baseline_section(path: Path) -> MetricsBaselineSectionProbe:
             payload=None,
         )
     try:
-        raw_payload = json.loads(path.read_text("utf-8"))
-    except (OSError, json.JSONDecodeError):
+        raw_payload = orjson.loads(path.read_text("utf-8"))
+    except (OSError, JSONDecodeError):
         return MetricsBaselineSectionProbe(
             has_metrics_section=True,
             payload=None,

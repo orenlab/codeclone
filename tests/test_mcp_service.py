@@ -34,6 +34,7 @@ from codeclone.mcp_service import (
     MCPServiceError,
 )
 from codeclone.models import MetricsDiff
+from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 
 
 def _write_clone_fixture(root: Path, relative_dir: str = "pkg") -> None:
@@ -68,10 +69,8 @@ def _write_clone_fixture(root: Path, relative_dir: str = "pkg") -> None:
 
 
 def _write_quality_fixture(root: Path) -> None:
-    pkg = root.joinpath("pkg")
-    pkg.mkdir(exist_ok=True)
-    pkg.joinpath("__init__.py").write_text("", "utf-8")
-    pkg.joinpath("quality.py").write_text(
+    _write_shared_quality_fixture(
+        root,
         (
             "class SplitByConcern:\n"
             "    def __init__(self) -> None:\n"
@@ -101,7 +100,6 @@ def _write_quality_fixture(root: Path) -> None:
             "def unused_helper() -> int:\n"
             "    return 42\n"
         ),
-        "utf-8",
     )
 
 
@@ -270,27 +268,28 @@ def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
         "topic": "workflow",
         "detail": "compact",
         "summary": (
-            "CodeClone MCP is triage-first and budget-aware. Start with compact "
+            "CodeClone MCP is triage-first and budget-aware. Start with a "
             "summary or production triage, then narrow through hotspots or "
             "focused checks before opening one finding in detail."
         ),
         "key_points": [
             "Recommended first pass: analyze_repository or analyze_changed_paths.",
             (
+                "Start with default or pyproject-resolved thresholds; lower "
+                "them only for an explicit higher-sensitivity follow-up pass."
+            ),
+            (
                 "Use get_run_summary or get_production_triage before broad "
-                "finding enumeration."
+                "finding listing."
             ),
             (
                 "Prefer list_hotspots or focused check_* tools over "
-                "list_findings on medium or noisy repositories."
+                "list_findings on noisy repositories."
             ),
-            (
-                "Use get_finding and get_remediation only after selecting a "
-                "specific issue."
-            ),
+            ("Use get_finding and get_remediation only after selecting an issue."),
             (
                 "get_report_section(section='all') is an exception path, not "
-                "a default exploration step."
+                "a default first step."
             ),
         ],
         "recommended_tools": [
@@ -322,20 +321,58 @@ def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
     assert normal["doc_links"] == compact["doc_links"]
     assert cast("list[str]", normal["warnings"]) == [
         (
-            "Broad list_findings calls can burn context quickly on large or "
+            "Broad list_findings calls burn context quickly on large or "
             "noisy repositories."
         ),
         (
             "Prefer generate_pr_summary(format='markdown') unless machine JSON "
-            "is explicitly needed."
+            "is explicitly required."
         ),
     ]
+
+
+def test_mcp_service_help_covers_analysis_profiles() -> None:
+    service = CodeCloneMCPService(history_limit=4)
+
+    compact = service.get_help(topic="analysis_profile")
+    normal = service.get_help(topic="analysis_profile", detail="normal")
+
+    assert compact["topic"] == "analysis_profile"
+    assert compact["detail"] == "compact"
+    assert "intentionally conservative" in str(compact["summary"])
+    assert "analyze_repository" in cast("list[str]", compact["recommended_tools"])
+    assert compact["doc_links"] == [
+        {
+            "title": "Config and defaults",
+            "url": "https://orenlab.github.io/codeclone/book/04-config-and-defaults/",
+        },
+        {
+            "title": "Core pipeline",
+            "url": "https://orenlab.github.io/codeclone/book/05-core-pipeline/",
+        },
+        {
+            "title": "MCP interface contract",
+            "url": "https://orenlab.github.io/codeclone/book/20-mcp-interface/",
+        },
+    ]
+    assert normal["topic"] == "analysis_profile"
+    assert normal["detail"] == "normal"
+    assert "Run comparisons are most meaningful when profiles are aligned." in cast(
+        "list[str]", normal["warnings"]
+    )
     assert cast("list[str]", normal["anti_patterns"]) == [
-        "Starting exploration with list_findings on a noisy repository.",
-        "Using get_report_section(section='all') as the default first step.",
         (
-            "Escalating detail on larger lists instead of opening one finding "
-            "with get_finding."
+            "Assuming a clean default pass means no finer-grained duplication "
+            "exists anywhere in the repository."
+        ),
+        (
+            "Lowering thresholds for exploration and then interpreting the "
+            "result as if it had the same meaning as the conservative "
+            "default pass."
+        ),
+        (
+            "Mixing low-threshold exploratory output into baseline or CI "
+            "reasoning without acknowledging the profile change."
         ),
     ]
 
@@ -1280,6 +1317,8 @@ def test_mcp_service_git_diff_and_helper_branch_edges(
     assert service._normalize_relative_path("./.github/workflows/docs.yml") == (
         ".github/workflows/docs.yml"
     )
+    with pytest.raises(MCPServiceContractError, match="path traversal not allowed"):
+        service._normalize_relative_path("../outside.py")
 
     full_record = _dummy_run_record(tmp_path, "full")
     object.__setattr__(

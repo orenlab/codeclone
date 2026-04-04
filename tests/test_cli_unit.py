@@ -337,25 +337,39 @@ def test_argument_parser_contract_error_marker_for_invalid_args(
     assert "CONTRACT ERROR:" in err
 
 
-def test_validate_changed_scope_args_requires_diff_source() -> None:
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(
+            Namespace(
+                changed_only=True,
+                diff_against=None,
+                paths_from_git_diff=None,
+            ),
+            id="requires_diff_source",
+        ),
+        pytest.param(
+            Namespace(
+                changed_only=False,
+                diff_against="main",
+                paths_from_git_diff=None,
+            ),
+            id="diff_against_requires_changed_only",
+        ),
+        pytest.param(
+            Namespace(
+                changed_only=True,
+                diff_against="HEAD~1",
+                paths_from_git_diff="HEAD~2",
+            ),
+            id="conflicting_diff_sources",
+        ),
+    ],
+)
+def test_validate_changed_scope_args_rejects_invalid_combinations(
+    args: Namespace,
+) -> None:
     cli.console = cli._make_console(no_color=True)
-    args = Namespace(
-        changed_only=True,
-        diff_against=None,
-        paths_from_git_diff=None,
-    )
-    with pytest.raises(SystemExit) as exc:
-        cli._validate_changed_scope_args(args=args)
-    assert exc.value.code == 2
-
-
-def test_validate_changed_scope_args_requires_changed_only_for_diff_against() -> None:
-    cli.console = cli._make_console(no_color=True)
-    args = Namespace(
-        changed_only=False,
-        diff_against="main",
-        paths_from_git_diff=None,
-    )
     with pytest.raises(SystemExit) as exc:
         cli._validate_changed_scope_args(args=args)
     assert exc.value.code == 2
@@ -369,18 +383,6 @@ def test_validate_changed_scope_args_promotes_paths_from_git_diff() -> None:
     )
     assert cli._validate_changed_scope_args(args=args) == "HEAD~1"
     assert args.changed_only is True
-
-
-def test_validate_changed_scope_args_rejects_conflicting_diff_sources() -> None:
-    cli.console = cli._make_console(no_color=True)
-    args = Namespace(
-        changed_only=True,
-        diff_against="HEAD~1",
-        paths_from_git_diff="HEAD~2",
-    )
-    with pytest.raises(SystemExit) as exc:
-        cli._validate_changed_scope_args(args=args)
-    assert exc.value.code == 2
 
 
 def test_normalize_changed_paths_relativizes_dedupes_and_sorts(tmp_path: Path) -> None:

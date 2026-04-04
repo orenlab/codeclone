@@ -6,8 +6,9 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
+
+import orjson
 
 from .._coerce import as_int, as_mapping, as_sequence
 from ..domain.source_scope import IMPACT_SCOPE_NON_RUNTIME, SOURCE_KIND_OTHER
@@ -19,11 +20,7 @@ _as_sequence = as_sequence
 
 
 def render_json_report_document(payload: Mapping[str, object]) -> str:
-    return json.dumps(
-        payload,
-        ensure_ascii=False,
-        indent=2,
-    )
+    return orjson.dumps(payload, option=orjson.OPT_INDENT_2).decode("utf-8")
 
 
 def format_meta_text_value(value: object) -> str:
@@ -54,9 +51,8 @@ def _format_key_values(
         if key not in mapping:
             continue
         formatted = format_meta_text_value(mapping.get(key))
-        if skip_empty and formatted == "(none)":
-            continue
-        parts.append(f"{key}={formatted}")
+        if not skip_empty or formatted != "(none)":
+            parts.append(f"{key}={formatted}")
     return " ".join(parts) if parts else "(none)"
 
 

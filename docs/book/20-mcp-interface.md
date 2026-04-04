@@ -89,29 +89,29 @@ produced by the report contract.
 
 Current tool set (`21` tools):
 
-| Tool                     | Key parameters                                                                          | Purpose                                                                                      |
-|--------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| `analyze_repository`     | absolute `root`, `analysis_mode`, thresholds, cache/baseline paths                      | Full analysis → compact summary; then `get_run_summary` or `get_production_triage`           |
-| `analyze_changed_paths`  | absolute `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`                     | Diff-aware analysis → compact changed-files snapshot                                         |
-| `get_run_summary`        | `run_id`                                                                                | Cheapest run snapshot: health, findings, baseline, inventory                                 |
-| `get_production_triage`  | `run_id`, `max_hotspots`, `max_suggestions`                                             | Production-first view: health, hotspots, suggestions                                        |
-| `help`                   | `topic`, `detail`                                                                       | Semantic guide for workflow, baseline, suppressions, review state, changed-scope             |
-| `compare_runs`           | `run_id_before`, `run_id_after`, `focus`                                                | Run-to-run delta: regressions, improvements, health change                                  |
-| `evaluate_gates`         | `run_id`, gate thresholds                                                               | Preview CI gating decisions                                                                  |
-| `get_report_section`     | `run_id`, `section`, `family`, `path`, `offset`, `limit`                                | Read report sections; `metrics_detail` is paginated with family/path filters                 |
-| `list_findings`          | `family`, `severity`, `novelty`, `sort_by`, `detail_level`, `changed_paths`, pagination | Filtered, paginated findings; use after hotspots or `check_*`                                |
-| `get_finding`            | `finding_id`, `run_id`, `detail_level`                                                  | Single finding detail by id; defaults to `normal`                                            |
-| `get_remediation`        | `finding_id`, `run_id`, `detail_level`                                                  | Remediation payload for one finding                                                          |
-| `list_hotspots`          | `kind`, `run_id`, `detail_level`, `changed_paths`, `limit`                              | Priority-ranked hotspot views; preferred before broad listing                                |
-| `check_clones`           | `run_id`, `root`, `path`, `clone_type`, `source_kind`, `detail_level`                   | Clone findings only; `health.dimensions` includes only `clones`                              |
-| `check_complexity`       | `run_id`, `root`, `path`, `min_complexity`, `detail_level`                              | Complexity hotspots only                                                                     |
-| `check_coupling`         | `run_id`, `root`, `path`, `detail_level`                                                | Coupling hotspots only                                                                       |
-| `check_cohesion`         | `run_id`, `root`, `path`, `detail_level`                                                | Cohesion hotspots only                                                                       |
-| `check_dead_code`        | `run_id`, `root`, `path`, `min_severity`, `detail_level`                                | Dead-code findings only                                                                      |
-| `generate_pr_summary`    | `run_id`, `changed_paths`, `git_diff_ref`, `format`                                     | PR-friendly markdown or JSON summary                                                         |
-| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note`                                                          | Session-local review marker (in-memory)                                                      |
-| `list_reviewed_findings` | `run_id`                                                                                | List reviewed findings for a run                                                             |
-| `clear_session_runs`     | none                                                                                    | Reset in-memory runs and session state                                                       |
+| Tool                     | Key parameters                                                                          | Purpose                                                                                            |
+|--------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
+| `analyze_repository`     | absolute `root`, `analysis_mode`, thresholds, cache/baseline paths                      | Full analysis → compact summary; then `get_run_summary` or `get_production_triage`                 |
+| `analyze_changed_paths`  | absolute `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`                     | Diff-aware analysis → compact changed-files snapshot                                               |
+| `get_run_summary`        | `run_id`                                                                                | Cheapest run snapshot: health, findings, baseline, inventory                                       |
+| `get_production_triage`  | `run_id`, `max_hotspots`, `max_suggestions`                                             | Production-first view: health, hotspots, suggestions                                               |
+| `help`                   | `topic`, `detail`                                                                       | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope |
+| `compare_runs`           | `run_id_before`, `run_id_after`, `focus`                                                | Run-to-run delta: regressions, improvements, health change                                         |
+| `evaluate_gates`         | `run_id`, gate thresholds                                                               | Preview CI gating decisions                                                                        |
+| `get_report_section`     | `run_id`, `section`, `family`, `path`, `offset`, `limit`                                | Read report sections; `metrics_detail` is paginated with family/path filters                       |
+| `list_findings`          | `family`, `severity`, `novelty`, `sort_by`, `detail_level`, `changed_paths`, pagination | Filtered, paginated findings; use after hotspots or `check_*`                                      |
+| `get_finding`            | `finding_id`, `run_id`, `detail_level`                                                  | Single finding detail by id; defaults to `normal`                                                  |
+| `get_remediation`        | `finding_id`, `run_id`, `detail_level`                                                  | Remediation payload for one finding                                                                |
+| `list_hotspots`          | `kind`, `run_id`, `detail_level`, `changed_paths`, `limit`                              | Priority-ranked hotspot views; preferred before broad listing                                      |
+| `check_clones`           | `run_id`, `root`, `path`, `clone_type`, `source_kind`, `detail_level`                   | Clone findings only; `health.dimensions` includes only `clones`                                    |
+| `check_complexity`       | `run_id`, `root`, `path`, `min_complexity`, `detail_level`                              | Complexity hotspots only                                                                           |
+| `check_coupling`         | `run_id`, `root`, `path`, `detail_level`                                                | Coupling hotspots only                                                                             |
+| `check_cohesion`         | `run_id`, `root`, `path`, `detail_level`                                                | Cohesion hotspots only                                                                             |
+| `check_dead_code`        | `run_id`, `root`, `path`, `min_severity`, `detail_level`                                | Dead-code findings only                                                                            |
+| `generate_pr_summary`    | `run_id`, `changed_paths`, `git_diff_ref`, `format`                                     | PR-friendly markdown or JSON summary                                                               |
+| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note`                                                          | Session-local review marker (in-memory)                                                            |
+| `list_reviewed_findings` | `run_id`                                                                                | List reviewed findings for a run                                                                   |
+| `clear_session_runs`     | none                                                                                    | Reset in-memory runs and session state                                                             |
 
 All tools are read-only except `mark_finding_reviewed` and `clear_session_runs`
 (session-local, in-memory). `check_*` tools query stored runs — call
@@ -124,6 +124,12 @@ Recommended workflow:
 3. `list_hotspots` or `check_*`
 4. `get_finding` → `get_remediation`
 5. `generate_pr_summary(format="markdown")`
+
+For analysis sensitivity, the intended model is:
+
+1. start with repo defaults or `pyproject`-resolved thresholds
+2. lower thresholds only for an explicit higher-sensitivity exploratory pass
+3. compare runs only when profile differences are understood
 
 ## Resources
 
@@ -166,6 +172,13 @@ state behind `codeclone://latest/...`.
 - `streamable-http` defaults to loopback binding.
   Non-loopback hosts require explicit `--allow-remote` because the server has
   no built-in authentication.
+- `--allow-remote` expands the trust boundary materially:
+    - any reachable network client can trigger CPU-intensive analysis
+    - any reachable network client can read analysis results
+    - request parameters such as `root` and path filters can still probe
+      repository-relative filesystem structure
+    - use it only on trusted networks or behind a firewall / authenticated
+      reverse proxy
 - MCP must reuse current:
     - pipeline stages
     - baseline trust semantics

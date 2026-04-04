@@ -6,6 +6,11 @@
 
 from __future__ import annotations
 
+from codeclone._html_report._sections._structural import (
+    _finding_matters_html,
+    _finding_why_template_html,
+    _occurrences_table_html,
+)
 from codeclone._html_snippets import _FileCache
 from codeclone.models import StructuralFindingGroup, StructuralFindingOccurrence
 from codeclone.report.explain_contract import (
@@ -14,10 +19,7 @@ from codeclone.report.explain_contract import (
 )
 from codeclone.report.findings import (
     _dedupe_items,
-    _finding_matters_html,
     _finding_scope_text,
-    _finding_why_template_html,
-    _occurrences_table_html,
 )
 from codeclone.report.markdown import (
     _append_findings_section,

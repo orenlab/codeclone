@@ -20,6 +20,7 @@ import pytest
 from codeclone import mcp_server
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.mcp_server import MCPDependencyError, build_mcp_server
+from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 
 
 def _structured_tool_result(result: object) -> dict[str, object]:
@@ -71,10 +72,8 @@ def _write_clone_fixture(root: Path) -> None:
 
 
 def _write_quality_fixture(root: Path) -> None:
-    pkg = root.joinpath("pkg")
-    pkg.mkdir(exist_ok=True)
-    pkg.joinpath("__init__.py").write_text("", "utf-8")
-    pkg.joinpath("quality.py").write_text(
+    _write_shared_quality_fixture(
+        root,
         (
             "def complex_branch(flag: int) -> int:\n"
             "    total = 0\n"
@@ -91,7 +90,6 @@ def _write_quality_fixture(root: Path) -> None:
             "def unused_helper() -> int:\n"
             "    return 42\n"
         ),
-        "utf-8",
     )
 
 
@@ -103,6 +101,9 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "Use list_hotspots or focused check_* tools" in str(server.instructions)
     assert "prefer generate_pr_summary(format='markdown')" in str(server.instructions)
     assert "Use help(topic=...)" in str(server.instructions)
+    assert "default or pyproject-resolved thresholds for the first pass" in str(
+        server.instructions
+    )
 
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert set(tools) == {
@@ -160,7 +161,11 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "get_run_summary or get_production_triage" in str(
         tools["analyze_repository"].description
     )
+    assert "conservative first pass" in str(tools["analyze_repository"].description)
     assert "get_report_section(section='changed')" in str(
+        tools["analyze_changed_paths"].description
+    )
+    assert "conservative profile first" in str(
         tools["analyze_changed_paths"].description
     )
     assert "Use analyze_repository first" in str(tools["check_complexity"].description)
@@ -169,7 +174,9 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         tools["get_production_triage"].description
     )
     assert "bounded guidance, not a full manual" in str(tools["help"].description)
-    assert "workflow, suppressions, baseline" in str(tools["help"].description)
+    assert "workflow, analysis_profile, suppressions, baseline" in str(
+        tools["help"].description
+    )
     assert "Prefer list_hotspots or focused check_* tools" in str(
         tools["list_findings"].description
     )

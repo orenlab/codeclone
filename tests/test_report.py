@@ -13,11 +13,13 @@ from typing import cast
 
 import pytest
 
-import codeclone.report as report_mod
-import codeclone.report.findings as report_findings_mod
 import codeclone.report.merge as merge_mod
 import codeclone.report.overview as overview_mod
 import codeclone.report.serialize as serialize_mod
+from codeclone._html_report._sections._structural import (
+    _finding_why_template_html,
+    build_structural_findings_html_panel,
+)
 from codeclone._html_snippets import _FileCache
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.models import (
@@ -36,9 +38,21 @@ from codeclone.report import (
     to_markdown_report,
     to_sarif_report,
 )
-from codeclone.report.findings import build_structural_findings_html_panel
 from codeclone.report.json_contract import build_report_document
 from codeclone.report.overview import materialize_report_overview
+from codeclone.report.segments import (
+    analyze_segment_statements as _analyze_segment_statements,
+)
+from codeclone.report.segments import (
+    assign_targets_attribute_only as _assign_targets_attribute_only,
+)
+from codeclone.report.segments import (
+    collect_file_functions as _collect_file_functions,
+)
+from codeclone.report.segments import merge_segment_items as _merge_segment_items
+from codeclone.report.segments import (
+    segment_statements as _segment_statements,
+)
 from codeclone.report.serialize import (
     render_json_report_document,
     render_text_report_document,
@@ -1714,7 +1728,7 @@ def test_report_findings_template_html_covers_custom_kind_fallback(
             signature={"stmt_seq": "Assign", "terminal": "fallthrough"},
         ),
     )
-    html = report_findings_mod._finding_why_template_html(
+    html = _finding_why_template_html(
         StructuralFindingGroup(
             finding_kind="custom_kind",
             finding_key="custom:1",
@@ -2369,10 +2383,10 @@ def test_segment_groups_deterministic(tmp_path: Path) -> None:
 
 def test_segment_helpers_cover_edge_cases(tmp_path: Path) -> None:
     # _merge_segment_items empty
-    assert report_mod._merge_segment_items([]) == []
+    assert _merge_segment_items([]) == []
 
     # _merge_segment_items skips invalid lines and still appends trailing current
-    merged = report_mod._merge_segment_items(
+    merged = _merge_segment_items(
         [
             {"start_line": 0, "end_line": 0},
             {"start_line": 2, "end_line": 3, "filepath": "x", "qualname": "q"},
@@ -2382,29 +2396,29 @@ def test_segment_helpers_cover_edge_cases(tmp_path: Path) -> None:
 
     # _assign_targets_attribute_only
     assign_attr = ast.parse("self.x = 1").body[0]
-    assert report_mod._assign_targets_attribute_only(assign_attr)
+    assert _assign_targets_attribute_only(assign_attr)
     annassign_attr = ast.parse("self.y: int = 2").body[0]
-    assert report_mod._assign_targets_attribute_only(annassign_attr)
+    assert _assign_targets_attribute_only(annassign_attr)
     assign_name = ast.parse("x = 1").body[0]
-    assert not report_mod._assign_targets_attribute_only(assign_name)
+    assert not _assign_targets_attribute_only(assign_name)
     expr_stmt = ast.parse("pass").body[0]
-    assert not report_mod._assign_targets_attribute_only(expr_stmt)
+    assert not _assign_targets_attribute_only(expr_stmt)
 
     # _analyze_segment_statements empty
-    assert report_mod._analyze_segment_statements([]) is None
+    assert _analyze_segment_statements([]) is None
 
     # _segment_statements handles non-list body and missing lineno
     class Dummy:
         body = None
 
     dummy = cast(ast.FunctionDef, cast(object, Dummy()))
-    assert report_mod._segment_statements(dummy, 1, 2) == []
+    assert _segment_statements(dummy, 1, 2) == []
 
     func = ast.parse("def f():\n    x = 1\n").body[0]
     assert isinstance(func, ast.FunctionDef)
     stmt = func.body[0]
     delattr(stmt, "lineno")
-    assert report_mod._segment_statements(func, 1, 2) == []
+    assert _segment_statements(func, 1, 2) == []
 
 
 def test_segment_prepare_unknown_paths(tmp_path: Path) -> None:
@@ -2513,7 +2527,7 @@ def test_collect_file_functions_class_and_async(tmp_path: Path) -> None:
     )
     f = tmp_path / "a.py"
     f.write_text(src, "utf-8")
-    funcs = report_mod._collect_file_functions(str(f))
+    funcs = _collect_file_functions(str(f))
     assert funcs is not None
     assert "C.a" in funcs
 

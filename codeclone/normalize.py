@@ -146,17 +146,15 @@ class AstNormalizer(ast.NodeTransformer):
                 and len(operand.comparators) == 1
             ):
                 op = operand.ops[0]
+                negated_op_type: type[ast.cmpop] | None = None
                 if isinstance(op, ast.In):
+                    negated_op_type = ast.NotIn
+                elif isinstance(op, ast.Is):
+                    negated_op_type = ast.IsNot
+                if negated_op_type is not None:
                     cmp = ast.Compare(
                         left=operand.left,
-                        ops=[ast.NotIn()],
-                        comparators=operand.comparators,
-                    )
-                    return ast.copy_location(cmp, new_node)
-                if isinstance(op, ast.Is):
-                    cmp = ast.Compare(
-                        left=operand.left,
-                        ops=[ast.IsNot()],
+                        ops=[negated_op_type()],
                         comparators=operand.comparators,
                     )
                     return ast.copy_location(cmp, new_node)
@@ -223,11 +221,12 @@ def normalized_ast_dump_from_list(
     the original AST for downstream metrics and reporting passes.
     """
     active_normalizer = normalizer or AstNormalizer(cfg)
+    copies = [copy.deepcopy(node) for node in nodes]
     dumps: list[str] = []
 
-    for node in nodes:
+    for node in copies:
         # Fingerprints ignore location attributes, so we skip location repair.
-        new_node = active_normalizer.visit(copy.deepcopy(node))
+        new_node = active_normalizer.visit(node)
         assert isinstance(new_node, ast.AST)
         dumps.append(ast.dump(new_node, annotate_fields=True, include_attributes=False))
 
@@ -242,9 +241,10 @@ def _normalized_stmt_dump(stmt: ast.stmt, normalizer: AstNormalizer) -> str:
 
 def stmt_hashes(statements: Sequence[ast.stmt], cfg: NormalizationConfig) -> list[str]:
     normalizer = AstNormalizer(cfg)
+    copies = [copy.deepcopy(statement) for statement in statements]
     return [
         hashlib.sha1(
             _normalized_stmt_dump(stmt, normalizer).encode("utf-8")
         ).hexdigest()
-        for stmt in statements
+        for stmt in copies
     ]

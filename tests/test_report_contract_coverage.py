@@ -1449,50 +1449,62 @@ def test_suggestion_finding_id_fallback_branch() -> None:
     assert _suggestion_finding_id(fake) == "design:unmapped_category:Synthetic title"
 
 
-def test_suggestion_finding_id_segment_clone_branch() -> None:
-    segment_clone = Suggestion(
-        severity="info",
-        category="clone",
-        title="Segment clone",
-        location="code/a.py:1-3",
-        steps=(),
-        effort="easy",
-        priority=1.0,
-        finding_family="clones",
-        finding_kind="clone_group",
-        subject_key="seg-1",
-        fact_kind="Segment clone group",
-        fact_summary="same segment",
-        fact_count=2,
-        spread_files=2,
-        spread_functions=2,
-        confidence="medium",
-        source_kind="production",
-    )
-    assert _suggestion_finding_id(segment_clone) == "clone:segment:seg-1"
-
-
-def test_suggestion_finding_id_block_clone_branch() -> None:
-    block_clone = Suggestion(
-        severity="warning",
-        category="clone",
-        title="Block clone",
-        location="code/a.py:10-15",
-        steps=(),
-        effort="easy",
-        priority=1.5,
-        finding_family="clones",
-        finding_kind="clone_group",
-        subject_key="blk-1",
-        fact_kind="Block clone group",
-        fact_summary="same statement sequence",
-        fact_count=2,
-        spread_files=2,
-        spread_functions=2,
-        confidence="high",
-        source_kind="production",
-    )
-    assert _suggestion_finding_id(block_clone) == "clone:block:blk-1"
+@pytest.mark.parametrize(
+    ("suggestion", "expected_finding_id"),
+    [
+        pytest.param(
+            Suggestion(
+                severity="info",
+                category="clone",
+                title="Segment clone",
+                location="code/a.py:1-3",
+                steps=(),
+                effort="easy",
+                priority=1.0,
+                finding_family="clones",
+                finding_kind="clone_group",
+                subject_key="seg-1",
+                fact_kind="Segment clone group",
+                fact_summary="same segment",
+                fact_count=2,
+                spread_files=2,
+                spread_functions=2,
+                confidence="medium",
+                source_kind="production",
+            ),
+            "clone:segment:seg-1",
+            id="segment_clone",
+        ),
+        pytest.param(
+            Suggestion(
+                severity="warning",
+                category="clone",
+                title="Block clone",
+                location="code/a.py:10-15",
+                steps=(),
+                effort="easy",
+                priority=1.5,
+                finding_family="clones",
+                finding_kind="clone_group",
+                subject_key="blk-1",
+                fact_kind="Block clone group",
+                fact_summary="same statement sequence",
+                fact_count=2,
+                spread_files=2,
+                spread_functions=2,
+                confidence="high",
+                source_kind="production",
+            ),
+            "clone:block:blk-1",
+            id="block_clone",
+        ),
+    ],
+)
+def test_suggestion_finding_id_clone_branches(
+    suggestion: Suggestion,
+    expected_finding_id: str,
+) -> None:
+    assert _suggestion_finding_id(suggestion) == expected_finding_id
 
 
 def test_sarif_private_helper_branches() -> None:

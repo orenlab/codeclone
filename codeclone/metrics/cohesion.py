@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 import ast
-from typing import Literal
 
 from ..contracts import COHESION_RISK_MEDIUM_MAX
+from ._risk import RiskLevel, threshold_risk
 
 
 def _self_attribute_name(node: ast.AST) -> str | None:
@@ -81,9 +81,5 @@ def compute_lcom4(class_node: ast.ClassDef) -> tuple[int, int, int]:
     return components, len(method_names), len(instance_vars)
 
 
-def cohesion_risk(lcom4: int) -> Literal["low", "medium", "high"]:
-    if lcom4 <= 1:
-        return "low"
-    if lcom4 <= COHESION_RISK_MEDIUM_MAX:
-        return "medium"
-    return "high"
+def cohesion_risk(lcom4: int) -> RiskLevel:
+    return threshold_risk(lcom4, low_max=1, medium_max=COHESION_RISK_MEDIUM_MAX)

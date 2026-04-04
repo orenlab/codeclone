@@ -7,11 +7,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+
+import orjson
 
 from .._coerce import as_float as _as_float
 from .._coerce import as_int as _as_int
@@ -437,15 +438,20 @@ def _design_result_message(
     qualname: str,
     items: Sequence[Mapping[str, object]],
 ) -> str:
-    if category == CATEGORY_COHESION:
-        lcom4 = _as_int(facts.get("lcom4"))
-        return f"Low cohesion class (LCOM4={lcom4}): {qualname}."
-    if category == CATEGORY_COMPLEXITY:
-        cc = _as_int(facts.get("cyclomatic_complexity"))
-        return f"High complexity function (CC={cc}): {qualname}."
-    if category == CATEGORY_COUPLING:
-        cbo = _as_int(facts.get("cbo"))
-        return f"High coupling class (CBO={cbo}): {qualname}."
+    metric_specs = {
+        CATEGORY_COHESION: ("lcom4", "Low cohesion class", "LCOM4"),
+        CATEGORY_COMPLEXITY: (
+            "cyclomatic_complexity",
+            "High complexity function",
+            "CC",
+        ),
+        CATEGORY_COUPLING: ("cbo", "High coupling class", "CBO"),
+    }
+    spec = metric_specs.get(category)
+    if spec is not None:
+        fact_key, label, metric_label = spec
+        value = _as_int(facts.get(fact_key))
+        return f"{label} ({metric_label}={value}): {qualname}."
     modules = [_text(item.get("module")) for item in items if _text(item.get("module"))]
     return f"Dependency cycle ({len(modules)} modules): {' -> '.join(modules)}."
 
@@ -904,15 +910,14 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
             **({"reportGeneratedAtUtc": generated_at} if generated_at else {}),
         },
     }
-    return json.dumps(
+    return orjson.dumps(
         {
             "$schema": SARIF_SCHEMA_URL,
             "version": SARIF_VERSION,
             "runs": [run],
         },
-        ensure_ascii=False,
-        indent=2,
-    )
+        option=orjson.OPT_INDENT_2,
+    ).decode("utf-8")
 
 
 def to_sarif_report(

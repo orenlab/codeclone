@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from hashlib import sha256
 from typing import TYPE_CHECKING, Literal
+
+import orjson
 
 from .._coerce import as_float as _as_float
 from .._coerce import as_int as _as_int
@@ -70,6 +71,9 @@ from .derived import (
     relative_report_path,
     report_location_from_group_item,
     report_location_from_structural_occurrence,
+)
+from .derived import (
+    normalized_source_kind as _normalized_source_kind,
 )
 from .derived import (
     source_scope_from_counts as _report_source_scope_from_counts,
@@ -299,17 +303,6 @@ def _source_scope_from_filepaths(
         )
         counts[location.source_kind] += 1
     return _source_scope_from_counts(counts)
-
-
-def _normalized_source_kind(value: object) -> SourceKind:
-    source_kind_text = str(value).strip().lower() or SOURCE_KIND_OTHER
-    if source_kind_text == SOURCE_KIND_PRODUCTION:
-        return SOURCE_KIND_PRODUCTION
-    if source_kind_text == SOURCE_KIND_TESTS:
-        return SOURCE_KIND_TESTS
-    if source_kind_text == SOURCE_KIND_FIXTURES:
-        return SOURCE_KIND_FIXTURES
-    return SOURCE_KIND_OTHER
 
 
 def _source_scope_from_counts(
@@ -2350,12 +2343,10 @@ def _build_integrity_payload(
         findings=findings,
         metrics=metrics,
     )
-    canonical_json = json.dumps(
+    canonical_json = orjson.dumps(
         canonical_payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
+        option=orjson.OPT_SORT_KEYS,
+    )
     payload_sha = sha256(canonical_json).hexdigest()
     return {
         "canonicalization": {

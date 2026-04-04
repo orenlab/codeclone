@@ -53,6 +53,17 @@ def _violates(import_name: str, forbidden_prefixes: tuple[str, ...]) -> bool:
     )
 
 
+def _matches_module_prefix(module_name: str, module_prefix: str) -> bool:
+    return module_name.startswith((module_prefix, module_prefix + "."))
+
+
+def _is_allowed_import(import_name: str, allowed_prefixes: tuple[str, ...]) -> bool:
+    return any(
+        import_name == prefix or import_name.startswith(prefix + ".")
+        for prefix in allowed_prefixes
+    )
+
+
 def test_architecture_layer_violations() -> None:
     root = Path(__file__).resolve().parents[1]
     violations: list[str] = []
@@ -64,6 +75,8 @@ def test_architecture_layer_violations() -> None:
                 "codeclone.ui_messages",
                 "codeclone.html_report",
                 "codeclone.cli",
+                "codeclone._html_",
+                "codeclone._html_report",
             ),
         ),
         (
@@ -116,29 +129,31 @@ def test_architecture_layer_violations() -> None:
         imports = _iter_local_imports(module_name, path.read_text("utf-8"))
 
         for module_prefix, forbidden_prefixes in forbidden_by_module_prefix:
-            if not module_name.startswith((module_prefix, module_prefix + ".")):
-                continue
-            violations.extend(
-                [
-                    (
-                        f"{module_name} -> {import_name} "
-                        f"(forbidden: {forbidden_prefixes})"
-                    )
-                    for import_name in imports
-                    if _violates(import_name, forbidden_prefixes)
-                ]
-            )
+            if _matches_module_prefix(module_name, module_prefix):
+                violations.extend(
+                    [
+                        (
+                            f"{module_name} -> {import_name} "
+                            f"(forbidden: {forbidden_prefixes})"
+                        )
+                        for import_name in imports
+                        if _violates(import_name, forbidden_prefixes)
+                    ]
+                )
 
         if module_name == "codeclone.models":
             allowed_prefixes = ("codeclone.contracts", "codeclone.errors")
-            for import_name in imports:
-                if import_name in allowed_prefixes or import_name.startswith(
-                    tuple(f"{prefix}." for prefix in allowed_prefixes)
-                ):
-                    continue
-                violations.append(
+            unexpected_imports = [
+                import_name
+                for import_name in imports
+                if not _is_allowed_import(import_name, allowed_prefixes)
+            ]
+            violations.extend(
+                [
                     f"codeclone.models imports unexpected local module: {import_name}"
-                )
+                    for import_name in unexpected_imports
+                ]
+            )
 
         if (
             module_name.startswith("codeclone.domain.")

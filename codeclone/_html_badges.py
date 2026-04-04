@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
-from ._html_escape import _escape_attr, _escape_html
+from ._html_escape import _escape_html
 from .domain.quality import (
     EFFORT_EASY,
     EFFORT_HARD,
@@ -63,16 +63,16 @@ def _quality_badge_html(text: str) -> str:
     r = text.strip().lower()
     if r in (RISK_LOW, RISK_HIGH, RISK_MEDIUM):
         return (
-            f'<span class="risk-badge risk-{_escape_attr(r)}">{_escape_html(r)}</span>'
+            f'<span class="risk-badge risk-{_escape_html(r)}">{_escape_html(r)}</span>'
         )
     if r in (SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO):
         return (
-            f'<span class="severity-badge severity-{_escape_attr(r)}">'
+            f'<span class="severity-badge severity-{_escape_html(r)}">'
             f"{_escape_html(r)}</span>"
         )
     if r in _EFFORT_CSS:
         return (
-            f'<span class="risk-badge risk-{_escape_attr(r)}">{_escape_html(r)}</span>'
+            f'<span class="risk-badge risk-{_escape_html(r)}">{_escape_html(r)}</span>'
         )
     return _escape_html(text)
 
@@ -80,7 +80,7 @@ def _quality_badge_html(text: str) -> str:
 def _source_kind_badge_html(source_kind: str) -> str:
     normalized = normalize_source_kind(source_kind)
     return (
-        f'<span class="source-kind-badge source-kind-{_escape_attr(normalized)}">'
+        f'<span class="source-kind-badge source-kind-{_escape_html(normalized)}">'
         f"{_escape_html(source_kind_label(normalized))}</span>"
     )
 
@@ -117,7 +117,7 @@ def _render_chain_flow(
     for i, mod in enumerate(parts):
         short = _short_label(str(mod))
         nodes.append(
-            f'<span class="chain-node" title="{_escape_attr(str(mod))}">'
+            f'<span class="chain-node" title="{_escape_html(str(mod))}">'
             f"{_escape_html(short)}</span>"
         )
         if arrows and i < len(parts) - 1:
@@ -154,7 +154,7 @@ def _stat_card(
     if glossary_tip_fn is not None:
         tip_html = glossary_tip_fn(label)
     elif tip:
-        tip_html = f'<span class="kpi-help" data-tip="{_escape_attr(tip)}">?</span>'
+        tip_html = f'<span class="kpi-help" data-tip="{_escape_html(tip)}">?</span>'
 
     detail_html = ""
     if detail:
@@ -167,7 +167,7 @@ def _stat_card(
     value_cls = f" meta-value--{value_tone}" if value_tone else ""
 
     return (
-        f'<div class="{_escape_attr(css_class)}">'
+        f'<div class="{_escape_html(css_class)}">'
         f'<div class="meta-label">{_escape_html(label)}{tip_html}{delta_html}</div>'
         f'<div class="meta-value{value_cls}">{_escape_html(str(value))}</div>'
         f"{detail_html}"

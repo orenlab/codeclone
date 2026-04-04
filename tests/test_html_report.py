@@ -1891,8 +1891,8 @@ def test_html_report_renders_directory_hotspots_from_canonical_report() -> None:
         html,
         "Hotspots by Directory",
         "top 5 of 6 directories",
-        "<code>dir1</code>",
-        "<code>dir5</code>",
+        'title="dir1">dir1</code>',
+        'title="dir5">dir5</code>',
     )
 
 
@@ -1985,7 +1985,7 @@ def test_html_report_directory_hotspots_use_test_scope_roots() -> None:
     _assert_html_contains(
         html,
         "Hotspots by Directory",
-        "<code>tests/<wbr>fixtures</code>",
+        'title="tests/fixtures">tests/fixtures</code>',
     )
     assert "golden_project" not in html
     assert "clone_metrics_cycle" not in html

@@ -57,7 +57,21 @@ class _DummyFuture:
         return self._result
 
 
-class _DummyExecutor:
+class _FalseExitContext:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: object | None,
+    ) -> Literal[False]:
+        self._on_exit()
+        return False
+
+    def _on_exit(self) -> None:
+        return None
+
+
+class _DummyExecutor(_FalseExitContext):
     def __init__(self, max_workers: int | None = None) -> None:
         self.max_workers = max_workers
         self._active = False
@@ -66,14 +80,8 @@ class _DummyExecutor:
         self._active = True
         return self
 
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: object | None,
-    ) -> Literal[False]:
+    def _on_exit(self) -> None:
         self._active = False
-        return False
 
     def submit(
         self, fn: Callable[..., object], *args: object, **kwargs: object
@@ -82,20 +90,12 @@ class _DummyExecutor:
         return _DummyFuture(fn(*args, **kwargs))
 
 
-class _FailingExecutor:
+class _FailingExecutor(_FalseExitContext):
     def __init__(self, max_workers: int | None = None) -> None:
         self.max_workers = max_workers
 
     def __enter__(self) -> _FailingExecutor:
         raise PermissionError("nope")
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: object | None,
-    ) -> Literal[False]:
-        return False
 
 
 @dataclass(slots=True)
@@ -109,20 +109,12 @@ class _FixedFuture:
         return self.value
 
 
-class _FixedExecutor:
+class _FixedExecutor(_FalseExitContext):
     def __init__(self, future: _FixedFuture, *args: object, **kwargs: object) -> None:
         self._future = future
 
     def __enter__(self) -> _FixedExecutor:
         return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: object | None,
-    ) -> Literal[False]:
-        return False
 
     def submit(
         self, fn: Callable[..., object], *args: object, **kwargs: object
@@ -130,7 +122,7 @@ class _FixedExecutor:
         return self._future
 
 
-class _DummyProgress:
+class _DummyProgress(_FalseExitContext):
     def __init__(self, *args: object, **kwargs: object) -> None:
         self._entered = False
         self._last_task = 0
@@ -139,14 +131,8 @@ class _DummyProgress:
         self._entered = True
         return self
 
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: object | None,
-    ) -> Literal[False]:
+    def _on_exit(self) -> None:
         self._entered = False
-        return False
 
     def add_task(self, _desc: str, total: int) -> int:
         self._last_task = total if self._entered else 0
@@ -1202,25 +1188,6 @@ def test_cli_open_html_report_opens_written_html(
     assert opened == [html_out.resolve()]
 
 
-def test_cli_open_html_report_requires_html_output(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    _write_python_module(tmp_path, "a.py")
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            [
-                str(tmp_path),
-                "--open-html-report",
-            ],
-        )
-    assert exc.value.code == 2
-    out = capsys.readouterr().out
-    assert "--open-html-report requires --html" in out
-
-
 def test_cli_open_html_report_failure_warns_without_failing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1296,10 +1263,27 @@ def test_cli_timestamped_report_paths_do_not_rewrite_explicit_paths(
     assert not (tmp_path / "custom-20260322T213145Z.html").exists()
 
 
-def test_cli_timestamped_report_paths_require_requested_report_output(
+@pytest.mark.parametrize(
+    ("argv", "expected_message"),
+    [
+        pytest.param(
+            ["--open-html-report"],
+            "--open-html-report requires --html",
+            id="open_html_requires_html",
+        ),
+        pytest.param(
+            ["--timestamped-report-paths"],
+            "--timestamped-report-paths requires at least one report output flag",
+            id="timestamped_requires_output",
+        ),
+    ],
+)
+def test_cli_report_flag_contract_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+    expected_message: str,
 ) -> None:
     _write_python_module(tmp_path, "a.py")
     with pytest.raises(SystemExit) as exc:
@@ -1307,12 +1291,12 @@ def test_cli_timestamped_report_paths_require_requested_report_output(
             monkeypatch,
             [
                 str(tmp_path),
-                "--timestamped-report-paths",
+                *argv,
             ],
         )
     assert exc.value.code == 2
     out = capsys.readouterr().out
-    assert "--timestamped-report-paths requires at least one report output flag" in out
+    assert expected_message in out
 
 
 def test_cli_reports_include_audit_metadata_ok(
