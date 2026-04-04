@@ -46,6 +46,7 @@ repository build:
 - [CLI behavior, modes, and UX](book/09-cli.md)
 - [MCP interface contract](book/20-mcp-interface.md)
 - [VS Code extension contract](book/21-vscode-extension.md)
+- [Claude Desktop bundle contract](book/22-claude-desktop-bundle.md)
 - [HTML report rendering contract](book/10-html-render.md)
 
 ## System Properties
@@ -70,6 +71,8 @@ repository build:
 - [CFG design and semantics](cfg.md)
 - [MCP integration for AI agents and clients](mcp.md)
 - [VS Code extension usage guide](vscode-extension.md)
+- [Claude Desktop bundle usage guide](claude-desktop-bundle.md)
+- [Privacy Policy](privacy-policy.md)
 - [SARIF integration for IDE/code-scanning use](sarif.md)
 - [Docs publishing and Pages workflow](publishing.md)
 

@@ -56,7 +56,12 @@ class MCPDependencyError(RuntimeError):
 MCPCallable = TypeVar("MCPCallable", bound=Callable[..., object])
 
 
-def _load_mcp_runtime() -> tuple[type[FastMCP], ToolAnnotations, ToolAnnotations]:
+def _load_mcp_runtime() -> tuple[
+    type[FastMCP],
+    ToolAnnotations,
+    ToolAnnotations,
+    ToolAnnotations,
+]:
     try:
         from mcp.server.fastmcp import FastMCP as runtime_fastmcp
         from mcp.types import ToolAnnotations as runtime_tool_annotations
@@ -71,8 +76,14 @@ def _load_mcp_runtime() -> tuple[type[FastMCP], ToolAnnotations, ToolAnnotations
             openWorldHint=False,
         ),
         runtime_tool_annotations(
-            readOnlyHint=False,
+            readOnlyHint=True,
             destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        runtime_tool_annotations(
+            readOnlyHint=False,
+            destructiveHint=True,
             idempotentHint=True,
             openWorldHint=False,
         ),
@@ -89,7 +100,7 @@ def build_mcp_server(
     debug: bool = False,
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO",
 ) -> FastMCP:
-    runtime_fastmcp, read_only_tool, session_tool = _load_mcp_runtime()
+    runtime_fastmcp, read_only_tool, analysis_tool, session_tool = _load_mcp_runtime()
     service = CodeCloneMCPService(history_limit=_validated_history_limit(history_limit))
     mcp = runtime_fastmcp(
         name="CodeClone",
@@ -129,7 +140,7 @@ def build_mcp_server(
             "fresh run. Defaults are the conservative first pass; lower "
             "thresholds only for an explicit deeper review."
         ),
-        annotations=session_tool,
+        annotations=analysis_tool,
         structured_output=True,
     )
     def analyze_repository(
@@ -193,7 +204,7 @@ def build_mcp_server(
             "conservative profile first; lower thresholds only for an "
             "explicit higher-sensitivity pass."
         ),
-        annotations=session_tool,
+        annotations=analysis_tool,
         structured_output=True,
     )
     def analyze_changed_paths(
@@ -307,7 +318,7 @@ def build_mcp_server(
             "Evaluate CodeClone gate conditions against an existing MCP run without "
             "modifying baselines or exiting the process."
         ),
-        annotations=session_tool,
+        annotations=read_only_tool,
         structured_output=True,
     )
     def evaluate_gates(

@@ -134,6 +134,8 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         assert tool.annotations.readOnlyHint is (
             name
             in {
+                "analyze_repository",
+                "analyze_changed_paths",
                 "check_complexity",
                 "check_clones",
                 "check_coupling",
@@ -141,6 +143,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "check_dead_code",
                 "get_run_summary",
                 "get_production_triage",
+                "evaluate_gates",
                 "help",
                 "get_report_section",
                 "list_findings",
@@ -152,7 +155,9 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "list_reviewed_findings",
             }
         )
-        assert tool.annotations.destructiveHint is False
+        assert tool.annotations.destructiveHint is (
+            name in {"mark_finding_reviewed", "clear_session_runs"}
+        )
         assert tool.annotations.idempotentHint is True
     assert "cache_policy='off'" in str(tools["analyze_repository"].description)
     assert "cache_policy='off'" in str(tools["analyze_changed_paths"].description)

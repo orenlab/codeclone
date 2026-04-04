@@ -1,0 +1,93 @@
+{
+  "manifest_version": "0.3",
+  "name": "codeclone",
+  "display_name": "CodeClone",
+  "version": "2.0.0-b4.0",
+  "description": "Baseline-aware structural review for Claude Desktop through a local CodeClone MCP launcher.",
+  "long_description": "CodeClone for Claude Desktop is a small local MCP bundle wrapper around codeclone-mcp. It keeps Claude on the same canonical CodeClone MCP surface used by the CLI, HTML report, and VS Code extension while preserving a read-only, baseline-aware workflow. The bundle runs locally, forces stdio transport, and lets users configure an explicit launcher path when codeclone-mcp is not on PATH.",
+  "author": {
+    "name": "Den Rozhnovskiy",
+    "email": "pytelemonbot@mail.ru",
+    "url": "https://github.com/orenlab"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/orenlab/codeclone.git"
+  },
+  "homepage": "https://github.com/orenlab/codeclone",
+  "documentation": "https://orenlab.github.io/codeclone/claude-desktop-bundle/",
+  "support": "https://github.com/orenlab/codeclone/issues",
+  "privacy_policies": [
+    "https://orenlab.github.io/codeclone/privacy-policy/"
+  ],
+  "icon": "media/icon.png",
+  "keywords": [
+    "mcp",
+    "claude-desktop",
+    "codeclone",
+    "structural-review",
+    "baseline-aware"
+  ],
+  "tools": [
+    {
+      "name": "analyze_repository",
+      "description": "Run a baseline-aware CodeClone analysis for the current repository."
+    },
+    {
+      "name": "analyze_changed_paths",
+      "description": "Run changed-files analysis for PR-style structural review."
+    },
+    {
+      "name": "get_production_triage",
+      "description": "Return the cheapest production-first hotspot and health snapshot."
+    },
+    {
+      "name": "get_finding",
+      "description": "Open one canonical finding by id."
+    },
+    {
+      "name": "get_remediation",
+      "description": "Return remediation guidance for one canonical finding."
+    }
+  ],
+  "tools_generated": true,
+  "license": "MPL-2.0",
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.js"
+      ],
+      "env": {
+        "CODECLONE_MCP_COMMAND": "${user_config.launcher_command}",
+        "CODECLONE_MCP_ARGS_JSON": "${user_config.launcher_args_json}"
+      }
+    }
+  },
+  "user_config": {
+    "launcher_command": {
+      "type": "string",
+      "title": "CodeClone launcher command",
+      "description": "Optional absolute path or bare command name for codeclone-mcp. Leave empty to use auto-discovery and PATH.",
+      "required": false
+    },
+    "launcher_args_json": {
+      "type": "string",
+      "title": "Advanced launcher args (JSON array)",
+      "description": "Optional JSON array of additional codeclone-mcp arguments. Keep transport unset; this bundle always uses stdio.",
+      "required": false
+    }
+  }
+}

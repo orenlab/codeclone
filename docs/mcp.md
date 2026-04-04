@@ -40,6 +40,22 @@ codex mcp list
 If you installed CodeClone into a project virtual environment rather than a
 global tool path, use the full launcher path instead of bare `codeclone-mcp`.
 
+### Claude Desktop bundle
+
+If you want a native Claude Desktop install surface instead of manual MCP
+configuration, CodeClone also ships a local `.mcpb` bundle wrapper in
+`extensions/claude-desktop-codeclone/`.
+
+That bundle:
+
+- installs through Claude Desktop's Extensions settings
+- launches the same local `codeclone-mcp` server
+- keeps transport fixed to local `stdio`
+- lets you configure an explicit launcher path when `codeclone-mcp` is not on
+  `PATH`
+
+It is a setup wrapper, not a second MCP server or a second analysis model.
+
 ## Start the server
 
 **Local agents** (Claude Code, Codex, Copilot Chat, Gemini CLI):

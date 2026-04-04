@@ -31,6 +31,7 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 - [09-cli.md](09-cli.md)
 - [20-mcp-interface.md](20-mcp-interface.md)
 - [21-vscode-extension.md](21-vscode-extension.md)
+- [22-claude-desktop-bundle.md](22-claude-desktop-bundle.md)
 - [10-html-render.md](10-html-render.md)
 
 ### System properties

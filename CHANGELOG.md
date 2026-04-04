@@ -31,6 +31,8 @@
 - Add VS Code extension (`codeclone-mcp` client) with baseline-aware triage, source drill-down, Explorer decorations,
   and HTML-report bridging.
 - Add Node unit tests, extension-host smoke tests, and `.vsix` packaging.
+- Add Claude Desktop `.mcpb` bundle wrapper for the local `codeclone-mcp` launcher with explicit launcher settings,
+  local-stdio enforcement, and deterministic package build smoke.
 
 ## [2.0.0b3] - 20260401
 
