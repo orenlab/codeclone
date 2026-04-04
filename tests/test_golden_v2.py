@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
 
 import pytest
 
@@ -38,33 +39,27 @@ class _DummyFuture:
         return self.value
 
 
-class _DummyExecutor:
-    def __init__(self, max_workers: int | None = None) -> None:
-        self.max_workers = max_workers
-
-    def __enter__(self) -> _DummyExecutor:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: object | None,
-    ) -> Literal[False]:
-        return False
+@dataclass(slots=True)
+class _InlineExecutor:
+    max_workers: int | None = None
 
     def submit(
         self,
-        fn: object,
+        fn: Callable[..., object],
         *args: object,
         **kwargs: object,
     ) -> _DummyFuture:
-        assert callable(fn)
         return _DummyFuture(fn(*args, **kwargs))
 
 
+def _dummy_process_pool_executor(
+    max_workers: int | None = None,
+) -> object:
+    return nullcontext(_InlineExecutor(max_workers=max_workers))
+
+
 def _patch_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _DummyExecutor)
+    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _dummy_process_pool_executor)
     monkeypatch.setattr(pipeline, "as_completed", lambda futures: futures)
 
 
