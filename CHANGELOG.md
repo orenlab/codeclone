@@ -33,6 +33,8 @@
 - Add Node unit tests, extension-host smoke tests, and `.vsix` packaging.
 - Add Claude Desktop `.mcpb` bundle wrapper for the local `codeclone-mcp` launcher with explicit launcher settings,
   local-stdio enforcement, and deterministic package build smoke.
+- Add a native Codex plugin with repo-local discovery metadata, bundled `codeclone-mcp` config, and a
+  conservative-first CodeClone review skill.
 
 ## [2.0.0b3] - 20260401
 

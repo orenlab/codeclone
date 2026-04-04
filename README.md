@@ -46,6 +46,7 @@ Live sample report:
 - **MCP server** — optional read-only surface for AI agents and IDEs, designed as a budget-aware guided control
   surface for agentic development
 - **VS Code extension** — preview native client for CodeClone MCP with triage-first structural review
+- **Native client surfaces** — preview Claude Desktop bundle and Codex plugin over the same canonical MCP contract
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Fast** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
 
@@ -176,6 +177,12 @@ Docs:
 ·
 [MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
 
+Native client surfaces also ship in this repository:
+
+- a preview VS Code extension for guided IDE review
+- a preview Claude Desktop bundle for local `.mcpb` installation
+- a preview Codex plugin for native Codex discovery and setup
+
 ### VS Code Extension
 
 A preview VS Code extension ships in
@@ -189,6 +196,18 @@ Docs:
 [VS Code extension guide](https://orenlab.github.io/codeclone/vscode-extension/)
 ·
 [VS Code extension contract](https://orenlab.github.io/codeclone/book/21-vscode-extension/)
+
+### Codex Plugin
+
+A preview Codex plugin ships in
+[`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone).
+It provides a native Codex plugin surface with repo-local discovery metadata, a
+bundled `codeclone-mcp` definition, and a focused CodeClone review skill.
+
+Docs:
+[Codex plugin guide](https://orenlab.github.io/codeclone/codex-plugin/)
+·
+[Codex plugin contract](https://orenlab.github.io/codeclone/book/23-codex-plugin/)
 
 ## Configuration
 

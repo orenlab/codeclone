@@ -17,6 +17,8 @@ Main ownership layers:
   limited Restricted Mode and source-first review flow.
 - Claude Desktop bundle surface: installable local `.mcpb` wrapper that launches the same `codeclone-mcp` server for
   Claude Desktop without introducing a second MCP or analysis layer.
+- Codex plugin surface: repo-local Codex plugin under `plugins/` and `.agents/plugins/marketplace.json` that adds
+  native plugin discovery, a local MCP definition, and a CodeClone review skill over the same server.
 - Render layer: HTML rendering and template assets.
 
 ## Data model
@@ -35,6 +37,7 @@ Main ownership layers:
 | MCP agent interface   | `codeclone/mcp_service.py`, `codeclone/mcp_server.py`                                                                                                                                              | Read-only MCP tools/resources over canonical analysis and report layers                         |
 | VS Code extension     | `extensions/vscode-codeclone/*`                                                                                                                                                                    | Native VS Code control surface over MCP, with limited Restricted Mode, triage-first review, and source-first drill-down |
 | Claude Desktop bundle | `extensions/claude-desktop-codeclone/*`                                                                                                                                                            | Installable local MCPB wrapper over `codeclone-mcp`, keeping Claude Desktop on the canonical read-only MCP surface |
+| Codex plugin          | `plugins/codeclone/*`, `.agents/plugins/marketplace.json`                                                                                                                                          | Native Codex plugin surface over `codeclone-mcp`, with repo-local discovery metadata and CodeClone skill guidance |
 | Rendering             | `codeclone/html_report.py`, `codeclone/_html_report/*`, `codeclone/_html_badges.py`, `codeclone/_html_js.py`, `codeclone/_html_escape.py`, `codeclone/_html_snippets.py`, `codeclone/templates.py` | HTML-only view layer over report data                                                           |
 
 Refs:
@@ -53,6 +56,8 @@ Refs:
   integration surface over canonical report semantics, not a separate analyzer.
 - The Claude Desktop bundle follows the same rule: it is a local installation
   and launcher surface over `codeclone-mcp`, not a second server.
+- The Codex plugin follows the same rule: it is a local discovery and skills
+  surface over `codeclone-mcp`, not a second analyzer or report model.
 - MCP may ship task-specific slim projections (for example, summary-only metrics
   or inventory counts) as long as canonical report data remains the source of
   truth and richer detail stays reachable through dedicated tools/sections.
@@ -136,6 +141,7 @@ Refs:
 | MCP agent surface                     | [20-mcp-interface.md](20-mcp-interface.md)                                                                       |
 | VS Code IDE surface                   | [21-vscode-extension.md](21-vscode-extension.md)                                                                 |
 | Claude Desktop install surface        | [22-claude-desktop-bundle.md](22-claude-desktop-bundle.md)                                                      |
+| Codex plugin surface                  | [23-codex-plugin.md](23-codex-plugin.md)                                                                        |
 | Health score model                    | [15-health-score.md](15-health-score.md)                                                                         |
 | Metrics gates and metrics baseline    | [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)                                               |
 | Dead-code liveness policy             | [16-dead-code-contract.md](16-dead-code-contract.md)                                                             |

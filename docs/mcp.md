@@ -40,6 +40,20 @@ codex mcp list
 If you installed CodeClone into a project virtual environment rather than a
 global tool path, use the full launcher path instead of bare `codeclone-mcp`.
 
+### Codex plugin
+
+If you want a native Codex plugin surface instead of manual MCP registration,
+CodeClone also ships a repo-local plugin in `plugins/codeclone/`.
+
+That plugin adds:
+
+- a repo-local marketplace entry for Codex plugin discovery
+- a local `.mcp.json` definition for `codeclone-mcp`
+- a focused CodeClone review skill
+
+It stays a thin Codex-native wrapper over the same `codeclone-mcp` server and
+does not create a second analysis path.
+
 ### Claude Desktop bundle
 
 If you want a native Claude Desktop install surface instead of manual MCP

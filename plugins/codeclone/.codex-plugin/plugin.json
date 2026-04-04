@@ -1,0 +1,45 @@
+{
+  "name": "codeclone",
+  "version": "2.0.0-b4.0",
+  "description": "Baseline-aware structural review for Codex through the local CodeClone MCP server.",
+  "author": {
+    "name": "Den Rozhnovskiy",
+    "email": "pytelemonbot@mail.ru",
+    "url": "https://github.com/orenlab"
+  },
+  "homepage": "https://orenlab.github.io/codeclone/codex-plugin/",
+  "repository": "https://github.com/orenlab/codeclone",
+  "license": "MPL-2.0",
+  "keywords": [
+    "codeclone",
+    "codex",
+    "mcp",
+    "structural-review",
+    "baseline-aware"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "CodeClone",
+    "shortDescription": "Baseline-aware structural review for Codex.",
+    "longDescription": "CodeClone for Codex adds a native local plugin surface over codeclone-mcp. It keeps Codex on the same canonical CodeClone MCP semantics used by the CLI, HTML report, and VS Code extension, while adding a focused skill for conservative-first, triage-first structural review.",
+    "developerName": "OrenLab",
+    "category": "Developer Tools",
+    "capabilities": [
+      "MCP",
+      "Skills",
+      "Read-only"
+    ],
+    "websiteURL": "https://orenlab.github.io/codeclone/codex-plugin/",
+    "privacyPolicyURL": "https://orenlab.github.io/codeclone/privacy-policy/",
+    "termsOfServiceURL": "https://orenlab.github.io/codeclone/terms-of-use/",
+    "defaultPrompt": [
+      "Use CodeClone to analyze this repo and rank the top production hotspots.",
+      "Run a changed-files CodeClone review for my current diff.",
+      "Start with the default CodeClone profile, then deepen only if needed."
+    ],
+    "brandColor": "#58A6FF",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png"
+  }
+}

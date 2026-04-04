@@ -1,0 +1,20 @@
+{
+  "name": "orenlab-local",
+  "interface": {
+    "displayName": "OrenLab Local Plugins"
+  },
+  "plugins": [
+    {
+      "name": "codeclone",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codeclone"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

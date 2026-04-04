@@ -64,6 +64,8 @@ Key artifacts:
 - `extensions/vscode-codeclone/` — preview VS Code extension as a native, read-only IDE client over `codeclone-mcp`
 - `extensions/claude-desktop-codeclone/` — preview Claude Desktop `.mcpb` bundle as a local install wrapper over
   `codeclone-mcp`
+- `plugins/codeclone/` + `.agents/plugins/marketplace.json` — preview Codex plugin as a native local discovery layer
+  over `codeclone-mcp`, with a bundled CodeClone review skill
 - MCP runs are in-memory only; review markers are session-local and must never
   leak into baseline/cache/report artifacts
 - `docs/`, `mkdocs.yml`, `.github/workflows/docs.yml` — published documentation site and docs build pipeline
@@ -118,6 +120,15 @@ node --check extensions/claude-desktop-codeclone/src/launcher.js
 node --check extensions/claude-desktop-codeclone/scripts/build-mcpb.mjs
 node --test extensions/claude-desktop-codeclone/test/*.test.js
 node extensions/claude-desktop-codeclone/scripts/build-mcpb.mjs --out /tmp/codeclone-claude-desktop.mcpb
+```
+
+If you touched the Codex plugin surface, also run:
+
+```bash
+python3 -m json.tool plugins/codeclone/.codex-plugin/plugin.json >/tmp/codeclone-codex-plugin.json
+python3 -m json.tool plugins/codeclone/.mcp.json >/tmp/codeclone-codex-mcp.json
+python3 -m json.tool .agents/plugins/marketplace.json >/tmp/codeclone-codex-marketplace.json
+uv run pytest -q tests/test_codex_plugin.py
 ```
 
 ---
@@ -361,6 +372,8 @@ Architecture is layered, but grounded in current code (not aspirational diagrams
   `codeclone-mcp`, with baseline-aware, triage-first, source-first review UX.
 - **Claude Desktop bundle surface** (`extensions/claude-desktop-codeclone/*`) is a native `.mcpb` install wrapper for
   Claude Desktop that launches the same local `codeclone-mcp` server via local `stdio`.
+- **Codex plugin surface** (`plugins/codeclone/*`, `.agents/plugins/marketplace.json`) is a native local Codex plugin
+  over `codeclone-mcp`, with repo-local discovery metadata and a bundled CodeClone review skill.
 - **Tests-as-spec** (`tests/`) lock behavior, contracts, determinism, and architecture boundaries.
 
 Non-negotiable interpretation:
@@ -372,6 +385,8 @@ Non-negotiable interpretation:
 - The VS Code extension is a guided IDE view over MCP and must not introduce a second analysis or truth path.
 - The Claude Desktop bundle is a local setup surface over `codeclone-mcp` and must not introduce a second server or
   truth path.
+- The Codex plugin is a local discovery and guidance surface over `codeclone-mcp` and must not introduce a second
+  analyzer, MCP server, or truth path.
 
 ## 13) Module map
 
@@ -424,6 +439,8 @@ Use this map to route changes to the right owner module.
   source-first, and faithful to MCP/canonical report semantics rather than building a second analyzer or report model.
 - `extensions/claude-desktop-codeclone/*` — preview Claude Desktop bundle surface; keep it local-stdio-only,
   launcher-focused, and faithful to `codeclone-mcp` rather than re-implementing MCP semantics in the bundle layer.
+- `plugins/codeclone/*`, `.agents/plugins/marketplace.json` — preview Codex plugin surface; keep it Codex-native,
+  conservative-first, skills-guided, and faithful to `codeclone-mcp` rather than inventing plugin-only analysis logic.
 - `tests/` — executable specification: architecture rules, contracts, goldens, invariants, regressions.
 
 ## 14) Dependency direction
@@ -481,6 +498,7 @@ If you change a contract-sensitive zone, route docs/tests/approval deliberately.
 | MCP interface (`codeclone/mcp_service.py`, `codeclone/mcp_server.py`, packaging extra/launcher)                                     | `README.md`, `docs/book/20-mcp-interface.md`, `docs/mcp.md`, `docs/book/01-architecture-map.md`, `docs/book/14-compatibility-and-versioning.md`, `CHANGELOG.md`     | `tests/test_mcp_service.py`, `tests/test_mcp_server.py`, plus CLI/package tests if launcher/install semantics change                                                | tool/resource shapes, read-only semantics, optional-dependency packaging behavior change     | public MCP tool names, resource URIs, launcher/install behavior, or response semantics change |
 | VS Code extension surface (`extensions/vscode-codeclone/*`)                                                                         | `README.md`, `docs/book/21-vscode-extension.md`, `docs/vscode-extension.md`, `docs/book/01-architecture-map.md`, `docs/README.md`, `CHANGELOG.md`                   | `node --check extensions/vscode-codeclone/src/support.js`, `node --check extensions/vscode-codeclone/src/mcpClient.js`, `node --check extensions/vscode-codeclone/src/extension.js`, `node --test extensions/vscode-codeclone/test/*.test.js`, plus local extension-host smoke and package smoke when surface/manifest/assets change | command/view UX, trust/runtime model, source-first review flow, or packaging metadata change | documented commands/views/setup/trust behavior, packaged assets, or publish metadata change   |
 | Claude Desktop bundle surface (`extensions/claude-desktop-codeclone/*`)                                                             | `docs/book/22-claude-desktop-bundle.md`, `docs/claude-desktop-bundle.md`, `docs/mcp.md`, `docs/book/01-architecture-map.md`, `docs/README.md`, `CHANGELOG.md`      | `node --check extensions/claude-desktop-codeclone/server/index.js`, `node --check extensions/claude-desktop-codeclone/src/launcher.js`, `node --check extensions/claude-desktop-codeclone/scripts/build-mcpb.mjs`, `node --test extensions/claude-desktop-codeclone/test/*.test.js`, plus `.mcpb` build smoke | bundle install/runtime model, launcher UX, local-stdio constraints, or bundle metadata change | documented Claude Desktop install/setup/runtime behavior or packaged bundle semantics change   |
+| Codex plugin surface (`plugins/codeclone/*`, `.agents/plugins/marketplace.json`)                                                    | `docs/book/23-codex-plugin.md`, `docs/codex-plugin.md`, `docs/mcp.md`, `docs/book/01-architecture-map.md`, `docs/README.md`, `CHANGELOG.md`                        | `python3 -m json.tool plugins/codeclone/.codex-plugin/plugin.json`, `python3 -m json.tool plugins/codeclone/.mcp.json`, `python3 -m json.tool .agents/plugins/marketplace.json`, `tests/test_codex_plugin.py` | plugin discovery/runtime model, bundled MCP config, bundled skill behavior, or plugin metadata change | documented Codex plugin install/discovery/runtime behavior or plugin manifest/marketplace semantics change |
 | Docs site / sample report publication (`docs/`, `mkdocs.yml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py`) | `docs/README.md`, `docs/publishing.md`, `docs/examples/report.md`, and any contract pages surfaced by the change, `CHANGELOG.md` when user-visible behavior changes | `mkdocs build --strict`, sample-report generation smoke path, and relevant report/html tests if generated examples or embeds change                                 | published docs navigation, sample-report generation, or Pages workflow semantics change      | published documentation behavior or sample-report generation contract changes                 |
 
 Golden rule: do not “fix” failures by snapshot refresh unless the underlying contract change is intentional, documented,

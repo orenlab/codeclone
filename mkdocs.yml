@@ -73,6 +73,7 @@ nav:
           - MCP Interface: book/20-mcp-interface.md
           - VS Code Extension: book/21-vscode-extension.md
           - Claude Desktop Bundle: book/22-claude-desktop-bundle.md
+          - Codex Plugin: book/23-codex-plugin.md
           - HTML Render: book/10-html-render.md
       - System Properties:
           - Security Model: book/11-security-model.md
@@ -96,7 +97,9 @@ nav:
       - MCP for AI Agents: mcp.md
       - VS Code Extension: vscode-extension.md
       - Claude Desktop Bundle: claude-desktop-bundle.md
+      - Codex Plugin: codex-plugin.md
       - Privacy Policy: privacy-policy.md
+      - Terms of Use: terms-of-use.md
       - SARIF for IDEs: sarif.md
       - Publishing and Docs Site: publishing.md
   - Examples:
