@@ -1,75 +1,39 @@
 # Claude Desktop Bundle
 
-CodeClone ships a local Claude Desktop bundle in
+Local `.mcpb` bundle wrapper for `codeclone-mcp` in
 `extensions/claude-desktop-codeclone/`.
 
-It is a small Node-based `.mcpb` wrapper around the local `codeclone-mcp`
-launcher.
+Installable package instead of hand-editing client JSON. Same canonical MCP
+surface used by CLI, VS Code, Codex, and Claude Code. The manifest includes
+pre-loaded instructions that guide Claude toward conservative-first,
+production-first structural review.
 
-## What it is for
-
-The bundle exists to make local CodeClone setup in Claude Desktop easier:
-
-- installable `.mcpb` package instead of hand-editing client JSON
-- the same read-only `codeclone-mcp` surface already used by other MCP clients
-- explicit local-stdio runtime
-- optional launcher override when `codeclone-mcp` is not already on `PATH`
-
-It does not bundle Python or CodeClone itself.
-
-## Install requirements
-
-Install CodeClone with the optional MCP extra first:
+## Install
 
 ```bash
-uv tool install "codeclone[mcp]"
-```
-
-If you want to keep the launcher inside an existing environment instead:
-
-```bash
-uv pip install "codeclone[mcp]"
-```
-
-Verify the launcher:
-
-```bash
-codeclone-mcp --help
+uv tool install "codeclone[mcp]"    # or: uv pip install "codeclone[mcp]"
+codeclone-mcp --help                # verify
 ```
 
 ## Bundle workflow
 
-1. Build the `.mcpb` package from `extensions/claude-desktop-codeclone/`.
-2. In Claude Desktop, open `Settings -> Extensions -> Advanced settings`.
-3. Install the generated `.mcpb`.
-4. If Claude Desktop cannot resolve `codeclone-mcp`, set an explicit launcher
-   command in the bundle settings.
-
-## Runtime model
-
-The bundle runs a small Node wrapper that launches `codeclone-mcp` via local
-`stdio`. Claude Desktop talks to the same canonical MCP surface as every other
-client — the bundle only handles launcher resolution.
+1. Build: `cd extensions/claude-desktop-codeclone && node scripts/build-mcpb.mjs`
+2. Claude Desktop: **Settings → Extensions → Install Extension** → select `.mcpb`
+3. If `codeclone-mcp` is not on `PATH`, set **CodeClone launcher command** in
+   the bundle settings to an absolute path.
 
 ## Settings
 
-### `CodeClone launcher command`
+| Setting                        | Purpose                                              |
+|--------------------------------|------------------------------------------------------|
+| **CodeClone launcher command** | Absolute path or bare command for `codeclone-mcp`    |
+| **Advanced launcher args**     | JSON array of extra args (transport is always stdio) |
 
-Optional absolute path or bare command name for `codeclone-mcp`.
+## Runtime model
 
-### `Advanced launcher args (JSON array)`
-
-Optional JSON array of additional launcher arguments for advanced setups.
-
-The bundle rejects transport and network-listener arguments because the Claude
-Desktop package is intentionally local-stdio-only.
-
-## Design decisions
-
-- **Small wrapper, not a shadow runtime** — Node only locates and launches
-  `codeclone-mcp`
-- **Setup honesty** — missing launchers fail with a clear install hint
-- **Local-only transport** — no streamable HTTP or remote-listener switches
+Node wrapper launches `codeclone-mcp` via local `stdio`. Auto-discovers the
+launcher in `~/.local/bin`, macOS `~/Library/Python/*/bin`, or Windows Python
+paths. Falls back to `PATH`.
 
 ## Privacy
 
@@ -78,10 +42,8 @@ See [Privacy Policy](privacy-policy.md).
 
 ## Current limits
 
-- the bundle expects a global or explicitly configured launcher; it does not
-  auto-discover repository-local virtual environments
-- it is a local install surface for Claude Desktop, not a hosted service layer
-- it does not change CodeClone MCP semantics or add bundle-only tools
+- expects a global or explicitly configured launcher
+- local install surface, not a hosted service layer
 
 For the underlying MCP contract, see:
 

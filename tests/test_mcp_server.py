@@ -17,6 +17,7 @@ from typing import cast
 
 import pytest
 
+from codeclone import __version__ as CODECLONE_VERSION
 from codeclone import mcp_server
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.mcp_server import MCPDependencyError, build_mcp_server
@@ -96,6 +97,7 @@ def _write_quality_fixture(root: Path) -> None:
 def test_mcp_server_exposes_expected_read_only_tools() -> None:
     _require_mcp_runtime()
     server = build_mcp_server(history_limit=4)
+    init_options = server._mcp_server.create_initialization_options()
 
     assert "prefer get_run_summary or get_production_triage" in str(server.instructions)
     assert "Use list_hotspots or focused check_* tools" in str(server.instructions)
@@ -182,6 +184,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "workflow, analysis_profile, suppressions, baseline" in str(
         tools["help"].description
     )
+    assert init_options.server_version == CODECLONE_VERSION
     assert "Prefer list_hotspots or focused check_* tools" in str(
         tools["list_findings"].description
     )

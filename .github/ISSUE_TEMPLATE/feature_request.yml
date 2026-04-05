@@ -1,8 +1,8 @@
 name: ✨ Feature request
 description: Propose an enhancement to CodeClone
 title: "[Feature]: "
-labels: ["enhancement"]
-assignees: []
+labels: [ "enhancement" ]
+assignees: [ ]
 
 body:
   - type: markdown

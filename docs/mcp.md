@@ -42,33 +42,15 @@ global tool path, use the full launcher path instead of bare `codeclone-mcp`.
 
 ### Codex plugin
 
-If you want a native Codex plugin surface instead of manual MCP registration,
-CodeClone also ships a repo-local plugin in `plugins/codeclone/`.
-
-That plugin adds:
-
-- a repo-local marketplace entry for Codex plugin discovery
-- a local `.mcp.json` definition for `codeclone-mcp`
-- a focused CodeClone review skill
-
-It stays a thin Codex-native wrapper over the same `codeclone-mcp` server and
-does not create a second analysis path.
+A native Codex plugin ships in `plugins/codeclone/` with repo-local
+discovery, a `.mcp.json` definition, and two skills (review + hotspots).
+See [Codex plugin guide](codex-plugin.md).
 
 ### Claude Desktop bundle
 
-If you want a native Claude Desktop install surface instead of manual MCP
-configuration, CodeClone also ships a local `.mcpb` bundle wrapper in
-`extensions/claude-desktop-codeclone/`.
-
-That bundle:
-
-- installs through Claude Desktop's Extensions settings
-- launches the same local `codeclone-mcp` server
-- keeps transport fixed to local `stdio`
-- lets you configure an explicit launcher path when `codeclone-mcp` is not on
-  `PATH`
-
-It is a setup wrapper, not a second MCP server or a second analysis model.
+A local `.mcpb` bundle ships in `extensions/claude-desktop-codeclone/` with
+pre-loaded instructions and auto-discovery of the launcher.
+See [Claude Desktop bundle guide](claude-desktop-bundle.md).
 
 ## Start the server
 

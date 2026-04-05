@@ -97,17 +97,20 @@
         {
           "id": "codeclone.overview",
           "name": "Overview",
-          "type": "tree"
+          "type": "tree",
+          "icon": "media/view-overview.svg"
         },
         {
           "id": "codeclone.hotspots",
           "name": "Hotspots",
-          "type": "tree"
+          "type": "tree",
+          "icon": "media/view-hotspots.svg"
         },
         {
           "id": "codeclone.session",
           "name": "Runs & Session",
-          "type": "tree"
+          "type": "tree",
+          "icon": "media/view-session.svg"
         }
       ]
     },
@@ -120,12 +123,12 @@
       {
         "view": "codeclone.overview",
         "when": "isWorkspaceTrusted && !codeclone.connected && !codeclone.hasRun",
-        "contents": "Start with [Analyze Workspace](command:codeclone.analyzeWorkspace) for a conservative first structural pass.\n\nUse [Review Changes](command:codeclone.analyzeChangedFiles) when you want a diff-focused pass, and [Analysis Depth](command:codeclone.setAnalysisProfile) only when you need a higher-sensitivity follow-up.\n\nNeed local setup? Open [Setup Help](command:codeclone.openSetupHelp).\n\nUse [Verify Local Server](command:codeclone.connectMcp) only when you want to check the launcher manually."
+        "contents": "Start with [Analyze Workspace](command:codeclone.analyzeWorkspace) for a conservative first structural pass.\n\nUse [Review Changes](command:codeclone.analyzeChangedFiles) when you want a diff-focused pass, and [Set Analysis Depth](command:codeclone.setAnalysisProfile) only when you need a higher-sensitivity follow-up.\n\nNeed local setup? Open [Setup Help](command:codeclone.openSetupHelp).\n\nUse [Verify Local Server](command:codeclone.connectMcp) only when you want to check the launcher manually."
       },
       {
         "view": "codeclone.overview",
         "when": "isWorkspaceTrusted && codeclone.connected && !codeclone.hasRun",
-        "contents": "CodeClone is ready for this workspace. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) for a conservative full pass, or [Review Changes](command:codeclone.analyzeChangedFiles) for a diff-focused review.\n\nIf the first pass looks clean but you want smaller units, open [Analysis Depth](command:codeclone.setAnalysisProfile).\n\nNeed a quick mental model? Open [workflow help](command:codeclone.showHelpTopic)."
+        "contents": "CodeClone is ready for this workspace. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) for a conservative full pass, or [Review Changes](command:codeclone.analyzeChangedFiles) for a diff-focused review.\n\nIf the first pass looks clean but you want smaller units, open [Set Analysis Depth](command:codeclone.setAnalysisProfile).\n\nNeed a quick mental model? Open [workflow help](command:codeclone.showHelpTopic)."
       },
       {
         "view": "codeclone.hotspots",
@@ -174,7 +177,7 @@
       },
       {
         "command": "codeclone.setAnalysisProfile",
-        "title": "Analysis Depth",
+        "title": "Set Analysis Depth",
         "category": "CodeClone",
         "icon": "$(settings-gear)"
       },
@@ -286,7 +289,7 @@
       },
       {
         "command": "codeclone.openSetupHelp",
-        "title": "Setup Help",
+        "title": "Open Setup Help",
         "category": "CodeClone",
         "icon": "$(tools)"
       },
@@ -555,39 +558,39 @@
       ],
       "editor/title": [
         {
-          "command": "codeclone.previousReviewItem",
+          "command": "codeclone.nextReviewItem",
           "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor",
           "group": "navigation@1"
         },
         {
-          "command": "codeclone.nextReviewItem",
+          "command": "codeclone.previousReviewItem",
           "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor",
-          "group": "navigation@2"
+          "group": "secondary@1"
         },
         {
           "command": "codeclone.showRemediation",
           "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsFinding",
-          "group": "navigation@3"
+          "group": "secondary@2"
         },
         {
           "command": "codeclone.markFindingReviewed",
           "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsFinding && !codeclone.activeReviewTargetIsReviewed",
-          "group": "navigation@4"
+          "group": "secondary@3"
         },
         {
           "command": "codeclone.copyRefactorBrief",
           "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsFinding",
-          "group": "secondary@1"
+          "group": "secondary@4"
         },
         {
           "command": "codeclone.openInHtmlReport",
           "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsFinding",
-          "group": "secondary@2"
+          "group": "secondary@5"
         },
         {
           "command": "codeclone.copyOverloadedModuleBrief",
           "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsOverloadedModule",
-          "group": "secondary@1"
+          "group": "secondary@4"
         }
       ]
     },

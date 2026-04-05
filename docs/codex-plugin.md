@@ -1,74 +1,42 @@
 # Codex Plugin
 
 CodeClone ships a native Codex plugin in `plugins/codeclone/`.
-
-This is the Codex-native surface for CodeClone. It uses the local plugin model
-instead of pretending Codex wants a VS Code-style extension package.
-
-## What it is for
-
-The plugin gives Codex:
-
-- a repo-local discoverable plugin entry
-- a local MCP server definition for `codeclone-mcp`
-- a focused CodeClone review skill
-- starter prompts aligned with the canonical CodeClone workflow
-
-It stays read-only and does not create a second analysis model.
+Repo-local discovery via `.agents/plugins/marketplace.json`.
 
 ## What ships in the plugin
 
-- `.codex-plugin/plugin.json` for plugin metadata and prompts
-- `.mcp.json` for the local `codeclone-mcp --transport stdio` definition
-- `skills/codeclone-review/SKILL.md` for conservative-first, triage-first usage
-  guidance
-- `.agents/plugins/marketplace.json` for repo-local plugin discovery
+| File                         | Purpose                                            |
+|------------------------------|----------------------------------------------------|
+| `.codex-plugin/plugin.json`  | Plugin metadata, prompts, instructions             |
+| `.mcp.json`                  | Local `codeclone-mcp --transport stdio` definition |
+| `skills/codeclone-review/`   | Conservative-first full review skill               |
+| `skills/codeclone-hotspots/` | Quick hotspot discovery skill                      |
+| `assets/`                    | Plugin branding                                    |
 
-## Runtime model
+## Install
 
-Additive — Codex discovers the plugin from `.agents/plugins/marketplace.json`,
-gets a local MCP definition and a review skill. Does not mutate
-`~/.codex/config.toml` or install a second server binary.
+```bash
+uv tool install "codeclone[mcp]"    # or: uv pip install "codeclone[mcp]"
+codeclone-mcp --help                # verify
+```
 
-## Relationship to `codex mcp add`
-
-Codex already supports direct MCP registration:
+Manual MCP registration without the plugin:
 
 ```bash
 codex mcp add codeclone -- codeclone-mcp --transport stdio
 ```
 
-That path remains valid and is still the simplest manual setup.
+## Runtime model
 
-The plugin exists for the native Codex plugin/discovery surface:
-
-- plugin card metadata
-- local marketplace entry
-- bundled CodeClone review skill
-- repo-local MCP definition
-
-## Product decisions
-
-- **Codex-native path** — local plugin system for discovery and skills
-- **Canonical MCP first** — same `codeclone-mcp` server as every other client
-- **Skill-guided review** — workflow guidance, not a second analyzer
-- **No hidden config writes** — does not rewrite user MCP config
+Additive — Codex discovers the plugin from `.agents/plugins/marketplace.json`,
+gets a local MCP definition and two skills. Does not mutate
+`~/.codex/config.toml` or install a second server binary.
 
 ## Current limits
 
-- if you already registered `codeclone-mcp` manually in `~/.codex/config.toml`,
-  you may see a duplicate Codex MCP surface until you keep only one setup path
+- if you already registered `codeclone-mcp` manually, keep only one setup path
+  to avoid duplicate MCP surfaces
 - the bundled `.mcp.json` assumes `codeclone-mcp` resolves on `PATH`
-- explicit launcher overrides still belong in user config, not inside the
-  plugin manifest
-
-## Source of truth
-
-The Codex plugin is only a local presentation and discovery layer over:
-
-- `codeclone-mcp`
-- the canonical report semantics behind MCP
-- the existing CodeClone docs and contracts
 
 For the underlying interface contract, see:
 

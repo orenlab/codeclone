@@ -1,8 +1,8 @@
 name: MCP server
 description: Report an MCP bug or propose an MCP workflow/tooling improvement
 title: "[MCP]: "
-labels: ["mcp"]
-assignees: []
+labels: [ "mcp" ]
+assignees: [ ]
 
 body:
   - type: markdown

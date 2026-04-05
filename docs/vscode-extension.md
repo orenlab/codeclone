@@ -25,16 +25,18 @@ It does not create a second truth model and it does not mutate the repository.
 
 The extension needs a local `codeclone-mcp` launcher.
 
+Minimum supported CodeClone version: `2.0.0b4`.
+
 Recommended install for the preview extension:
 
 ```bash
-uv tool install "codeclone[mcp]"
+uv tool install "codeclone[mcp]>=2.0.0b4"
 ```
 
 If you want the launcher inside the current environment instead:
 
 ```bash
-uv pip install "codeclone[mcp]"
+uv pip install "codeclone[mcp]>=2.0.0b4"
 ```
 
 Verify the launcher:
@@ -88,10 +90,10 @@ not as the primary IDE workflow.
 2. Run `Analyze Workspace`.
 3. Use `Review Priorities` or `Review Changes`.
 4. If the first pass looks clean but you want smaller repeated units, open
-   `Analysis Depth`.
+   `Set Analysis Depth`.
 5. Reveal source before opening deeper detail.
 
-If the launcher is missing, use `Setup Help` from the extension.
+If the launcher is missing, use `Open Setup Help` from the extension.
 
 ## Trust model
 

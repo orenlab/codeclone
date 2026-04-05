@@ -41,6 +41,9 @@ Current server characteristics:
 - process-count policy:
     - `processes` is an optional override
     - when omitted, MCP defers to the core CodeClone runtime
+- initialize metadata:
+    - `serverInfo.version` reflects the CodeClone package version
+    - clients may use it for compatibility checks
 - root contract:
     - analysis tools require an absolute repository root
     - relative roots such as `.` are rejected in MCP because server cwd may

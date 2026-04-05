@@ -40,16 +40,18 @@ report inside the sidebar.
 
 CodeClone for VS Code needs a local `codeclone-mcp` launcher.
 
+Minimum supported CodeClone version: `2.0.0b4`.
+
 Recommended install for the preview extension:
 
 ```bash
-uv tool install "codeclone[mcp]"
+uv tool install "codeclone[mcp]>=2.0.0b4"
 ```
 
 If you want the launcher inside the current environment instead:
 
 ```bash
-uv pip install "codeclone[mcp]"
+uv pip install "codeclone[mcp]>=2.0.0b4"
 ```
 
 Verify the launcher:
@@ -65,9 +67,9 @@ codeclone-mcp --help
 3. Run `Analyze Workspace`.
 4. Use `Review Priorities` or `Review Changes` as the first pass.
 5. If the first pass looks clean but you want smaller repeated units, open
-   `Analysis Depth`.
+   `Set Analysis Depth`.
 
-If the local launcher is missing, use `Setup Help` from the view or command
+If the local launcher is missing, use `Open Setup Help` from the view or command
 palette.
 
 ## Main surfaces
@@ -119,9 +121,9 @@ The extension is intentionally code-centered:
 - findings prefer `Reveal Source` as the default review action
 - source locations are opened in the editor and softly highlighted
 - deeper actions stay explicit:
-  - `Open Finding`
-  - `Show Remediation`
-  - `Mark Reviewed`
+    - `Open Finding`
+    - `Show Remediation`
+    - `Mark Reviewed`
 
 This keeps the extension focused on review and refactoring flow instead of
 opening raw JSON-like details by default.

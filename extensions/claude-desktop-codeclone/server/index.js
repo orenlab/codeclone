@@ -1,5 +1,5 @@
 "use strict";
 
-const { runProxy } = require("../src/launcher");
+const {runProxy} = require("../src/launcher");
 
 void runProxy();

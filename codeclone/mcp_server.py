@@ -114,6 +114,8 @@ def build_mcp_server(
         log_level=log_level,
         dependencies=(f"codeclone=={__version__}",),
     )
+    # FastMCP otherwise reports the `mcp` package version in initialize/serverInfo.
+    mcp._mcp_server.version = __version__
 
     def tool(*args: Any, **kwargs: Any) -> Callable[[MCPCallable], MCPCallable]:
         return cast(

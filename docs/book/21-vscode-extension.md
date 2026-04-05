@@ -61,7 +61,7 @@ The intended IDE path mirrors CodeClone MCP:
 1. `Analyze Workspace` or `Review Changes`
 2. compact overview and priority review
 3. review new regressions or production hotspots
-4. use `Analysis Depth` only when you need a higher-sensitivity follow-up
+4. use `Set Analysis Depth` only when you need a higher-sensitivity follow-up
 5. reveal source
 6. open canonical finding or remediation only when needed
 
@@ -118,6 +118,7 @@ The extension runs as a workspace extension and requires:
 - local filesystem access
 - local git access for changed-files review
 - a local `codeclone-mcp` launcher, or an explicitly configured launcher
+- CodeClone `2.0.0b4` or newer
 
 For this reason:
 
