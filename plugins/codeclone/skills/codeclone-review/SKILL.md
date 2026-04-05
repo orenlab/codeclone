@@ -10,11 +10,14 @@ health-oriented refactor planning in a Python repository.
 
 ## Rules
 
+- Use MCP tools only when invoked through the CodeClone plugin.
+- If no latest MCP run exists, call `analyze_repository` or `analyze_changed_paths` yourself before reading `latest/*` resources.
 - Start with the default or `pyproject`-resolved CodeClone profile.
 - Do not lower thresholds on the first pass.
 - Lower-threshold runs are explicit exploratory follow-ups, not silent replacements.
 - Prefer production-first and changed-files-first review over broad listing.
 - CodeClone is the source of truth — do not reinterpret findings independently.
+- Do not fall back to CLI or local report files.
 - Never auto-suppress findings or mutate repository state.
 
 ## Workflows

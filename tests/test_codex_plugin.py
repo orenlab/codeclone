@@ -82,14 +82,32 @@ def test_codex_plugin_marketplace_and_mcp_config_are_aligned() -> None:
 
 def test_codex_plugin_skill_exists() -> None:
     root = Path(__file__).resolve().parents[1]
-    skill_path = (
-        root / "plugins" / "codeclone" / "skills" / "codeclone-review" / "SKILL.md"
-    )
+    plugin_root = root / "plugins" / "codeclone"
+    skill_path = plugin_root / "skills" / "codeclone-review" / "SKILL.md"
+    hotspot_skill_path = plugin_root / "skills" / "codeclone-hotspots" / "SKILL.md"
     skill_text = skill_path.read_text(encoding="utf-8")
+    hotspot_skill_text = hotspot_skill_path.read_text(encoding="utf-8")
+    manifest = _load_json(plugin_root / ".codex-plugin" / "plugin.json")
+    assert isinstance(manifest, dict)
 
-    assert "name: codeclone-review" in skill_text
-    assert "conservative first pass" in skill_text
-    assert 'help(topic="analysis_profile")' in skill_text
+    for needle in (
+        "name: codeclone-review",
+        "conservative first pass",
+        'help(topic="analysis_profile")',
+        "Use MCP tools only",
+        "Do not fall back to CLI or local report files.",
+    ):
+        assert needle in skill_text
+
+    for needle in (
+        "name: codeclone-hotspots",
+        "Use MCP tools only",
+        "Do not fall back to CLI or local report files.",
+    ):
+        assert needle in hotspot_skill_text
+
+    assert "Use MCP tools only." in manifest["instructions"]
+    assert "never fall back to CLI, local report files" in manifest["instructions"]
 
 
 def test_codex_plugin_readme_and_docs_exist() -> None:

@@ -40,8 +40,8 @@ The bundle currently provides:
 - one installable `.mcpb` package
 - one local Node launcher wrapper
 - two user settings:
-  - launcher command
-  - advanced launcher args as a JSON array
+    - launcher command
+    - advanced launcher args as a JSON array
 - one build script for deterministic local packaging
 
 It intentionally does not add bundle-only MCP tools or prompts.

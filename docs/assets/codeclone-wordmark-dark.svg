@@ -12,5 +12,6 @@
           font-size="28"
           font-weight="700"
           dominant-baseline="central"
-          text-anchor="start">CodeClone</text>
+          text-anchor="start">CodeClone
+    </text>
 </svg>

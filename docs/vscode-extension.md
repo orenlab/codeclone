@@ -28,13 +28,13 @@ The extension needs a local `codeclone-mcp` launcher.
 Recommended install for the preview extension:
 
 ```bash
-pip install --pre "codeclone[mcp]"
+uv tool install "codeclone[mcp]"
 ```
 
-After the `2.0.0b4` line is stable, the regular install command is enough:
+If you want the launcher inside the current environment instead:
 
 ```bash
-pip install "codeclone[mcp]"
+uv pip install "codeclone[mcp]"
 ```
 
 Verify the launcher:

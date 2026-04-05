@@ -9,8 +9,14 @@ Read-only, baseline-aware, local stdio only.
 ## Install
 
 ```bash
-uv tool install "codeclone[mcp]"    # or: pip install "codeclone[mcp]"
+uv tool install "codeclone[mcp]"
 codeclone-mcp --help                # verify launcher
+```
+
+If you want to keep the launcher inside an existing environment instead, use:
+
+```bash
+uv pip install "codeclone[mcp]"
 ```
 
 Build and install the bundle:
@@ -28,10 +34,10 @@ extension settings to an absolute path.
 
 ## Configuration
 
-| Setting | Purpose |
-|---------|---------|
-| **CodeClone launcher command** | Absolute path or bare command for `codeclone-mcp` |
-| **Advanced launcher args** | JSON array of extra args (transport is always stdio) |
+| Setting                        | Purpose                                              |
+|--------------------------------|------------------------------------------------------|
+| **CodeClone launcher command** | Absolute path or bare command for `codeclone-mcp`    |
+| **Advanced launcher args**     | JSON array of extra args (transport is always stdio) |
 
 ## Usage
 

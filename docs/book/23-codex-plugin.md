@@ -38,7 +38,7 @@ The plugin currently provides:
 - `.mcp.json`
 - `README.md`
 - one bundled skill:
-  - `codeclone-review`
+    - `codeclone-review`
 - a repo-local marketplace entry in `.agents/plugins/marketplace.json`
 
 ## Runtime model

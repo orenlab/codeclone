@@ -25,10 +25,10 @@ Install CodeClone with the optional MCP extra first:
 uv tool install "codeclone[mcp]"
 ```
 
-You can also use:
+If you want to keep the launcher inside an existing environment instead:
 
 ```bash
-pip install "codeclone[mcp]"
+uv pip install "codeclone[mcp]"
 ```
 
 Verify the launcher:

@@ -21,7 +21,7 @@
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
-  "instructions": "You have access to CodeClone — a structural code quality analysis tool for Python. Use it for baseline-aware clone detection, quality metrics, and architectural review. Always start with the default analysis profile. Prefer get_production_triage as the first read after analysis. For PR reviews use analyze_changed_paths, not full analysis. Never auto-suppress findings or mutate repository state.",
+  "instructions": "You have access to CodeClone through the local CodeClone MCP server. Use MCP tools only. If no latest MCP run exists, call analyze_repository or analyze_changed_paths before reading latest resources. Start with the default profile, prefer get_production_triage after analysis, use analyze_changed_paths for diffs, and never fall back to CLI, local report files, or repository mutation.",
   "interface": {
     "displayName": "CodeClone",
     "shortDescription": "Structural code quality analysis for Python.",

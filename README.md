@@ -57,7 +57,7 @@ Live sample report:
 ## Quick Start
 
 ```bash
-pip install codeclone          # or: uv tool install codeclone
+uv tool install codeclone
 
 codeclone .                    # analyze
 codeclone . --html             # HTML report
@@ -164,7 +164,7 @@ Optional read-only MCP server for AI agents and IDE clients.
 21 tools + 10 resources — never mutates source, baselines, or repo state.
 
 ```bash
-pip install "codeclone[mcp]"
+uv tool install "codeclone[mcp]"
 
 codeclone-mcp --transport stdio              # local (Claude Code, Codex, Copilot, Gemini CLI)
 codeclone-mcp --transport streamable-http    # remote / HTTP-only clients
@@ -177,11 +177,11 @@ Docs:
 
 ### Native Client Surfaces
 
-| Surface | Location | Purpose |
-|---------|----------|---------|
-| **VS Code extension** | [`extensions/vscode-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/vscode-codeclone) | Triage-first structural review in the editor |
-| **Claude Desktop bundle** | [`extensions/claude-desktop-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone) | Local `.mcpb` install surface |
-| **Codex plugin** | [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone) | Native Codex discovery, skill, and MCP definition |
+| Surface                   | Location                                                                                                                     | Purpose                                           |
+|---------------------------|------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------|
+| **VS Code extension**     | [`extensions/vscode-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/vscode-codeclone)                 | Triage-first structural review in the editor      |
+| **Claude Desktop bundle** | [`extensions/claude-desktop-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone) | Local `.mcpb` install surface                     |
+| **Codex plugin**          | [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone)                                     | Native Codex discovery, skill, and MCP definition |
 
 All three are thin wrappers over the same `codeclone-mcp` contract — no second analysis engine.
 

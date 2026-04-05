@@ -7,24 +7,28 @@ Read-only, baseline-aware, local stdio only.
 
 ## What ships here
 
-| File | Purpose |
-|------|---------|
-| `.codex-plugin/plugin.json` | Plugin metadata and prompts |
-| `.mcp.json` | Local `codeclone-mcp --transport stdio` definition |
-| `skills/codeclone-review/` | Conservative-first full review skill |
-| `skills/codeclone-hotspots/` | Quick hotspot discovery skill |
-| `assets/` | Plugin branding |
+| File                         | Purpose                                            |
+|------------------------------|----------------------------------------------------|
+| `.codex-plugin/plugin.json`  | Plugin metadata and prompts                        |
+| `.mcp.json`                  | Local `codeclone-mcp --transport stdio` definition |
+| `skills/codeclone-review/`   | Conservative-first full review skill               |
+| `skills/codeclone-hotspots/` | Quick hotspot discovery skill                      |
+| `assets/`                    | Plugin branding                                    |
 
 ## Install
 
 `codeclone-mcp` must be on `PATH`:
 
 ```bash
-uv tool install "codeclone[mcp]"    # or: pip install "codeclone[mcp]"
+uv tool install "codeclone[mcp]"
 codeclone-mcp --help                # verify
 ```
 
+If you want to keep the launcher inside an existing environment instead, use
+`uv pip install "codeclone[mcp]"`.
+
 Codex discovers the plugin from `.agents/plugins/marketplace.json`.
+It does not rewrite `~/.codex/config.toml`.
 
 If you prefer manual MCP registration instead:
 

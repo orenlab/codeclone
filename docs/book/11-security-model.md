@@ -59,13 +59,13 @@ Refs:
 
 ## Failure modes
 
-| Condition                                | Security behavior |
-|------------------------------------------|-------------------|
-| Symlink points outside root              | File skipped      |
-| Root under sensitive dirs                | Validation error  |
-| Oversized baseline                       | Baseline rejected |
-| Oversized cache                          | Cache ignored     |
-| HTML-injected payload in metadata/source | Escaped output    |
+| Condition                                | Security behavior  |
+|------------------------------------------|--------------------|
+| Symlink points outside root              | File skipped       |
+| Root under sensitive dirs                | Validation error   |
+| Oversized baseline                       | Baseline rejected  |
+| Oversized cache                          | Cache ignored      |
+| HTML-injected payload in metadata/source | Escaped output     |
 | `--allow-remote` not passed for HTTP     | Transport rejected |
 | `cache_policy=refresh` requested         | Policy rejected    |
 | `git_diff_ref` fails regex               | Parameter rejected |

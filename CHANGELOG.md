@@ -13,7 +13,8 @@
 - Bump canonical report schema to `2.3`.
 - Add `metrics.overloaded_modules` — report-only module-hotspot ranking by size, complexity, and coupling pressure.
 - Surface Overloaded Modules across JSON, text/markdown, HTML, and MCP without affecting findings, health, or gates.
-- Normalize the canonical family name and MCP/report output to `overloaded_modules`; `god_modules` remains accepted as a read-only MCP input alias during transition.
+- Normalize the canonical family name and MCP/report output to `overloaded_modules`; `god_modules` remains accepted as a
+  read-only MCP input alias during transition.
 
 ### CLI and HTML
 
