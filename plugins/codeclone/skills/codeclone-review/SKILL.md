@@ -1,58 +1,64 @@
 ---
 name: codeclone-review
-description: Use when Codex should review a Python repository through CodeClone MCP with a conservative first pass, baseline-aware triage, changed-files review, or a deeper exploratory follow-up.
+description: Use when Codex should review a Python repository through CodeClone MCP — conservative first pass, baseline-aware triage, changed-files review, or deeper exploratory follow-up.
 ---
 
 # CodeClone Review
 
-Use this skill when the task is structural review, clone triage, changed-scope
-review, or health-oriented refactor planning in a Python repository.
+Use this skill for structural review, clone triage, changed-scope review, or
+health-oriented refactor planning in a Python repository.
 
-## Core rules
+## Rules
 
 - Start with the default or `pyproject`-resolved CodeClone profile.
 - Do not lower thresholds on the first pass.
-- Treat lower-threshold runs as explicit exploratory follow-ups, not as a silent
-  replacement for the conservative default profile.
+- Lower-threshold runs are explicit exploratory follow-ups, not silent replacements.
 - Prefer production-first and changed-files-first review over broad listing.
-- Keep CodeClone as the source of truth. Do not invent a second analyzer or
-  reinterpret findings independently.
+- CodeClone is the source of truth — do not reinterpret findings independently.
+- Never auto-suppress findings or mutate repository state.
 
-## First-pass workflows
+## Workflows
 
-### Full repository review
+### Full repository
 
-1. Run `analyze_repository`.
-2. Read `get_run_summary` or `get_production_triage`.
-3. Use `list_hotspots` or focused `check_*` tools before broad `list_findings`.
-4. Open one finding with `get_finding` or `get_remediation` only when needed.
+```
+analyze_repository → get_production_triage
+→ list_hotspots → get_finding → get_remediation
+```
 
-### Changed-files review
+### Changed files (PR / patch)
 
-1. Run `analyze_changed_paths`.
-2. Read `get_report_section(section="changed")` or `get_production_triage`.
-3. Focus on changed-scope findings first.
+```
+analyze_changed_paths → get_report_section(section="changed")
+→ list_findings(changed_paths=..., sort_by="priority") → generate_pr_summary
+```
 
-## Deeper exploratory follow-up
+### Gate preview
 
-If the default pass looks clean but the user wants smaller local repetition:
+```
+analyze_repository → evaluate_gates
+→ explain reasons, do not change files
+```
 
-1. Call `help(topic="analysis_profile")` if thresholds or semantics are unclear.
+### Deeper follow-up
+
+If the default pass looks clean:
+
+1. Call `help(topic="analysis_profile")` for threshold semantics.
 2. Run a second analysis with lower thresholds.
-3. Explain that the second pass is higher-sensitivity and may increase noise.
-4. Keep comparisons profile-aware.
+3. Explain this is a higher-sensitivity pass with more noise.
+4. Use `compare_runs` to show the delta.
 
-## Prompt shaping
+## Tool preferences
 
-Prefer prompts that explicitly name:
-
-- repository-wide review vs changed-files review
-- production hotspots vs all findings
-- default conservative pass vs deeper exploratory follow-up
+- Prefer `list_hotspots` or `check_*` before broad `list_findings`.
+- Use `get_finding` / `get_remediation` for one finding — not `detail_level=full` on lists.
+- Use `"production-only"` / `source_kind` filters to cut test noise.
+- Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
+- Pass absolute `root` — MCP rejects relative roots.
 
 ## Non-goals
 
 - Do not auto-suppress findings.
 - Do not treat report-only `overloaded_modules` as findings or gate data.
-- Do not present a clean default pass as proof that no finer-grained repetition
-  exists.
+- Do not present a clean default pass as proof that no finer-grained issues exist.

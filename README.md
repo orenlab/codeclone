@@ -1,6 +1,10 @@
-<p align="center">
-  <img src="https://orenlab.github.io/codeclone/assets/codeclone-wordmark.svg" alt="CodeClone" height="60">
-</p>
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/codeclone-wordmark-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/codeclone-wordmark.svg">
+    <img alt="CodeClone" src="docs/assets/codeclone-wordmark.svg" width="320">
+  </picture>
+</div>
 
 <p align="center">
   <strong>Structural code quality analysis for Python</strong>
@@ -156,58 +160,30 @@ repos:
 
 ## MCP Server
 
-CodeClone ships an optional read-only MCP server for AI agents and IDE clients.
+Optional read-only MCP server for AI agents and IDE clients.
+21 tools + 10 resources — never mutates source, baselines, or repo state.
 
 ```bash
-# install the MCP extra
 pip install "codeclone[mcp]"
 
-# local agents (Claude Code, Codex, Copilot, Gemini CLI)
-codeclone-mcp --transport stdio
-
-# remote / HTTP-only clients
-codeclone-mcp --transport streamable-http --port 8000
+codeclone-mcp --transport stdio              # local (Claude Code, Codex, Copilot, Gemini CLI)
+codeclone-mcp --transport streamable-http    # remote / HTTP-only clients
 ```
-
-21 tools + 10 resources. Read-only — never mutates source, baselines, or repo state.
-Payloads are optimized for LLM context: compact summaries by default, full detail on drill-down.
 
 Docs:
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
 ·
 [MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
 
-Native client surfaces also ship in this repository:
+### Native Client Surfaces
 
-- a preview VS Code extension for guided IDE review
-- a preview Claude Desktop bundle for local `.mcpb` installation
-- a preview Codex plugin for native Codex discovery and setup
+| Surface | Location | Purpose |
+|---------|----------|---------|
+| **VS Code extension** | [`extensions/vscode-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/vscode-codeclone) | Triage-first structural review in the editor |
+| **Claude Desktop bundle** | [`extensions/claude-desktop-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone) | Local `.mcpb` install surface |
+| **Codex plugin** | [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone) | Native Codex discovery, skill, and MCP definition |
 
-### VS Code Extension
-
-A preview VS Code extension ships in
-[`extensions/vscode-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/vscode-codeclone).
-It connects to `codeclone-mcp` and provides triage-first structural review inside the editor:
-overview, hotspots, review loop, and drill-down into findings or the HTML report.
-It starts with a conservative first pass and can switch to an explicit
-higher-sensitivity analysis profile for deeper local review.
-
-Docs:
-[VS Code extension guide](https://orenlab.github.io/codeclone/vscode-extension/)
-·
-[VS Code extension contract](https://orenlab.github.io/codeclone/book/21-vscode-extension/)
-
-### Codex Plugin
-
-A preview Codex plugin ships in
-[`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone).
-It provides a native Codex plugin surface with repo-local discovery metadata, a
-bundled `codeclone-mcp` definition, and a focused CodeClone review skill.
-
-Docs:
-[Codex plugin guide](https://orenlab.github.io/codeclone/codex-plugin/)
-·
-[Codex plugin contract](https://orenlab.github.io/codeclone/book/23-codex-plugin/)
+All three are thin wrappers over the same `codeclone-mcp` contract — no second analysis engine.
 
 ## Configuration
 

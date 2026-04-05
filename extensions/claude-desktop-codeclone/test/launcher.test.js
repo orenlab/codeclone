@@ -8,6 +8,7 @@ const test = require("node:test");
 const {
   BLOCKED_ARGS,
   buildSetupMessage,
+  exitProxy,
   normalizeConfiguredValue,
   parseLauncherArgsJson,
   resolveLaunchSpec,
@@ -86,8 +87,35 @@ test("resolveLaunchSpec falls back to PATH when nothing is configured", async ()
 
 test("buildSetupMessage stays actionable and bounded", () => {
   const text = buildSetupMessage();
-  assert.match(text, /uv tool install "codeclone\[mcp\]"/);
+  assert.match(text, /includes the MCP extra/);
   assert.match(text, /absolute launcher path/);
+});
+
+test("exitProxy sets exitCode and exits immediately", () => {
+  const originalExit = process.exit;
+  const originalPause = process.stdin.pause;
+  const originalExitCode = process.exitCode;
+  /** @type {number | null} */
+  let paused = 0;
+  /** @type {number | null} */
+  let exitArg = null;
+  process.stdin.pause = () => {
+    paused += 1;
+    return process.stdin;
+  };
+  process.exit = (code) => {
+    exitArg = code ?? 0;
+    throw new Error("exitProxy sentinel");
+  };
+  try {
+    assert.throws(() => exitProxy(2), /exitProxy sentinel/);
+  } finally {
+    process.exit = originalExit;
+    process.stdin.pause = originalPause;
+    process.exitCode = originalExitCode;
+  }
+  assert.equal(paused, 1);
+  assert.equal(exitArg, 2);
 });
 
 test("server proxy launches the configured stdio child", async () => {
@@ -144,6 +172,40 @@ test("server proxy prints a setup hint when the launcher is missing", async () =
 
   const exitCode = await new Promise((resolve) => {
     child.on("exit", resolve);
+  });
+
+  assert.equal(exitCode, 2);
+  assert.match(stderr, /CodeClone launcher not found/);
+});
+
+test("server proxy exits promptly on launcher startup failure even if stdin stays open", async () => {
+  const child = spawn(
+    process.execPath,
+    [serverEntry],
+    {
+      cwd: rootDir,
+      env: {
+        ...process.env,
+        CODECLONE_MCP_COMMAND: "/tmp/does-not-exist/codeclone-mcp",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
+
+  const exitCode = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("proxy did not exit promptly"));
+    }, 1500);
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
   });
 
   assert.equal(exitCode, 2);

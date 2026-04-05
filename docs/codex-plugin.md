@@ -26,14 +26,9 @@ It stays read-only and does not create a second analysis model.
 
 ## Runtime model
 
-The plugin is additive:
-
-- Codex can discover the plugin from `.agents/plugins/marketplace.json`
-- the plugin contributes a local MCP definition
-- the skill teaches Codex how to use the existing CodeClone MCP surface well
-
-The plugin does not mutate `~/.codex/config.toml` and does not install a second
-server binary.
+Additive — Codex discovers the plugin from `.agents/plugins/marketplace.json`,
+gets a local MCP definition and a review skill. Does not mutate
+`~/.codex/config.toml` or install a second server binary.
 
 ## Relationship to `codex mcp add`
 
@@ -54,12 +49,10 @@ The plugin exists for the native Codex plugin/discovery surface:
 
 ## Product decisions
 
-- **Codex-native path**: use the local plugin system for discovery and skills
-- **Canonical MCP first**: the plugin points to the same `codeclone-mcp`
-  server and semantics as every other client
-- **Skill-guided review**: the plugin adds workflow guidance, not a second
-  analyzer
-- **No hidden config writes**: the plugin does not rewrite user MCP config
+- **Codex-native path** — local plugin system for discovery and skills
+- **Canonical MCP first** — same `codeclone-mcp` server as every other client
+- **Skill-guided review** — workflow guidance, not a second analyzer
+- **No hidden config writes** — does not rewrite user MCP config
 
 ## Current limits
 

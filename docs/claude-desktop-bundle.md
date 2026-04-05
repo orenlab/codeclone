@@ -47,15 +47,9 @@ codeclone-mcp --help
 
 ## Runtime model
 
-The bundle runs a small local Node wrapper and then launches `codeclone-mcp`
-through local `stdio`.
-
-That means:
-
-- Claude Desktop still talks to canonical CodeClone MCP
-- transport stays local and read-only
-- there is no second analysis engine inside the bundle
-- bundle settings only influence launcher resolution, not analysis truth
+The bundle runs a small Node wrapper that launches `codeclone-mcp` via local
+`stdio`. Claude Desktop talks to the same canonical MCP surface as every other
+client — the bundle only handles launcher resolution.
 
 ## Settings
 
@@ -72,25 +66,15 @@ Desktop package is intentionally local-stdio-only.
 
 ## Design decisions
 
-- **Small wrapper, not a shadow runtime**: Node is used only to locate and
-  launch `codeclone-mcp`.
-- **Canonical MCP first**: Claude Desktop reaches the same tool/resource
-  contract as every other CodeClone MCP client.
-- **Setup honesty**: missing launchers fail with a clear install hint instead
-  of pretending the bundle can analyze on its own.
-- **Local-only transport**: the bundle does not expose streamable HTTP or
-  remote-listener switches.
+- **Small wrapper, not a shadow runtime** — Node only locates and launches
+  `codeclone-mcp`
+- **Setup honesty** — missing launchers fail with a clear install hint
+- **Local-only transport** — no streamable HTTP or remote-listener switches
 
-## Privacy policy
+## Privacy
 
-The bundle is a local wrapper and does not operate a separate hosted CodeClone
-service.
-
-- no CodeClone-owned telemetry
-- no CodeClone-owned cloud sync path
-- no bundle-level remote listener
-
-For the full policy page, see [Privacy Policy](privacy-policy.md).
+Local wrapper only — no telemetry, no cloud sync, no remote listener.
+See [Privacy Policy](privacy-policy.md).
 
 ## Current limits
 

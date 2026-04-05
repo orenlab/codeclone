@@ -216,9 +216,19 @@ async function resolveLaunchSpec(options = {}) {
 function buildSetupMessage() {
   return [
     "CodeClone launcher not found.",
-    "Install the optional MCP extra with: uv tool install \"codeclone[mcp]\"",
+    "Install a CodeClone build that includes the MCP extra, or point this bundle at a working codeclone-mcp launcher.",
     "Or configure an absolute launcher path in the Claude Desktop bundle settings.",
   ].join("\n");
+}
+
+/**
+ * @param {number} code
+ * @returns {void}
+ */
+function exitProxy(code) {
+  process.exitCode = code;
+  process.stdin.pause();
+  process.exit(code);
 }
 
 /**
@@ -306,7 +316,7 @@ async function runProxy(options = {}) {
     }
     settled = true;
     detach();
-    process.exitCode = code;
+    exitProxy(code);
   };
 
   child.on("error", (error) => {
@@ -332,6 +342,7 @@ module.exports = {
   BLOCKED_ARGS,
   buildSetupMessage,
   candidateAutoCommands,
+  exitProxy,
   normalizeConfiguredValue,
   parseLauncherArgsJson,
   resolveLaunchSpec,

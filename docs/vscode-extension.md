@@ -108,11 +108,9 @@ the local MCP launcher.
 
 ## Design decisions
 
-- native VS Code views first, not a custom report dashboard
-- baseline-aware review instead of broad lint-style listing
-- conservative first pass by default; deeper sensitivity must stay explicit
-- report-only layers stay visually separate from findings and health
-- repository truth stays in CodeClone MCP and canonical report semantics
+- Native VS Code views first, not a custom report dashboard
+- Baseline-aware review instead of broad lint-style listing
+- Conservative first pass by default; deeper sensitivity is explicit
 
 ## Current limits
 

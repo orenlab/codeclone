@@ -1,60 +1,47 @@
 # CodeClone for Codex
 
-CodeClone ships a native Codex plugin in `plugins/codeclone/`.
+Native Codex plugin for structural code quality analysis over `codeclone-mcp`.
 
-This plugin is a local Codex discovery and guidance layer over the canonical
-`codeclone-mcp` server. It does not install Python, bundle CodeClone, or
-invent a second analysis model.
+Same canonical MCP surface used by CLI, VS Code, Claude Desktop, and Claude Code.
+Read-only, baseline-aware, local stdio only.
 
 ## What ships here
 
-- `.codex-plugin/plugin.json` for Codex plugin metadata
-- `.mcp.json` for the local `codeclone-mcp --transport stdio` definition
-- `skills/codeclone-review/` for conservative-first CodeClone review guidance
-- `assets/` for plugin branding
+| File | Purpose |
+|------|---------|
+| `.codex-plugin/plugin.json` | Plugin metadata and prompts |
+| `.mcp.json` | Local `codeclone-mcp --transport stdio` definition |
+| `skills/codeclone-review/` | Conservative-first full review skill |
+| `skills/codeclone-hotspots/` | Quick hotspot discovery skill |
+| `assets/` | Plugin branding |
 
-## What it is for
+## Install
 
-Use this plugin when you want a native Codex surface for CodeClone instead of
-registering `codeclone-mcp` manually.
+`codeclone-mcp` must be on `PATH`:
 
-It keeps Codex on the same:
+```bash
+uv tool install "codeclone[mcp]"    # or: pip install "codeclone[mcp]"
+codeclone-mcp --help                # verify
+```
 
-- MCP tools and resources
-- baseline-aware semantics
-- triage-first review model
-- conservative-first analysis profile guidance
+Codex discovers the plugin from `.agents/plugins/marketplace.json`.
 
-## Runtime model
-
-The plugin stays thin on purpose:
-
-- Codex discovers the plugin from `.agents/plugins/marketplace.json`
-- the plugin contributes a local `.mcp.json` server definition
-- the plugin skill teaches Codex how to use CodeClone MCP well
-
-It does not rewrite `~/.codex/config.toml` and does not mutate repository
-state.
-
-## Install notes
-
-- `codeclone-mcp` must already be installed and resolvable on `PATH`, or
-  registered separately through user config
-- if you already added CodeClone manually with `codex mcp add`, you may want
-  to keep only one setup path to avoid duplicate MCP surfaces
-
-Manual MCP registration remains valid:
+If you prefer manual MCP registration instead:
 
 ```bash
 codex mcp add codeclone -- codeclone-mcp --transport stdio
 ```
 
-## Source of truth
+## Skills
 
-The plugin is only a Codex-native shell over the same canonical CodeClone
-contracts used everywhere else.
+**codeclone-review** — full structural review: conservative first pass,
+baseline-aware triage, changed-files review, deeper exploratory follow-up.
 
-- docs: <https://orenlab.github.io/codeclone/codex-plugin/>
-- MCP guide: <https://orenlab.github.io/codeclone/mcp/>
-- privacy: <https://orenlab.github.io/codeclone/privacy-policy/>
-- terms: <https://orenlab.github.io/codeclone/terms-of-use/>
+**codeclone-hotspots** — quick quality snapshot: health check, top risks,
+single-metric queries, pre-merge sanity checks.
+
+## Links
+
+- [Codex plugin guide](https://orenlab.github.io/codeclone/codex-plugin/)
+- [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
+- [Privacy Policy](https://orenlab.github.io/codeclone/privacy-policy/)

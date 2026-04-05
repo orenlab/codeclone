@@ -224,112 +224,53 @@ list_findings → get_finding → mark_finding_reviewed
 
 Good prompts include **scope**, **goal**, and **constraint**:
 
-### Health check
-
 ```text
-Use codeclone MCP to analyze this repository. Give me a concise structural health summary
-and explain which findings are worth looking at first.
-```
+# Health check
+Use codeclone MCP to analyze this repository.
+Give me a concise structural health summary and the top findings to look at first.
 
-### Clone triage (production only)
-
-```text
-Analyze through codeclone MCP, filter to clone findings in production code only,
-and show me the top 3 clone groups worth fixing first.
-```
-
-### Changed-files review
-
-```text
+# Changed-files review
 Use codeclone MCP in changed-files mode for my latest edits.
 Focus only on findings that touch changed files and rank them by priority.
-```
 
-### Dead-code review
-
-```text
-Use codeclone MCP to review dead-code findings. Separate actionable items from
-likely framework false positives. Do not add suppressions automatically.
-```
-
-### Gate preview
-
-```text
-Run codeclone through MCP and preview gating with fail_on_new plus a zero clone threshold.
+# Gate preview
+Run codeclone through MCP and preview gating with fail_on_new.
 Explain the exact reasons. Do not change any files.
-```
 
-### AI-generated code check
-
-```text
-I added code with an AI agent. Use codeclone MCP to check for new structural drift:
-clone groups, dead code, duplicated branches, design hotspots.
+# AI-generated code check
+I added code with an AI agent. Use codeclone MCP to check for new structural drift.
 Separate accepted baseline debt from new regressions.
-```
-
-### Safe refactor planning
-
-```text
-Use codeclone MCP to pick one production finding that looks safe to refactor.
-Explain why it is a good candidate and outline a minimal plan.
-```
-
-### Run comparison
-
-```text
-Compare the latest CodeClone MCP run against the previous one.
-Show regressions, resolved findings, and health delta.
 ```
 
 **Tips:**
 
 - Use `analyze_changed_paths` for PRs, not full analysis.
-- Prefer `get_run_summary` or `get_production_triage` for the first pass on a
-  new run.
-- Treat lowered thresholds as exploratory analysis, not as a silent replacement
-  for the conservative default profile.
-- Use `help(topic=...)` when the safest next step or contract meaning is
-  unclear; it is a bounded semantic guide, not a docs dump.
-- Prefer `list_hotspots` or the narrow `check_*` tools before broad
-  `list_findings` calls.
+- Prefer `get_run_summary` or `get_production_triage` as the first pass.
+- Prefer `list_hotspots` or narrow `check_*` tools before broad `list_findings`.
 - Use `get_finding` / `get_remediation` for one finding instead of raising
   `detail_level` on larger lists.
-- Set `cache_policy="off"` when you need the freshest truth from a new analysis
-  run, not whatever older session state currently sits behind `latest/*`.
-- Pass an absolute `root` to `analyze_repository` / `analyze_changed_paths`.
-  MCP intentionally rejects relative roots like `.` to avoid analyzing the
-  wrong directory when server cwd and client workspace differ.
-- Prefer `generate_pr_summary(format="markdown")` for agent-facing output; use
-  `json` only when another machine step needs it.
-- Avoid `get_report_section(section="all")` unless you truly need the full
-  canonical report document.
-- Use `get_report_section(section="metrics_detail", family=..., limit=...)` for
-  metrics drill-down; the unfiltered call is intentionally bounded.
+- Pass an absolute `root` — MCP rejects relative roots like `.`.
 - Use `"production-only"` / `source_kind` filters to cut test/fixture noise.
 - Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
-- Ask the agent to separate baseline debt from new regressions.
 
 ## Client configuration
 
-All clients use the same CodeClone server — only the registration differs.
+All clients use the same server — only the registration format differs.
 
-### Claude Code / Anthropic
+### JSON clients (Claude Code, Copilot Chat, Gemini CLI)
 
 ```json
 {
   "mcpServers": {
     "codeclone": {
       "command": "codeclone-mcp",
-      "args": [
-        "--transport",
-        "stdio"
-      ]
+      "args": ["--transport", "stdio"]
     }
   }
 }
 ```
 
-### Codex / OpenAI (command-based)
+### Codex / OpenAI
 
 ```toml
 [mcp_servers.codeclone]
@@ -338,33 +279,7 @@ command = "codeclone-mcp"
 args = ["--transport", "stdio"]
 ```
 
-For the Responses API or remote-only OpenAI clients, use `streamable-http`.
-
-### GitHub Copilot Chat
-
-```json
-{
-  "mcpServers": {
-    "codeclone": {
-      "command": "codeclone-mcp",
-      "args": [
-        "--transport",
-        "stdio"
-      ]
-    }
-  }
-}
-```
-
-### Gemini CLI
-
-Same `stdio` registration. If the client only accepts remote URLs, use
-`streamable-http` and point to the `/mcp` endpoint.
-
-### Other clients
-
-- `stdio` for local analysis
-- `streamable-http` for remote/HTTP-only clients
+For the Responses API or remote-only clients, use `streamable-http`.
 
 If `codeclone-mcp` is not on `PATH`, use an absolute path to the launcher.
 

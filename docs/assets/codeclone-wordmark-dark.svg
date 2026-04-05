@@ -7,7 +7,7 @@
           stroke-linejoin="round"/>
 
     <text x="54" y="30"
-          fill="#1c1c1e"
+          fill="#e8e8e8"
           font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace"
           font-size="28"
           font-weight="700"

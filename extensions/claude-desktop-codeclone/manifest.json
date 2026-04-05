@@ -4,7 +4,7 @@
   "display_name": "CodeClone",
   "version": "2.0.0-b4.0",
   "description": "Baseline-aware structural review for Claude Desktop through a local CodeClone MCP launcher.",
-  "long_description": "CodeClone for Claude Desktop is a small local MCP bundle wrapper around codeclone-mcp. It keeps Claude on the same canonical CodeClone MCP surface used by the CLI, HTML report, and VS Code extension while preserving a read-only, baseline-aware workflow. The bundle runs locally, forces stdio transport, and lets users configure an explicit launcher path when codeclone-mcp is not on PATH.",
+  "long_description": "CodeClone for Claude Desktop wraps the local codeclone-mcp launcher as an MCP bundle. It keeps Claude on the same canonical MCP surface used by the CLI, HTML report, VS Code extension, and Codex plugin — read-only, baseline-aware, local stdio only.",
   "author": {
     "name": "Den Rozhnovskiy",
     "email": "pytelemonbot@mail.ru",
@@ -26,7 +26,8 @@
     "claude-desktop",
     "codeclone",
     "structural-review",
-    "baseline-aware"
+    "baseline-aware",
+    "code-quality"
   ],
   "tools": [
     {
@@ -42,12 +43,36 @@
       "description": "Return the cheapest production-first hotspot and health snapshot."
     },
     {
+      "name": "get_run_summary",
+      "description": "Cheapest run snapshot: health, findings, baseline, inventory."
+    },
+    {
+      "name": "list_hotspots",
+      "description": "Priority-ranked hotspot views by kind."
+    },
+    {
       "name": "get_finding",
       "description": "Open one canonical finding by id."
     },
     {
       "name": "get_remediation",
       "description": "Return remediation guidance for one canonical finding."
+    },
+    {
+      "name": "compare_runs",
+      "description": "Run-to-run delta: regressions, improvements, health change."
+    },
+    {
+      "name": "evaluate_gates",
+      "description": "Preview CI gating decisions for the current run."
+    },
+    {
+      "name": "generate_pr_summary",
+      "description": "PR-friendly markdown or JSON summary of the analysis."
+    },
+    {
+      "name": "help",
+      "description": "Semantic guide for workflow, analysis profile, baseline, and review state."
     }
   ],
   "tools_generated": true,
@@ -56,6 +81,7 @@
     "claude_desktop": ">=0.10.0",
     "platforms": [
       "darwin",
+      "linux",
       "win32"
     ],
     "runtimes": {
@@ -86,7 +112,7 @@
     "launcher_args_json": {
       "type": "string",
       "title": "Advanced launcher args (JSON array)",
-      "description": "Optional JSON array of additional codeclone-mcp arguments. Keep transport unset; this bundle always uses stdio.",
+      "description": "Optional JSON array of additional codeclone-mcp arguments. Transport is always stdio and cannot be overridden.",
       "required": false
     }
   }
