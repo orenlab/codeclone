@@ -78,11 +78,14 @@ const {
     isMinimumSupportedCodeCloneVersion,
     resolveAnalysisSettings,
     sameAnalysisSettings,
+    locationsNeedDetailHydration,
     normalizedLaunchSpec,
     parseUtcTimestamp,
+    revealLineSpan,
     resolveWorkspacePath,
     signedInteger,
     staleMessage,
+    unsupportedVersionMessage,
     workspaceLocalLauncherCandidates,
 } = require("./support");
 
@@ -570,6 +573,7 @@ class CodeCloneController {
                 command: configuredCommand,
                 args: Array.isArray(configuredArgs) ? configuredArgs : [],
                 cwd: folder.uri.fsPath,
+                source: "configured",
             });
         }
         const candidates = workspaceLocalLauncherCandidates(folder.uri.fsPath);
@@ -585,18 +589,21 @@ class CodeCloneController {
                 command: localLauncher,
                 args: Array.isArray(configuredArgs) ? configuredArgs : [],
                 cwd: folder.uri.fsPath,
+                source: "workspaceLocal",
             });
         }
         const primary = /** @type {any} */ (normalizedLaunchSpec({
             command: "codeclone-mcp",
             args: Array.isArray(configuredArgs) ? configuredArgs : [],
             cwd: folder.uri.fsPath,
+            source: "path",
         }));
         primary.fallback = (await looksLikeCodeCloneRepo(folder.uri.fsPath))
             ? normalizedLaunchSpec({
                 command: "uv",
                 args: ["run", "codeclone-mcp"],
                 cwd: folder.uri.fsPath,
+                source: "uvFallback",
             })
             : null;
         return primary;
@@ -647,7 +654,11 @@ class CodeCloneController {
             this.updateContextKeys();
             this.updateStatusBar();
             throw new MCPClientError(
-                `The local CodeClone MCP server is not supported. It reported version ${reportedVersion}; this extension requires CodeClone >= ${MINIMUM_SUPPORTED_CODECLONE_VERSION}.`
+                unsupportedVersionMessage(
+                    reportedVersion,
+                    MINIMUM_SUPPORTED_CODECLONE_VERSION,
+                    effectiveLaunchSpec
+                )
             );
         }
         this.updateContextKeys();
@@ -1148,16 +1159,31 @@ class CodeCloneController {
         if (!state) {
             return null;
         }
-        let locations = normalizeFindingLocations(state.folder, activeNode.locations);
-        let detailPayload = null;
-        if (locations.length === 0) {
+        let detailPayload =
+            activeNode.detailPayload && typeof activeNode.detailPayload === "object"
+                ? activeNode.detailPayload
+                : null;
+        let locations = detailPayload
+            ? normalizeFindingLocations(state.folder, detailPayload.locations)
+            : normalizeFindingLocations(state.folder, activeNode.locations);
+        if (
+            !detailPayload ||
+            locations.length === 0 ||
+            locationsNeedDetailHydration(activeNode.locations)
+        ) {
             await this.ensureConnected(state.folder);
             detailPayload = await this.client.callTool("get_finding", {
                 run_id: activeNode.runId,
                 finding_id: activeNode.findingId,
                 detail_level: "normal",
             });
-            locations = normalizeFindingLocations(state.folder, detailPayload.locations);
+            const detailLocations = normalizeFindingLocations(
+                state.folder,
+                detailPayload.locations
+            );
+            if (detailLocations.length > 0) {
+                locations = detailLocations;
+            }
         }
         const resolved = {
             ...activeNode,
@@ -1932,18 +1958,17 @@ class CodeCloneController {
                 preview: true,
             });
             if (typeof line === "number") {
-                const startLine = Math.max(line - 1, 0);
-                const finalLine = Math.max(
-                    typeof endLine === "number" ? endLine - 1 : startLine,
-                    startLine
-                );
-                const position = new vscode.Position(startLine, 0);
+                const span = revealLineSpan(line, endLine, document.lineCount);
+                if (!span) {
+                    return;
+                }
+                const position = new vscode.Position(span.startLine, 0);
                 const endPosition = new vscode.Position(
-                    finalLine,
-                    document.lineAt(finalLine).range.end.character
+                    span.finalLine,
+                    document.lineAt(span.finalLine).range.end.character
                 );
                 const range = new vscode.Range(position, endPosition);
-                editor.selection = new vscode.Selection(position, position);
+                editor.selection = new vscode.Selection(position, endPosition);
                 editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
                 this.flashRevealRange(editor, range);
             }

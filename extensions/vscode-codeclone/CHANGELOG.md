@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.2.1
+
+- refresh packaged extension metadata for prerelease validation
+
 ## 0.2.0
 
 - add a native preview VS Code extension for `codeclone-mcp`

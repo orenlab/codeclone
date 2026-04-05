@@ -20,12 +20,12 @@ Read-only, baseline-aware, local stdio only.
 `codeclone-mcp` must be on `PATH`:
 
 ```bash
-uv tool install "codeclone[mcp]"
-codeclone-mcp --help                # verify
+uv tool install --pre "codeclone[mcp]"
+codeclone-mcp --help                       # verify
 ```
 
 If you want to keep the launcher inside an existing environment instead, use
-`uv pip install "codeclone[mcp]"`.
+`uv pip install --pre "codeclone[mcp]"`.
 
 Codex discovers the plugin from `.agents/plugins/marketplace.json`.
 It does not rewrite `~/.codex/config.toml`.

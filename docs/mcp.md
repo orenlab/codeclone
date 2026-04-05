@@ -10,9 +10,9 @@ Works with any MCP-capable client regardless of backend model.
 ## Install
 
 ```bash
-uv tool install "codeclone[mcp]"    # install as a standalone tool
+uv tool install --pre "codeclone[mcp]"    # install as a standalone tool
 # or, inside an existing environment
-uv pip install "codeclone[mcp]"     # add the MCP extra to that environment
+uv pip install --pre "codeclone[mcp]"     # add the MCP extra to that environment
 ```
 
 ## Quick client setup
@@ -246,7 +246,10 @@ All clients use the same server — only the registration format differs.
   "mcpServers": {
     "codeclone": {
       "command": "codeclone-mcp",
-      "args": ["--transport", "stdio"]
+      "args": [
+        "--transport",
+        "stdio"
+      ]
     }
   }
 }
@@ -274,13 +277,13 @@ If `codeclone-mcp` is not on `PATH`, use an absolute path to the launcher.
 
 ## Troubleshooting
 
-| Problem                                                   | Fix                                                                            |
-|-----------------------------------------------------------|--------------------------------------------------------------------------------|
-| `CodeClone MCP support requires the optional 'mcp' extra` | `uv tool install "codeclone[mcp]"` or `uv pip install "codeclone[mcp]"`        |
-| Client cannot find `codeclone-mcp`                        | `uv tool install "codeclone[mcp]"` or use an absolute launcher path            |
-| Client only accepts remote MCP                            | Use `streamable-http` transport                                                |
-| Agent reads stale results                                 | Call `analyze_repository` again; `latest` always points to the most recent run |
-| `changed_paths` rejected                                  | Pass a `list[str]` of repo-relative paths, not a comma-separated string        |
+| Problem                                                   | Fix                                                                                 |
+|-----------------------------------------------------------|-------------------------------------------------------------------------------------|
+| `CodeClone MCP support requires the optional 'mcp' extra` | `uv tool install --pre "codeclone[mcp]"` or `uv pip install --pre "codeclone[mcp]"` |
+| Client cannot find `codeclone-mcp`                        | `uv tool install --pre "codeclone[mcp]"` or use an absolute launcher path           |
+| Client only accepts remote MCP                            | Use `streamable-http` transport                                                     |
+| Agent reads stale results                                 | Call `analyze_repository` again; `latest` always points to the most recent run      |
+| `changed_paths` rejected                                  | Pass a `list[str]` of repo-relative paths, not a comma-separated string             |
 
 ## See also
 

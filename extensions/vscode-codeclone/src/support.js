@@ -47,6 +47,44 @@ function parseUtcTimestamp(value) {
     return Number.isNaN(parsed) ? null : parsed;
 }
 
+function revealLineSpan(line, endLine, lineCount) {
+    if (
+        typeof line !== "number" ||
+        !Number.isFinite(line) ||
+        typeof lineCount !== "number" ||
+        !Number.isFinite(lineCount) ||
+        lineCount < 1
+    ) {
+        return null;
+    }
+    const lastDocumentLine = Math.max(Math.trunc(lineCount) - 1, 0);
+    const startLine = Math.min(Math.max(Math.trunc(line) - 1, 0), lastDocumentLine);
+    const requestedEndLine =
+        typeof endLine === "number" && Number.isFinite(endLine)
+            ? Math.trunc(endLine) - 1
+            : startLine;
+    const finalLine = Math.min(
+        Math.max(requestedEndLine, startLine),
+        lastDocumentLine
+    );
+    return {startLine, finalLine};
+}
+
+function locationsNeedDetailHydration(value) {
+    if (!Array.isArray(value) || value.length === 0) {
+        return true;
+    }
+    return value.some((entry) => {
+        if (typeof entry === "string") {
+            return true;
+        }
+        if (!entry || typeof entry !== "object") {
+            return true;
+        }
+        return typeof entry.end_line !== "number";
+    });
+}
+
 function staleMessage(reason) {
     if (reason === STALE_REASON_EDITOR) {
         return "Review data may be stale because there are unsaved editor changes.";
@@ -69,7 +107,8 @@ function normalizedLaunchSpec(spec) {
     if (!cwd) {
         throw new Error("CodeClone MCP launcher cwd must not be empty.");
     }
-    return {command, args, cwd};
+    const source = String(spec?.source || "").trim();
+    return {command, args, cwd, source};
 }
 
 function trimTail(value, maxChars) {
@@ -176,6 +215,40 @@ function isMinimumSupportedCodeCloneVersion(
 ) {
     const comparison = compareCodeCloneVersions(value, minimum);
     return comparison !== null && comparison >= 0;
+}
+
+function launchSpecOrigin(spec) {
+    const launchSpec = spec || {};
+    const command = String(launchSpec.command || "").trim() || "codeclone-mcp";
+    const args = Array.isArray(launchSpec.args)
+        ? launchSpec.args.filter((value) => typeof value === "string" && value.trim())
+        : [];
+    const renderedCommand = args.length > 0 ? `${command} ${args.join(" ")}` : command;
+    switch (String(launchSpec.source || "").trim()) {
+        case "workspaceLocal":
+            return `workspace-local launcher (${renderedCommand})`;
+        case "configured":
+            return `configured launcher (${renderedCommand})`;
+        case "uvFallback":
+            return `repo-local uv fallback (${renderedCommand})`;
+        case "path":
+        default:
+            return `PATH launcher (${renderedCommand})`;
+    }
+}
+
+function unsupportedVersionMessage(
+    reportedVersion,
+    minimum = MINIMUM_SUPPORTED_CODECLONE_VERSION,
+    launchSpec = null
+) {
+    const actualVersion = String(reportedVersion || "unknown");
+    return (
+        `The local CodeClone MCP server is not supported. It reported version ` +
+        `${actualVersion}; this extension requires CodeClone >= ${minimum}. ` +
+        `The extension resolved ${launchSpecOrigin(launchSpec)}. ` +
+        `Update that environment or set codeclone.mcp.command to a newer launcher.`
+    );
 }
 
 function nonNegativeInteger(value, fallback) {
@@ -290,15 +363,19 @@ module.exports = {
     compareCodeCloneVersions,
     customAnalysisThresholds,
     isMinimumSupportedCodeCloneVersion,
+    launchSpecOrigin,
+    locationsNeedDetailHydration,
     normalizedLaunchSpec,
     normalizeAnalysisProfile,
     parseUtcTimestamp,
     parseCodeCloneVersion,
+    revealLineSpan,
     resolveWorkspacePath,
     resolveAnalysisSettings,
     sameAnalysisSettings,
     signedInteger,
     staleMessage,
     trimTail,
+    unsupportedVersionMessage,
     workspaceLocalLauncherCandidates,
 };

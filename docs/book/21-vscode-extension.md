@@ -8,6 +8,8 @@ Document the current contract and behavior of the VS Code extension shipped in
 This chapter describes the extension as an interface layer over existing
 CodeClone contracts. It does not define a second analysis truth model.
 
+Marketplace: [orenlab.codeclone](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)
+
 ## Position in the platform
 
 The VS Code extension is:
@@ -119,6 +121,9 @@ The extension runs as a workspace extension and requires:
 - local git access for changed-files review
 - a local `codeclone-mcp` launcher, or an explicitly configured launcher
 - CodeClone `2.0.0b4` or newer
+
+In `auto` mode, launcher resolution prefers the current workspace virtualenv
+before `PATH`.
 
 For this reason:
 

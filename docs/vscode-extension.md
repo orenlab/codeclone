@@ -6,6 +6,8 @@ CodeClone ships a preview VS Code extension in
 It is a native IDE surface over `codeclone-mcp` and is designed for
 baseline-aware, triage-first structural review inside the editor.
 
+Marketplace: [CodeClone for VS Code](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)
+
 ## What it is for
 
 The extension helps you:
@@ -27,16 +29,19 @@ The extension needs a local `codeclone-mcp` launcher.
 
 Minimum supported CodeClone version: `2.0.0b4`.
 
+In `auto` mode, it checks the current workspace virtualenv before falling back
+to `PATH`.
+
 Recommended install for the preview extension:
 
 ```bash
-uv tool install "codeclone[mcp]>=2.0.0b4"
+uv tool install --pre "codeclone[mcp]"
 ```
 
 If you want the launcher inside the current environment instead:
 
 ```bash
-uv pip install "codeclone[mcp]>=2.0.0b4"
+uv pip install --pre "codeclone[mcp]"
 ```
 
 Verify the launcher:

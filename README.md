@@ -164,7 +164,7 @@ Optional read-only MCP server for AI agents and IDE clients.
 21 tools + 10 resources — never mutates source, baselines, or repo state.
 
 ```bash
-uv tool install "codeclone[mcp]"       # or: uv pip install "codeclone[mcp]"
+uv tool install --pre "codeclone[mcp]"       # or: uv pip install --pre "codeclone[mcp]"
 
 codeclone-mcp --transport stdio            # local (Claude Code, Codex, Copilot, Gemini CLI)
 codeclone-mcp --transport streamable-http  # remote / HTTP-only clients
@@ -179,7 +179,7 @@ Docs:
 
 | Surface                   | Location                                                                                                                     | Purpose                                            |
 |---------------------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------|
-| **VS Code extension**     | [`extensions/vscode-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/vscode-codeclone)                 | Triage-first structural review in the editor       |
+| **VS Code extension**     | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)                                 | Triage-first structural review in the editor       |
 | **Claude Desktop bundle** | [`extensions/claude-desktop-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone) | Local `.mcpb` install with pre-loaded instructions |
 | **Codex plugin**          | [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone)                                     | Native discovery, two skills, and MCP definition   |
 

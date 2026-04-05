@@ -9,14 +9,14 @@ Read-only, baseline-aware, local stdio only.
 ## Install
 
 ```bash
-uv tool install "codeclone[mcp]"
-codeclone-mcp --help                # verify launcher
+uv tool install --pre "codeclone[mcp]"
+codeclone-mcp --help                       # verify launcher
 ```
 
 If you want to keep the launcher inside an existing environment instead, use:
 
 ```bash
-uv pip install "codeclone[mcp]"
+uv pip install --pre "codeclone[mcp]"
 ```
 
 Build and install the bundle:

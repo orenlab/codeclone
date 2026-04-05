@@ -11,7 +11,7 @@ production-first structural review.
 ## Install
 
 ```bash
-uv tool install "codeclone[mcp]"    # or: uv pip install "codeclone[mcp]"
+uv tool install --pre "codeclone[mcp]"    # or: uv pip install --pre "codeclone[mcp]"
 codeclone-mcp --help                # verify
 ```
 

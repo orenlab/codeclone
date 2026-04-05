@@ -17,16 +17,20 @@ const {
     compareCodeCloneVersions,
     customAnalysisThresholds,
     isMinimumSupportedCodeCloneVersion,
+    launchSpecOrigin,
+    locationsNeedDetailHydration,
     normalizedLaunchSpec,
     normalizeAnalysisProfile,
     parseCodeCloneVersion,
     parseUtcTimestamp,
+    revealLineSpan,
     resolveWorkspacePath,
     resolveAnalysisSettings,
     sameAnalysisSettings,
     signedInteger,
     staleMessage,
     trimTail,
+    unsupportedVersionMessage,
     workspaceLocalLauncherCandidates,
 } = require("../src/support");
 
@@ -44,6 +48,43 @@ test("parseUtcTimestamp returns milliseconds for valid UTC strings", () => {
     );
     assert.equal(parseUtcTimestamp("not-a-date"), null);
     assert.equal(parseUtcTimestamp(""), null);
+});
+
+test("revealLineSpan preserves multi-line finding spans and clamps to the document", () => {
+    assert.deepEqual(revealLineSpan(5, 9, 20), {
+        startLine: 4,
+        finalLine: 8,
+    });
+    assert.deepEqual(revealLineSpan(5, undefined, 20), {
+        startLine: 4,
+        finalLine: 4,
+    });
+    assert.deepEqual(revealLineSpan(50, 80, 10), {
+        startLine: 9,
+        finalLine: 9,
+    });
+    assert.equal(revealLineSpan(undefined, 9, 20), null);
+    assert.equal(revealLineSpan(5, 9, 0), null);
+});
+
+test("locationsNeedDetailHydration stays true for summary-only finding locations", () => {
+    assert.equal(locationsNeedDetailHydration([]), true);
+    assert.equal(
+        locationsNeedDetailHydration(["pkg/mod.py:10", "pkg/mod.py:20"]),
+        true
+    );
+    assert.equal(
+        locationsNeedDetailHydration([
+            {path: "pkg/mod.py", line: 10, end_line: null},
+        ]),
+        true
+    );
+    assert.equal(
+        locationsNeedDetailHydration([
+            {path: "pkg/mod.py", line: 10, end_line: 18},
+        ]),
+        false
+    );
 });
 
 test("staleMessage stays explicit for editor and workspace drift", () => {
@@ -68,6 +109,7 @@ test("normalizedLaunchSpec trims arguments and rejects empty command or cwd", ()
             command: "codeclone-mcp",
             args: ["--stdio"],
             cwd: "/tmp/workspace",
+            source: "",
         }
     );
     assert.throws(
@@ -77,6 +119,39 @@ test("normalizedLaunchSpec trims arguments and rejects empty command or cwd", ()
     assert.throws(
         () => normalizedLaunchSpec({command: "codeclone-mcp", args: [], cwd: ""}),
         /must not be empty/
+    );
+});
+
+test("launchSpecOrigin makes launcher provenance explicit", () => {
+    assert.equal(
+        launchSpecOrigin({
+            command: "/workspace/repo/.venv/bin/codeclone-mcp",
+            args: [],
+            cwd: "/workspace/repo",
+            source: "workspaceLocal",
+        }),
+        "workspace-local launcher (/workspace/repo/.venv/bin/codeclone-mcp)"
+    );
+    assert.equal(
+        launchSpecOrigin({
+            command: "uv",
+            args: ["run", "codeclone-mcp"],
+            cwd: "/workspace/repo",
+            source: "uvFallback",
+        }),
+        "repo-local uv fallback (uv run codeclone-mcp)"
+    );
+});
+
+test("unsupportedVersionMessage includes launcher provenance and next step", () => {
+    assert.equal(
+        unsupportedVersionMessage("1.27.0", "2.0.0b4", {
+            command: "/workspace/repo/.venv/bin/codeclone-mcp",
+            args: [],
+            cwd: "/workspace/repo",
+            source: "workspaceLocal",
+        }),
+        "The local CodeClone MCP server is not supported. It reported version 1.27.0; this extension requires CodeClone >= 2.0.0b4. The extension resolved workspace-local launcher (/workspace/repo/.venv/bin/codeclone-mcp). Update that environment or set codeclone.mcp.command to a newer launcher."
     );
 });
 
