@@ -202,6 +202,7 @@ class ChangedCloneGate:
 
 
 _as_mapping = _coerce.as_mapping
+_as_int = _coerce.as_int
 _as_sequence = _coerce.as_sequence
 
 
@@ -1438,10 +1439,22 @@ def _main_impl() -> None:
         files_analyzed=processing_result.files_analyzed,
         cache_hits=discovery_result.cache_hits,
         files_skipped=processing_result.files_skipped,
-        analyzed_lines=processing_result.analyzed_lines,
-        analyzed_functions=processing_result.analyzed_functions,
-        analyzed_methods=processing_result.analyzed_methods,
-        analyzed_classes=processing_result.analyzed_classes,
+        analyzed_lines=(
+            processing_result.analyzed_lines
+            + int(getattr(discovery_result, "cached_lines", 0))
+        ),
+        analyzed_functions=(
+            processing_result.analyzed_functions
+            + int(getattr(discovery_result, "cached_functions", 0))
+        ),
+        analyzed_methods=(
+            processing_result.analyzed_methods
+            + int(getattr(discovery_result, "cached_methods", 0))
+        ),
+        analyzed_classes=(
+            processing_result.analyzed_classes
+            + int(getattr(discovery_result, "cached_classes", 0))
+        ),
         func_clones_count=analysis_result.func_clones_count,
         block_clones_count=analysis_result.block_clones_count,
         segment_clones_count=analysis_result.segment_clones_count,
@@ -1451,6 +1464,10 @@ def _main_impl() -> None:
 
     if analysis_result.project_metrics is not None:
         pm = analysis_result.project_metrics
+        overloaded_modules_summary = _as_mapping(
+            _as_mapping(analysis_result.metrics_payload).get("overloaded_modules")
+        ).get("summary")
+        overloaded_modules_summary_map = _as_mapping(overloaded_modules_summary)
         _print_metrics(
             console=cast("_PrinterLike", console),
             quiet=args.quiet,
@@ -1467,6 +1484,18 @@ def _main_impl() -> None:
                 health_total=pm.health.total,
                 health_grade=pm.health.grade,
                 suppressed_dead_code_count=analysis_result.suppressed_dead_code_items,
+                overloaded_modules_candidates=_as_int(
+                    overloaded_modules_summary_map.get("candidates")
+                ),
+                overloaded_modules_total=_as_int(
+                    overloaded_modules_summary_map.get("total")
+                ),
+                overloaded_modules_population_status=str(
+                    overloaded_modules_summary_map.get("population_status", "")
+                ),
+                overloaded_modules_top_score=_coerce.as_float(
+                    overloaded_modules_summary_map.get("top_score")
+                ),
             ),
         )
 

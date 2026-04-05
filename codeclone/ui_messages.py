@@ -178,7 +178,7 @@ SUMMARY_COMPACT_CLONES = (
 SUMMARY_COMPACT_METRICS = (
     "Metrics  cc={cc_avg}/{cc_max}  cbo={cbo_avg}/{cbo_max}"
     "  lcom4={lcom_avg}/{lcom_max}  cycles={cycles}  dead_code={dead}"
-    "  health={health}({grade})"
+    "  health={health}({grade})  overloaded_modules={overloaded_modules}"
 )
 SUMMARY_COMPACT_CHANGED_SCOPE = (
     "Changed  paths={paths}  findings={findings}  new={new}  known={known}"
@@ -397,6 +397,7 @@ def fmt_summary_compact_metrics(
     dead: int,
     health: int,
     grade: str,
+    overloaded_modules: int,
 ) -> str:
     return SUMMARY_COMPACT_METRICS.format(
         cc_avg=f"{cc_avg:.1f}",
@@ -409,6 +410,7 @@ def fmt_summary_compact_metrics(
         dead=dead,
         health=health,
         grade=grade,
+        overloaded_modules=overloaded_modules,
     )
 
 
@@ -461,11 +463,10 @@ def fmt_summary_parsed(
 ) -> str | None:
     if lines == 0 and functions == 0 and methods == 0 and classes == 0:
         return None
+    callable_count = functions + methods
     parts = [f"{_vn(lines, 'bold cyan')} lines"]
-    if functions:
-        parts.append(f"{_v(functions, 'bold cyan')} functions")
-    if methods:
-        parts.append(f"{_v(methods, 'bold cyan')} methods")
+    if callable_count:
+        parts.append(f"{_v(callable_count, 'bold cyan')} callables")
     if classes:
         parts.append(f"{_v(classes, 'bold cyan')} classes")
     val = " \u00b7 ".join(parts)
@@ -533,6 +534,24 @@ def fmt_metrics_dead_code(count: int, *, suppressed: int = 0) -> str:
                 f"  {'Dead code':<{_L}}[bold red]{count} found[/bold red]"
                 f"{suppressed_suffix}"
             )
+
+
+def fmt_metrics_overloaded_modules(
+    *,
+    candidates: int,
+    total: int,
+    population_status: str,
+    top_score: float,
+) -> str:
+    parts = [f"{_v(candidates, 'bold magenta')} candidates"]
+    if top_score > 0:
+        parts.append(f"max score {top_score:.2f}")
+    parts.append(f"{_vn(total)} ranked")
+    summary = " \u00b7 ".join(parts)
+    note = "report-only"
+    if population_status and population_status != "ok":
+        note = f"{note}; {population_status.replace('_', ' ')} population"
+    return f"  {'Overloaded':<{_L}}{summary} [dim]({note})[/dim]"
 
 
 def fmt_changed_scope_paths(*, count: int) -> str:

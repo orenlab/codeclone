@@ -15,6 +15,7 @@ from typing import Any, cast
 import pytest
 
 import codeclone.structural_findings as sf
+from codeclone import _coerce
 from codeclone.models import StructuralFindingGroup, StructuralFindingOccurrence
 from codeclone.structural_findings import (
     build_clone_cohort_structural_findings,
@@ -45,6 +46,12 @@ def _findings(source: str, qualname: str = "mod:fn") -> list[StructuralFindingGr
             collect_findings=True,
         ).structural_findings
     )
+
+
+def _assert_single_group(source: str) -> StructuralFindingGroup:
+    groups = _findings(source)
+    assert len(groups) == 1
+    return groups[0]
 
 
 # ---------------------------------------------------------------------------
@@ -90,63 +97,97 @@ def test_detects_identical_branch_families(source: str) -> None:
     assert len(groups[0].items) == 2
 
 
-def test_no_finding_single_arm() -> None:
-    source = """
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         return 1
-"""
-    groups = _findings(source)
-    assert groups == []
-
-
-def test_no_finding_pass_only_branch() -> None:
-    source = """
+""",
+            id="single_arm",
+        ),
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         pass
     elif x == 2:
         pass
-"""
-    groups = _findings(source)
-    assert groups == []
-
-
-def test_no_finding_empty_body() -> None:
-    source = """
+""",
+            id="pass_only",
+        ),
+        pytest.param(
+            """
 def fn():
     pass
-"""
-    groups = _findings(source)
-    assert groups == []
-
-
-def test_single_statement_return_branches_are_filtered() -> None:
-    source = """
+""",
+            id="empty_body",
+        ),
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         return 1
     elif x == 2:
         return 2
-"""
-    groups = _findings(source)
-    assert groups == []
-
-
-def test_single_statement_call_branch_is_filtered_as_trivial() -> None:
-    source = """
+""",
+            id="single_return_branches",
+        ),
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         warn("a")
     elif x == 2:
         warn("b")
-"""
-    groups = _findings(source)
-    assert groups == []
+""",
+            id="single_call_branches",
+        ),
+        pytest.param(
+            """
+def fn(x):
+    if x == 1:
+        left = 1
+        right = 2
+    elif x == 2:
+        left = 3
+        right = 4
+""",
+            id="homogeneous_trivial_multi_stmt",
+        ),
+        pytest.param(
+            """
+def fn(x):
+    if x > 0:
+        raise ValueError("a")
+    else:
+        raise ValueError("b")
+""",
+            id="single_raise_else",
+        ),
+        pytest.param(
+            """
+def fn(x):
+    if x == 1:
+        return x
+    elif x == 2:
+        raise ValueError("nope")
+""",
+            id="different_signatures",
+        ),
+    ],
+)
+def test_non_reportable_branch_patterns_do_not_form_groups(source: str) -> None:
+    assert _findings(source) == []
 
 
-def test_single_statement_try_branch_still_counts_as_meaningful() -> None:
-    source = """
+@pytest.mark.parametrize(
+    ("source", "expected_items"),
+    [
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         try:
@@ -158,14 +199,12 @@ def fn(x):
             warn("b")
         except RuntimeError:
             recover("b")
-"""
-    groups = _findings(source)
-    assert len(groups) == 1
-    assert len(groups[0].items) == 2
-
-
-def test_multi_statement_guard_exit_branch_still_counts_as_meaningful() -> None:
-    source = """
+""",
+            2,
+            id="single_statement_try_branch",
+        ),
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         note("a")
@@ -173,49 +212,18 @@ def fn(x):
     elif x == 2:
         note("b")
         return None
-"""
-    groups = _findings(source)
-    assert len(groups) == 1
-    assert len(groups[0].items) == 2
-
-
-def test_homogeneous_trivial_multi_statement_branch_is_filtered() -> None:
-    source = """
-def fn(x):
-    if x == 1:
-        left = 1
-        right = 2
-    elif x == 2:
-        left = 3
-        right = 4
-"""
-    groups = _findings(source)
-    assert groups == []
-
-
-def test_single_statement_raise_else_branch_is_filtered() -> None:
-    source = """
-def fn(x):
-    if x > 0:
-        raise ValueError("a")
-    else:
-        raise ValueError("b")
-"""
-    groups = _findings(source)
-    assert groups == []
-
-
-def test_different_signatures_no_group() -> None:
-    """Different branch shapes should NOT form a group."""
-    source = """
-def fn(x):
-    if x == 1:
-        return x
-    elif x == 2:
-        raise ValueError("nope")
-"""
-    groups = _findings(source)
-    assert groups == []
+""",
+            2,
+            id="guard_exit_branch",
+        ),
+    ],
+)
+def test_meaningful_branch_patterns_are_retained(
+    source: str,
+    expected_items: int,
+) -> None:
+    group = _assert_single_group(source)
+    assert len(group.items) == expected_items
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +231,11 @@ def fn(x):
 # ---------------------------------------------------------------------------
 
 
-def test_terminal_return_none() -> None:
-    source = """
+@pytest.mark.parametrize(
+    ("source", "signature_key", "expected_value"),
+    [
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         y = 1
@@ -232,14 +243,13 @@ def fn(x):
     elif x == 2:
         y = 2
         return
-"""
-    groups = _findings(source)
-    assert len(groups) == 1
-    assert groups[0].signature["terminal"] == "return_none"
-
-
-def test_terminal_return_const() -> None:
-    source = """
+""",
+            "terminal",
+            "return_none",
+            id="terminal_return_none",
+        ),
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         y = x
@@ -247,14 +257,13 @@ def fn(x):
     elif x == 2:
         y = x + 1
         return 99
-"""
-    groups = _findings(source)
-    assert len(groups) == 1
-    assert groups[0].signature["terminal"] == "return_const"
-
-
-def test_terminal_return_name() -> None:
-    source = """
+""",
+            "terminal",
+            "return_const",
+            id="terminal_return_const",
+        ),
+        pytest.param(
+            """
 def fn(x, y):
     if x:
         z = y
@@ -262,14 +271,13 @@ def fn(x, y):
     elif not x:
         z = y
         return y
-"""
-    groups = _findings(source)
-    assert len(groups) == 1
-    assert groups[0].signature["terminal"] == "return_name"
-
-
-def test_terminal_return_expr() -> None:
-    source = """
+""",
+            "terminal",
+            "return_name",
+            id="terminal_return_name",
+        ),
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         y = x
@@ -277,14 +285,13 @@ def fn(x):
     elif x == 2:
         y = x
         return x - 1
-"""
-    groups = _findings(source)
-    assert len(groups) == 1
-    assert groups[0].signature["terminal"] == "return_expr"
-
-
-def test_nested_if_flag() -> None:
-    source = """
+""",
+            "terminal",
+            "return_expr",
+            id="terminal_return_expr",
+        ),
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         if x > 0:
@@ -294,14 +301,13 @@ def fn(x):
         if x > 0:
             pass
         return x
-"""
-    groups = _findings(source)
-    assert len(groups) == 1
-    assert groups[0].signature["nested_if"] == "1"
-
-
-def test_has_loop_flag() -> None:
-    source = """
+""",
+            "nested_if",
+            "1",
+            id="nested_if",
+        ),
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         for i in range(x):
@@ -311,14 +317,13 @@ def fn(x):
         for i in range(x):
             pass
         return x
-"""
-    groups = _findings(source)
-    assert len(groups) == 1
-    assert groups[0].signature["has_loop"] == "1"
-
-
-def test_has_try_flag() -> None:
-    source = """
+""",
+            "has_loop",
+            "1",
+            id="has_loop",
+        ),
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         try:
@@ -332,14 +337,13 @@ def fn(x):
         except Exception:
             pass
         return x
-"""
-    groups = _findings(source)
-    assert len(groups) == 1
-    assert groups[0].signature["has_try"] == "1"
-
-
-def test_calls_bucketed_zero() -> None:
-    source = """
+""",
+            "has_try",
+            "1",
+            id="has_try",
+        ),
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         y = x + 1
@@ -347,14 +351,13 @@ def fn(x):
     elif x == 2:
         y = x - 1
         return y
-"""
-    groups = _findings(source)
-    assert len(groups) == 1
-    assert groups[0].signature["calls"] == "0"
-
-
-def test_calls_bucketed_one() -> None:
-    source = """
+""",
+            "calls",
+            "0",
+            id="calls_zero",
+        ),
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         foo()
@@ -362,14 +365,13 @@ def fn(x):
     elif x == 2:
         bar()
         return x
-"""
-    groups = _findings(source)
-    assert len(groups) == 1
-    assert groups[0].signature["calls"] == "1"
-
-
-def test_calls_bucketed_two_plus() -> None:
-    source = """
+""",
+            "calls",
+            "1",
+            id="calls_one",
+        ),
+        pytest.param(
+            """
 def fn(x):
     if x == 1:
         foo()
@@ -379,10 +381,20 @@ def fn(x):
         baz()
         qux()
         return x
-"""
-    groups = _findings(source)
-    assert len(groups) == 1
-    assert groups[0].signature["calls"] == "2+"
+""",
+            "calls",
+            "2+",
+            id="calls_two_plus",
+        ),
+    ],
+)
+def test_signature_components_are_recorded(
+    source: str,
+    signature_key: str,
+    expected_value: str,
+) -> None:
+    group = _assert_single_group(source)
+    assert group.signature[signature_key] == expected_value
 
 
 # ---------------------------------------------------------------------------
@@ -655,15 +667,15 @@ def test_private_helper_fallbacks_and_defaults_are_deterministic() -> None:
 
 
 def test_private_member_decoding_and_majority_defaults() -> None:
-    assert sf._as_item_int(True) == 1
-    assert sf._as_item_int("bad-int") == 0
+    assert _coerce.as_int(True) == 1
+    assert _coerce.as_int("bad-int") == 0
     assert sf._as_item_bool(1) is True
     assert sf._as_item_bool("yes") is True
     assert sf._as_item_bool("no") is False
     assert sf._clone_member_from_item({}) is None
-    assert sf._majority_str([], default="fallback") == "fallback"
-    assert sf._majority_int([], default=7) == 7
-    assert sf._majority_bool([], default=True) is True
+    assert sf._majority_value([], default="fallback") == "fallback"
+    assert sf._majority_value([], default=7) == 7
+    assert sf._majority_value([], default=True) is True
 
     member = sf._CloneCohortMember(
         file_path="pkg/a.py",

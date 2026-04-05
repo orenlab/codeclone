@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from .._html_escape import _escape_attr, _escape_html
+from .._html_escape import _escape_html
 
 
 def render_split_tabs(
@@ -28,7 +28,7 @@ def render_split_tabs(
 
     nav: list[str] = [
         '<nav class="clone-nav" role="tablist" '
-        f'data-subtab-group="{_escape_attr(group_id)}">'
+        f'data-subtab-group="{_escape_html(group_id)}">'
     ]
     for idx, (tab_id, label, count, _) in enumerate(tabs):
         active = " active" if idx == 0 else ""
@@ -42,7 +42,7 @@ def render_split_tabs(
         nav.append(
             f'<button class="clone-nav-btn{active}" '
             f'data-clone-tab="{tab_id}" '
-            f'data-subtab-group="{_escape_attr(group_id)}" '
+            f'data-subtab-group="{_escape_html(group_id)}" '
             f'type="button">{_escape_html(label)} {badge}</button>'
         )
     nav.append("</nav>")
@@ -53,7 +53,7 @@ def render_split_tabs(
         panels.append(
             f'<div class="clone-panel{active}" '
             f'data-clone-panel="{tab_id}" '
-            f'data-subtab-group="{_escape_attr(group_id)}">'
+            f'data-subtab-group="{_escape_html(group_id)}">'
             f"{panel_html}</div>"
         )
 

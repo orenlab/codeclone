@@ -1,8 +1,8 @@
 name: ✨ Feature request
 description: Propose an enhancement to CodeClone
 title: "[Feature]: "
-labels: ["enhancement"]
-assignees: []
+labels: [ "enhancement" ]
+assignees: [ ]
 
 body:
   - type: markdown
@@ -18,9 +18,22 @@ body:
         - Clone detection logic
         - CFG semantics
         - AST normalization
+        - Structural findings / suggestions
+        - Metrics / health model
+        - Canonical report / contracts
         - HTML report / UX
         - CLI / CI integration
+        - MCP server / agent workflow
         - Performance
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: user_impact
+    attributes:
+      label: Why is this worth adding?
+      description: What concrete workflow, quality, or UX problem would this solve?
     validations:
       required: true
 
@@ -44,3 +57,14 @@ body:
     id: alternatives
     attributes:
       label: Alternatives considered
+
+  - type: checkboxes
+    id: contracts
+    attributes:
+      label: Contract-sensitive areas
+      description: Tick any surfaces you believe this may affect.
+      options:
+        - label: Baseline / cache compatibility
+        - label: Canonical report JSON schema
+        - label: CLI exit codes or script-facing output
+        - label: MCP tool or resource semantics

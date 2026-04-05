@@ -493,6 +493,8 @@ def test_html_report_structural_findings_tab_uses_normalized_groups() -> None:
         ">1</span>",
         "Repeated non-overlapping branch-body shapes",
         "1 function",
+        "Suggested action",
+        "Review whether the repeated local branch can be simplified in place.",
     )
     assert "stmt seq" in html and "Expr,For" in html
     assert "stmt_seq=Expr</span>" not in html
@@ -1566,6 +1568,31 @@ def _metrics_payload(
             "grade": health_grade,
             "dimensions": {"coverage": 99},
         },
+        "overloaded_modules": {
+            "summary": {
+                "total": 1,
+                "candidates": 0,
+                "population_status": "limited",
+                "top_score": 0.0,
+                "average_score": 0.0,
+                "candidate_score_cutoff": 0.0,
+            },
+            "items": [],
+            "detection": {
+                "version": "1",
+                "scope": "report_only",
+                "strategy": "project_relative_composite",
+                "minimum_population": 20,
+                "size_signals": ["loc", "callable_count", "complexity_total"],
+                "dependency_signals": [
+                    "fan_in",
+                    "fan_out",
+                    "total_deps",
+                    "import_edges",
+                ],
+                "shape_signals": ["hub_balance", "reimport_ratio"],
+            },
+        },
     }
 
 
@@ -1624,6 +1651,181 @@ def test_html_report_metrics_risk_branches() -> None:
         '<span class="main-tab-label">Dead Code</span><span class="tab-count">2</span>'
         in html
     )
+
+
+def test_html_report_renders_overloaded_modules_in_quality_and_overview() -> None:
+    payload = _metrics_payload(
+        health_score=72,
+        health_grade="B",
+        complexity_max=25,
+        complexity_high_risk=1,
+        coupling_high_risk=1,
+        cohesion_low=1,
+        dep_cycles=[],
+        dep_max_depth=4,
+        dead_total=1,
+        dead_critical=1,
+    )
+    overloaded_modules = payload["overloaded_modules"]
+    assert isinstance(overloaded_modules, dict)
+    overloaded_modules["summary"] = {
+        "total": 3,
+        "candidates": 1,
+        "population_status": "ok",
+        "top_score": 0.93,
+        "average_score": 0.42,
+        "candidate_score_cutoff": 0.88,
+    }
+    overloaded_modules["items"] = [
+        {
+            "module": "pkg.hub",
+            "relative_path": "pkg/hub.py",
+            "source_kind": "production",
+            "loc": 420,
+            "functions": 5,
+            "methods": 2,
+            "classes": 1,
+            "callable_count": 7,
+            "complexity_total": 31,
+            "complexity_max": 12,
+            "fan_in": 4,
+            "fan_out": 7,
+            "total_deps": 11,
+            "import_edges": 9,
+            "reimport_edges": 2,
+            "reimport_ratio": 0.2222,
+            "instability": 0.6364,
+            "hub_balance": 0.7273,
+            "size_score": 0.95,
+            "dependency_score": 0.91,
+            "shape_score": 0.8,
+            "score": 0.93,
+            "candidate_status": "candidate",
+            "candidate_reasons": [
+                "size_pressure",
+                "dependency_pressure",
+                "hub_like_shape",
+            ],
+        }
+    ]
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=payload,
+    )
+
+    _assert_html_contains(
+        html,
+        "Overloaded Modules",
+        "pkg.hub",
+        "Top candidates",
+        "0.93",
+        "overloaded-modules",
+    )
+    assert "hub-like shape" not in html
+    assert "Candidate cutoff" not in html
+    assert "Ranked modules" not in html
+
+
+def test_html_report_renders_overloaded_modules_from_legacy_god_modules_key() -> None:
+    payload = _metrics_payload(
+        health_score=72,
+        health_grade="B",
+        complexity_max=25,
+        complexity_high_risk=1,
+        coupling_high_risk=1,
+        cohesion_low=1,
+        dep_cycles=[],
+        dep_max_depth=4,
+        dead_total=1,
+        dead_critical=1,
+    )
+    legacy_overloaded_modules = payload.pop("overloaded_modules")
+    payload["god_modules"] = legacy_overloaded_modules
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=payload,
+    )
+
+    _assert_html_contains(html, "Overloaded Modules")
+
+
+def test_html_report_renders_run_snapshot_from_canonical_inventory() -> None:
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    report_document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo/project", "project_name": "project"},
+        metrics=metrics,
+        inventory={
+            "files": {
+                "total_found": 158,
+                "analyzed": 120,
+                "cached": 38,
+                "skipped": 2,
+                "source_io_skipped": 1,
+            },
+            "code": {
+                "parsed_lines": 22320,
+                "functions": 180,
+                "methods": 40,
+                "classes": 12,
+            },
+            "file_list": [
+                "/repo/project/pkg/a.py",
+                "/repo/project/pkg/b.py",
+            ],
+        },
+    )
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta=report_document["meta"],
+        metrics=report_document["metrics"],
+        report_document=report_document,
+    )
+
+    inventory = cast(dict[str, object], report_document["inventory"])
+    files_inventory = cast(dict[str, object], inventory["files"])
+    code_inventory = cast(dict[str, object], inventory["code"])
+    total_found = cast(int, files_inventory["total_found"])
+    parsed_lines = cast(int, code_inventory["parsed_lines"])
+    functions = cast(int, code_inventory["functions"])
+    methods = cast(int, code_inventory["methods"])
+    classes = cast(int, code_inventory["classes"])
+    expected_summary = (
+        f"{total_found} files \u00b7 "
+        f"{parsed_lines:,} lines \u00b7 "
+        f"{functions + methods} callables \u00b7 "
+        f"{classes} classes"
+    )
+    _assert_html_contains(
+        html,
+        "Executive Summary",
+        expected_summary,
+    )
+    assert "Scan scope" not in html
 
 
 def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
@@ -1689,8 +1891,8 @@ def test_html_report_renders_directory_hotspots_from_canonical_report() -> None:
         html,
         "Hotspots by Directory",
         "top 5 of 6 directories",
-        "<code>dir1</code>",
-        "<code>dir5</code>",
+        'title="dir1">dir1</code>',
+        'title="dir5">dir5</code>',
     )
 
 
@@ -1783,7 +1985,7 @@ def test_html_report_directory_hotspots_use_test_scope_roots() -> None:
     _assert_html_contains(
         html,
         "Hotspots by Directory",
-        "<code>tests/<wbr>fixtures</code>",
+        'title="tests/fixtures">tests/fixtures</code>',
     )
     assert "golden_project" not in html
     assert "clone_metrics_cycle" not in html

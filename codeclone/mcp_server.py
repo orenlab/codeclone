@@ -34,6 +34,9 @@ _SERVER_INSTRUCTIONS = (
     "get_production_triage for the first pass. Use list_hotspots or focused "
     "check_* tools before broader list_findings calls, then drill into one "
     "finding with get_finding or get_remediation. Use "
+    "help(topic=...) when workflow or contract semantics are unclear. Use "
+    "default or pyproject-resolved thresholds for the first pass, and lower "
+    "them only for an explicit higher-sensitivity follow-up when needed. Use "
     "get_report_section(section='metrics_detail', family=..., limit=...) for "
     "bounded metrics drill-down, and prefer generate_pr_summary(format='markdown') "
     "unless machine JSON is required. Pass an absolute repository root to "
@@ -53,7 +56,12 @@ class MCPDependencyError(RuntimeError):
 MCPCallable = TypeVar("MCPCallable", bound=Callable[..., object])
 
 
-def _load_mcp_runtime() -> tuple[type[FastMCP], ToolAnnotations, ToolAnnotations]:
+def _load_mcp_runtime() -> tuple[
+    type[FastMCP],
+    ToolAnnotations,
+    ToolAnnotations,
+    ToolAnnotations,
+]:
     try:
         from mcp.server.fastmcp import FastMCP as runtime_fastmcp
         from mcp.types import ToolAnnotations as runtime_tool_annotations
@@ -68,8 +76,14 @@ def _load_mcp_runtime() -> tuple[type[FastMCP], ToolAnnotations, ToolAnnotations
             openWorldHint=False,
         ),
         runtime_tool_annotations(
-            readOnlyHint=False,
+            readOnlyHint=True,
             destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        runtime_tool_annotations(
+            readOnlyHint=False,
+            destructiveHint=True,
             idempotentHint=True,
             openWorldHint=False,
         ),
@@ -86,7 +100,7 @@ def build_mcp_server(
     debug: bool = False,
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO",
 ) -> FastMCP:
-    runtime_fastmcp, read_only_tool, session_tool = _load_mcp_runtime()
+    runtime_fastmcp, read_only_tool, analysis_tool, session_tool = _load_mcp_runtime()
     service = CodeCloneMCPService(history_limit=_validated_history_limit(history_limit))
     mcp = runtime_fastmcp(
         name="CodeClone",
@@ -100,6 +114,8 @@ def build_mcp_server(
         log_level=log_level,
         dependencies=(f"codeclone=={__version__}",),
     )
+    # FastMCP otherwise reports the `mcp` package version in initialize/serverInfo.
+    mcp._mcp_server.version = __version__
 
     def tool(*args: Any, **kwargs: Any) -> Callable[[MCPCallable], MCPCallable]:
         return cast(
@@ -119,13 +135,14 @@ def build_mcp_server(
     @tool(
         title="Analyze Repository",
         description=(
-            "Run a deterministic CodeClone analysis for a repository and register "
-            "the result as the latest MCP run. Pass an absolute repository root: "
-            "relative roots like '.' are rejected in MCP. Then prefer "
-            "get_run_summary or get_production_triage for the first pass. Tip: "
-            "set cache_policy='off' to bypass cache and get fully fresh results."
+            "Run a deterministic CodeClone analysis and register it as the "
+            "latest MCP run. Pass an absolute repository root; relative roots "
+            "like '.' are rejected in MCP. Start with get_run_summary or "
+            "get_production_triage. Tip: set cache_policy='off' for a fully "
+            "fresh run. Defaults are the conservative first pass; lower "
+            "thresholds only for an explicit deeper review."
         ),
-        annotations=session_tool,
+        annotations=analysis_tool,
         structured_output=True,
     )
     def analyze_repository(
@@ -181,13 +198,15 @@ def build_mcp_server(
         title="Analyze Changed Paths",
         description=(
             "Run a deterministic CodeClone analysis and return a changed-files "
-            "projection using explicit paths or a git diff ref. Pass an absolute "
-            "repository root: relative roots like '.' are rejected in MCP. Then "
-            "prefer get_report_section(section='changed') or get_production_triage "
-            "before broader finding lists. Tip: set cache_policy='off' to bypass "
-            "cache and get fully fresh results."
+            "projection from explicit paths or a git diff ref. Pass an absolute "
+            "repository root; relative roots like '.' are rejected in MCP. "
+            "Start with get_report_section(section='changed') or "
+            "get_production_triage before broader finding lists. Tip: set "
+            "cache_policy='off' for a fully fresh run. Start with the "
+            "conservative profile first; lower thresholds only for an "
+            "explicit higher-sensitivity pass."
         ),
-        annotations=session_tool,
+        annotations=analysis_tool,
         structured_output=True,
     )
     def analyze_changed_paths(
@@ -274,12 +293,34 @@ def build_mcp_server(
         )
 
     @tool(
+        title="Help",
+        description=(
+            "Explain a supported CodeClone workflow or contract topic and "
+            "suggest the safest next step. Return compact guidance with "
+            "canonical doc links. Use this when workflow or contract meaning "
+            "is unclear. This is bounded guidance, not a full manual. "
+            "Supported topics: workflow, analysis_profile, suppressions, "
+            "baseline, latest_runs, review_state, changed_scope."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def help(
+        topic: str,
+        detail: str = "compact",
+    ) -> dict[str, object]:
+        return service.get_help(
+            topic=topic,  # type: ignore[arg-type]
+            detail=detail,  # type: ignore[arg-type]
+        )
+
+    @tool(
         title="Evaluate Gates",
         description=(
             "Evaluate CodeClone gate conditions against an existing MCP run without "
             "modifying baselines or exiting the process."
         ),
-        annotations=session_tool,
+        annotations=read_only_tool,
         structured_output=True,
     )
     def evaluate_gates(

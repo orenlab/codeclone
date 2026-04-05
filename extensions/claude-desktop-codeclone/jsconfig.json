@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "checkJs": true,
+    "strict": true,
+    "noEmit": true
+  },
+  "include": [
+    "server/**/*.js",
+    "src/**/*.js",
+    "scripts/**/*.mjs",
+    "test/**/*.js"
+  ]
+}

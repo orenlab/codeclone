@@ -86,6 +86,17 @@ def test_stmt_hashes_normalize_names() -> None:
     assert stmt_hashes([s1], cfg)[0] == stmt_hashes([s2], cfg)[0]
 
 
+def test_stmt_hashes_does_not_mutate_input_ast() -> None:
+    cfg = NormalizationConfig()
+    statement = ast.parse("value = user_input + 1").body[0]
+    before = ast.dump(statement, annotate_fields=True, include_attributes=False)
+
+    stmt_hashes([statement], cfg)
+
+    after = ast.dump(statement, annotate_fields=True, include_attributes=False)
+    assert after == before
+
+
 def test_normalized_ast_dump_does_not_mutate_input_ast() -> None:
     cfg = NormalizationConfig()
     node = ast.parse(

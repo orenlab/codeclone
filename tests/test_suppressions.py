@@ -48,8 +48,11 @@ async def d() -> int:
     )
 
 
-def test_extract_suppression_directives_ignores_unknown_and_malformed_safely() -> None:
-    source = """
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(
+            """
 def a() -> int:  # codeclone: ignore[dead-code, dead-code, unknown-rule]
     return 1
 
@@ -61,21 +64,22 @@ def c() -> int:  # codeclone: IGNORE[dead-code]
 
 def d() -> int:  # codeclone ignore[dead-code]
     return 4
-""".strip()
-    directives = extract_suppression_directives(source)
-    assert directives == (
-        SuppressionDirective(line=1, binding="inline", rules=("dead-code",)),
-    )
-
-
-def test_extract_suppression_directives_ignores_invalid_rule_tokens() -> None:
-    source = """
+""".strip(),
+            id="unknown_and_malformed",
+        ),
+        pytest.param(
+            """
 def a() -> int:  # codeclone: ignore[dead-code, , invalid!, unknown-rule]
     return 1
 
 def b() -> int:  # codeclone: ignore[unknown-rule]
     return 2
-""".strip()
+""".strip(),
+            id="invalid_rule_tokens",
+        ),
+    ],
+)
+def test_extract_suppression_directives_ignores_invalid_forms(source: str) -> None:
     directives = extract_suppression_directives(source)
     assert directives == (
         SuppressionDirective(line=1, binding="inline", rules=("dead-code",)),
@@ -88,8 +92,11 @@ def test_extract_suppression_directives_returns_empty_on_tokenize_error() -> Non
     assert extract_suppression_directives(source) == ()
 
 
-def test_bind_suppressions_applies_only_to_adjacent_declaration_line() -> None:
-    source = """
+@pytest.mark.parametrize(
+    ("source", "declarations", "expected_bindings"),
+    [
+        pytest.param(
+            """
 # codeclone: ignore[dead-code]
 def kept() -> int:
     return 1
@@ -98,227 +105,117 @@ def kept() -> int:
 
 def not_bound() -> int:
     return 2
-""".strip()
-    directives = extract_suppression_directives(source)
-    declarations = (
-        DeclarationTarget(
-            filepath="pkg/mod.py",
-            qualname="pkg.mod:kept",
-            start_line=2,
-            end_line=3,
-            kind="function",
+""".strip(),
+            (
+                DeclarationTarget(
+                    filepath="pkg/mod.py",
+                    qualname="pkg.mod:kept",
+                    start_line=2,
+                    end_line=3,
+                    kind="function",
+                ),
+                DeclarationTarget(
+                    filepath="pkg/mod.py",
+                    qualname="pkg.mod:not_bound",
+                    start_line=7,
+                    end_line=8,
+                    kind="function",
+                ),
+            ),
+            (
+                SuppressionBinding(
+                    filepath="pkg/mod.py",
+                    qualname="pkg.mod:kept",
+                    start_line=2,
+                    end_line=3,
+                    kind="function",
+                    rules=("dead-code",),
+                ),
+            ),
+            id="adjacent_leading_only",
         ),
-        DeclarationTarget(
-            filepath="pkg/mod.py",
-            qualname="pkg.mod:not_bound",
-            start_line=7,
-            end_line=8,
-            kind="function",
-        ),
-    )
-    bindings = bind_suppressions_to_declarations(
-        directives=directives,
-        declarations=declarations,
-    )
-    assert bindings == (
-        SuppressionBinding(
-            filepath="pkg/mod.py",
-            qualname="pkg.mod:kept",
-            start_line=2,
-            end_line=3,
-            kind="function",
-            rules=("dead-code",),
-        ),
-    )
-
-
-def test_bind_suppressions_does_not_propagate_class_inline_to_method() -> None:
-    source = """
+        pytest.param(
+            """
 class Demo:  # codeclone: ignore[dead-code]
     def method(self) -> int:
         return 1
-""".strip()
-    directives = extract_suppression_directives(source)
-    declarations = (
-        DeclarationTarget(
-            filepath="pkg/mod.py",
-            qualname="pkg.mod:Demo",
-            start_line=1,
-            end_line=3,
-            kind="class",
+""".strip(),
+            (
+                DeclarationTarget(
+                    filepath="pkg/mod.py",
+                    qualname="pkg.mod:Demo",
+                    start_line=1,
+                    end_line=3,
+                    kind="class",
+                ),
+                DeclarationTarget(
+                    filepath="pkg/mod.py",
+                    qualname="pkg.mod:Demo.method",
+                    start_line=2,
+                    end_line=3,
+                    kind="method",
+                ),
+            ),
+            (
+                SuppressionBinding(
+                    filepath="pkg/mod.py",
+                    qualname="pkg.mod:Demo",
+                    start_line=1,
+                    end_line=3,
+                    kind="class",
+                    rules=("dead-code",),
+                ),
+            ),
+            id="class_inline_does_not_propagate",
         ),
-        DeclarationTarget(
-            filepath="pkg/mod.py",
-            qualname="pkg.mod:Demo.method",
-            start_line=2,
-            end_line=3,
-            kind="method",
-        ),
-    )
-    bindings = bind_suppressions_to_declarations(
-        directives=directives,
-        declarations=declarations,
-    )
-    assert bindings == (
-        SuppressionBinding(
-            filepath="pkg/mod.py",
-            qualname="pkg.mod:Demo",
-            start_line=1,
-            end_line=3,
-            kind="class",
-            rules=("dead-code",),
-        ),
-    )
-
-
-def test_bind_suppressions_applies_to_method_target() -> None:
-    source = """
+        pytest.param(
+            """
 class Demo:
     # codeclone: ignore[dead-code]
     def method(self) -> int:
         return 1
-""".strip()
-    directives = extract_suppression_directives(source)
-    declarations = (
-        DeclarationTarget(
-            filepath="pkg/mod.py",
-            qualname="pkg.mod:Demo",
-            start_line=1,
-            end_line=4,
-            kind="class",
-        ),
-        DeclarationTarget(
-            filepath="pkg/mod.py",
-            qualname="pkg.mod:Demo.method",
-            start_line=3,
-            end_line=4,
-            kind="method",
-        ),
-    )
-    bindings = bind_suppressions_to_declarations(
-        directives=directives,
-        declarations=declarations,
-    )
-    assert bindings == (
-        SuppressionBinding(
-            filepath="pkg/mod.py",
-            qualname="pkg.mod:Demo.method",
-            start_line=3,
-            end_line=4,
-            kind="method",
-            rules=("dead-code",),
-        ),
-    )
-
-
-def test_bind_suppressions_supports_inline_on_multiline_declaration_end_line() -> None:
-    source = """
-@decorator
-def keep(
-    arg: int,
-) -> int:  # codeclone: ignore[dead-code]
-    return arg
-""".strip()
-    directives = extract_suppression_directives(source)
-    declarations = (
-        DeclarationTarget(
-            filepath="pkg/mod.py",
-            qualname="pkg.mod:keep",
-            start_line=2,
-            end_line=5,
-            kind="function",
-            declaration_end_line=4,
-        ),
-    )
-    bindings = bind_suppressions_to_declarations(
-        directives=directives,
-        declarations=declarations,
-    )
-    assert bindings == (
-        SuppressionBinding(
-            filepath="pkg/mod.py",
-            qualname="pkg.mod:keep",
-            start_line=2,
-            end_line=5,
-            kind="function",
-            rules=("dead-code",),
-        ),
-    )
-
-
-@pytest.mark.parametrize(
-    ("source", "declaration"),
-    [
-        (
-            """
-@decorator
-def keep(  # codeclone: ignore[dead-code]
-    arg: int,
-) -> int:
-    return arg
 """.strip(),
-            DeclarationTarget(
-                filepath="pkg/mod.py",
-                qualname="pkg.mod:keep",
-                start_line=2,
-                end_line=5,
-                kind="function",
-                declaration_end_line=4,
+            (
+                DeclarationTarget(
+                    filepath="pkg/mod.py",
+                    qualname="pkg.mod:Demo",
+                    start_line=1,
+                    end_line=4,
+                    kind="class",
+                ),
+                DeclarationTarget(
+                    filepath="pkg/mod.py",
+                    qualname="pkg.mod:Demo.method",
+                    start_line=3,
+                    end_line=4,
+                    kind="method",
+                ),
             ),
-        ),
-        (
-            """
-async def keep_async(  # codeclone: ignore[dead-code]
-    arg: int,
-) -> int:
-    return arg
-""".strip(),
-            DeclarationTarget(
-                filepath="pkg/mod.py",
-                qualname="pkg.mod:keep_async",
-                start_line=1,
-                end_line=4,
-                kind="function",
-                declaration_end_line=3,
+            (
+                SuppressionBinding(
+                    filepath="pkg/mod.py",
+                    qualname="pkg.mod:Demo.method",
+                    start_line=3,
+                    end_line=4,
+                    kind="method",
+                    rules=("dead-code",),
+                ),
             ),
-        ),
-        (
-            """
-class Demo(  # codeclone: ignore[dead-code]
-    Base,
-):
-    pass
-""".strip(),
-            DeclarationTarget(
-                filepath="pkg/mod.py",
-                qualname="pkg.mod:Demo",
-                start_line=1,
-                end_line=4,
-                kind="class",
-                declaration_end_line=3,
-            ),
+            id="method_target",
         ),
     ],
 )
-def test_bind_suppressions_supports_inline_on_multiline_declaration_start_line(
+def test_bind_suppressions_targets_expected_declaration_scope(
     source: str,
-    declaration: DeclarationTarget,
+    declarations: tuple[DeclarationTarget, ...],
+    expected_bindings: tuple[SuppressionBinding, ...],
 ) -> None:
     directives = extract_suppression_directives(source)
     bindings = bind_suppressions_to_declarations(
         directives=directives,
-        declarations=(declaration,),
+        declarations=declarations,
     )
-    assert bindings == (
-        SuppressionBinding(
-            filepath=declaration.filepath,
-            qualname=declaration.qualname,
-            start_line=declaration.start_line,
-            end_line=declaration.end_line,
-            kind=declaration.kind,
-            rules=("dead-code",),
-        ),
-    )
+    assert bindings == expected_bindings
 
 
 def test_bind_suppressions_ignores_inline_comment_on_middle_signature_line() -> None:
@@ -351,7 +248,60 @@ def keep(
 @pytest.mark.parametrize(
     ("source", "declaration"),
     [
-        (
+        pytest.param(
+            """
+@decorator
+def keep(
+    arg: int,
+) -> int:  # codeclone: ignore[dead-code]
+    return arg
+""".strip(),
+            DeclarationTarget(
+                filepath="pkg/mod.py",
+                qualname="pkg.mod:keep",
+                start_line=2,
+                end_line=5,
+                kind="function",
+                declaration_end_line=4,
+            ),
+            id="decorated_function_end_line",
+        ),
+        pytest.param(
+            """
+@decorator
+def keep(  # codeclone: ignore[dead-code]
+    arg: int,
+) -> int:
+    return arg
+""".strip(),
+            DeclarationTarget(
+                filepath="pkg/mod.py",
+                qualname="pkg.mod:keep",
+                start_line=2,
+                end_line=5,
+                kind="function",
+                declaration_end_line=4,
+            ),
+            id="decorated_function_start_line",
+        ),
+        pytest.param(
+            """
+async def keep_async(  # codeclone: ignore[dead-code]
+    arg: int,
+) -> int:
+    return arg
+""".strip(),
+            DeclarationTarget(
+                filepath="pkg/mod.py",
+                qualname="pkg.mod:keep_async",
+                start_line=1,
+                end_line=4,
+                kind="function",
+                declaration_end_line=3,
+            ),
+            id="async_function_start_line",
+        ),
+        pytest.param(
             """
 async def keep_async(
     arg: int,
@@ -366,8 +316,26 @@ async def keep_async(
                 kind="function",
                 declaration_end_line=3,
             ),
+            id="async_function_end_line",
         ),
-        (
+        pytest.param(
+            """
+class Demo(  # codeclone: ignore[dead-code]
+    Base,
+):
+    pass
+""".strip(),
+            DeclarationTarget(
+                filepath="pkg/mod.py",
+                qualname="pkg.mod:Demo",
+                start_line=1,
+                end_line=4,
+                kind="class",
+                declaration_end_line=3,
+            ),
+            id="class_start_line",
+        ),
+        pytest.param(
             """
 class Demo(
     Base,
@@ -382,10 +350,11 @@ class Demo(
                 kind="class",
                 declaration_end_line=3,
             ),
+            id="class_end_line",
         ),
     ],
 )
-def test_bind_suppressions_supports_multiline_inline_for_supported_targets(
+def test_bind_suppressions_supports_multiline_inline_on_supported_boundaries(
     source: str,
     declaration: DeclarationTarget,
 ) -> None:

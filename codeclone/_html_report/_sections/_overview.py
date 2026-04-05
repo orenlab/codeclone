@@ -55,10 +55,10 @@ _DIRECTORY_BUCKET_ORDER: tuple[str, ...] = (
 _DIRECTORY_KIND_LABELS: dict[str, str] = {
     "clones": "clones",
     "structural": "structural",
-    "dead_code": "dead code",
     "complexity": "complexity",
     "cohesion": "cohesion",
     "coupling": "coupling",
+    "dead_code": "dead code",
     "dependency": "dependency",
 }
 
@@ -398,10 +398,52 @@ def _directory_kind_meta_parts(
     kind_rows.sort(key=lambda item: (-item[1], item[0]))
     if len(kind_rows) <= 1:
         return []
-    parts: list[str] = []
-    for kind, count in kind_rows[:2]:
-        parts.append(_dir_meta_span(count, _DIRECTORY_KIND_LABELS.get(kind, kind)))
-    return parts
+    if kind_rows[0][1] >= total_groups:
+        return []
+    return [
+        _dir_meta_span(count, _DIRECTORY_KIND_LABELS.get(kind, kind))
+        for kind, count in kind_rows[:2]
+    ]
+
+
+def _format_count(value: int | float) -> str:
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    return f"{int(value):,}"
+
+
+def _mb(*pairs: tuple[str, object]) -> str:
+    """Render compact micro-badges for stat-card detail rows."""
+    return "".join(
+        f'<span class="kpi-micro">'
+        f'<span class="kpi-micro-val">{_escape_html(str(v))}</span>'
+        f'<span class="kpi-micro-lbl">{_escape_html(label)}</span></span>'
+        for label, v in pairs
+        if v is not None and str(v) != "n/a"
+    )
+
+
+def _scan_scope_subtitle(ctx: ReportContext) -> str:
+    """Build a subtitle string with scan-scope essentials for the Executive Summary header."""
+    inventory = _as_mapping(getattr(ctx, "inventory_map", {}))
+    if not inventory:
+        return "Project-wide context derived from the full scanned root."
+
+    files = _as_mapping(inventory.get("files"))
+    code = _as_mapping(inventory.get("code"))
+    total_found = _as_int(files.get("total_found"))
+    parsed_lines = _as_int(code.get("parsed_lines"))
+    functions = _as_int(code.get("functions"))
+    methods = _as_int(code.get("methods"))
+    classes = _as_int(code.get("classes"))
+    callable_total = functions + methods
+
+    return (
+        f"{_format_count(total_found)} files \u00b7 "
+        f"{_format_count(parsed_lines)} lines \u00b7 "
+        f"{_format_count(callable_total)} callables \u00b7 "
+        f"{_format_count(classes)} classes"
+    )
 
 
 def _directory_hotspot_bucket_body(bucket: str, payload: Mapping[str, object]) -> str:
@@ -444,7 +486,7 @@ def _directory_hotspot_bucket_body(bucket: str, payload: Mapping[str, object]) -
                 )
             )
 
-        path_html = _escape_html(path).replace("/", "/<wbr>")
+        path_escaped = _escape_html(path)
 
         prev_pct = min(cumulative, 100.0)
         cur_pct = min(share_pct, 100.0 - prev_pct)
@@ -459,14 +501,14 @@ def _directory_hotspot_bucket_body(bucket: str, payload: Mapping[str, object]) -
 
         rows.append(
             '<div class="dir-hotspot-entry">'
-            '<div class="dir-hotspot-path">'
-            f"<code>{path_html}</code>"
+            '<div class="dir-hotspot-head">'
+            f'<code class="dir-hotspot-path" title="{path_escaped}">{path_escaped}</code>'
             f" {_source_kind_badge_html(dominant_kind)}"
             "</div>"
-            f'<div class="dir-hotspot-bar-row">{bar_html}'
+            f'<div class="dir-hotspot-detail">{bar_html}'
             f'<span class="dir-hotspot-pct">{share_pct:.1f}%</span>'
-            "</div>"
             f'<div class="dir-hotspot-meta">{_DIR_META_SEP.join(meta_parts)}</div>'
+            "</div>"
             "</div>"
         )
     return subtitle_html + '<div class="dir-hotspot-list">' + "".join(rows) + "</div>"
@@ -498,6 +540,79 @@ def _directory_hotspots_section(ctx: ReportContext) -> str:
         )
         + '<div class="overview-summary-grid overview-summary-grid--2col">'
         + "".join(cards)
+        + "</div></section>"
+    )
+
+
+def _overloaded_modules_section(ctx: ReportContext) -> str:
+    overloaded_modules = _as_mapping(getattr(ctx, "overloaded_modules_map", {}))
+    if not overloaded_modules:
+        return ""
+    summary = _as_mapping(overloaded_modules.get("summary"))
+    candidates = _as_int(summary.get("candidates"))
+    if candidates <= 0:
+        return ""
+    candidate_rows = [
+        _as_mapping(item)
+        for item in _as_sequence(overloaded_modules.get("items"))
+        if str(_as_mapping(item).get("candidate_status", "")).strip() == "candidate"
+    ][:5]
+    if not candidate_rows:
+        return ""
+
+    rows_html: list[str] = []
+    for row in candidate_rows:
+        score = _as_float(row.get("score"))
+        relative_path = str(row.get("relative_path", "")).strip()
+        if not relative_path:
+            relative_path = str(row.get("module", "")).replace(".", "/") + ".py"
+        fan_summary = f"{_as_int(row.get('fan_in'))}/{_as_int(row.get('fan_out'))}"
+        rows_html.append(
+            '<div class="overloaded-module-entry">'
+            '<div class="overloaded-module-head">'
+            '<div class="overloaded-module-title">'
+            f"<code>{_escape_html(relative_path)}</code>"
+            f"{_source_kind_badge_html(str(row.get('source_kind', 'other')))}"
+            "</div>"
+            f'<span class="overloaded-module-score">{score:.2f}</span>'
+            "</div>"
+            '<div class="overloaded-module-metrics">'
+            f"<span>{_escape_html(_format_count(_as_int(row.get('loc'))))} LOC</span>"
+            f"{_DIR_META_SEP}"
+            f"<span>fan-in/out {_escape_html(fan_summary)}</span>"
+            f"{_DIR_META_SEP}"
+            f"<span>complexity {_escape_html(str(_as_int(row.get('complexity_total'))))}</span>"
+            "</div>"
+            "</div>"
+        )
+
+    total_ranked = _as_int(summary.get("total"))
+    subtitle = (
+        f"{candidates} candidate{'s' if candidates != 1 else ''} "
+        f"across {total_ranked} ranked module{'s' if total_ranked != 1 else ''}"
+        " \u2014 disproportionate size, complexity, or coupling."
+    )
+    mid = (len(rows_html) + 1) // 2
+    left_html = "".join(rows_html[:mid])
+    right_html = "".join(rows_html[mid:])
+    return (
+        '<section class="overview-cluster">'
+        + overview_cluster_header("Overloaded Modules", subtitle)
+        + '<div class="overview-summary-grid overview-summary-grid--2col">'
+        + overview_summary_item_html(
+            label="Top candidates",
+            body_html='<div class="overloaded-module-list">' + left_html + "</div>",
+        )
+        + (
+            overview_summary_item_html(
+                label="More candidates",
+                body_html='<div class="overloaded-module-list">'
+                + right_html
+                + "</div>",
+            )
+            if right_html
+            else ""
+        )
         + "</div></section>"
     )
 
@@ -582,16 +697,6 @@ def render_overview_panel(ctx: ReportContext) -> str:
         _new_clones = sum(
             1 for gk, _ in ctx.func_sorted if gk in ctx.new_func_keys
         ) + sum(1 for gk, _ in ctx.block_sorted if gk in ctx.new_block_keys)
-
-    def _mb(*pairs: tuple[str, object]) -> str:
-        """Render micro-badges: [label value] [label value] ..."""
-        return "".join(
-            f'<span class="kpi-micro">'
-            f'<span class="kpi-micro-val">{_escape_html(str(v))}</span>'
-            f'<span class="kpi-micro-lbl">{_escape_html(label)}</span></span>'
-            for label, v in pairs
-            if v is not None and str(v) != "n/a"
-        )
 
     _baseline_ok = (
         '<span class="kpi-micro kpi-micro--baselined">\u2713 baselined</span>'
@@ -739,13 +844,11 @@ def render_overview_panel(ctx: ReportContext) -> str:
         "cohesion": None,
     }
 
-    # Executive summary: issue breakdown (sorted) + source breakdown
+    # Executive summary: issue breakdown + source breakdown (2-col)
+    scan_scope_subtitle = _scan_scope_subtitle(ctx)
     executive = (
         '<section class="overview-cluster">'
-        + overview_cluster_header(
-            "Executive Summary",
-            "Project-wide context derived from the full scanned root.",
-        )
+        + overview_cluster_header("Executive Summary", scan_scope_subtitle)
         + '<div class="overview-summary-grid overview-summary-grid--2col">'
         + overview_summary_item_html(
             label="Issue breakdown",
@@ -778,6 +881,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
         + "</div>"
         + executive
         + _directory_hotspots_section(ctx)
+        + _overloaded_modules_section(ctx)
         + _analytics_section(ctx)
     )
 

@@ -12,7 +12,7 @@ from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING
 
 from .._html_badges import _quality_badge_html, _tab_empty
-from .._html_escape import _escape_attr, _escape_html
+from .._html_escape import _escape_html
 from ._glossary import glossary_tip
 
 if TYPE_CHECKING:
@@ -106,8 +106,8 @@ def render_rows_table(
         if h in _PATH_HEADERS and ctx is not None:
             short = ctx.relative_path(cell)
             return (
-                f'<td{cls_attr} title="{_escape_attr(cell)}">'
-                f'<a class="ide-link" data-file="{_escape_attr(cell)}" data-line="1">'
+                f'<td{cls_attr} title="{_escape_html(cell)}">'
+                f'<a class="ide-link" data-file="{_escape_html(cell)}" data-line="1">'
                 f"{_escape_html(short)}</a></td>"
             )
         return f"<td{cls_attr}>{_escape_html(cell)}</td>"

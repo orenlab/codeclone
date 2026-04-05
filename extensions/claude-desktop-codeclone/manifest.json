@@ -1,0 +1,119 @@
+{
+  "manifest_version": "0.3",
+  "name": "codeclone",
+  "display_name": "CodeClone",
+  "version": "2.0.0-b4.0",
+  "description": "Baseline-aware structural review for Claude Desktop through a local CodeClone MCP launcher.",
+  "long_description": "CodeClone for Claude Desktop wraps the local codeclone-mcp launcher as an MCP bundle. It keeps Claude on the same canonical MCP surface used by the CLI, HTML report, VS Code extension, and Codex plugin — read-only, baseline-aware, local stdio only.",
+  "author": {
+    "name": "Den Rozhnovskiy",
+    "email": "pytelemonbot@mail.ru",
+    "url": "https://github.com/orenlab"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/orenlab/codeclone.git"
+  },
+  "homepage": "https://github.com/orenlab/codeclone",
+  "documentation": "https://orenlab.github.io/codeclone/claude-desktop-bundle/",
+  "support": "https://github.com/orenlab/codeclone/issues",
+  "privacy_policies": [
+    "https://orenlab.github.io/codeclone/privacy-policy/"
+  ],
+  "icon": "media/icon.png",
+  "keywords": [
+    "mcp",
+    "claude-desktop",
+    "codeclone",
+    "structural-review",
+    "baseline-aware",
+    "code-quality"
+  ],
+  "tools": [
+    {
+      "name": "analyze_repository",
+      "description": "Run a baseline-aware CodeClone analysis for the current repository."
+    },
+    {
+      "name": "analyze_changed_paths",
+      "description": "Run changed-files analysis for PR-style structural review."
+    },
+    {
+      "name": "get_production_triage",
+      "description": "Return the cheapest production-first hotspot and health snapshot."
+    },
+    {
+      "name": "get_run_summary",
+      "description": "Cheapest run snapshot: health, findings, baseline, inventory."
+    },
+    {
+      "name": "list_hotspots",
+      "description": "Priority-ranked hotspot views by kind."
+    },
+    {
+      "name": "get_finding",
+      "description": "Open one canonical finding by id."
+    },
+    {
+      "name": "get_remediation",
+      "description": "Return remediation guidance for one canonical finding."
+    },
+    {
+      "name": "compare_runs",
+      "description": "Run-to-run delta: regressions, improvements, health change."
+    },
+    {
+      "name": "evaluate_gates",
+      "description": "Preview CI gating decisions for the current run."
+    },
+    {
+      "name": "generate_pr_summary",
+      "description": "PR-friendly markdown or JSON summary of the analysis."
+    },
+    {
+      "name": "help",
+      "description": "Semantic guide for workflow, analysis profile, baseline, and review state."
+    }
+  ],
+  "tools_generated": true,
+  "license": "MPL-2.0",
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": [
+      "darwin",
+      "linux",
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.js"
+      ],
+      "env": {
+        "CODECLONE_MCP_COMMAND": "${user_config.launcher_command}",
+        "CODECLONE_MCP_ARGS_JSON": "${user_config.launcher_args_json}"
+      }
+    }
+  },
+  "user_config": {
+    "launcher_command": {
+      "type": "string",
+      "title": "CodeClone launcher command",
+      "description": "Optional absolute path or bare command name for codeclone-mcp. Leave empty to use auto-discovery and PATH.",
+      "required": false
+    },
+    "launcher_args_json": {
+      "type": "string",
+      "title": "Advanced launcher args (JSON array)",
+      "description": "Optional JSON array of additional codeclone-mcp arguments. Transport is always stdio and cannot be overridden.",
+      "required": false
+    }
+  }
+}

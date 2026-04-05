@@ -1,6 +1,59 @@
 # Changelog
 
-## [2.0.0b3]
+## [2.0.0b4]
+
+### MCP server
+
+- Add `help(topic=...)` tool for workflow guidance, baseline semantics, analysis profile, and review-state routing
+  (tool count: 20 → 21).
+- Add `analysis_profile` help topic for explicit conservative-first / deeper-review threshold guidance.
+- Enrich `_SERVER_INSTRUCTIONS` with triage-first workflow, budget-aware drill-down, and conservative-first threshold
+  guidance so MCP-capable clients receive structured behavioral context on connect.
+- Optimize MCP payloads: short finding IDs (sha256-based for block clones), compact `derived` section projection,
+  bounded `metrics_detail` with pagination.
+- Fix MCP initialize metadata so `serverInfo.version` reports the CodeClone package version rather than the underlying
+  `mcp` runtime version.
+
+### Report contract
+
+- Bump canonical report schema to `2.3`.
+- Add `metrics.overloaded_modules` — report-only module-hotspot ranking by size, complexity, and coupling pressure.
+- Surface Overloaded Modules across JSON, text/markdown, HTML, and MCP without affecting findings, health, or gates.
+- Normalize the canonical family name and MCP/report output to `overloaded_modules`; `god_modules` remains accepted as a
+  read-only MCP input alias during transition.
+
+### CLI and HTML
+
+- Align CLI and HTML scope summaries with canonical inventory totals.
+- Redesign Overview tab: Executive Summary becomes 2-column (Issue Breakdown + Source Breakdown) with scan scope in
+  the section subtitle; Overloaded Modules section replaces the earlier stretched module-hotspot layout.
+
+### Documentation
+
+- Add Health Score chapter: scoring inputs, report-only layers, phased expansion policy.
+- Document that future releases may lower scores due to broader scoring model, not only worse code.
+
+### IDE and client integration (preview)
+
+- Add VS Code extension (`codeclone-mcp` client) with baseline-aware triage, source drill-down, Explorer decorations,
+  and HTML-report bridging.
+- Add conservative, deeper-review, and custom analysis profiles to the VS Code extension and pass them through to MCP.
+- Add limited Restricted Mode: onboarding works in untrusted workspaces, analysis stays gated until trust is granted.
+- Add Node unit tests, extension-host smoke tests, and `.vsix` packaging.
+- Tighten the VS Code extension to current VS Code UX guidance: one primary editor action, titled Quick Picks,
+  per-view icons, non-button tree details, and a hard minimum local CodeClone version gate (`>= 2.0.0b4`).
+- Add Claude Desktop `.mcpb` bundle wrapper for the local `codeclone-mcp` launcher with pre-loaded review instructions,
+  explicit launcher settings, platform auto-discovery (macOS, Linux, Windows), local-stdio enforcement, signal
+  forwarding, and deterministic package build smoke.
+- Add a native Codex plugin with repo-local discovery metadata, bundled `codeclone-mcp` config, pre-loaded instructions,
+  and two skills: conservative-first full review and quick hotspot discovery.
+
+### Internal
+
+- Extract shared `_json_io` module for deterministic JSON serialization across baseline, cache, and report paths.
+- Remove low-signal structural clone noise surfaced by stricter analysis passes without touching golden fixture debt.
+
+## [2.0.0b3] - 2026-04-01
 
 2.0.0b3 is the release where CodeClone stops looking like "a strong analyzer with extras" and starts looking like a
 coherent platform: canonical-report-first, agent-facing, CI-native, and product-grade.
@@ -49,7 +102,8 @@ coherent platform: canonical-report-first, agent-facing, CI-native, and product-
 
 ### HTML report
 
-- Add `Hotspots by Directory` to the Overview tab, surfacing directory-level concentration for `all`, `clones`, and low-cohesion findings with scope-aware badges and compact counts.
+- Add `Hotspots by Directory` to the Overview tab, surfacing directory-level concentration for `all`, `clones`, and
+  low-cohesion findings with scope-aware badges and compact counts.
 - Add IDE picker (PyCharm, IDEA, VS Code, Cursor, Fleet, Zed) with persistent selection.
 - Add clickable file-path deep links across all tabs and stable `finding-{id}` anchors.
 
@@ -57,7 +111,7 @@ coherent platform: canonical-report-first, agent-facing, CI-native, and product-
 
 - Ship Composite Action v2 with configurable quality gates, SARIF upload to Code Scanning, and PR summary comments.
 
-## [2.0.0b2]
+## [2.0.0b2] - 2026-03-28
 
 ### Dependencies
 
@@ -71,7 +125,7 @@ coherent platform: canonical-report-first, agent-facing, CI-native, and product-
 - Keep Overview KPI micro-badges inside cards at extreme browser/mobile widths.
 - Restyle Report Provenance summary badges to match the card-style badge language used across the report.
 
-## [2.0.0b1] - 20260325
+## [2.0.0b1] - 2026-03-25
 
 Major upgrade: CodeClone evolves from a structural clone detector into a
 **baseline-aware code-health and CI governance tool** for Python.

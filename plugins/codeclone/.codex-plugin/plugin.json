@@ -1,0 +1,48 @@
+{
+  "name": "codeclone",
+  "version": "2.0.0-b4.0",
+  "description": "Baseline-aware structural code quality analysis for Codex through the local CodeClone MCP server.",
+  "author": {
+    "name": "Den Rozhnovskiy",
+    "email": "pytelemonbot@mail.ru",
+    "url": "https://github.com/orenlab"
+  },
+  "homepage": "https://orenlab.github.io/codeclone/codex-plugin/",
+  "repository": "https://github.com/orenlab/codeclone",
+  "license": "MPL-2.0",
+  "keywords": [
+    "codeclone",
+    "codex",
+    "mcp",
+    "structural-review",
+    "baseline-aware",
+    "code-quality",
+    "clone-detection"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "instructions": "You have access to CodeClone through the local CodeClone MCP server. Use MCP tools only. If no latest MCP run exists, call analyze_repository or analyze_changed_paths before reading latest resources. Start with the default profile, prefer get_production_triage after analysis, use analyze_changed_paths for diffs, and never fall back to CLI, local report files, or repository mutation.",
+  "interface": {
+    "displayName": "CodeClone",
+    "shortDescription": "Structural code quality analysis for Python.",
+    "longDescription": "CodeClone for Codex — clone detection, quality metrics, and baseline-aware governance over the canonical codeclone-mcp server. Ships a review skill and a hotspot discovery skill for conservative-first, triage-first structural review.",
+    "developerName": "OrenLab",
+    "category": "Developer Tools",
+    "capabilities": [
+      "MCP",
+      "Skills",
+      "Read-only"
+    ],
+    "websiteURL": "https://orenlab.github.io/codeclone/codex-plugin/",
+    "privacyPolicyURL": "https://orenlab.github.io/codeclone/privacy-policy/",
+    "termsOfServiceURL": "https://orenlab.github.io/codeclone/terms-of-use/",
+    "defaultPrompt": [
+      "Use CodeClone to analyze this repo and show the top production hotspots.",
+      "Run a changed-files CodeClone review for my current diff.",
+      "Check CodeClone health and explain what to fix first."
+    ],
+    "brandColor": "#58A6FF",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png"
+  }
+}

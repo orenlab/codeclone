@@ -82,6 +82,7 @@ class _ParseTimeoutError(Exception):
 _NamedDeclarationNode = _qualnames.FunctionNode | ast.ClassDef
 # Unique key for a declaration's token index: (start_line, end_line, qualname).
 _DeclarationTokenIndexKey = tuple[int, int, str]
+_DECLARATION_TOKEN_STRINGS = frozenset({"def", "async", "class"})
 
 
 def _consumed_cpu_seconds(resource_module: object) -> float:
@@ -199,11 +200,8 @@ def _build_declaration_token_index(
 ) -> Mapping[_DeclarationTokenIndexKey, int]:
     indexed: dict[_DeclarationTokenIndexKey, int] = {}
     for idx, token in enumerate(source_tokens):
-        if token.type != tokenize.NAME:
-            continue
-        if token.string not in {"def", "async", "class"}:
-            continue
-        indexed[(token.start[0], token.start[1], token.string)] = idx
+        if token.type == tokenize.NAME and token.string in _DECLARATION_TOKEN_STRINGS:
+            indexed[(token.start[0], token.start[1], token.string)] = idx
     return indexed
 
 
@@ -821,59 +819,44 @@ def _collect_declaration_targets(
     include_inline_lines: bool = False,
 ) -> tuple[DeclarationTarget, ...]:
     declarations: list[DeclarationTarget] = []
+    declaration_specs: list[
+        tuple[str, ast.AST, Literal["function", "method", "class"]]
+    ] = [
+        (
+            local_name,
+            node,
+            "method" if "." in local_name else "function",
+        )
+        for local_name, node in collector.units
+    ]
+    declaration_specs.extend(
+        (class_qualname, class_node, "class")
+        for class_qualname, class_node in collector.class_nodes
+    )
 
-    for local_name, node in collector.units:
+    for qualname_suffix, node, kind in declaration_specs:
         start = int(getattr(node, "lineno", 0))
         end = int(getattr(node, "end_lineno", 0))
-        if start <= 0 or end <= 0:
-            continue
-        declaration_end_line = (
-            _declaration_end_line(
-                node,
-                source_tokens=source_tokens,
-                source_token_index=source_token_index,
+        if start > 0 and end > 0:
+            declaration_end_line = (
+                _declaration_end_line(
+                    node,
+                    source_tokens=source_tokens,
+                    source_token_index=source_token_index,
+                )
+                if include_inline_lines
+                else None
             )
-            if include_inline_lines
-            else None
-        )
-        kind: Literal["function", "method"] = (
-            "method" if "." in local_name else "function"
-        )
-        declarations.append(
-            DeclarationTarget(
-                filepath=filepath,
-                qualname=f"{module_name}:{local_name}",
-                start_line=start,
-                end_line=end,
-                kind=kind,
-                declaration_end_line=declaration_end_line,
+            declarations.append(
+                DeclarationTarget(
+                    filepath=filepath,
+                    qualname=f"{module_name}:{qualname_suffix}",
+                    start_line=start,
+                    end_line=end,
+                    kind=kind,
+                    declaration_end_line=declaration_end_line,
+                )
             )
-        )
-
-    for class_qualname, class_node in collector.class_nodes:
-        start = int(getattr(class_node, "lineno", 0))
-        end = int(getattr(class_node, "end_lineno", 0))
-        if start <= 0 or end <= 0:
-            continue
-        declaration_end_line = (
-            _declaration_end_line(
-                class_node,
-                source_tokens=source_tokens,
-                source_token_index=source_token_index,
-            )
-            if include_inline_lines
-            else None
-        )
-        declarations.append(
-            DeclarationTarget(
-                filepath=filepath,
-                qualname=f"{module_name}:{class_qualname}",
-                start_line=start,
-                end_line=end,
-                kind="class",
-                declaration_end_line=declaration_end_line,
-            )
-        )
 
     return tuple(
         sorted(

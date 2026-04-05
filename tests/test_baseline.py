@@ -806,7 +806,7 @@ def test_baseline_atomic_write_json_cleans_up_temp_file_on_replace_failure(
         temp_holder["path"] = Path(src)
         raise OSError("replace failed")
 
-    monkeypatch.setattr("codeclone.baseline.os.replace", _boom_replace)
+    monkeypatch.setattr("codeclone._json_io.os.replace", _boom_replace)
 
     with pytest.raises(OSError, match="replace failed"):
         baseline_mod._atomic_write_json(path, _trusted_payload())

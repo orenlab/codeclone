@@ -2,8 +2,8 @@ name: CodeClone
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
-    paths: ["**/*.py"]
+    types: [ opened, synchronize, reopened ]
+    paths: [ "**/*.py" ]
 
 permissions:
   contents: read

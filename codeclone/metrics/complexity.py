@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 import ast
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from ..contracts import COMPLEXITY_RISK_LOW_MAX, COMPLEXITY_RISK_MEDIUM_MAX
+from ._risk import RiskLevel, threshold_risk
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -88,9 +89,9 @@ def nesting_depth(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
     return _visit_statements(list(func_node.body), 0)
 
 
-def risk_level(cc: int) -> Literal["low", "medium", "high"]:
-    if cc <= COMPLEXITY_RISK_LOW_MAX:
-        return "low"
-    if cc <= COMPLEXITY_RISK_MEDIUM_MAX:
-        return "medium"
-    return "high"
+def risk_level(cc: int) -> RiskLevel:
+    return threshold_risk(
+        cc,
+        low_max=COMPLEXITY_RISK_LOW_MAX,
+        medium_max=COMPLEXITY_RISK_MEDIUM_MAX,
+    )

@@ -7,15 +7,17 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import subprocess
 from argparse import Namespace
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from json import JSONDecodeError
 from pathlib import Path
 from threading import RLock
 from typing import Final, Literal, cast
+
+import orjson
 
 from . import __version__
 from ._cli_args import (
@@ -51,6 +53,7 @@ from .contracts import (
     DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+    DOCS_URL,
     REPORT_SCHEMA_VERSION,
     ExitCode,
 )
@@ -123,12 +126,24 @@ FindingSort = Literal["default", "priority", "severity", "spread"]
 DetailLevel = Literal["summary", "normal", "full"]
 ComparisonFocus = Literal["all", "clones", "structural", "metrics"]
 PRSummaryFormat = Literal["markdown", "json"]
+HelpTopic = Literal[
+    "workflow",
+    "analysis_profile",
+    "suppressions",
+    "baseline",
+    "latest_runs",
+    "review_state",
+    "changed_scope",
+]
+HelpDetail = Literal["compact", "normal"]
 MetricsDetailFamily = Literal[
     "complexity",
     "coupling",
     "cohesion",
     "dependencies",
     "dead_code",
+    "god_modules",
+    "overloaded_modules",
     "health",
 ]
 ReportSection = Literal[
@@ -203,6 +218,18 @@ _VALID_FINDING_SORT = frozenset({"default", "priority", "severity", "spread"})
 _VALID_DETAIL_LEVELS = frozenset({"summary", "normal", "full"})
 _VALID_COMPARISON_FOCUS = frozenset({"all", "clones", "structural", "metrics"})
 _VALID_PR_SUMMARY_FORMATS = frozenset({"markdown", "json"})
+_VALID_HELP_TOPICS = frozenset(
+    {
+        "workflow",
+        "analysis_profile",
+        "suppressions",
+        "baseline",
+        "latest_runs",
+        "review_state",
+        "changed_scope",
+    }
+)
+_VALID_HELP_DETAILS = frozenset({"compact", "normal"})
 DEFAULT_MCP_HISTORY_LIMIT = 4
 MAX_MCP_HISTORY_LIMIT = 10
 _VALID_REPORT_SECTIONS = frozenset(
@@ -235,6 +262,10 @@ _SOURCE_KIND_BREAKDOWN_ORDER: Final[tuple[str, ...]] = (
     SOURCE_KIND_MIXED,
     SOURCE_KIND_OTHER,
 )
+_COMPACT_ITEM_PATH_KEYS: Final[frozenset[str]] = frozenset(
+    {"relative_path", "path", "filepath", "file"}
+)
+_COMPACT_ITEM_EMPTY_VALUES: Final[tuple[object, ...]] = ("", None, [], {}, ())
 _HOTLIST_REPORT_KEYS: Final[dict[str, str]] = {
     "most_actionable": "most_actionable_ids",
     "highest_spread": "highest_spread_ids",
@@ -255,11 +286,365 @@ _VALID_METRICS_DETAIL_FAMILIES = frozenset(
         "cohesion",
         "dependencies",
         "dead_code",
+        "god_modules",
+        "overloaded_modules",
         "health",
     }
 )
+_METRICS_DETAIL_FAMILY_ALIASES: Final[dict[str, str]] = {
+    "god_modules": "overloaded_modules",
+}
 _SHORT_RUN_ID_LENGTH = 8
 _SHORT_HASH_ID_LENGTH = 6
+
+
+@dataclass(frozen=True)
+class MCPHelpTopicSpec:
+    summary: str
+    key_points: tuple[str, ...]
+    recommended_tools: tuple[str, ...]
+    doc_links: tuple[tuple[str, str], ...]
+    warnings: tuple[str, ...] = ()
+    anti_patterns: tuple[str, ...] = ()
+
+
+_MCP_BOOK_URL: Final = f"{DOCS_URL}book/"
+_MCP_GUIDE_URL: Final = f"{DOCS_URL}mcp/"
+_MCP_INTERFACE_DOC_LINK: Final[tuple[str, str]] = (
+    "MCP interface contract",
+    f"{_MCP_BOOK_URL}20-mcp-interface/",
+)
+_BASELINE_DOC_LINK: Final[tuple[str, str]] = (
+    "Baseline contract",
+    f"{_MCP_BOOK_URL}06-baseline/",
+)
+_CONFIG_DOC_LINK: Final[tuple[str, str]] = (
+    "Config and defaults",
+    f"{_MCP_BOOK_URL}04-config-and-defaults/",
+)
+_PIPELINE_DOC_LINK: Final[tuple[str, str]] = (
+    "Core pipeline",
+    f"{_MCP_BOOK_URL}05-core-pipeline/",
+)
+_SUPPRESSIONS_DOC_LINK: Final[tuple[str, str]] = (
+    "Inline suppressions contract",
+    f"{_MCP_BOOK_URL}19-inline-suppressions/",
+)
+_MCP_GUIDE_DOC_LINK: Final[tuple[str, str]] = ("MCP usage guide", _MCP_GUIDE_URL)
+_HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
+    "workflow": MCPHelpTopicSpec(
+        summary=(
+            "CodeClone MCP is triage-first and budget-aware. Start with a "
+            "summary or production triage, then narrow through hotspots or "
+            "focused checks before opening one finding in detail."
+        ),
+        key_points=(
+            "Recommended first pass: analyze_repository or analyze_changed_paths.",
+            (
+                "Start with default or pyproject-resolved thresholds; lower them "
+                "only for an explicit higher-sensitivity follow-up pass."
+            ),
+            (
+                "Use get_run_summary or get_production_triage before broad "
+                "finding listing."
+            ),
+            (
+                "Prefer list_hotspots or focused check_* tools over "
+                "list_findings on noisy repositories."
+            ),
+            ("Use get_finding and get_remediation only after selecting an issue."),
+            (
+                "get_report_section(section='all') is an exception path, not "
+                "a default first step."
+            ),
+        ),
+        recommended_tools=(
+            "analyze_repository",
+            "analyze_changed_paths",
+            "get_run_summary",
+            "get_production_triage",
+            "list_hotspots",
+            "check_clones",
+            "check_dead_code",
+            "get_finding",
+            "get_remediation",
+        ),
+        doc_links=(_MCP_INTERFACE_DOC_LINK, _MCP_GUIDE_DOC_LINK),
+        warnings=(
+            (
+                "Broad list_findings calls burn context quickly on large or "
+                "noisy repositories."
+            ),
+            (
+                "Prefer generate_pr_summary(format='markdown') unless machine "
+                "JSON is explicitly required."
+            ),
+        ),
+        anti_patterns=(
+            "Starting exploration with list_findings on a noisy repository.",
+            "Using get_report_section(section='all') as the default first step.",
+            (
+                "Escalating detail on larger lists instead of opening one "
+                "finding with get_finding."
+            ),
+        ),
+    ),
+    "analysis_profile": MCPHelpTopicSpec(
+        summary=(
+            "CodeClone default analysis is intentionally conservative: stable "
+            "first-pass review, baseline-aware governance, and CI-friendly "
+            "signal over maximum local sensitivity."
+        ),
+        key_points=(
+            (
+                "Default thresholds are intentionally conservative and "
+                "production-friendly."
+            ),
+            (
+                "A clean default run does not rule out smaller local "
+                "duplication or repetition."
+            ),
+            (
+                "Lowering thresholds increases sensitivity and can surface "
+                "smaller functions, tighter windows, and finer local signals."
+            ),
+            (
+                "Lower-threshold runs are best for exploratory local review, "
+                "not as a silent replacement for the default governance profile."
+            ),
+            "Interpret results in the context of the active threshold profile.",
+        ),
+        recommended_tools=(
+            "analyze_repository",
+            "analyze_changed_paths",
+            "get_run_summary",
+            "compare_runs",
+        ),
+        doc_links=(
+            _CONFIG_DOC_LINK,
+            _PIPELINE_DOC_LINK,
+            _MCP_INTERFACE_DOC_LINK,
+        ),
+        warnings=(
+            (
+                "Do not treat a default-threshold run as proof that no smaller "
+                "local clone or repetition exists."
+            ),
+            (
+                "Lower-threshold runs usually increase noise and should be read "
+                "as higher-sensitivity exploratory passes."
+            ),
+            "Run comparisons are most meaningful when profiles are aligned.",
+        ),
+        anti_patterns=(
+            (
+                "Assuming a clean default pass means no finer-grained "
+                "duplication exists anywhere in the repository."
+            ),
+            (
+                "Lowering thresholds for exploration and then interpreting the "
+                "result as if it had the same meaning as the conservative "
+                "default pass."
+            ),
+            (
+                "Mixing low-threshold exploratory output into baseline or CI "
+                "reasoning without acknowledging the profile change."
+            ),
+        ),
+    ),
+    "suppressions": MCPHelpTopicSpec(
+        summary=(
+            "CodeClone supports explicit inline suppressions for selected "
+            "findings. They are local policy, not analysis truth, and should "
+            "stay narrow and declaration-scoped."
+        ),
+        key_points=(
+            "Current syntax uses codeclone: ignore[rule-id,...].",
+            "Binding is declaration-scoped: def, async def, or class.",
+            (
+                "Supported placement is the previous line or inline on the "
+                "declaration or header line."
+            ),
+            (
+                "Suppressions are target-specific and do not imply file-wide "
+                "or cascading scope."
+            ),
+            (
+                "Use suppressions for accepted dynamic or runtime false "
+                "positives, not to hide broad classes of debt."
+            ),
+        ),
+        recommended_tools=("get_finding", "get_remediation"),
+        doc_links=(_SUPPRESSIONS_DOC_LINK, _MCP_INTERFACE_DOC_LINK),
+        warnings=(
+            (
+                "MCP explains suppression semantics but never creates or "
+                "updates suppressions."
+            ),
+        ),
+        anti_patterns=(
+            "Treating suppressions as file-wide or inherited state.",
+            (
+                "Using suppressions to hide broad structural debt instead of "
+                "accepted false positives."
+            ),
+        ),
+    ),
+    "baseline": MCPHelpTopicSpec(
+        summary=(
+            "A baseline is CodeClone's accepted comparison snapshot for clones "
+            "and optional metrics. It separates known debt from new regressions "
+            "and is trust-checked before use."
+        ),
+        key_points=(
+            (
+                "Canonical baseline schema is v2.0 with meta and clone keys; "
+                "metrics may be embedded for unified flows."
+            ),
+            (
+                "Compatibility depends on generator identity, supported "
+                "schema version, fingerprint version, python tag, and payload "
+                "integrity."
+            ),
+            (
+                "Known means already present in the trusted baseline; new "
+                "means not accepted by baseline."
+            ),
+            (
+                "In CI and gating contexts, untrusted baseline states are "
+                "contract errors rather than soft warnings."
+            ),
+            "MCP is read-only and does not update or rewrite baselines.",
+        ),
+        recommended_tools=("get_run_summary", "evaluate_gates", "compare_runs"),
+        doc_links=(_BASELINE_DOC_LINK,),
+        warnings=(
+            "Baseline trust semantics directly affect new-vs-known classification.",
+        ),
+        anti_patterns=(
+            "Treating baseline as mutable MCP session state.",
+            "Assuming an untrusted baseline is only cosmetic in CI contexts.",
+        ),
+    ),
+    "latest_runs": MCPHelpTopicSpec(
+        summary=(
+            "latest/* resources point to the most recent analysis run in the "
+            "current MCP session. They are convenience handles, not persistent "
+            "truth anchors."
+        ),
+        key_points=(
+            "Run history is in-memory only and bounded by history-limit.",
+            "The latest pointer moves when a newer analyze_* call registers a run.",
+            "A fresh repository state requires a fresh analyze run.",
+            (
+                "Short run ids are convenience handles derived from canonical "
+                "run identity."
+            ),
+            (
+                "Do not assume latest/* is globally current outside the "
+                "active MCP session."
+            ),
+        ),
+        recommended_tools=(
+            "analyze_repository",
+            "analyze_changed_paths",
+            "get_run_summary",
+            "compare_runs",
+        ),
+        doc_links=(_MCP_INTERFACE_DOC_LINK, _MCP_GUIDE_DOC_LINK),
+        warnings=(
+            (
+                "latest/* can point at a different repository after a later "
+                "analyze call in the same session."
+            ),
+        ),
+        anti_patterns=(
+            (
+                "Assuming latest/* remains tied to one repository across the "
+                "whole client session."
+            ),
+            (
+                "Using latest/* as a substitute for starting a fresh run when "
+                "freshness matters."
+            ),
+        ),
+    ),
+    "review_state": MCPHelpTopicSpec(
+        summary=(
+            "Reviewed state in MCP is session-local workflow state. It helps "
+            "long sessions track review progress without modifying canonical "
+            "findings, baseline, or persisted artifacts."
+        ),
+        key_points=(
+            "Review markers are in-memory only.",
+            "They do not change report truth, finding identity, or CI semantics.",
+            "They are useful for triage workflows across long sessions.",
+            (
+                "They should not be interpreted as acceptance, suppression, "
+                "or baseline update."
+            ),
+        ),
+        recommended_tools=(
+            "list_hotspots",
+            "get_finding",
+            "mark_finding_reviewed",
+            "list_reviewed_findings",
+        ),
+        doc_links=(_MCP_INTERFACE_DOC_LINK, _MCP_GUIDE_DOC_LINK),
+        warnings=(
+            "Reviewed markers disappear when the MCP session is cleared or restarted.",
+        ),
+        anti_patterns=(
+            "Treating reviewed state as a persistent acceptance signal.",
+            "Assuming reviewed findings are removed from canonical report truth.",
+        ),
+    ),
+    "changed_scope": MCPHelpTopicSpec(
+        summary=(
+            "Changed-scope analysis narrows review to findings that touch a "
+            "selected change set. It is for PR and patch review, not a "
+            "replacement for full canonical analysis."
+        ),
+        key_points=(
+            (
+                "Use analyze_changed_paths with explicit changed_paths or "
+                "git_diff_ref for review-focused runs."
+            ),
+            (
+                "Start with the same conservative profile as the default "
+                "review, then lower thresholds only when you explicitly want "
+                "a higher-sensitivity changed-files pass."
+            ),
+            (
+                "Changed-scope is best for asking what new issues touch "
+                "modified files and whether anything should block CI."
+            ),
+            "Prefer production triage and hotspot views before broad listing.",
+            "If repository-wide truth is needed, run full analysis first.",
+        ),
+        recommended_tools=(
+            "analyze_changed_paths",
+            "get_run_summary",
+            "get_production_triage",
+            "evaluate_gates",
+            "generate_pr_summary",
+        ),
+        doc_links=(_MCP_INTERFACE_DOC_LINK, _MCP_GUIDE_DOC_LINK),
+        warnings=(
+            (
+                "Changed-scope narrows review focus; it does not replace the "
+                "full canonical report for repository-wide truth."
+            ),
+        ),
+        anti_patterns=(
+            "Using changed-scope as if it were the only source of repository truth.",
+            (
+                "Starting changed-files review with broad listing instead of "
+                "compact triage."
+            ),
+        ),
+    ),
+}
 
 
 def _suggestion_finding_id_payload(suggestion: object) -> str:
@@ -391,12 +776,10 @@ def _json_text_payload(
     *,
     sort_keys: bool = True,
 ) -> str:
-    return json.dumps(
-        payload,
-        ensure_ascii=False,
-        indent=2,
-        sort_keys=sort_keys,
-    )
+    options = orjson.OPT_INDENT_2
+    if sort_keys:
+        options |= orjson.OPT_SORT_KEYS
+    return orjson.dumps(payload, option=options).decode("utf-8")
 
 
 def _git_diff_lines_payload(
@@ -428,8 +811,8 @@ def _git_diff_lines_payload(
 
 def _load_report_document_payload(report_json: str) -> dict[str, object]:
     try:
-        payload = json.loads(report_json)
-    except json.JSONDecodeError as exc:
+        payload = orjson.loads(report_json)
+    except JSONDecodeError as exc:
         raise MCPServiceError(
             f"Generated canonical report is not valid JSON: {exc}"
         ) from exc
@@ -1027,14 +1410,20 @@ class CodeCloneMCPService:
                 raise MCPServiceContractError(
                     "Report section 'metrics_detail' is not available in this run."
                 )
-            validated_family = cast(
-                "MetricsDetailFamily | None",
-                self._validate_optional_choice(
-                    "family",
-                    family,
-                    _VALID_METRICS_DETAIL_FAMILIES,
-                ),
+            validated_family_input = self._validate_optional_choice(
+                "family",
+                family,
+                _VALID_METRICS_DETAIL_FAMILIES,
             )
+            normalized_family = (
+                _METRICS_DETAIL_FAMILY_ALIASES.get(
+                    str(validated_family_input),
+                    str(validated_family_input),
+                )
+                if validated_family_input is not None
+                else None
+            )
+            validated_family = cast("MetricsDetailFamily | None", normalized_family)
             return self._metrics_detail_payload(
                 metrics=metrics,
                 family=validated_family,
@@ -1297,6 +1686,38 @@ class CodeCloneMCPService:
             },
         }
 
+    def get_help(
+        self,
+        *,
+        topic: HelpTopic,
+        detail: HelpDetail = "compact",
+    ) -> dict[str, object]:
+        validated_topic = cast(
+            "HelpTopic",
+            self._validate_choice("topic", topic, _VALID_HELP_TOPICS),
+        )
+        validated_detail = cast(
+            "HelpDetail",
+            self._validate_choice("detail", detail, _VALID_HELP_DETAILS),
+        )
+        spec = _HELP_TOPIC_SPECS[validated_topic]
+        payload: dict[str, object] = {
+            "topic": validated_topic,
+            "detail": validated_detail,
+            "summary": spec.summary,
+            "key_points": list(spec.key_points),
+            "recommended_tools": list(spec.recommended_tools),
+            "doc_links": [
+                {"title": title, "url": url} for title, url in spec.doc_links
+            ],
+        }
+        if validated_detail == "normal":
+            if spec.warnings:
+                payload["warnings"] = list(spec.warnings)
+            if spec.anti_patterns:
+                payload["anti_patterns"] = list(spec.anti_patterns)
+        return payload
+
     def generate_pr_summary(
         self,
         *,
@@ -1546,30 +1967,14 @@ class CodeCloneMCPService:
         max_results: int = 10,
         detail_level: DetailLevel = "summary",
     ) -> dict[str, object]:
-        validated_detail = cast(
-            "DetailLevel",
-            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
-        )
-        record = self._resolve_granular_record(
+        return self._check_design_metric(
             run_id=run_id,
             root=root,
-            analysis_mode="full",
-        )
-        findings = self._query_findings(
-            record=record,
-            family="design",
-            category=CATEGORY_COUPLING,
-            detail_level=validated_detail,
-            changed_paths=self._path_filter_tuple(path),
-            sort_by="priority",
-        )
-        return self._granular_payload(
-            record=record,
-            check="coupling",
-            items=findings,
-            detail_level=validated_detail,
-            max_results=max_results,
             path=path,
+            max_results=max_results,
+            detail_level=detail_level,
+            category=CATEGORY_COUPLING,
+            check="coupling",
         )
 
     def check_cohesion(
@@ -1580,6 +1985,27 @@ class CodeCloneMCPService:
         path: str | None = None,
         max_results: int = 10,
         detail_level: DetailLevel = "summary",
+    ) -> dict[str, object]:
+        return self._check_design_metric(
+            run_id=run_id,
+            root=root,
+            path=path,
+            max_results=max_results,
+            detail_level=detail_level,
+            category=CATEGORY_COHESION,
+            check="cohesion",
+        )
+
+    def _check_design_metric(
+        self,
+        *,
+        run_id: str | None,
+        root: str | None,
+        path: str | None,
+        max_results: int,
+        detail_level: DetailLevel,
+        category: str,
+        check: str,
     ) -> dict[str, object]:
         validated_detail = cast(
             "DetailLevel",
@@ -1593,14 +2019,14 @@ class CodeCloneMCPService:
         findings = self._query_findings(
             record=record,
             family="design",
-            category=CATEGORY_COHESION,
+            category=category,
             detail_level=validated_detail,
             changed_paths=self._path_filter_tuple(path),
             sort_by="priority",
         )
         return self._granular_payload(
             record=record,
-            check="cohesion",
+            check=check,
             items=findings,
             detail_level=validated_detail,
             max_results=max_results,
@@ -1861,10 +2287,12 @@ class CodeCloneMCPService:
                 short_to_canonical[disambiguated] = canonical_id
         return canonical_to_short, short_to_canonical
 
-    def _base_short_finding_id(self, canonical_id: str) -> str:
+    @staticmethod
+    def _base_short_finding_id(canonical_id: str) -> str:
         return _base_short_finding_id_payload(canonical_id)
 
-    def _disambiguated_short_finding_id(self, canonical_id: str) -> str:
+    @staticmethod
+    def _disambiguated_short_finding_id(canonical_id: str) -> str:
         return _disambiguated_short_finding_id_payload(canonical_id)
 
     def _disambiguated_short_finding_ids(
@@ -1983,7 +2411,10 @@ class CodeCloneMCPService:
             return ""
         if cleaned.startswith("./"):
             cleaned = cleaned[2:]
-        return cleaned.rstrip("/")
+        cleaned = cleaned.rstrip("/")
+        if ".." in Path(cleaned).parts:
+            raise MCPServiceContractError(f"path traversal not allowed: {path}")
+        return cleaned
 
     def _previous_run_for_root(self, record: MCPRunRecord) -> MCPRunRecord | None:
         previous: MCPRunRecord | None = None
@@ -3585,18 +4016,21 @@ class CodeCloneMCPService:
         self,
         summary: Mapping[str, object],
     ) -> dict[str, object]:
-        baseline = self._as_mapping(summary.get("baseline"))
-        return {
-            "loaded": bool(baseline.get("loaded", False)),
-            "status": str(baseline.get("status", "")),
-            "trusted": bool(baseline.get("trusted_for_diff", False)),
-        }
+        return self._summary_trusted_state_payload(summary, key="baseline")
 
     def _summary_metrics_baseline_payload(
         self,
         summary: Mapping[str, object],
     ) -> dict[str, object]:
-        baseline = self._as_mapping(summary.get("metrics_baseline"))
+        return self._summary_trusted_state_payload(summary, key="metrics_baseline")
+
+    def _summary_trusted_state_payload(
+        self,
+        summary: Mapping[str, object],
+        *,
+        key: str,
+    ) -> dict[str, object]:
+        baseline = self._as_mapping(summary.get(key))
         return {
             "loaded": bool(baseline.get("loaded", False)),
             "status": str(baseline.get("status", "")),
@@ -3762,14 +4196,15 @@ class CodeCloneMCPService:
                 if family is None:
                     compact_item = {"family": family_name, **compact_item}
                 items.append(compact_item)
-        items.sort(
-            key=lambda item: (
-                str(item.get("family", family or "")),
-                str(item.get("path", "")),
-                str(item.get("qualname", "")),
-                _as_int(item.get("start_line", 0), 0),
+        if family is None:
+            items.sort(
+                key=lambda item: (
+                    str(item.get("family", "")),
+                    str(item.get("path", "")),
+                    str(item.get("qualname", "")),
+                    _as_int(item.get("start_line", 0), 0),
+                )
             )
-        )
         page = items[normalized_offset : normalized_offset + normalized_limit]
         return {
             "family": family,
@@ -3811,11 +4246,11 @@ class CodeCloneMCPService:
         if path_value:
             compact["path"] = path_value
         for key, value in item.items():
-            if key in {"relative_path", "path", "filepath", "file"}:
-                continue
-            if value in ("", None, [], {}, ()):
-                continue
-            compact[str(key)] = value
+            if (
+                key not in _COMPACT_ITEM_PATH_KEYS
+                and value not in _COMPACT_ITEM_EMPTY_VALUES
+            ):
+                compact[str(key)] = value
         return compact
 
     @staticmethod

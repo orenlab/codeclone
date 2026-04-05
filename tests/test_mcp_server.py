@@ -17,9 +17,11 @@ from typing import cast
 
 import pytest
 
+from codeclone import __version__ as CODECLONE_VERSION
 from codeclone import mcp_server
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.mcp_server import MCPDependencyError, build_mcp_server
+from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 
 
 def _structured_tool_result(result: object) -> dict[str, object]:
@@ -71,10 +73,8 @@ def _write_clone_fixture(root: Path) -> None:
 
 
 def _write_quality_fixture(root: Path) -> None:
-    pkg = root.joinpath("pkg")
-    pkg.mkdir(exist_ok=True)
-    pkg.joinpath("__init__.py").write_text("", "utf-8")
-    pkg.joinpath("quality.py").write_text(
+    _write_shared_quality_fixture(
+        root,
         (
             "def complex_branch(flag: int) -> int:\n"
             "    total = 0\n"
@@ -91,23 +91,28 @@ def _write_quality_fixture(root: Path) -> None:
             "def unused_helper() -> int:\n"
             "    return 42\n"
         ),
-        "utf-8",
     )
 
 
 def test_mcp_server_exposes_expected_read_only_tools() -> None:
     _require_mcp_runtime()
     server = build_mcp_server(history_limit=4)
+    init_options = server._mcp_server.create_initialization_options()
 
     assert "prefer get_run_summary or get_production_triage" in str(server.instructions)
     assert "Use list_hotspots or focused check_* tools" in str(server.instructions)
     assert "prefer generate_pr_summary(format='markdown')" in str(server.instructions)
+    assert "Use help(topic=...)" in str(server.instructions)
+    assert "default or pyproject-resolved thresholds for the first pass" in str(
+        server.instructions
+    )
 
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert set(tools) == {
         "analyze_repository",
         "analyze_changed_paths",
         "clear_session_runs",
+        "help",
         "get_run_summary",
         "get_production_triage",
         "evaluate_gates",
@@ -131,6 +136,8 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         assert tool.annotations.readOnlyHint is (
             name
             in {
+                "analyze_repository",
+                "analyze_changed_paths",
                 "check_complexity",
                 "check_clones",
                 "check_coupling",
@@ -138,6 +145,8 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "check_dead_code",
                 "get_run_summary",
                 "get_production_triage",
+                "evaluate_gates",
+                "help",
                 "get_report_section",
                 "list_findings",
                 "get_finding",
@@ -148,7 +157,9 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "list_reviewed_findings",
             }
         )
-        assert tool.annotations.destructiveHint is False
+        assert tool.annotations.destructiveHint is (
+            name in {"mark_finding_reviewed", "clear_session_runs"}
+        )
         assert tool.annotations.idempotentHint is True
     assert "cache_policy='off'" in str(tools["analyze_repository"].description)
     assert "cache_policy='off'" in str(tools["analyze_changed_paths"].description)
@@ -157,7 +168,11 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "get_run_summary or get_production_triage" in str(
         tools["analyze_repository"].description
     )
+    assert "conservative first pass" in str(tools["analyze_repository"].description)
     assert "get_report_section(section='changed')" in str(
+        tools["analyze_changed_paths"].description
+    )
+    assert "conservative profile first" in str(
         tools["analyze_changed_paths"].description
     )
     assert "Use analyze_repository first" in str(tools["check_complexity"].description)
@@ -165,6 +180,11 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "default first-pass review" in str(
         tools["get_production_triage"].description
     )
+    assert "bounded guidance, not a full manual" in str(tools["help"].description)
+    assert "workflow, analysis_profile, suppressions, baseline" in str(
+        tools["help"].description
+    )
+    assert init_options.server_version == CODECLONE_VERSION
     assert "Prefer list_hotspots or focused check_* tools" in str(
         tools["list_findings"].description
     )
@@ -243,6 +263,19 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         "functions",
         "classes",
     }
+
+    help_payload = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "help",
+                {"topic": "changed_scope", "detail": "normal"},
+            )
+        )
+    )
+    assert help_payload["topic"] == "changed_scope"
+    assert help_payload["detail"] == "normal"
+    assert "warnings" in help_payload
+    assert "recommended_tools" in help_payload
 
     findings_result = _structured_tool_result(
         asyncio.run(
@@ -351,7 +384,43 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             )
         )
     )
+    overloaded_modules_page = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_report_section",
+                {
+                    "section": "metrics_detail",
+                    "family": "overloaded_modules",
+                    "limit": 5,
+                },
+            )
+        )
+    )
+    overloaded_modules_alias_page = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_report_section",
+                {"section": "metrics_detail", "family": "god_modules", "limit": 5},
+            )
+        )
+    )
     assert cast("list[dict[str, object]]", metrics_detail_page["items"])
+    assert overloaded_modules_page["family"] == "overloaded_modules"
+    assert overloaded_modules_alias_page["family"] == "overloaded_modules"
+    assert overloaded_modules_alias_page["items"] == overloaded_modules_page["items"]
+    report_metrics = cast("dict[str, object]", report_payload["metrics"])
+    report_families = cast("dict[str, object]", report_metrics["families"])
+    report_overloaded_modules = cast(
+        "dict[str, object]", report_families["overloaded_modules"]
+    )
+    report_overloaded_module_items = cast(
+        "list[dict[str, object]]",
+        report_overloaded_modules["items"],
+    )
+    assert (
+        cast("list[dict[str, object]]", overloaded_modules_page["items"])[0]["path"]
+        == report_overloaded_module_items[0]["relative_path"]
+    )
     changed_section = _structured_tool_result(
         asyncio.run(server.call_tool("get_report_section", {"section": "changed"}))
     )

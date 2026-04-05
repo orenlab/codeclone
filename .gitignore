@@ -38,3 +38,4 @@ site/
 /docs/SPEC-2.0.0.md
 /.uv-cache/
 /package-lock.json
+extensions/vscode-codeclone/node_modules

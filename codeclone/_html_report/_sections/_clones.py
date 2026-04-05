@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Literal
 from ... import _coerce
 from ..._html_badges import _source_kind_badge_html
 from ..._html_data_attrs import _build_data_attrs
-from ..._html_escape import _escape_attr, _escape_html
+from ..._html_escape import _escape_html
 from ..._html_filters import CLONE_TYPE_OPTIONS, SPREAD_OPTIONS, _render_select
 from ..._html_snippets import _render_code_block
 from ...report._source_kinds import SOURCE_KIND_FILTER_VALUES
@@ -159,7 +159,7 @@ def _render_group_explanation(meta: Mapping[str, object]) -> str:
         "data-assert-ratio": str(meta.get("assert_ratio", "")),
         "data-consecutive-asserts": str(meta.get("consecutive_asserts", "")),
     }
-    attr_html = " ".join(f'{k}="{_escape_attr(v)}"' for k, v in attrs.items() if v)
+    attr_html = " ".join(f'{k}="{_escape_html(v)}"' for k, v in attrs.items() if v)
     parts = [f'<span class="{css}">{_escape_html(text)}</span>' for text, css in items]
     note = ""
     if isinstance(meta.get("hint_note"), str):
@@ -175,7 +175,7 @@ def _render_section_toolbar(
     group_count: int,
 ) -> str:
     return (
-        f'<div class="toolbar" role="toolbar" aria-label="{_escape_attr(section_title)} controls">'
+        f'<div class="toolbar" role="toolbar" aria-label="{_escape_html(section_title)} controls">'
         '<div class="toolbar-left">'
         '<div class="search-box">'
         f'<span class="search-ico">{ICONS["search"]}</span>'
@@ -324,7 +324,7 @@ def _metrics_button_html(section_id: str, group_id: str) -> str:
         return ""
     return (
         f'<button class="btn ghost" type="button" '
-        f'data-metrics-btn="{_escape_attr(group_id)}">Info</button>'
+        f'data-metrics-btn="{_escape_html(group_id)}">Info</button>'
     )
 
 
@@ -389,16 +389,16 @@ def _render_group_items_html(
                 f'<div class="item-compare-meta">{_escape_html(compare_text)}</div>'
             )
         rendered.append(
-            f'<div class="item" data-qualname="{_escape_attr(qualname)}" '
-            f'data-filepath="{_escape_attr(filepath)}" '
+            f'<div class="item" data-qualname="{_escape_html(qualname)}" '
+            f'data-filepath="{_escape_html(filepath)}" '
             f'data-start-line="{start_line}" data-end-line="{end_line}" '
             f'data-peer-count="{peer_count}" data-instance-index="{item_index}">'
             '<div class="item-header">'
-            f'<div class="item-title" title="{_escape_attr(qualname)}">'
+            f'<div class="item-title" title="{_escape_html(qualname)}">'
             f"{_escape_html(display_qualname)}</div>"
             f'<div class="item-loc">'
-            f'<a class="ide-link" data-file="{_escape_attr(filepath)}" data-line="{start_line}" '
-            f'title="{_escape_attr(filepath)}:{start_line}-{end_line}">'
+            f'<a class="ide-link" data-file="{_escape_html(filepath)}" data-line="{start_line}" '
+            f'title="{_escape_html(filepath)}:{start_line}-{end_line}">'
             f"{_escape_html(display_filepath)}:{start_line}-{end_line}</a></div></div>"
             f"{compare_html}"
             f"{snippet.code_html}"
@@ -424,7 +424,7 @@ def _render_group_html(
     for item in items:
         search_parts.append(str(item.get("qualname", "")))
         search_parts.append(str(item.get("filepath", "")))
-    search_blob = _escape_attr(" ".join(search_parts).lower())
+    search_blob = _escape_html(" ".join(search_parts).lower())
 
     block_meta = _group_block_meta(section_id, group_key, block_group_facts)
     group_name = _derive_group_display_name(
@@ -472,12 +472,12 @@ def _render_group_html(
     explanation_html = _render_group_explanation(block_meta) if block_meta else ""
 
     return (
-        f'<div class="group" id="finding-{_escape_attr(finding_id)}" '
+        f'<div class="group" id="finding-{_escape_html(finding_id)}" '
         f'data-group="{section_id}" '
         f'data-group-index="{group_index}" '
-        f'data-finding-id="{_escape_attr(finding_id)}" '
-        f'data-group-key="{_escape_attr(group_key)}" '
-        f'data-novelty="{_escape_attr(section_novelty.get(group_key, "all"))}" '
+        f'data-finding-id="{_escape_html(finding_id)}" '
+        f'data-group-key="{_escape_html(group_key)}" '
+        f'data-novelty="{_escape_html(section_novelty.get(group_key, "all"))}" '
         f'data-search="{search_blob}"{_build_data_attrs(group_attrs)}>'
         '<div class="group-head">'
         '<div class="group-head-left">'

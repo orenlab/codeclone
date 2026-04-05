@@ -354,6 +354,88 @@ def _rich_report_document() -> dict[str, object]:
                 },
             }
         },
+        "overloaded_modules": {
+            "summary": {
+                "total": 2,
+                "candidates": 1,
+                "population_status": "ok",
+                "top_score": 0.94,
+                "average_score": 0.58,
+                "candidate_score_cutoff": 0.91,
+            },
+            "detection": {
+                "version": "1",
+                "scope": "report_only",
+                "strategy": "project_relative_composite",
+                "minimum_population": 20,
+                "size_signals": ["loc", "callable_count", "complexity_total"],
+                "dependency_signals": [
+                    "fan_in",
+                    "fan_out",
+                    "total_deps",
+                    "import_edges",
+                ],
+                "shape_signals": ["hub_balance", "reimport_ratio"],
+            },
+            "items": [
+                {
+                    "module": "codeclone.alpha",
+                    "filepath": "/repo/codeclone/codeclone/alpha.py",
+                    "source_kind": "production",
+                    "loc": 900,
+                    "functions": 6,
+                    "methods": 2,
+                    "classes": 1,
+                    "callable_count": 8,
+                    "complexity_total": 64,
+                    "complexity_max": 18,
+                    "fan_in": 3,
+                    "fan_out": 8,
+                    "total_deps": 11,
+                    "import_edges": 12,
+                    "reimport_edges": 4,
+                    "reimport_ratio": 0.3333,
+                    "instability": 0.7273,
+                    "hub_balance": 0.5455,
+                    "size_score": 0.96,
+                    "dependency_score": 0.93,
+                    "shape_score": 0.81,
+                    "score": 0.94,
+                    "candidate_status": "candidate",
+                    "candidate_reasons": [
+                        "size_pressure",
+                        "dependency_pressure",
+                        "hub_like_shape",
+                    ],
+                },
+                {
+                    "module": "tests.test_alpha",
+                    "filepath": "/repo/codeclone/tests/test_alpha.py",
+                    "source_kind": "tests",
+                    "loc": 120,
+                    "functions": 2,
+                    "methods": 0,
+                    "classes": 0,
+                    "callable_count": 2,
+                    "complexity_total": 6,
+                    "complexity_max": 4,
+                    "fan_in": 0,
+                    "fan_out": 1,
+                    "total_deps": 1,
+                    "import_edges": 1,
+                    "reimport_edges": 0,
+                    "reimport_ratio": 0.0,
+                    "instability": 1.0,
+                    "hub_balance": 0.0,
+                    "size_score": 0.22,
+                    "dependency_score": 0.11,
+                    "shape_score": 0.0,
+                    "score": 0.16,
+                    "candidate_status": "non_candidate",
+                    "candidate_reasons": [],
+                },
+            ],
+        },
     }
     suggestions = (
         Suggestion(
@@ -1120,6 +1202,48 @@ def test_markdown_render_long_list_branches() -> None:
     assert "... and 2 more item(s)" in markdown
 
 
+def test_report_contract_renderers_include_overloaded_modules_section() -> None:
+    payload = _rich_report_document()
+
+    text = render_text_report_document(payload)
+    markdown = render_markdown_report_document(payload)
+
+    assert "OVERLOADED MODULES (top 10)" in text
+    assert "module=codeclone.alpha" in text
+    assert '<a id="overloaded-modules"></a>' in markdown
+    assert "### Overloaded Modules" in markdown
+    assert "candidate_status=candidate" in markdown
+
+
+def test_report_contract_includes_canonical_overloaded_modules_family() -> None:
+    payload = _rich_report_document()
+
+    metrics = cast(dict[str, object], payload["metrics"])
+    summary = cast(dict[str, object], metrics["summary"])
+    families = cast(dict[str, object], metrics["families"])
+    overloaded_modules = cast(dict[str, object], families["overloaded_modules"])
+    overloaded_summary = cast(dict[str, object], overloaded_modules["summary"])
+
+    assert summary["overloaded_modules"] == overloaded_summary
+    assert overloaded_summary == {
+        "total": 2,
+        "candidates": 1,
+        "population_status": "ok",
+        "top_score": 0.94,
+        "average_score": 0.58,
+        "candidate_score_cutoff": 0.91,
+    }
+    first = cast(list[dict[str, object]], overloaded_modules["items"])[0]
+    assert first["module"] == "codeclone.alpha"
+    assert first["relative_path"] == "codeclone/alpha.py"
+    assert first["candidate_status"] == "candidate"
+    assert first["candidate_reasons"] == [
+        "size_pressure",
+        "dependency_pressure",
+        "hub_like_shape",
+    ]
+
+
 def test_sarif_helper_level_mapping() -> None:
     assert _severity_to_level("critical") == "error"
     assert _severity_to_level("warning") == "warning"
@@ -1325,50 +1449,62 @@ def test_suggestion_finding_id_fallback_branch() -> None:
     assert _suggestion_finding_id(fake) == "design:unmapped_category:Synthetic title"
 
 
-def test_suggestion_finding_id_segment_clone_branch() -> None:
-    segment_clone = Suggestion(
-        severity="info",
-        category="clone",
-        title="Segment clone",
-        location="code/a.py:1-3",
-        steps=(),
-        effort="easy",
-        priority=1.0,
-        finding_family="clones",
-        finding_kind="clone_group",
-        subject_key="seg-1",
-        fact_kind="Segment clone group",
-        fact_summary="same segment",
-        fact_count=2,
-        spread_files=2,
-        spread_functions=2,
-        confidence="medium",
-        source_kind="production",
-    )
-    assert _suggestion_finding_id(segment_clone) == "clone:segment:seg-1"
-
-
-def test_suggestion_finding_id_block_clone_branch() -> None:
-    block_clone = Suggestion(
-        severity="warning",
-        category="clone",
-        title="Block clone",
-        location="code/a.py:10-15",
-        steps=(),
-        effort="easy",
-        priority=1.5,
-        finding_family="clones",
-        finding_kind="clone_group",
-        subject_key="blk-1",
-        fact_kind="Block clone group",
-        fact_summary="same statement sequence",
-        fact_count=2,
-        spread_files=2,
-        spread_functions=2,
-        confidence="high",
-        source_kind="production",
-    )
-    assert _suggestion_finding_id(block_clone) == "clone:block:blk-1"
+@pytest.mark.parametrize(
+    ("suggestion", "expected_finding_id"),
+    [
+        pytest.param(
+            Suggestion(
+                severity="info",
+                category="clone",
+                title="Segment clone",
+                location="code/a.py:1-3",
+                steps=(),
+                effort="easy",
+                priority=1.0,
+                finding_family="clones",
+                finding_kind="clone_group",
+                subject_key="seg-1",
+                fact_kind="Segment clone group",
+                fact_summary="same segment",
+                fact_count=2,
+                spread_files=2,
+                spread_functions=2,
+                confidence="medium",
+                source_kind="production",
+            ),
+            "clone:segment:seg-1",
+            id="segment_clone",
+        ),
+        pytest.param(
+            Suggestion(
+                severity="warning",
+                category="clone",
+                title="Block clone",
+                location="code/a.py:10-15",
+                steps=(),
+                effort="easy",
+                priority=1.5,
+                finding_family="clones",
+                finding_kind="clone_group",
+                subject_key="blk-1",
+                fact_kind="Block clone group",
+                fact_summary="same statement sequence",
+                fact_count=2,
+                spread_files=2,
+                spread_functions=2,
+                confidence="high",
+                source_kind="production",
+            ),
+            "clone:block:blk-1",
+            id="block_clone",
+        ),
+    ],
+)
+def test_suggestion_finding_id_clone_branches(
+    suggestion: Suggestion,
+    expected_finding_id: str,
+) -> None:
+    assert _suggestion_finding_id(suggestion) == expected_finding_id
 
 
 def test_sarif_private_helper_branches() -> None:
@@ -1765,6 +1901,12 @@ def test_collect_paths_from_metrics_covers_all_metric_families_and_skips_missing
                 {"filepath": None},
             ],
         },
+        "overloaded_modules": {
+            "items": [
+                {"filepath": "/repo/god.py"},
+                {"filepath": ""},
+            ]
+        },
     }
 
     assert _collect_paths_from_metrics(metrics) == {
@@ -1772,6 +1914,7 @@ def test_collect_paths_from_metrics_covers_all_metric_families_and_skips_missing
         "/repo/coupling.py",
         "/repo/cohesion.py",
         "/repo/dead.py",
+        "/repo/god.py",
         "/repo/suppressed.py",
     }
 

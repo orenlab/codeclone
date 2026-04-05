@@ -1,5 +1,5 @@
 name: 🐞 Bug report
-description: Incorrect clone detection, crashes, or broken reports
+description: Incorrect analysis results, crashes, broken reports, or contract regressions
 title: "[Bug]: "
 labels: [ "bug" ]
 assignees: [ ]
@@ -16,7 +16,7 @@ body:
     attributes:
       label: CodeClone version
       description: Output of `codeclone --version`
-      placeholder: "1.1.0"
+      placeholder: "2.0.0b4"
     validations:
       required: true
 
@@ -26,11 +26,17 @@ body:
       label: Affected area
       options:
         - Function clone detection (Type-2)
-        - Block clone detection (Type-3-lite)
+        - Block clone detection
+        - Segment clone reporting
+        - Structural findings
+        - Quality metrics / health
         - CFG construction
         - AST normalization
+        - Canonical report / JSON
         - HTML report
-        - CLI / baseline
+        - CLI / baseline / cache
+        - GitHub Action / CI
+        - MCP server
     validations:
       required: true
 
@@ -62,4 +68,4 @@ body:
     id: notes
     attributes:
       label: Additional context
-      description: CFG structure, HTML screenshots, logs, etc.
+      description: Baseline/cache status, HTML screenshots, MCP payloads, logs, etc.

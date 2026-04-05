@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from .. import __version__, _coerce
 from .._html_css import build_css
-from .._html_escape import _escape_attr, _escape_html
+from .._html_escape import _escape_html
 from .._html_js import build_js
 from .._html_snippets import _FileCache, _pygments_css
 from ..contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
@@ -111,6 +111,9 @@ def build_html_report(
         _as_int(_as_mapping(ctx.complexity_map.get("summary")).get("high_risk"))
         + _as_int(_as_mapping(ctx.coupling_map.get("summary")).get("high_risk"))
         + _as_int(_as_mapping(ctx.cohesion_map.get("summary")).get("low_cohesion"))
+        + _as_int(
+            _as_mapping(ctx.overloaded_modules_map.get("summary")).get("candidates")
+        )
     )
 
     def _tab_badge(count: int) -> str:
@@ -398,5 +401,5 @@ def build_html_report(
         css=css_html,
         js=js_html,
         body=body_html,
-        scan_root=_escape_attr(ctx.scan_root),
+        scan_root=_escape_html(ctx.scan_root),
     )

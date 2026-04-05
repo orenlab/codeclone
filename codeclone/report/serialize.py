@@ -6,8 +6,9 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
+
+import orjson
 
 from .._coerce import as_int, as_mapping, as_sequence
 from ..domain.source_scope import IMPACT_SCOPE_NON_RUNTIME, SOURCE_KIND_OTHER
@@ -19,11 +20,7 @@ _as_sequence = as_sequence
 
 
 def render_json_report_document(payload: Mapping[str, object]) -> str:
-    return json.dumps(
-        payload,
-        ensure_ascii=False,
-        indent=2,
-    )
+    return orjson.dumps(payload, option=orjson.OPT_INDENT_2).decode("utf-8")
 
 
 def format_meta_text_value(value: object) -> str:
@@ -54,9 +51,8 @@ def _format_key_values(
         if key not in mapping:
             continue
         formatted = format_meta_text_value(mapping.get(key))
-        if skip_empty and formatted == "(none)":
-            continue
-        parts.append(f"{key}={formatted}")
+        if not skip_empty or formatted != "(none)":
+            parts.append(f"{key}={formatted}")
     return " ".join(parts) if parts else "(none)"
 
 
@@ -600,6 +596,7 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         "complexity",
         "coupling",
         "cohesion",
+        "overloaded_modules",
         "dependencies",
         "dead_code",
         "health",
@@ -613,11 +610,51 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
                 keys = ("total", "average", "max", "low_cohesion")
             case "dependencies":
                 keys = ("modules", "edges", "cycles", "max_depth")
+            case "overloaded_modules":
+                keys = (
+                    "total",
+                    "candidates",
+                    "population_status",
+                    "top_score",
+                    "average_score",
+                )
             case "dead_code":
                 keys = ("total", "high_confidence", "suppressed")
             case _:
                 keys = ("score", "grade")
         lines.append(f"{family_name}: {_format_key_values(family_summary, keys)}")
+
+    overloaded_modules_family = _as_mapping(metrics_families.get("overloaded_modules"))
+    if not overloaded_modules_family:
+        overloaded_modules_family = _as_mapping(metrics_families.get("god_modules"))
+    overloaded_module_items = _as_sequence(overloaded_modules_family.get("items"))
+    lines.extend(
+        [
+            "",
+            "OVERLOADED MODULES (top 10)",
+        ]
+    )
+    if not overloaded_module_items:
+        lines.append("(none)")
+    else:
+        lines.extend(
+            "- "
+            + _format_key_values(
+                item,
+                (
+                    "module",
+                    "relative_path",
+                    "source_kind",
+                    "score",
+                    "candidate_status",
+                    "loc",
+                    "fan_in",
+                    "fan_out",
+                    "complexity_total",
+                ),
+            )
+            for item in map(_as_mapping, overloaded_module_items[:10])
+        )
 
     lines.append("")
     _append_overview(lines, overview, hotlists)

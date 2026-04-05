@@ -4,11 +4,11 @@ This site is built with MkDocs and published to
 [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/).
 
 !!! note "Version Notice"
-    This site currently documents the in-development `v2.0.x` line from `main`.
-    For the latest stable CodeClone documentation (`v1.4.4`), see the
-    [`v1.4.4` README](https://github.com/orenlab/codeclone/blob/v1.4.4/README.md)
-    and the
-    [`v1.4.4` docs tree](https://github.com/orenlab/codeclone/tree/v1.4.4/docs).
+This site currently documents the in-development `v2.0.x` line from `main`.
+For the latest stable CodeClone documentation (`v1.4.4`), see the
+[`v1.4.4` README](https://github.com/orenlab/codeclone/blob/v1.4.4/README.md)
+and the
+[`v1.4.4` docs tree](https://github.com/orenlab/codeclone/tree/v1.4.4/docs).
 
 It has two documentation layers:
 
@@ -39,12 +39,15 @@ repository build:
 - [Core pipeline and invariants](book/05-core-pipeline.md)
 - [Baseline contract (schema v2.0)](book/06-baseline.md)
 - [Cache contract (schema v2.3)](book/07-cache.md)
-- [Report contract (schema v2.2)](book/08-report.md)
+- [Report contract (schema v2.3)](book/08-report.md)
 
 ## Interfaces
 
 - [CLI behavior, modes, and UX](book/09-cli.md)
 - [MCP interface contract](book/20-mcp-interface.md)
+- [VS Code extension contract](book/21-vscode-extension.md)
+- [Claude Desktop bundle contract](book/22-claude-desktop-bundle.md)
+- [Codex plugin contract](book/23-codex-plugin.md)
 - [HTML report rendering contract](book/10-html-render.md)
 
 ## System Properties
@@ -56,6 +59,7 @@ repository build:
 
 ## Quality Contracts
 
+- [Health Score model and evolution policy](book/15-health-score.md)
 - [Metrics mode and quality gates](book/15-metrics-and-quality-gates.md)
 - [Dead-code contract and test-boundary policy](book/16-dead-code-contract.md)
 - [Suggestions and clone typing contract](book/17-suggestions-and-clone-typing.md)
@@ -67,6 +71,11 @@ repository build:
 - [Architecture narrative](architecture.md)
 - [CFG design and semantics](cfg.md)
 - [MCP integration for AI agents and clients](mcp.md)
+- [VS Code extension usage guide](vscode-extension.md)
+- [Claude Desktop bundle usage guide](claude-desktop-bundle.md)
+- [Codex plugin usage guide](codex-plugin.md)
+- [Privacy Policy](privacy-policy.md)
+- [Terms of Use](terms-of-use.md)
 - [SARIF integration for IDE/code-scanning use](sarif.md)
 - [Docs publishing and Pages workflow](publishing.md)
 

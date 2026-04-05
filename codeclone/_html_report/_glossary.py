@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from .._html_escape import _escape_attr
+from .._html_escape import _escape_html
 
 GLOSSARY: dict[str, str] = {
     # Complexity
@@ -56,4 +56,4 @@ def glossary_tip(label: str) -> str:
     tip = GLOSSARY.get(label.lower(), "")
     if not tip:
         return ""
-    return f' <span class="kpi-help" data-tip="{_escape_attr(tip)}">?</span>'
+    return f' <span class="kpi-help" data-tip="{_escape_html(tip)}">?</span>'

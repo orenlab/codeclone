@@ -19,8 +19,9 @@ import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from hashlib import sha1
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 
+from ._coerce import as_int, as_str
 from .domain.findings import (
     STRUCTURAL_KIND_CLONE_COHORT_DRIFT,
     STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
@@ -646,36 +647,33 @@ class _FunctionStructureScanner:
             deduped_occurrences = {
                 (start, end): (sig, start, end) for sig, start, end in occurrences
             }
-            if len(deduped_occurrences) < 2:
-                continue
-
-            sorted_occurrences = sorted(
-                deduped_occurrences.values(),
-                key=lambda item: (item[1], item[2]),
-            )
-            sig_dict = sorted_occurrences[0][0]
-            fkey = _finding_key(self._qualname, sig_key)
-            raw_group = StructuralFindingGroup(
-                finding_kind=_FINDING_KIND_BRANCHES,
-                finding_key=fkey,
-                signature=sig_dict,
-                items=tuple(
-                    StructuralFindingOccurrence(
-                        finding_kind=_FINDING_KIND_BRANCHES,
-                        finding_key=fkey,
-                        file_path=self._filepath,
-                        qualname=self._qualname,
-                        start=start,
-                        end=end,
-                        signature=sig_dict,
-                    )
-                    for _, start, end in sorted_occurrences
-                ),
-            )
-            normalized_group = normalize_structural_finding_group(raw_group)
-            if normalized_group is None:
-                continue
-            groups.append(normalized_group)
+            if len(deduped_occurrences) >= 2:
+                sorted_occurrences = sorted(
+                    deduped_occurrences.values(),
+                    key=lambda item: (item[1], item[2]),
+                )
+                sig_dict = sorted_occurrences[0][0]
+                fkey = _finding_key(self._qualname, sig_key)
+                raw_group = StructuralFindingGroup(
+                    finding_kind=_FINDING_KIND_BRANCHES,
+                    finding_key=fkey,
+                    signature=sig_dict,
+                    items=tuple(
+                        StructuralFindingOccurrence(
+                            finding_kind=_FINDING_KIND_BRANCHES,
+                            finding_key=fkey,
+                            file_path=self._filepath,
+                            qualname=self._qualname,
+                            start=start,
+                            end=end,
+                            signature=sig_dict,
+                        )
+                        for _, start, end in sorted_occurrences
+                    ),
+                )
+                normalized_group = normalize_structural_finding_group(raw_group)
+                if normalized_group is not None:
+                    groups.append(normalized_group)
 
         groups.sort(key=lambda g: (-len(g.items), g.finding_key))
         return groups
@@ -718,23 +716,6 @@ class _CloneCohortMember:
         )
 
 
-def _as_item_str(value: object, default: str = "") -> str:
-    return value if isinstance(value, str) else default
-
-
-def _as_item_int(value: object, default: int = 0) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return default
-    return default
-
-
 def _as_item_bool(value: object, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
@@ -754,10 +735,10 @@ def _as_item_bool(value: object, default: bool = False) -> bool:
 
 def _group_item_sort_key(item: GroupItemLike) -> tuple[str, str, int, int]:
     return (
-        _as_item_str(item.get("filepath")),
-        _as_item_str(item.get("qualname")),
-        _as_item_int(item.get("start_line")),
-        _as_item_int(item.get("end_line")),
+        as_str(item.get("filepath")),
+        as_str(item.get("qualname")),
+        as_int(item.get("start_line")),
+        as_int(item.get("end_line")),
     )
 
 
@@ -773,19 +754,19 @@ def _clone_member_sort_key(
 
 
 def _clone_member_from_item(item: GroupItemLike) -> _CloneCohortMember | None:
-    file_path = _as_item_str(item.get("filepath")).strip()
-    qualname = _as_item_str(item.get("qualname")).strip()
-    start = _as_item_int(item.get("start_line"))
-    end = _as_item_int(item.get("end_line"))
+    file_path = as_str(item.get("filepath")).strip()
+    qualname = as_str(item.get("qualname")).strip()
+    start = as_int(item.get("start_line"))
+    end = as_int(item.get("end_line"))
     if not file_path or not qualname or start <= 0 or end <= 0:
         return None
-    terminal_kind = _as_item_str(item.get("terminal_kind"), "fallthrough").strip()
-    try_finally_profile = _as_item_str(item.get("try_finally_profile"), "none").strip()
-    side_effect_order_profile = _as_item_str(
+    terminal_kind = as_str(item.get("terminal_kind"), "fallthrough").strip()
+    try_finally_profile = as_str(item.get("try_finally_profile"), "none").strip()
+    side_effect_order_profile = as_str(
         item.get("side_effect_order_profile"),
         "none",
     ).strip()
-    entry_guard_terminal_profile = _as_item_str(
+    entry_guard_terminal_profile = as_str(
         item.get("entry_guard_terminal_profile"),
         "none",
     ).strip()
@@ -794,7 +775,7 @@ def _clone_member_from_item(item: GroupItemLike) -> _CloneCohortMember | None:
         qualname=qualname,
         start=start,
         end=end,
-        entry_guard_count=max(0, _as_item_int(item.get("entry_guard_count"))),
+        entry_guard_count=max(0, as_int(item.get("entry_guard_count"))),
         entry_guard_terminal_profile=(
             entry_guard_terminal_profile if entry_guard_terminal_profile else "none"
         ),
@@ -810,25 +791,23 @@ def _clone_member_from_item(item: GroupItemLike) -> _CloneCohortMember | None:
     )
 
 
-def _majority_str(values: Sequence[str], *, default: str) -> str:
-    if not values:
-        return default
-    counts = Counter(values)
-    top = max(counts.values())
-    winners = sorted(value for value, count in counts.items() if count == top)
-    return winners[0] if winners else default
+@overload
+def _majority_value(values: Sequence[bool], *, default: bool) -> bool: ...
 
 
-def _majority_int(values: Sequence[int], *, default: int) -> int:
-    if not values:
-        return default
-    counts = Counter(values)
-    top = max(counts.values())
-    winners = sorted(value for value, count in counts.items() if count == top)
-    return winners[0] if winners else default
+@overload
+def _majority_value(values: Sequence[int], *, default: int) -> int: ...
 
 
-def _majority_bool(values: Sequence[bool], *, default: bool) -> bool:
+@overload
+def _majority_value(values: Sequence[str], *, default: str) -> str: ...
+
+
+def _majority_value(
+    values: Sequence[str | int | bool],
+    *,
+    default: str | int | bool,
+) -> str | int | bool:
     if not values:
         return default
     counts = Counter(values)
@@ -896,13 +875,13 @@ def _clone_guard_exit_divergence(
     ):
         return None
 
-    majority_guard_count = _majority_int(guard_counts, default=0)
-    majority_guard_terminal_profile = _majority_str(
+    majority_guard_count = _majority_value(guard_counts, default=0)
+    majority_guard_terminal_profile = _majority_value(
         guard_terminal_profiles,
         default="none",
     )
-    majority_terminal_kind = _majority_str(terminal_kinds, default="fallthrough")
-    majority_side_effect_before_guard = _majority_bool(
+    majority_terminal_kind = _majority_value(terminal_kinds, default="fallthrough")
+    majority_side_effect_before_guard = _majority_value(
         side_effect_before_guard_values,
         default=False,
     )
@@ -988,7 +967,7 @@ def _clone_cohort_drift(
         return None
 
     majority_profile = {
-        field: _majority_str(values, default="none")
+        field: _majority_value(values, default="none")
         for field, values in value_space.items()
     }
     divergent_members = [
@@ -1049,14 +1028,12 @@ def build_clone_cohort_structural_findings(
     groups: list[StructuralFindingGroup] = []
     for cohort_id in sorted(func_groups):
         rows = func_groups[cohort_id]
-        if len(rows) < 3:
-            continue
         members = [
             member
             for member in (_clone_member_from_item(row) for row in rows)
             if member is not None
         ]
-        if len(members) < 3:
+        if len(rows) < 3 or len(members) < 3:
             continue
 
         guard_exit_group = _clone_guard_exit_divergence(cohort_id, members)

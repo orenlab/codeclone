@@ -78,6 +78,8 @@ Refs:
 - Novelty controls reflect baseline trust split note and per-group novelty flags.
 - Suppressed dead-code rows are rendered only from report dead-code suppression
   payloads and do not become active dead-code findings in UI tables.
+- Structural finding cards may render a compact inline suggested action when a
+  low-signal local hint intentionally has no separate suggestion card.
 - IDE link `data-file` and `data-line` attributes are escaped via
   `_escape_attr` before insertion into HTML.
 

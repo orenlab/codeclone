@@ -34,6 +34,7 @@ from codeclone.mcp_service import (
     MCPServiceError,
 )
 from codeclone.models import MetricsDiff
+from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 
 
 def _write_clone_fixture(root: Path, relative_dir: str = "pkg") -> None:
@@ -68,10 +69,8 @@ def _write_clone_fixture(root: Path, relative_dir: str = "pkg") -> None:
 
 
 def _write_quality_fixture(root: Path) -> None:
-    pkg = root.joinpath("pkg")
-    pkg.mkdir(exist_ok=True)
-    pkg.joinpath("__init__.py").write_text("", "utf-8")
-    pkg.joinpath("quality.py").write_text(
+    _write_shared_quality_fixture(
+        root,
         (
             "class SplitByConcern:\n"
             "    def __init__(self) -> None:\n"
@@ -101,7 +100,6 @@ def _write_quality_fixture(root: Path) -> None:
             "def unused_helper() -> int:\n"
             "    return 42\n"
         ),
-        "utf-8",
     )
 
 
@@ -258,15 +256,135 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
     assert len(str(summary["run_id"])) == 8
     assert summary["mode"] == "full"
     assert summary["schema"] == REPORT_SCHEMA_VERSION
-    latest_baseline = cast("dict[str, object]", latest["baseline"])
-    latest_cache = cast("dict[str, object]", latest["cache"])
-    assert latest_baseline["status"] == "missing"
-    assert latest_baseline["trusted"] is False
-    assert latest_cache["used"] is False
-    assert latest_cache["freshness"] == "fresh"
-    latest_health = cast("dict[str, object]", latest["health"])
-    assert isinstance(latest_health["score"], int)
-    assert latest_health["grade"]
+
+
+def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
+    service = CodeCloneMCPService(history_limit=4)
+
+    compact = service.get_help(topic="workflow")
+    normal = service.get_help(topic="workflow", detail="normal")
+
+    assert compact == {
+        "topic": "workflow",
+        "detail": "compact",
+        "summary": (
+            "CodeClone MCP is triage-first and budget-aware. Start with a "
+            "summary or production triage, then narrow through hotspots or "
+            "focused checks before opening one finding in detail."
+        ),
+        "key_points": [
+            "Recommended first pass: analyze_repository or analyze_changed_paths.",
+            (
+                "Start with default or pyproject-resolved thresholds; lower "
+                "them only for an explicit higher-sensitivity follow-up pass."
+            ),
+            (
+                "Use get_run_summary or get_production_triage before broad "
+                "finding listing."
+            ),
+            (
+                "Prefer list_hotspots or focused check_* tools over "
+                "list_findings on noisy repositories."
+            ),
+            ("Use get_finding and get_remediation only after selecting an issue."),
+            (
+                "get_report_section(section='all') is an exception path, not "
+                "a default first step."
+            ),
+        ],
+        "recommended_tools": [
+            "analyze_repository",
+            "analyze_changed_paths",
+            "get_run_summary",
+            "get_production_triage",
+            "list_hotspots",
+            "check_clones",
+            "check_dead_code",
+            "get_finding",
+            "get_remediation",
+        ],
+        "doc_links": [
+            {
+                "title": "MCP interface contract",
+                "url": "https://orenlab.github.io/codeclone/book/20-mcp-interface/",
+            },
+            {
+                "title": "MCP usage guide",
+                "url": "https://orenlab.github.io/codeclone/mcp/",
+            },
+        ],
+    }
+    assert normal["topic"] == "workflow"
+    assert normal["detail"] == "normal"
+    assert normal["summary"] == compact["summary"]
+    assert normal["recommended_tools"] == compact["recommended_tools"]
+    assert normal["doc_links"] == compact["doc_links"]
+    assert cast("list[str]", normal["warnings"]) == [
+        (
+            "Broad list_findings calls burn context quickly on large or "
+            "noisy repositories."
+        ),
+        (
+            "Prefer generate_pr_summary(format='markdown') unless machine JSON "
+            "is explicitly required."
+        ),
+    ]
+
+
+def test_mcp_service_help_covers_analysis_profiles() -> None:
+    service = CodeCloneMCPService(history_limit=4)
+
+    compact = service.get_help(topic="analysis_profile")
+    normal = service.get_help(topic="analysis_profile", detail="normal")
+
+    assert compact["topic"] == "analysis_profile"
+    assert compact["detail"] == "compact"
+    assert "intentionally conservative" in str(compact["summary"])
+    assert "analyze_repository" in cast("list[str]", compact["recommended_tools"])
+    assert compact["doc_links"] == [
+        {
+            "title": "Config and defaults",
+            "url": "https://orenlab.github.io/codeclone/book/04-config-and-defaults/",
+        },
+        {
+            "title": "Core pipeline",
+            "url": "https://orenlab.github.io/codeclone/book/05-core-pipeline/",
+        },
+        {
+            "title": "MCP interface contract",
+            "url": "https://orenlab.github.io/codeclone/book/20-mcp-interface/",
+        },
+    ]
+    assert normal["topic"] == "analysis_profile"
+    assert normal["detail"] == "normal"
+    assert "Run comparisons are most meaningful when profiles are aligned." in cast(
+        "list[str]", normal["warnings"]
+    )
+    assert cast("list[str]", normal["anti_patterns"]) == [
+        (
+            "Assuming a clean default pass means no finer-grained duplication "
+            "exists anywhere in the repository."
+        ),
+        (
+            "Lowering thresholds for exploration and then interpreting the "
+            "result as if it had the same meaning as the conservative "
+            "default pass."
+        ),
+        (
+            "Mixing low-threshold exploratory output into baseline or CI "
+            "reasoning without acknowledging the profile change."
+        ),
+    ]
+
+
+def test_mcp_service_help_validates_topic_and_detail() -> None:
+    service = CodeCloneMCPService(history_limit=4)
+
+    with pytest.raises(MCPServiceContractError, match="Invalid value for topic"):
+        service.get_help(topic="gates")  # type: ignore[arg-type]
+
+    with pytest.raises(MCPServiceContractError, match="Invalid value for detail"):
+        service.get_help(topic="baseline", detail="full")  # type: ignore[arg-type]
 
 
 def test_mcp_service_summary_inventory_is_compact_and_report_inventory_stays_canonical(
@@ -786,6 +904,7 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
         "cohesion",
         "dependencies",
         "dead_code",
+        "overloaded_modules",
         "health",
     }
     assert "families" not in metrics_summary
@@ -793,6 +912,44 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
     assert set(metrics_detail) == {"summary", "_hint"}
     assert "family" in metrics_detail_page
     assert cast("list[dict[str, object]]", metrics_detail_page["items"])
+    overloaded_modules_page = service.get_report_section(
+        run_id=run_id,
+        section="metrics_detail",
+        family="overloaded_modules",
+        limit=5,
+    )
+    assert overloaded_modules_page["family"] == "overloaded_modules"
+    overloaded_modules_items = cast(
+        "list[dict[str, object]]", overloaded_modules_page["items"]
+    )
+    assert overloaded_modules_items
+    overloaded_modules_alias_page = service.get_report_section(
+        run_id=run_id,
+        section="metrics_detail",
+        family="god_modules",
+        limit=5,
+    )
+    assert overloaded_modules_alias_page["family"] == "overloaded_modules"
+    assert (
+        cast("list[dict[str, object]]", overloaded_modules_alias_page["items"])
+        == overloaded_modules_items
+    )
+    report_record = service._runs.get(run_id)
+    assert report_record is not None
+    report_document = report_record.report_document
+    metrics_map = cast("dict[str, object]", report_document["metrics"])
+    families_map = cast("dict[str, object]", metrics_map["families"])
+    overloaded_modules_family = cast(
+        "dict[str, object]", families_map["overloaded_modules"]
+    )
+    overloaded_modules_report_items = cast(
+        "list[dict[str, object]]",
+        overloaded_modules_family["items"],
+    )
+    assert (
+        overloaded_modules_items[0]["path"]
+        == overloaded_modules_report_items[0]["relative_path"]
+    )
 
 
 def test_mcp_service_evaluate_gates_on_existing_run(tmp_path: Path) -> None:
@@ -1160,6 +1317,8 @@ def test_mcp_service_git_diff_and_helper_branch_edges(
     assert service._normalize_relative_path("./.github/workflows/docs.yml") == (
         ".github/workflows/docs.yml"
     )
+    with pytest.raises(MCPServiceContractError, match="path traversal not allowed"):
+        service._normalize_relative_path("../outside.py")
 
     full_record = _dummy_run_record(tmp_path, "full")
     object.__setattr__(
@@ -3130,6 +3289,56 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
                 "qualname": "pkg.mod:run",
                 "score": 10,
             }
+        ],
+    }
+    overloaded_modules_payload = service._metrics_detail_payload(
+        metrics={
+            "summary": {},
+            "families": {
+                "overloaded_modules": {
+                    "items": [
+                        {
+                            "relative_path": "zeta.py",
+                            "module": "pkg.zeta",
+                            "score": 0.99,
+                            "candidate_status": "candidate",
+                        },
+                        {
+                            "relative_path": "alpha.py",
+                            "module": "pkg.alpha",
+                            "score": 0.12,
+                            "candidate_status": "non_candidate",
+                        },
+                    ]
+                }
+            },
+        },
+        family="overloaded_modules",
+        path=None,
+        offset=0,
+        limit=5,
+    )
+    assert overloaded_modules_payload == {
+        "family": "overloaded_modules",
+        "path": None,
+        "offset": 0,
+        "limit": 5,
+        "returned": 2,
+        "total": 2,
+        "has_more": False,
+        "items": [
+            {
+                "path": "zeta.py",
+                "module": "pkg.zeta",
+                "score": 0.99,
+                "candidate_status": "candidate",
+            },
+            {
+                "path": "alpha.py",
+                "module": "pkg.alpha",
+                "score": 0.12,
+                "candidate_status": "non_candidate",
+            },
         ],
     }
     assert service._compact_metrics_item(

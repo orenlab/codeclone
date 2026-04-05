@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from hashlib import sha256
 from typing import TYPE_CHECKING, Literal
+
+import orjson
 
 from .._coerce import as_float as _as_float
 from .._coerce import as_int as _as_int
@@ -72,6 +73,9 @@ from .derived import (
     report_location_from_structural_occurrence,
 )
 from .derived import (
+    normalized_source_kind as _normalized_source_kind,
+)
+from .derived import (
     source_scope_from_counts as _report_source_scope_from_counts,
 )
 from .derived import (
@@ -96,6 +100,8 @@ __all__ = [
     "design_group_id",
     "structural_group_id",
 ]
+
+_OVERLOADED_MODULES_FAMILY = "overloaded_modules"
 
 
 def _optional_str(value: object) -> str | None:
@@ -299,17 +305,6 @@ def _source_scope_from_filepaths(
     return _source_scope_from_counts(counts)
 
 
-def _normalized_source_kind(value: object) -> SourceKind:
-    source_kind_text = str(value).strip().lower() or SOURCE_KIND_OTHER
-    if source_kind_text == SOURCE_KIND_PRODUCTION:
-        return SOURCE_KIND_PRODUCTION
-    if source_kind_text == SOURCE_KIND_TESTS:
-        return SOURCE_KIND_TESTS
-    if source_kind_text == SOURCE_KIND_FIXTURES:
-        return SOURCE_KIND_FIXTURES
-    return SOURCE_KIND_OTHER
-
-
 def _source_scope_from_counts(
     counts: Mapping[SourceKind, int],
 ) -> dict[str, object]:
@@ -348,6 +343,12 @@ def _collect_paths_from_metrics(metrics: Mapping[str, object]) -> set[str]:
         if filepath is not None:
             paths.add(filepath)
     for item in _as_sequence(dead_code.get("suppressed_items")):
+        item_map = _as_mapping(item)
+        filepath = _optional_str(item_map.get("filepath"))
+        if filepath is not None:
+            paths.add(filepath)
+    overloaded_modules = _as_mapping(metrics.get(_OVERLOADED_MODULES_FAMILY))
+    for item in _as_sequence(overloaded_modules.get("items")):
         item_map = _as_mapping(item)
         filepath = _optional_str(item_map.get("filepath"))
         if filepath is not None:
@@ -632,11 +633,73 @@ def _normalize_metrics_families(
         str(key): _as_int(value)
         for key, value in sorted(_as_mapping(health.get("dimensions")).items())
     }
+    overloaded_modules = _as_mapping(metrics_map.get(_OVERLOADED_MODULES_FAMILY))
+    overloaded_modules_detection = _as_mapping(overloaded_modules.get("detection"))
+    overloaded_module_items = sorted(
+        (
+            {
+                "module": str(item_map.get("module", "")).strip(),
+                "relative_path": _contract_path(
+                    item_map.get("filepath", ""),
+                    scan_root=scan_root,
+                )[0]
+                or "",
+                "source_kind": str(item_map.get("source_kind", SOURCE_KIND_OTHER)),
+                "loc": _as_int(item_map.get("loc")),
+                "functions": _as_int(item_map.get("functions")),
+                "methods": _as_int(item_map.get("methods")),
+                "classes": _as_int(item_map.get("classes")),
+                "callable_count": _as_int(item_map.get("callable_count")),
+                "complexity_total": _as_int(item_map.get("complexity_total")),
+                "complexity_max": _as_int(item_map.get("complexity_max")),
+                "fan_in": _as_int(item_map.get("fan_in")),
+                "fan_out": _as_int(item_map.get("fan_out")),
+                "total_deps": _as_int(item_map.get("total_deps")),
+                "import_edges": _as_int(item_map.get("import_edges")),
+                "reimport_edges": _as_int(item_map.get("reimport_edges")),
+                "reimport_ratio": round(
+                    _as_float(item_map.get("reimport_ratio")),
+                    4,
+                ),
+                "instability": round(_as_float(item_map.get("instability")), 4),
+                "hub_balance": round(_as_float(item_map.get("hub_balance")), 4),
+                "size_score": round(_as_float(item_map.get("size_score")), 4),
+                "dependency_score": round(
+                    _as_float(item_map.get("dependency_score")),
+                    4,
+                ),
+                "shape_score": round(_as_float(item_map.get("shape_score")), 4),
+                "score": round(_as_float(item_map.get("score")), 4),
+                "candidate_status": str(
+                    item_map.get("candidate_status", "non_candidate")
+                ),
+                "candidate_reasons": [
+                    str(reason)
+                    for reason in _as_sequence(item_map.get("candidate_reasons"))
+                    if str(reason).strip()
+                ],
+            }
+            for item in _as_sequence(overloaded_modules.get("items"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: (
+            {"candidate": 0, "ranked_only": 1, "non_candidate": 2}.get(
+                str(item["candidate_status"]),
+                3,
+            ),
+            -_as_float(item["score"]),
+            -_as_float(item["size_score"]),
+            -_as_float(item["dependency_score"]),
+            item["relative_path"],
+            item["module"],
+        ),
+    )
 
     complexity_summary = _as_mapping(complexity.get("summary"))
     coupling_summary = _as_mapping(coupling.get("summary"))
     cohesion_summary = _as_mapping(cohesion.get("summary"))
     dead_code_summary = _as_mapping(dead_code.get("summary"))
+    overloaded_modules_summary = _as_mapping(overloaded_modules.get("summary"))
     dead_high_confidence = sum(
         1
         for item in dead_items
@@ -710,6 +773,63 @@ def _normalize_metrics_families(
                 "dimensions": health_dimensions,
             },
             "items": [],
+            "items_truncated": False,
+        },
+        _OVERLOADED_MODULES_FAMILY: {
+            "summary": {
+                "total": len(overloaded_module_items),
+                "candidates": _as_int(overloaded_modules_summary.get("candidates")),
+                "population_status": str(
+                    overloaded_modules_summary.get("population_status", "limited")
+                ),
+                "top_score": round(
+                    _as_float(overloaded_modules_summary.get("top_score")),
+                    4,
+                ),
+                "average_score": round(
+                    _as_float(overloaded_modules_summary.get("average_score")),
+                    4,
+                ),
+                "candidate_score_cutoff": round(
+                    _as_float(overloaded_modules_summary.get("candidate_score_cutoff")),
+                    4,
+                ),
+            },
+            "detection": {
+                "version": str(overloaded_modules_detection.get("version", "1")),
+                "scope": str(overloaded_modules_detection.get("scope", "report_only")),
+                "strategy": str(
+                    overloaded_modules_detection.get(
+                        "strategy",
+                        "project_relative_composite",
+                    )
+                ),
+                "minimum_population": _as_int(
+                    overloaded_modules_detection.get("minimum_population"),
+                ),
+                "size_signals": [
+                    str(signal)
+                    for signal in _as_sequence(
+                        overloaded_modules_detection.get("size_signals")
+                    )
+                    if str(signal).strip()
+                ],
+                "dependency_signals": [
+                    str(signal)
+                    for signal in _as_sequence(
+                        overloaded_modules_detection.get("dependency_signals")
+                    )
+                    if str(signal).strip()
+                ],
+                "shape_signals": [
+                    str(signal)
+                    for signal in _as_sequence(
+                        overloaded_modules_detection.get("shape_signals")
+                    )
+                    if str(signal).strip()
+                ],
+            },
+            "items": overloaded_module_items,
             "items_truncated": False,
         },
     }
@@ -2223,12 +2343,10 @@ def _build_integrity_payload(
         findings=findings,
         metrics=metrics,
     )
-    canonical_json = json.dumps(
+    canonical_json = orjson.dumps(
         canonical_payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
+        option=orjson.OPT_SORT_KEYS,
+    )
     payload_sha = sha256(canonical_json).hexdigest()
     return {
         "canonicalization": {

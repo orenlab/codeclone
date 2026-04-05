@@ -47,6 +47,9 @@ Embedded metrics contract:
 - Top-level `metrics` is allowed only for baseline schema `>= 2.0`.
 - Clone baseline save preserves existing embedded `metrics` payload and
   `meta.metrics_payload_sha256`.
+- The default runtime flow is unified: clone baseline and metrics baseline
+  usually share the same `codeclone.baseline.json` file unless the metrics path
+  is explicitly overridden.
 
 Integrity payload includes only:
 

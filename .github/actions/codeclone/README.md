@@ -149,7 +149,7 @@ Explicit prerelease:
 
 ```yaml
 with:
-  package-version: "2.0.0b3"
+  package-version: "2.0.0b4"
 ```
 
 Local/self-repo validation:

@@ -30,6 +30,9 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 
 - [09-cli.md](09-cli.md)
 - [20-mcp-interface.md](20-mcp-interface.md)
+- [21-vscode-extension.md](21-vscode-extension.md)
+- [22-claude-desktop-bundle.md](22-claude-desktop-bundle.md)
+- [23-codex-plugin.md](23-codex-plugin.md)
 - [10-html-render.md](10-html-render.md)
 
 ### System properties
@@ -41,6 +44,7 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 
 ### Quality and recommendations
 
+- [15-health-score.md](15-health-score.md)
 - [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
 - [16-dead-code-contract.md](16-dead-code-contract.md)
 - [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)

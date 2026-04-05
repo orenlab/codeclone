@@ -1,6 +1,10 @@
-<p align="center">
-  <img src="https://orenlab.github.io/codeclone/assets/codeclone-wordmark.svg" alt="CodeClone" height="60">
-</p>
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/codeclone-wordmark-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/codeclone-wordmark.svg">
+    <img alt="CodeClone" src="docs/assets/codeclone-wordmark.svg" width="320">
+  </picture>
+</div>
 
 <p align="center">
   <strong>Structural code quality analysis for Python</strong>
@@ -38,20 +42,22 @@ Live sample report:
 
 - **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
 - **Structural findings** — duplicated branch families, clone guard/exit divergence and clone-cohort drift (report-only)
-- **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, dead code, health
-  score
+- **Quality metrics** — cyclomatic complexity, coupling (`CBO`), cohesion (`LCOM4`), dependency cycles, dead code,
+  health score, and report-only `Overloaded Modules` profiling
 - **Baseline governance** — separates accepted **legacy** debt from **new regressions** and lets CI fail **only** on
   what changed
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
-- **MCP server** — optional read-only MCP surface for AI agents and IDEs, designed as a budget-aware guided control
+- **MCP server** — optional read-only surface for AI agents and IDEs, designed as a budget-aware guided control
   surface for agentic development
+- **VS Code extension** — preview native client for CodeClone MCP with triage-first structural review
+- **Native client surfaces** — preview Claude Desktop bundle and Codex plugin over the same canonical MCP contract
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Fast** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
 
 ## Quick Start
 
 ```bash
-pip install codeclone          # or: uv tool install codeclone
+uv tool install codeclone      # use --pre for beta
 
 codeclone .                    # analyze
 codeclone . --html             # HTML report
@@ -154,33 +160,30 @@ repos:
 
 ## MCP Server
 
-CodeClone ships an optional read-only MCP server for AI agents and IDE clients.
+Optional read-only MCP server for AI agents and IDE clients.
+21 tools + 10 resources — never mutates source, baselines, or repo state.
 
 ```bash
-# install the MCP extra
-pip install "codeclone[mcp]"
+uv tool install --pre "codeclone[mcp]"       # or: uv pip install --pre "codeclone[mcp]"
 
-# local agents (Claude Code, Codex, Copilot, Gemini CLI)
-codeclone-mcp --transport stdio
-
-# remote / HTTP-only clients
-codeclone-mcp --transport streamable-http --port 8000
+codeclone-mcp --transport stdio            # local (Claude Code, Codex, Copilot, Gemini CLI)
+codeclone-mcp --transport streamable-http  # remote / HTTP-only clients
 ```
-
-20 tools + 10 resources — deterministic, baseline-aware, and read-only.
-Never mutates source files, baselines, or repo state.
-
-Payloads are optimized for LLM context: compact summaries by default, full detail on demand.
-The cheapest useful path is also the most obvious path: first-pass triage stays compact, and deeper detail is explicit.
-
-Recommended agent flow:
-`analyze_repository` or `analyze_changed_paths` → `get_run_summary` or `get_production_triage` →
-`list_hotspots` or `check_*` → `get_finding` → `get_remediation`
 
 Docs:
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
 ·
 [MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
+
+### Native Client Surfaces
+
+| Surface                   | Location                                                                                                                     | Purpose                                            |
+|---------------------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------|
+| **VS Code extension**     | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)                                 | Triage-first structural review in the editor       |
+| **Claude Desktop bundle** | [`extensions/claude-desktop-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone) | Local `.mcpb` install with pre-loaded instructions |
+| **Codex plugin**          | [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone)                                     | Native discovery, two skills, and MCP definition   |
+
+All three are thin wrappers over the same `codeclone-mcp` contract — no second analysis engine.
 
 ## Configuration
 
@@ -271,13 +274,13 @@ class Middleware:  # codeclone: ignore[dead-code]
 Dynamic/runtime false positives are resolved via explicit inline suppressions, not via broad heuristics.
 
 <details>
-<summary>Canonical JSON report shape (v2.2)</summary>
+<summary>Canonical JSON report shape (v2.3)</summary>
 
 ```json
 {
-  "report_schema_version": "2.2",
+  "report_schema_version": "2.3",
   "meta": {
-    "codeclone_version": "2.0.0b3",
+    "codeclone_version": "2.0.0b4",
     "project_name": "...",
     "scan_root": ".",
     "report_mode": "full",

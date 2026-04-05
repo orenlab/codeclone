@@ -1,24 +1,56 @@
 # MCP Usage Guide
 
 CodeClone MCP is a **read-only, baseline-aware** analysis server for AI agents
-and MCP-capable clients. It exposes the existing deterministic pipeline without
-mutating source files, baselines, cache, or on-disk report artifacts. Only
-session-local review/run state is mutable in memory.
-It is not only bounded in payload shape — it actively guides agents toward
-low-cost, high-signal workflows.
+and MCP-capable clients. It exposes the deterministic pipeline without mutating
+source files, baselines, cache, or report artifacts. Session-local review/run
+state is mutable in memory only.
 
-MCP is a **client integration surface**, not a model-specific feature. It works
-with any MCP-capable client regardless of the backend model.
-In practice, the cheapest useful path is also the most obvious one: summary or
-triage first, then hotspots or focused checks, then single-finding drill-down.
+Works with any MCP-capable client regardless of backend model.
 
 ## Install
 
 ```bash
-pip install "codeclone[mcp]"        # add MCP extra
-# or
-uv tool install "codeclone[mcp]"    # install as a standalone tool
+uv tool install --pre "codeclone[mcp]"    # install as a standalone tool
+# or, inside an existing environment
+uv pip install --pre "codeclone[mcp]"     # add the MCP extra to that environment
 ```
+
+## Quick client setup
+
+If `codeclone-mcp` is already on your `PATH`, both Claude Code and Codex can
+register it directly as a local stdio server.
+
+### Claude Code
+
+```bash
+claude mcp add codeclone -- codeclone-mcp --transport stdio
+claude mcp list
+```
+
+Use `--scope project` if you want Claude Code to store the shared config in
+`.mcp.json` for the repository instead of your local user state.
+
+### Codex
+
+```bash
+codex mcp add codeclone -- codeclone-mcp --transport stdio
+codex mcp list
+```
+
+If you installed CodeClone into a project virtual environment rather than a
+global tool path, use the full launcher path instead of bare `codeclone-mcp`.
+
+### Codex plugin
+
+A native Codex plugin ships in `plugins/codeclone/` with repo-local
+discovery, a `.mcp.json` definition, and two skills (review + hotspots).
+See [Codex plugin guide](codex-plugin.md).
+
+### Claude Desktop bundle
+
+A local `.mcpb` bundle ships in `extensions/claude-desktop-codeclone/` with
+pre-loaded instructions and auto-discovery of the launcher.
+See [Claude Desktop bundle guide](claude-desktop-bundle.md).
 
 ## Start the server
 
@@ -40,55 +72,59 @@ codeclone-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 ```
 
 Non-loopback hosts require `--allow-remote` (no built-in auth).
+When `--allow-remote` is enabled, any reachable network client can trigger
+CPU-intensive analysis, read results, and probe repository-relative paths
+through MCP request parameters. Use it only on trusted networks. For anything
+production-adjacent, put the server behind a firewall or a reverse proxy with
+authentication.
 Run retention is bounded: default `4`, max `10` (`--history-limit`).
 If a tool request omits `processes`, MCP defers process-count policy to the
 core CodeClone runtime.
 
+Current `b4` MCP surface: `21` tools, `7` fixed resources, and `3`
+run-scoped URI templates.
+
 ## Tool surface
 
-| Tool                     | Purpose                                                                                                                                                                                                                                 |
-|--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `analyze_repository`     | Full analysis → register as latest run and return a compact MCP summary; then prefer `get_run_summary` or `get_production_triage` for the first pass                                                                                    |
-| `analyze_changed_paths`  | Diff-aware analysis with `changed_paths` or `git_diff_ref`; returns a compact changed-files snapshot; then prefer `get_report_section(section="changed")` or `get_production_triage` before broader list calls                          |
-| `get_run_summary`        | Cheapest run-level snapshot: compact health/findings/baseline summary with slim inventory counts; `health` is explicit `available=false` when metrics were skipped                                                                      |
-| `get_production_triage`  | Compact production-first view: health, cache freshness, production hotspots, production suggestions; best default first pass on noisy repos                                                                                             |
-| `compare_runs`           | Regressions, improvements, and run-to-run health delta between comparable runs; returns `mixed` for conflicting signals and `incomparable` when roots/settings differ, with empty comparison cards and `health_delta=null` in that case |
-| `list_findings`          | Filtered, paginated finding groups with compact summary payloads by default; use after hotspots or `check_*` when you need a broader filtered list                                                                                      |
-| `get_finding`            | Deep inspection of one finding by id; defaults to normal detail and accepts `detail_level`; use after `list_hotspots`, `list_findings`, or `check_*`                                                                                    |
-| `get_remediation`        | Structured remediation payload for one finding; defaults to normal detail; use when you only need the fix packet for a single finding                                                                                                   |
-| `list_hotspots`          | Derived views: highest priority, production hotspots, spread, etc., with compact summary cards; preferred first-pass triage before broader listing                                                                                      |
-| `get_report_section`     | Read canonical report sections; prefer specific sections over `section="all"`; `metrics` is summary-only, `metrics_detail` is paginated/bounded                                                                                         |
-| `evaluate_gates`         | Preview CI/gating decisions without exiting                                                                                                                                                                                             |
-| `check_clones`           | Clone findings from a stored run; cheaper and narrower than `list_findings` when you only need clone debt                                                                                                                               |
-| `check_complexity`       | Complexity hotspots from a stored run; cheaper and narrower than `list_findings` when you only need complexity                                                                                                                          |
-| `check_coupling`         | Coupling hotspots from a stored run; cheaper and narrower than `list_findings` when you only need coupling                                                                                                                              |
-| `check_cohesion`         | Cohesion hotspots from a stored run; cheaper and narrower than `list_findings` when you only need cohesion                                                                                                                              |
-| `check_dead_code`        | Dead-code findings from a stored run; cheaper and narrower than `list_findings` when you only need dead code                                                                                                                            |
-| `generate_pr_summary`    | PR-friendly markdown or JSON summary; prefer `markdown` for compact LLM-facing output and `json` for machine post-processing                                                                                                            |
-| `mark_finding_reviewed`  | Session-local review marker (in-memory only)                                                                                                                                                                                            |
-| `list_reviewed_findings` | List reviewed findings for a run                                                                                                                                                                                                        |
-| `clear_session_runs`     | Reset all in-memory runs and session caches                                                                                                                                                                                             |
+| Tool                     | Purpose                                                                                             |
+|--------------------------|-----------------------------------------------------------------------------------------------------|
+| `analyze_repository`     | Full analysis → compact summary; use `get_run_summary` or `get_production_triage` as the first pass |
+| `analyze_changed_paths`  | Diff-aware analysis via `changed_paths` or `git_diff_ref`; compact changed-files snapshot           |
+| `get_run_summary`        | Cheapest run snapshot: health, findings, baseline, inventory                                        |
+| `get_production_triage`  | Production-first view: health, hotspots, suggestions; best first pass for noisy repos               |
+| `help`                   | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope  |
+| `compare_runs`           | Run-to-run delta: regressions, improvements, health change                                          |
+| `list_findings`          | Filtered, paginated findings; use after hotspots or `check_*`                                       |
+| `get_finding`            | Single finding detail by id; defaults to `normal` detail level                                      |
+| `get_remediation`        | Remediation payload for one finding                                                                 |
+| `list_hotspots`          | Priority-ranked hotspot views; preferred before broad listing                                       |
+| `get_report_section`     | Read report sections; `metrics_detail` is paginated with family/path filters                        |
+| `evaluate_gates`         | Preview CI gating decisions                                                                         |
+| `check_clones`           | Clone findings only; narrower than `list_findings`                                                  |
+| `check_complexity`       | Complexity hotspots only                                                                            |
+| `check_coupling`         | Coupling hotspots only                                                                              |
+| `check_cohesion`         | Cohesion hotspots only                                                                              |
+| `check_dead_code`        | Dead-code findings only                                                                             |
+| `generate_pr_summary`    | PR-friendly markdown or JSON summary                                                                |
+| `mark_finding_reviewed`  | Session-local review marker (in-memory)                                                             |
+| `list_reviewed_findings` | List reviewed findings for a run                                                                    |
+| `clear_session_runs`     | Reset in-memory runs and session state                                                              |
 
 > `check_*` tools query stored runs only. Call `analyze_repository` or
 > `analyze_changed_paths` first.
 
-`check_*` responses keep `health.score` and `health.grade`, but slim
-`health.dimensions` down to the one dimension relevant to that tool.
-List-style finding responses now use short MCP finding ids and compact relative
-locations by default; `normal` keeps structured `{path, line, end_line, symbol}`
-locations, while `full` keeps the richer compatibility payload including `uri`.
-Summary-style MCP cache payloads expose `freshness` (`fresh`, `mixed`, `reused`).
-Inline design-threshold parameters on `analyze_repository` /
-`analyze_changed_paths` become part of the canonical run: they are recorded in
-`meta.analysis_thresholds.design_findings` and define that run's canonical
-design findings.
+**Payload conventions:**
 
-Run ids in MCP payloads are short session handles (first 8 hex chars of the
-canonical digest). MCP tools and run-scoped resources accept both short and full
-run ids. Finding ids follow the same rule: MCP responses use compact ids, while
-the canonical `report.json` keeps full finding ids unchanged. When a short
-finding id would collide within a run, MCP lengthens it just enough to keep it
-unique.
+- `check_*` responses include only the relevant health dimension.
+- Finding responses use short MCP IDs and relative paths by default;
+  `detail_level=full` restores the compatibility payload with URIs.
+- Run IDs are 8-char hex handles; finding IDs are short prefixed forms.
+  Both accept the full canonical form as input.
+- `metrics_detail(family="overloaded_modules")` exposes the report-only
+  module-hotspot layer without turning it into findings or gate data.
+- `help(topic=...)` is static: meaning, anti-patterns, next step, doc links.
+- Start with repo defaults or `pyproject`-resolved thresholds, then lower them
+  only for an explicit higher-sensitivity exploratory pass.
 
 ## Resource surface
 
@@ -130,11 +166,26 @@ analyze_repository → get_run_summary or get_production_triage
 → list_hotspots or check_* → get_finding → get_remediation
 ```
 
+### Semantic uncertainty recovery
+
+```
+help(topic="workflow" | "analysis_profile" | "baseline" | "suppressions" | "latest_runs" | "review_state" | "changed_scope")
+```
+
 ### Full repository review
 
 ```
 analyze_repository → get_production_triage
 → list_hotspots(kind="highest_priority") → get_finding → evaluate_gates
+```
+
+### Conservative first pass, then deeper review
+
+```
+analyze_repository
+→ help(topic="analysis_profile") when you need finer-grained local review
+→ analyze_repository(min_loc=..., min_stmt=..., ...) as an explicit higher-sensitivity pass
+→ compare_runs
 ```
 
 ### Changed-files review (PR / patch)
@@ -155,92 +206,40 @@ list_findings → get_finding → mark_finding_reviewed
 
 Good prompts include **scope**, **goal**, and **constraint**:
 
-### Health check
-
 ```text
-Use codeclone MCP to analyze this repository. Give me a concise structural health summary
-and explain which findings are worth looking at first.
-```
+# Health check
+Use codeclone MCP to analyze this repository.
+Give me a concise structural health summary and the top findings to look at first.
 
-### Clone triage (production only)
-
-```text
-Analyze through codeclone MCP, filter to clone findings in production code only,
-and show me the top 3 clone groups worth fixing first.
-```
-
-### Changed-files review
-
-```text
+# Changed-files review
 Use codeclone MCP in changed-files mode for my latest edits.
 Focus only on findings that touch changed files and rank them by priority.
-```
 
-### Dead-code review
-
-```text
-Use codeclone MCP to review dead-code findings. Separate actionable items from
-likely framework false positives. Do not add suppressions automatically.
-```
-
-### Gate preview
-
-```text
-Run codeclone through MCP and preview gating with fail_on_new plus a zero clone threshold.
+# Gate preview
+Run codeclone through MCP and preview gating with fail_on_new.
 Explain the exact reasons. Do not change any files.
-```
 
-### AI-generated code check
-
-```text
-I added code with an AI agent. Use codeclone MCP to check for new structural drift:
-clone groups, dead code, duplicated branches, design hotspots.
+# AI-generated code check
+I added code with an AI agent. Use codeclone MCP to check for new structural drift.
 Separate accepted baseline debt from new regressions.
-```
-
-### Safe refactor planning
-
-```text
-Use codeclone MCP to pick one production finding that looks safe to refactor.
-Explain why it is a good candidate and outline a minimal plan.
-```
-
-### Run comparison
-
-```text
-Compare the latest CodeClone MCP run against the previous one.
-Show regressions, resolved findings, and health delta.
 ```
 
 **Tips:**
 
 - Use `analyze_changed_paths` for PRs, not full analysis.
-- Prefer `get_run_summary` or `get_production_triage` for the first pass on a
-  new run.
-- Prefer `list_hotspots` or the narrow `check_*` tools before broad
-  `list_findings` calls.
+- Prefer `get_run_summary` or `get_production_triage` as the first pass.
+- Prefer `list_hotspots` or narrow `check_*` tools before broad `list_findings`.
 - Use `get_finding` / `get_remediation` for one finding instead of raising
   `detail_level` on larger lists.
-- Set `cache_policy="off"` when you need the freshest truth from a new analysis
-  run, not whatever older session state currently sits behind `latest/*`.
-- Pass an absolute `root` to `analyze_repository` / `analyze_changed_paths`.
-  MCP intentionally rejects relative roots like `.` to avoid analyzing the
-  wrong directory when server cwd and client workspace differ.
-- Prefer `generate_pr_summary(format="markdown")` for agent-facing output; use
-  `json` only when another machine step needs it.
-- Avoid `get_report_section(section="all")` unless you truly need the full
-  canonical report document.
-- Use `get_report_section(section="metrics_detail", family=..., limit=...)` for
-  metrics drill-down; the unfiltered call is intentionally bounded.
+- Pass an absolute `root` — MCP rejects relative roots like `.`.
 - Use `"production-only"` / `source_kind` filters to cut test/fixture noise.
 - Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
-- Ask the agent to separate baseline debt from new regressions.
 
 ## Client configuration
 
-All clients use the same CodeClone server — only the registration differs.
+All clients use the same server — only the registration format differs.
 
-### Claude Code / Anthropic
+### JSON clients (Claude Code, Copilot Chat, Gemini CLI)
 
 ```json
 {
@@ -256,7 +255,7 @@ All clients use the same CodeClone server — only the registration differs.
 }
 ```
 
-### Codex / OpenAI (command-based)
+### Codex / OpenAI
 
 ```toml
 [mcp_servers.codeclone]
@@ -265,33 +264,7 @@ command = "codeclone-mcp"
 args = ["--transport", "stdio"]
 ```
 
-For the Responses API or remote-only OpenAI clients, use `streamable-http`.
-
-### GitHub Copilot Chat
-
-```json
-{
-  "mcpServers": {
-    "codeclone": {
-      "command": "codeclone-mcp",
-      "args": [
-        "--transport",
-        "stdio"
-      ]
-    }
-  }
-}
-```
-
-### Gemini CLI
-
-Same `stdio` registration. If the client only accepts remote URLs, use
-`streamable-http` and point to the `/mcp` endpoint.
-
-### Other clients
-
-- `stdio` for local analysis
-- `streamable-http` for remote/HTTP-only clients
+For the Responses API or remote-only clients, use `streamable-http`.
 
 If `codeclone-mcp` is not on `PATH`, use an absolute path to the launcher.
 
@@ -304,13 +277,13 @@ If `codeclone-mcp` is not on `PATH`, use an absolute path to the launcher.
 
 ## Troubleshooting
 
-| Problem                                                   | Fix                                                                            |
-|-----------------------------------------------------------|--------------------------------------------------------------------------------|
-| `CodeClone MCP support requires the optional 'mcp' extra` | `pip install "codeclone[mcp]"`                                                 |
-| Client cannot find `codeclone-mcp`                        | `uv tool install "codeclone[mcp]"` or use absolute path                        |
-| Client only accepts remote MCP                            | Use `streamable-http` transport                                                |
-| Agent reads stale results                                 | Call `analyze_repository` again; `latest` always points to the most recent run |
-| `changed_paths` rejected                                  | Pass a `list[str]` of repo-relative paths, not a comma-separated string        |
+| Problem                                                   | Fix                                                                                 |
+|-----------------------------------------------------------|-------------------------------------------------------------------------------------|
+| `CodeClone MCP support requires the optional 'mcp' extra` | `uv tool install --pre "codeclone[mcp]"` or `uv pip install --pre "codeclone[mcp]"` |
+| Client cannot find `codeclone-mcp`                        | `uv tool install --pre "codeclone[mcp]"` or use an absolute launcher path           |
+| Client only accepts remote MCP                            | Use `streamable-http` transport                                                     |
+| Agent reads stale results                                 | Call `analyze_repository` again; `latest` always points to the most recent run      |
+| `changed_paths` rejected                                  | Pass a `list[str]` of repo-relative paths, not a comma-separated string             |
 
 ## See also
 

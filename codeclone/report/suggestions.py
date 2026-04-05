@@ -578,7 +578,7 @@ def _structural_summary(group: StructuralFindingGroup) -> tuple[str, str]:
             return "Repeated branch family", "same repeated branch shape"
 
 
-def _structural_steps(group: StructuralFindingGroup) -> tuple[str, ...]:
+def structural_action_steps(group: StructuralFindingGroup) -> tuple[str, ...]:
     match group.finding_kind:
         case "clone_guard_exit_divergence":
             return (
@@ -600,6 +600,19 @@ def _structural_steps(group: StructuralFindingGroup) -> tuple[str, ...]:
             pass
 
     terminal = str(group.signature.get("terminal", "")).strip()
+    stmt_seq = str(group.signature.get("stmt_seq", "")).strip()
+    stmt_names = tuple(part.strip() for part in stmt_seq.split(",") if part.strip())
+    if "Continue" in stmt_names:
+        return (
+            (
+                "Review whether the repeated continue guard can be merged "
+                "into one predicate."
+            ),
+            (
+                "If separate continue checks keep the local control flow clearer, "
+                "keep this as a report-only hint."
+            ),
+        )
     match terminal:
         case "raise":
             return (
@@ -616,12 +629,47 @@ def _structural_steps(group: StructuralFindingGroup) -> tuple[str, ...]:
             )
         case _:
             return (
-                "Review whether the repeated branch family should become a helper.",
+                "Review whether the repeated local branch can be simplified in place.",
                 (
-                    "Keep this as a report-only hint if the local duplication is "
-                    "intentional."
+                    "If the local duplication keeps control flow clearer, keep "
+                    "this as a report-only hint."
                 ),
             )
+
+
+def structural_suggestion_severity(
+    group: StructuralFindingGroup,
+    *,
+    occurrence_count: int,
+    spread_functions: int,
+) -> Severity:
+    severity: Severity = (
+        SEVERITY_WARNING
+        if occurrence_count >= 4 or spread_functions > 1
+        else SEVERITY_INFO
+    )
+    if group.finding_kind in {
+        "clone_guard_exit_divergence",
+        "clone_cohort_drift",
+    }:
+        severity = SEVERITY_WARNING
+    return severity
+
+
+def structural_has_separate_suggestion(
+    group: StructuralFindingGroup,
+    *,
+    occurrence_count: int,
+    spread_functions: int,
+) -> bool:
+    return (
+        structural_suggestion_severity(
+            group,
+            occurrence_count=occurrence_count,
+            spread_functions=spread_functions,
+        )
+        != SEVERITY_INFO
+    )
 
 
 def _structural_suggestions(
@@ -639,14 +687,17 @@ def _structural_suggestions(
         spread_files, spread_functions = group_spread(locations)
         source_kind, breakdown = _source_context(locations, scan_root=scan_root)
         count = len(locations)
-        severity: Severity = (
-            SEVERITY_WARNING if count >= 4 or spread_functions > 1 else SEVERITY_INFO
+        severity = structural_suggestion_severity(
+            group,
+            occurrence_count=count,
+            spread_functions=spread_functions,
         )
-        if group.finding_kind in {
-            "clone_guard_exit_divergence",
-            "clone_cohort_drift",
-        }:
-            severity = SEVERITY_WARNING
+        if not structural_has_separate_suggestion(
+            group,
+            occurrence_count=count,
+            spread_functions=spread_functions,
+        ):
+            continue
         title, summary = _structural_summary(group)
         location_label = format_group_location_label(
             representative,
@@ -660,7 +711,7 @@ def _structural_suggestions(
                 category=CATEGORY_STRUCTURAL,
                 title=title,
                 location=location_label,
-                steps=_structural_steps(group),
+                steps=structural_action_steps(group),
                 effort=EFFORT_MODERATE,
                 priority=_priority(severity, EFFORT_MODERATE),
                 finding_family=FAMILY_STRUCTURAL,

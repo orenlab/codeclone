@@ -29,12 +29,11 @@ Modes:
 
 - `analysis_mode=full`: metrics computed and suggestions enabled
 - `analysis_mode=clones_only`: metrics skipped
-- Health score is a weighted blend: clones 25%, complexity 20%, cohesion 15%,
-  coupling 10%, dead code 10%, dependencies 10%, coverage 10%.
-- Clone dimension uses a piecewise density curve with breakpoints at 0.05
-  (score 90), 0.20 (score 50), 0.50 (score 0). Below 5% density the penalty
-  is mild; 5–20% is steep; above 20% is aggressive.
-- Grade bands: A ≥90, B ≥75, C ≥60, D ≥40, F <40.
+- Health-score semantics are defined in
+  [15-health-score.md](15-health-score.md).
+- Metrics comparison state is unified by default: unless `--metrics-baseline`
+  is explicitly redirected, metrics baseline data comes from the same
+  `codeclone.baseline.json` path as clone baseline data.
 
 Refs:
 
@@ -119,9 +118,12 @@ Refs:
 - Absolute threshold defaults are not frozen by this chapter.
 - Metrics scoring internals, per-dimension weighting, and the exact clone
   density curve may evolve if exit semantics and contract statuses stay stable.
+  See [15-health-score.md](15-health-score.md) for the current model and the
+  phased expansion policy.
 
 ## See also
 
+- [15-health-score.md](15-health-score.md)
 - [04-config-and-defaults.md](04-config-and-defaults.md)
 - [05-core-pipeline.md](05-core-pipeline.md)
 - [09-cli.md](09-cli.md)

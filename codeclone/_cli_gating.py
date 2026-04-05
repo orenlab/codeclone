@@ -90,37 +90,37 @@ def policy_context(*, args: _GatingArgs, gate_kind: str) -> str:
     if args.ci:
         return "ci"
 
-    parts: list[str] = []
-
+    parts: tuple[str | None, ...]
     match gate_kind:
         case "metrics":
-            if args.fail_on_new_metrics:
-                parts.append("fail-on-new-metrics")
-            if args.fail_complexity >= 0:
-                parts.append(f"fail-complexity={args.fail_complexity}")
-            if args.fail_coupling >= 0:
-                parts.append(f"fail-coupling={args.fail_coupling}")
-            if args.fail_cohesion >= 0:
-                parts.append(f"fail-cohesion={args.fail_cohesion}")
-            if args.fail_cycles:
-                parts.append("fail-cycles")
-            if args.fail_dead_code:
-                parts.append("fail-dead-code")
-            if args.fail_health >= 0:
-                parts.append(f"fail-health={args.fail_health}")
-
+            parts = (
+                "fail-on-new-metrics" if args.fail_on_new_metrics else None,
+                f"fail-complexity={args.fail_complexity}"
+                if args.fail_complexity >= 0
+                else None,
+                f"fail-coupling={args.fail_coupling}"
+                if args.fail_coupling >= 0
+                else None,
+                f"fail-cohesion={args.fail_cohesion}"
+                if args.fail_cohesion >= 0
+                else None,
+                "fail-cycles" if args.fail_cycles else None,
+                "fail-dead-code" if args.fail_dead_code else None,
+                f"fail-health={args.fail_health}" if args.fail_health >= 0 else None,
+            )
         case "new-clones":
-            if args.fail_on_new:
-                parts.append("fail-on-new")
-
+            parts = ("fail-on-new" if args.fail_on_new else None,)
         case "threshold":
-            if args.fail_threshold >= 0:
-                parts.append(f"fail-threshold={args.fail_threshold}")
-
+            parts = (
+                f"fail-threshold={args.fail_threshold}"
+                if args.fail_threshold >= 0
+                else None,
+            )
         case _:
-            pass
+            parts = ()
 
-    return ", ".join(parts) if parts else "custom"
+    enabled_parts = tuple(part for part in parts if part is not None)
+    return ", ".join(enabled_parts) if enabled_parts else "custom"
 
 
 def print_gating_failure_block(

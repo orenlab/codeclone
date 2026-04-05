@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from ... import _coerce
 from ..._html_badges import _render_chain_flow, _short_label, _stat_card, _tab_empty
-from ..._html_escape import _escape_attr, _escape_html
+from ..._html_escape import _escape_html
 from .._components import Tone, insight_block
 from .._glossary import glossary_tip
 from .._tables import render_rows_table
@@ -198,7 +198,7 @@ def _render_dep_edges(
         marker = "dep-arrow-cycle" if is_cycle else "dep-arrow"
         rendered.append(
             f'<path class="dep-edge" '
-            f'data-source="{_escape_attr(source)}" data-target="{_escape_attr(target)}" '
+            f'data-source="{_escape_html(source)}" data-target="{_escape_html(target)}" '
             f'd="M{x1a:.1f},{y1a:.1f} Q{mx:.1f},{my:.1f} {x2a:.1f},{y2a:.1f}" '
             f'fill="none" stroke="{stroke}" stroke-opacity="{opacity}" '
             f'stroke-width="1" marker-end="url(#{marker})"/>'
@@ -247,7 +247,7 @@ def _render_dep_nodes_and_labels(
             fill, fill_opacity, extra = "var(--accent-primary)", "0.7", ""
 
         nodes_svg.append(
-            f'<circle class="dep-node" data-node="{_escape_attr(node)}" '
+            f'<circle class="dep-node" data-node="{_escape_html(node)}" '
             f'cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" '
             f'fill="{fill}" fill-opacity="{fill_opacity}" {extra}/>'
         )
@@ -255,7 +255,7 @@ def _render_dep_nodes_and_labels(
         font_size = "10" if is_hub else "9"
         if rotate_labels:
             labels_svg.append(
-                f'<text class="dep-label" data-node="{_escape_attr(node)}" '
+                f'<text class="dep-label" data-node="{_escape_html(node)}" '
                 f'x="0" y="0" font-size="{font_size}" text-anchor="start" '
                 f'transform="translate({x:.1f},{y - radius - 6:.1f}) rotate(-45)">'
                 f"<title>{_escape_html(node)}</title>{_escape_html(label)}</text>"
@@ -263,7 +263,7 @@ def _render_dep_nodes_and_labels(
             continue
 
         labels_svg.append(
-            f'<text class="dep-label" data-node="{_escape_attr(node)}" '
+            f'<text class="dep-label" data-node="{_escape_html(node)}" '
             f'x="{x:.1f}" y="{y - radius - 5:.1f}" font-size="{font_size}" text-anchor="middle">'
             f"<title>{_escape_html(node)}</title>{_escape_html(label)}</text>"
         )

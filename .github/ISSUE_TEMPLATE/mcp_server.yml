@@ -1,0 +1,75 @@
+name: MCP server
+description: Report an MCP bug or propose an MCP workflow/tooling improvement
+title: "[MCP]: "
+labels: [ "mcp" ]
+assignees: [ ]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for issues about the **CodeClone MCP server**:
+        tools, resources, payload shape, routing, session semantics, root handling,
+        IDE/MCP client behavior, and agent-facing workflow quality.
+
+  - type: input
+    id: version
+    attributes:
+      label: CodeClone version
+      description: Output of `codeclone --version`
+      placeholder: "2.0.0b4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: MCP category
+      options:
+        - Tool behavior
+        - Resource behavior
+        - Payload size / shape
+        - Session / latest-runs semantics
+        - Root / safety semantics
+        - Guidance / workflow routing
+        - Packaging / launcher / transport
+    validations:
+      required: true
+
+  - type: textarea
+    id: client
+    attributes:
+      label: MCP client or host
+      description: Codex, Claude Desktop, Cursor, VS Code, custom client, etc.
+      placeholder: "Codex desktop / stdio"
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the current MCP behavior and why it is wrong or awkward.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen instead?
+      description: Focus on the safest and most budget-aware expected behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction or request sequence
+      description: |
+        Include the relevant tool/resource calls when possible.
+        Small, exact examples are preferred over screenshots.
+      render: json
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Payload excerpts, error text, screenshots, or workflow notes.

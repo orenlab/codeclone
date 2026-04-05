@@ -62,6 +62,7 @@ class ReportContext:
     cohesion_map: Mapping[str, object]
     dependencies_map: Mapping[str, object]
     dead_code_map: Mapping[str, object]
+    overloaded_modules_map: Mapping[str, object]
     health_map: Mapping[str, object]
 
     # -- suggestions + structural --
@@ -71,6 +72,7 @@ class ReportContext:
     # -- derived --
     overview_data: Mapping[str, object]
     report_document: Mapping[str, object]
+    inventory_map: Mapping[str, object]
     derived_map: Mapping[str, object]
     integrity_map: Mapping[str, object]
 
@@ -140,11 +142,8 @@ def _group_sort_key(items: Collection[object]) -> tuple[int]:
 
 def _meta_pick(*values: object) -> object | None:
     for value in values:
-        if value is None:
-            continue
-        if isinstance(value, str) and not value.strip():
-            continue
-        return value
+        if value is not None and (not isinstance(value, str) or value.strip()):
+            return value
     return None
 
 
@@ -175,6 +174,7 @@ def build_context(
     metrics_baseline_meta = _as_mapping(meta.get("metrics_baseline"))
     runtime_meta = _as_mapping(meta.get("runtime"))
     report_document_map = _as_mapping(report_document)
+    inventory_map = _as_mapping(report_document_map.get("inventory"))
     derived_map = _as_mapping(report_document_map.get("derived"))
     integrity_map = _as_mapping(report_document_map.get("integrity"))
 
@@ -234,6 +234,9 @@ def build_context(
     cohesion_map = _as_mapping(metrics_map.get("cohesion"))
     dependencies_map = _as_mapping(metrics_map.get("dependencies"))
     dead_code_map = _as_mapping(metrics_map.get("dead_code"))
+    overloaded_modules_map = _as_mapping(metrics_map.get("overloaded_modules"))
+    if not overloaded_modules_map:
+        overloaded_modules_map = _as_mapping(metrics_map.get("god_modules"))
     health_map = _as_mapping(metrics_map.get("health"))
 
     suggestions_tuple = tuple(suggestions or ())
@@ -278,11 +281,13 @@ def build_context(
         cohesion_map=cohesion_map,
         dependencies_map=dependencies_map,
         dead_code_map=dead_code_map,
+        overloaded_modules_map=overloaded_modules_map,
         health_map=health_map,
         suggestions=suggestions_tuple,
         structural_findings=tuple(structural_findings or ()),
         overview_data=overview_data,
         report_document=report_document_map,
+        inventory_map=inventory_map,
         derived_map=derived_map,
         integrity_map=integrity_map,
         metrics_diff=metrics_diff,

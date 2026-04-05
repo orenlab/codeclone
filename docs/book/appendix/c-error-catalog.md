@@ -73,12 +73,12 @@ Refs:
 
 ## MCP interface errors
 
-| Condition | Behavior |
-|-----------|----------|
-| Optional `mcp` extra missing | `codeclone-mcp` prints install hint and exits `2` |
-| Invalid root path / invalid numeric config | MCP service contract error |
-| Missing run or finding id | MCP service request error |
-| Unsupported MCP resource URI / report section | MCP service contract error |
+| Condition                                     | Behavior                                          |
+|-----------------------------------------------|---------------------------------------------------|
+| Optional `mcp` extra missing                  | `codeclone-mcp` prints install hint and exits `2` |
+| Invalid root path / invalid numeric config    | MCP service contract error                        |
+| Missing run or finding id                     | MCP service request error                         |
+| Unsupported MCP resource URI / report section | MCP service contract error                        |
 
 Refs:
 

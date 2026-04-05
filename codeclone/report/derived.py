@@ -37,6 +37,7 @@ __all__ = [
     "format_report_location_label",
     "format_spread_location_label",
     "group_spread",
+    "normalized_source_kind",
     "relative_report_path",
     "report_location_from_group_item",
     "report_location_from_structural_occurrence",

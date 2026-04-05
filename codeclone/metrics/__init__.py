@@ -18,11 +18,13 @@ from .dependencies import (
     max_depth,
 )
 from .health import HealthInputs, compute_health
+from .overloaded_modules import build_overloaded_modules_payload
 
 __all__ = [
     "HealthInputs",
     "build_dep_graph",
     "build_import_graph",
+    "build_overloaded_modules_payload",
     "cohesion_risk",
     "compute_cbo",
     "compute_health",

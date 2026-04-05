@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from codeclone.cache import CacheEntry
+from codeclone.metrics import build_overloaded_modules_payload
 from codeclone.models import (
     ClassMetrics,
     DeadCandidate,
@@ -175,6 +176,127 @@ def test_build_metrics_report_payload_includes_suppressed_dead_code_items() -> N
             "confidence": "high",
             "suppressed_by": [{"rule": "dead-code", "source": "inline_codeclone"}],
         }
+    ]
+
+
+def test_metrics_payload_includes_overloaded_modules_for_small_population() -> None:
+    payload = build_metrics_report_payload(
+        scan_root="/repo",
+        project_metrics=_project_metrics(dead_confidence="high"),
+        units=(
+            {
+                "qualname": "pkg.alpha:run",
+                "filepath": "/repo/pkg/alpha.py",
+                "cyclomatic_complexity": 12,
+            },
+            {
+                "qualname": "tests.test_beta:run",
+                "filepath": "/repo/tests/test_beta.py",
+                "cyclomatic_complexity": 2,
+            },
+        ),
+        class_metrics=(),
+        module_deps=(
+            ModuleDep(
+                source="pkg.alpha",
+                target="tests.test_beta",
+                import_type="import",
+                line=1,
+            ),
+        ),
+        source_stats_by_file=(
+            ("/repo/pkg/alpha.py", 240, 3, 1, 1),
+            ("/repo/tests/test_beta.py", 40, 1, 0, 0),
+        ),
+        suppressed_dead_code=(),
+    )
+
+    overloaded_modules = payload["overloaded_modules"]
+    assert isinstance(overloaded_modules, dict)
+    summary = overloaded_modules["summary"]
+    assert summary["total"] == 2
+    assert summary["candidates"] == 0
+    assert summary["population_status"] == "limited"
+    assert summary["top_score"] >= summary["average_score"] >= 0.0
+    assert summary["candidate_score_cutoff"] <= 1.0
+    assert summary["candidate_score_cutoff"] >= summary["top_score"]
+    items = overloaded_modules["items"]
+    assert [item["module"] for item in items] == ["pkg.alpha", "tests.test_beta"]
+    assert items[0]["candidate_status"] == "ranked_only"
+    assert items[0]["candidate_reasons"] == ["size_pressure", "dependency_pressure"]
+    assert items[0]["source_kind"] == "production"
+    assert items[1]["candidate_status"] == "ranked_only"
+    assert items[1]["candidate_reasons"] == ["dependency_pressure"]
+    assert items[1]["source_kind"] == "tests"
+
+
+def test_build_overloaded_modules_payload_flags_project_relative_candidates() -> None:
+    scan_root = "/repo"
+    source_stats = [
+        (f"{scan_root}/pkg/core.py", 2000, 24, 4, 2),
+        *((f"{scan_root}/pkg/mod_{idx}.py", 40 + idx, 1, 0, 0) for idx in range(20)),
+    ]
+    units = [
+        *(
+            {
+                "qualname": f"pkg.core:fn_{idx}",
+                "filepath": f"{scan_root}/pkg/core.py",
+                "cyclomatic_complexity": 8 + (idx % 4),
+            }
+            for idx in range(24)
+        ),
+        *(
+            {
+                "qualname": f"pkg.mod_{idx}:fn",
+                "filepath": f"{scan_root}/pkg/mod_{idx}.py",
+                "cyclomatic_complexity": 1,
+            }
+            for idx in range(20)
+        ),
+    ]
+    deps = [
+        *(
+            ModuleDep(
+                source=f"pkg.mod_{idx}",
+                target="pkg.core",
+                import_type="import",
+                line=1,
+            )
+            for idx in range(10)
+        ),
+        *(
+            ModuleDep(
+                source="pkg.core",
+                target=f"pkg.mod_{idx}",
+                import_type="import",
+                line=idx + 1,
+            )
+            for idx in range(10, 20)
+        ),
+    ]
+
+    payload = build_overloaded_modules_payload(
+        scan_root=scan_root,
+        source_stats_by_file=source_stats,
+        units=units,
+        class_metrics=(),
+        module_deps=deps,
+    )
+
+    summary = payload["summary"]
+    assert isinstance(summary, dict)
+    assert summary["population_status"] == "ok"
+    assert summary["candidates"] >= 1
+    items = payload["items"]
+    assert isinstance(items, list)
+    first = items[0]
+    assert isinstance(first, dict)
+    assert first["module"] == "pkg.core"
+    assert first["candidate_status"] == "candidate"
+    assert first["candidate_reasons"] == [
+        "size_pressure",
+        "dependency_pressure",
+        "hub_like_shape",
     ]
 
 

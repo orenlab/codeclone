@@ -33,9 +33,9 @@ Refs:
 - Supported placements:
     - previous line before declaration (`leading`)
     - end-of-line comment on declaration header (`inline`)
-      - same-line single-line declaration
-      - first line of a multiline declaration header
-      - closing header line containing `:`
+        - same-line single-line declaration
+        - first line of a multiline declaration header
+        - closing header line containing `:`
 - Current supported dead-code rule id: `dead-code`.
 - Rule list supports comma-separated values and deduplicates deterministically.
 - Suppression applies only to declaration targets (`def`, `async def`, `class`).

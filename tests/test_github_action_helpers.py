@@ -100,7 +100,7 @@ def test_render_pr_comment_uses_canonical_report_summary() -> None:
     action_impl = _load_action_impl()
     report = {
         "meta": {
-            "codeclone_version": "2.0.0b3",
+            "codeclone_version": "2.0.0b4",
             "baseline": {"status": "ok"},
             "cache": {"used": True},
         },
@@ -141,7 +141,7 @@ def test_render_pr_comment_uses_canonical_report_summary() -> None:
             "Structural: 15",
             "Dead code: 0",
             "Design: 3",
-            "`2.0.0b3`",
+            "`2.0.0b4`",
         ),
     )
 
@@ -156,7 +156,7 @@ def test_resolve_install_target_uses_repo_source_for_local_action_checkout(
     target = _resolve_install_target(
         action_path=action_path,
         workspace=repo_root,
-        package_version="2.0.0b3",
+        package_version="2.0.0b4",
     )
 
     assert target.source == "repo"
@@ -173,7 +173,7 @@ def test_resolve_install_target_uses_pypi_for_remote_checkout(tmp_path: Path) ->
     pinned = _resolve_install_target(
         action_path=action_path,
         workspace=workspace_root,
-        package_version="2.0.0b3",
+        package_version="2.0.0b4",
     )
     latest = _resolve_install_target(
         action_path=action_path,
@@ -188,7 +188,7 @@ def test_resolve_install_target_uses_pypi_for_remote_checkout(tmp_path: Path) ->
         latest.requirement,
     ) == (
         "pypi-version",
-        "codeclone==2.0.0b3",
+        "codeclone==2.0.0b4",
         "pypi-latest",
         "codeclone",
     )

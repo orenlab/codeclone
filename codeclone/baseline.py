@@ -8,17 +8,19 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
-import os
 import re
 import sys
-import tempfile
 from datetime import datetime, timezone
 from enum import Enum
+from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
+import orjson
+
 from . import __version__
+from ._json_io import read_json_object as _read_json_object
+from ._json_io import write_json_document_atomically as _write_json_document_atomically
 from ._schema_validation import validate_top_level_structure
 from .contracts import (
     BASELINE_FINGERPRINT_VERSION,
@@ -420,21 +422,12 @@ class Baseline:
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    data = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
-    fd_num, tmp_name = tempfile.mkstemp(
-        dir=path.parent,
-        suffix=".tmp",
+    _write_json_document_atomically(
+        path,
+        payload,
+        indent=True,
+        trailing_newline=True,
     )
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd_num, "wb") as fd:
-            fd.write(data.encode("utf-8"))
-            fd.flush()
-            os.fsync(fd.fileno())
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
 
 
 def _safe_stat_size(path: Path) -> int:
@@ -449,25 +442,22 @@ def _safe_stat_size(path: Path) -> int:
 
 def _load_json_object(path: Path) -> dict[str, Any]:
     try:
-        raw = path.read_text("utf-8")
+        return _read_json_object(path)
     except OSError as e:
         raise BaselineValidationError(
             f"Cannot read baseline file at {path}: {e}",
             status=BaselineStatus.INVALID_JSON,
         ) from e
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
+    except JSONDecodeError as e:
         raise BaselineValidationError(
             f"Corrupted baseline file at {path}: {e}",
             status=BaselineStatus.INVALID_JSON,
         ) from e
-    if not isinstance(data, dict):
+    except TypeError:
         raise BaselineValidationError(
             f"Baseline payload must be an object at {path}",
             status=BaselineStatus.INVALID_TYPE,
-        )
-    return data
+        ) from None
 
 
 def _validate_top_level_structure(payload: dict[str, Any], *, path: Path) -> None:
@@ -624,13 +614,8 @@ def _compute_payload_sha256(
         "functions": sorted(functions),
         "python_tag": python_tag,
     }
-    serialized = json.dumps(
-        canonical,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    serialized = orjson.dumps(canonical, option=orjson.OPT_SORT_KEYS)
+    return hashlib.sha256(serialized).hexdigest()
 
 
 def current_python_tag() -> str:

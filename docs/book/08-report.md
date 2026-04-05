@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define report contracts in `2.0.0b3`: canonical JSON (`report_schema_version=2.2`)
+Define report contracts in `2.0.0b4`: canonical JSON (`report_schema_version=2.3`)
 plus deterministic TXT/Markdown/SARIF projections.
 
 ## Public surface
@@ -16,7 +16,7 @@ plus deterministic TXT/Markdown/SARIF projections.
 
 ## Data model
 
-JSON report top-level (v2.2):
+JSON report top-level (v2.3):
 
 - `report_schema_version`
 - `meta`
@@ -32,6 +32,21 @@ Canonical provenance additions:
   thresholds used to materialize canonical design findings for that run
   (`complexity > N`, `coupling > N`, `cohesion >= N`).
 
+Canonical report-only metrics additions:
+
+- `metrics.families.overloaded_modules` records project-relative module hotspot
+  profiles and candidate classification for `Overloaded Modules`
+- the family is canonical report truth, but it does **not** participate in
+  findings totals, health, gates, baseline NEW/KNOWN semantics, or SARIF in
+  `b4`
+- `Overloaded Modules` is a report-only experimental layer rather than a second
+  complexity metric:
+    - complexity reports local control-flow hotspots in functions and methods
+    - `Overloaded Modules` reports module-level responsibility overload and dependency
+      pressure
+    - the layer may later become scoring only after validation and explicit
+      health-model documentation updates
+
 Canonical vs non-canonical split:
 
 - Canonical: `report_schema_version`, `meta`, `inventory`, `findings`, `metrics`
@@ -40,8 +55,8 @@ Canonical vs non-canonical split:
 
 Derived projection layer:
 
-- `derived.suggestions[*]` — actionable projection cards keyed back to canonical
-  findings via `finding_id`
+- `derived.suggestions[*]` — action-surplus projection cards keyed back to
+  canonical findings via `finding_id`
 - `derived.overview` — summary-only overview facts:
     - `families`
     - `top_risks`
@@ -61,6 +76,15 @@ Finding families:
 - `findings.groups.dead_code.groups`
 - `findings.groups.design.groups`
 - `findings.summary.suppressed.dead_code` (suppressed counter, non-active findings)
+
+Important role split:
+
+- Findings explain what was detected.
+- Suggestions exist only when they add action structure on top of a finding
+  (next step, prioritization, effort/risk framing, grouped remediation, or
+  review relevance).
+- Low-signal local structural info hints may remain findings-only and not
+  appear as separate suggestion cards.
 
 Structural finding kinds currently emitted by core/report pipeline:
 
@@ -97,6 +121,9 @@ Per-group common axes (family-specific fields may extend):
 - `derived.overview.directory_hotspots` is a deterministic report-layer
   aggregation over canonical findings; HTML must render it as-is or omit it on
   compatibility paths without a canonical report document.
+- `derived.overview.health_snapshot` is a projection over canonical
+  `metrics.families.health.summary`; it summarizes the current score but does
+  not define a second health model.
 - `derived.overview.directory_hotspots[*].path` is an overview-oriented
   directory key: runtime findings keep their parent directory, while test-only
   and fixture-only findings collapse to the corresponding source-scope roots
@@ -116,6 +143,10 @@ Per-group common axes (family-specific fields may extend):
 - Dead-code suppressed candidates are carried only under metrics
   (`metrics.families.dead_code.suppressed_items`) and never promoted to
   active `findings.groups.dead_code`.
+- A lower score after upgrade may reflect a broader health model, not only
+  worse code. Report renderers may surface the score, but health-model
+  expansion is documented separately in [15-health-score.md](15-health-score.md)
+  and compatibility notes.
 
 ## Invariants (MUST)
 
@@ -170,6 +201,7 @@ Refs:
 - [07-cache.md](07-cache.md)
 - [09-cli.md](09-cli.md)
 - [10-html-render.md](10-html-render.md)
+- [15-health-score.md](15-health-score.md)
 - [20-mcp-interface.md](20-mcp-interface.md)
 - [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)
 - [../sarif.md](../sarif.md)

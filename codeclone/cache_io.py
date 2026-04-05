@@ -8,11 +8,18 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
-import os
-import tempfile
 from collections.abc import Mapping
 from pathlib import Path
+
+from ._json_io import (
+    json_text as _json_text,
+)
+from ._json_io import (
+    read_json_document as _read_json_document,
+)
+from ._json_io import (
+    write_json_document_atomically as _write_json_document_atomically,
+)
 
 
 def as_str_or_none(value: object) -> str | None:
@@ -36,7 +43,7 @@ def as_str_dict(value: object) -> dict[str, object] | None:
 
 
 def canonical_json(data: object) -> str:
-    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return _json_text(data, sort_keys=True)
 
 
 def sign_cache_payload(data: Mapping[str, object]) -> str:
@@ -52,20 +59,8 @@ def verify_cache_payload_signature(
 
 
 def read_json_document(path: Path) -> object:
-    return json.loads(path.read_text("utf-8"))
+    return _read_json_document(path)
 
 
 def write_json_document_atomically(path: Path, document: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = canonical_json(document).encode("utf-8")
-    fd_num, tmp_name = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd_num, "wb") as fd:
-            fd.write(data)
-            fd.flush()
-            os.fsync(fd.fileno())
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    _write_json_document_atomically(path, document, sort_keys=True)

@@ -26,6 +26,10 @@ class MetricsSnapshot:
     health_total: int
     health_grade: str
     suppressed_dead_code_count: int = 0
+    overloaded_modules_candidates: int = 0
+    overloaded_modules_total: int = 0
+    overloaded_modules_population_status: str = ""
+    overloaded_modules_top_score: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +136,7 @@ def _print_metrics(
                 dead=metrics.dead_code_count,
                 health=metrics.health_total,
                 grade=metrics.health_grade,
+                overloaded_modules=metrics.overloaded_modules_candidates,
             )
         )
     else:
@@ -158,6 +163,14 @@ def _print_metrics(
             ui.fmt_metrics_dead_code(
                 metrics.dead_code_count,
                 suppressed=metrics.suppressed_dead_code_count,
+            )
+        )
+        console.print(
+            ui.fmt_metrics_overloaded_modules(
+                candidates=metrics.overloaded_modules_candidates,
+                total=metrics.overloaded_modules_total,
+                population_status=metrics.overloaded_modules_population_status,
+                top_score=metrics.overloaded_modules_top_score,
             )
         )
 

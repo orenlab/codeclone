@@ -4,12 +4,10 @@
 
 Define the current public MCP surface in the `2.0` beta line.
 
-This interface is **optional** and is installed via the `mcp` extra. It does
-not replace the CLI or the canonical JSON report contract. Instead, it exposes
-the existing deterministic analysis pipeline as a **read-only MCP server** for
-AI agents and MCP-capable clients.
-It is intentionally budget-aware and triage-first: the MCP surface is shaped as
-guided control flow for agentic development, not as a flat dump of report data.
+This interface is **optional** (installed via the `mcp` extra). It exposes
+the deterministic analysis pipeline as a **read-only MCP server** for AI agents
+and MCP-capable clients. It does not replace the CLI or the canonical report
+contract.
 
 ## Public surface
 
@@ -43,6 +41,9 @@ Current server characteristics:
 - process-count policy:
     - `processes` is an optional override
     - when omitted, MCP defers to the core CodeClone runtime
+- initialize metadata:
+    - `serverInfo.version` reflects the CodeClone package version
+    - clients may use it for compatibility checks
 - root contract:
     - analysis tools require an absolute repository root
     - relative roots such as `.` are rejected in MCP because server cwd may
@@ -72,6 +73,8 @@ Current server characteristics:
     - the cheapest useful path is designed to be the most obvious path:
       `get_run_summary` / `get_production_triage` first, then `list_hotspots`
       or `check_*`, then `get_finding` / `get_remediation`
+    - `help(topic=...)` is a bounded semantic routing tool for contract/workflow
+      uncertainty; it is not a second manual or docs proxy
 - finding-list payloads:
     - MCP finding ids are compact projection ids; canonical report ids are unchanged
     - `detail_level="summary"` is the default for list/check/hotspot tools
@@ -87,47 +90,49 @@ produced by the report contract.
 
 ## Tools
 
-Current tool set:
+Current tool set (`21` tools):
 
-| Tool                     | Key parameters                                                                                                                                         | Purpose / notes                                                                                                                                                                                                                                                                                  |
-|--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `analyze_repository`     | absolute `root`, `analysis_mode`, `changed_paths`, `git_diff_ref`, inline thresholds, cache/baseline paths                                             | Run deterministic CodeClone analysis, register the latest run, and return a compact MCP summary. The intended next step is `get_run_summary` or `get_production_triage`, not broad listing by default                                                                                            |
-| `analyze_changed_paths`  | absolute `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, inline thresholds                                                                 | Diff-aware fast path: analyze a repo, attach a changed-files projection, and return a compact changed-files snapshot. The intended next step is `get_report_section(section="changed")` or `get_production_triage`                                                                               |
-| `get_run_summary`        | `run_id`                                                                                                                                               | Return the stored summary for the latest or specified run, with slim inventory counts instead of the full file registry; this is the cheapest run-level snapshot and `health` becomes explicit `available=false` when metrics were skipped                                                       |
-| `get_production_triage`  | `run_id`, `max_hotspots`, `max_suggestions`                                                                                                            | Return a compact production-first MCP projection: health, cache `freshness`, production hotspots, production suggestions, and global source-kind counters. This is the default first-pass view for large or noisy repositories                                                                   |
-| `compare_runs`           | `run_id_before`, `run_id_after`, `focus`                                                                                                               | Compare two registered runs by finding ids and run-to-run health delta; MCP returns short run ids, compact regression/improvement cards, `mixed` for conflicting signals, and `incomparable` with top-level `reason`, empty comparison cards, and `health_delta=null` when roots/settings differ |
-| `evaluate_gates`         | `run_id`, gate thresholds/booleans                                                                                                                     | Evaluate CI/gating conditions against an existing run without exiting the process                                                                                                                                                                                                                |
-| `get_report_section`     | `run_id`, `section`, `family`, `path`, `offset`, `limit`                                                                                               | Return a canonical report section. Prefer targeted sections instead of `section="all"` unless the client truly needs the full canonical report. `metrics` is summary-only; `metrics_detail` is paginated/bounded and falls back to summary+hint when unfiltered                                  |
-| `list_findings`          | `family`, `category`, `severity`, `source_kind`, `novelty`, `sort_by`, `detail_level`, `changed_paths`, `git_diff_ref`, `exclude_reviewed`, pagination | Return deterministically ordered finding groups with filtering and pagination; compact summary detail is the default. Intended for broader filtered review after hotspots or `check_*`, not as the cheapest first-pass call                                                                      |
-| `get_finding`            | `finding_id`, `run_id`, `detail_level`                                                                                                                 | Return one finding by id; defaults to `normal` detail and accepts MCP short ids. Use this after `list_hotspots`, `list_findings`, or `check_*` instead of raising detail on larger lists                                                                                                         |
-| `get_remediation`        | `finding_id`, `run_id`, `detail_level`                                                                                                                 | Return just the remediation/explainability packet for one finding. Use this when the client needs the fix packet without pulling broader detail payloads                                                                                                                                         |
-| `list_hotspots`          | `kind`, `run_id`, `detail_level`, `changed_paths`, `git_diff_ref`, `exclude_reviewed`, `limit`, `max_results`                                          | Return one derived hotlist (`most_actionable`, `highest_spread`, `highest_priority`, `production_hotspots`, `test_fixture_hotspots`) with compact summary cards. This is the preferred first-pass triage surface before broader `list_findings` calls                                            |
-| `check_clones`           | `run_id`, `root`, `path`, `clone_type`, `source_kind`, `max_results`, `detail_level`                                                                   | Return clone findings from a compatible stored run; `health.dimensions` includes only `clones`. Prefer this narrower tool over `list_findings` when only clone debt is needed                                                                                                                    |
-| `check_complexity`       | `run_id`, `root`, `path`, `min_complexity`, `max_results`, `detail_level`                                                                              | Return complexity hotspots from a compatible stored run; `health.dimensions` includes only `complexity`. Prefer this narrower tool over `list_findings` when only complexity is needed                                                                                                           |
-| `check_coupling`         | `run_id`, `root`, `path`, `max_results`, `detail_level`                                                                                                | Return coupling hotspots from a compatible stored run; `health.dimensions` includes only `coupling`. Prefer this narrower tool over `list_findings` when only coupling is needed                                                                                                                 |
-| `check_cohesion`         | `run_id`, `root`, `path`, `max_results`, `detail_level`                                                                                                | Return cohesion hotspots from a compatible stored run; `health.dimensions` includes only `cohesion`. Prefer this narrower tool over `list_findings` when only cohesion is needed                                                                                                                 |
-| `check_dead_code`        | `run_id`, `root`, `path`, `min_severity`, `max_results`, `detail_level`                                                                                | Return dead-code findings from a compatible stored run; `health.dimensions` includes only `dead_code`. Prefer this narrower tool over `list_findings` when only dead code is needed                                                                                                              |
-| `generate_pr_summary`    | `run_id`, `changed_paths`, `git_diff_ref`, `format`                                                                                                    | Build a PR-friendly changed-files summary in markdown or JSON. Prefer `markdown` for compact LLM-facing output and reserve `json` for machine post-processing                                                                                                                                    |
-| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note`                                                                                                                         | Mark a finding as reviewed in the in-memory MCP session                                                                                                                                                                                                                                          |
-| `list_reviewed_findings` | `run_id`                                                                                                                                               | Return the current reviewed findings for the selected run                                                                                                                                                                                                                                        |
-| `clear_session_runs`     | none                                                                                                                                                   | Clear all stored in-memory runs plus ephemeral review/gate/session caches for the current server process                                                                                                                                                                                         |
+| Tool                     | Key parameters                                                                          | Purpose                                                                                            |
+|--------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
+| `analyze_repository`     | absolute `root`, `analysis_mode`, thresholds, cache/baseline paths                      | Full analysis → compact summary; then `get_run_summary` or `get_production_triage`                 |
+| `analyze_changed_paths`  | absolute `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`                     | Diff-aware analysis → compact changed-files snapshot                                               |
+| `get_run_summary`        | `run_id`                                                                                | Cheapest run snapshot: health, findings, baseline, inventory                                       |
+| `get_production_triage`  | `run_id`, `max_hotspots`, `max_suggestions`                                             | Production-first view: health, hotspots, suggestions                                               |
+| `help`                   | `topic`, `detail`                                                                       | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope |
+| `compare_runs`           | `run_id_before`, `run_id_after`, `focus`                                                | Run-to-run delta: regressions, improvements, health change                                         |
+| `evaluate_gates`         | `run_id`, gate thresholds                                                               | Preview CI gating decisions                                                                        |
+| `get_report_section`     | `run_id`, `section`, `family`, `path`, `offset`, `limit`                                | Read report sections; `metrics_detail` is paginated with family/path filters                       |
+| `list_findings`          | `family`, `severity`, `novelty`, `sort_by`, `detail_level`, `changed_paths`, pagination | Filtered, paginated findings; use after hotspots or `check_*`                                      |
+| `get_finding`            | `finding_id`, `run_id`, `detail_level`                                                  | Single finding detail by id; defaults to `normal`                                                  |
+| `get_remediation`        | `finding_id`, `run_id`, `detail_level`                                                  | Remediation payload for one finding                                                                |
+| `list_hotspots`          | `kind`, `run_id`, `detail_level`, `changed_paths`, `limit`                              | Priority-ranked hotspot views; preferred before broad listing                                      |
+| `check_clones`           | `run_id`, `root`, `path`, `clone_type`, `source_kind`, `detail_level`                   | Clone findings only; `health.dimensions` includes only `clones`                                    |
+| `check_complexity`       | `run_id`, `root`, `path`, `min_complexity`, `detail_level`                              | Complexity hotspots only                                                                           |
+| `check_coupling`         | `run_id`, `root`, `path`, `detail_level`                                                | Coupling hotspots only                                                                             |
+| `check_cohesion`         | `run_id`, `root`, `path`, `detail_level`                                                | Cohesion hotspots only                                                                             |
+| `check_dead_code`        | `run_id`, `root`, `path`, `min_severity`, `detail_level`                                | Dead-code findings only                                                                            |
+| `generate_pr_summary`    | `run_id`, `changed_paths`, `git_diff_ref`, `format`                                     | PR-friendly markdown or JSON summary                                                               |
+| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note`                                                          | Session-local review marker (in-memory)                                                            |
+| `list_reviewed_findings` | `run_id`                                                                                | List reviewed findings for a run                                                                   |
+| `clear_session_runs`     | none                                                                                    | Reset in-memory runs and session state                                                             |
 
-All analysis/report tools are read-only with respect to repo state. The only
-mutable MCP tools are `mark_finding_reviewed` and `clear_session_runs`, and
-their effects are session-local and in-memory only. `analyze_repository`,
-`analyze_changed_paths`, and `evaluate_gates` are
-sessionful and may populate or reuse in-memory run state. The granular
-`check_*` tools are read-only over stored runs: use `analyze_repository` or
-`analyze_changed_paths` first, then query the latest run or pass a specific
-`run_id`.
+All tools are read-only except `mark_finding_reviewed` and `clear_session_runs`
+(session-local, in-memory). `check_*` tools query stored runs — call
+`analyze_repository` or `analyze_changed_paths` first.
 
-Budget-aware workflow is intentional:
+Recommended workflow:
 
-- first pass: `get_run_summary` or `get_production_triage`
-- targeted triage: `list_hotspots` or the relevant `check_*`
-- single-finding drill-down: `get_finding`, then `get_remediation`
-- bounded metrics drill-down: `get_report_section(section="metrics_detail", family=..., limit=...)`
-- PR output: `generate_pr_summary(format="markdown")` unless machine JSON is explicitly needed
+1. `get_run_summary` or `get_production_triage`
+2. `help(topic=...)` if contract meaning is unclear
+3. `list_hotspots` or `check_*`
+4. `get_finding` → `get_remediation`
+5. `generate_pr_summary(format="markdown")`
+
+For analysis sensitivity, the intended model is:
+
+1. start with repo defaults or `pyproject`-resolved thresholds
+2. lower thresholds only for an explicit higher-sensitivity exploratory pass
+3. compare runs only when profile differences are understood
 
 ## Resources
 
@@ -170,6 +175,13 @@ state behind `codeclone://latest/...`.
 - `streamable-http` defaults to loopback binding.
   Non-loopback hosts require explicit `--allow-remote` because the server has
   no built-in authentication.
+- `--allow-remote` expands the trust boundary materially:
+    - any reachable network client can trigger CPU-intensive analysis
+    - any reachable network client can read analysis results
+    - request parameters such as `root` and path filters can still probe
+      repository-relative filesystem structure
+    - use it only on trusted networks or behind a firewall / authenticated
+      reverse proxy
 - MCP must reuse current:
     - pipeline stages
     - baseline trust semantics
@@ -189,6 +201,9 @@ state behind `codeclone://latest/...`.
 - Canonical JSON remains the source of truth for report semantics.
 - `list_findings` and `list_hotspots` are deterministic projections over the
   canonical report, not a separate analysis branch.
+- `metrics_detail(family="overloaded_modules")` exposes the canonical report-only
+  module-hotspot layer, but does not promote it into findings, hotlists, or
+  gate semantics.
 - `get_remediation` is a deterministic MCP projection over existing
   suggestions/explainability data, not a second remediation engine.
 - `analysis_mode="clones_only"` must mirror the same metric/dependency

@@ -43,11 +43,15 @@ _ANCHORS: tuple[tuple[str, str, int], ...] = (
     ("complexity", "Complexity", 3),
     ("coupling", "Coupling", 3),
     ("cohesion", "Cohesion", 3),
+    ("overloaded-modules", "Overloaded Modules", 3),
     ("dependencies", "Dependencies", 3),
     ("dead-code-metrics", "Dead Code", 3),
     ("dead-code-suppressed", "Suppressed Dead Code", 3),
     ("integrity", "Integrity", 2),
 )
+_ANCHOR_MAP: dict[str, tuple[str, str, int]] = {
+    anchor[0]: anchor for anchor in _ANCHORS
+}
 
 
 def _text(value: object) -> str:
@@ -93,6 +97,10 @@ def _append_anchor(lines: list[str], anchor_id: str, title: str, level: int) -> 
     lines.append(f'<a id="{anchor_id}"></a>')
     lines.append(f"{'#' * level} {title}")
     lines.append("")
+
+
+def _anchor(anchor_id: str) -> tuple[str, str, int]:
+    return _ANCHOR_MAP[anchor_id]
 
 
 def _append_kv_bullets(
@@ -235,7 +243,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         "",
     ]
 
-    _append_anchor(lines, *_ANCHORS[0])
+    _append_anchor(lines, *_anchor("overview"))
     _append_kv_bullets(
         lines,
         (
@@ -260,7 +268,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         ),
     )
 
-    _append_anchor(lines, *_ANCHORS[1])
+    _append_anchor(lines, *_anchor("inventory"))
     _append_kv_bullets(
         lines,
         (
@@ -292,7 +300,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         ),
     )
 
-    _append_anchor(lines, *_ANCHORS[2])
+    _append_anchor(lines, *_anchor("findings-summary"))
     _append_kv_bullets(
         lines,
         (
@@ -330,7 +338,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         ),
     )
 
-    _append_anchor(lines, *_ANCHORS[3])
+    _append_anchor(lines, *_anchor("top-risks"))
     top_risks = [_as_mapping(item) for item in _as_sequence(overview.get("top_risks"))]
     if top_risks:
         for idx, risk in enumerate(top_risks[:10], start=1):
@@ -345,7 +353,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     lines.append("")
 
     if suggestions:
-        _append_anchor(lines, *_ANCHORS[4])
+        _append_anchor(lines, *_anchor("suggestions"))
         for suggestion in map(_as_mapping, suggestions):
             action = _as_mapping(suggestion.get("action"))
             lines.append(f"### {_text(suggestion.get('title'))}")
@@ -372,8 +380,8 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
                     lines.append(f"  {idx}. {step}")
             lines.append("")
 
-    _append_anchor(lines, *_ANCHORS[5])
-    _append_anchor(lines, *_ANCHORS[6])
+    _append_anchor(lines, *_anchor("findings"))
+    _append_anchor(lines, *_anchor("clone-findings"))
     _append_findings_section(
         lines,
         groups=[
@@ -383,7 +391,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         ],
     )
 
-    _append_anchor(lines, *_ANCHORS[7])
+    _append_anchor(lines, *_anchor("structural-findings"))
     _append_findings_section(
         lines,
         groups=_as_sequence(
@@ -391,7 +399,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         ),
     )
 
-    _append_anchor(lines, *_ANCHORS[8])
+    _append_anchor(lines, *_anchor("dead-code-findings"))
     _append_findings_section(
         lines,
         groups=_as_sequence(
@@ -399,13 +407,13 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         ),
     )
 
-    _append_anchor(lines, *_ANCHORS[9])
+    _append_anchor(lines, *_anchor("design-findings"))
     _append_findings_section(
         lines,
         groups=_as_sequence(_as_mapping(findings_groups.get("design")).get("groups")),
     )
 
-    _append_anchor(lines, *_ANCHORS[10])
+    _append_anchor(lines, *_anchor("metrics"))
     for anchor_id, title, summary_keys, item_keys in (
         ("health", "Health", ("score", "grade"), ()),
         (
@@ -427,6 +435,26 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             ("lcom4", "method_count", "instance_var_count", "risk"),
         ),
         (
+            "overloaded-modules",
+            "Overloaded Modules",
+            (
+                "total",
+                "candidates",
+                "population_status",
+                "top_score",
+                "average_score",
+            ),
+            (
+                "source_kind",
+                "score",
+                "candidate_status",
+                "loc",
+                "fan_in",
+                "fan_out",
+                "complexity_total",
+            ),
+        ),
+        (
             "dependencies",
             "Dependencies",
             ("modules", "edges", "cycles", "max_depth"),
@@ -439,8 +467,16 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             ("kind", "confidence"),
         ),
     ):
-        family_key = "dead_code" if anchor_id == "dead-code-metrics" else anchor_id
+        family_key = (
+            "dead_code"
+            if anchor_id == "dead-code-metrics"
+            else (
+                "overloaded_modules" if anchor_id == "overloaded-modules" else anchor_id
+            )
+        )
         family_payload = _as_mapping(metrics_families.get(family_key))
+        if not family_payload and family_key == "overloaded_modules":
+            family_payload = _as_mapping(metrics_families.get("god_modules"))
         family_summary_map = _as_mapping(family_payload.get("summary"))
         _append_anchor(lines, anchor_id, title, 3)
         _append_kv_bullets(
@@ -454,14 +490,14 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         )
 
     dead_code_family_payload = _as_mapping(metrics_families.get("dead_code"))
-    _append_anchor(lines, *_ANCHORS[17])
+    _append_anchor(lines, *_anchor("dead-code-suppressed"))
     _append_metric_items(
         lines,
         items=_as_sequence(dead_code_family_payload.get("suppressed_items")),
         key_order=("kind", "confidence", "suppression_rule", "suppression_source"),
     )
 
-    _append_anchor(lines, *_ANCHORS[18])
+    _append_anchor(lines, *_anchor("integrity"))
     _append_kv_bullets(
         lines,
         (

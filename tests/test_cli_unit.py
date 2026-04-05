@@ -337,25 +337,39 @@ def test_argument_parser_contract_error_marker_for_invalid_args(
     assert "CONTRACT ERROR:" in err
 
 
-def test_validate_changed_scope_args_requires_diff_source() -> None:
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(
+            Namespace(
+                changed_only=True,
+                diff_against=None,
+                paths_from_git_diff=None,
+            ),
+            id="requires_diff_source",
+        ),
+        pytest.param(
+            Namespace(
+                changed_only=False,
+                diff_against="main",
+                paths_from_git_diff=None,
+            ),
+            id="diff_against_requires_changed_only",
+        ),
+        pytest.param(
+            Namespace(
+                changed_only=True,
+                diff_against="HEAD~1",
+                paths_from_git_diff="HEAD~2",
+            ),
+            id="conflicting_diff_sources",
+        ),
+    ],
+)
+def test_validate_changed_scope_args_rejects_invalid_combinations(
+    args: Namespace,
+) -> None:
     cli.console = cli._make_console(no_color=True)
-    args = Namespace(
-        changed_only=True,
-        diff_against=None,
-        paths_from_git_diff=None,
-    )
-    with pytest.raises(SystemExit) as exc:
-        cli._validate_changed_scope_args(args=args)
-    assert exc.value.code == 2
-
-
-def test_validate_changed_scope_args_requires_changed_only_for_diff_against() -> None:
-    cli.console = cli._make_console(no_color=True)
-    args = Namespace(
-        changed_only=False,
-        diff_against="main",
-        paths_from_git_diff=None,
-    )
     with pytest.raises(SystemExit) as exc:
         cli._validate_changed_scope_args(args=args)
     assert exc.value.code == 2
@@ -369,18 +383,6 @@ def test_validate_changed_scope_args_promotes_paths_from_git_diff() -> None:
     )
     assert cli._validate_changed_scope_args(args=args) == "HEAD~1"
     assert args.changed_only is True
-
-
-def test_validate_changed_scope_args_rejects_conflicting_diff_sources() -> None:
-    cli.console = cli._make_console(no_color=True)
-    args = Namespace(
-        changed_only=True,
-        diff_against="HEAD~1",
-        paths_from_git_diff="HEAD~2",
-    )
-    with pytest.raises(SystemExit) as exc:
-        cli._validate_changed_scope_args(args=args)
-    assert exc.value.code == 2
 
 
 def test_normalize_changed_paths_relativizes_dedupes_and_sorts(tmp_path: Path) -> None:
@@ -910,9 +912,10 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
             dead=1,
             health=85,
             grade="B",
+            overloaded_modules=3,
         )
         == "Metrics  cc=2.8/21  cbo=0.6/8  lcom4=1.2/4"
-        "  cycles=0  dead_code=1  health=85(B)"
+        "  cycles=0  dead_code=1  health=85(B)  overloaded_modules=3"
     )
 
 
@@ -923,8 +926,7 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
     parsed = ui.fmt_summary_parsed(lines=1200, functions=3, methods=2, classes=1)
     assert parsed is not None
     assert "1,200" in parsed
-    assert "[bold cyan]3[/bold cyan] functions" in parsed
-    assert "[bold cyan]2[/bold cyan] methods" in parsed
+    assert "[bold cyan]5[/bold cyan] callables" in parsed
     assert "[bold cyan]1[/bold cyan] classes" in parsed
 
     clones = ui.fmt_summary_clones(
@@ -944,6 +946,24 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
     clean_with_suppressed = ui.fmt_metrics_dead_code(0, suppressed=9)
     assert "✔ clean" in clean_with_suppressed
     assert "(9 suppressed)" in clean_with_suppressed
+    overloaded_modules = ui.fmt_metrics_overloaded_modules(
+        candidates=4,
+        total=158,
+        population_status="ok",
+        top_score=0.98,
+    )
+    assert all(
+        fragment in overloaded_modules
+        for fragment in ("4", "max score 0.98", "158 ranked", "(report-only)")
+    )
+    limited_overloaded_modules = ui.fmt_metrics_overloaded_modules(
+        candidates=0,
+        total=12,
+        population_status="limited",
+        top_score=0.0,
+    )
+    assert "12 ranked" in limited_overloaded_modules
+    assert "report-only; limited population" in limited_overloaded_modules
     changed_paths = ui.fmt_changed_scope_paths(count=45)
     assert "45" in changed_paths
     assert "from git diff" in changed_paths
@@ -1003,6 +1023,35 @@ def test_print_changed_scope_uses_compact_line_in_quiet_mode(
     assert "findings=7" in out
     assert "new=2" in out
     assert "known=5" in out
+
+
+def test_print_metrics_in_quiet_mode_includes_overloaded_modules(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    cli_summary._print_metrics(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=True,
+        metrics=cli_summary.MetricsSnapshot(
+            complexity_avg=2.8,
+            complexity_max=20,
+            high_risk_count=0,
+            coupling_avg=0.5,
+            coupling_max=9,
+            cohesion_avg=1.2,
+            cohesion_max=4,
+            cycles_count=0,
+            dead_code_count=0,
+            health_total=85,
+            health_grade="B",
+            overloaded_modules_candidates=3,
+            overloaded_modules_total=158,
+            overloaded_modules_population_status="ok",
+            overloaded_modules_top_score=0.98,
+        ),
+    )
+    out = capsys.readouterr().out
+    assert "overloaded_modules=3" in out
 
 
 def test_configure_metrics_mode_rejects_skip_metrics_with_metrics_flags(
