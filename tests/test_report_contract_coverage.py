@@ -530,6 +530,12 @@ def _rich_report_document() -> dict[str, object]:
         "python_tag": "cp313",
         "analysis_mode": "full",
         "report_mode": "full",
+        "min_loc": 10,
+        "min_stmt": 6,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
         "baseline_loaded": True,
         "baseline_status": "ok",
         "cache_used": True,
@@ -579,6 +585,16 @@ def test_report_document_rich_invariants_and_renderers() -> None:
             cast("dict[str, object]", payload["meta"])["analysis_thresholds"],
         )["design_findings"],
     )
+    assert cast(
+        "dict[str, int]", cast("dict[str, object]", payload["meta"])["analysis_profile"]
+    ) == {
+        "min_loc": 10,
+        "min_stmt": 6,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
+    }
     assert design_thresholds["complexity"] == {
         "metric": "cyclomatic_complexity",
         "operator": ">",

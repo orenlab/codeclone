@@ -438,11 +438,24 @@ def _scan_scope_subtitle(ctx: ReportContext) -> str:
     classes = _as_int(code.get("classes"))
     callable_total = functions + methods
 
-    return (
+    scope_summary = (
         f"{_format_count(total_found)} files \u00b7 "
         f"{_format_count(parsed_lines)} lines \u00b7 "
         f"{_format_count(callable_total)} callables \u00b7 "
         f"{_format_count(classes)} classes"
+    )
+    analysis_profile = _as_mapping(ctx.meta.get("analysis_profile"))
+    if not analysis_profile:
+        return scope_summary
+    return (
+        f"{scope_summary}. "
+        "Thresholds: "
+        f"func {_as_int(analysis_profile.get('min_loc'))}/"
+        f"{_as_int(analysis_profile.get('min_stmt'))} \u00b7 "
+        f"block {_as_int(analysis_profile.get('block_min_loc'))}/"
+        f"{_as_int(analysis_profile.get('block_min_stmt'))} \u00b7 "
+        f"seg {_as_int(analysis_profile.get('segment_min_loc'))}/"
+        f"{_as_int(analysis_profile.get('segment_min_stmt'))}"
     )
 
 

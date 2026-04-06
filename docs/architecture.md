@@ -144,7 +144,7 @@ gating decisions.
 Detected findings can be rendered as:
 
 - interactive HTML (`--html`),
-- canonical JSON (`--json`, schema `2.3`),
+- canonical JSON (`--json`, schema `2.4`),
 - deterministic text projection (`--text`),
 - deterministic Markdown projection (`--md`),
 - deterministic SARIF projection (`--sarif`).
@@ -158,6 +158,7 @@ Reporting uses a layered model:
 Provenance is carried through `meta` and includes:
 
 - runtime/context (`codeclone_version`, `python_version`, `python_tag`, `analysis_mode`, `report_mode`)
+- analysis profile (`meta.analysis_profile`)
 - analysis thresholds (`meta.analysis_thresholds.design_findings`)
 - baseline status block (`meta.baseline.*`)
 - cache status block (`meta.cache.*`)

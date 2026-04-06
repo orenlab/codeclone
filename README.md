@@ -16,7 +16,7 @@
   <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main&style=flat-square" alt="Tests"></a>
   <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml/badge.svg?style=flat-square" alt="Benchmark"></a>
   <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone.svg?style=flat-square" alt="Python"></a>
-  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-85%20(B)-green" alt="codeclone 85 (B)"></a>
+  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-87%20(B)-green" alt="codeclone 87 (B)"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MPL--2.0-brightgreen?style=flat-square" alt="License"></a>
 </p>
 
@@ -274,16 +274,24 @@ class Middleware:  # codeclone: ignore[dead-code]
 Dynamic/runtime false positives are resolved via explicit inline suppressions, not via broad heuristics.
 
 <details>
-<summary>Canonical JSON report shape (v2.3)</summary>
+<summary>Canonical JSON report shape (v2.4)</summary>
 
 ```json
 {
-  "report_schema_version": "2.3",
+  "report_schema_version": "2.4",
   "meta": {
-    "codeclone_version": "2.0.0b4",
+    "codeclone_version": "2.0.0b5",
     "project_name": "...",
     "scan_root": ".",
     "report_mode": "full",
+    "analysis_profile": {
+      "min_loc": 10,
+      "min_stmt": 6,
+      "block_min_loc": 20,
+      "block_min_stmt": 8,
+      "segment_min_loc": 20,
+      "segment_min_stmt": 10
+    },
     "analysis_thresholds": {
       "design_findings": {
         "...": "..."

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define report contracts in `2.0.0b4`: canonical JSON (`report_schema_version=2.3`)
+Define report contracts in `2.0.0b5`: canonical JSON (`report_schema_version=2.4`)
 plus deterministic TXT/Markdown/SARIF projections.
 
 ## Public surface
@@ -16,7 +16,7 @@ plus deterministic TXT/Markdown/SARIF projections.
 
 ## Data model
 
-JSON report top-level (v2.3):
+JSON report top-level (v2.4):
 
 - `report_schema_version`
 - `meta`
@@ -28,6 +28,9 @@ JSON report top-level (v2.3):
 
 Canonical provenance additions:
 
+- `meta.analysis_profile` records the effective runtime clone, block, and
+  segment thresholds for that run (`min_loc`, `min_stmt`, `block_*`,
+  `segment_*`).
 - `meta.analysis_thresholds.design_findings` records the effective report-level
   thresholds used to materialize canonical design findings for that run
   (`complexity > N`, `coupling > N`, `cohesion >= N`).

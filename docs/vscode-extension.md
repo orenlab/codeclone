@@ -35,13 +35,13 @@ to `PATH`.
 Recommended install for the preview extension:
 
 ```bash
-uv tool install --pre "codeclone[mcp]"
+uv tool install "codeclone[mcp]>=2.0.0b4"
 ```
 
 If you want the launcher inside the current environment instead:
 
 ```bash
-uv pip install --pre "codeclone[mcp]"
+uv pip install "codeclone[mcp]>=2.0.0b4"
 ```
 
 Verify the launcher:

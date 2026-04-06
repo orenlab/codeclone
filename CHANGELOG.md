@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.0.0b5]
+
+### MCP, HTML, and docs
+
+- Bump canonical report schema to `2.4` for `meta.analysis_profile`.
+- Surface the effective runtime analysis profile (`min_loc`, `min_stmt`, block, and segment thresholds) in canonical
+  report metadata, MCP summary/triage projections, and the HTML Executive Summary subtitle.
+- Refresh branch metadata and client docs for the `2.0.0b5` line.
+- Update the README repository health badge to `87 (B)`.
+
 ## [2.0.0b4]
 
 ### MCP server

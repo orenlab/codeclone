@@ -256,6 +256,18 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
     assert len(str(summary["run_id"])) == 8
     assert summary["mode"] == "full"
     assert summary["schema"] == REPORT_SCHEMA_VERSION
+    assert cast("dict[str, int]", summary["analysis_profile"]) == {
+        "min_loc": 10,
+        "min_stmt": 6,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
+    }
+    assert cast("dict[str, int]", latest["analysis_profile"]) == cast(
+        "dict[str, int]",
+        summary["analysis_profile"],
+    )
 
 
 def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
@@ -417,6 +429,14 @@ def test_mcp_service_summary_inventory_is_compact_and_report_inventory_stays_can
     }
     assert "inventory" not in changed_summary
     assert cast(int, changed_summary["changed_files"]) == 1
+    assert cast("dict[str, int]", changed_summary["analysis_profile"]) == {
+        "min_loc": 10,
+        "min_stmt": 6,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
+    }
     assert isinstance(
         cast("dict[str, object]", report_inventory["file_registry"])["items"],
         list,
@@ -517,6 +537,14 @@ def test_mcp_service_hotspot_resources_and_triage_are_production_first(
         for item in cast("list[dict[str, object]]", top_suggestions["items"])
     )
     assert latest_triage["run_id"] == summary["run_id"]
+    assert cast("dict[str, int]", triage["analysis_profile"]) == {
+        "min_loc": 10,
+        "min_stmt": 6,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
+    }
     with pytest.raises(
         MCPServiceContractError,
         match="only as codeclone://latest/triage",
@@ -680,9 +708,21 @@ def test_mcp_service_granular_checks_pr_summary_and_resources(
         "dict[str, object]",
         service.get_run_summary(run_id=run_id)["health"],
     )
+    summary_analysis_profile = cast(
+        "dict[str, int]",
+        service.get_run_summary(run_id=run_id)["analysis_profile"],
+    )
     summary_dimensions = cast("dict[str, object]", summary_health["dimensions"])
     assert clones["check"] == "clones"
     assert cast(int, clones["total"]) >= 1
+    assert summary_analysis_profile == {
+        "min_loc": 10,
+        "min_stmt": 6,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
+    }
 
     complexity = service.check_complexity(
         run_id=run_id,
@@ -811,6 +851,14 @@ def test_mcp_service_clones_only_health_is_marked_unavailable(
     assert summary["health"] == expected
     assert stored_summary["health"] == expected
     assert triage["health"] == expected
+    assert cast("dict[str, int]", stored_summary["analysis_profile"]) == {
+        "min_loc": 10,
+        "min_stmt": 6,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
+    }
     assert latest_health == expected
 
 

@@ -150,6 +150,29 @@ def _design_findings_thresholds_payload(
     }
 
 
+def _analysis_profile_payload(
+    raw_meta: Mapping[str, object] | None,
+) -> dict[str, int] | None:
+    meta = dict(raw_meta or {})
+    nested = _as_mapping(meta.get("analysis_profile"))
+    if nested:
+        meta = dict(nested)
+    keys = (
+        "min_loc",
+        "min_stmt",
+        "block_min_loc",
+        "block_min_stmt",
+        "segment_min_loc",
+        "segment_min_stmt",
+    )
+    if any(key not in meta for key in keys):
+        return None
+    payload = {key: _as_int(meta.get(key), -1) for key in keys}
+    if any(value < 0 for value in payload.values()):
+        return None
+    return payload
+
+
 def _normalize_path(value: str) -> str:
     return value.replace("\\", "/").strip()
 
@@ -977,7 +1000,7 @@ def _build_meta_payload(
             scan_root=scan_root,
         )
     )
-    return {
+    payload: dict[str, object] = {
         "codeclone_version": str(meta.get("codeclone_version", "")),
         "project_name": str(meta.get("project_name", "")),
         "scan_root": ".",
@@ -1039,6 +1062,10 @@ def _build_meta_payload(
             "metrics_baseline_path_absolute": metrics_baseline_abs,
         },
     }
+    analysis_profile = _analysis_profile_payload(meta)
+    if analysis_profile is not None:
+        payload["analysis_profile"] = analysis_profile
+    return payload
 
 
 def _clone_group_assessment(

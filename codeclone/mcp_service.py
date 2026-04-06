@@ -1076,6 +1076,12 @@ class CodeCloneMCPService:
             ),
             analysis_mode=request.analysis_mode,
             metrics_computed=self._metrics_computed(request.analysis_mode),
+            min_loc=_as_int(args.min_loc, DEFAULT_MIN_LOC),
+            min_stmt=_as_int(args.min_stmt, DEFAULT_MIN_STMT),
+            block_min_loc=_as_int(args.block_min_loc, DEFAULT_BLOCK_MIN_LOC),
+            block_min_stmt=_as_int(args.block_min_stmt, DEFAULT_BLOCK_MIN_STMT),
+            segment_min_loc=_as_int(args.segment_min_loc, DEFAULT_SEGMENT_MIN_LOC),
+            segment_min_stmt=_as_int(args.segment_min_stmt, DEFAULT_SEGMENT_MIN_STMT),
             design_complexity_threshold=_as_int(
                 getattr(
                     args,
@@ -1654,7 +1660,7 @@ class CodeCloneMCPService:
             for row in suggestion_rows
             if str(row.get("source_kind", "")) == SOURCE_KIND_PRODUCTION
         ]
-        return {
+        payload: dict[str, object] = {
             "run_id": self._short_run_id(record.run_id),
             "health": dict(self._summary_health_payload(summary)),
             "cache": dict(self._as_mapping(summary.get("cache"))),
@@ -1685,6 +1691,10 @@ class CodeCloneMCPService:
                 "items": production_suggestions[:suggestion_limit],
             },
         }
+        analysis_profile = self._summary_analysis_profile_payload(summary)
+        if analysis_profile:
+            payload["analysis_profile"] = analysis_profile
+        return payload
 
     def get_help(
         self,
@@ -3252,6 +3262,7 @@ class CodeCloneMCPService:
             "run_id": self._short_run_id(record.run_id),
             "changed_files": len(record.changed_paths),
             "health": health_payload,
+            "analysis_profile": self._summary_analysis_profile_payload(record.summary),
             "health_delta": (
                 _as_int(changed_projection.get("health_delta", 0), 0)
                 if changed_projection.get("health_delta") is not None
@@ -3916,6 +3927,7 @@ class CodeCloneMCPService:
         metrics = self._as_mapping(report_document.get("metrics"))
         metrics_summary = self._as_mapping(metrics.get("summary"))
         summary = self._as_mapping(findings.get("summary"))
+        analysis_profile = self._summary_analysis_profile_payload(meta)
         payload = {
             "run_id": run_id,
             "root": str(root_path),
@@ -3971,6 +3983,8 @@ class CodeCloneMCPService:
             "warnings": list(warnings),
             "failures": list(failures),
         }
+        if analysis_profile:
+            payload["analysis_profile"] = analysis_profile
         payload["cache"] = self._summary_cache_payload(payload)
         payload["health"] = self._summary_health_payload(payload)
         return payload
@@ -4010,7 +4024,28 @@ class CodeCloneMCPService:
             "warnings": list(self._as_sequence(summary.get("warnings"))),
             "failures": list(self._as_sequence(summary.get("failures"))),
         }
+        analysis_profile = self._summary_analysis_profile_payload(summary)
+        if analysis_profile:
+            payload["analysis_profile"] = analysis_profile
         return payload
+
+    def _summary_analysis_profile_payload(
+        self,
+        summary: Mapping[str, object],
+    ) -> dict[str, int]:
+        analysis_profile = self._as_mapping(summary.get("analysis_profile"))
+        if not analysis_profile:
+            return {}
+        keys = (
+            "min_loc",
+            "min_stmt",
+            "block_min_loc",
+            "block_min_stmt",
+            "segment_min_loc",
+            "segment_min_stmt",
+        )
+        payload = {key: _as_int(analysis_profile.get(key), -1) for key in keys}
+        return {key: value for key, value in payload.items() if value >= 0}
 
     def _summary_baseline_payload(
         self,

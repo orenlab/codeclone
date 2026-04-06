@@ -1828,6 +1828,56 @@ def test_html_report_renders_run_snapshot_from_canonical_inventory() -> None:
     assert "Scan scope" not in html
 
 
+def test_html_report_executive_summary_includes_effective_analysis_profile() -> None:
+    report_document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={
+            "scan_root": "/repo/project",
+            "project_name": "project",
+            "min_loc": 5,
+            "min_stmt": 2,
+            "block_min_loc": 8,
+            "block_min_stmt": 3,
+            "segment_min_loc": 13,
+            "segment_min_stmt": 4,
+        },
+        metrics=_metrics_payload(
+            health_score=82,
+            health_grade="B",
+            complexity_max=12,
+            complexity_high_risk=0,
+            coupling_high_risk=0,
+            cohesion_low=0,
+            dep_cycles=[],
+            dep_max_depth=2,
+            dead_total=0,
+            dead_critical=0,
+        ),
+        inventory={
+            "files": {"total_found": 1, "analyzed": 1, "cached": 0, "skipped": 0},
+            "code": {"parsed_lines": 20, "functions": 1, "methods": 0, "classes": 0},
+            "file_list": ["/repo/project/pkg/a.py"],
+        },
+    )
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta=report_document["meta"],
+        metrics=report_document["metrics"],
+        report_document=report_document,
+    )
+
+    _assert_html_contains(
+        html,
+        "Executive Summary",
+        "Thresholds: func 5/2 · block 8/3 · seg 13/4",
+    )
+
+
 def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
     html = build_html_report(
         func_groups={},

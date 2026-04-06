@@ -2,14 +2,14 @@
 
 ## Purpose
 
-Compact structural layouts for baseline/cache/report contracts in `2.0.0b4`.
+Compact structural layouts for baseline/cache/report contracts in `2.0.0b5`.
 
 ## Baseline schema (`2.0`)
 
 ```json
 {
   "meta": {
-    "generator": { "name": "codeclone", "version": "2.0.0b4" },
+    "generator": { "name": "codeclone", "version": "2.0.0b5" },
     "schema_version": "2.0",
     "fingerprint_version": "1",
     "python_tag": "cp313",
@@ -77,17 +77,25 @@ Notes:
 - `u` row decoder accepts both legacy 11-column rows and canonical 17-column rows
   (legacy rows map new structural fields to neutral defaults).
 
-## Report schema (`2.3`)
+## Report schema (`2.4`)
 
 ```json
 {
-  "report_schema_version": "2.3",
+  "report_schema_version": "2.4",
   "meta": {
-    "codeclone_version": "2.0.0b4",
+    "codeclone_version": "2.0.0b5",
     "project_name": "codeclone",
     "scan_root": ".",
     "analysis_mode": "full",
     "report_mode": "full",
+    "analysis_profile": {
+      "min_loc": 10,
+      "min_stmt": 6,
+      "block_min_loc": 20,
+      "block_min_stmt": 8,
+      "segment_min_loc": 20,
+      "segment_min_stmt": 10
+    },
     "analysis_thresholds": {
       "design_findings": {
         "complexity": { "metric": "cyclomatic_complexity", "operator": ">", "value": 20 },
@@ -266,7 +274,7 @@ Notes:
 ```text
 # CodeClone Report
 - Markdown schema: 1.0
-- Source report schema: 2.3
+- Source report schema: 2.4
 ...
 ## Overview
 ## Inventory
@@ -297,7 +305,7 @@ Notes:
       "tool": {
         "driver": {
           "name": "codeclone",
-          "version": "2.0.0b4",
+          "version": "2.0.0b5",
           "rules": [
             {
               "id": "CCLONE001",

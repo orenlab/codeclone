@@ -55,7 +55,7 @@ Current server characteristics:
     - `off`
       `refresh` is rejected in MCP because the server is read-only.
 - summary payload:
-    - `run_id`, `version`, `schema`, `mode`
+    - `run_id`, `version`, `schema`, `mode`, compact `analysis_profile`
     - `baseline`, `metrics_baseline`, `cache`
     - `cache.freshness` classifies summary cache reuse as `fresh`, `mixed`,
       or `reused`
@@ -96,8 +96,8 @@ Current tool set (`21` tools):
 |--------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
 | `analyze_repository`     | absolute `root`, `analysis_mode`, thresholds, cache/baseline paths                      | Full analysis → compact summary; then `get_run_summary` or `get_production_triage`                 |
 | `analyze_changed_paths`  | absolute `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`                     | Diff-aware analysis → compact changed-files snapshot                                               |
-| `get_run_summary`        | `run_id`                                                                                | Cheapest run snapshot: health, findings, baseline, inventory                                       |
-| `get_production_triage`  | `run_id`, `max_hotspots`, `max_suggestions`                                             | Production-first view: health, hotspots, suggestions                                               |
+| `get_run_summary`        | `run_id`                                                                                | Cheapest run snapshot: health, findings, baseline, inventory, active thresholds                    |
+| `get_production_triage`  | `run_id`, `max_hotspots`, `max_suggestions`                                             | Production-first view: health, hotspots, suggestions, active thresholds                            |
 | `help`                   | `topic`, `detail`                                                                       | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope |
 | `compare_runs`           | `run_id_before`, `run_id_after`, `focus`                                                | Run-to-run delta: regressions, improvements, health change                                         |
 | `evaluate_gates`         | `run_id`, gate thresholds                                                               | Preview CI gating decisions                                                                        |
