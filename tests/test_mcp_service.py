@@ -254,6 +254,8 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
     latest = service.get_run_summary()
     assert summary["run_id"] == latest["run_id"]
     assert len(str(summary["run_id"])) == 8
+    assert summary["focus"] == "repository"
+    assert summary["health_scope"] == "repository"
     assert summary["mode"] == "full"
     assert summary["schema"] == REPORT_SCHEMA_VERSION
     assert cast("dict[str, int]", summary["analysis_profile"]) == {
@@ -267,6 +269,13 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
     assert cast("dict[str, int]", latest["analysis_profile"]) == cast(
         "dict[str, int]",
         summary["analysis_profile"],
+    )
+    assert (
+        cast("dict[str, object]", summary["findings"])["new_by_source_kind"]
+        == cast(
+            "dict[str, object]",
+            latest["findings"],
+        )["new_by_source_kind"]
     )
 
 
@@ -428,6 +437,8 @@ def test_mcp_service_summary_inventory_is_compact_and_report_inventory_stays_can
         "classes",
     }
     assert "inventory" not in changed_summary
+    assert changed_summary["focus"] == "changed_paths"
+    assert changed_summary["health_scope"] == "repository"
     assert cast(int, changed_summary["changed_files"]) == 1
     assert cast("dict[str, int]", changed_summary["analysis_profile"]) == {
         "min_loc": 10,
@@ -437,6 +448,9 @@ def test_mcp_service_summary_inventory_is_compact_and_report_inventory_stays_can
         "segment_min_loc": 20,
         "segment_min_stmt": 10,
     }
+    assert sum(
+        cast("dict[str, int]", changed_summary["new_by_source_kind"]).values()
+    ) == cast(int, changed_summary["new_findings"])
     assert isinstance(
         cast("dict[str, object]", report_inventory["file_registry"])["items"],
         list,
@@ -517,9 +531,17 @@ def test_mcp_service_hotspot_resources_and_triage_are_production_first(
     production_items = cast("list[dict[str, object]]", production_hotspots["items"])
 
     assert triage["run_id"] == summary["run_id"]
+    assert triage["focus"] == "production"
+    assert triage["health_scope"] == "repository"
     assert _mapping_child(triage, "cache")["freshness"] == "fresh"
     assert findings_breakdown["production"] >= 1
     assert findings_breakdown["tests"] >= 1
+    assert sum(
+        cast("dict[str, int]", triage_findings["new_by_source_kind"]).values()
+    ) == cast(
+        int,
+        cast("dict[str, object]", summary["findings"])["new"],
+    )
     assert cast(int, triage_findings["outside_focus"]) >= 1
     assert suggestions_breakdown["production"] >= 1
     assert suggestions_breakdown["tests"] >= 1
@@ -2730,6 +2752,8 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         service.get_report_section(run_id="helpers", section="findings")
 
     assert service._summary_payload({"inventory": {}}) == {
+        "focus": "repository",
+        "health_scope": "repository",
         "inventory": {},
         "health": {"available": False, "reason": "unavailable"},
     }
@@ -3271,6 +3295,13 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
         "known": 0,
         "by_family": {},
         "production": 0,
+        "new_by_source_kind": {
+            "production": 0,
+            "tests": 0,
+            "fixtures": 0,
+            "mixed": 0,
+            "other": 0,
+        },
     }
 
     record = _dummy_run_record(tmp_path, "summary-helper")
@@ -3292,6 +3323,13 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
         "known": 1,
         "by_family": {},
         "production": 0,
+        "new_by_source_kind": {
+            "production": 0,
+            "tests": 0,
+            "fixtures": 0,
+            "mixed": 0,
+            "other": 0,
+        },
     }
 
     metrics_payload = service._metrics_detail_payload(

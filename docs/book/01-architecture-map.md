@@ -68,6 +68,9 @@ Refs:
 - The same rule applies to summary cache convenience fields such as
   `freshness` and to production-first triage projections built from
   canonical hotlists/suggestions.
+- The same rule also applies to compact interpretation hints such as
+  `health_scope`, `focus`, and `new_by_source_kind`: they clarify projection
+  meaning without introducing a second report truth.
 - MCP finding lists may also expose short run/finding ids and slimmer relative
   location projections, while keeping `get_finding(detail_level="full")` as the
   richer per-finding inspection path.

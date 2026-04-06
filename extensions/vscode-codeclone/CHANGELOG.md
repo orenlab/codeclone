@@ -1,5 +1,10 @@
 # Change Log
 
+## 0.2.2
+
+- surface repository-vs-focus semantics more clearly in triage and summary UX
+- explain new findings by source kind without widening the review flow
+
 ## 0.2.1
 
 - refresh packaged extension metadata for prerelease validation

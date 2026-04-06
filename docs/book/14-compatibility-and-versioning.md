@@ -56,7 +56,8 @@ Version bump rules:
   short MCP ids, slim summary locations, or omitting `priority_factors`
   outside `detail_level="full"`.
 - Additive MCP-only convenience fields/projections such as
-  `cache.freshness` or production-first triage also do not change
+  `cache.freshness`, production-first triage, `health_scope`, `focus`, or
+  `new_by_source_kind` also do not change
   `report_schema_version` when they are derived from unchanged canonical report
   and summary data.
 - The same rule applies to bounded MCP semantic guidance such as

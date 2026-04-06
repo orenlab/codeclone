@@ -2302,7 +2302,10 @@ class CodeCloneController {
                 {
                     nodeType: "section",
                     id: "overview.health",
-                    label: "Structural Health",
+                    label:
+                        String(state.latestSummary.health_scope || "repository") === "repository"
+                            ? "Repository Health"
+                            : "Structural Health",
                     description:
                         baselineDrift.healthDelta !== null
                             ? `${state.latestSummary.health.score}/${state.latestSummary.health.grade} · ${signedInteger(
@@ -2354,6 +2357,10 @@ class CodeCloneController {
         if (node.id === "overview.health") {
             const dimensions = safeObject(state.latestSummary.health.dimensions);
             return [
+                this.detailNode(
+                    "Scope",
+                    capitalize(String(state.latestSummary.health_scope || "repository"))
+                ),
                 this.detailNode("Score", `${state.latestSummary.health.score}/${state.latestSummary.health.grade}`),
                 this.detailNode("Clones", number(dimensions.clones)),
                 this.detailNode("Complexity", number(dimensions.complexity)),
@@ -2412,15 +2419,30 @@ class CodeCloneController {
         }
         if (node.id === "overview.triage") {
             const nextAction = this.describeNextBestAction(state);
+            const triageFindings = safeObject(state.latestTriage?.findings);
+            const summaryFindings = safeObject(state.latestSummary.findings);
             return [
                 this.detailNode("Next best action", nextAction.label),
                 this.detailNode("Focus mode", focusModeSpec(this.hotspotFocusMode).label),
+                this.detailNode(
+                    "Focus",
+                    capitalize(String(state.latestTriage?.focus || "production").replace(/_/g, " "))
+                ),
+                this.detailNode(
+                    "Health scope",
+                    capitalize(String(state.latestSummary.health_scope || "repository"))
+                ),
                 this.detailNode(
                     "Analysis depth",
                     currentAnalysisSettings ? currentAnalysisSettings.label : "unknown"
                 ),
                 this.detailNode("New regressions", number(reviewCounts.new)),
+                this.detailNode(
+                    "New by source kind",
+                    formatSourceKindSummary(summaryFindings.new_by_source_kind)
+                ),
                 this.detailNode("Production hotspots", number(reviewCounts.production)),
+                this.detailNode("Outside focus", number(triageFindings.outside_focus)),
                 this.detailNode(
                     "New clones",
                     baselineDrift.newClones !== null
@@ -2438,9 +2460,17 @@ class CodeCloneController {
         }
         if (node.id === "overview.changed") {
             return [
+                this.detailNode(
+                    "Focus",
+                    capitalize(String(state.changedSummary.focus || "changed_paths").replace(/_/g, " "))
+                ),
                 this.detailNode("Changed files", number(state.changedSummary.changed_files)),
                 this.detailNode("Verdict", String(state.changedSummary.verdict)),
                 this.detailNode("New findings", number(state.changedSummary.new_findings)),
+                this.detailNode(
+                    "New by source kind",
+                    formatSourceKindSummary(state.changedSummary.new_by_source_kind)
+                ),
                 this.detailNode("Resolved findings", number(state.changedSummary.resolved_findings)),
                 this.detailNode(
                     "Health delta",

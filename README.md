@@ -162,6 +162,8 @@ repos:
 
 Optional read-only MCP server for AI agents and IDE clients.
 21 tools + 10 resources — never mutates source, baselines, or repo state.
+Compact summary and triage payloads make scope explicit: repository-wide health,
+current focus, and new-finding source-kind attribution.
 
 ```bash
 uv tool install --pre "codeclone[mcp]"       # or: uv pip install --pre "codeclone[mcp]"

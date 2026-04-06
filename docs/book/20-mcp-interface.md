@@ -56,17 +56,21 @@ Current server characteristics:
       `refresh` is rejected in MCP because the server is read-only.
 - summary payload:
     - `run_id`, `version`, `schema`, `mode`, compact `analysis_profile`
+    - `health_scope` explains what the health score covers
+    - `focus` explains the active summary/triage lens
     - `baseline`, `metrics_baseline`, `cache`
     - `cache.freshness` classifies summary cache reuse as `fresh`, `mixed`,
       or `reused`
     - flattened `inventory` (`files`, `lines`, `functions`, `classes`)
-    - flattened `findings` (`total`, `new`, `known`, `by_family`, `production`)
+    - flattened `findings` (`total`, `new`, `known`, `by_family`, `production`,
+      `new_by_source_kind`)
     - flattened `diff` (`new_clones`, `health_delta`)
     - `warnings`, `failures`
     - `analyze_changed_paths` is intentionally more compact than `get_run_summary`:
-      it returns `changed_files`, `health`, `health_delta`, `verdict`,
-      `new_findings`, `resolved_findings`, and an empty `changed_findings`
-      placeholder, while detailed changed payload stays in
+      it returns `changed_files`, `focus`, `health_scope`, `health`,
+      `health_delta`, `verdict`, `new_findings`, `new_by_source_kind`,
+      `resolved_findings`, and an empty `changed_findings` placeholder, while
+      detailed changed payload stays in
       `get_report_section(section="changed")`
 - workflow guidance:
     - the MCP surface is intentionally agent-guiding rather than list-first

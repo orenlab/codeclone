@@ -217,6 +217,18 @@ function isMinimumSupportedCodeCloneVersion(
     return comparison !== null && comparison >= 0;
 }
 
+/**
+ * @typedef {{
+ *   command?: string,
+ *   args?: string[],
+ *   cwd?: string,
+ *   source?: string,
+ * }} LaunchSpecLike
+ */
+
+/**
+ * @param {LaunchSpecLike | null | undefined} spec
+ */
 function launchSpecOrigin(spec) {
     const launchSpec = spec || {};
     const command = String(launchSpec.command || "").trim() || "codeclone-mcp";
@@ -237,6 +249,11 @@ function launchSpecOrigin(spec) {
     }
 }
 
+/**
+ * @param {string} reportedVersion
+ * @param {string} [minimum]
+ * @param {LaunchSpecLike | null | undefined} [launchSpec]
+ */
 function unsupportedVersionMessage(
     reportedVersion,
     minimum = MINIMUM_SUPPORTED_CODECLONE_VERSION,

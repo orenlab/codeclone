@@ -80,7 +80,7 @@ function formatSourceKindSummary(value) {
         .filter(([, count]) => typeof count === "number" && count > 0)
         .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey));
     if (entries.length === 0) {
-        return "No production findings by source kind.";
+        return "none";
     }
     return entries
         .map(([key, count]) => `${capitalize(key)} ${count}`)

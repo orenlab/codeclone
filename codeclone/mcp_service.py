@@ -157,9 +157,15 @@ ReportSection = Literal[
     "changed",
     "integrity",
 ]
+HealthScope = Literal["repository"]
+SummaryFocus = Literal["repository", "production", "changed_paths"]
 
 _LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
 _REPORT_DUMMY_PATH = Path(".cache/codeclone/report.json")
+_HEALTH_SCOPE_REPOSITORY: Final[HealthScope] = "repository"
+_FOCUS_REPOSITORY: Final[SummaryFocus] = "repository"
+_FOCUS_PRODUCTION: Final[SummaryFocus] = "production"
+_FOCUS_CHANGED_PATHS: Final[SummaryFocus] = "changed_paths"
 _MCP_CONFIG_KEYS = frozenset(
     {
         "min_loc",
@@ -1662,11 +1668,20 @@ class CodeCloneMCPService:
         ]
         payload: dict[str, object] = {
             "run_id": self._short_run_id(record.run_id),
+            "focus": _FOCUS_PRODUCTION,
+            "health_scope": _HEALTH_SCOPE_REPOSITORY,
             "health": dict(self._summary_health_payload(summary)),
             "cache": dict(self._as_mapping(summary.get("cache"))),
             "findings": {
                 "total": len(findings),
                 "by_source_kind": findings_breakdown,
+                "new_by_source_kind": dict(
+                    self._as_mapping(
+                        self._as_mapping(summary.get("findings")).get(
+                            "new_by_source_kind"
+                        )
+                    )
+                ),
                 "outside_focus": len(findings)
                 - findings_breakdown[SOURCE_KIND_PRODUCTION],
             },
@@ -3228,6 +3243,11 @@ class CodeCloneMCPService:
         known_count = sum(
             1 for item in items if str(item.get("novelty", "")) == "known"
         )
+        new_by_source_kind = self._source_kind_breakdown(
+            item.get("source_kind")
+            for item in items
+            if str(item.get("novelty", "")) == "new"
+        )
         health_delta = self._summary_health_delta(record.summary)
         return {
             "run_id": self._short_run_id(record.run_id),
@@ -3235,6 +3255,7 @@ class CodeCloneMCPService:
             "total": len(items),
             "new": new_count,
             "known": known_count,
+            "new_by_source_kind": new_by_source_kind,
             "items": items,
             "health": dict(self._summary_health_payload(record.summary)),
             "health_delta": health_delta,
@@ -3260,6 +3281,8 @@ class CodeCloneMCPService:
         )
         return {
             "run_id": self._short_run_id(record.run_id),
+            "focus": _FOCUS_CHANGED_PATHS,
+            "health_scope": _HEALTH_SCOPE_REPOSITORY,
             "changed_files": len(record.changed_paths),
             "health": health_payload,
             "analysis_profile": self._summary_analysis_profile_payload(record.summary),
@@ -3270,6 +3293,9 @@ class CodeCloneMCPService:
             ),
             "verdict": str(changed_projection.get("verdict", "stable")),
             "new_findings": _as_int(changed_projection.get("new", 0), 0),
+            "new_by_source_kind": dict(
+                self._as_mapping(changed_projection.get("new_by_source_kind"))
+            ),
             "resolved_findings": 0,
             "changed_findings": [],
         }
@@ -4003,6 +4029,8 @@ class CodeCloneMCPService:
             and not summary.get("baseline")
         ):
             return {
+                "focus": _FOCUS_REPOSITORY,
+                "health_scope": _HEALTH_SCOPE_REPOSITORY,
                 "inventory": self._summary_inventory_payload(inventory),
                 "health": self._summary_health_payload(summary),
             }
@@ -4011,6 +4039,8 @@ class CodeCloneMCPService:
         )
         payload: dict[str, object] = {
             "run_id": self._short_run_id(resolved_run_id) if resolved_run_id else "",
+            "focus": _FOCUS_REPOSITORY,
+            "health_scope": _HEALTH_SCOPE_REPOSITORY,
             "version": str(summary.get("codeclone_version", __version__)),
             "schema": str(summary.get("report_schema_version", REPORT_SCHEMA_VERSION)),
             "mode": str(summary.get("analysis_mode", "")),
@@ -4149,6 +4179,7 @@ class CodeCloneMCPService:
                 "known": 0,
                 "by_family": {},
                 "production": 0,
+                "new_by_source_kind": self._source_kind_breakdown(()),
             }
         findings = self._base_findings(record)
         by_family: dict[str, int] = {
@@ -4160,6 +4191,11 @@ class CodeCloneMCPService:
         new_count = 0
         known_count = 0
         production_count = 0
+        new_by_source_kind = self._source_kind_breakdown(
+            self._finding_source_kind(finding)
+            for finding in findings
+            if str(finding.get("novelty", "")).strip() == "new"
+        )
         for finding in findings:
             family = str(finding.get("family", "")).strip()
             family_key = "clones" if family == FAMILY_CLONE else family
@@ -4177,6 +4213,7 @@ class CodeCloneMCPService:
             "known": known_count,
             "by_family": {key: value for key, value in by_family.items() if value > 0},
             "production": production_count,
+            "new_by_source_kind": new_by_source_kind,
         }
 
     def _summary_diff_payload(
