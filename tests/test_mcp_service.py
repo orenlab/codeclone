@@ -19,6 +19,7 @@ import pytest
 
 from codeclone import mcp_service as mcp_service_mod
 from codeclone._cli_config import ConfigValidationError
+from codeclone.baseline import Baseline, current_python_tag
 from codeclone.cache import Cache
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.mcp_service import (
@@ -277,6 +278,42 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
             latest["findings"],
         )["new_by_source_kind"]
     )
+
+
+def test_mcp_service_summary_explains_untrusted_baseline_python_tag_mismatch(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    baseline = Baseline(tmp_path / "codeclone.baseline.json")
+    baseline.generator = "codeclone"
+    baseline.schema_version = "2.0"
+    baseline.fingerprint_version = "1"
+    baseline.python_tag = "cp313" if current_python_tag() != "cp313" else "cp314"
+    baseline.created_at = "2026-04-07T00:00:00Z"
+    baseline.save()
+
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+
+    baseline_payload = cast("dict[str, object]", summary["baseline"])
+    assert baseline_payload["status"] == "mismatch_python_version"
+    assert baseline_payload["trusted"] is False
+    assert baseline_payload["compared_without_valid_baseline"] is True
+    assert baseline_payload["baseline_python_tag"] == baseline.python_tag
+    assert baseline_payload["runtime_python_tag"] == current_python_tag()
+    assert any(
+        "Baseline python tag mismatch" in warning
+        for warning in cast("list[str]", summary["warnings"])
+    )
+
+    triage = service.get_production_triage()
+    assert cast("dict[str, object]", triage["baseline"]) == baseline_payload
 
 
 def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:

@@ -121,6 +121,8 @@ run-scoped URI templates.
 - Summary and triage projections keep interpretation compact: `health_scope`
   explains what the health score covers, `focus` explains the active view, and
   `new_by_source_kind` attributes new findings without widening the payload.
+- When baseline comparison is untrusted, summary and triage also expose
+  `baseline.compared_without_valid_baseline` plus baseline/runtime python tags.
 - Run IDs are 8-char hex handles; finding IDs are short prefixed forms.
   Both accept the full canonical form as input.
 - `metrics_detail(family="overloaded_modules")` exposes the report-only

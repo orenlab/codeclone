@@ -30,7 +30,7 @@ The extension needs a local `codeclone-mcp` launcher.
 Minimum supported CodeClone version: `2.0.0b4`.
 
 In `auto` mode, it checks the current workspace virtualenv before falling back
-to `PATH`.
+to `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.
 
 Recommended install for the preview extension:
 

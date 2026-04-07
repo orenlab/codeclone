@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "codeclone",
   "display_name": "CodeClone",
-  "version": "2.0.0-b4.0",
+  "version": "2.0.0-b5.0",
   "description": "Baseline-aware structural review for Claude Desktop through a local CodeClone MCP launcher.",
   "long_description": "CodeClone for Claude Desktop wraps the local codeclone-mcp launcher as an MCP bundle. It keeps Claude on the same canonical MCP surface used by the CLI, HTML report, VS Code extension, and Codex plugin — read-only, baseline-aware, local stdio only.",
   "author": {

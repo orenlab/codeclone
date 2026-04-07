@@ -123,7 +123,7 @@ The extension runs as a workspace extension and requires:
 - CodeClone `2.0.0b4` or newer
 
 In `auto` mode, launcher resolution prefers the current workspace virtualenv
-before `PATH`.
+before `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.
 
 For this reason:
 

@@ -61,7 +61,25 @@ function formatBooleanWord(value) {
 function formatBaselineState(payload) {
     const entry = safeObject(payload);
     const status = String(entry.status || "unknown");
-    return entry.trusted ? `${status} · trusted` : `${status} · untrusted`;
+    const parts = [status, entry.trusted ? "trusted" : "untrusted"];
+    if (entry.compared_without_valid_baseline) {
+        parts.push("comparing without valid baseline");
+    }
+    return parts.join(" · ");
+}
+
+function formatBaselineTags(payload) {
+    const entry = safeObject(payload);
+    const baselinePythonTag = String(entry.baseline_python_tag || "").trim();
+    const runtimePythonTag = String(entry.runtime_python_tag || "").trim();
+    const parts = [];
+    if (baselinePythonTag) {
+        parts.push(`baseline ${baselinePythonTag}`);
+    }
+    if (runtimePythonTag) {
+        parts.push(`runtime ${runtimePythonTag}`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : "unknown";
 }
 
 function formatCacheSummary(payload) {
@@ -294,6 +312,7 @@ module.exports = {
     findingIcon,
     firstNormalizedLocation,
     focusModeSpec,
+    formatBaselineTags,
     formatBaselineState,
     formatBooleanWord,
     formatCacheSummary,

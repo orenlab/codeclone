@@ -9,6 +9,10 @@
   report metadata, MCP summary/triage projections, and the HTML Executive Summary subtitle.
 - Clarify MCP interpretation with compact `health_scope`, `focus`, and `new_by_source_kind` fields in summary/triage
   projections.
+- Make baseline mismatch handling more explicit in MCP and the VS Code client by surfacing baseline/runtime python tags
+  and whether comparison is proceeding without a valid baseline.
+- Make the Codex plugin prefer workspace-local launchers before `PATH`, with Poetry environment fallback for
+  python-tag-safe MCP startup.
 - Refresh branch metadata and client docs for the `2.0.0b5` line.
 - Update the README repository health badge to `87 (B)`.
 

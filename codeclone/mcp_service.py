@@ -1670,6 +1670,7 @@ class CodeCloneMCPService:
             "run_id": self._short_run_id(record.run_id),
             "focus": _FOCUS_PRODUCTION,
             "health_scope": _HEALTH_SCOPE_REPOSITORY,
+            "baseline": dict(self._as_mapping(summary.get("baseline"))),
             "health": dict(self._summary_health_payload(summary)),
             "cache": dict(self._as_mapping(summary.get("cache"))),
             "findings": {
@@ -3283,6 +3284,7 @@ class CodeCloneMCPService:
             "run_id": self._short_run_id(record.run_id),
             "focus": _FOCUS_CHANGED_PATHS,
             "health_scope": _HEALTH_SCOPE_REPOSITORY,
+            "baseline": dict(self._summary_baseline_payload(record.summary)),
             "changed_files": len(record.changed_paths),
             "health": health_payload,
             "analysis_profile": self._summary_analysis_profile_payload(record.summary),
@@ -3959,6 +3961,7 @@ class CodeCloneMCPService:
             "root": str(root_path),
             "analysis_mode": request.analysis_mode,
             "codeclone_version": meta.get("codeclone_version", __version__),
+            "python_tag": str(meta.get("python_tag", "")),
             "report_schema_version": report_document.get(
                 "report_schema_version",
                 REPORT_SCHEMA_VERSION,
@@ -3971,6 +3974,7 @@ class CodeCloneMCPService:
                 "loaded": bool(meta_baseline.get("loaded", baseline_state.loaded)),
                 "status": str(meta_baseline.get("status", baseline_state.status.value)),
                 "trusted_for_diff": baseline_state.trusted_for_diff,
+                "python_tag": meta_baseline.get("python_tag"),
             },
             "metrics_baseline": {
                 "path": meta_metrics_baseline.get(
@@ -4096,11 +4100,21 @@ class CodeCloneMCPService:
         key: str,
     ) -> dict[str, object]:
         baseline = self._as_mapping(summary.get(key))
-        return {
+        trusted = bool(baseline.get("trusted_for_diff", False))
+        payload: dict[str, object] = {
             "loaded": bool(baseline.get("loaded", False)),
             "status": str(baseline.get("status", "")),
-            "trusted": bool(baseline.get("trusted_for_diff", False)),
+            "trusted": trusted,
         }
+        if key == "baseline":
+            payload["compared_without_valid_baseline"] = not trusted
+            baseline_python_tag = baseline.get("python_tag")
+            runtime_python_tag = summary.get("python_tag")
+            if isinstance(baseline_python_tag, str) and baseline_python_tag.strip():
+                payload["baseline_python_tag"] = baseline_python_tag
+            if isinstance(runtime_python_tag, str) and runtime_python_tag.strip():
+                payload["runtime_python_tag"] = runtime_python_tag
+        return payload
 
     def _summary_cache_payload(
         self,

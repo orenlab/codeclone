@@ -23,6 +23,7 @@ const {
     findingIcon,
     firstNormalizedLocation,
     focusModeSpec,
+    formatBaselineTags,
     formatBaselineState,
     formatBooleanWord,
     formatCacheSummary,
@@ -76,6 +77,7 @@ const {
     STALE_REASON_EDITOR,
     STALE_REASON_WORKSPACE,
     isMinimumSupportedCodeCloneVersion,
+    launchSpecOrigin,
     resolveAnalysisSettings,
     sameAnalysisSettings,
     locationsNeedDetailHydration,
@@ -1275,7 +1277,12 @@ class CodeCloneController {
         if (drift.healthDelta !== null) {
             parts.push(`${signedInteger(drift.healthDelta)} health`);
         }
-        return parts.length > 0 ? parts.join(" · ") : "baseline unavailable";
+        if (parts.length > 0) {
+            return parts.join(" · ");
+        }
+        return safeObject(state?.latestSummary?.baseline).compared_without_valid_baseline
+            ? "comparing without valid baseline"
+            : "baseline unavailable";
     }
 
     async inspectLocalHtmlReport(state) {
@@ -2379,6 +2386,9 @@ class CodeCloneController {
         }
         if (node.id === "overview.run") {
             const inventory = safeObject(state.latestSummary.inventory);
+            const baseline = safeObject(state.latestSummary.baseline);
+            const baselineTags = formatBaselineTags(baseline);
+            const launch = this.connectionInfo.launchSpec;
             return [
                 this.detailNode("Workspace", state.folder.name),
                 this.detailNode("Run ID", state.currentRunId),
@@ -2408,7 +2418,14 @@ class CodeCloneController {
                 this.detailNode("Parsed lines", number(inventory.lines)),
                 this.detailNode("Callables", number(inventory.functions)),
                 this.detailNode("Classes", number(inventory.classes)),
-                this.detailNode("Baseline", formatBaselineState(state.latestSummary.baseline)),
+                this.detailNode("Baseline", formatBaselineState(baseline)),
+                ...(baseline.compared_without_valid_baseline &&
+                baselineTags !== "unknown"
+                    ? [this.detailNode("Baseline tags", baselineTags)]
+                    : []),
+                ...(baseline.compared_without_valid_baseline && launch
+                    ? [this.detailNode("Runtime source", launchSpecOrigin(launch))]
+                    : []),
                 this.detailNode(
                     "Metrics baseline",
                     formatBaselineState(state.latestSummary.metrics_baseline)
@@ -2581,6 +2598,10 @@ class CodeCloneController {
                     this.connectionInfo.serverInfo ? this.connectionInfo.serverInfo.version : "unknown"
                 ),
                 this.detailNode("Available tools", number(this.connectionInfo.toolCount)),
+                this.detailNode(
+                    "Runtime source",
+                    launch ? launchSpecOrigin(launch) : "not started"
+                ),
                 this.detailNode(
                     "Launcher",
                     launch ? `${launch.command} ${launch.args.join(" ")}`.trim() : "not started"

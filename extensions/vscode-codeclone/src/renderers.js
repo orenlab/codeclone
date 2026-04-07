@@ -9,6 +9,8 @@ const {
     capitalize,
     compactDecimal,
     decimal,
+    formatBaselineTags,
+    formatBaselineState,
     formatKind,
     formatSeverity,
     formatSourceKindSummary,
@@ -194,6 +196,7 @@ function renderRemediationMarkdown(payload) {
 function renderTriageMarkdown(state) {
     const summary = safeObject(state.latestSummary);
     const triage = safeObject(state.latestTriage);
+    const baseline = safeObject(summary.baseline);
     const health = safeObject(summary.health);
     const findings = safeObject(summary.findings);
     const triageFindings = safeObject(triage.findings);
@@ -208,17 +211,22 @@ function renderTriageMarkdown(state) {
     );
     const items = safeArray(topHotspots.items);
     const suggestions = safeArray(topSuggestions.items);
+    const baselineTags = formatBaselineTags(baseline);
     const lines = [
         "# CodeClone Production Triage",
         "",
         `- Run: \`${state.currentRunId || "n/a"}\``,
         `- Workspace: \`${state.folder.name}\``,
         `- Health: ${health.score || 0}/${health.grade || "?"} · ${healthScope} scope`,
+        `- Baseline: ${formatBaselineState(baseline)}`,
         `- Focus: ${focus} · ${Number(triageFindings.outside_focus || 0)} outside focus`,
         `- Findings: ${findings.total || 0} total · ${findings.production || 0} production`,
         `- New findings: ${formatSourceKindSummary(findings.new_by_source_kind)}`,
         `- Source kinds: ${formatSourceKindSummary(triageFindings.by_source_kind)}`,
     ];
+    if (baseline.compared_without_valid_baseline && baselineTags !== "unknown") {
+        lines.push(`- Baseline tags: ${baselineTags}`);
+    }
     if (items.length > 0) {
         lines.push(
             "",

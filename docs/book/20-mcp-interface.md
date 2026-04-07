@@ -59,6 +59,9 @@ Current server characteristics:
     - `health_scope` explains what the health score covers
     - `focus` explains the active summary/triage lens
     - `baseline`, `metrics_baseline`, `cache`
+    - untrusted baseline comparisons stay compact but explicit through
+      `baseline.compared_without_valid_baseline`,
+      `baseline.baseline_python_tag`, and `baseline.runtime_python_tag`
     - `cache.freshness` classifies summary cache reuse as `fresh`, `mixed`,
       or `reused`
     - flattened `inventory` (`files`, `lines`, `functions`, `classes`)
@@ -67,9 +70,10 @@ Current server characteristics:
     - flattened `diff` (`new_clones`, `health_delta`)
     - `warnings`, `failures`
     - `analyze_changed_paths` is intentionally more compact than `get_run_summary`:
-      it returns `changed_files`, `focus`, `health_scope`, `health`,
-      `health_delta`, `verdict`, `new_findings`, `new_by_source_kind`,
-      `resolved_findings`, and an empty `changed_findings` placeholder, while
+      it returns `changed_files`, compact `baseline`, `focus`, `health_scope`,
+      `health`, `health_delta`, `verdict`, `new_findings`,
+      `new_by_source_kind`, `resolved_findings`, and an empty
+      `changed_findings` placeholder, while
       detailed changed payload stays in
       `get_report_section(section="changed")`
 - workflow guidance:

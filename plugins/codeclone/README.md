@@ -17,15 +17,28 @@ Read-only, baseline-aware, local stdio only.
 
 ## Install
 
-`codeclone-mcp` must be on `PATH`:
+The plugin prefers a workspace launcher first:
+
+1. `./.venv/bin/codeclone-mcp`
+2. the current Poetry environment launcher
+3. `codeclone-mcp` from `PATH`
+
+Recommended workspace-local setup:
 
 ```bash
-uv tool install --pre "codeclone[mcp]"
-codeclone-mcp --help                       # verify
+uv venv
+uv pip install --python .venv/bin/python "codeclone[mcp]>=2.0.0b4"
+.venv/bin/codeclone-mcp --help
 ```
 
-If you want to keep the launcher inside an existing environment instead, use
-`uv pip install --pre "codeclone[mcp]"`.
+If your workspace uses Poetry, install CodeClone into that Poetry environment.
+
+Global fallback:
+
+```bash
+uv tool install "codeclone[mcp]>=2.0.0b4"
+codeclone-mcp --help
+```
 
 Codex discovers the plugin from `.agents/plugins/marketplace.json`.
 It does not rewrite `~/.codex/config.toml`.

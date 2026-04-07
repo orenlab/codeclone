@@ -46,6 +46,7 @@ The plugin currently provides:
 The plugin surface is additive:
 
 - `.mcp.json` contributes a local stdio MCP server definition
+- that launcher prefers a workspace `.venv`, then a Poetry env, then `PATH`
 - the skill contributes workflow guidance and starter prompts
 - `README.md` documents local usage and boundaries inside the repository tree
 - Codex remains free to use direct `mcp add` config alongside or instead of the
@@ -65,7 +66,8 @@ The plugin does not rewrite user config or install CodeClone automatically.
 - **Repo-local clarity**: the plugin is meant to travel with the repository as
   a native Codex surface.
 - **Launcher honesty**: the plugin assumes `codeclone-mcp` is already
-  installable or configured in the local environment.
+  installable in the current workspace or reachable on `PATH`, and prefers the
+  workspace environment when one is present.
 
 ## Relationship to other interfaces
 

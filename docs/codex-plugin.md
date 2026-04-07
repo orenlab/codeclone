@@ -8,7 +8,7 @@ Repo-local discovery via `.agents/plugins/marketplace.json`.
 | File                         | Purpose                                            |
 |------------------------------|----------------------------------------------------|
 | `.codex-plugin/plugin.json`  | Plugin metadata, prompts, instructions             |
-| `.mcp.json`                  | Local `codeclone-mcp --transport stdio` definition |
+| `.mcp.json`                  | Workspace-first MCP launcher definition            |
 | `skills/codeclone-review/`   | Conservative-first full review skill               |
 | `skills/codeclone-hotspots/` | Quick hotspot discovery skill                      |
 | `assets/`                    | Plugin branding                                    |
@@ -16,8 +16,16 @@ Repo-local discovery via `.agents/plugins/marketplace.json`.
 ## Install
 
 ```bash
-uv tool install --pre "codeclone[mcp]"    # or: uv pip install --pre "codeclone[mcp]"
-codeclone-mcp --help                # verify
+uv venv
+uv pip install --python .venv/bin/python "codeclone[mcp]>=2.0.0b4"
+.venv/bin/codeclone-mcp --help
+```
+
+Global fallback:
+
+```bash
+uv tool install "codeclone[mcp]>=2.0.0b4"
+codeclone-mcp --help
 ```
 
 Manual MCP registration without the plugin:
@@ -36,7 +44,7 @@ gets a local MCP definition and two skills. Does not mutate
 
 - if you already registered `codeclone-mcp` manually, keep only one setup path
   to avoid duplicate MCP surfaces
-- the bundled `.mcp.json` assumes `codeclone-mcp` resolves on `PATH`
+- the bundled `.mcp.json` prefers `.venv`, then a Poetry env, then `PATH`
 
 For the underlying interface contract, see:
 

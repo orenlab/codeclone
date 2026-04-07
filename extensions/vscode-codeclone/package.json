@@ -2,7 +2,7 @@
   "name": "codeclone",
   "displayName": "CodeClone",
   "description": "Baseline-aware, triage-first structural review for Python, powered by CodeClone MCP.",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "preview": true,
   "publisher": "orenlab",
   "license": "MPL-2.0",
