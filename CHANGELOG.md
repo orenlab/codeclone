@@ -11,8 +11,11 @@
   projections.
 - Make baseline mismatch handling more explicit in MCP and the VS Code client by surfacing baseline/runtime python tags
   and whether comparison is proceeding without a valid baseline.
-- Make the Codex plugin prefer workspace-local launchers before `PATH`, with Poetry environment fallback for
+- Make the Claude Desktop bundle and Codex plugin prefer workspace-local launchers before `PATH`, with Poetry environment fallback for
   python-tag-safe MCP startup.
+- Add `workspace_root` user-config field to the Claude Desktop bundle: setting it to the project directory forces the
+  launcher to prefer `.venv` inside that path even when Claude Desktop starts with a different working directory
+  (fixes python-tag mismatch caused by system-wide interpreter fallback).
 - Refresh branch metadata and client docs for the `2.0.0b5` line.
 - Update the README repository health badge to `87 (B)`.
 

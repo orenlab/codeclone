@@ -57,13 +57,14 @@ The wrapper:
 5. proxies stdio until shutdown
 
 The wrapper may auto-discover a few common global install locations, but it is
-primarily designed for:
+now prefers:
 
-- `codeclone-mcp` on `PATH`
+- a workspace-local `.venv`
+- the active Poetry environment for the current workspace
+- user-local install locations and `PATH`
 - or an explicit launcher command in bundle settings
 
-Repository-local virtual environments are intentionally outside the default
-bundle contract.
+This keeps the launcher closer to the active project Python when possible.
 
 ## Design rules
 

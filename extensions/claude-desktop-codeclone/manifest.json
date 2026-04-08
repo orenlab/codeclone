@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "codeclone",
   "display_name": "CodeClone",
-  "version": "2.0.0-b5.0",
+  "version": "2.0.0-b5.1",
   "description": "Baseline-aware structural review for Claude Desktop through a local CodeClone MCP launcher.",
   "long_description": "CodeClone for Claude Desktop wraps the local codeclone-mcp launcher as an MCP bundle. It keeps Claude on the same canonical MCP surface used by the CLI, HTML report, VS Code extension, and Codex plugin — read-only, baseline-aware, local stdio only.",
   "author": {
@@ -98,15 +98,22 @@
       ],
       "env": {
         "CODECLONE_MCP_COMMAND": "${user_config.launcher_command}",
-        "CODECLONE_MCP_ARGS_JSON": "${user_config.launcher_args_json}"
+        "CODECLONE_MCP_ARGS_JSON": "${user_config.launcher_args_json}",
+        "CODECLONE_WORKSPACE_ROOT": "${user_config.workspace_root}"
       }
     }
   },
   "user_config": {
+    "workspace_root": {
+      "type": "string",
+      "title": "Workspace root path",
+      "description": "Optional absolute path to the Python project root (the directory that contains .venv or venv). When set, the launcher prefers that virtual environment over user-local or system-wide installs. Useful when Claude Desktop starts outside the project directory.",
+      "required": false
+    },
     "launcher_command": {
       "type": "string",
       "title": "CodeClone launcher command",
-      "description": "Optional absolute path or bare command name for codeclone-mcp. Leave empty to use auto-discovery and PATH.",
+      "description": "Optional absolute path or bare command name for codeclone-mcp. Leave empty to prefer workspace launchers, then user-local paths, then PATH.",
       "required": false
     },
     "launcher_args_json": {
