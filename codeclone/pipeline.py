@@ -13,6 +13,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
+import orjson
+
 from ._coerce import as_int, as_str
 from .cache import (
     Cache,
@@ -257,7 +259,7 @@ def _segment_groups_digest(segment_groups: GroupMap) -> str:
             for item in items
         ]
         normalized_rows.append((group_key, tuple(normalized_items)))
-    payload = repr(tuple(normalized_rows)).encode("utf-8")
+    payload = orjson.dumps(tuple(normalized_rows), option=orjson.OPT_SORT_KEYS)
     return sha256(payload).hexdigest()
 
 

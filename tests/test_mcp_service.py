@@ -1415,10 +1415,16 @@ def test_mcp_service_git_diff_and_helper_branch_edges(
 ) -> None:
     service = CodeCloneMCPService(history_limit=4)
 
-    with pytest.raises(MCPGitDiffError, match="must not start with '-'"):
+    with pytest.raises(MCPGitDiffError, match="Invalid git diff ref"):
         mcp_service_mod._git_diff_lines_payload(
             root_path=tmp_path,
             git_diff_ref="--cached",
+        )
+
+    with pytest.raises(MCPGitDiffError, match="safe revision expression"):
+        mcp_service_mod._git_diff_lines_payload(
+            root_path=tmp_path,
+            git_diff_ref="HEAD:path",
         )
 
     assert service._normalize_relative_path("./.github/workflows/docs.yml") == (

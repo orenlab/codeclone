@@ -47,6 +47,7 @@ from ._cli_runtime import (
 )
 from ._coerce import as_float as _as_float
 from ._coerce import as_int as _as_int
+from ._git_diff import validate_git_diff_ref
 from .baseline import Baseline
 from .cache import Cache, CacheStatus
 from .contracts import (
@@ -793,13 +794,13 @@ def _git_diff_lines_payload(
     root_path: Path,
     git_diff_ref: str,
 ) -> tuple[str, ...]:
-    if git_diff_ref.startswith("-"):
-        raise MCPGitDiffError(
-            f"Invalid git diff ref '{git_diff_ref}': must not start with '-'."
-        )
+    try:
+        validated_ref = validate_git_diff_ref(git_diff_ref)
+    except ValueError as exc:
+        raise MCPGitDiffError(str(exc)) from exc
     try:
         completed = subprocess.run(
-            ["git", "diff", "--name-only", git_diff_ref, "--"],
+            ["git", "diff", "--name-only", validated_ref, "--"],
             cwd=root_path,
             check=True,
             capture_output=True,
@@ -808,7 +809,7 @@ def _git_diff_lines_payload(
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise MCPGitDiffError(
-            f"Unable to resolve changed paths from git diff ref '{git_diff_ref}'."
+            f"Unable to resolve changed paths from git diff ref '{validated_ref}'."
         ) from exc
     return tuple(
         sorted({line.strip() for line in completed.stdout.splitlines() if line.strip()})

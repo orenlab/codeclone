@@ -236,6 +236,8 @@ Separate accepted baseline debt from new regressions.
 - Prefer `list_hotspots` or narrow `check_*` tools before broad `list_findings`.
 - Use `get_finding` / `get_remediation` for one finding instead of raising
   `detail_level` on larger lists.
+- Keep `git_diff_ref` to a safe single revision expression; option-like,
+  whitespace-containing, and punctuated shell-style inputs are rejected.
 - Pass an absolute `root` — MCP rejects relative roots like `.`.
 - Use `"production-only"` / `source_kind` filters to cut test/fixture noise.
 - Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.

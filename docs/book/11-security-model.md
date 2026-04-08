@@ -33,8 +33,9 @@ Security-relevant input classes:
 - `cache_policy=refresh` is rejected — MCP cannot trigger cache invalidation.
 - Review markers (`mark_finding_reviewed`) are session-local in-memory state;
   they are never persisted to disk or leaked into baselines/reports.
-- `git_diff_ref` parameter is validated against a strict regex to prevent
-  command injection via shell-interpreted git arguments.
+- `git_diff_ref` is validated as a safe single revision expression before any
+  `git diff` subprocess call. Leading option-like prefixes, whitespace/control
+  characters, and unsupported punctuation are rejected.
 - Run history is bounded by `--history-limit` (default 10) to prevent
   unbounded memory growth.
 
@@ -68,7 +69,7 @@ Refs:
 | HTML-injected payload in metadata/source | Escaped output     |
 | `--allow-remote` not passed for HTTP     | Transport rejected |
 | `cache_policy=refresh` requested         | Policy rejected    |
-| `git_diff_ref` fails regex               | Parameter rejected |
+| `git_diff_ref` fails validation          | Parameter rejected |
 
 ## Determinism / canonicalization
 

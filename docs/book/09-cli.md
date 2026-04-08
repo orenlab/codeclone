@@ -75,6 +75,8 @@ Refs:
 - `--changed-only` requires either `--diff-against` or `--paths-from-git-diff`.
 - `--diff-against` requires `--changed-only`.
 - `--diff-against` and `--paths-from-git-diff` are mutually exclusive.
+- Git diff refs are validated as safe single revision expressions before
+  subprocess execution.
 - Browser-open failure after a successful HTML write is warning-only and does not change the process exit code.
 - Baseline update write failure is contract error.
 - In gating mode, unreadable source files are contract errors with higher priority than clone gating failure.

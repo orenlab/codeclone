@@ -224,7 +224,8 @@ Security boundaries:
 - `cache_policy=refresh` rejected to preserve read-only semantics.
 - Review markers are session-local in-memory state, never persisted.
 - Run history bounded by `--history-limit` to prevent unbounded memory growth.
-- `git_diff_ref` validated against strict regex to prevent injection.
+- `git_diff_ref` validated as a safe single revision expression before any
+  `git diff` subprocess call.
 
 ---
 

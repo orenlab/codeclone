@@ -92,6 +92,7 @@ from ._cli_summary import (
     _print_metrics,
     _print_summary,
 )
+from ._git_diff import validate_git_diff_ref
 from .baseline import Baseline
 from .cache import Cache, CacheStatus, build_segment_report_projection
 from .contracts import (
@@ -270,16 +271,14 @@ def _normalize_changed_paths(
 
 
 def _git_diff_changed_paths(*, root_path: Path, git_diff_ref: str) -> tuple[str, ...]:
-    if git_diff_ref.startswith("-"):
-        console.print(
-            ui.fmt_contract_error(
-                f"Invalid git diff ref '{git_diff_ref}': must not start with '-'."
-            )
-        )
+    try:
+        validated_ref = validate_git_diff_ref(git_diff_ref)
+    except ValueError as exc:
+        console.print(ui.fmt_contract_error(str(exc)))
         sys.exit(ExitCode.CONTRACT_ERROR)
     try:
         completed = subprocess.run(
-            ["git", "diff", "--name-only", git_diff_ref, "--"],
+            ["git", "diff", "--name-only", validated_ref, "--"],
             cwd=str(root_path),
             check=True,
             capture_output=True,
@@ -294,7 +293,7 @@ def _git_diff_changed_paths(*, root_path: Path, git_diff_ref: str) -> tuple[str,
         console.print(
             ui.fmt_contract_error(
                 "Unable to resolve changed files from git diff ref "
-                f"'{git_diff_ref}': {exc}"
+                f"'{validated_ref}': {exc}"
             )
         )
         sys.exit(ExitCode.CONTRACT_ERROR)

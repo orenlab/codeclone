@@ -498,6 +498,29 @@ def test_git_diff_changed_paths_rejects_option_like_ref(tmp_path: Path) -> None:
     assert exc.value.code == 2
 
 
+@pytest.mark.parametrize(
+    "git_diff_ref",
+    [
+        "HEAD~1;rm",
+        "HEAD path",
+        "HEAD:path",
+        "../HEAD",
+        " HEAD",
+    ],
+)
+def test_git_diff_changed_paths_rejects_unsafe_ref_syntax(
+    tmp_path: Path,
+    git_diff_ref: str,
+) -> None:
+    cli.console = cli._make_console(no_color=True)
+    with pytest.raises(SystemExit) as exc:
+        cli._git_diff_changed_paths(
+            root_path=tmp_path.resolve(),
+            git_diff_ref=git_diff_ref,
+        )
+    assert exc.value.code == 2
+
+
 def test_report_path_origins_ignores_unrelated_equals_tokens() -> None:
     assert cli._report_path_origins(("--unknown=value", "--json=out.json")) == {
         "html": None,

@@ -16,6 +16,12 @@
 - Add `workspace_root` user-config field to the Claude Desktop bundle: setting it to the project directory forces the
   launcher to prefer `.venv` inside that path even when Claude Desktop starts with a different working directory
   (fixes python-tag mismatch caused by system-wide interpreter fallback).
+- Validate `git_diff_ref` inputs as safe single revision expressions in both
+  CLI and MCP before invoking `git diff`.
+- Replace the segment-group raw digest `repr()` payload with canonical JSON
+  bytes for cross-version-safe determinism.
+- Align the tests workflow coverage gate with the canonical `fail_under = 99`
+  policy and refresh the remaining `actions/checkout` pin in `codeclone.yml`.
 - Refresh branch metadata and client docs for the `2.0.0b5` line.
 - Update the README repository health badge to `87 (B)`.
 

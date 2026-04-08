@@ -228,6 +228,8 @@ state behind `codeclone://latest/...`.
 - `analyze_changed_paths` requires `changed_paths` or `git_diff_ref`.
 - `analyze_repository` and `analyze_changed_paths` require an absolute `root`;
   relative roots like `.` are rejected.
+- `git_diff_ref` is validated as a safe single revision expression before
+  invoking `git diff`.
 - `changed_paths` is a structured `list[str]` of repo-relative paths, not a
   comma-separated string payload.
 - `analyze_changed_paths` may return the same `run_id` as a previous run when
