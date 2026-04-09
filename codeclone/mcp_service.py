@@ -141,8 +141,10 @@ MetricsDetailFamily = Literal[
     "complexity",
     "coupling",
     "cohesion",
+    "coverage_adoption",
     "dependencies",
     "dead_code",
+    "api_surface",
     "god_modules",
     "overloaded_modules",
     "health",
@@ -181,6 +183,9 @@ _MCP_CONFIG_KEYS = frozenset(
         "baseline",
         "max_baseline_size_mb",
         "metrics_baseline",
+        "typing_coverage",
+        "docstring_coverage",
+        "api_surface",
     }
 )
 _RESOURCE_SECTION_MAP: Final[dict[str, ReportSection]] = {
@@ -291,8 +296,10 @@ _VALID_METRICS_DETAIL_FAMILIES = frozenset(
         "complexity",
         "coupling",
         "cohesion",
+        "coverage_adoption",
         "dependencies",
         "dead_code",
+        "api_surface",
         "god_modules",
         "overloaded_modules",
         "health",
@@ -880,6 +887,7 @@ class MCPAnalysisRequest:
     block_min_stmt: int | None = None
     segment_min_loc: int | None = None
     segment_min_stmt: int | None = None
+    api_surface: bool | None = None
     complexity_threshold: int | None = None
     coupling_threshold: int | None = None
     cohesion_threshold: int | None = None
@@ -903,6 +911,11 @@ class MCPGateRequest:
     fail_dead_code: bool = False
     fail_health: int = -1
     fail_on_new_metrics: bool = False
+    fail_on_typing_regression: bool = False
+    fail_on_docstring_regression: bool = False
+    fail_on_api_break: bool = False
+    min_typing_coverage: int = -1
+    min_docstring_coverage: int = -1
 
 
 @dataclass(frozen=True, slots=True)
@@ -1345,6 +1358,11 @@ class CodeCloneMCPService:
                 "fail_dead_code": request.fail_dead_code,
                 "fail_health": request.fail_health,
                 "fail_on_new_metrics": request.fail_on_new_metrics,
+                "fail_on_typing_regression": request.fail_on_typing_regression,
+                "fail_on_docstring_regression": request.fail_on_docstring_regression,
+                "fail_on_api_break": request.fail_on_api_break,
+                "min_typing_coverage": request.min_typing_coverage,
+                "min_docstring_coverage": request.min_docstring_coverage,
             },
         }
         with self._state_lock:
@@ -1370,6 +1388,11 @@ class CodeCloneMCPService:
                     fail_dead_code=request.fail_dead_code,
                     fail_health=request.fail_health,
                     fail_on_new_metrics=request.fail_on_new_metrics,
+                    fail_on_typing_regression=request.fail_on_typing_regression,
+                    fail_on_docstring_regression=request.fail_on_docstring_regression,
+                    fail_on_api_break=request.fail_on_api_break,
+                    min_typing_coverage=request.min_typing_coverage,
+                    min_docstring_coverage=request.min_docstring_coverage,
                 ),
             )
             reasons.extend(f"metric:{reason}" for reason in metric_reasons)
@@ -3742,6 +3765,14 @@ class CodeCloneMCPService:
             fail_dead_code=False,
             fail_health=-1,
             fail_on_new_metrics=False,
+            fail_on_typing_regression=False,
+            fail_on_docstring_regression=False,
+            fail_on_api_break=False,
+            min_typing_coverage=-1,
+            min_docstring_coverage=-1,
+            typing_coverage=True,
+            docstring_coverage=True,
+            api_surface=False,
             design_complexity_threshold=DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
             design_coupling_threshold=DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
             design_cohesion_threshold=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
@@ -3785,7 +3816,7 @@ class CodeCloneMCPService:
         if not validate_numeric_args(args):
             raise MCPServiceContractError(
                 "Numeric analysis settings must be non-negative and thresholds "
-                "must be >= -1."
+                "must be >= -1. Coverage thresholds must be between 0 and 100."
             )
 
         return args
@@ -3805,6 +3836,7 @@ class CodeCloneMCPService:
             "block_min_stmt": request.block_min_stmt,
             "segment_min_loc": request.segment_min_loc,
             "segment_min_stmt": request.segment_min_stmt,
+            "api_surface": request.api_surface,
             "max_baseline_size_mb": request.max_baseline_size_mb,
             "max_cache_size_mb": request.max_cache_size_mb,
             "design_complexity_threshold": request.complexity_threshold,
@@ -4245,6 +4277,26 @@ class CodeCloneMCPService:
                 and self._summary_health_payload(summary).get("available") is not False
                 else None
             ),
+            "typing_param_permille_delta": _as_int(
+                metrics_diff.get("typing_param_permille_delta", 0),
+                0,
+            ),
+            "typing_return_permille_delta": _as_int(
+                metrics_diff.get("typing_return_permille_delta", 0),
+                0,
+            ),
+            "docstring_permille_delta": _as_int(
+                metrics_diff.get("docstring_permille_delta", 0),
+                0,
+            ),
+            "api_breaking_changes": _as_int(
+                metrics_diff.get("api_breaking_changes", 0),
+                0,
+            ),
+            "new_api_symbols": _as_int(
+                metrics_diff.get("new_api_symbols", 0),
+                0,
+            ),
         }
 
     def _metrics_detail_payload(
@@ -4365,6 +4417,34 @@ class CodeCloneMCPService:
             "new_cycles": len(new_cycles),
             "new_dead_code": len(new_dead_code),
             "health_delta": _as_int(health_delta, 0),
+            "typing_param_permille_delta": _as_int(
+                getattr(metrics_diff, "typing_param_permille_delta", 0),
+                0,
+            ),
+            "typing_return_permille_delta": _as_int(
+                getattr(metrics_diff, "typing_return_permille_delta", 0),
+                0,
+            ),
+            "docstring_permille_delta": _as_int(
+                getattr(metrics_diff, "docstring_permille_delta", 0),
+                0,
+            ),
+            "api_breaking_changes": len(
+                tuple(
+                    cast(
+                        Sequence[object],
+                        getattr(metrics_diff, "new_api_breaking_changes", ()),
+                    )
+                )
+            ),
+            "new_api_symbols": len(
+                tuple(
+                    cast(
+                        Sequence[object],
+                        getattr(metrics_diff, "new_api_symbols", ()),
+                    )
+                )
+            ),
         }
 
     def _dict_list(self, value: object) -> list[dict[str, object]]:

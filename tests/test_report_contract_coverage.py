@@ -1218,6 +1218,18 @@ def test_markdown_render_long_list_branches() -> None:
     assert "... and 2 more item(s)" in markdown
 
 
+def _metric_family_payload(
+    payload: dict[str, object],
+    family: str,
+) -> tuple[dict[str, object], dict[str, object], list[dict[str, object]]]:
+    metrics = cast(dict[str, object], payload["metrics"])
+    summary = cast(dict[str, object], metrics["summary"])
+    families = cast(dict[str, object], metrics["families"])
+    family_payload = cast(dict[str, object], families[family])
+    items = cast(list[dict[str, object]], family_payload["items"])
+    return summary, family_payload, items
+
+
 def test_report_contract_renderers_include_overloaded_modules_section() -> None:
     payload = _rich_report_document()
 
@@ -1234,10 +1246,10 @@ def test_report_contract_renderers_include_overloaded_modules_section() -> None:
 def test_report_contract_includes_canonical_overloaded_modules_family() -> None:
     payload = _rich_report_document()
 
-    metrics = cast(dict[str, object], payload["metrics"])
-    summary = cast(dict[str, object], metrics["summary"])
-    families = cast(dict[str, object], metrics["families"])
-    overloaded_modules = cast(dict[str, object], families["overloaded_modules"])
+    summary, overloaded_modules, overloaded_items = _metric_family_payload(
+        payload,
+        "overloaded_modules",
+    )
     overloaded_summary = cast(dict[str, object], overloaded_modules["summary"])
 
     assert summary["overloaded_modules"] == overloaded_summary
@@ -1249,15 +1261,160 @@ def test_report_contract_includes_canonical_overloaded_modules_family() -> None:
         "average_score": 0.58,
         "candidate_score_cutoff": 0.91,
     }
-    first = cast(list[dict[str, object]], overloaded_modules["items"])[0]
-    assert first["module"] == "codeclone.alpha"
-    assert first["relative_path"] == "codeclone/alpha.py"
-    assert first["candidate_status"] == "candidate"
+    first = overloaded_items[0]
+    assert (
+        first["module"],
+        first["relative_path"],
+        first["candidate_status"],
+    ) == (
+        "codeclone.alpha",
+        "codeclone/alpha.py",
+        "candidate",
+    )
     assert first["candidate_reasons"] == [
         "size_pressure",
         "dependency_pressure",
         "hub_like_shape",
     ]
+
+
+def test_report_contract_includes_canonical_adoption_and_api_surface_families() -> None:
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics={
+            "coverage_adoption": {
+                "summary": {
+                    "params_total": 4,
+                    "params_annotated": 3,
+                    "param_permille": 750,
+                    "baseline_diff_available": True,
+                    "param_delta": 125,
+                    "returns_total": 2,
+                    "returns_annotated": 1,
+                    "return_permille": 500,
+                    "return_delta": 250,
+                    "public_symbol_total": 3,
+                    "public_symbol_documented": 2,
+                    "docstring_permille": 667,
+                    "docstring_delta": 167,
+                    "typing_any_count": 1,
+                },
+                "items": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "/repo/pkg/mod.py",
+                        "callable_count": 2,
+                        "params_total": 4,
+                        "params_annotated": 3,
+                        "param_permille": 750,
+                        "returns_total": 2,
+                        "returns_annotated": 1,
+                        "return_permille": 500,
+                        "any_annotation_count": 1,
+                        "public_symbol_total": 3,
+                        "public_symbol_documented": 2,
+                        "docstring_permille": 667,
+                    }
+                ],
+            },
+            "api_surface": {
+                "summary": {
+                    "enabled": True,
+                    "baseline_diff_available": True,
+                    "modules": 1,
+                    "public_symbols": 2,
+                    "added": 1,
+                    "breaking": 1,
+                    "strict_types": False,
+                },
+                "items": [
+                    {
+                        "record_kind": "symbol",
+                        "module": "pkg.mod",
+                        "filepath": "/repo/pkg/mod.py",
+                        "qualname": "pkg.mod:run",
+                        "start_line": 10,
+                        "end_line": 12,
+                        "symbol_kind": "function",
+                        "exported_via": "name",
+                        "params_total": 1,
+                        "params": [
+                            {
+                                "name": "value",
+                                "kind": "pos_or_kw",
+                                "has_default": False,
+                                "annotated": True,
+                            }
+                        ],
+                        "returns_annotated": True,
+                    },
+                    {
+                        "record_kind": "breaking_change",
+                        "module": "pkg.mod",
+                        "filepath": "/repo/pkg/mod.py",
+                        "qualname": "pkg.mod:old",
+                        "start_line": 20,
+                        "end_line": 21,
+                        "symbol_kind": "function",
+                        "change_kind": "removed",
+                        "detail": "Removed from the public API surface.",
+                    },
+                ],
+            },
+        },
+    )
+
+    summary, adoption, adoption_items = _metric_family_payload(
+        payload,
+        "coverage_adoption",
+    )
+    adoption_summary = cast(dict[str, object], adoption["summary"])
+    assert summary["coverage_adoption"] == adoption_summary
+    assert adoption_summary == {
+        "modules": 1,
+        "params_total": 4,
+        "params_annotated": 3,
+        "param_permille": 750,
+        "baseline_diff_available": True,
+        "param_delta": 125,
+        "returns_total": 2,
+        "returns_annotated": 1,
+        "return_permille": 500,
+        "return_delta": 250,
+        "public_symbol_total": 3,
+        "public_symbol_documented": 2,
+        "docstring_permille": 667,
+        "docstring_delta": 167,
+        "typing_any_count": 1,
+    }
+    adoption_item = adoption_items[0]
+    assert (
+        adoption_item["module"],
+        adoption_item["relative_path"],
+        adoption_item["docstring_permille"],
+    ) == ("pkg.mod", "pkg/mod.py", 667)
+
+    _, api_surface, api_items = _metric_family_payload(payload, "api_surface")
+    api_summary = cast(dict[str, object], api_surface["summary"])
+    assert summary["api_surface"] == api_summary
+    assert api_summary == {
+        "enabled": True,
+        "baseline_diff_available": True,
+        "modules": 1,
+        "public_symbols": 2,
+        "added": 1,
+        "breaking": 1,
+        "strict_types": False,
+    }
+    assert (
+        api_items[0]["record_kind"],
+        api_items[0]["relative_path"],
+        api_items[1]["record_kind"],
+        api_items[1]["change_kind"],
+    ) == ("symbol", "pkg/mod.py", "breaking_change", "removed")
 
 
 def test_sarif_helper_level_mapping() -> None:
@@ -1614,14 +1771,25 @@ def test_sarif_private_helper_family_dispatches() -> None:
     design_complexity = _sarif_rule_spec({"family": "design", "category": "complexity"})
     design_coupling = _sarif_rule_spec({"family": "design", "category": "coupling"})
     design_dependency = _sarif_rule_spec({"family": "design", "category": "dependency"})
-    assert clone_function.rule_id == "CCLONE001"
-    assert clone_block.rule_id == "CCLONE002"
-    assert structural_guard.rule_id == "CSTRUCT002"
-    assert structural_drift.rule_id == "CSTRUCT003"
-    assert design_cohesion.rule_id == "CDESIGN001"
-    assert design_complexity.rule_id == "CDESIGN002"
-    assert design_coupling.rule_id == "CDESIGN003"
-    assert design_dependency.rule_id == "CDESIGN004"
+    assert (
+        clone_function.rule_id,
+        clone_block.rule_id,
+        structural_guard.rule_id,
+        structural_drift.rule_id,
+        design_cohesion.rule_id,
+        design_complexity.rule_id,
+        design_coupling.rule_id,
+        design_dependency.rule_id,
+    ) == (
+        "CCLONE001",
+        "CCLONE002",
+        "CSTRUCT002",
+        "CSTRUCT003",
+        "CDESIGN001",
+        "CDESIGN002",
+        "CDESIGN003",
+        "CDESIGN004",
+    )
 
     assert (
         _sarif_result_message(
@@ -1923,9 +2091,23 @@ def test_collect_paths_from_metrics_covers_all_metric_families_and_skips_missing
                 {"filepath": ""},
             ]
         },
+        "coverage_adoption": {
+            "items": [
+                {"filepath": "/repo/adoption.py"},
+                {"filepath": None},
+            ]
+        },
+        "api_surface": {
+            "items": [
+                {"filepath": "/repo/api.py"},
+                {"filepath": ""},
+            ]
+        },
     }
 
     assert _collect_paths_from_metrics(metrics) == {
+        "/repo/adoption.py",
+        "/repo/api.py",
         "/repo/complexity.py",
         "/repo/coupling.py",
         "/repo/cohesion.py",

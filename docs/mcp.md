@@ -123,10 +123,14 @@ run-scoped URI templates.
   `new_by_source_kind` attributes new findings without widening the payload.
 - When baseline comparison is untrusted, summary and triage also expose
   `baseline.compared_without_valid_baseline` plus baseline/runtime python tags.
+- Summary `diff` also carries compact adoption/API deltas:
+  `typing_param_permille_delta`, `typing_return_permille_delta`,
+  `docstring_permille_delta`, `api_breaking_changes`, and `new_api_symbols`.
 - Run IDs are 8-char hex handles; finding IDs are short prefixed forms.
   Both accept the full canonical form as input.
 - `metrics_detail(family="overloaded_modules")` exposes the report-only
   module-hotspot layer without turning it into findings or gate data.
+- `metrics_detail` also accepts `coverage_adoption` and `api_surface`.
 - `help(topic=...)` is static: meaning, anti-patterns, next step, doc links.
 - Start with repo defaults or `pyproject`-resolved thresholds, then lower them
   only for an explicit higher-sensitivity exploratory pass.
@@ -187,7 +191,7 @@ analyze_repository → get_production_triage
 ### Conservative first pass, then deeper review
 
 ```
-analyze_repository
+analyze_repository(api_surface=true)     # when you need API inventory/diff
 → help(topic="analysis_profile") when you need finer-grained local review
 → analyze_repository(min_loc=..., min_stmt=..., ...) as an explicit higher-sensitivity pass
 → compare_runs

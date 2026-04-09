@@ -397,9 +397,10 @@ def test_baseline_verify_generator_mismatch(tmp_path: Path) -> None:
     ("schema_version", "error_match"),
     [
         ("1.1", "newer than supported"),
+        ("2.2", "newer than supported"),
         ("3.0", "schema version mismatch"),
     ],
-    ids=["schema_too_new", "schema_major_mismatch"],
+    ids=["schema_minor_too_new_v1", "schema_minor_too_new_v2", "schema_major_mismatch"],
 )
 def test_baseline_verify_schema_incompatibilities(
     tmp_path: Path, schema_version: str, error_match: str
@@ -411,6 +412,17 @@ def test_baseline_verify_schema_incompatibilities(
     with pytest.raises(BaselineValidationError, match=error_match) as exc:
         baseline.verify_compatibility(current_python_tag=_python_tag())
     assert exc.value.status == "mismatch_schema_version"
+
+
+def test_baseline_verify_accepts_previous_minor_in_current_major(
+    tmp_path: Path,
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    _write_payload(baseline_path, _trusted_payload(schema_version="2.0"))
+    baseline = Baseline(baseline_path)
+    baseline.load()
+    baseline.verify_compatibility(current_python_tag=_python_tag())
+    assert baseline.schema_version == "2.0"
 
 
 def test_baseline_verify_fingerprint_mismatch(tmp_path: Path) -> None:
@@ -991,6 +1003,29 @@ def test_baseline_save_preserves_embedded_metrics_and_hash(tmp_path: Path) -> No
     assert saved_meta["metrics_payload_sha256"] == "f" * 64
 
 
+def test_baseline_save_preserves_embedded_api_surface_and_hash(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    payload = _trusted_payload()
+    assert isinstance(payload, dict)
+    payload["metrics"] = {"health_score": 70}
+    payload["api_surface"] = {"modules": [{"module": "pkg.mod", "symbols": []}]}
+    meta = payload.get("meta")
+    assert isinstance(meta, dict)
+    meta["metrics_payload_sha256"] = "f" * 64
+    meta["api_surface_payload_sha256"] = "a" * 64
+    _write_payload(baseline_path, payload)
+
+    baseline = Baseline(baseline_path)
+    baseline.load()
+    baseline.save()
+
+    saved = json.loads(baseline_path.read_text("utf-8"))
+    saved_meta = saved.get("meta")
+    assert isinstance(saved_meta, dict)
+    assert saved["api_surface"] == {"modules": [{"module": "pkg.mod", "symbols": []}]}
+    assert saved_meta["api_surface_payload_sha256"] == "a" * 64
+
+
 def test_baseline_save_preserves_embedded_metrics_without_hash(tmp_path: Path) -> None:
     baseline_path = tmp_path / "baseline.json"
     payload = _trusted_payload()
@@ -1015,7 +1050,7 @@ def test_baseline_save_preserves_embedded_metrics_without_hash(tmp_path: Path) -
 def test_preserve_embedded_metrics_variants(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
     _write_payload(path, {"meta": {}, "clones": {"functions": [], "blocks": []}})
-    assert baseline_mod._preserve_embedded_metrics(path) == (None, None)
+    assert baseline_mod._preserve_embedded_metrics(path) == (None, None, None, None)
 
     _write_payload(
         path,
@@ -1025,7 +1060,12 @@ def test_preserve_embedded_metrics_variants(tmp_path: Path) -> None:
             "metrics": {"x": 1},
         },
     )
-    assert baseline_mod._preserve_embedded_metrics(path) == ({"x": 1}, None)
+    assert baseline_mod._preserve_embedded_metrics(path) == (
+        {"x": 1},
+        None,
+        None,
+        None,
+    )
 
     _write_payload(
         path,
@@ -1035,7 +1075,12 @@ def test_preserve_embedded_metrics_variants(tmp_path: Path) -> None:
             "metrics": {"x": 2},
         },
     )
-    assert baseline_mod._preserve_embedded_metrics(path) == ({"x": 2}, None)
+    assert baseline_mod._preserve_embedded_metrics(path) == (
+        {"x": 2},
+        None,
+        None,
+        None,
+    )
 
     _write_payload(
         path,
@@ -1045,7 +1090,31 @@ def test_preserve_embedded_metrics_variants(tmp_path: Path) -> None:
             "metrics": {"x": 3},
         },
     )
-    assert baseline_mod._preserve_embedded_metrics(path) == ({"x": 3}, "a" * 64)
+    assert baseline_mod._preserve_embedded_metrics(path) == (
+        {"x": 3},
+        "a" * 64,
+        None,
+        None,
+    )
+
+    _write_payload(
+        path,
+        {
+            "meta": {
+                "metrics_payload_sha256": "a" * 64,
+                "api_surface_payload_sha256": "b" * 64,
+            },
+            "clones": {"functions": [], "blocks": []},
+            "metrics": {"x": 3},
+            "api_surface": {"modules": [{"module": "pkg.mod"}]},
+        },
+    )
+    assert baseline_mod._preserve_embedded_metrics(path) == (
+        {"x": 3},
+        "a" * 64,
+        {"modules": [{"module": "pkg.mod"}]},
+        "b" * 64,
+    )
 
 
 def test_baseline_save_defensive_non_mapping_meta(
@@ -1068,7 +1137,7 @@ def test_baseline_save_defensive_non_mapping_meta(
     monkeypatch.setattr(
         baseline_mod,
         "_preserve_embedded_metrics",
-        lambda _path: ({"health_score": 1}, "a" * 64),
+        lambda _path: ({"health_score": 1}, "a" * 64, None, None),
     )
     baseline.save()
 

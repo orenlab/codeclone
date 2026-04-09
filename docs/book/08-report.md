@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define report contracts in `2.0.0b5`: canonical JSON (`report_schema_version=2.4`)
+Define report contracts in `2.0.0b5`: canonical JSON (`report_schema_version=2.5`)
 plus deterministic TXT/Markdown/SARIF projections.
 
 ## Public surface
@@ -16,7 +16,7 @@ plus deterministic TXT/Markdown/SARIF projections.
 
 ## Data model
 
-JSON report top-level (v2.4):
+JSON report top-level (v2.5):
 
 - `report_schema_version`
 - `meta`
@@ -39,6 +39,12 @@ Canonical report-only metrics additions:
 
 - `metrics.families.overloaded_modules` records project-relative module hotspot
   profiles and candidate classification for `Overloaded Modules`
+- `metrics.families.coverage_adoption` records parameter coverage, return
+  coverage, public docstring coverage, and `Any` usage counts, plus compact
+  baseline deltas when a trusted metrics baseline is available
+- `metrics.families.api_surface` records the current public symbol inventory
+  and compact baseline diff facts (`added`, `breaking`) when
+  `--api-surface` is enabled
 - the family is canonical report truth, but it does **not** participate in
   findings totals, health, gates, baseline NEW/KNOWN semantics, or SARIF in
   `b4`
@@ -49,6 +55,14 @@ Canonical report-only metrics additions:
       pressure
     - the layer may later become scoring only after validation and explicit
       health-model documentation updates
+
+Coverage/API role split:
+
+- `coverage_adoption` is a canonical metrics family, not a style linter. It
+  reports observable adoption facts only.
+- `api_surface` is a canonical metrics/gating family, not a second finding
+  engine. It reports public API inventory plus baseline-diff facts when the
+  run opted into API collection.
 
 Canonical vs non-canonical split:
 

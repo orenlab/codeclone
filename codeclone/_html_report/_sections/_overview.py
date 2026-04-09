@@ -423,6 +423,153 @@ def _mb(*pairs: tuple[str, object]) -> str:
     )
 
 
+def _format_permille_pct(value: object) -> str:
+    return f"{_as_int(value) / 10.0:.1f}%"
+
+
+def _format_permille_delta(value: object) -> str:
+    delta = _as_int(value)
+    sign = "+" if delta > 0 else ""
+    return f"{sign}{delta / 10.0:.1f}pt"
+
+
+def _overview_stat(value: str, label: str) -> str:
+    return (
+        '<div class="overview-stat">'
+        f'<div class="overview-stat-value">{_escape_html(value)}</div>'
+        f'<div class="overview-stat-label">{_escape_html(label)}</div>'
+        "</div>"
+    )
+
+
+def _overview_stat_row(*stats: tuple[str, str]) -> str:
+    return (
+        '<div class="overview-stat-row">'
+        + "".join(_overview_stat(value, label) for value, label in stats)
+        + "</div>"
+    )
+
+
+def _adoption_card_html(adoption_summary: Mapping[str, object]) -> str:
+    params_pct = _format_permille_pct(adoption_summary.get("param_permille"))
+    returns_pct = _format_permille_pct(adoption_summary.get("return_permille"))
+    docs_pct = _format_permille_pct(adoption_summary.get("docstring_permille"))
+    stats_html = _overview_stat_row(
+        (params_pct, "params"),
+        (returns_pct, "returns"),
+        (docs_pct, "docstrings"),
+    )
+
+    deltas_html = ""
+    if bool(adoption_summary.get("baseline_diff_available")):
+        deltas_html = _mb(
+            (
+                "\u0394 params",
+                _format_permille_delta(adoption_summary.get("param_delta")),
+            ),
+            (
+                "\u0394 returns",
+                _format_permille_delta(adoption_summary.get("return_delta")),
+            ),
+            (
+                "\u0394 docs",
+                _format_permille_delta(adoption_summary.get("docstring_delta")),
+            ),
+        )
+        if deltas_html:
+            deltas_html = f'<div class="kpi-detail">{deltas_html}</div>'
+
+    any_count = _as_int(adoption_summary.get("typing_any_count"))
+    if any_count > 0:
+        noun = "symbol" if any_count == 1 else "symbols"
+        caption_html = (
+            '<div class="overview-stat-caption">'
+            f"{_format_count(any_count)} {noun} typed as <code>Any</code>"
+            "</div>"
+        )
+    else:
+        caption_html = (
+            '<div class="overview-stat-caption">'
+            "No symbols fall back to <code>Any</code>."
+            "</div>"
+        )
+
+    return stats_html + deltas_html + caption_html
+
+
+def _api_card_html(api_summary: Mapping[str, object]) -> str:
+    if not bool(api_summary.get("enabled")):
+        return (
+            '<div class="overview-summary-value">Disabled in this run.</div>'
+            '<div class="overview-stat-caption">'
+            "Enable with <code>--api-surface</code> to track public symbols."
+            "</div>"
+        )
+
+    symbols = _as_int(api_summary.get("public_symbols"))
+    modules = _as_int(api_summary.get("modules"))
+    stats_html = _overview_stat_row(
+        (_format_count(symbols), "public symbols"),
+        (_format_count(modules), "modules"),
+    )
+
+    chips_html = ""
+    if bool(api_summary.get("baseline_diff_available")):
+        breaking = _as_int(api_summary.get("breaking"))
+        added = _as_int(api_summary.get("added"))
+        chips_html = _mb(("breaking", breaking), ("added", added))
+        if chips_html:
+            chips_html = f'<div class="kpi-detail">{chips_html}</div>'
+
+    if bool(api_summary.get("strict_types")):
+        caption_html = (
+            '<div class="overview-stat-caption">'
+            "Strict type check enabled for the public surface."
+            "</div>"
+        )
+    else:
+        caption_html = ""
+
+    return stats_html + chips_html + caption_html
+
+
+def _adoption_and_api_section(ctx: ReportContext) -> str:
+    metrics_map = _as_mapping(getattr(ctx, "metrics_map", {}))
+    adoption = _as_mapping(metrics_map.get("coverage_adoption"))
+    adoption_summary = _as_mapping(adoption.get("summary"))
+    api_surface = _as_mapping(metrics_map.get("api_surface"))
+    api_summary = _as_mapping(api_surface.get("summary"))
+    if not adoption_summary and not api_summary:
+        return ""
+
+    cards: list[str] = []
+    if adoption_summary:
+        cards.append(
+            overview_summary_item_html(
+                label="Adoption coverage",
+                body_html=_adoption_card_html(adoption_summary),
+            )
+        )
+    if api_summary:
+        cards.append(
+            overview_summary_item_html(
+                label="Public API surface",
+                body_html=_api_card_html(api_summary),
+            )
+        )
+
+    return (
+        '<section class="overview-cluster">'
+        + overview_cluster_header(
+            "Adoption & API",
+            "Type/docstring adoption and public API surface are shown as facts, not style pressure.",
+        )
+        + '<div class="overview-summary-grid overview-summary-grid--2col">'
+        + "".join(cards)
+        + "</div></section>"
+    )
+
+
 def _scan_scope_subtitle(ctx: ReportContext) -> str:
     """Build a subtitle string with scan-scope essentials for the Executive Summary header."""
     inventory = _as_mapping(getattr(ctx, "inventory_map", {}))
@@ -893,6 +1040,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
         + "</div>"
         + "</div>"
         + executive
+        + _adoption_and_api_section(ctx)
         + _directory_hotspots_section(ctx)
         + _overloaded_modules_section(ctx)
         + _analytics_section(ctx)

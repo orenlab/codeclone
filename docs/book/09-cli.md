@@ -27,7 +27,28 @@ Summary metrics:
 - function/block/segment groups
 - suppressed segment groups
 - dead-code active/suppressed status in metrics line
+- adoption coverage in the normal `Metrics` block:
+  parameter typing, return typing, public docstrings, and `Any` count
+- public API surface in the normal `Metrics` block when `api_surface` was
+  collected: symbol/module counts plus added/breaking deltas when a trusted
+  metrics baseline is available
 - new vs baseline
+
+Metrics-related CLI gates:
+
+- threshold gates:
+  `--fail-complexity`, `--fail-coupling`, `--fail-cohesion`, `--fail-health`
+- coverage threshold gates:
+  `--min-typing-coverage`, `--min-docstring-coverage`
+- baseline-aware delta gates:
+  `--fail-on-new-metrics`,
+  `--fail-on-typing-regression`,
+  `--fail-on-docstring-regression`,
+  `--fail-on-api-break`
+- update mode:
+  `--update-metrics-baseline`
+- opt-in metrics family:
+  `--api-surface`
 
 Refs:
 
@@ -58,6 +79,19 @@ Refs:
     - `N found (M suppressed)` when active dead-code items exist
     - `✔ clean` when both active and suppressed are zero
     - `✔ clean (M suppressed)` when active is zero but suppressed > 0
+- The normal rich `Metrics` block includes:
+    - `Adoption` when adoption coverage facts were computed
+    - `Public API` when `api_surface` facts were computed
+- Quiet compact metrics output stays on the existing fixed one-line summary and
+  does not expand adoption/API detail.
+- Typing/docstring adoption metrics are computed by default in full mode.
+- `--api-surface` is opt-in in normal runs, but runtime auto-enables it when
+  `--fail-on-api-break` or `--update-metrics-baseline` needs a public API
+  snapshot.
+- `--fail-on-typing-regression` / `--fail-on-docstring-regression` require a
+  metrics baseline that already contains adoption coverage data.
+- `--fail-on-api-break` requires a metrics baseline that already contains
+  `api_surface` data.
 
 Refs:
 
@@ -91,20 +125,21 @@ Refs:
 
 ## Failure modes
 
-| Condition                                    | User-facing category | Exit |
-|----------------------------------------------|----------------------|------|
-| Invalid CLI flag                             | contract             | 2    |
-| Invalid output extension/path                | contract             | 2    |
-| `--open-html-report` without `--html`        | contract             | 2    |
-| `--timestamped-report-paths` without reports | contract             | 2    |
-| `--changed-only` without diff source         | contract             | 2    |
-| `--diff-against` without `--changed-only`    | contract             | 2    |
-| `--diff-against` + `--paths-from-git-diff`   | contract             | 2    |
-| Baseline untrusted in CI/gating              | contract             | 2    |
-| Unreadable source in CI/gating               | contract             | 2    |
-| New clones with `--fail-on-new`              | gating               | 3    |
-| Threshold exceeded                           | gating               | 3    |
-| Unexpected exception                         | internal             | 5    |
+| Condition                                                                 | User-facing category | Exit |
+|---------------------------------------------------------------------------|----------------------|------|
+| Invalid CLI flag                                                          | contract             | 2    |
+| Invalid output extension/path                                             | contract             | 2    |
+| `--open-html-report` without `--html`                                     | contract             | 2    |
+| `--timestamped-report-paths` without reports                              | contract             | 2    |
+| `--changed-only` without diff source                                      | contract             | 2    |
+| `--diff-against` without `--changed-only`                                 | contract             | 2    |
+| `--diff-against` + `--paths-from-git-diff`                                | contract             | 2    |
+| Baseline untrusted in CI/gating                                           | contract             | 2    |
+| Coverage/API regression gate without required metrics-baseline capability | contract             | 2    |
+| Unreadable source in CI/gating                                            | contract             | 2    |
+| New clones with `--fail-on-new`                                           | gating               | 3    |
+| Threshold exceeded                                                        | gating               | 3    |
+| Unexpected exception                                                      | internal             | 5    |
 
 ## Determinism / canonicalization
 

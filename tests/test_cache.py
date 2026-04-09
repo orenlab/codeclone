@@ -262,6 +262,87 @@ def test_store_canonical_file_entry_marks_dirty_only_when_entry_changes(
     assert cache._dirty is True
 
 
+def test_cache_helper_type_guards_and_wire_api_decoders_cover_invalid_inputs() -> None:
+    assert cache_mod._as_module_typing_coverage_dict({"module": "pkg"}) is None
+    assert cache_mod._as_module_docstring_coverage_dict({"module": "pkg"}) is None
+    assert cache_mod._as_module_api_surface_dict({"module": "pkg"}) is None
+    assert (
+        cache_mod._has_cache_entry_container_shape(
+            {
+                "stat": {"mtime_ns": 1, "size": 1},
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "typing_coverage": {"module": "pkg"},
+            }
+        )
+        is False
+    )
+    assert (
+        cache_mod._has_cache_entry_container_shape(
+            {
+                "stat": {"mtime_ns": 1, "size": 1},
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "docstring_coverage": {"module": "pkg"},
+            }
+        )
+        is False
+    )
+    assert (
+        cache_mod._has_cache_entry_container_shape(
+            {
+                "stat": {"mtime_ns": 1, "size": 1},
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "api_surface": {"module": "pkg"},
+            }
+        )
+        is False
+    )
+    assert (
+        cache_mod._decode_optional_wire_api_surface(
+            obj={"as": ["pkg.mod", ["run"], [None]]},
+            filepath="pkg/mod.py",
+        )
+        is None
+    )
+    assert (
+        cache_mod._decode_optional_wire_module_ints(
+            obj={"tc": ["pkg.mod", "bad"]},
+            key="tc",
+            expected_len=2,
+            int_indexes=(1,),
+        )
+        is None
+    )
+    assert cache_mod._decode_wire_api_surface_symbol(["pkg.mod:run"]) is None
+    assert (
+        cache_mod._decode_wire_api_surface_symbol(
+            ["pkg.mod:run", "function", 1, 2, "name", "", [None]]
+        )
+        is None
+    )
+    assert cache_mod._decode_wire_api_param_spec(["value"]) is None
+    assert cache_mod._is_api_param_spec_dict([]) is False
+    assert cache_mod._is_public_symbol_dict([]) is False
+    assert (
+        cache_mod._is_public_symbol_dict(
+            {
+                "qualname": "pkg.mod:run",
+                "kind": "function",
+                "exported_via": "name",
+                "start_line": 1,
+                "end_line": 2,
+                "params": "bad",
+            }
+        )
+        is False
+    )
+
+
 def test_get_file_entry_missing_after_fallback_returns_none(tmp_path: Path) -> None:
     root = tmp_path / "project"
     root.mkdir()

@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import inspect
 import os
+from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from hashlib import sha256
@@ -17,12 +19,14 @@ import orjson
 
 from ._coerce import as_int, as_str
 from .cache import (
+    ApiParamSpecDict,
     Cache,
     CacheEntry,
     ClassMetricsDict,
     DeadCandidateDict,
     FileStat,
     ModuleDepDict,
+    PublicSymbolDict,
     SegmentReportProjection,
     SourceStatsDict,
     StructuralFindingGroupDict,
@@ -42,6 +46,9 @@ from .metrics import (
     find_unused,
 )
 from .models import (
+    ApiBreakingChange,
+    ApiParamSpec,
+    ApiSurfaceSnapshot,
     BlockUnit,
     ClassMetrics,
     DeadCandidate,
@@ -52,8 +59,12 @@ from .models import (
     GroupItemLike,
     GroupMap,
     MetricsDiff,
+    ModuleApiSurface,
     ModuleDep,
+    ModuleDocstringCoverage,
+    ModuleTypingCoverage,
     ProjectMetrics,
+    PublicSymbol,
     SegmentUnit,
     StructuralFindingGroup,
     StructuralFindingOccurrence,
@@ -120,6 +131,9 @@ class DiscoveryResult:
     files_to_process: tuple[str, ...]
     skipped_warnings: tuple[str, ...]
     cached_referenced_qualnames: frozenset[str] = frozenset()
+    cached_typing_modules: tuple[ModuleTypingCoverage, ...] = ()
+    cached_docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
+    cached_api_modules: tuple[ModuleApiSurface, ...] = ()
     cached_structural_findings: tuple[StructuralFindingGroup, ...] = ()
     cached_segment_report_projection: SegmentReportProjection | None = None
     cached_lines: int = 0
@@ -165,6 +179,9 @@ class ProcessingResult:
     failed_files: tuple[str, ...]
     source_read_failures: tuple[str, ...]
     referenced_qualnames: frozenset[str] = frozenset()
+    typing_modules: tuple[ModuleTypingCoverage, ...] = ()
+    docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
+    api_modules: tuple[ModuleApiSurface, ...] = ()
     structural_findings: tuple[StructuralFindingGroup, ...] = ()
     source_stats_by_file: tuple[tuple[str, int, int, int, int], ...] = ()
 
@@ -214,6 +231,11 @@ class MetricGateConfig:
     fail_dead_code: bool
     fail_health: int
     fail_on_new_metrics: bool
+    fail_on_typing_regression: bool = False
+    fail_on_docstring_regression: bool = False
+    fail_on_api_break: bool = False
+    min_typing_coverage: int = -1
+    min_docstring_coverage: int = -1
 
 
 def _as_sorted_str_tuple(value: object) -> tuple[str, ...]:
@@ -381,10 +403,13 @@ def _new_discovery_buffers() -> tuple[
     list[DeadCandidate],
     set[str],
     set[str],
+    list[ModuleTypingCoverage],
+    list[ModuleDocstringCoverage],
+    list[ModuleApiSurface],
     list[str],
     list[str],
 ]:
-    return [], [], [], [], [], [], set(), set(), [], []
+    return [], [], [], [], [], [], set(), set(), [], [], [], [], []
 
 
 def _decode_cached_structural_finding_group(
@@ -483,7 +508,185 @@ def _usable_cached_source_stats(
     return _cache_entry_source_stats(entry)
 
 
-def _load_cached_metrics(
+def _cache_dict_module_fields(
+    value: object,
+) -> tuple[Mapping[str, object], str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    row = cast("Mapping[str, object]", value)
+    module = row.get("module")
+    filepath = row.get("filepath")
+    if not isinstance(module, str) or not isinstance(filepath, str):
+        return None
+    return row, module, filepath
+
+
+def _cache_dict_int_fields(
+    row: Mapping[str, object],
+    *keys: str,
+) -> tuple[int, ...] | None:
+    values: list[int] = []
+    for key in keys:
+        value = row.get(key)
+        if not isinstance(value, int):
+            return None
+        values.append(value)
+    return tuple(values)
+
+
+def _typing_coverage_from_cache_dict(
+    value: object,
+) -> ModuleTypingCoverage | None:
+    row_info = _cache_dict_module_fields(value)
+    if row_info is None:
+        return None
+    row, module, filepath = row_info
+    int_fields = _cache_dict_int_fields(
+        row,
+        "callable_count",
+        "params_total",
+        "params_annotated",
+        "returns_total",
+        "returns_annotated",
+        "any_annotation_count",
+    )
+    if int_fields is None:
+        return None
+    (
+        callable_count,
+        params_total,
+        params_annotated,
+        returns_total,
+        returns_annotated,
+        any_annotation_count,
+    ) = int_fields
+    return ModuleTypingCoverage(
+        module=module,
+        filepath=filepath,
+        callable_count=callable_count,
+        params_total=params_total,
+        params_annotated=params_annotated,
+        returns_total=returns_total,
+        returns_annotated=returns_annotated,
+        any_annotation_count=any_annotation_count,
+    )
+
+
+def _docstring_coverage_from_cache_dict(
+    value: object,
+) -> ModuleDocstringCoverage | None:
+    row_info = _cache_dict_module_fields(value)
+    if row_info is None:
+        return None
+    row, module, filepath = row_info
+    totals = _cache_dict_int_fields(
+        row,
+        "public_symbol_total",
+        "public_symbol_documented",
+    )
+    if totals is None:
+        return None
+    public_symbol_total, public_symbol_documented = totals
+    return ModuleDocstringCoverage(
+        module=module,
+        filepath=filepath,
+        public_symbol_total=public_symbol_total,
+        public_symbol_documented=public_symbol_documented,
+    )
+
+
+def _api_param_spec_from_cache_dict(value: ApiParamSpecDict) -> ApiParamSpec | None:
+    name = value.get("name")
+    kind = value.get("kind")
+    has_default = value.get("has_default")
+    annotation_hash = value.get("annotation_hash", "")
+    if (
+        not isinstance(name, str)
+        or not isinstance(kind, str)
+        or not isinstance(has_default, bool)
+        or not isinstance(annotation_hash, str)
+    ):
+        return None
+    return ApiParamSpec(
+        name=name,
+        kind=cast(
+            "Literal['pos_only', 'pos_or_kw', 'vararg', 'kw_only', 'kwarg']",
+            kind,
+        ),
+        has_default=has_default,
+        annotation_hash=annotation_hash,
+    )
+
+
+def _public_symbol_from_cache_dict(
+    value: PublicSymbolDict,
+) -> PublicSymbol | None:
+    qualname = value.get("qualname")
+    kind = value.get("kind")
+    start_line = value.get("start_line")
+    end_line = value.get("end_line")
+    exported_via = value.get("exported_via", "name")
+    returns_hash = value.get("returns_hash", "")
+    params_raw = value.get("params", [])
+    if (
+        not isinstance(qualname, str)
+        or not isinstance(kind, str)
+        or not isinstance(start_line, int)
+        or not isinstance(end_line, int)
+        or not isinstance(exported_via, str)
+        or not isinstance(returns_hash, str)
+        or not isinstance(params_raw, list)
+    ):
+        return None
+    params = []
+    for param in params_raw:
+        if not isinstance(param, dict):
+            return None
+        parsed = _api_param_spec_from_cache_dict(param)
+        if parsed is None:
+            return None
+        params.append(parsed)
+    return PublicSymbol(
+        qualname=qualname,
+        kind=cast("Literal['function', 'class', 'method', 'constant']", kind),
+        start_line=start_line,
+        end_line=end_line,
+        params=tuple(params),
+        returns_hash=returns_hash,
+        exported_via=cast("Literal['all', 'name']", exported_via),
+    )
+
+
+def _api_surface_from_cache_dict(value: object) -> ModuleApiSurface | None:
+    row_info = _cache_dict_module_fields(value)
+    if row_info is None:
+        return None
+    row, module, filepath = row_info
+    all_declared_raw = row.get("all_declared", [])
+    symbols_raw = row.get("symbols", [])
+    if (
+        not isinstance(all_declared_raw, list)
+        or not isinstance(symbols_raw, list)
+        or not all(isinstance(item, str) for item in all_declared_raw)
+    ):
+        return None
+    symbols: list[PublicSymbol] = []
+    for item in symbols_raw:
+        if not isinstance(item, dict):
+            return None
+        parsed = _public_symbol_from_cache_dict(cast("PublicSymbolDict", item))
+        if parsed is None:
+            return None
+        symbols.append(parsed)
+    return ModuleApiSurface(
+        module=module,
+        filepath=filepath,
+        all_declared=tuple(sorted(set(all_declared_raw))) or None,
+        symbols=tuple(sorted(symbols, key=lambda item: item.qualname)),
+    )
+
+
+def _load_cached_metrics_extended(
     entry: CacheEntry,
     *,
     filepath: str,
@@ -493,6 +696,9 @@ def _load_cached_metrics(
     tuple[DeadCandidate, ...],
     frozenset[str],
     frozenset[str],
+    ModuleTypingCoverage | None,
+    ModuleDocstringCoverage | None,
+    ModuleApiSurface | None,
 ]:
     class_metrics_rows: list[ClassMetricsDict] = entry.get("class_metrics", [])
     class_metrics = tuple(
@@ -559,12 +765,20 @@ def _load_cached_metrics(
         if is_test_filepath(filepath)
         else frozenset(entry.get("referenced_qualnames", []))
     )
+    typing_coverage = _typing_coverage_from_cache_dict(entry.get("typing_coverage"))
+    docstring_coverage = _docstring_coverage_from_cache_dict(
+        entry.get("docstring_coverage")
+    )
+    api_surface = _api_surface_from_cache_dict(entry.get("api_surface"))
     return (
         class_metrics,
         module_deps,
         dead_candidates,
         referenced_names,
         referenced_qualnames,
+        typing_coverage,
+        docstring_coverage,
+        api_surface,
     )
 
 
@@ -586,6 +800,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         cached_dead_candidates,
         cached_referenced_names,
         cached_referenced_qualnames,
+        cached_typing_modules,
+        cached_docstring_modules,
+        cached_api_modules,
         files_to_process,
         skipped_warnings,
     ) = _new_discovery_buffers()
@@ -642,12 +859,21 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                     dead_candidates,
                     referenced_names,
                     referenced_qualnames,
-                ) = _load_cached_metrics(cached, filepath=filepath)
+                    typing_coverage,
+                    docstring_coverage,
+                    api_surface,
+                ) = _load_cached_metrics_extended(cached, filepath=filepath)
                 cached_class_metrics.extend(class_metrics)
                 cached_module_deps.extend(module_deps)
                 cached_dead_candidates.extend(dead_candidates)
                 cached_referenced_names.update(referenced_names)
                 cached_referenced_qualnames.update(referenced_qualnames)
+                if typing_coverage is not None:
+                    cached_typing_modules.append(typing_coverage)
+                if docstring_coverage is not None:
+                    cached_docstring_modules.append(docstring_coverage)
+                if api_surface is not None:
+                    cached_api_modules.append(api_surface)
             if collect_structural_findings:
                 cached_sf.extend(
                     _decode_cached_structural_finding_group(group_dict, filepath)
@@ -674,6 +900,18 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         ),
         cached_referenced_names=frozenset(cached_referenced_names),
         cached_referenced_qualnames=frozenset(cached_referenced_qualnames),
+        cached_typing_modules=tuple(
+            sorted(cached_typing_modules, key=lambda item: (item.filepath, item.module))
+        ),
+        cached_docstring_modules=tuple(
+            sorted(
+                cached_docstring_modules,
+                key=lambda item: (item.filepath, item.module),
+            )
+        ),
+        cached_api_modules=tuple(
+            sorted(cached_api_modules, key=lambda item: (item.filepath, item.module))
+        ),
         files_to_process=tuple(files_to_process),
         skipped_warnings=tuple(sorted(skipped_warnings)),
         cached_structural_findings=tuple(cached_sf),
@@ -695,6 +933,10 @@ def process_file(
     min_loc: int,
     min_stmt: int,
     collect_structural_findings: bool = True,
+    collect_typing_coverage: bool = True,
+    collect_docstring_coverage: bool = True,
+    collect_api_surface: bool = False,
+    api_include_private_modules: bool = False,
     block_min_loc: int = 20,
     block_min_stmt: int = 8,
     segment_min_loc: int = 20,
@@ -757,6 +999,10 @@ def process_file(
                 segment_min_loc=segment_min_loc,
                 segment_min_stmt=segment_min_stmt,
                 collect_structural_findings=collect_structural_findings,
+                collect_typing_coverage=collect_typing_coverage,
+                collect_docstring_coverage=collect_docstring_coverage,
+                collect_api_surface=collect_api_surface,
+                api_include_private_modules=api_include_private_modules,
             )
         )
 
@@ -804,6 +1050,9 @@ def process(
             dead_candidates=discovery.cached_dead_candidates,
             referenced_names=discovery.cached_referenced_names,
             referenced_qualnames=discovery.cached_referenced_qualnames,
+            typing_modules=discovery.cached_typing_modules,
+            docstring_modules=discovery.cached_docstring_modules,
+            api_modules=discovery.cached_api_modules,
             files_analyzed=0,
             files_skipped=discovery.files_skipped,
             analyzed_lines=0,
@@ -825,6 +1074,26 @@ def process(
     all_dead_candidates: list[DeadCandidate] = list(discovery.cached_dead_candidates)
     all_referenced_names: set[str] = set(discovery.cached_referenced_names)
     all_referenced_qualnames: set[str] = set(discovery.cached_referenced_qualnames)
+    all_typing_modules: list[ModuleTypingCoverage] = list(
+        discovery.cached_typing_modules
+    )
+    all_docstring_modules: list[ModuleDocstringCoverage] = list(
+        discovery.cached_docstring_modules
+    )
+    all_api_modules: list[ModuleApiSurface] = list(discovery.cached_api_modules)
+    collect_structural_findings = _should_collect_structural_findings(boot.output_paths)
+    collect_typing_coverage = not boot.args.skip_metrics and bool(
+        getattr(boot.args, "typing_coverage", True)
+    )
+    collect_docstring_coverage = not boot.args.skip_metrics and bool(
+        getattr(boot.args, "docstring_coverage", True)
+    )
+    collect_api_surface = not boot.args.skip_metrics and bool(
+        getattr(boot.args, "api_surface", False)
+    )
+    api_include_private_modules = bool(
+        getattr(boot.args, "api_include_private_modules", False)
+    )
 
     files_analyzed = 0
     files_skipped = discovery.files_skipped
@@ -930,6 +1199,12 @@ def process(
                 all_referenced_qualnames.update(
                     result.file_metrics.referenced_qualnames
                 )
+                if result.file_metrics.typing_coverage is not None:
+                    all_typing_modules.append(result.file_metrics.typing_coverage)
+                if result.file_metrics.docstring_coverage is not None:
+                    all_docstring_modules.append(result.file_metrics.docstring_coverage)
+                if result.file_metrics.api_surface is not None:
+                    all_api_modules.append(result.file_metrics.api_surface)
             return
 
         files_skipped += 1
@@ -940,22 +1215,49 @@ def process(
 
     def _run_sequential(files: Sequence[str]) -> None:
         for filepath in files:
-            _accept_result(
-                process_file(
-                    filepath,
-                    root_str,
-                    boot.config,
-                    min_loc,
-                    min_stmt,
-                    collect_structural_findings,
-                    block_min_loc,
-                    block_min_stmt,
-                    segment_min_loc,
-                    segment_min_stmt,
-                )
-            )
+            _accept_result(_invoke_process_file(filepath))
             if on_advance is not None:
                 on_advance()
+
+    def _invoke_process_file(filepath: str) -> FileProcessResult:
+        optional_kwargs: dict[str, object] = {
+            "collect_structural_findings": collect_structural_findings,
+            "collect_typing_coverage": collect_typing_coverage,
+            "collect_docstring_coverage": collect_docstring_coverage,
+            "collect_api_surface": collect_api_surface,
+            "api_include_private_modules": api_include_private_modules,
+            "block_min_loc": block_min_loc,
+            "block_min_stmt": block_min_stmt,
+            "segment_min_loc": segment_min_loc,
+            "segment_min_stmt": segment_min_stmt,
+        }
+        try:
+            signature = inspect.signature(process_file)
+        except (TypeError, ValueError):
+            supported_kwargs = optional_kwargs
+        else:
+            parameters = tuple(signature.parameters.values())
+            if any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters
+            ):
+                supported_kwargs = optional_kwargs
+            else:
+                supported_names = {parameter.name for parameter in parameters}
+                supported_kwargs = {
+                    key: value
+                    for key, value in optional_kwargs.items()
+                    if key in supported_names
+                }
+        process_callable = cast("Callable[..., FileProcessResult]", process_file)
+        return process_callable(
+            filepath,
+            root_str,
+            boot.config,
+            min_loc,
+            min_stmt,
+            **supported_kwargs,
+        )
 
     if _should_use_parallel(len(files_to_process), processes):
         try:
@@ -964,17 +1266,8 @@ def process(
                     batch = files_to_process[idx : idx + batch_size]
                     futures = [
                         executor.submit(
-                            process_file,
+                            _invoke_process_file,
                             filepath,
-                            root_str,
-                            boot.config,
-                            min_loc,
-                            min_stmt,
-                            collect_structural_findings,
-                            block_min_loc,
-                            block_min_stmt,
-                            segment_min_loc,
-                            segment_min_stmt,
                         )
                         for filepath in batch
                     ]
@@ -1011,6 +1304,15 @@ def process(
         ),
         referenced_names=frozenset(all_referenced_names),
         referenced_qualnames=frozenset(all_referenced_qualnames),
+        typing_modules=tuple(
+            sorted(all_typing_modules, key=lambda item: (item.filepath, item.module))
+        ),
+        docstring_modules=tuple(
+            sorted(all_docstring_modules, key=lambda item: (item.filepath, item.module))
+        ),
+        api_modules=tuple(
+            sorted(all_api_modules, key=lambda item: (item.filepath, item.module))
+        ),
         files_analyzed=files_analyzed,
         files_skipped=files_skipped,
         analyzed_lines=analyzed_lines,
@@ -1045,6 +1347,9 @@ def compute_project_metrics(
     dead_candidates: Sequence[DeadCandidate],
     referenced_names: frozenset[str],
     referenced_qualnames: frozenset[str],
+    typing_modules: Sequence[ModuleTypingCoverage] = (),
+    docstring_modules: Sequence[ModuleDocstringCoverage] = (),
+    api_modules: Sequence[ModuleApiSurface] = (),
     files_found: int,
     files_analyzed_or_cached: int,
     function_clone_groups: int,
@@ -1126,6 +1431,23 @@ def compute_project_metrics(
             referenced_qualnames=referenced_qualnames,
         )
 
+    typing_rows = tuple(
+        sorted(typing_modules, key=lambda item: (item.filepath, item.module))
+    )
+    docstring_rows = tuple(
+        sorted(docstring_modules, key=lambda item: (item.filepath, item.module))
+    )
+    api_rows = tuple(sorted(api_modules, key=lambda item: (item.filepath, item.module)))
+    typing_param_total = sum(item.params_total for item in typing_rows)
+    typing_param_annotated = sum(item.params_annotated for item in typing_rows)
+    typing_return_total = sum(item.returns_total for item in typing_rows)
+    typing_return_annotated = sum(item.returns_annotated for item in typing_rows)
+    typing_any_count = sum(item.any_annotation_count for item in typing_rows)
+    docstring_public_total = sum(item.public_symbol_total for item in docstring_rows)
+    docstring_public_documented = sum(
+        item.public_symbol_documented for item in docstring_rows
+    )
+
     health = compute_health(
         HealthInputs(
             files_found=files_found,
@@ -1164,6 +1486,16 @@ def compute_project_metrics(
         dependency_longest_chains=dep_graph.longest_chains,
         dead_code=dead_items,
         health=health,
+        typing_param_total=typing_param_total,
+        typing_param_annotated=typing_param_annotated,
+        typing_return_total=typing_return_total,
+        typing_return_annotated=typing_return_annotated,
+        typing_any_count=typing_any_count,
+        docstring_public_total=docstring_public_total,
+        docstring_public_documented=docstring_public_documented,
+        typing_modules=typing_rows,
+        docstring_modules=docstring_rows,
+        api_surface=ApiSurfaceSnapshot(modules=api_rows) if api_rows else None,
     )
     return project_metrics, dep_graph, dead_items
 
@@ -1191,6 +1523,235 @@ def compute_suggestions(
         structural_findings=structural_findings,
         scan_root=scan_root,
     )
+
+
+def _permille(numerator: int, denominator: int) -> int:
+    if denominator <= 0:
+        return 0
+    return round((1000.0 * float(numerator)) / float(denominator))
+
+
+def _coverage_adoption_rows(
+    project_metrics: ProjectMetrics,
+) -> list[dict[str, object]]:
+    docstring_by_module = {
+        (item.filepath, item.module): item for item in project_metrics.docstring_modules
+    }
+    rows: list[dict[str, object]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for typing_item in project_metrics.typing_modules:
+        key = (typing_item.filepath, typing_item.module)
+        seen_keys.add(key)
+        docstring_item = docstring_by_module.get(key)
+        doc_total = docstring_item.public_symbol_total if docstring_item else 0
+        doc_documented = (
+            docstring_item.public_symbol_documented if docstring_item else 0
+        )
+        rows.append(
+            {
+                "module": typing_item.module,
+                "filepath": typing_item.filepath,
+                "callable_count": typing_item.callable_count,
+                "params_total": typing_item.params_total,
+                "params_annotated": typing_item.params_annotated,
+                "param_permille": _permille(
+                    typing_item.params_annotated,
+                    typing_item.params_total,
+                ),
+                "returns_total": typing_item.returns_total,
+                "returns_annotated": typing_item.returns_annotated,
+                "return_permille": _permille(
+                    typing_item.returns_annotated,
+                    typing_item.returns_total,
+                ),
+                "any_annotation_count": typing_item.any_annotation_count,
+                "public_symbol_total": doc_total,
+                "public_symbol_documented": doc_documented,
+                "docstring_permille": _permille(doc_documented, doc_total),
+            }
+        )
+    for docstring_item in project_metrics.docstring_modules:
+        key = (docstring_item.filepath, docstring_item.module)
+        if key in seen_keys:
+            continue
+        rows.append(
+            {
+                "module": docstring_item.module,
+                "filepath": docstring_item.filepath,
+                "callable_count": 0,
+                "params_total": 0,
+                "params_annotated": 0,
+                "param_permille": 0,
+                "returns_total": 0,
+                "returns_annotated": 0,
+                "return_permille": 0,
+                "any_annotation_count": 0,
+                "public_symbol_total": docstring_item.public_symbol_total,
+                "public_symbol_documented": docstring_item.public_symbol_documented,
+                "docstring_permille": _permille(
+                    docstring_item.public_symbol_documented,
+                    docstring_item.public_symbol_total,
+                ),
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda item: (
+            _as_int(item.get("param_permille")),
+            _as_int(item.get("docstring_permille")),
+            _as_int(item.get("return_permille")),
+            _as_str(item.get("module")),
+        ),
+    )
+
+
+def _api_surface_summary(
+    api_surface: ApiSurfaceSnapshot | None,
+) -> dict[str, object]:
+    modules = api_surface.modules if api_surface is not None else ()
+    return {
+        "enabled": api_surface is not None,
+        "modules": len(modules),
+        "public_symbols": sum(len(module.symbols) for module in modules),
+        "added": 0,
+        "breaking": 0,
+        "strict_types": False,
+    }
+
+
+def _api_surface_rows(
+    api_surface: ApiSurfaceSnapshot | None,
+) -> list[dict[str, object]]:
+    if api_surface is None:
+        return []
+    rows: list[dict[str, object]] = []
+    for module in api_surface.modules:
+        rows.extend(
+            {
+                "record_kind": "symbol",
+                "module": module.module,
+                "filepath": module.filepath,
+                "qualname": symbol.qualname,
+                "start_line": symbol.start_line,
+                "end_line": symbol.end_line,
+                "symbol_kind": symbol.kind,
+                "exported_via": symbol.exported_via,
+                "params_total": len(symbol.params),
+                "params": [
+                    {
+                        "name": param.name,
+                        "kind": param.kind,
+                        "has_default": param.has_default,
+                        "annotated": bool(param.annotation_hash),
+                    }
+                    for param in symbol.params
+                ],
+                "returns_annotated": bool(symbol.returns_hash),
+            }
+            for symbol in module.symbols
+        )
+    return sorted(
+        rows,
+        key=lambda item: (
+            _as_str(item.get("filepath")),
+            _as_int(item.get("start_line")),
+            _as_int(item.get("end_line")),
+            _as_str(item.get("qualname")),
+            _as_str(item.get("record_kind")),
+        ),
+    )
+
+
+def _breaking_api_surface_rows(
+    changes: Sequence[object],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for change in changes:
+        if not isinstance(change, ApiBreakingChange):
+            continue
+        module_name, _, _local_name = change.qualname.partition(":")
+        rows.append(
+            {
+                "record_kind": "breaking_change",
+                "module": module_name,
+                "filepath": change.filepath,
+                "qualname": change.qualname,
+                "start_line": change.start_line,
+                "end_line": change.end_line,
+                "symbol_kind": change.symbol_kind,
+                "change_kind": change.change_kind,
+                "detail": change.detail,
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda item: (
+            _as_str(item.get("filepath")),
+            _as_int(item.get("start_line")),
+            _as_int(item.get("end_line")),
+            _as_str(item.get("qualname")),
+            _as_str(item.get("change_kind")),
+        ),
+    )
+
+
+def _enrich_metrics_report_payload(
+    *,
+    metrics_payload: Mapping[str, object],
+    metrics_diff: MetricsDiff | None,
+) -> dict[str, object]:
+    enriched = {
+        key: (dict(value) if isinstance(value, Mapping) else value)
+        for key, value in metrics_payload.items()
+    }
+    coverage_adoption = dict(
+        cast("Mapping[str, object]", enriched.get("coverage_adoption", {}))
+    )
+    coverage_summary = dict(
+        cast("Mapping[str, object]", coverage_adoption.get("summary", {}))
+    )
+    if coverage_summary:
+        coverage_summary["baseline_diff_available"] = metrics_diff is not None
+        coverage_summary["param_delta"] = (
+            int(metrics_diff.typing_param_permille_delta)
+            if metrics_diff is not None
+            else 0
+        )
+        coverage_summary["return_delta"] = (
+            int(metrics_diff.typing_return_permille_delta)
+            if metrics_diff is not None
+            else 0
+        )
+        coverage_summary["docstring_delta"] = (
+            int(metrics_diff.docstring_permille_delta)
+            if metrics_diff is not None
+            else 0
+        )
+        coverage_adoption["summary"] = coverage_summary
+        enriched["coverage_adoption"] = coverage_adoption
+
+    api_surface = dict(cast("Mapping[str, object]", enriched.get("api_surface", {})))
+    api_summary = dict(cast("Mapping[str, object]", api_surface.get("summary", {})))
+    api_items = list(cast("Sequence[object]", api_surface.get("items", ())))
+    if api_summary:
+        api_summary["baseline_diff_available"] = metrics_diff is not None
+        api_summary["added"] = (
+            len(metrics_diff.new_api_symbols) if metrics_diff is not None else 0
+        )
+        api_summary["breaking"] = (
+            len(metrics_diff.new_api_breaking_changes)
+            if metrics_diff is not None
+            else 0
+        )
+        api_surface["summary"] = api_summary
+    if metrics_diff is not None and metrics_diff.new_api_breaking_changes:
+        api_items.extend(
+            _breaking_api_surface_rows(metrics_diff.new_api_breaking_changes)
+        )
+    api_surface["items"] = api_items
+    if api_surface:
+        enriched["api_surface"] = api_surface
+    return enriched
 
 
 def build_metrics_report_payload(
@@ -1256,6 +1817,9 @@ def build_metrics_report_payload(
     ]
     active_dead_items = tuple(project_metrics.dead_code)
     suppressed_dead_items = tuple(suppressed_dead_code)
+    coverage_adoption_rows = _coverage_adoption_rows(project_metrics)
+    api_surface_summary = _api_surface_summary(project_metrics.api_surface)
+    api_surface_items = _api_surface_rows(project_metrics.api_surface)
 
     def _serialize_dead_item(
         item: DeadItem,
@@ -1351,6 +1915,35 @@ def build_metrics_report_payload(
             "grade": project_metrics.health.grade,
             "dimensions": dict(project_metrics.health.dimensions),
         },
+        "coverage_adoption": {
+            "summary": {
+                "modules": len(coverage_adoption_rows),
+                "params_total": project_metrics.typing_param_total,
+                "params_annotated": project_metrics.typing_param_annotated,
+                "param_permille": _permille(
+                    project_metrics.typing_param_annotated,
+                    project_metrics.typing_param_total,
+                ),
+                "returns_total": project_metrics.typing_return_total,
+                "returns_annotated": project_metrics.typing_return_annotated,
+                "return_permille": _permille(
+                    project_metrics.typing_return_annotated,
+                    project_metrics.typing_return_total,
+                ),
+                "public_symbol_total": project_metrics.docstring_public_total,
+                "public_symbol_documented": project_metrics.docstring_public_documented,
+                "docstring_permille": _permille(
+                    project_metrics.docstring_public_documented,
+                    project_metrics.docstring_public_total,
+                ),
+                "typing_any_count": project_metrics.typing_any_count,
+            },
+            "items": coverage_adoption_rows,
+        },
+        "api_surface": {
+            "summary": dict(api_surface_summary),
+            "items": api_surface_items,
+        },
         "overloaded_modules": build_overloaded_modules_payload(
             scan_root=scan_root,
             source_stats_by_file=source_stats_by_file,
@@ -1428,6 +2021,9 @@ def analyze(
             dead_candidates=processing.dead_candidates,
             referenced_names=processing.referenced_names,
             referenced_qualnames=processing.referenced_qualnames,
+            typing_modules=processing.typing_modules,
+            docstring_modules=processing.docstring_modules,
+            api_modules=processing.api_modules,
             files_found=discovery.files_found,
             files_analyzed_or_cached=files_analyzed_or_cached,
             function_clone_groups=func_clones_count,
@@ -1548,6 +2144,14 @@ def report(
     )
 
     if needs_report_document:
+        metrics_for_report = (
+            _enrich_metrics_report_payload(
+                metrics_payload=analysis.metrics_payload,
+                metrics_diff=cast("MetricsDiff | None", metrics_diff),
+            )
+            if analysis.metrics_payload is not None
+            else None
+        )
         report_document = build_report_document(
             func_groups=analysis.func_groups,
             block_groups=analysis.block_groups_report,
@@ -1558,12 +2162,20 @@ def report(
             new_function_group_keys=new_func,
             new_block_group_keys=new_block,
             new_segment_group_keys=set(analysis.segment_groups.keys()),
-            metrics=analysis.metrics_payload,
+            metrics=metrics_for_report,
             suggestions=analysis.suggestions,
             structural_findings=sf,
         )
 
     if boot.output_paths.html and html_builder is not None:
+        metrics_for_html = (
+            _enrich_metrics_report_payload(
+                metrics_payload=analysis.metrics_payload,
+                metrics_diff=cast("MetricsDiff | None", metrics_diff),
+            )
+            if analysis.metrics_payload is not None
+            else None
+        )
         contents["html"] = html_builder(
             func_groups=analysis.func_groups,
             block_groups=analysis.block_groups_report,
@@ -1572,7 +2184,7 @@ def report(
             new_function_group_keys=new_func,
             new_block_group_keys=new_block,
             report_meta=report_meta,
-            metrics=analysis.metrics_payload,
+            metrics=metrics_for_html,
             suggestions=analysis.suggestions,
             structural_findings=sf,
             report_document=report_document,
@@ -1643,81 +2255,194 @@ def metric_gate_reasons(
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
+    _append_threshold_metric_reasons(
+        reasons=reasons,
+        project_metrics=project_metrics,
+        config=config,
+    )
+    _append_new_metric_diff_reasons(
+        reasons=reasons,
+        metrics_diff=metrics_diff,
+        config=config,
+    )
+    _append_adoption_metric_reasons(
+        reasons=reasons,
+        metrics_diff=metrics_diff,
+        project_metrics=project_metrics,
+        config=config,
+    )
+    return tuple(reasons)
 
-    if (
-        config.fail_complexity >= 0
-        and project_metrics.complexity_max > config.fail_complexity
-    ):
-        reasons.append(
+
+def _append_threshold_metric_reasons(
+    *,
+    reasons: list[str],
+    project_metrics: ProjectMetrics,
+    config: MetricGateConfig,
+) -> None:
+    threshold_rows = (
+        (
+            config.fail_complexity >= 0
+            and project_metrics.complexity_max > config.fail_complexity,
             "Complexity threshold exceeded: "
             f"max CC={project_metrics.complexity_max}, "
-            f"threshold={config.fail_complexity}."
-        )
-    if (
-        config.fail_coupling >= 0
-        and project_metrics.coupling_max > config.fail_coupling
-    ):
-        reasons.append(
+            f"threshold={config.fail_complexity}.",
+        ),
+        (
+            config.fail_coupling >= 0
+            and project_metrics.coupling_max > config.fail_coupling,
             "Coupling threshold exceeded: "
             f"max CBO={project_metrics.coupling_max}, "
-            f"threshold={config.fail_coupling}."
-        )
-    if (
-        config.fail_cohesion >= 0
-        and project_metrics.cohesion_max > config.fail_cohesion
-    ):
-        reasons.append(
+            f"threshold={config.fail_coupling}.",
+        ),
+        (
+            config.fail_cohesion >= 0
+            and project_metrics.cohesion_max > config.fail_cohesion,
             "Cohesion threshold exceeded: "
             f"max LCOM4={project_metrics.cohesion_max}, "
-            f"threshold={config.fail_cohesion}."
-        )
+            f"threshold={config.fail_cohesion}.",
+        ),
+        (
+            config.fail_health >= 0
+            and project_metrics.health.total < config.fail_health,
+            "Health score below threshold: "
+            f"score={project_metrics.health.total}, threshold={config.fail_health}.",
+        ),
+    )
+    reasons.extend(message for triggered, message in threshold_rows if triggered)
     if config.fail_cycles and project_metrics.dependency_cycles:
         reasons.append(
             "Dependency cycles detected: "
             f"{len(project_metrics.dependency_cycles)} cycle(s)."
         )
-    if config.fail_dead_code:
-        high_conf_dead = [
-            item for item in project_metrics.dead_code if item.confidence == "high"
-        ]
-        if high_conf_dead:
-            reasons.append(
-                f"Dead code detected (high confidence): {len(high_conf_dead)} item(s)."
-            )
-    if config.fail_health >= 0 and project_metrics.health.total < config.fail_health:
+    high_conf_dead = _high_confidence_dead_code_count(project_metrics.dead_code)
+    if config.fail_dead_code and high_conf_dead > 0:
         reasons.append(
-            "Health score below threshold: "
-            f"score={project_metrics.health.total}, threshold={config.fail_health}."
+            f"Dead code detected (high confidence): {high_conf_dead} item(s)."
         )
 
-    if config.fail_on_new_metrics and metrics_diff is not None:
-        if metrics_diff.new_high_risk_functions:
-            reasons.append(
-                "New high-risk functions vs metrics baseline: "
-                f"{len(metrics_diff.new_high_risk_functions)}."
-            )
-        if metrics_diff.new_high_coupling_classes:
-            reasons.append(
-                "New high-coupling classes vs metrics baseline: "
-                f"{len(metrics_diff.new_high_coupling_classes)}."
-            )
-        if metrics_diff.new_cycles:
-            reasons.append(
-                "New dependency cycles vs metrics baseline: "
-                f"{len(metrics_diff.new_cycles)}."
-            )
-        if metrics_diff.new_dead_code:
-            reasons.append(
-                "New dead code items vs metrics baseline: "
-                f"{len(metrics_diff.new_dead_code)}."
-            )
-        if metrics_diff.health_delta < 0:
-            reasons.append(
-                "Health score regressed vs metrics baseline: "
-                f"delta={metrics_diff.health_delta}."
-            )
 
-    return tuple(reasons)
+def _append_new_metric_diff_reasons(
+    *,
+    reasons: list[str],
+    metrics_diff: MetricsDiff | None,
+    config: MetricGateConfig,
+) -> None:
+    if not config.fail_on_new_metrics or metrics_diff is None:
+        return
+    if metrics_diff.new_high_risk_functions:
+        reasons.append(
+            "New high-risk functions vs metrics baseline: "
+            f"{len(metrics_diff.new_high_risk_functions)}."
+        )
+    if metrics_diff.new_high_coupling_classes:
+        reasons.append(
+            "New high-coupling classes vs metrics baseline: "
+            f"{len(metrics_diff.new_high_coupling_classes)}."
+        )
+    if metrics_diff.new_cycles:
+        reasons.append(
+            "New dependency cycles vs metrics baseline: "
+            f"{len(metrics_diff.new_cycles)}."
+        )
+    if metrics_diff.new_dead_code:
+        reasons.append(
+            "New dead code items vs metrics baseline: "
+            f"{len(metrics_diff.new_dead_code)}."
+        )
+    if metrics_diff.health_delta < 0:
+        reasons.append(
+            "Health score regressed vs metrics baseline: "
+            f"delta={metrics_diff.health_delta}."
+        )
+
+
+def _append_metric_gate_reason(
+    *,
+    reasons: list[str],
+    enabled: bool,
+    triggered: bool,
+    message: str,
+) -> None:
+    if enabled and triggered:
+        reasons.append(message)
+
+
+def _append_adoption_metric_reasons(
+    *,
+    reasons: list[str],
+    metrics_diff: MetricsDiff | None,
+    project_metrics: ProjectMetrics,
+    config: MetricGateConfig,
+) -> None:
+    typing_percent = (
+        _permille(
+            project_metrics.typing_param_annotated,
+            project_metrics.typing_param_total,
+        )
+        / 10.0
+    )
+    docstring_percent = (
+        _permille(
+            project_metrics.docstring_public_documented,
+            project_metrics.docstring_public_total,
+        )
+        / 10.0
+    )
+    if config.min_typing_coverage >= 0 and typing_percent < float(
+        config.min_typing_coverage
+    ):
+        reasons.append(
+            "Typing coverage below threshold: "
+            f"coverage={typing_percent:.1f}%, threshold={config.min_typing_coverage}%."
+        )
+    if config.min_docstring_coverage >= 0 and docstring_percent < float(
+        config.min_docstring_coverage
+    ):
+        reasons.append(
+            "Docstring coverage below threshold: "
+            "coverage="
+            f"{docstring_percent:.1f}%, "
+            f"threshold={config.min_docstring_coverage}%."
+        )
+    if metrics_diff is None:
+        return
+    if config.fail_on_typing_regression:
+        typing_delta = int(getattr(metrics_diff, "typing_param_permille_delta", 0))
+        return_delta = int(getattr(metrics_diff, "typing_return_permille_delta", 0))
+        if typing_delta < 0 or return_delta < 0:
+            reasons.append(
+                "Typing coverage regressed vs metrics baseline: "
+                f"params_delta={typing_delta}, returns_delta={return_delta}."
+            )
+    docstring_delta = int(getattr(metrics_diff, "docstring_permille_delta", 0))
+    _append_metric_gate_reason(
+        reasons=reasons,
+        enabled=config.fail_on_docstring_regression,
+        triggered=docstring_delta < 0,
+        message=(
+            "Docstring coverage regressed vs metrics baseline: "
+            f"delta={docstring_delta}."
+        ),
+    )
+    api_breaking = tuple(
+        cast(
+            "Sequence[object]",
+            getattr(metrics_diff, "new_api_breaking_changes", ()),
+        )
+    )
+    _append_metric_gate_reason(
+        reasons=reasons,
+        enabled=config.fail_on_api_break,
+        triggered=bool(api_breaking),
+        message=(
+            f"Public API breaking changes vs metrics baseline: {len(api_breaking)}."
+        ),
+    )
+
+
+def _high_confidence_dead_code_count(items: Sequence[DeadItem]) -> int:
+    return sum(1 for item in items if item.confidence == "high")
 
 
 def gate(
@@ -1742,6 +2467,17 @@ def gate(
                 fail_dead_code=boot.args.fail_dead_code,
                 fail_health=boot.args.fail_health,
                 fail_on_new_metrics=boot.args.fail_on_new_metrics,
+                fail_on_typing_regression=bool(
+                    getattr(boot.args, "fail_on_typing_regression", False)
+                ),
+                fail_on_docstring_regression=bool(
+                    getattr(boot.args, "fail_on_docstring_regression", False)
+                ),
+                fail_on_api_break=bool(getattr(boot.args, "fail_on_api_break", False)),
+                min_typing_coverage=int(getattr(boot.args, "min_typing_coverage", -1)),
+                min_docstring_coverage=int(
+                    getattr(boot.args, "min_docstring_coverage", -1)
+                ),
             ),
         )
         reasons.extend(f"metric:{reason}" for reason in metric_reasons)

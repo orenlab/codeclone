@@ -67,7 +67,9 @@ Current server characteristics:
     - flattened `inventory` (`files`, `lines`, `functions`, `classes`)
     - flattened `findings` (`total`, `new`, `known`, `by_family`, `production`,
       `new_by_source_kind`)
-    - flattened `diff` (`new_clones`, `health_delta`)
+    - flattened `diff` (`new_clones`, `health_delta`,
+      `typing_param_permille_delta`, `typing_return_permille_delta`,
+      `docstring_permille_delta`, `api_breaking_changes`, `new_api_symbols`)
     - `warnings`, `failures`
     - `analyze_changed_paths` is intentionally more compact than `get_run_summary`:
       it returns `changed_files`, compact `baseline`, `focus`, `health_scope`,
@@ -102,8 +104,8 @@ Current tool set (`21` tools):
 
 | Tool                     | Key parameters                                                                          | Purpose                                                                                            |
 |--------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
-| `analyze_repository`     | absolute `root`, `analysis_mode`, thresholds, cache/baseline paths                      | Full analysis → compact summary; then `get_run_summary` or `get_production_triage`                 |
-| `analyze_changed_paths`  | absolute `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`                     | Diff-aware analysis → compact changed-files snapshot                                               |
+| `analyze_repository`     | absolute `root`, `analysis_mode`, thresholds, `api_surface`, cache/baseline paths       | Full analysis → compact summary; then `get_run_summary` or `get_production_triage`                 |
+| `analyze_changed_paths`  | absolute `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, `api_surface`      | Diff-aware analysis → compact changed-files snapshot                                               |
 | `get_run_summary`        | `run_id`                                                                                | Cheapest run snapshot: health, findings, baseline, inventory, active thresholds                    |
 | `get_production_triage`  | `run_id`, `max_hotspots`, `max_suggestions`                                             | Production-first view: health, hotspots, suggestions, active thresholds                            |
 | `help`                   | `topic`, `detail`                                                                       | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope |
@@ -135,6 +137,9 @@ Recommended workflow:
 3. `list_hotspots` or `check_*`
 4. `get_finding` → `get_remediation`
 5. `generate_pr_summary(format="markdown")`
+
+`metrics_detail` families currently include canonical health/quality families
+plus `overloaded_modules`, `coverage_adoption`, and `api_surface`.
 
 For analysis sensitivity, the intended model is:
 

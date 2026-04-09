@@ -650,6 +650,20 @@ _OVERVIEW = """\
   padding-left:var(--sp-3);position:relative;line-height:1.5}
 .overview-summary-list li::before{content:"\\2022";position:absolute;left:0;color:var(--text-muted)}
 .overview-summary-value{font-size:.85rem;color:var(--text-muted)}
+/* Compact stat grid used inside overview-summary-item cards (Adoption & API). */
+.overview-stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));
+  gap:var(--sp-3);align-items:end}
+.overview-stat{display:flex;flex-direction:column;gap:2px;min-width:0}
+.overview-stat-value{font-size:1.35rem;font-weight:700;color:var(--text-primary);
+  font-variant-numeric:tabular-nums;line-height:1.15}
+.overview-stat-label{font-size:.68rem;font-weight:500;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.04em}
+.overview-stat-caption{margin-top:var(--sp-3);font-size:.72rem;color:var(--text-muted);
+  line-height:1.4}
+.overview-stat-caption code{font-family:var(--font-mono);font-size:.68rem;
+  padding:1px 4px;border-radius:var(--radius-sm);background:var(--bg-raised);
+  color:var(--text-secondary)}
+.overview-stat-row + .kpi-detail{margin-top:var(--sp-2)}
 .overview-fact-list{display:flex;flex-direction:column;gap:var(--sp-2);margin-top:var(--sp-3)}
 .overview-fact-row{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-3);
   font-size:.76rem;border-bottom:1px solid color-mix(in srgb,var(--border) 45%,transparent);padding-bottom:6px}

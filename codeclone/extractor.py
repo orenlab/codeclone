@@ -30,6 +30,8 @@ from .metrics import (
     cyclomatic_complexity,
     risk_level,
 )
+from .metrics.adoption import collect_module_adoption
+from .metrics.api_surface import collect_module_api_surface
 from .models import (
     BlockUnit,
     ClassMetrics,
@@ -926,6 +928,10 @@ def extract_units_and_stats_from_source(
     segment_min_loc: int = 20,
     segment_min_stmt: int = 10,
     collect_structural_findings: bool = True,
+    collect_typing_coverage: bool = True,
+    collect_docstring_coverage: bool = True,
+    collect_api_surface: bool = False,
+    api_include_private_modules: bool = False,
 ) -> tuple[
     list[Unit],
     list[BlockUnit],
@@ -938,6 +944,8 @@ def extract_units_and_stats_from_source(
         tree = _parse_with_limits(source, PARSE_TIMEOUT_SECONDS)
     except SyntaxError as e:
         raise ParseError(f"Failed to parse {filepath}: {e}") from e
+    if not isinstance(tree, ast.Module):
+        raise ParseError(f"Failed to parse {filepath}: expected module AST root")
 
     collector = _qualnames.QualnameCollector()
     collector.visit(tree)
@@ -1099,6 +1107,30 @@ def extract_units_and_stats_from_source(
             ),
         )
     )
+    typing_coverage = None
+    docstring_coverage = None
+    if collect_typing_coverage or collect_docstring_coverage:
+        module_typing, module_docstrings = collect_module_adoption(
+            tree=tree,
+            module_name=module_name,
+            filepath=filepath,
+            collector=collector,
+            imported_names=import_names,
+        )
+        if collect_typing_coverage:
+            typing_coverage = module_typing
+        if collect_docstring_coverage:
+            docstring_coverage = module_docstrings
+    api_surface = None
+    if collect_api_surface:
+        api_surface = collect_module_api_surface(
+            tree=tree,
+            module_name=module_name,
+            filepath=filepath,
+            collector=collector,
+            imported_names=import_names,
+            include_private_modules=api_include_private_modules,
+        )
 
     return (
         units,
@@ -1118,6 +1150,9 @@ def extract_units_and_stats_from_source(
             import_names=import_names,
             class_names=class_names,
             referenced_qualnames=referenced_qualnames,
+            typing_coverage=typing_coverage,
+            docstring_coverage=docstring_coverage,
+            api_surface=api_surface,
         ),
         structural_findings,
     )

@@ -18,12 +18,19 @@ Metrics gate inputs:
 
 - threshold gates:
   `--fail-complexity`, `--fail-coupling`, `--fail-cohesion`, `--fail-health`
+- adoption threshold gates:
+  `--min-typing-coverage`, `--min-docstring-coverage`
 - boolean structural gates:
   `--fail-cycles`, `--fail-dead-code`
-- delta gate:
-  `--fail-on-new-metrics`
+- baseline-aware delta gates:
+  `--fail-on-new-metrics`,
+  `--fail-on-typing-regression`,
+  `--fail-on-docstring-regression`,
+  `--fail-on-api-break`
 - baseline update:
   `--update-metrics-baseline`
+- opt-in metrics family:
+  `--api-surface`
 
 Modes:
 
@@ -53,6 +60,13 @@ Refs:
   `skip_dead_code=true`, `skip_dependencies=true`.
 - `--fail-dead-code` forces dead-code analysis on (even if metrics are skipped).
 - `--fail-cycles` forces dependency analysis on (even if metrics are skipped).
+- Type/docstring adoption metrics are computed by default in full mode.
+- `--api-surface` is opt-in in normal runs, but runtime auto-enables it when
+  `--fail-on-api-break` or `--update-metrics-baseline` needs a public API
+  snapshot.
+- In the normal CLI `Metrics` block, adoption coverage is shown whenever metrics
+  are computed, and the public API surface line appears when `api_surface`
+  facts were collected.
 - `--update-baseline` in full mode implies metrics-baseline update in the same
   run.
 - If metrics baseline path equals clone baseline path and clone baseline file is
@@ -60,6 +74,10 @@ Refs:
   embedded metrics can be written safely.
 - `--fail-on-new-metrics` requires trusted metrics baseline unless baseline is
   being updated in the same run.
+- `--fail-on-typing-regression` / `--fail-on-docstring-regression` require a
+  metrics baseline that already contains adoption coverage data.
+- `--fail-on-api-break` requires a metrics baseline that already contains
+  `api_surface` data.
 - In CI mode, if metrics baseline was loaded and trusted, runtime enables
   `fail_on_new_metrics=true`.
 
@@ -74,7 +92,8 @@ Refs:
 - Metrics diff is computed only when:
   metrics were computed and metrics baseline is trusted.
 - Metric gate reasons are emitted in deterministic order:
-  threshold checks -> cycles/dead/health -> NEW-vs-baseline diffs.
+  threshold checks -> cycles/dead/health -> NEW-vs-baseline diffs ->
+  adoption/API baseline diffs.
 - Metric gate reasons are namespaced as `metric:*` in gate output.
 
 Refs:
@@ -84,12 +103,13 @@ Refs:
 
 ## Failure modes
 
-| Condition                                                  | Behavior                 |
-|------------------------------------------------------------|--------------------------|
-| `--skip-metrics` with metrics flags                        | Contract error, exit `2` |
-| `--fail-on-new-metrics` without trusted baseline           | Contract error, exit `2` |
-| `--update-metrics-baseline` when metrics were not computed | Contract error, exit `2` |
-| Threshold breach or NEW-vs-baseline metric regressions     | Gating failure, exit `3` |
+| Condition                                                   | Behavior                 |
+|-------------------------------------------------------------|--------------------------|
+| `--skip-metrics` with metrics flags                         | Contract error, exit `2` |
+| `--fail-on-new-metrics` without trusted baseline            | Contract error, exit `2` |
+| Coverage/API regression gate without required baseline data | Contract error, exit `2` |
+| `--update-metrics-baseline` when metrics were not computed  | Contract error, exit `2` |
+| Threshold breach or NEW-vs-baseline metric regressions      | Gating failure, exit `3` |
 
 ## Determinism / canonicalization
 

@@ -21,9 +21,19 @@ from ._json_io import read_json_object as _read_json_object
 from ._json_io import write_json_document_atomically as _write_json_document_atomically
 from ._schema_validation import validate_top_level_structure
 from .baseline import current_python_tag
+from .cache_paths import runtime_filepath_from_wire, wire_filepath_from_runtime
 from .contracts import BASELINE_SCHEMA_VERSION, METRICS_BASELINE_SCHEMA_VERSION
 from .errors import BaselineValidationError
-from .models import MetricsDiff, MetricsSnapshot, ProjectMetrics
+from .metrics.api_surface import compare_api_surfaces
+from .models import (
+    ApiParamSpec,
+    ApiSurfaceSnapshot,
+    MetricsDiff,
+    MetricsSnapshot,
+    ModuleApiSurface,
+    ProjectMetrics,
+    PublicSymbol,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -64,7 +74,9 @@ METRICS_BASELINE_UNTRUSTED_STATUSES: Final[frozenset[MetricsBaselineStatus]] = (
 )
 
 _TOP_LEVEL_REQUIRED_KEYS = frozenset({"meta", "metrics"})
-_TOP_LEVEL_ALLOWED_KEYS = _TOP_LEVEL_REQUIRED_KEYS | frozenset({"clones"})
+_TOP_LEVEL_ALLOWED_KEYS = _TOP_LEVEL_REQUIRED_KEYS | frozenset(
+    {"clones", "api_surface"}
+)
 _META_REQUIRED_KEYS = frozenset(
     {"generator", "schema_version", "python_tag", "created_at", "payload_sha256"}
 )
@@ -83,7 +95,16 @@ _METRICS_REQUIRED_KEYS = frozenset(
         "health_grade",
     }
 )
+_METRICS_OPTIONAL_KEYS = frozenset(
+    {
+        "typing_param_permille",
+        "typing_return_permille",
+        "docstring_permille",
+        "typing_any_count",
+    }
+)
 _METRICS_PAYLOAD_SHA256_KEY = "metrics_payload_sha256"
+_API_SURFACE_PAYLOAD_SHA256_KEY = "api_surface_payload_sha256"
 
 
 def coerce_metrics_baseline_status(
@@ -116,15 +137,38 @@ def snapshot_from_project_metrics(project_metrics: ProjectMetrics) -> MetricsSna
         ),
         health_score=int(project_metrics.health.total),
         health_grade=project_metrics.health.grade,
+        typing_param_permille=_permille(
+            project_metrics.typing_param_annotated,
+            project_metrics.typing_param_total,
+        ),
+        typing_return_permille=_permille(
+            project_metrics.typing_return_annotated,
+            project_metrics.typing_return_total,
+        ),
+        docstring_permille=_permille(
+            project_metrics.docstring_public_documented,
+            project_metrics.docstring_public_total,
+        ),
+        typing_any_count=int(project_metrics.typing_any_count),
     )
+
+
+def _permille(numerator: int, denominator: int) -> int:
+    if denominator <= 0:
+        return 0
+    return round((1000.0 * float(numerator)) / float(denominator))
 
 
 def _canonical_json(payload: object) -> str:
     return orjson.dumps(payload, option=orjson.OPT_SORT_KEYS).decode("utf-8")
 
 
-def _snapshot_payload(snapshot: MetricsSnapshot) -> dict[str, object]:
-    return {
+def _snapshot_payload(
+    snapshot: MetricsSnapshot,
+    *,
+    include_adoption: bool = True,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
         "max_complexity": int(snapshot.max_complexity),
         "high_risk_functions": list(snapshot.high_risk_functions),
         "max_coupling": int(snapshot.max_coupling),
@@ -137,10 +181,26 @@ def _snapshot_payload(snapshot: MetricsSnapshot) -> dict[str, object]:
         "health_score": int(snapshot.health_score),
         "health_grade": snapshot.health_grade,
     }
+    if include_adoption:
+        payload.update(
+            {
+                "typing_param_permille": int(snapshot.typing_param_permille),
+                "typing_return_permille": int(snapshot.typing_return_permille),
+                "docstring_permille": int(snapshot.docstring_permille),
+                "typing_any_count": int(snapshot.typing_any_count),
+            }
+        )
+    return payload
 
 
-def _compute_payload_sha256(snapshot: MetricsSnapshot) -> str:
-    canonical = _canonical_json(_snapshot_payload(snapshot))
+def _compute_payload_sha256(
+    snapshot: MetricsSnapshot,
+    *,
+    include_adoption: bool = True,
+) -> str:
+    canonical = _canonical_json(
+        _snapshot_payload(snapshot, include_adoption=include_adoption)
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -158,9 +218,12 @@ def _now_utc_z() -> str:
 
 class MetricsBaseline:
     __slots__ = (
+        "api_surface_payload_sha256",
+        "api_surface_snapshot",
         "created_at",
         "generator_name",
         "generator_version",
+        "has_coverage_adoption_snapshot",
         "is_embedded_in_clone_baseline",
         "path",
         "payload_sha256",
@@ -178,6 +241,9 @@ class MetricsBaseline:
         self.created_at: str | None = None
         self.payload_sha256: str | None = None
         self.snapshot: MetricsSnapshot | None = None
+        self.has_coverage_adoption_snapshot = False
+        self.api_surface_payload_sha256: str | None = None
+        self.api_surface_snapshot: ApiSurfaceSnapshot | None = None
         self.is_embedded_in_clone_baseline = False
 
     def load(
@@ -244,13 +310,21 @@ class MetricsBaseline:
 
         _validate_required_keys(meta_obj, _META_REQUIRED_KEYS, path=self.path)
         _validate_required_keys(metrics_obj, _METRICS_REQUIRED_KEYS, path=self.path)
-        _validate_exact_keys(metrics_obj, _METRICS_REQUIRED_KEYS, path=self.path)
+        _validate_exact_keys(
+            metrics_obj,
+            _METRICS_REQUIRED_KEYS | _METRICS_OPTIONAL_KEYS,
+            path=self.path,
+        )
 
         generator_name, generator_version = _parse_generator(meta_obj, path=self.path)
         schema_version = _require_str(meta_obj, "schema_version", path=self.path)
         python_tag = _require_str(meta_obj, "python_tag", path=self.path)
         created_at = _require_str(meta_obj, "created_at", path=self.path)
         payload_sha256 = _extract_metrics_payload_sha256(meta_obj, path=self.path)
+        api_surface_payload_sha256 = _extract_optional_payload_sha256(
+            meta_obj,
+            key=_API_SURFACE_PAYLOAD_SHA256_KEY,
+        )
 
         self.generator_name = generator_name
         self.generator_version = generator_version
@@ -258,7 +332,16 @@ class MetricsBaseline:
         self.python_tag = python_tag
         self.created_at = created_at
         self.payload_sha256 = payload_sha256
+        self.api_surface_payload_sha256 = api_surface_payload_sha256
         self.snapshot = _parse_snapshot(metrics_obj, path=self.path)
+        self.has_coverage_adoption_snapshot = _has_coverage_adoption_snapshot(
+            metrics_obj,
+        )
+        self.api_surface_snapshot = _parse_api_surface_snapshot(
+            payload.get("api_surface"),
+            path=self.path,
+            root=self.path.parent,
+        )
 
     def save(self) -> None:
         if self.snapshot is None:
@@ -273,11 +356,18 @@ class MetricsBaseline:
             generator_name=self.generator_name or METRICS_BASELINE_GENERATOR,
             generator_version=self.generator_version or __version__,
             created_at=self.created_at or _now_utc_z(),
+            api_surface_snapshot=self.api_surface_snapshot,
+            api_surface_root=self.path.parent,
         )
         payload_meta = cast("Mapping[str, Any]", payload["meta"])
         payload_metrics_hash = _require_str(
             payload_meta,
             "payload_sha256",
+            path=self.path,
+        )
+        payload_api_surface_hash = _optional_require_str(
+            payload_meta,
+            _API_SURFACE_PAYLOAD_SHA256_KEY,
             path=self.path,
         )
         existing: dict[str, Any] | None = None
@@ -302,11 +392,18 @@ class MetricsBaseline:
             merged_meta = dict(existing_meta)
             merged_meta["schema_version"] = merged_schema_version
             merged_meta[_METRICS_PAYLOAD_SHA256_KEY] = payload_metrics_hash
+            if payload_api_surface_hash is None:
+                merged_meta.pop(_API_SURFACE_PAYLOAD_SHA256_KEY, None)
+            else:
+                merged_meta[_API_SURFACE_PAYLOAD_SHA256_KEY] = payload_api_surface_hash
             merged_payload: dict[str, object] = {
                 "meta": merged_meta,
                 "clones": clones_obj,
                 "metrics": payload["metrics"],
             }
+            api_surface_payload = payload.get("api_surface")
+            if api_surface_payload is not None:
+                merged_payload["api_surface"] = api_surface_payload
             self.path.parent.mkdir(parents=True, exist_ok=True)
             _atomic_write_json(self.path, merged_payload)
             self.is_embedded_in_clone_baseline = True
@@ -315,6 +412,12 @@ class MetricsBaseline:
             self.created_at = _require_str(merged_meta, "created_at", path=self.path)
             self.payload_sha256 = _require_str(
                 merged_meta, _METRICS_PAYLOAD_SHA256_KEY, path=self.path
+            )
+            self.has_coverage_adoption_snapshot = True
+            self.api_surface_payload_sha256 = _optional_require_str(
+                merged_meta,
+                _API_SURFACE_PAYLOAD_SHA256_KEY,
+                path=self.path,
             )
             self.generator_name, self.generator_version = _parse_generator(
                 merged_meta, path=self.path
@@ -330,6 +433,8 @@ class MetricsBaseline:
         self.python_tag = _require_str(payload_meta, "python_tag", path=self.path)
         self.created_at = _require_str(payload_meta, "created_at", path=self.path)
         self.payload_sha256 = payload_metrics_hash
+        self.has_coverage_adoption_snapshot = True
+        self.api_surface_payload_sha256 = payload_api_surface_hash
 
     def verify_compatibility(self, *, runtime_python_tag: str) -> None:
         if self.generator_name != METRICS_BASELINE_GENERATOR:
@@ -342,7 +447,10 @@ class MetricsBaseline:
             if self.is_embedded_in_clone_baseline
             else METRICS_BASELINE_SCHEMA_VERSION
         )
-        if self.schema_version != expected_schema:
+        if not _is_compatible_metrics_schema(
+            baseline_version=self.schema_version,
+            expected_version=expected_schema,
+        ):
             raise BaselineValidationError(
                 "Metrics baseline schema version mismatch: "
                 f"baseline={self.schema_version}, "
@@ -373,12 +481,58 @@ class MetricsBaseline:
                 "Metrics baseline integrity payload hash is missing.",
                 status=MetricsBaselineStatus.INTEGRITY_MISSING,
             )
-        expected = _compute_payload_sha256(self.snapshot)
+        expected = _compute_payload_sha256(
+            self.snapshot,
+            include_adoption=self.has_coverage_adoption_snapshot,
+        )
         if not hmac.compare_digest(self.payload_sha256, expected):
             raise BaselineValidationError(
                 "Metrics baseline integrity check failed: payload_sha256 mismatch.",
                 status=MetricsBaselineStatus.INTEGRITY_FAILED,
             )
+        if self.api_surface_snapshot is not None:
+            if (
+                not isinstance(self.api_surface_payload_sha256, str)
+                or len(self.api_surface_payload_sha256) != 64
+            ):
+                raise BaselineValidationError(
+                    "Metrics baseline API surface integrity payload hash is missing.",
+                    status=MetricsBaselineStatus.INTEGRITY_MISSING,
+                )
+            expected_api = _compute_api_surface_payload_sha256(
+                self.api_surface_snapshot,
+                root=self.path.parent,
+            )
+            legacy_absolute_expected_api = _compute_api_surface_payload_sha256(
+                self.api_surface_snapshot
+            )
+            legacy_expected_api = _compute_legacy_api_surface_payload_sha256(
+                self.api_surface_snapshot,
+                root=self.path.parent,
+            )
+            legacy_absolute_qualname_expected_api = (
+                _compute_legacy_api_surface_payload_sha256(self.api_surface_snapshot)
+            )
+            if not (
+                hmac.compare_digest(self.api_surface_payload_sha256, expected_api)
+                or hmac.compare_digest(
+                    self.api_surface_payload_sha256,
+                    legacy_absolute_expected_api,
+                )
+                or hmac.compare_digest(
+                    self.api_surface_payload_sha256,
+                    legacy_expected_api,
+                )
+                or hmac.compare_digest(
+                    self.api_surface_payload_sha256,
+                    legacy_absolute_qualname_expected_api,
+                )
+            ):
+                raise BaselineValidationError(
+                    "Metrics baseline integrity check failed: "
+                    "api_surface payload_sha256 mismatch.",
+                    status=MetricsBaselineStatus.INTEGRITY_FAILED,
+                )
 
     @staticmethod
     def from_project_metrics(
@@ -397,6 +551,16 @@ class MetricsBaseline:
         baseline.created_at = _now_utc_z()
         baseline.snapshot = snapshot_from_project_metrics(project_metrics)
         baseline.payload_sha256 = _compute_payload_sha256(baseline.snapshot)
+        baseline.has_coverage_adoption_snapshot = True
+        baseline.api_surface_snapshot = project_metrics.api_surface
+        baseline.api_surface_payload_sha256 = (
+            _compute_api_surface_payload_sha256(
+                project_metrics.api_surface,
+                root=baseline.path.parent,
+            )
+            if project_metrics.api_surface is not None
+            else None
+        )
         return baseline
 
     def diff(self, current: ProjectMetrics) -> MetricsDiff:
@@ -413,6 +577,10 @@ class MetricsBaseline:
                 dead_code_items=(),
                 health_score=0,
                 health_grade="F",
+                typing_param_permille=0,
+                typing_return_permille=0,
+                docstring_permille=0,
+                typing_any_count=0,
             )
         else:
             snapshot = self.snapshot
@@ -442,6 +610,11 @@ class MetricsBaseline:
                 set(current_snapshot.dead_code_items) - set(snapshot.dead_code_items)
             )
         )
+        added_api_symbols, api_breaking_changes = compare_api_surfaces(
+            baseline=self.api_surface_snapshot,
+            current=current.api_surface,
+            strict_types=False,
+        )
 
         return MetricsDiff(
             new_high_risk_functions=new_high_risk_functions,
@@ -449,7 +622,53 @@ class MetricsBaseline:
             new_cycles=new_cycles,
             new_dead_code=new_dead_code,
             health_delta=current_snapshot.health_score - snapshot.health_score,
+            typing_param_permille_delta=(
+                current_snapshot.typing_param_permille - snapshot.typing_param_permille
+            ),
+            typing_return_permille_delta=(
+                current_snapshot.typing_return_permille
+                - snapshot.typing_return_permille
+            ),
+            docstring_permille_delta=(
+                current_snapshot.docstring_permille - snapshot.docstring_permille
+            ),
+            new_api_symbols=added_api_symbols,
+            new_api_breaking_changes=api_breaking_changes,
         )
+
+
+def _is_compatible_metrics_schema(
+    *,
+    baseline_version: str | None,
+    expected_version: str,
+) -> bool:
+    if baseline_version is None:
+        return False
+    baseline_major_minor = _parse_major_minor(baseline_version)
+    expected_major_minor = _parse_major_minor(expected_version)
+    if baseline_major_minor is None or expected_major_minor is None:
+        return baseline_version == expected_version
+    baseline_major, baseline_minor = baseline_major_minor
+    expected_major, expected_minor = expected_major_minor
+    return baseline_major == expected_major and baseline_minor <= expected_minor
+
+
+def _has_coverage_adoption_snapshot(metrics_obj: Mapping[str, object]) -> bool:
+    return all(
+        key in metrics_obj
+        for key in (
+            "typing_param_permille",
+            "typing_return_permille",
+            "docstring_permille",
+        )
+    )
+
+
+def _parse_major_minor(version: str) -> tuple[int, int] | None:
+    parts = version.split(".")
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        return None
+    return int(parts[0]), int(parts[1])
 
 
 def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
@@ -544,6 +763,15 @@ def _extract_metrics_payload_sha256(
     return _require_str(payload, "payload_sha256", path=path)
 
 
+def _extract_optional_payload_sha256(
+    payload: Mapping[str, Any],
+    *,
+    key: str,
+) -> str | None:
+    value = payload.get(key)
+    return value if isinstance(value, str) else None
+
+
 def _require_int(payload: Mapping[str, Any], key: str, *, path: Path) -> int:
     value = payload.get(key)
     if isinstance(value, bool):
@@ -555,6 +783,23 @@ def _require_int(payload: Mapping[str, Any], key: str, *, path: Path) -> int:
         return value
     raise BaselineValidationError(
         f"Invalid metrics baseline schema at {path}: {key!r} must be int",
+        status=MetricsBaselineStatus.INVALID_TYPE,
+    )
+
+
+def _optional_require_str(
+    payload: Mapping[str, Any],
+    key: str,
+    *,
+    path: Path,
+) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    raise BaselineValidationError(
+        f"Invalid metrics baseline schema at {path}: {key!r} must be str",
         status=MetricsBaselineStatus.INVALID_TYPE,
     )
 
@@ -743,7 +988,260 @@ def _parse_snapshot(
         ),
         health_score=_require_int(payload, "health_score", path=path),
         health_grade=cast("Literal['A', 'B', 'C', 'D', 'F']", grade),
+        typing_param_permille=_optional_int(
+            payload,
+            "typing_param_permille",
+            path=path,
+        ),
+        typing_return_permille=_optional_int(
+            payload,
+            "typing_return_permille",
+            path=path,
+        ),
+        docstring_permille=_optional_int(payload, "docstring_permille", path=path),
+        typing_any_count=_optional_int(payload, "typing_any_count", path=path),
     )
+
+
+def _optional_int(payload: Mapping[str, Any], key: str, *, path: Path) -> int:
+    value = payload.get(key)
+    if value is None:
+        return 0
+    return _require_int(payload, key, path=path)
+
+
+def _parse_api_surface_snapshot(
+    payload: object,
+    *,
+    path: Path,
+    root: Path | None = None,
+) -> ApiSurfaceSnapshot | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise BaselineValidationError(
+            f"Invalid metrics baseline schema at {path}: 'api_surface' must be object",
+            status=MetricsBaselineStatus.INVALID_TYPE,
+        )
+    raw_modules = payload.get("modules", [])
+    if not isinstance(raw_modules, list):
+        raise BaselineValidationError(
+            f"Invalid metrics baseline schema at {path}: "
+            "'api_surface.modules' must be list",
+            status=MetricsBaselineStatus.INVALID_TYPE,
+        )
+    modules: list[ModuleApiSurface] = []
+    for raw_module in raw_modules:
+        if not isinstance(raw_module, dict):
+            raise BaselineValidationError(
+                f"Invalid metrics baseline schema at {path}: "
+                "api surface module must be object",
+                status=MetricsBaselineStatus.INVALID_TYPE,
+            )
+        module = _require_str(raw_module, "module", path=path)
+        wire_filepath = _require_str(raw_module, "filepath", path=path)
+        filepath = runtime_filepath_from_wire(wire_filepath, root=root)
+        all_declared = _require_str_list_or_none(raw_module, "all_declared", path=path)
+        raw_symbols = raw_module.get("symbols", [])
+        if not isinstance(raw_symbols, list):
+            raise BaselineValidationError(
+                f"Invalid metrics baseline schema at {path}: "
+                "api surface symbols must be list",
+                status=MetricsBaselineStatus.INVALID_TYPE,
+            )
+        symbols: list[PublicSymbol] = []
+        for raw_symbol in raw_symbols:
+            if not isinstance(raw_symbol, dict):
+                raise BaselineValidationError(
+                    f"Invalid metrics baseline schema at {path}: "
+                    "api surface symbol must be object",
+                    status=MetricsBaselineStatus.INVALID_TYPE,
+                )
+            local_name = _optional_require_str(raw_symbol, "local_name", path=path)
+            legacy_qualname = _optional_require_str(raw_symbol, "qualname", path=path)
+            if local_name is None and legacy_qualname is None:
+                raise BaselineValidationError(
+                    f"Invalid metrics baseline schema at {path}: "
+                    "api surface symbol requires 'local_name' or 'qualname'",
+                    status=MetricsBaselineStatus.MISSING_FIELDS,
+                )
+            if local_name is None:
+                assert legacy_qualname is not None
+                qualname = legacy_qualname
+            else:
+                qualname = _compose_api_surface_qualname(
+                    module=module,
+                    local_name=local_name,
+                )
+            kind = _require_str(raw_symbol, "kind", path=path)
+            exported_via = _require_str(raw_symbol, "exported_via", path=path)
+            params_raw = raw_symbol.get("params", [])
+            if not isinstance(params_raw, list):
+                raise BaselineValidationError(
+                    f"Invalid metrics baseline schema at {path}: "
+                    "api surface params must be list",
+                    status=MetricsBaselineStatus.INVALID_TYPE,
+                )
+            params: list[ApiParamSpec] = []
+            for raw_param in params_raw:
+                if not isinstance(raw_param, dict):
+                    raise BaselineValidationError(
+                        f"Invalid metrics baseline schema at {path}: "
+                        "api param must be object",
+                        status=MetricsBaselineStatus.INVALID_TYPE,
+                    )
+                name = _require_str(raw_param, "name", path=path)
+                param_kind = _require_str(raw_param, "kind", path=path)
+                has_default = raw_param.get("has_default")
+                annotation_hash = _optional_require_str(
+                    raw_param,
+                    "annotation_hash",
+                    path=path,
+                )
+                if not isinstance(has_default, bool):
+                    raise BaselineValidationError(
+                        f"Invalid metrics baseline schema at {path}: "
+                        "api param 'has_default' must be bool",
+                        status=MetricsBaselineStatus.INVALID_TYPE,
+                    )
+                params.append(
+                    ApiParamSpec(
+                        name=name,
+                        kind=cast(
+                            (
+                                "Literal['pos_only', 'pos_or_kw', "
+                                "'vararg', 'kw_only', 'kwarg']"
+                            ),
+                            param_kind,
+                        ),
+                        has_default=has_default,
+                        annotation_hash=annotation_hash or "",
+                    )
+                )
+            symbols.append(
+                PublicSymbol(
+                    qualname=qualname,
+                    kind=cast(
+                        "Literal['function', 'class', 'method', 'constant']",
+                        kind,
+                    ),
+                    start_line=_require_int(raw_symbol, "start_line", path=path),
+                    end_line=_require_int(raw_symbol, "end_line", path=path),
+                    params=tuple(params),
+                    returns_hash=_optional_require_str(
+                        raw_symbol,
+                        "returns_hash",
+                        path=path,
+                    )
+                    or "",
+                    exported_via=cast("Literal['all', 'name']", exported_via),
+                )
+            )
+        modules.append(
+            ModuleApiSurface(
+                module=module,
+                filepath=filepath,
+                symbols=tuple(sorted(symbols, key=lambda item: item.qualname)),
+                all_declared=tuple(all_declared) if all_declared is not None else None,
+            )
+        )
+    return ApiSurfaceSnapshot(
+        modules=tuple(sorted(modules, key=lambda item: (item.filepath, item.module)))
+    )
+
+
+def _require_str_list_or_none(
+    payload: Mapping[str, Any],
+    key: str,
+    *,
+    path: Path,
+) -> list[str] | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    return _require_str_list(payload, key, path=path)
+
+
+def _api_surface_snapshot_payload(
+    snapshot: ApiSurfaceSnapshot,
+    *,
+    root: Path | None = None,
+    legacy_qualname: bool = False,
+) -> dict[str, object]:
+    return {
+        "modules": [
+            {
+                "module": module.module,
+                "filepath": wire_filepath_from_runtime(module.filepath, root=root),
+                "all_declared": list(module.all_declared or ()),
+                "symbols": [
+                    {
+                        ("qualname" if legacy_qualname else "local_name"): (
+                            symbol.qualname
+                            if legacy_qualname
+                            else _local_name_from_qualname(
+                                module=module.module,
+                                qualname=symbol.qualname,
+                            )
+                        ),
+                        "kind": symbol.kind,
+                        "start_line": symbol.start_line,
+                        "end_line": symbol.end_line,
+                        "params": [
+                            {
+                                "name": param.name,
+                                "kind": param.kind,
+                                "has_default": param.has_default,
+                                "annotation_hash": param.annotation_hash,
+                            }
+                            for param in symbol.params
+                        ],
+                        "returns_hash": symbol.returns_hash,
+                        "exported_via": symbol.exported_via,
+                    }
+                    for symbol in sorted(
+                        module.symbols,
+                        key=lambda item: item.qualname,
+                    )
+                ],
+            }
+            for module in sorted(
+                snapshot.modules,
+                key=lambda item: (item.filepath, item.module),
+            )
+        ]
+    }
+
+
+def _compute_api_surface_payload_sha256(
+    snapshot: ApiSurfaceSnapshot,
+    *,
+    root: Path | None = None,
+) -> str:
+    canonical = _canonical_json(_api_surface_snapshot_payload(snapshot, root=root))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _compute_legacy_api_surface_payload_sha256(
+    snapshot: ApiSurfaceSnapshot,
+    *,
+    root: Path | None = None,
+) -> str:
+    canonical = _canonical_json(
+        _api_surface_snapshot_payload(snapshot, root=root, legacy_qualname=True)
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _compose_api_surface_qualname(*, module: str, local_name: str) -> str:
+    return f"{module}:{local_name}"
+
+
+def _local_name_from_qualname(*, module: str, qualname: str) -> str:
+    prefix = f"{module}:"
+    if qualname.startswith(prefix):
+        return qualname[len(prefix) :]
+    return qualname
 
 
 def _build_payload(
@@ -754,9 +1252,11 @@ def _build_payload(
     generator_name: str,
     generator_version: str,
     created_at: str,
+    api_surface_snapshot: ApiSurfaceSnapshot | None = None,
+    api_surface_root: Path | None = None,
 ) -> dict[str, Any]:
     payload_sha256 = _compute_payload_sha256(snapshot)
-    return {
+    payload: dict[str, Any] = {
         "meta": {
             "generator": {
                 "name": generator_name,
@@ -769,6 +1269,18 @@ def _build_payload(
         },
         "metrics": _snapshot_payload(snapshot),
     }
+    if api_surface_snapshot is not None:
+        payload["meta"][_API_SURFACE_PAYLOAD_SHA256_KEY] = (
+            _compute_api_surface_payload_sha256(
+                api_surface_snapshot,
+                root=api_surface_root,
+            )
+        )
+        payload["api_surface"] = _api_surface_snapshot_payload(
+            api_surface_snapshot,
+            root=api_surface_root,
+        )
+    return payload
 
 
 __all__ = [

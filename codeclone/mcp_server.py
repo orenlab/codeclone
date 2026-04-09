@@ -158,6 +158,7 @@ def build_mcp_server(
         block_min_stmt: int | None = None,
         segment_min_loc: int | None = None,
         segment_min_stmt: int | None = None,
+        api_surface: bool | None = None,
         complexity_threshold: int | None = None,
         coupling_threshold: int | None = None,
         cohesion_threshold: int | None = None,
@@ -182,6 +183,7 @@ def build_mcp_server(
                 block_min_stmt=block_min_stmt,
                 segment_min_loc=segment_min_loc,
                 segment_min_stmt=segment_min_stmt,
+                api_surface=api_surface,
                 complexity_threshold=complexity_threshold,
                 coupling_threshold=coupling_threshold,
                 cohesion_threshold=cohesion_threshold,
@@ -222,6 +224,7 @@ def build_mcp_server(
         block_min_stmt: int | None = None,
         segment_min_loc: int | None = None,
         segment_min_stmt: int | None = None,
+        api_surface: bool | None = None,
         complexity_threshold: int | None = None,
         coupling_threshold: int | None = None,
         cohesion_threshold: int | None = None,
@@ -246,6 +249,7 @@ def build_mcp_server(
                 block_min_stmt=block_min_stmt,
                 segment_min_loc=segment_min_loc,
                 segment_min_stmt=segment_min_stmt,
+                api_surface=api_surface,
                 complexity_threshold=complexity_threshold,
                 coupling_threshold=coupling_threshold,
                 cohesion_threshold=cohesion_threshold,
@@ -334,6 +338,11 @@ def build_mcp_server(
         fail_dead_code: bool = False,
         fail_health: int = -1,
         fail_on_new_metrics: bool = False,
+        fail_on_typing_regression: bool = False,
+        fail_on_docstring_regression: bool = False,
+        fail_on_api_break: bool = False,
+        min_typing_coverage: int = -1,
+        min_docstring_coverage: int = -1,
     ) -> dict[str, object]:
         return service.evaluate_gates(
             MCPGateRequest(
@@ -347,6 +356,11 @@ def build_mcp_server(
                 fail_dead_code=fail_dead_code,
                 fail_health=fail_health,
                 fail_on_new_metrics=fail_on_new_metrics,
+                fail_on_typing_regression=fail_on_typing_regression,
+                fail_on_docstring_regression=fail_on_docstring_regression,
+                fail_on_api_break=fail_on_api_break,
+                min_typing_coverage=min_typing_coverage,
+                min_docstring_coverage=min_docstring_coverage,
             )
         )
 

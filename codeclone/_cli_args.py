@@ -213,6 +213,23 @@ def build_parser(version: str) -> _ArgumentParser:
         flag="--ci",
         help_text=ui.HELP_CI,
     )
+    _add_bool_optional_argument(
+        baselines_ci_group,
+        flag="--typing-coverage",
+        help_text=ui.HELP_TYPING_COVERAGE,
+        default=True,
+    )
+    _add_bool_optional_argument(
+        baselines_ci_group,
+        flag="--docstring-coverage",
+        help_text=ui.HELP_DOCSTRING_COVERAGE,
+        default=True,
+    )
+    _add_bool_optional_argument(
+        baselines_ci_group,
+        flag="--api-surface",
+        help_text=ui.HELP_API_SURFACE,
+    )
 
     quality_group = ap.add_argument_group("Quality gates")
     _add_bool_optional_argument(
@@ -277,6 +294,35 @@ def build_parser(version: str) -> _ArgumentParser:
         default=-1,
         metavar="SCORE_MIN",
         help=ui.HELP_FAIL_HEALTH,
+    )
+    _add_bool_optional_argument(
+        quality_group,
+        flag="--fail-on-typing-regression",
+        help_text=ui.HELP_FAIL_ON_TYPING_REGRESSION,
+    )
+    _add_bool_optional_argument(
+        quality_group,
+        flag="--fail-on-docstring-regression",
+        help_text=ui.HELP_FAIL_ON_DOCSTRING_REGRESSION,
+    )
+    _add_bool_optional_argument(
+        quality_group,
+        flag="--fail-on-api-break",
+        help_text=ui.HELP_FAIL_ON_API_BREAK,
+    )
+    quality_group.add_argument(
+        "--min-typing-coverage",
+        type=int,
+        default=-1,
+        metavar="PERCENT",
+        help=ui.HELP_MIN_TYPING_COVERAGE,
+    )
+    quality_group.add_argument(
+        "--min-docstring-coverage",
+        type=int,
+        default=-1,
+        metavar="PERCENT",
+        help=ui.HELP_MIN_DOCSTRING_COVERAGE,
     )
 
     stages_group = ap.add_argument_group("Analysis stages")

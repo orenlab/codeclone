@@ -173,6 +173,16 @@ _SECTION_ICON_BODIES: dict[str, tuple[str, str]] = {
         '<rect x="14" y="5" width="6" height="14" rx="1.5"/>'
         '<path d="M10 12h4"/>',
     ),
+    "coverage-adoption": (
+        "2",
+        '<path d="M21 12a9 9 0 1 1-6.22-8.56"/>'
+        '<polyline points="22 4 12 14.01 9 11.01"/>',
+    ),
+    "api-surface": (
+        "2",
+        '<path d="M4 4h7v7H4z"/><path d="M13 4h7v7h-7z"/>'
+        '<path d="M4 13h7v7H4z"/><path d="M13 13h7v7h-7z"/>',
+    ),
 }
 
 

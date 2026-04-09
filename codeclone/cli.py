@@ -139,6 +139,7 @@ if TYPE_CHECKING:
 MAX_FILE_SIZE = 10 * 1024 * 1024
 __all__ = [
     "MAX_FILE_SIZE",
+    "ExitCode",
     "ProcessingResult",
     "analyze",
     "bootstrap",
@@ -1196,7 +1197,8 @@ def _main_impl() -> None:
             console.print(
                 ui.fmt_contract_error(
                     "Size limits must be non-negative integers (MB), "
-                    "threshold flags must be >= 0 or -1."
+                    "threshold flags must be >= 0 or -1, and coverage thresholds "
+                    "must be between 0 and 100."
                 )
             )
             sys.exit(ExitCode.CONTRACT_ERROR)
@@ -1343,6 +1345,11 @@ def _main_impl() -> None:
         or args.fail_dead_code
         or args.fail_health >= 0
         or args.fail_on_new_metrics
+        or args.fail_on_typing_regression
+        or args.fail_on_docstring_regression
+        or args.fail_on_api_break
+        or args.min_typing_coverage >= 0
+        or args.min_docstring_coverage >= 0
     )
     source_read_contract_failure = (
         bool(processing_result.source_read_failures)
@@ -1469,9 +1476,21 @@ def _main_impl() -> None:
 
     if analysis_result.project_metrics is not None:
         pm = analysis_result.project_metrics
+        metrics_payload_map = _as_mapping(analysis_result.metrics_payload)
         overloaded_modules_summary = _as_mapping(
-            _as_mapping(analysis_result.metrics_payload).get("overloaded_modules")
-        ).get("summary")
+            _as_mapping(metrics_payload_map.get("overloaded_modules")).get("summary")
+        )
+        adoption_summary = _as_mapping(
+            _as_mapping(metrics_payload_map.get("coverage_adoption")).get("summary")
+        )
+        api_surface_summary = _as_mapping(
+            _as_mapping(metrics_payload_map.get("api_surface")).get("summary")
+        )
+        api_surface_diff_available = bool(
+            metrics_baseline_state.trusted_for_diff
+            and getattr(metrics_baseline_state.baseline, "api_surface_snapshot", None)
+            is not None
+        )
         overloaded_modules_summary_map = _as_mapping(overloaded_modules_summary)
         _print_metrics(
             console=cast("_PrinterLike", console),
@@ -1500,6 +1519,39 @@ def _main_impl() -> None:
                 ),
                 overloaded_modules_top_score=_coerce.as_float(
                     overloaded_modules_summary_map.get("top_score")
+                ),
+                adoption_param_permille=(
+                    _as_int(adoption_summary.get("param_permille"))
+                    if adoption_summary
+                    else None
+                ),
+                adoption_return_permille=(
+                    _as_int(adoption_summary.get("return_permille"))
+                    if adoption_summary
+                    else None
+                ),
+                adoption_docstring_permille=(
+                    _as_int(adoption_summary.get("docstring_permille"))
+                    if adoption_summary
+                    else None
+                ),
+                adoption_any_annotation_count=_as_int(
+                    adoption_summary.get("typing_any_count")
+                ),
+                api_surface_enabled=bool(api_surface_summary.get("enabled")),
+                api_surface_modules=_as_int(api_surface_summary.get("modules")),
+                api_surface_public_symbols=_as_int(
+                    api_surface_summary.get("public_symbols")
+                ),
+                api_surface_added=(
+                    len(metrics_diff.new_api_symbols)
+                    if metrics_diff is not None and api_surface_diff_available
+                    else 0
+                ),
+                api_surface_breaking=(
+                    len(metrics_diff.new_api_breaking_changes)
+                    if metrics_diff is not None and api_surface_diff_available
+                    else 0
                 ),
             ),
         )

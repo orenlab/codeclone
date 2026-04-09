@@ -3292,6 +3292,7 @@ def test_cli_summary_format_stable(
     assert "Summary" in out
     assert out.count("Summary") == 1
     assert "Metrics" in out
+    assert "Adoption" in out
     assert "Overloaded" in out
     assert "callables" in out
     assert "Files parsed" not in out
@@ -3304,6 +3305,21 @@ def test_cli_summary_format_stable(
     assert _summary_metric(out, "Block clones") >= 0
     assert _summary_metric(out, "suppressed") >= 0
     assert _summary_metric(out, "New vs baseline") >= 0
+
+
+def test_cli_summary_with_api_surface_shows_public_api_line(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f(value: int) -> int:\n    return value\n", "utf-8")
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, [str(tmp_path), "--no-progress", "--api-surface"])
+    out = capsys.readouterr().out
+    assert "Public API" in out
+    assert "symbols" in out
+    assert "modules" in out
 
 
 def test_cli_summary_no_color_has_no_ansi(

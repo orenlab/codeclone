@@ -1878,6 +1878,80 @@ def test_html_report_executive_summary_includes_effective_analysis_profile() -> 
     )
 
 
+def test_html_report_overview_includes_adoption_and_api_summary_cluster() -> None:
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["coverage_adoption"] = {
+        "summary": {
+            "params_total": 4,
+            "params_annotated": 3,
+            "param_permille": 750,
+            "baseline_diff_available": True,
+            "param_delta": 125,
+            "returns_total": 2,
+            "returns_annotated": 1,
+            "return_permille": 500,
+            "return_delta": 250,
+            "public_symbol_total": 3,
+            "public_symbol_documented": 2,
+            "docstring_permille": 667,
+            "docstring_delta": 167,
+            "typing_any_count": 1,
+        },
+        "items": [],
+    }
+    metrics["api_surface"] = {
+        "summary": {
+            "enabled": True,
+            "baseline_diff_available": True,
+            "modules": 1,
+            "public_symbols": 2,
+            "added": 1,
+            "breaking": 1,
+            "strict_types": False,
+        },
+        "items": [],
+    }
+
+    html = _render_metrics_html(metrics)
+
+    _assert_html_contains(
+        html,
+        "Adoption &amp; API",
+        "Adoption coverage",
+        '<div class="overview-stat-value">75.0%</div>',
+        '<div class="overview-stat-label">params</div>',
+        '<div class="overview-stat-value">50.0%</div>',
+        '<div class="overview-stat-label">returns</div>',
+        '<div class="overview-stat-value">66.7%</div>',
+        '<div class="overview-stat-label">docstrings</div>',
+        "Δ params",
+        "+12.5pt",
+        "Δ returns",
+        "+25.0pt",
+        "Δ docs",
+        "+16.7pt",
+        "1 symbol typed as <code>Any</code>",
+        "Public API surface",
+        '<div class="overview-stat-value">2</div>',
+        '<div class="overview-stat-label">public symbols</div>',
+        '<div class="overview-stat-value">1</div>',
+        '<div class="overview-stat-label">modules</div>',
+        "breaking",
+        "added",
+    )
+
+
 def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
     html = build_html_report(
         func_groups={},

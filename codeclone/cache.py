@@ -52,7 +52,10 @@ from .models import (
     DeadCandidate,
     FileMetrics,
     FunctionGroupItem,
+    ModuleApiSurface,
     ModuleDep,
+    ModuleDocstringCoverage,
+    ModuleTypingCoverage,
     SegmentGroupItem,
     SegmentUnit,
     StructuralFindingGroup,
@@ -151,6 +154,48 @@ class DeadCandidateDict(DeadCandidateDictBase, total=False):
     suppressed_rules: list[str]
 
 
+class ModuleTypingCoverageDict(TypedDict):
+    module: str
+    filepath: str
+    callable_count: int
+    params_total: int
+    params_annotated: int
+    returns_total: int
+    returns_annotated: int
+    any_annotation_count: int
+
+
+class ModuleDocstringCoverageDict(TypedDict):
+    module: str
+    filepath: str
+    public_symbol_total: int
+    public_symbol_documented: int
+
+
+class ApiParamSpecDict(TypedDict):
+    name: str
+    kind: str
+    has_default: bool
+    annotation_hash: str
+
+
+class PublicSymbolDict(TypedDict):
+    qualname: str
+    kind: str
+    start_line: int
+    end_line: int
+    params: list[ApiParamSpecDict]
+    returns_hash: str
+    exported_via: str
+
+
+class ModuleApiSurfaceDict(TypedDict):
+    module: str
+    filepath: str
+    all_declared: list[str]
+    symbols: list[PublicSymbolDict]
+
+
 class StructuralFindingOccurrenceDict(TypedDict):
     qualname: str
     start: int
@@ -180,6 +225,9 @@ class CacheEntry(CacheEntryBase, total=False):
     referenced_qualnames: list[str]
     import_names: list[str]
     class_names: list[str]
+    typing_coverage: ModuleTypingCoverageDict
+    docstring_coverage: ModuleDocstringCoverageDict
+    api_surface: ModuleApiSurfaceDict
     structural_findings: list[StructuralFindingGroupDict]
 
 
@@ -639,47 +687,44 @@ class Cache:
         if stat is None or units is None or blocks is None or segments is None:
             return None
 
-        class_metrics_raw = _as_typed_class_metrics_list(entry.get("class_metrics", []))
-        module_deps_raw = _as_typed_module_deps_list(entry.get("module_deps", []))
-        dead_candidates_raw = _as_typed_dead_candidates_list(
-            entry.get("dead_candidates", [])
-        )
-        referenced_names_raw = _as_typed_string_list(entry.get("referenced_names", []))
-        referenced_qualnames_raw = _as_typed_string_list(
-            entry.get("referenced_qualnames", [])
-        )
-        import_names_raw = _as_typed_string_list(entry.get("import_names", []))
-        class_names_raw = _as_typed_string_list(entry.get("class_names", []))
-        if (
-            class_metrics_raw is None
-            or module_deps_raw is None
-            or dead_candidates_raw is None
-            or referenced_names_raw is None
-            or referenced_qualnames_raw is None
-            or import_names_raw is None
-            or class_names_raw is None
-        ):
+        optional_sections = _decode_optional_cache_sections(entry)
+        if optional_sections is None:
             return None
+        (
+            class_metrics_raw,
+            module_deps_raw,
+            dead_candidates_raw,
+            referenced_names_raw,
+            referenced_qualnames_raw,
+            import_names_raw,
+            class_names_raw,
+            typing_coverage_raw,
+            docstring_coverage_raw,
+            api_surface_raw,
+            source_stats,
+            structural_findings,
+        ) = optional_sections
 
-        entry_to_canonicalize: CacheEntry = CacheEntry(
-            stat=stat,
-            units=units,
-            blocks=blocks,
-            segments=segments,
-            class_metrics=class_metrics_raw,
-            module_deps=module_deps_raw,
-            dead_candidates=dead_candidates_raw,
-            referenced_names=referenced_names_raw,
-            referenced_qualnames=referenced_qualnames_raw,
-            import_names=import_names_raw,
-            class_names=class_names_raw,
+        entry_to_canonicalize: CacheEntry = _attach_optional_cache_sections(
+            CacheEntry(
+                stat=stat,
+                units=units,
+                blocks=blocks,
+                segments=segments,
+                class_metrics=class_metrics_raw,
+                module_deps=module_deps_raw,
+                dead_candidates=dead_candidates_raw,
+                referenced_names=referenced_names_raw,
+                referenced_qualnames=referenced_qualnames_raw,
+                import_names=import_names_raw,
+                class_names=class_names_raw,
+            ),
+            typing_coverage=typing_coverage_raw,
+            docstring_coverage=docstring_coverage_raw,
+            api_surface=api_surface_raw,
+            source_stats=source_stats,
+            structural_findings=structural_findings,
         )
-        source_stats = _as_source_stats_dict(entry.get("source_stats"))
-        if source_stats is not None:
-            entry_to_canonicalize["source_stats"] = source_stats
-        sf_raw = entry.get("structural_findings")
-        if isinstance(sf_raw, list):
-            entry_to_canonicalize["structural_findings"] = sf_raw
         canonical_entry = _canonicalize_cache_entry(entry_to_canonicalize)
         return self._store_canonical_file_entry(
             runtime_path=runtime_lookup_key,
@@ -717,6 +762,9 @@ class Cache:
             referenced_qualnames,
             import_names,
             class_names,
+            typing_coverage,
+            docstring_coverage,
+            api_surface,
         ) = _new_optional_metrics_payload()
         if file_metrics is not None:
             class_metrics_rows = [
@@ -734,6 +782,18 @@ class Cache:
             referenced_qualnames = sorted(set(file_metrics.referenced_qualnames))
             import_names = sorted(set(file_metrics.import_names))
             class_names = sorted(set(file_metrics.class_names))
+            typing_coverage = _typing_coverage_dict_from_model(
+                file_metrics.typing_coverage,
+                filepath=runtime_path,
+            )
+            docstring_coverage = _docstring_coverage_dict_from_model(
+                file_metrics.docstring_coverage,
+                filepath=runtime_path,
+            )
+            api_surface = _api_surface_dict_from_model(
+                file_metrics.api_surface,
+                filepath=runtime_path,
+            )
 
         source_stats_payload = source_stats or SourceStatsDict(
             lines=0,
@@ -755,6 +815,12 @@ class Cache:
             import_names=import_names,
             class_names=class_names,
         )
+        if typing_coverage is not None:
+            entry_dict["typing_coverage"] = typing_coverage
+        if docstring_coverage is not None:
+            entry_dict["docstring_coverage"] = docstring_coverage
+        if api_surface is not None:
+            entry_dict["api_surface"] = api_surface
         if structural_findings is not None:
             entry_dict["structural_findings"] = _normalize_cached_structural_groups(
                 [
@@ -814,8 +880,11 @@ def _new_optional_metrics_payload() -> tuple[
     list[str],
     list[str],
     list[str],
+    ModuleTypingCoverageDict | None,
+    ModuleDocstringCoverageDict | None,
+    ModuleApiSurfaceDict | None,
 ]:
-    return [], [], [], [], [], [], []
+    return [], [], [], [], [], [], [], None, None, None
 
 
 def _unit_dict_from_model(unit: Unit, filepath: str) -> UnitDict:
@@ -861,6 +930,74 @@ def _segment_dict_from_model(segment: SegmentUnit, filepath: str) -> SegmentDict
         start_line=segment.start_line,
         end_line=segment.end_line,
         size=segment.size,
+    )
+
+
+def _typing_coverage_dict_from_model(
+    coverage: ModuleTypingCoverage | None,
+    *,
+    filepath: str,
+) -> ModuleTypingCoverageDict | None:
+    if coverage is None:
+        return None
+    return ModuleTypingCoverageDict(
+        module=coverage.module,
+        filepath=filepath,
+        callable_count=coverage.callable_count,
+        params_total=coverage.params_total,
+        params_annotated=coverage.params_annotated,
+        returns_total=coverage.returns_total,
+        returns_annotated=coverage.returns_annotated,
+        any_annotation_count=coverage.any_annotation_count,
+    )
+
+
+def _docstring_coverage_dict_from_model(
+    coverage: ModuleDocstringCoverage | None,
+    *,
+    filepath: str,
+) -> ModuleDocstringCoverageDict | None:
+    if coverage is None:
+        return None
+    return ModuleDocstringCoverageDict(
+        module=coverage.module,
+        filepath=filepath,
+        public_symbol_total=coverage.public_symbol_total,
+        public_symbol_documented=coverage.public_symbol_documented,
+    )
+
+
+def _api_surface_dict_from_model(
+    surface: ModuleApiSurface | None,
+    *,
+    filepath: str,
+) -> ModuleApiSurfaceDict | None:
+    if surface is None:
+        return None
+    return ModuleApiSurfaceDict(
+        module=surface.module,
+        filepath=filepath,
+        all_declared=list(surface.all_declared or ()),
+        symbols=[
+            PublicSymbolDict(
+                qualname=symbol.qualname,
+                kind=symbol.kind,
+                start_line=symbol.start_line,
+                end_line=symbol.end_line,
+                params=[
+                    ApiParamSpecDict(
+                        name=param.name,
+                        kind=param.kind,
+                        has_default=param.has_default,
+                        annotation_hash=param.annotation_hash,
+                    )
+                    for param in symbol.params
+                ],
+                returns_hash=symbol.returns_hash,
+                exported_via=symbol.exported_via,
+            )
+            for symbol in surface.symbols
+        ],
     )
 
 
@@ -1006,6 +1143,28 @@ def _as_typed_string_list(value: object) -> list[str] | None:
     return _as_typed_list(value, predicate=lambda item: isinstance(item, str))
 
 
+def _as_module_typing_coverage_dict(
+    value: object,
+) -> ModuleTypingCoverageDict | None:
+    if not _is_module_typing_coverage_dict(value):
+        return None
+    return cast("ModuleTypingCoverageDict", value)
+
+
+def _as_module_docstring_coverage_dict(
+    value: object,
+) -> ModuleDocstringCoverageDict | None:
+    if not _is_module_docstring_coverage_dict(value):
+        return None
+    return cast("ModuleDocstringCoverageDict", value)
+
+
+def _as_module_api_surface_dict(value: object) -> ModuleApiSurfaceDict | None:
+    if not _is_module_api_surface_dict(value):
+        return None
+    return cast("ModuleApiSurfaceDict", value)
+
+
 def _normalized_optional_string_list(value: object) -> list[str] | None:
     items = _as_typed_string_list(value)
     if not items:
@@ -1042,7 +1201,108 @@ def _has_cache_entry_container_shape(entry: Mapping[str, object]) -> bool:
         "class_names",
         "structural_findings",
     )
-    return all(isinstance(entry.get(key, []), list) for key in optional_list_keys)
+    if not all(isinstance(entry.get(key, []), list) for key in optional_list_keys):
+        return False
+    typing_coverage = entry.get("typing_coverage")
+    if typing_coverage is not None and not _is_module_typing_coverage_dict(
+        typing_coverage
+    ):
+        return False
+    docstring_coverage = entry.get("docstring_coverage")
+    if docstring_coverage is not None and not _is_module_docstring_coverage_dict(
+        docstring_coverage
+    ):
+        return False
+    api_surface = entry.get("api_surface")
+    return api_surface is None or _is_module_api_surface_dict(api_surface)
+
+
+def _decode_optional_cache_sections(
+    entry: Mapping[str, object],
+) -> (
+    tuple[
+        list[ClassMetricsDict],
+        list[ModuleDepDict],
+        list[DeadCandidateDict],
+        list[str],
+        list[str],
+        list[str],
+        list[str],
+        ModuleTypingCoverageDict | None,
+        ModuleDocstringCoverageDict | None,
+        ModuleApiSurfaceDict | None,
+        SourceStatsDict | None,
+        list[StructuralFindingGroupDict] | None,
+    ]
+    | None
+):
+    class_metrics_raw = _as_typed_class_metrics_list(entry.get("class_metrics", []))
+    module_deps_raw = _as_typed_module_deps_list(entry.get("module_deps", []))
+    dead_candidates_raw = _as_typed_dead_candidates_list(
+        entry.get("dead_candidates", [])
+    )
+    referenced_names_raw = _as_typed_string_list(entry.get("referenced_names", []))
+    referenced_qualnames_raw = _as_typed_string_list(
+        entry.get("referenced_qualnames", [])
+    )
+    import_names_raw = _as_typed_string_list(entry.get("import_names", []))
+    class_names_raw = _as_typed_string_list(entry.get("class_names", []))
+    if (
+        class_metrics_raw is None
+        or module_deps_raw is None
+        or dead_candidates_raw is None
+        or referenced_names_raw is None
+        or referenced_qualnames_raw is None
+        or import_names_raw is None
+        or class_names_raw is None
+    ):
+        return None
+    typing_coverage_raw = _as_module_typing_coverage_dict(entry.get("typing_coverage"))
+    docstring_coverage_raw = _as_module_docstring_coverage_dict(
+        entry.get("docstring_coverage")
+    )
+    api_surface_raw = _as_module_api_surface_dict(entry.get("api_surface"))
+    source_stats = _as_source_stats_dict(entry.get("source_stats"))
+    structural_findings = entry.get("structural_findings")
+    typed_structural_findings = (
+        structural_findings if isinstance(structural_findings, list) else None
+    )
+    return (
+        class_metrics_raw,
+        module_deps_raw,
+        dead_candidates_raw,
+        referenced_names_raw,
+        referenced_qualnames_raw,
+        import_names_raw,
+        class_names_raw,
+        typing_coverage_raw,
+        docstring_coverage_raw,
+        api_surface_raw,
+        source_stats,
+        typed_structural_findings,
+    )
+
+
+def _attach_optional_cache_sections(
+    entry: CacheEntry,
+    *,
+    typing_coverage: ModuleTypingCoverageDict | None = None,
+    docstring_coverage: ModuleDocstringCoverageDict | None = None,
+    api_surface: ModuleApiSurfaceDict | None = None,
+    source_stats: SourceStatsDict | None = None,
+    structural_findings: list[StructuralFindingGroupDict] | None = None,
+) -> CacheEntry:
+    if typing_coverage is not None:
+        entry["typing_coverage"] = typing_coverage
+    if docstring_coverage is not None:
+        entry["docstring_coverage"] = docstring_coverage
+    if api_surface is not None:
+        entry["api_surface"] = api_surface
+    if source_stats is not None:
+        entry["source_stats"] = source_stats
+    if structural_findings is not None:
+        entry["structural_findings"] = structural_findings
+    return entry
 
 
 def _canonicalize_cache_entry(entry: CacheEntry) -> CacheEntry:
@@ -1110,6 +1370,66 @@ def _canonicalize_cache_entry(entry: CacheEntry) -> CacheEntry:
         "import_names": sorted(set(entry["import_names"])),
         "class_names": sorted(set(entry["class_names"])),
     }
+    typing_coverage = entry.get("typing_coverage")
+    if typing_coverage is not None:
+        result["typing_coverage"] = ModuleTypingCoverageDict(
+            module=typing_coverage["module"],
+            filepath=typing_coverage["filepath"],
+            callable_count=typing_coverage["callable_count"],
+            params_total=typing_coverage["params_total"],
+            params_annotated=typing_coverage["params_annotated"],
+            returns_total=typing_coverage["returns_total"],
+            returns_annotated=typing_coverage["returns_annotated"],
+            any_annotation_count=typing_coverage["any_annotation_count"],
+        )
+    docstring_coverage = entry.get("docstring_coverage")
+    if docstring_coverage is not None:
+        result["docstring_coverage"] = ModuleDocstringCoverageDict(
+            module=docstring_coverage["module"],
+            filepath=docstring_coverage["filepath"],
+            public_symbol_total=docstring_coverage["public_symbol_total"],
+            public_symbol_documented=docstring_coverage["public_symbol_documented"],
+        )
+    api_surface = entry.get("api_surface")
+    if api_surface is not None:
+        symbols = sorted(
+            api_surface["symbols"],
+            key=lambda item: (
+                item["qualname"],
+                item["kind"],
+                item["start_line"],
+                item["end_line"],
+            ),
+        )
+        normalized_symbols = [
+            PublicSymbolDict(
+                qualname=symbol["qualname"],
+                kind=symbol["kind"],
+                start_line=symbol["start_line"],
+                end_line=symbol["end_line"],
+                params=sorted(
+                    [
+                        ApiParamSpecDict(
+                            name=param["name"],
+                            kind=param["kind"],
+                            has_default=param["has_default"],
+                            annotation_hash=param["annotation_hash"],
+                        )
+                        for param in symbol.get("params", [])
+                    ],
+                    key=lambda item: (item["kind"], item["name"]),
+                ),
+                returns_hash=symbol.get("returns_hash", ""),
+                exported_via=symbol.get("exported_via", "name"),
+            )
+            for symbol in symbols
+        ]
+        result["api_surface"] = ModuleApiSurfaceDict(
+            module=api_surface["module"],
+            filepath=api_surface["filepath"],
+            all_declared=sorted(set(api_surface.get("all_declared", []))),
+            symbols=normalized_symbols,
+        )
     sf = entry.get("structural_findings")
     if sf is not None:
         result["structural_findings"] = sf
@@ -1200,11 +1520,8 @@ def _decode_optional_wire_source_stats(
     *,
     obj: dict[str, object],
 ) -> SourceStatsDict | None:
-    raw = obj.get("ss")
-    if raw is None:
-        return None
-    row = _as_list(raw)
-    if row is None or len(row) != 4:
+    row = _decode_optional_wire_row(obj=obj, key="ss", expected_len=4)
+    if row is None:
         return None
     counts = _decode_wire_int_fields(row, 0, 1, 2, 3)
     if counts is None:
@@ -1261,6 +1578,21 @@ def _decode_optional_wire_items_for_filepath(
             return None
         decoded_items.append(decoded)
     return decoded_items
+
+
+def _decode_optional_wire_row(
+    *,
+    obj: dict[str, object],
+    key: str,
+    expected_len: int,
+) -> list[object] | None:
+    raw = obj.get(key)
+    if raw is None:
+        return None
+    row = _as_list(raw)
+    if row is None or len(row) != expected_len:
+        return None
+    return row
 
 
 def _decode_optional_wire_names(
@@ -1335,6 +1667,12 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
         import_names,
         class_names,
     ) = name_sections
+    typing_coverage = _decode_optional_wire_typing_coverage(obj=obj, filepath=filepath)
+    docstring_coverage = _decode_optional_wire_docstring_coverage(
+        obj=obj,
+        filepath=filepath,
+    )
+    api_surface = _decode_optional_wire_api_surface(obj=obj, filepath=filepath)
     coupled_classes_map = _decode_optional_wire_coupled_classes(obj=obj, key="cc")
     if coupled_classes_map is None:
         return None
@@ -1349,27 +1687,30 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
     if structural_findings is None:
         return None
 
-    result = CacheEntry(
-        stat=stat,
-        units=units,
-        blocks=blocks,
-        segments=segments,
-        class_metrics=class_metrics,
-        module_deps=module_deps,
-        dead_candidates=dead_candidates,
-        referenced_names=referenced_names,
-        referenced_qualnames=referenced_qualnames,
-        import_names=import_names,
-        class_names=class_names,
+    return _attach_optional_cache_sections(
+        CacheEntry(
+            stat=stat,
+            units=units,
+            blocks=blocks,
+            segments=segments,
+            class_metrics=class_metrics,
+            module_deps=module_deps,
+            dead_candidates=dead_candidates,
+            referenced_names=referenced_names,
+            referenced_qualnames=referenced_qualnames,
+            import_names=import_names,
+            class_names=class_names,
+        ),
+        typing_coverage=typing_coverage,
+        docstring_coverage=docstring_coverage,
+        api_surface=api_surface,
+        source_stats=source_stats,
+        structural_findings=(
+            _normalize_cached_structural_groups(structural_findings, filepath=filepath)
+            if has_structural_findings
+            else None
+        ),
     )
-    if source_stats is not None:
-        result["source_stats"] = source_stats
-    if has_structural_findings:
-        result["structural_findings"] = _normalize_cached_structural_groups(
-            structural_findings,
-            filepath=filepath,
-        )
-    return result
 
 
 def _decode_wire_file_sections(
@@ -1461,6 +1802,157 @@ def _decode_wire_name_sections(
         referenced_qualnames,
         import_names,
         class_names,
+    )
+
+
+def _decode_optional_wire_typing_coverage(
+    *,
+    obj: dict[str, object],
+    filepath: str,
+) -> ModuleTypingCoverageDict | None:
+    module_and_ints = _decode_optional_wire_module_ints(
+        obj=obj,
+        key="tc",
+        expected_len=7,
+        int_indexes=(1, 2, 3, 4, 5, 6),
+    )
+    if module_and_ints is None:
+        return None
+    module, ints = module_and_ints
+    (
+        callable_count,
+        params_total,
+        params_annotated,
+        returns_total,
+        returns_annotated,
+        any_annotation_count,
+    ) = ints
+    return ModuleTypingCoverageDict(
+        module=module,
+        filepath=filepath,
+        callable_count=callable_count,
+        params_total=params_total,
+        params_annotated=params_annotated,
+        returns_total=returns_total,
+        returns_annotated=returns_annotated,
+        any_annotation_count=any_annotation_count,
+    )
+
+
+def _decode_optional_wire_docstring_coverage(
+    *,
+    obj: dict[str, object],
+    filepath: str,
+) -> ModuleDocstringCoverageDict | None:
+    module_and_counts = _decode_optional_wire_module_ints(
+        obj=obj,
+        key="dg",
+        expected_len=3,
+        int_indexes=(1, 2),
+    )
+    if module_and_counts is None:
+        return None
+    module, counts = module_and_counts
+    public_symbol_total, public_symbol_documented = counts
+    return ModuleDocstringCoverageDict(
+        module=module,
+        filepath=filepath,
+        public_symbol_total=public_symbol_total,
+        public_symbol_documented=public_symbol_documented,
+    )
+
+
+def _decode_optional_wire_api_surface(
+    *,
+    obj: dict[str, object],
+    filepath: str,
+) -> ModuleApiSurfaceDict | None:
+    row = _decode_optional_wire_row(obj=obj, key="as", expected_len=3)
+    if row is None:
+        return None
+    module = _as_str(row[0])
+    all_declared = _decode_optional_wire_names(obj={"ad": row[1]}, key="ad")
+    symbols_raw = _as_list(row[2])
+    if module is None or all_declared is None or symbols_raw is None:
+        return None
+    symbols: list[PublicSymbolDict] = []
+    for symbol_raw in symbols_raw:
+        decoded_symbol = _decode_wire_api_surface_symbol(symbol_raw)
+        if decoded_symbol is None:
+            return None
+        symbols.append(decoded_symbol)
+    return ModuleApiSurfaceDict(
+        module=module,
+        filepath=filepath,
+        all_declared=sorted(set(all_declared)),
+        symbols=symbols,
+    )
+
+
+def _decode_optional_wire_module_ints(
+    *,
+    obj: dict[str, object],
+    key: str,
+    expected_len: int,
+    int_indexes: tuple[int, ...],
+) -> tuple[str, tuple[int, ...]] | None:
+    row = _decode_optional_wire_row(obj=obj, key=key, expected_len=expected_len)
+    if row is None:
+        return None
+    module = _as_str(row[0])
+    ints = _decode_wire_int_fields(row, *int_indexes)
+    if module is None or ints is None:
+        return None
+    return module, ints
+
+
+def _decode_wire_api_surface_symbol(
+    value: object,
+) -> PublicSymbolDict | None:
+    symbol_row = _decode_wire_row(value, valid_lengths={7})
+    if symbol_row is None:
+        return None
+    str_fields = _decode_wire_str_fields(symbol_row, 0, 1, 4, 5)
+    int_fields = _decode_wire_int_fields(symbol_row, 2, 3)
+    params_raw = _as_list(symbol_row[6])
+    if str_fields is None or int_fields is None or params_raw is None:
+        return None
+    qualname, kind, exported_via, returns_hash = str_fields
+    start_line, end_line = int_fields
+    params: list[ApiParamSpecDict] = []
+    for param_raw in params_raw:
+        decoded_param = _decode_wire_api_param_spec(param_raw)
+        if decoded_param is None:
+            return None
+        params.append(decoded_param)
+    return PublicSymbolDict(
+        qualname=qualname,
+        kind=kind,
+        start_line=start_line,
+        end_line=end_line,
+        params=params,
+        returns_hash=returns_hash,
+        exported_via=exported_via,
+    )
+
+
+def _decode_wire_api_param_spec(
+    value: object,
+) -> ApiParamSpecDict | None:
+    param_row = _decode_wire_row(value, valid_lengths={4})
+    if param_row is None:
+        return None
+    str_fields = _decode_wire_str_fields(param_row, 0, 1, 3)
+    int_fields = _decode_wire_int_fields(param_row, 2)
+    if str_fields is None or int_fields is None:
+        return None
+    name, param_kind, annotation_hash = str_fields
+    (has_default_raw,) = int_fields
+    return ApiParamSpecDict(
+        name=name,
+        kind=param_kind,
+        has_default=bool(has_default_raw),
+        annotation_hash=annotation_hash,
     )
 
 
@@ -1623,20 +2115,15 @@ def _decode_wire_class_metric_fields(
 
 
 def _decode_wire_structural_group(value: object) -> StructuralFindingGroupDict | None:
-    group_row = _as_list(value)
-    if group_row is None or len(group_row) != 4:
+    group_row = _decode_wire_row(value, valid_lengths={4})
+    if group_row is None:
         return None
-    finding_kind = _as_str(group_row[0])
-    finding_key = _as_str(group_row[1])
+    str_fields = _decode_wire_str_fields(group_row, 0, 1)
     items_raw = _as_list(group_row[3])
     signature = _decode_wire_structural_signature(group_row[2])
-    if (
-        finding_kind is None
-        or finding_key is None
-        or items_raw is None
-        or signature is None
-    ):
+    if str_fields is None or items_raw is None or signature is None:
         return None
+    finding_kind, finding_key = str_fields
     items: list[StructuralFindingOccurrenceDict] = []
     for item_raw in items_raw:
         item = _decode_wire_structural_occurrence(item_raw)
@@ -1828,25 +2315,18 @@ def _decode_wire_dead_candidate(
     row = _decode_wire_row(value, valid_lengths={5, 6})
     if row is None:
         return None
-    qualname = _as_str(row[0])
-    local_name = _as_str(row[1])
-    start_line = _as_int(row[2])
-    end_line = _as_int(row[3])
-    kind = _as_str(row[4])
+    str_fields = _decode_wire_str_fields(row, 0, 1, 4)
+    int_fields = _decode_wire_int_fields(row, 2, 3)
     suppressed_rules: list[str] | None = []
     if len(row) == 6:
         raw_rules = _as_list(row[5])
         if raw_rules is None or not all(isinstance(rule, str) for rule in raw_rules):
             return None
         suppressed_rules = sorted({str(rule) for rule in raw_rules if str(rule)})
-    if (
-        qualname is None
-        or local_name is None
-        or start_line is None
-        or end_line is None
-        or kind is None
-    ):
+    if str_fields is None or int_fields is None:
         return None
+    qualname, local_name, kind = str_fields
+    start_line, end_line = int_fields
     decoded = DeadCandidateDict(
         qualname=qualname,
         local_name=local_name,
@@ -2038,6 +2518,50 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
         wire["in"] = sorted(set(entry["import_names"]))
     if entry["class_names"]:
         wire["cn"] = sorted(set(entry["class_names"]))
+    typing_coverage = entry.get("typing_coverage")
+    if typing_coverage is not None:
+        wire["tc"] = [
+            typing_coverage["module"],
+            typing_coverage["callable_count"],
+            typing_coverage["params_total"],
+            typing_coverage["params_annotated"],
+            typing_coverage["returns_total"],
+            typing_coverage["returns_annotated"],
+            typing_coverage["any_annotation_count"],
+        ]
+    docstring_coverage = entry.get("docstring_coverage")
+    if docstring_coverage is not None:
+        wire["dg"] = [
+            docstring_coverage["module"],
+            docstring_coverage["public_symbol_total"],
+            docstring_coverage["public_symbol_documented"],
+        ]
+    api_surface = entry.get("api_surface")
+    if api_surface is not None:
+        wire["as"] = [
+            api_surface["module"],
+            sorted(set(api_surface.get("all_declared", []))),
+            [
+                [
+                    symbol["qualname"],
+                    symbol["kind"],
+                    symbol["start_line"],
+                    symbol["end_line"],
+                    symbol.get("exported_via", "name"),
+                    symbol.get("returns_hash", ""),
+                    [
+                        [
+                            param["name"],
+                            param["kind"],
+                            1 if param["has_default"] else 0,
+                            param.get("annotation_hash", ""),
+                        ]
+                        for param in symbol.get("params", [])
+                    ],
+                ]
+                for symbol in api_surface["symbols"]
+            ],
+        ]
 
     if "structural_findings" in entry:
         sf = entry.get("structural_findings", [])
@@ -2131,6 +2655,74 @@ def _is_segment_dict(value: object) -> bool:
     string_keys = ("segment_hash", "segment_sig", "filepath", "qualname")
     int_keys = ("start_line", "end_line", "size")
     return _has_typed_fields(value, string_keys=string_keys, int_keys=int_keys)
+
+
+def _is_module_typing_coverage_dict(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    string_keys = ("module", "filepath")
+    int_keys = (
+        "callable_count",
+        "params_total",
+        "params_annotated",
+        "returns_total",
+        "returns_annotated",
+        "any_annotation_count",
+    )
+    return _has_typed_fields(value, string_keys=string_keys, int_keys=int_keys)
+
+
+def _is_module_docstring_coverage_dict(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    string_keys = ("module", "filepath")
+    int_keys = ("public_symbol_total", "public_symbol_documented")
+    return _has_typed_fields(value, string_keys=string_keys, int_keys=int_keys)
+
+
+def _is_api_param_spec_dict(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return (
+        isinstance(value.get("name"), str)
+        and isinstance(value.get("kind"), str)
+        and isinstance(value.get("has_default"), bool)
+        and isinstance(value.get("annotation_hash", ""), str)
+    )
+
+
+def _is_public_symbol_dict(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if not _has_typed_fields(
+        value,
+        string_keys=("qualname", "kind", "exported_via"),
+        int_keys=("start_line", "end_line"),
+    ):
+        return False
+    params = value.get("params", [])
+    return (
+        isinstance(value.get("returns_hash", ""), str)
+        and isinstance(
+            params,
+            list,
+        )
+        and all(_is_api_param_spec_dict(item) for item in params)
+    )
+
+
+def _is_module_api_surface_dict(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    all_declared = value.get("all_declared", [])
+    symbols = value.get("symbols", [])
+    return (
+        isinstance(value.get("module"), str)
+        and isinstance(value.get("filepath"), str)
+        and _is_string_list(all_declared)
+        and isinstance(symbols, list)
+        and all(_is_public_symbol_dict(item) for item in symbols)
+    )
 
 
 def _is_class_metrics_dict(value: object) -> bool:

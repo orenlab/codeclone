@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 # and narrowed before entering compatibility/integrity checks.
 
 BASELINE_GENERATOR = "codeclone"
-_BASELINE_SCHEMA_MAX_MINOR_BY_MAJOR = {1: 0, 2: 0}
+_BASELINE_SCHEMA_MAX_MINOR_BY_MAJOR = {1: 0, 2: 1}
 MAX_BASELINE_SIZE_BYTES = 5 * 1024 * 1024
 
 
@@ -85,7 +85,7 @@ def coerce_baseline_status(
 
 
 _TOP_LEVEL_REQUIRED_KEYS = {"meta", "clones"}
-_TOP_LEVEL_OPTIONAL_KEYS = {"metrics"}
+_TOP_LEVEL_OPTIONAL_KEYS = {"metrics", "api_surface"}
 _TOP_LEVEL_ALLOWED_KEYS = _TOP_LEVEL_REQUIRED_KEYS | _TOP_LEVEL_OPTIONAL_KEYS
 _META_REQUIRED_KEYS = {
     "generator",
@@ -245,15 +245,24 @@ class Baseline:
             generator_version=self.generator_version,
             created_at=self.created_at,
         )
-        preserved_metrics, preserved_metrics_hash = _preserve_embedded_metrics(
-            self.path
-        )
+        (
+            preserved_metrics,
+            preserved_metrics_hash,
+            preserved_api_surface,
+            preserved_api_surface_hash,
+        ) = _preserve_embedded_metrics(self.path)
         if preserved_metrics is not None:
             payload["metrics"] = preserved_metrics
             if preserved_metrics_hash is not None:
                 meta_obj = payload.get("meta")
                 if isinstance(meta_obj, dict):
                     meta_obj["metrics_payload_sha256"] = preserved_metrics_hash
+                    if preserved_api_surface_hash is not None:
+                        meta_obj["api_surface_payload_sha256"] = (
+                            preserved_api_surface_hash
+                        )
+        if preserved_api_surface is not None:
+            payload["api_surface"] = preserved_api_surface
         _atomic_write_json(self.path, payload)
 
         meta_obj = payload.get("meta")
@@ -499,21 +508,41 @@ def _is_legacy_baseline_payload(payload: dict[str, Any]) -> bool:
     return "functions" in payload and "blocks" in payload
 
 
-def _preserve_embedded_metrics(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+def _preserve_embedded_metrics(
+    path: Path,
+) -> tuple[dict[str, Any] | None, str | None, dict[str, Any] | None, str | None]:
     try:
         payload = _load_json_object(path)
     except BaselineValidationError:
-        return None, None
+        return None, None, None, None
     metrics_obj = payload.get("metrics")
+    api_surface_obj = payload.get("api_surface")
+    preserved_api_surface = (
+        dict(api_surface_obj) if isinstance(api_surface_obj, dict) else None
+    )
     if not isinstance(metrics_obj, dict):
-        return None, None
+        return None, None, preserved_api_surface, None
     meta_obj = payload.get("meta")
     if not isinstance(meta_obj, dict):
-        return dict(metrics_obj), None
+        return dict(metrics_obj), None, preserved_api_surface, None
     metrics_hash = meta_obj.get("metrics_payload_sha256")
+    api_surface_hash = meta_obj.get("api_surface_payload_sha256")
+    normalized_api_surface_hash = (
+        api_surface_hash if isinstance(api_surface_hash, str) else None
+    )
     if not isinstance(metrics_hash, str):
-        return dict(metrics_obj), None
-    return dict(metrics_obj), metrics_hash
+        return (
+            dict(metrics_obj),
+            None,
+            preserved_api_surface,
+            normalized_api_surface_hash,
+        )
+    return (
+        dict(metrics_obj),
+        metrics_hash,
+        preserved_api_surface,
+        normalized_api_surface_hash,
+    )
 
 
 def _parse_generator_meta(

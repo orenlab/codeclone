@@ -4,24 +4,90 @@
 
 Compact structural layouts for baseline/cache/report contracts in `2.0.0b5`.
 
-## Baseline schema (`2.0`)
+## Baseline schema (`2.1`)
 
 ```json
 {
   "meta": {
     "generator": { "name": "codeclone", "version": "2.0.0b5" },
-    "schema_version": "2.0",
+    "schema_version": "2.1",
     "fingerprint_version": "1",
     "python_tag": "cp313",
     "created_at": "2026-03-11T00:00:00Z",
     "payload_sha256": "...",
-    "metrics_payload_sha256": "..."
+    "metrics_payload_sha256": "...",
+    "api_surface_payload_sha256": "..."
   },
   "clones": {
     "functions": ["<fingerprint>|<loc_bucket>"],
     "blocks": ["<block_hash>|<block_hash>|<block_hash>|<block_hash>"]
   },
-  "metrics": { "...": "optional embedded metrics snapshot" }
+  "metrics": { "...": "optional embedded metrics snapshot" },
+  "api_surface": { "...": "optional embedded public API snapshot" }
+}
+```
+
+Compact embedded `api_surface` symbol layout:
+
+```json
+{
+  "module": "pkg.mod",
+  "filepath": "pkg/mod.py",
+  "symbols": [
+    {
+      "local_name": "PublicClass.method",
+      "kind": "method",
+      "start_line": 10,
+      "end_line": 14,
+      "params": [],
+      "returns_hash": "",
+      "exported_via": "name"
+    }
+  ]
+}
+```
+
+Notes:
+
+- `local_name` is stored on disk to avoid repeating the containing module path.
+- `filepath` is stored as a baseline-directory-relative wire path when
+  possible, rather than as a machine-local absolute path.
+- Runtime reconstructs canonical full qualnames as `module:local_name` before
+  API-surface diffing and restores runtime filepaths from the wire path.
+
+## Standalone metrics-baseline schema (`1.2`)
+
+```json
+{
+  "meta": {
+    "generator": { "name": "codeclone", "version": "2.0.0b5" },
+    "schema_version": "1.2",
+    "python_tag": "cp313",
+    "created_at": "2026-03-11T00:00:00Z",
+    "payload_sha256": "...",
+    "api_surface_payload_sha256": "..."
+  },
+  "metrics": { "...": "metrics snapshot" },
+  "api_surface": {
+    "modules": [
+      {
+        "module": "pkg.mod",
+        "filepath": "pkg/mod.py",
+        "all_declared": [],
+        "symbols": [
+          {
+            "local_name": "run",
+            "kind": "function",
+            "start_line": 10,
+            "end_line": 14,
+            "params": [],
+            "returns_hash": "",
+            "exported_via": "name"
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
 
@@ -77,11 +143,11 @@ Notes:
 - `u` row decoder accepts both legacy 11-column rows and canonical 17-column rows
   (legacy rows map new structural fields to neutral defaults).
 
-## Report schema (`2.4`)
+## Report schema (`2.5`)
 
 ```json
 {
-  "report_schema_version": "2.4",
+  "report_schema_version": "2.5",
   "meta": {
     "codeclone_version": "2.0.0b5",
     "project_name": "codeclone",
@@ -180,6 +246,27 @@ Notes:
         "population_status": "limited",
         "top_score": 0.0,
         "average_score": 0.0
+      },
+      "coverage_adoption": {
+        "modules": 0,
+        "params_total": 0,
+        "params_annotated": 0,
+        "param_permille": 0,
+        "returns_total": 0,
+        "returns_annotated": 0,
+        "return_permille": 0,
+        "public_symbol_total": 0,
+        "public_symbol_documented": 0,
+        "docstring_permille": 0,
+        "typing_any_count": 0
+      },
+      "api_surface": {
+        "enabled": false,
+        "modules": 0,
+        "public_symbols": 0,
+        "added": 0,
+        "breaking": 0,
+        "strict_types": false
       }
     },
     "families": {
@@ -212,6 +299,38 @@ Notes:
           "version": "1",
           "scope": "report_only",
           "strategy": "project_relative_composite"
+        },
+        "items": []
+      },
+      "coverage_adoption": {
+        "summary": {
+          "modules": 0,
+          "params_total": 0,
+          "params_annotated": 0,
+          "param_permille": 0,
+          "baseline_diff_available": false,
+          "param_delta": 0,
+          "returns_total": 0,
+          "returns_annotated": 0,
+          "return_permille": 0,
+          "return_delta": 0,
+          "public_symbol_total": 0,
+          "public_symbol_documented": 0,
+          "docstring_permille": 0,
+          "docstring_delta": 0,
+          "typing_any_count": 0
+        },
+        "items": []
+      },
+      "api_surface": {
+        "summary": {
+          "enabled": false,
+          "baseline_diff_available": false,
+          "modules": 0,
+          "public_symbols": 0,
+          "added": 0,
+          "breaking": 0,
+          "strict_types": false
         },
         "items": []
       },
@@ -274,7 +393,7 @@ Notes:
 ```text
 # CodeClone Report
 - Markdown schema: 1.0
-- Source report schema: 2.4
+- Source report schema: 2.5
 ...
 ## Overview
 ## Inventory
@@ -360,7 +479,7 @@ Notes:
       ],
       "properties": {
         "profileVersion": "1.0",
-        "reportSchemaVersion": "2.3"
+        "reportSchemaVersion": "2.5"
       },
       "results": [
         {

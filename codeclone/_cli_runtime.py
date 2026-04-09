@@ -34,6 +34,14 @@ class _RuntimeArgs(Protocol):
     fail_cohesion: int
     fail_health: int
     fail_on_new_metrics: bool
+    fail_on_typing_regression: bool
+    fail_on_docstring_regression: bool
+    fail_on_api_break: bool
+    min_typing_coverage: int
+    min_docstring_coverage: int
+    typing_coverage: bool
+    docstring_coverage: bool
+    api_surface: bool
     update_metrics_baseline: bool
     skip_metrics: bool
     fail_cycles: bool
@@ -67,6 +75,10 @@ def validate_numeric_args(args: _RuntimeArgs) -> bool:
             or args.fail_coupling < -1
             or args.fail_cohesion < -1
             or args.fail_health < -1
+            or args.min_typing_coverage < -1
+            or args.min_typing_coverage > 100
+            or args.min_docstring_coverage < -1
+            or args.min_docstring_coverage > 100
         )
     )
 
@@ -80,6 +92,11 @@ def _metrics_flags_requested(args: _RuntimeArgs) -> bool:
         or args.fail_dead_code
         or args.fail_health >= 0
         or args.fail_on_new_metrics
+        or args.fail_on_typing_regression
+        or args.fail_on_docstring_regression
+        or args.fail_on_api_break
+        or args.min_typing_coverage >= 0
+        or args.min_docstring_coverage >= 0
         or args.update_metrics_baseline
     )
 
@@ -117,6 +134,8 @@ def configure_metrics_mode(
         args.skip_dead_code = False
     if args.fail_cycles:
         args.skip_dependencies = False
+    if bool(getattr(args, "fail_on_api_break", False)) or args.update_metrics_baseline:
+        args.api_surface = True
 
 
 def resolve_cache_path(
@@ -155,6 +174,12 @@ def metrics_computed(args: _RuntimeArgs) -> tuple[str, ...]:
         computed.append("dependencies")
     if not args.skip_dead_code:
         computed.append("dead_code")
+    if bool(getattr(args, "typing_coverage", True)) or bool(
+        getattr(args, "docstring_coverage", True)
+    ):
+        computed.append("coverage_adoption")
+    if bool(getattr(args, "api_surface", False)):
+        computed.append("api_surface")
     return tuple(computed)
 
 

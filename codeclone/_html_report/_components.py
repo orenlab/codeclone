@@ -60,6 +60,8 @@ _SUMMARY_ICON_KEYS: dict[str, tuple[str, str]] = {
     "top candidates": ("quality", "summary-icon summary-icon--info"),
     "more candidates": ("quality", "summary-icon summary-icon--info"),
     "health profile": ("health-profile", "summary-icon summary-icon--info"),
+    "adoption coverage": ("coverage-adoption", "summary-icon summary-icon--info"),
+    "public api surface": ("api-surface", "summary-icon summary-icon--info"),
 }
 
 

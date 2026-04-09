@@ -144,7 +144,7 @@ gating decisions.
 Detected findings can be rendered as:
 
 - interactive HTML (`--html`),
-- canonical JSON (`--json`, schema `2.4`),
+- canonical JSON (`--json`, schema `2.5`),
 - deterministic text projection (`--text`),
 - deterministic Markdown projection (`--md`),
 - deterministic SARIF projection (`--sarif`).
@@ -234,7 +234,7 @@ Security boundaries:
 Baseline comparison allows CI to fail **only on new clones**,
 enabling gradual architectural improvement.
 
-Baseline files use a stable v2 contract (schema `2.0`, with compatibility
+Baseline files use a stable v2 contract (current schema `2.1`, with compatibility
 support for major `1` legacy schema checks where applicable). Compatibility is checked by
 `schema_version`, `fingerprint_version`, `python_tag`, and `generator.name`,
 not package patch/minor version.

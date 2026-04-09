@@ -93,6 +93,37 @@ HELP_FAIL_ON_NEW_METRICS = (
     "Exit with code 3 if new metrics violations appear relative to the\n"
     "metrics baseline."
 )
+HELP_TYPING_COVERAGE = (
+    "Collect typing adoption coverage facts in full analysis mode.\nEnabled by default."
+)
+HELP_DOCSTRING_COVERAGE = (
+    "Collect public docstring adoption coverage facts in full analysis mode.\n"
+    "Enabled by default."
+)
+HELP_API_SURFACE = (
+    "Collect public API surface facts for baseline-aware compatibility review.\n"
+    "Disabled by default."
+)
+HELP_FAIL_ON_TYPING_REGRESSION = (
+    "Exit with code 3 if typing adoption coverage regresses relative to the\n"
+    "metrics baseline."
+)
+HELP_FAIL_ON_DOCSTRING_REGRESSION = (
+    "Exit with code 3 if public docstring coverage regresses relative to the\n"
+    "metrics baseline."
+)
+HELP_FAIL_ON_API_BREAK = (
+    "Exit with code 3 if public API removals or signature breaks are detected\n"
+    "relative to the metrics baseline."
+)
+HELP_MIN_TYPING_COVERAGE = (
+    "Exit with code 3 if parameter typing coverage falls below the threshold.\n"
+    "Threshold is a whole percent from 0 to 100."
+)
+HELP_MIN_DOCSTRING_COVERAGE = (
+    "Exit with code 3 if public docstring coverage falls below the threshold.\n"
+    "Threshold is a whole percent from 0 to 100."
+)
 HELP_CI = (
     "Enable CI preset.\n"
     "Equivalent to: --fail-on-new --no-color --quiet.\n"
@@ -534,6 +565,49 @@ def fmt_metrics_dead_code(count: int, *, suppressed: int = 0) -> str:
                 f"  {'Dead code':<{_L}}[bold red]{count} found[/bold red]"
                 f"{suppressed_suffix}"
             )
+
+
+def _format_permille_pct(value: int) -> str:
+    return f"{value / 10.0:.1f}%"
+
+
+def fmt_metrics_adoption(
+    *,
+    param_permille: int,
+    return_permille: int,
+    docstring_permille: int,
+    any_annotation_count: int,
+) -> str:
+    parts = [
+        f"params {_format_permille_pct(param_permille)}",
+        f"returns {_format_permille_pct(return_permille)}",
+        f"docstrings {_format_permille_pct(docstring_permille)}",
+        f"Any {_v(any_annotation_count)}",
+    ]
+    return f"  {'Adoption':<{_L}}{' · '.join(parts)}"
+
+
+def fmt_metrics_api_surface(
+    *,
+    public_symbols: int,
+    modules: int,
+    added: int,
+    breaking: int,
+) -> str:
+    parts = [
+        f"{_v(public_symbols, 'bold cyan')} symbols",
+        f"{_v(modules, 'bold cyan')} modules",
+    ]
+    if breaking > 0 or added > 0:
+        parts.append(
+            " / ".join(
+                [
+                    f"{_v(breaking, 'bold red')} breaking",
+                    f"{_v(added, 'bold cyan')} added",
+                ]
+            )
+        )
+    return f"  {'Public API':<{_L}}{' · '.join(parts)}"
 
 
 def fmt_metrics_overloaded_modules(

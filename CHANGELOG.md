@@ -2,9 +2,35 @@
 
 ## [2.0.0b5]
 
+### Contracts, metrics, and review surfaces
+
+- Bump canonical report schema to `2.5` for `metrics.families.coverage_adoption`
+  and `metrics.families.api_surface`.
+- Bump clone baseline schema to `2.1` and standalone metrics-baseline schema to
+  `1.2` for compact `api_surface` wire payloads (`local_name` on disk,
+  reconstructed full qualnames in runtime) while keeping read-compatibility for
+  earlier `2.0` / `1.1` baseline files in the current b5 line.
+- Add shared public/private visibility classification for public-symbol-aware
+  metrics, without changing clone/fingerprint semantics.
+- Add canonical type/docstring adoption coverage:
+  parameter coverage, return coverage, public docstring coverage, and explicit
+  `Any` counts.
+- Add opt-in public API surface inventory and baseline diff:
+  public symbol snapshots, added symbols, and breaking changes against a
+  trusted metrics baseline.
+- Add new gates:
+  `--min-typing-coverage`, `--min-docstring-coverage`,
+  `--fail-on-typing-regression`, `--fail-on-docstring-regression`,
+  `--fail-on-api-break`.
+- Surface adoption and API metrics compactly in MCP summaries/detail, the HTML
+  Overview tab, and canonical report payloads without adding a new HTML tab.
+- Extend the normal CLI `Metrics` block with adoption coverage and public API
+  facts, while keeping the quiet compact metrics line unchanged.
+- Make unified clone baselines preserve embedded metrics and optional
+  `api_surface` payloads safely across saves.
+
 ### MCP, HTML, and docs
 
-- Bump canonical report schema to `2.4` for `meta.analysis_profile`.
 - Surface the effective runtime analysis profile (`min_loc`, `min_stmt`, block, and segment thresholds) in canonical
   report metadata, MCP summary/triage projections, and the HTML Executive Summary subtitle.
 - Clarify MCP interpretation with compact `health_scope`, `focus`, and `new_by_source_kind` fields in summary/triage

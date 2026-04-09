@@ -1368,6 +1368,11 @@ def test_mcp_service_helper_filters_and_metrics_payload() -> None:
         "new_cycles": 1,
         "new_dead_code": 1,
         "health_delta": -3,
+        "typing_param_permille_delta": 0,
+        "typing_return_permille_delta": 0,
+        "docstring_permille_delta": 0,
+        "new_api_symbols": 0,
+        "api_breaking_changes": 0,
     }
     assert service._metrics_diff_payload(None) is None
 
@@ -3467,6 +3472,102 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
                 "module": "pkg.alpha",
                 "score": 0.12,
                 "candidate_status": "non_candidate",
+            },
+        ],
+    }
+    coverage_adoption_payload = service._metrics_detail_payload(
+        metrics={
+            "summary": {},
+            "families": {
+                "coverage_adoption": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/mod.py",
+                            "module": "pkg.mod",
+                            "param_permille": 750,
+                            "docstring_permille": 667,
+                        }
+                    ]
+                }
+            },
+        },
+        family="coverage_adoption",
+        path=None,
+        offset=0,
+        limit=5,
+    )
+    assert coverage_adoption_payload == {
+        "family": "coverage_adoption",
+        "path": None,
+        "offset": 0,
+        "limit": 5,
+        "returned": 1,
+        "total": 1,
+        "has_more": False,
+        "items": [
+            {
+                "path": "pkg/mod.py",
+                "module": "pkg.mod",
+                "param_permille": 750,
+                "docstring_permille": 667,
+            }
+        ],
+    }
+    api_surface_payload = service._metrics_detail_payload(
+        metrics={
+            "summary": {},
+            "families": {
+                "api_surface": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/mod.py",
+                            "module": "pkg.mod",
+                            "qualname": "pkg.mod:run",
+                            "record_kind": "symbol",
+                            "symbol_kind": "function",
+                            "params_total": 1,
+                        },
+                        {
+                            "relative_path": "pkg/mod.py",
+                            "module": "pkg.mod",
+                            "qualname": "pkg.mod:old",
+                            "record_kind": "breaking_change",
+                            "change_kind": "removed",
+                            "detail": "Removed from the public API surface.",
+                        },
+                    ]
+                }
+            },
+        },
+        family="api_surface",
+        path=None,
+        offset=0,
+        limit=5,
+    )
+    assert api_surface_payload == {
+        "family": "api_surface",
+        "path": None,
+        "offset": 0,
+        "limit": 5,
+        "returned": 2,
+        "total": 2,
+        "has_more": False,
+        "items": [
+            {
+                "path": "pkg/mod.py",
+                "module": "pkg.mod",
+                "qualname": "pkg.mod:run",
+                "record_kind": "symbol",
+                "symbol_kind": "function",
+                "params_total": 1,
+            },
+            {
+                "path": "pkg/mod.py",
+                "module": "pkg.mod",
+                "qualname": "pkg.mod:old",
+                "record_kind": "breaking_change",
+                "change_kind": "removed",
+                "detail": "Removed from the public API surface.",
             },
         ],
     }

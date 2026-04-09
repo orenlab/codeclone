@@ -43,7 +43,8 @@ Live sample report:
 - **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
 - **Structural findings** — duplicated branch families, clone guard/exit divergence and clone-cohort drift (report-only)
 - **Quality metrics** — cyclomatic complexity, coupling (`CBO`), cohesion (`LCOM4`), dependency cycles, dead code,
-  health score, and report-only `Overloaded Modules` profiling
+  health score, type/docstring adoption coverage, public API surface diff, and report-only `Overloaded Modules`
+  profiling
 - **Baseline governance** — separates accepted **legacy** debt from **new regressions** and lets CI fail **only** on
   what changed
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
@@ -141,7 +142,17 @@ codeclone . --fail-cycles --fail-dead-code
 
 # Regression detection vs baseline
 codeclone . --fail-on-new-metrics
+
+# Adoption and API governance
+codeclone . --min-typing-coverage 80 --min-docstring-coverage 60
+codeclone . --fail-on-typing-regression --fail-on-docstring-regression
+codeclone . --api-surface --update-metrics-baseline
+codeclone . --fail-on-api-break
 ```
+
+In normal full-mode CLI output, CodeClone now surfaces adoption coverage
+(`params`, `returns`, `docstrings`, `Any`) in the main `Metrics` block, and it
+adds a `Public API` line when `--api-surface` facts are collected.
 
 ### Pre-commit
 
@@ -277,11 +288,11 @@ class Middleware:  # codeclone: ignore[dead-code]
 Dynamic/runtime false positives are resolved via explicit inline suppressions, not via broad heuristics.
 
 <details>
-<summary>Canonical JSON report shape (v2.4)</summary>
+<summary>Canonical JSON report shape (v2.5)</summary>
 
 ```json
 {
-  "report_schema_version": "2.4",
+  "report_schema_version": "2.5",
   "meta": {
     "codeclone_version": "2.0.0b5",
     "project_name": "...",
@@ -348,8 +359,16 @@ Dynamic/runtime false positives are resolved via explicit inline suppressions, n
     }
   },
   "metrics": {
-    "summary": {},
-    "families": {}
+    "summary": {
+      "...": "...",
+      "coverage_adoption": { "...": "..." },
+      "api_surface": { "...": "..." }
+    },
+    "families": {
+      "...": "...",
+      "coverage_adoption": { "...": "..." },
+      "api_surface": { "...": "..." }
+    }
   },
   "derived": {
     "suggestions": [],

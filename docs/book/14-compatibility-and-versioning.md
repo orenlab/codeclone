@@ -18,11 +18,11 @@ compatibility is enforced.
 
 Current contract versions:
 
-- `BASELINE_SCHEMA_VERSION = "2.0"`
+- `BASELINE_SCHEMA_VERSION = "2.1"`
 - `BASELINE_FINGERPRINT_VERSION = "1"`
 - `CACHE_VERSION = "2.3"`
-- `REPORT_SCHEMA_VERSION = "2.4"`
-- `METRICS_BASELINE_SCHEMA_VERSION = "1.0"` (used only when metrics are stored
+- `REPORT_SCHEMA_VERSION = "2.5"`
+- `METRICS_BASELINE_SCHEMA_VERSION = "1.2"` (used only when metrics are stored
   in a dedicated metrics-baseline file instead of the default unified baseline)
 
 Refs:
@@ -79,8 +79,27 @@ Version bump rules:
 Baseline compatibility rules:
 
 - Runtime accepts baseline schema majors `1` and `2` with supported minors.
-- Runtime writes current schema (`2.0`) on new/updated baseline saves.
+- Runtime writes current schema (`2.1`) on new/updated baseline saves.
 - Embedded top-level `metrics` is valid only for baseline schema `>= 2.0`.
+- Unified clone baselines may also embed top-level `api_surface` when metrics
+  baseline data is stored in the same file.
+- Embedded and standalone `api_surface` snapshots now use compact symbol wire
+  layout (`local_name` relative to `module`, `filepath` relative to the
+  baseline directory when possible) while runtime reconstructs full canonical
+  qualnames and runtime filepaths before comparison. This is a schema change
+  for baseline `2.1` / metrics-baseline `1.2`, not a silent serialization
+  detail.
+- Capability-sensitive metrics gates (for example adoption regression or API
+  break gating) must check for the required embedded data, not only the clone
+  baseline schema version.
+
+Metrics-baseline compatibility rules:
+
+- Runtime writes standalone metrics-baseline schema `1.2`.
+- Runtime accepts standalone metrics-baseline `1.1` and `1.2`.
+- When metrics are embedded into the unified clone baseline, the embedded
+  metrics section follows the clone baseline schema compatibility window
+  instead (`2.0` and `2.1` in the current runtime).
 
 Baseline regeneration rules:
 
@@ -149,7 +168,7 @@ Refs:
 
 ## Locked by tests
 
-- `tests/test_baseline.py::test_baseline_verify_schema_incompatibilities[schema_too_new]`
+- `tests/test_baseline.py::test_baseline_verify_schema_incompatibilities`
 - `tests/test_baseline.py::test_baseline_verify_schema_incompatibilities[schema_major_mismatch]`
 - `tests/test_baseline.py::test_baseline_verify_fingerprint_mismatch`
 - `tests/test_cache.py::test_cache_v_field_version_mismatch_warns`

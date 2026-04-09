@@ -102,6 +102,8 @@ __all__ = [
 ]
 
 _OVERLOADED_MODULES_FAMILY = "overloaded_modules"
+_COVERAGE_ADOPTION_FAMILY = "coverage_adoption"
+_API_SURFACE_FAMILY = "api_surface"
 
 
 def _optional_str(value: object) -> str | None:
@@ -372,6 +374,18 @@ def _collect_paths_from_metrics(metrics: Mapping[str, object]) -> set[str]:
             paths.add(filepath)
     overloaded_modules = _as_mapping(metrics.get(_OVERLOADED_MODULES_FAMILY))
     for item in _as_sequence(overloaded_modules.get("items")):
+        item_map = _as_mapping(item)
+        filepath = _optional_str(item_map.get("filepath"))
+        if filepath is not None:
+            paths.add(filepath)
+    coverage_adoption = _as_mapping(metrics.get(_COVERAGE_ADOPTION_FAMILY))
+    for item in _as_sequence(coverage_adoption.get("items")):
+        item_map = _as_mapping(item)
+        filepath = _optional_str(item_map.get("filepath"))
+        if filepath is not None:
+            paths.add(filepath)
+    api_surface = _as_mapping(metrics.get(_API_SURFACE_FAMILY))
+    for item in _as_sequence(api_surface.get("items")):
         item_map = _as_mapping(item)
         filepath = _optional_str(item_map.get("filepath"))
         if filepath is not None:
@@ -723,6 +737,82 @@ def _normalize_metrics_families(
     cohesion_summary = _as_mapping(cohesion.get("summary"))
     dead_code_summary = _as_mapping(dead_code.get("summary"))
     overloaded_modules_summary = _as_mapping(overloaded_modules.get("summary"))
+    coverage_adoption = _as_mapping(metrics_map.get(_COVERAGE_ADOPTION_FAMILY))
+    coverage_adoption_summary = _as_mapping(coverage_adoption.get("summary"))
+    coverage_adoption_items = sorted(
+        (
+            {
+                "module": str(item_map.get("module", "")).strip(),
+                "relative_path": _contract_path(
+                    item_map.get("filepath", ""),
+                    scan_root=scan_root,
+                )[0]
+                or "",
+                "callable_count": _as_int(item_map.get("callable_count")),
+                "params_total": _as_int(item_map.get("params_total")),
+                "params_annotated": _as_int(item_map.get("params_annotated")),
+                "param_permille": _as_int(item_map.get("param_permille")),
+                "returns_total": _as_int(item_map.get("returns_total")),
+                "returns_annotated": _as_int(item_map.get("returns_annotated")),
+                "return_permille": _as_int(item_map.get("return_permille")),
+                "any_annotation_count": _as_int(item_map.get("any_annotation_count")),
+                "public_symbol_total": _as_int(item_map.get("public_symbol_total")),
+                "public_symbol_documented": _as_int(
+                    item_map.get("public_symbol_documented")
+                ),
+                "docstring_permille": _as_int(item_map.get("docstring_permille")),
+            }
+            for item in _as_sequence(coverage_adoption.get("items"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: (
+            item["relative_path"],
+            item["module"],
+        ),
+    )
+    api_surface = _as_mapping(metrics_map.get(_API_SURFACE_FAMILY))
+    api_surface_summary = _as_mapping(api_surface.get("summary"))
+    api_surface_items = sorted(
+        (
+            {
+                "record_kind": str(item_map.get("record_kind", "symbol")),
+                "module": str(item_map.get("module", "")).strip(),
+                "relative_path": _contract_path(
+                    item_map.get("filepath", ""),
+                    scan_root=scan_root,
+                )[0]
+                or "",
+                "qualname": str(item_map.get("qualname", "")),
+                "start_line": _as_int(item_map.get("start_line")),
+                "end_line": _as_int(item_map.get("end_line")),
+                "symbol_kind": str(item_map.get("symbol_kind", "")),
+                "exported_via": _optional_str(item_map.get("exported_via")),
+                "params_total": _as_int(item_map.get("params_total")),
+                "params": [
+                    {
+                        "name": str(param_map.get("name", "")),
+                        "kind": str(param_map.get("kind", "")),
+                        "has_default": bool(param_map.get("has_default")),
+                        "annotated": bool(param_map.get("annotated")),
+                    }
+                    for param in _as_sequence(item_map.get("params"))
+                    for param_map in (_as_mapping(param),)
+                ],
+                "returns_annotated": bool(item_map.get("returns_annotated")),
+                "change_kind": _optional_str(item_map.get("change_kind")),
+                "detail": _optional_str(item_map.get("detail")),
+            }
+            for item in _as_sequence(api_surface.get("items"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: (
+            item["relative_path"],
+            item["start_line"],
+            item["end_line"],
+            item["qualname"],
+            item["record_kind"],
+        ),
+    )
     dead_high_confidence = sum(
         1
         for item in dead_items
@@ -796,6 +886,64 @@ def _normalize_metrics_families(
                 "dimensions": health_dimensions,
             },
             "items": [],
+            "items_truncated": False,
+        },
+        _COVERAGE_ADOPTION_FAMILY: {
+            "summary": {
+                "modules": len(coverage_adoption_items),
+                "params_total": _as_int(coverage_adoption_summary.get("params_total")),
+                "params_annotated": _as_int(
+                    coverage_adoption_summary.get("params_annotated")
+                ),
+                "param_permille": _as_int(
+                    coverage_adoption_summary.get("param_permille")
+                ),
+                "baseline_diff_available": bool(
+                    coverage_adoption_summary.get("baseline_diff_available")
+                ),
+                "param_delta": _as_int(coverage_adoption_summary.get("param_delta")),
+                "returns_total": _as_int(
+                    coverage_adoption_summary.get("returns_total")
+                ),
+                "returns_annotated": _as_int(
+                    coverage_adoption_summary.get("returns_annotated")
+                ),
+                "return_permille": _as_int(
+                    coverage_adoption_summary.get("return_permille")
+                ),
+                "return_delta": _as_int(coverage_adoption_summary.get("return_delta")),
+                "public_symbol_total": _as_int(
+                    coverage_adoption_summary.get("public_symbol_total")
+                ),
+                "public_symbol_documented": _as_int(
+                    coverage_adoption_summary.get("public_symbol_documented")
+                ),
+                "docstring_permille": _as_int(
+                    coverage_adoption_summary.get("docstring_permille")
+                ),
+                "docstring_delta": _as_int(
+                    coverage_adoption_summary.get("docstring_delta")
+                ),
+                "typing_any_count": _as_int(
+                    coverage_adoption_summary.get("typing_any_count")
+                ),
+            },
+            "items": coverage_adoption_items,
+            "items_truncated": False,
+        },
+        _API_SURFACE_FAMILY: {
+            "summary": {
+                "enabled": bool(api_surface_summary.get("enabled")),
+                "baseline_diff_available": bool(
+                    api_surface_summary.get("baseline_diff_available")
+                ),
+                "modules": _as_int(api_surface_summary.get("modules")),
+                "public_symbols": _as_int(api_surface_summary.get("public_symbols")),
+                "added": _as_int(api_surface_summary.get("added")),
+                "breaking": _as_int(api_surface_summary.get("breaking")),
+                "strict_types": bool(api_surface_summary.get("strict_types")),
+            },
+            "items": api_surface_items,
             "items_truncated": False,
         },
         _OVERLOADED_MODULES_FAMILY: {

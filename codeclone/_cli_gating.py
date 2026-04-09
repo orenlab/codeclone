@@ -18,12 +18,17 @@ __all__ = [
 class _GatingArgs(Protocol):
     ci: bool
     fail_on_new_metrics: bool
+    fail_on_typing_regression: bool
+    fail_on_docstring_regression: bool
+    fail_on_api_break: bool
     fail_complexity: int
     fail_coupling: int
     fail_cohesion: int
     fail_cycles: bool
     fail_dead_code: bool
     fail_health: int
+    min_typing_coverage: int
+    min_docstring_coverage: int
     fail_on_new: bool
     fail_threshold: int
 
@@ -34,6 +39,21 @@ class _PrinterLike(Protocol):
 
 def _strip_terminal_period(text: str) -> str:
     return text[:-1] if text.endswith(".") else text
+
+
+def _parse_two_part_metric_detail(
+    text: str,
+    *,
+    prefix: str,
+    right_label: str,
+) -> str | None:
+    if not text.startswith(prefix):
+        return None
+    left_part, right_part = text[len(prefix) :].split(", ", maxsplit=1)
+    return (
+        f"{left_part.rsplit('=', maxsplit=1)[1]} "
+        f"({right_label}={right_part.rsplit('=', maxsplit=1)[1]})"
+    )
 
 
 def parse_metric_reason_entry(reason: str) -> tuple[str, str]:
@@ -57,6 +77,19 @@ def parse_metric_reason_entry(reason: str) -> tuple[str, str]:
 
     if trimmed.startswith("Health score regressed vs metrics baseline: delta="):
         return "health_delta", trimmed.rsplit("=", maxsplit=1)[1]
+    typing_detail = _parse_two_part_metric_detail(
+        trimmed,
+        prefix="Typing coverage regressed vs metrics baseline: ",
+        right_label="returns_delta",
+    )
+    if typing_detail is not None:
+        return "typing_coverage_delta", typing_detail
+    if trimmed.startswith("Docstring coverage regressed vs metrics baseline: delta="):
+        return "docstring_coverage_delta", trimmed.rsplit("=", maxsplit=1)[1]
+    if trimmed.startswith("Public API breaking changes vs metrics baseline: "):
+        return "api_breaking_changes", tail(
+            "Public API breaking changes vs metrics baseline: "
+        )
 
     if trimmed.startswith("Dependency cycles detected: "):
         return "dependency_cycles", tail("Dependency cycles detected: ").replace(
@@ -73,15 +106,17 @@ def parse_metric_reason_entry(reason: str) -> tuple[str, str]:
         ("Coupling threshold exceeded: ", "coupling_max"),
         ("Cohesion threshold exceeded: ", "cohesion_max"),
         ("Health score below threshold: ", "health_score"),
+        ("Typing coverage below threshold: ", "typing_coverage"),
+        ("Docstring coverage below threshold: ", "docstring_coverage"),
     )
     for prefix, kind in threshold_prefixes:
-        if trimmed.startswith(prefix):
-            left_part, threshold_part = tail(prefix).split(", ")
-            return (
-                kind,
-                f"{left_part.rsplit('=', maxsplit=1)[1]} "
-                f"(threshold={threshold_part.rsplit('=', maxsplit=1)[1]})",
-            )
+        threshold_detail = _parse_two_part_metric_detail(
+            trimmed,
+            prefix=prefix,
+            right_label="threshold",
+        )
+        if threshold_detail is not None:
+            return kind, threshold_detail
 
     return "detail", trimmed
 
@@ -94,26 +129,49 @@ def policy_context(*, args: _GatingArgs, gate_kind: str) -> str:
     match gate_kind:
         case "metrics":
             parts = (
-                "fail-on-new-metrics" if args.fail_on_new_metrics else None,
-                f"fail-complexity={args.fail_complexity}"
-                if args.fail_complexity >= 0
+                "fail-on-new-metrics"
+                if bool(getattr(args, "fail_on_new_metrics", False))
                 else None,
-                f"fail-coupling={args.fail_coupling}"
-                if args.fail_coupling >= 0
+                f"fail-complexity={getattr(args, 'fail_complexity', -1)}"
+                if int(getattr(args, "fail_complexity", -1)) >= 0
                 else None,
-                f"fail-cohesion={args.fail_cohesion}"
-                if args.fail_cohesion >= 0
+                f"fail-coupling={getattr(args, 'fail_coupling', -1)}"
+                if int(getattr(args, "fail_coupling", -1)) >= 0
                 else None,
-                "fail-cycles" if args.fail_cycles else None,
-                "fail-dead-code" if args.fail_dead_code else None,
-                f"fail-health={args.fail_health}" if args.fail_health >= 0 else None,
+                f"fail-cohesion={getattr(args, 'fail_cohesion', -1)}"
+                if int(getattr(args, "fail_cohesion", -1)) >= 0
+                else None,
+                "fail-cycles" if bool(getattr(args, "fail_cycles", False)) else None,
+                "fail-dead-code"
+                if bool(getattr(args, "fail_dead_code", False))
+                else None,
+                f"fail-health={getattr(args, 'fail_health', -1)}"
+                if int(getattr(args, "fail_health", -1)) >= 0
+                else None,
+                "fail-on-typing-regression"
+                if bool(getattr(args, "fail_on_typing_regression", False))
+                else None,
+                "fail-on-docstring-regression"
+                if bool(getattr(args, "fail_on_docstring_regression", False))
+                else None,
+                "fail-on-api-break"
+                if bool(getattr(args, "fail_on_api_break", False))
+                else None,
+                f"min-typing-coverage={getattr(args, 'min_typing_coverage', -1)}"
+                if int(getattr(args, "min_typing_coverage", -1)) >= 0
+                else None,
+                f"min-docstring-coverage={getattr(args, 'min_docstring_coverage', -1)}"
+                if int(getattr(args, "min_docstring_coverage", -1)) >= 0
+                else None,
             )
         case "new-clones":
-            parts = ("fail-on-new" if args.fail_on_new else None,)
+            parts = (
+                "fail-on-new" if bool(getattr(args, "fail_on_new", False)) else None,
+            )
         case "threshold":
             parts = (
-                f"fail-threshold={args.fail_threshold}"
-                if args.fail_threshold >= 0
+                f"fail-threshold={getattr(args, 'fail_threshold', -1)}"
+                if int(getattr(args, "fail_threshold", -1)) >= 0
                 else None,
             )
         case _:
