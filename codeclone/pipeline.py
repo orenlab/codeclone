@@ -957,8 +957,6 @@ def process_file(
     min_loc: int,
     min_stmt: int,
     collect_structural_findings: bool = True,
-    collect_typing_coverage: bool = True,
-    collect_docstring_coverage: bool = True,
     collect_api_surface: bool = False,
     api_include_private_modules: bool = False,
     block_min_loc: int = 20,
@@ -1023,8 +1021,6 @@ def process_file(
                 segment_min_loc=segment_min_loc,
                 segment_min_stmt=segment_min_stmt,
                 collect_structural_findings=collect_structural_findings,
-                collect_typing_coverage=collect_typing_coverage,
-                collect_docstring_coverage=collect_docstring_coverage,
                 collect_api_surface=collect_api_surface,
                 api_include_private_modules=api_include_private_modules,
             )
@@ -1061,8 +1057,6 @@ def _invoke_process_file(
     min_stmt: int,
     *,
     collect_structural_findings: bool,
-    collect_typing_coverage: bool,
-    collect_docstring_coverage: bool,
     collect_api_surface: bool,
     api_include_private_modules: bool,
     block_min_loc: int,
@@ -1072,8 +1066,6 @@ def _invoke_process_file(
 ) -> FileProcessResult:
     optional_kwargs: dict[str, object] = {
         "collect_structural_findings": collect_structural_findings,
-        "collect_typing_coverage": collect_typing_coverage,
-        "collect_docstring_coverage": collect_docstring_coverage,
         "collect_api_surface": collect_api_surface,
         "api_include_private_modules": api_include_private_modules,
         "block_min_loc": block_min_loc,
@@ -1162,12 +1154,6 @@ def process(
     )
     all_api_modules: list[ModuleApiSurface] = list(discovery.cached_api_modules)
     collect_structural_findings = _should_collect_structural_findings(boot.output_paths)
-    collect_typing_coverage = not boot.args.skip_metrics and bool(
-        getattr(boot.args, "typing_coverage", True)
-    )
-    collect_docstring_coverage = not boot.args.skip_metrics and bool(
-        getattr(boot.args, "docstring_coverage", True)
-    )
     collect_api_surface = not boot.args.skip_metrics and bool(
         getattr(boot.args, "api_surface", False)
     )
@@ -1303,8 +1289,6 @@ def process(
                     min_loc,
                     min_stmt,
                     collect_structural_findings=collect_structural_findings,
-                    collect_typing_coverage=collect_typing_coverage,
-                    collect_docstring_coverage=collect_docstring_coverage,
                     collect_api_surface=collect_api_surface,
                     api_include_private_modules=api_include_private_modules,
                     block_min_loc=block_min_loc,
@@ -1330,8 +1314,6 @@ def process(
                             min_loc,
                             min_stmt,
                             collect_structural_findings=collect_structural_findings,
-                            collect_typing_coverage=collect_typing_coverage,
-                            collect_docstring_coverage=collect_docstring_coverage,
                             collect_api_surface=collect_api_surface,
                             api_include_private_modules=api_include_private_modules,
                             block_min_loc=block_min_loc,

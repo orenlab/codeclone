@@ -93,13 +93,6 @@ HELP_FAIL_ON_NEW_METRICS = (
     "Exit with code 3 if new metrics violations appear relative to the\n"
     "metrics baseline."
 )
-HELP_TYPING_COVERAGE = (
-    "Collect typing adoption coverage facts in full analysis mode.\nEnabled by default."
-)
-HELP_DOCSTRING_COVERAGE = (
-    "Collect public docstring adoption coverage facts in full analysis mode.\n"
-    "Enabled by default."
-)
 HELP_API_SURFACE = (
     "Collect public API surface facts for baseline-aware compatibility review.\n"
     "Disabled by default."

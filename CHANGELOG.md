@@ -28,6 +28,8 @@ across MCP/HTML/clients; tightens MCP launcher/runtime behavior.
 - Surface effective analysis profile in report meta, MCP summary/triage, and HTML subtitle.
 - Add `health_scope`, `focus`, `new_by_source_kind` to MCP summary/triage.
 - Make baseline mismatch explicit (python tags + no-valid-baseline signal).
+- Surface `Coverage Join` facts and the optional `coverage` MCP help topic in
+  the VS Code extension when the connected server supports them.
 - Prefer workspace-local launchers over `PATH` (Poetry fallback).
 - Add `workspace_root` to force project `.venv` selection.
 

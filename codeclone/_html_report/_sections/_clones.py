@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Literal
 
 from ... import _coerce
-from ..._html_badges import _source_kind_badge_html
+from ..._html_badges import _micro_badges, _source_kind_badge_html, _stat_card
 from ..._html_data_attrs import _build_data_attrs
 from ..._html_escape import _escape_html
 from ..._html_filters import CLONE_TYPE_OPTIONS, SPREAD_OPTIONS, _render_select
@@ -27,6 +27,7 @@ from ...report.explain_contract import format_group_instance_compare_meta
 from ...report.json_contract import clone_group_id
 from ...report.suggestions import classify_clone_type
 from .._components import Tone, insight_block
+from .._glossary import glossary_tip
 from .._icons import ICONS
 from .._tables import render_rows_table
 from .._tabs import render_split_tabs
@@ -740,12 +741,66 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
             "from active review."
         )
     clones_tone: Tone = "warn" if ctx.clone_groups_total > 0 else "ok"
+
+    # Stat cards
+    avg_per_group = (
+        f"{ctx.clone_instances_total / max(1, ctx.clone_groups_total):.1f}"
+        if ctx.clone_groups_total > 0
+        else "0"
+    )
+    high_spread = sum(
+        1
+        for gs in (ctx.func_sorted, ctx.block_sorted, ctx.segment_sorted)
+        for _, items in gs
+        if len({str(it.get("filepath", "")) for it in items}) > 1
+    )
+    clone_cards = [
+        _stat_card(
+            "Clone groups",
+            ctx.clone_groups_total,
+            detail=_micro_badges(
+                ("functions", len(ctx.func_sorted)),
+                ("blocks", len(ctx.block_sorted)),
+                ("segments", len(ctx.segment_sorted)),
+            ),
+            value_tone="warn" if ctx.clone_groups_total > 0 else "good",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Instances",
+            ctx.clone_instances_total,
+            detail=_micro_badges(("avg/group", avg_per_group)),
+            value_tone="warn" if ctx.clone_instances_total > 0 else "good",
+            glossary_tip_fn=glossary_tip,
+        ),
+    ]
+    if novelty_enabled:
+        clone_cards.append(
+            _stat_card(
+                "New groups",
+                total_new,
+                detail=_micro_badges(("known", total_known)),
+                value_tone="bad" if total_new > 0 else "good",
+                glossary_tip_fn=glossary_tip,
+            ),
+        )
+    clone_cards.append(
+        _stat_card(
+            "High spread",
+            high_spread,
+            value_tone="warn" if high_spread > 0 else "muted",
+            glossary_tip_fn=glossary_tip,
+        ),
+    )
+    clone_cards_html = f'<div class="stat-cards">{"".join(clone_cards)}</div>'
+
     panel = (
         insight_block(
             question="Where is duplication concentrated right now?",
             answer=clones_answer,
             tone=clones_tone,
         )
+        + clone_cards_html
         + panel
     )
 

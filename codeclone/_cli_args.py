@@ -216,18 +216,6 @@ def build_parser(version: str) -> _ArgumentParser:
     )
     _add_bool_optional_argument(
         baselines_ci_group,
-        flag="--typing-coverage",
-        help_text=ui.HELP_TYPING_COVERAGE,
-        default=True,
-    )
-    _add_bool_optional_argument(
-        baselines_ci_group,
-        flag="--docstring-coverage",
-        help_text=ui.HELP_DOCSTRING_COVERAGE,
-        default=True,
-    )
-    _add_bool_optional_argument(
-        baselines_ci_group,
         flag="--api-surface",
         help_text=ui.HELP_API_SURFACE,
     )

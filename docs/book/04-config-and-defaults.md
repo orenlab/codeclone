@@ -62,74 +62,75 @@ quiet = true
 
 Supported `[tool.codeclone]` keys in the current line:
 
+`Requires / Implies` lists only runtime-enforced relationships from the current
+code path. Use `-` when the key has no special dependency contract.
+
 Analysis:
 
-| Key                    | Type          | Default                              | Meaning                                                                                                                                       |
-|------------------------|---------------|--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| `min_loc`              | `int`         | `10`                                 | Minimum function LOC for clone admission                                                                                                      |
-| `min_stmt`             | `int`         | `6`                                  | Minimum function statement count for clone admission                                                                                          |
-| `block_min_loc`        | `int`         | `20`                                 | Minimum function LOC for block-window analysis                                                                                                |
-| `block_min_stmt`       | `int`         | `8`                                  | Minimum function statements for block-window analysis                                                                                         |
-| `segment_min_loc`      | `int`         | `20`                                 | Minimum function LOC for segment analysis                                                                                                     |
-| `segment_min_stmt`     | `int`         | `10`                                 | Minimum function statements for segment analysis                                                                                              |
-| `processes`            | `int`         | `4`                                  | Worker process count                                                                                                                          |
-| `cache_path`           | `str \| null` | `<root>/.cache/codeclone/cache.json` | Cache file path                                                                                                                               |
-| `max_cache_size_mb`    | `int`         | `50`                                 | Maximum accepted cache size before fail-open ignore                                                                                           |
-| `skip_metrics`         | `bool`        | `false*`                             | Skip full metrics mode when allowed                                                                                                           |
-| `skip_dead_code`       | `bool`        | `false`                              | Skip dead-code analysis                                                                                                                       |
-| `skip_dependencies`    | `bool`        | `false`                              | Skip dependency analysis                                                                                                                      |
-| `golden_fixture_paths` | `list[str]`   | `[]`                                 | Exclude clone groups fully contained in matching golden test fixtures from health/gates/active findings; keep them as suppressed report facts |
+| Key                    | Type          | Default                              | Meaning                                                                                                                                       | Requires / Implies                                                 |
+|------------------------|---------------|--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
+| `min_loc`              | `int`         | `10`                                 | Minimum function LOC for clone admission                                                                                                      | `-`                                                                |
+| `min_stmt`             | `int`         | `6`                                  | Minimum function statement count for clone admission                                                                                          | `-`                                                                |
+| `block_min_loc`        | `int`         | `20`                                 | Minimum function LOC for block-window analysis                                                                                                | `-`                                                                |
+| `block_min_stmt`       | `int`         | `8`                                  | Minimum function statements for block-window analysis                                                                                         | `-`                                                                |
+| `segment_min_loc`      | `int`         | `20`                                 | Minimum function LOC for segment analysis                                                                                                     | `-`                                                                |
+| `segment_min_stmt`     | `int`         | `10`                                 | Minimum function statements for segment analysis                                                                                              | `-`                                                                |
+| `processes`            | `int`         | `4`                                  | Worker process count                                                                                                                          | `-`                                                                |
+| `cache_path`           | `str \| null` | `<root>/.cache/codeclone/cache.json` | Cache file path                                                                                                                               | `-`                                                                |
+| `max_cache_size_mb`    | `int`         | `50`                                 | Maximum accepted cache size before fail-open ignore                                                                                           | `-`                                                                |
+| `skip_metrics`         | `bool`        | `false*`                             | Skip full metrics mode when allowed                                                                                                           | Incompatible with metrics gates/update; auto-enabled in some runs* |
+| `skip_dead_code`       | `bool`        | `false`                              | Skip dead-code analysis                                                                                                                       | Forced on by `skip_metrics`; overridden by `fail_dead_code`        |
+| `skip_dependencies`    | `bool`        | `false`                              | Skip dependency analysis                                                                                                                      | Forced on by `skip_metrics`; overridden by `fail_cycles`           |
+| `golden_fixture_paths` | `list[str]`   | `[]`                                 | Exclude clone groups fully contained in matching golden test fixtures from health/gates/active findings; keep them as suppressed report facts | Patterns must resolve under `tests/` or `tests/fixtures/`          |
 
 Baseline and CI:
 
-| Key                       | Type   | Default                   | Meaning                                   |
-|---------------------------|--------|---------------------------|-------------------------------------------|
-| `baseline`                | `str`  | `codeclone.baseline.json` | Clone baseline path                       |
-| `max_baseline_size_mb`    | `int`  | `5`                       | Maximum accepted baseline size            |
-| `update_baseline`         | `bool` | `false`                   | Rewrite unified baseline from current run |
-| `metrics_baseline`        | `str`  | `codeclone.baseline.json` | Dedicated metrics-baseline path override  |
-| `update_metrics_baseline` | `bool` | `false`                   | Rewrite metrics baseline from current run |
-| `ci`                      | `bool` | `false`                   | Enable CI preset behavior                 |
+| Key                       | Type   | Default                   | Meaning                                   | Requires / Implies                                                                                              |
+|---------------------------|--------|---------------------------|-------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `baseline`                | `str`  | `codeclone.baseline.json` | Clone baseline path                       | Default target for `metrics_baseline` when not overridden                                                       |
+| `max_baseline_size_mb`    | `int`  | `5`                       | Maximum accepted baseline size            | `-`                                                                                                             |
+| `update_baseline`         | `bool` | `false`                   | Rewrite unified baseline from current run | In unified mode, auto-enables `update_metrics_baseline` unless `skip_metrics=true`                              |
+| `metrics_baseline`        | `str`  | `codeclone.baseline.json` | Dedicated metrics-baseline path override  | Defaults to `baseline` path when not overridden                                                                 |
+| `update_metrics_baseline` | `bool` | `false`                   | Rewrite metrics baseline from current run | Requires metrics analysis; may auto-enable `update_baseline` for missing shared baseline                        |
+| `ci`                      | `bool` | `false`                   | Enable CI preset behavior                 | Implies `fail_on_new`, `no_color`, `quiet`; enables `fail_on_new_metrics` when a trusted metrics baseline loads |
 
 Quality gates and metric collection:
 
-| Key                            | Type          | Default | Meaning                                                                             |
-|--------------------------------|---------------|---------|-------------------------------------------------------------------------------------|
-| `fail_on_new`                  | `bool`        | `false` | Fail when new clone groups appear                                                   |
-| `fail_threshold`               | `int`         | `-1`    | Fail when clone count exceeds threshold                                             |
-| `fail_complexity`              | `int`         | `-1`    | Fail when max cyclomatic complexity exceeds threshold                               |
-| `fail_coupling`                | `int`         | `-1`    | Fail when max CBO exceeds threshold                                                 |
-| `fail_cohesion`                | `int`         | `-1`    | Fail when max LCOM4 exceeds threshold                                               |
-| `fail_cycles`                  | `bool`        | `false` | Fail when dependency cycles are present                                             |
-| `fail_dead_code`               | `bool`        | `false` | Fail when high-confidence dead code is present                                      |
-| `fail_health`                  | `int`         | `-1`    | Fail when health score drops below threshold                                        |
-| `fail_on_new_metrics`          | `bool`        | `false` | Fail on new metric hotspots vs trusted metrics baseline                             |
-| `typing_coverage`              | `bool`        | `true`  | Collect typing adoption facts                                                       |
-| `docstring_coverage`           | `bool`        | `true`  | Collect public docstring adoption facts                                             |
-| `api_surface`                  | `bool`        | `false` | Collect public API inventory/diff facts                                             |
-| `coverage_xml`                 | `str \| null` | `null`  | Join external Cobertura XML to current-run function spans                           |
-| `coverage_min`                 | `int`         | `50`    | Coverage threshold for joined measured coverage hotspots                            |
-| `min_typing_coverage`          | `int`         | `-1`    | Minimum allowed typing coverage percent                                             |
-| `min_docstring_coverage`       | `int`         | `-1`    | Minimum allowed docstring coverage percent                                          |
-| `fail_on_typing_regression`    | `bool`        | `false` | Fail on typing coverage regression vs metrics baseline                              |
-| `fail_on_docstring_regression` | `bool`        | `false` | Fail on docstring coverage regression vs metrics baseline                           |
-| `fail_on_api_break`            | `bool`        | `false` | Fail on public API breaking changes vs metrics baseline                             |
-| `fail_on_untested_hotspots`    | `bool`        | `false` | Fail when medium/high-risk functions measured by Coverage Join fall below threshold |
+| Key                            | Type          | Default | Meaning                                                                             | Requires / Implies                                                                                                   |
+|--------------------------------|---------------|---------|-------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `fail_on_new`                  | `bool`        | `false` | Fail when new clone groups appear                                                   | Requires a trusted clone baseline                                                                                    |
+| `fail_threshold`               | `int`         | `-1`    | Fail when clone count exceeds threshold                                             | `-`                                                                                                                  |
+| `fail_complexity`              | `int`         | `-1`    | Fail when max cyclomatic complexity exceeds threshold                               | Incompatible with `skip_metrics`                                                                                     |
+| `fail_coupling`                | `int`         | `-1`    | Fail when max CBO exceeds threshold                                                 | Incompatible with `skip_metrics`                                                                                     |
+| `fail_cohesion`                | `int`         | `-1`    | Fail when max LCOM4 exceeds threshold                                               | Incompatible with `skip_metrics`                                                                                     |
+| `fail_cycles`                  | `bool`        | `false` | Fail when dependency cycles are present                                             | Incompatible with `skip_metrics`; forces dependency analysis                                                         |
+| `fail_dead_code`               | `bool`        | `false` | Fail when high-confidence dead code is present                                      | Incompatible with `skip_metrics`; forces dead-code analysis                                                          |
+| `fail_health`                  | `int`         | `-1`    | Fail when health score drops below threshold                                        | Incompatible with `skip_metrics`                                                                                     |
+| `fail_on_new_metrics`          | `bool`        | `false` | Fail on new metric hotspots vs trusted metrics baseline                             | Requires trusted metrics baseline; incompatible with `skip_metrics`; auto-enabled by `ci` when baseline loads        |
+| `api_surface`                  | `bool`        | `false` | Collect public API inventory/diff facts                                             | Auto-enabled by `fail_on_api_break`                                                                                  |
+| `coverage_xml`                 | `str \| null` | `null`  | Join external Cobertura XML to current-run function spans                           | Enables Coverage Join                                                                                                |
+| `coverage_min`                 | `int`         | `50`    | Coverage threshold for joined measured coverage hotspots                            | Used by Coverage Join; meaningful with `coverage_xml`                                                                |
+| `min_typing_coverage`          | `int`         | `-1`    | Minimum allowed typing coverage percent                                             | Incompatible with `skip_metrics`                                                                                     |
+| `min_docstring_coverage`       | `int`         | `-1`    | Minimum allowed docstring coverage percent                                          | Incompatible with `skip_metrics`                                                                                     |
+| `fail_on_typing_regression`    | `bool`        | `false` | Fail on typing coverage regression vs metrics baseline                              | Requires trusted metrics baseline with adoption snapshot; incompatible with `skip_metrics`                           |
+| `fail_on_docstring_regression` | `bool`        | `false` | Fail on docstring coverage regression vs metrics baseline                           | Requires trusted metrics baseline with adoption snapshot; incompatible with `skip_metrics`                           |
+| `fail_on_api_break`            | `bool`        | `false` | Fail on public API breaking changes vs metrics baseline                             | Requires trusted metrics baseline with API surface snapshot; incompatible with `skip_metrics`; implies `api_surface` |
+| `fail_on_untested_hotspots`    | `bool`        | `false` | Fail when medium/high-risk functions measured by Coverage Join fall below threshold | Incompatible with `skip_metrics`; requires successful Coverage Join to fire                                          |
 
 Report outputs and local UX:
 
-| Key           | Type          | Default | Meaning                        |
-|---------------|---------------|---------|--------------------------------|
-| `html_out`    | `str \| null` | `null`  | HTML report output path        |
-| `json_out`    | `str \| null` | `null`  | JSON report output path        |
-| `md_out`      | `str \| null` | `null`  | Markdown report output path    |
-| `sarif_out`   | `str \| null` | `null`  | SARIF report output path       |
-| `text_out`    | `str \| null` | `null`  | Plain-text report output path  |
-| `no_progress` | `bool`        | `false` | Disable progress UI            |
-| `no_color`    | `bool`        | `false` | Disable colored CLI output     |
-| `quiet`       | `bool`        | `false` | Use compact CLI output         |
-| `verbose`     | `bool`        | `false` | Enable more verbose CLI output |
-| `debug`       | `bool`        | `false` | Enable debug diagnostics       |
+| Key           | Type          | Default | Meaning                        | Requires / Implies                     |
+|---------------|---------------|---------|--------------------------------|----------------------------------------|
+| `html_out`    | `str \| null` | `null`  | HTML report output path        | `-`                                    |
+| `json_out`    | `str \| null` | `null`  | JSON report output path        | `-`                                    |
+| `md_out`      | `str \| null` | `null`  | Markdown report output path    | `-`                                    |
+| `sarif_out`   | `str \| null` | `null`  | SARIF report output path       | `-`                                    |
+| `text_out`    | `str \| null` | `null`  | Plain-text report output path  | `-`                                    |
+| `no_progress` | `bool`        | `false` | Disable progress UI            | Implied by `quiet`                     |
+| `no_color`    | `bool`        | `false` | Disable colored CLI output     | Enabled by `ci`                        |
+| `quiet`       | `bool`        | `false` | Use compact CLI output         | Implies `no_progress`; enabled by `ci` |
+| `verbose`     | `bool`        | `false` | Enable more verbose CLI output | `-`                                    |
+| `debug`       | `bool`        | `false` | Enable debug diagnostics       | Also enabled by `CODECLONE_DEBUG=1`    |
 
 This is the exact accepted key set from `codeclone/_cli_config.py`; unknown
 keys are contract errors.

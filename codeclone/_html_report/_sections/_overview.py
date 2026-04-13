@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from ... import _coerce
-from ..._html_badges import _source_kind_badge_html, _stat_card
+from ..._html_badges import _micro_badges, _source_kind_badge_html, _stat_card
 from ..._html_escape import _escape_html
 from .._components import (
     Tone,
@@ -411,17 +411,6 @@ def _format_count(value: int | float) -> str:
     if isinstance(value, float):
         return f"{value:,.2f}"
     return f"{int(value):,}"
-
-
-def _mb(*pairs: tuple[str, object]) -> str:
-    """Render compact micro-badges for stat-card detail rows."""
-    return "".join(
-        f'<span class="kpi-micro">'
-        f'<span class="kpi-micro-val">{_escape_html(str(v))}</span>'
-        f'<span class="kpi-micro-lbl">{_escape_html(label)}</span></span>'
-        for label, v in pairs
-        if v is not None and str(v) != "n/a"
-    )
 
 
 def _format_permille_pct(value: object) -> str:
@@ -876,14 +865,14 @@ def render_overview_panel(ctx: ReportContext) -> str:
         baselined = total - delta
         extra = ""
         if baselined > 0:
-            extra = _mb(("baselined", baselined))
+            extra = _micro_badges(("baselined", baselined))
         return detail + extra, "bad"
 
     # KPI cards — compute detail + tone with baseline awareness
     _clone_detail, _clone_tone = _baselined_detail(
         ctx.clone_groups_total,
         _new_clones,
-        _mb(
+        _micro_badges(
             ("func", len(ctx.func_sorted)),
             ("block", len(ctx.block_sorted)),
             ("seg", len(ctx.segment_sorted)),
@@ -892,7 +881,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
     _cx_detail, _cx_tone = _baselined_detail(
         complexity_high_risk,
         _new_complexity,
-        _mb(
+        _micro_badges(
             ("avg", complexity_summary.get("average", "n/a")),
             ("max", complexity_summary.get("max", "n/a")),
         ),
@@ -900,7 +889,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
     _cp_detail, _cp_tone = _baselined_detail(
         coupling_high_risk,
         _new_coupling,
-        _mb(
+        _micro_badges(
             ("avg", coupling_summary.get("average", "n/a")),
             ("max", coupling_summary.get("max", "n/a")),
         ),
@@ -908,12 +897,12 @@ def render_overview_panel(ctx: ReportContext) -> str:
     _cy_detail, _cy_tone = _baselined_detail(
         dependency_cycle_count,
         _new_cycles,
-        _mb(("depth", dependency_max_depth)),
+        _micro_badges(("depth", dependency_max_depth)),
     )
     _dc_detail, _dc_tone = _baselined_detail(
         dead_total,
         _new_dead,
-        _mb(("high-conf", dead_high_conf)),
+        _micro_badges(("high-conf", dead_high_conf)),
     )
 
     kpis = [
@@ -944,7 +933,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
         _stat_card(
             "Low Cohesion",
             cohesion_low,
-            detail=_mb(
+            detail=_micro_badges(
                 ("avg", cohesion_summary.get("average", "n/a")),
                 ("max", cohesion_summary.get("max", "n/a")),
             ),
@@ -970,14 +959,14 @@ def render_overview_panel(ctx: ReportContext) -> str:
         _stat_card(
             "Findings",
             structural_count,
-            detail=_mb(("kinds", structural_kind_count)),
+            detail=_micro_badges(("kinds", structural_kind_count)),
             tip="Active structural findings reported in production code",
             value_tone="good" if structural_count == 0 else "warn",
         ),
         _stat_card(
             "Suggestions",
             len(ctx.suggestions),
-            detail=_mb(
+            detail=_micro_badges(
                 ("clone", clone_suggestion_count),
                 ("struct", structural_suggestion_count),
                 ("metric", metrics_suggestion_count),

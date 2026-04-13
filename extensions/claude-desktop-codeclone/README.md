@@ -5,6 +5,8 @@ instead of manual JSON editing.
 
 Same canonical MCP surface used by CLI, VS Code, Codex, and Claude Code.
 Read-only, baseline-aware, local stdio only.
+As the local `codeclone-mcp` server gains new canonical surfaces, the bundle
+exposes them without adding a second client-side interpretation layer.
 
 ## Install
 
@@ -60,6 +62,9 @@ Use CodeClone for a changed-files review of my current diff.
 
 # Deeper follow-up
 Run a default CodeClone pass first. If clean, do a second higher-sensitivity pass.
+
+# Coverage-aware follow-up
+If the current run includes coverage data, explain the Coverage Join facts and any scope gaps.
 ```
 
 ## Privacy

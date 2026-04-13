@@ -2322,7 +2322,7 @@ def test_cli_update_baseline_report_meta_uses_updated_payload_hash(
     assert baseline_meta["payload_sha256_verified"] is True
 
 
-def test_cli_update_baseline_rewrites_embedded_metrics_to_enabled_surfaces_only(
+def test_cli_update_baseline_rewrites_embedded_metrics_to_current_surfaces(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2356,8 +2356,6 @@ def public(value: int) -> int:
 [tool.codeclone]
 baseline = "codeclone.baseline.json"
 api_surface = false
-typing_coverage = false
-docstring_coverage = false
 """.strip()
         + "\n",
         "utf-8",
@@ -2377,13 +2375,10 @@ docstring_coverage = false
     metrics = cast(dict[str, object], payload["metrics"])
     assert_missing_keys(payload, "api_surface")
     assert_missing_keys(meta, "api_surface_payload_sha256")
-    assert_missing_keys(
-        metrics,
-        "typing_param_permille",
-        "typing_return_permille",
-        "docstring_permille",
-        "typing_any_count",
-    )
+    assert cast(int, metrics["typing_param_permille"]) >= 0
+    assert cast(int, metrics["typing_return_permille"]) >= 0
+    assert cast(int, metrics["docstring_permille"]) >= 0
+    assert cast(int, metrics["typing_any_count"]) >= 0
 
 
 def test_cli_update_baseline_write_error_is_contract_error(

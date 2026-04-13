@@ -8,9 +8,11 @@ const vscode = require("vscode");
 const {
     ANALYSIS_PROFILE_OPTIONS,
     HELP_TOPICS,
+    KNOWN_HELP_TOPICS,
     HOTSPOT_GROUPS,
     HOTSPOT_FOCUS_MODES,
     HOTSPOT_GROUPS_BY_MODE,
+    OPTIONAL_HELP_TOPICS,
     REVIEW_DECORATION_THEMES,
     WORKSPACE_STATE_HOTSPOT_FOCUS_MODE,
     WORKSPACE_STATE_LAST_HELP_TOPIC,
@@ -18,6 +20,7 @@ const {
 const {
     capitalize,
     compactDecimal,
+    coverageJoinPayload,
     decimal,
     emptyReviewArtifacts,
     findingIcon,
@@ -27,6 +30,10 @@ const {
     formatBaselineState,
     formatBooleanWord,
     formatCacheSummary,
+    formatCoverageJoinMeasuredUnits,
+    formatCoverageJoinPercent,
+    formatCoverageJoinStatus,
+    formatCoverageJoinSummary,
     formatKind,
     formatNovelty,
     formatRunScope,
@@ -103,7 +110,7 @@ class CodeCloneController {
             WORKSPACE_STATE_LAST_HELP_TOPIC,
             HELP_TOPICS[0]
         );
-        this.lastHelpTopic = HELP_TOPICS.includes(storedHelpTopic)
+        this.lastHelpTopic = KNOWN_HELP_TOPICS.includes(storedHelpTopic)
             ? storedHelpTopic
             : HELP_TOPICS[0];
         this.activeReviewTarget = null;
@@ -399,11 +406,29 @@ class CodeCloneController {
     }
 
     async persistLastHelpTopic(topic) {
-        this.lastHelpTopic = HELP_TOPICS.includes(topic) ? topic : HELP_TOPICS[0];
+        this.lastHelpTopic = KNOWN_HELP_TOPICS.includes(topic) ? topic : HELP_TOPICS[0];
         await this.context.workspaceState.update(
             WORKSPACE_STATE_LAST_HELP_TOPIC,
             this.lastHelpTopic
         );
+    }
+
+    availableHelpTopics() {
+        const detectedVersion =
+            this.connectionInfo.serverInfo?.version ||
+            this.getPrimaryState()?.latestSummary?.version ||
+            "";
+        return [
+            ...HELP_TOPICS,
+            ...OPTIONAL_HELP_TOPICS
+                .filter((entry) =>
+                    isMinimumSupportedCodeCloneVersion(
+                        detectedVersion,
+                        entry.minimumVersion
+                    )
+                )
+                .map((entry) => entry.topic),
+        ];
     }
 
     async manageWorkspaceTrust() {
@@ -2167,8 +2192,9 @@ class CodeCloneController {
     }
 
     async pickHelpTopic() {
+        const topics = this.availableHelpTopics();
         const picked = await vscode.window.showQuickPick(
-            HELP_TOPICS.map((topic) => ({
+            topics.map((topic) => ({
                 label: topic.replace(/_/g, " "),
                 description:
                     topic === this.lastHelpTopic ? "Last opened" : "CodeClone MCP help topic",
@@ -2304,6 +2330,7 @@ class CodeCloneController {
             overloadedModules: this.reviewArtifactCount(state, "overloadedModules"),
         };
         const baselineDrift = this.baselineDrift(state);
+        const coverageJoin = coverageJoinPayload(state.metricsSummary);
         if (!node) {
             const sections = [
                 {
@@ -2357,6 +2384,15 @@ class CodeCloneController {
                     label: "Overloaded Modules",
                     description: `${overloadedModules.candidates} candidates · top ${decimal(overloadedModules.top_score)} (report-only)`,
                     icon: new vscode.ThemeIcon("symbol-module"),
+                });
+            }
+            if (Object.keys(coverageJoin).length > 0) {
+                sections.push({
+                    nodeType: "section",
+                    id: "overview.coverageJoin",
+                    label: "Coverage Join",
+                    description: formatCoverageJoinSummary(coverageJoin),
+                    icon: new vscode.ThemeIcon("shield"),
                 });
             }
             return sections;
@@ -2511,6 +2547,39 @@ class CodeCloneController {
                 ),
             ];
         }
+        if (node.id === "overview.coverageJoin") {
+            return [
+                this.detailNode("Status", capitalize(formatCoverageJoinStatus(coverageJoin))),
+                this.detailNode(
+                    "Source",
+                    String(coverageJoin.source || "not configured")
+                ),
+                this.detailNode("Overall", formatCoverageJoinPercent(coverageJoin)),
+                this.detailNode(
+                    "Measured units",
+                    formatCoverageJoinMeasuredUnits(coverageJoin)
+                ),
+                this.detailNode(
+                    "Coverage hotspots",
+                    number(coverageJoin.coverage_hotspots)
+                ),
+                this.detailNode("Scope gaps", number(coverageJoin.scope_gap_hotspots)),
+                this.detailNode(
+                    "Threshold",
+                    typeof coverageJoin.hotspot_threshold_percent === "number"
+                        ? `${coverageJoin.hotspot_threshold_percent}%`
+                        : "n/a"
+                ),
+                ...(coverageJoin.invalid_reason
+                    ? [
+                        this.detailNode(
+                            "Reason",
+                            String(coverageJoin.invalid_reason)
+                        ),
+                    ]
+                    : []),
+            ];
+        }
         return [];
     }
 
@@ -2584,7 +2653,7 @@ class CodeCloneController {
                     nodeType: "section",
                     id: "session.help",
                     label: "Help Topics",
-                    description: `${HELP_TOPICS.length} topics`,
+                    description: `${this.availableHelpTopics().length} topics`,
                     icon: new vscode.ThemeIcon("question"),
                 },
             ];
@@ -2666,7 +2735,7 @@ class CodeCloneController {
             });
         }
         if (node.id === "session.help") {
-            return HELP_TOPICS.map((topic) => ({
+            return this.availableHelpTopics().map((topic) => ({
                 nodeType: "helpTopic",
                 topic,
                 label: topic,

@@ -98,7 +98,7 @@ Refs:
 - When `golden_fixture_paths` excludes clone groups from active review, CLI
   keeps that count inside the `Clones` summary line (`fixtures=N`) instead of
   adding a separate summary row.
-- Typing/docstring adoption metrics are computed by default in full mode.
+- Typing/docstring adoption metrics are computed in full mode.
 - `--api-surface` is opt-in in normal runs, but runtime auto-enables it when
   `--fail-on-api-break` or `--update-metrics-baseline` needs a public API
   snapshot.

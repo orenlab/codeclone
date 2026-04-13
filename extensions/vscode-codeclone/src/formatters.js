@@ -89,6 +89,85 @@ function formatCacheSummary(payload) {
     return `${usage} · ${freshness}`;
 }
 
+function coverageJoinPayload(metricsSummary) {
+    return safeObject(safeObject(metricsSummary).coverage_join);
+}
+
+function countedNoun(value, singular, plural = `${singular}s`) {
+    const normalized =
+        typeof value === "number" && !Number.isNaN(value) ? value : 0;
+    return `${number(normalized)} ${normalized === 1 ? singular : plural}`;
+}
+
+function formatCoverageJoinStatus(payload) {
+    const status = String(safeObject(payload).status || "").trim().toLowerCase();
+    switch (status) {
+        case "ok":
+            return "joined";
+        case "missing":
+            return "unavailable";
+        case "invalid":
+            return "invalid";
+        default:
+            return status ? status.replace(/_/g, " ") : "unavailable";
+    }
+}
+
+function formatCoverageJoinPercent(payload) {
+    const permille = safeObject(payload).overall_permille;
+    if (typeof permille !== "number" || Number.isNaN(permille)) {
+        return "n/a";
+    }
+    return `${compactDecimal(permille / 10)}%`;
+}
+
+function formatCoverageJoinMeasuredUnits(payload) {
+    const entry = safeObject(payload);
+    const measuredUnits =
+        typeof entry.measured_units === "number" && !Number.isNaN(entry.measured_units)
+            ? entry.measured_units
+            : null;
+    const totalUnits =
+        typeof entry.units === "number" && !Number.isNaN(entry.units)
+            ? entry.units
+            : null;
+    if (measuredUnits === null && totalUnits === null) {
+        return "n/a";
+    }
+    if (measuredUnits !== null && totalUnits !== null) {
+        return `${number(measuredUnits)} / ${number(totalUnits)}`;
+    }
+    return number(measuredUnits !== null ? measuredUnits : totalUnits);
+}
+
+function formatCoverageJoinSummary(payload) {
+    const entry = safeObject(payload);
+    if (Object.keys(entry).length === 0) {
+        return "";
+    }
+    if (String(entry.status || "").trim().toLowerCase() === "ok") {
+        const parts = [
+            `${formatCoverageJoinPercent(entry)} overall`,
+            countedNoun(entry.coverage_hotspots, "hotspot"),
+        ];
+        const scopeGaps =
+            typeof entry.scope_gap_hotspots === "number" &&
+            !Number.isNaN(entry.scope_gap_hotspots)
+                ? entry.scope_gap_hotspots
+                : 0;
+        if (scopeGaps > 0) {
+            parts.push(countedNoun(scopeGaps, "scope gap"));
+        }
+        return parts.join(" · ");
+    }
+    const parts = [formatCoverageJoinStatus(entry)];
+    const source = String(entry.source || "").trim();
+    if (source) {
+        parts.push(path.basename(source));
+    }
+    return parts.join(" · ");
+}
+
 function formatRunScope(value) {
     return value === "changed" ? "changed files" : "workspace";
 }
@@ -316,6 +395,11 @@ module.exports = {
     formatBaselineState,
     formatBooleanWord,
     formatCacheSummary,
+    coverageJoinPayload,
+    formatCoverageJoinMeasuredUnits,
+    formatCoverageJoinPercent,
+    formatCoverageJoinStatus,
+    formatCoverageJoinSummary,
     formatKind,
     formatNovelty,
     formatRunScope,

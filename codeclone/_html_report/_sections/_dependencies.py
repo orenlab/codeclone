@@ -13,7 +13,13 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from ... import _coerce
-from ..._html_badges import _render_chain_flow, _short_label, _stat_card, _tab_empty
+from ..._html_badges import (
+    _micro_badges,
+    _render_chain_flow,
+    _short_label,
+    _stat_card,
+    _tab_empty,
+)
 from ..._html_escape import _escape_html
 from .._components import Tone, insight_block
 from .._glossary import glossary_tip
@@ -338,15 +344,6 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
     dep_max_depth = _as_int(ctx.dependencies_map.get("max_depth"))
     cycle_count = len(dep_cycles)
 
-    def _mb(*pairs: tuple[str, object]) -> str:
-        return "".join(
-            f'<span class="kpi-micro">'
-            f'<span class="kpi-micro-val">{_escape_html(str(v))}</span>'
-            f'<span class="kpi-micro-lbl">{_escape_html(lbl)}</span></span>'
-            for lbl, v in pairs
-            if v is not None and str(v) != "n/a"
-        )
-
     dep_avg = (
         f"{dep_edge_count / dep_module_count:.1f}" if dep_module_count > 0 else "n/a"
     )
@@ -355,21 +352,21 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
         _stat_card(
             "Modules",
             dep_module_count,
-            detail=_mb(("imports", dep_edge_count)),
+            detail=_micro_badges(("imports", dep_edge_count)),
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
             "Edges",
             dep_edge_count,
-            detail=_mb(("avg/module", dep_avg)),
+            detail=_micro_badges(("avg/module", dep_avg)),
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
             "Max depth",
             dep_max_depth,
-            detail=_mb(("target", "< 8")),
+            detail=_micro_badges(("target", "< 8")),
             value_tone="warn" if dep_max_depth > 8 else "good",
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
@@ -378,9 +375,9 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
             "Cycles",
             cycle_count,
             detail=(
-                _mb(("modules", len(cycle_node_set)))
+                _micro_badges(("modules", len(cycle_node_set)))
                 if cycle_count > 0
-                else _mb(("status", "clean"))
+                else _micro_badges(("status", "clean"))
             ),
             value_tone="bad" if cycle_count > 0 else "good",
             css_class="meta-item",
@@ -453,7 +450,7 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
         insight_block(
             question="Do module dependencies form cycles?", answer=answer, tone=tone
         )
-        + f'<div class="dep-stats">{"".join(cards)}</div>'
+        + f'<div class="stat-cards">{"".join(cards)}</div>'
         + hub_bar
         + graph_svg
         + legend

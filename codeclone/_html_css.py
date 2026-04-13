@@ -668,8 +668,8 @@ _OVERVIEW = """\
 /* Fact-list: compact label ··· value rows inside overview-summary-item cards. */
 .overview-fact-list{display:flex;flex-direction:column;gap:var(--sp-2)}
 .overview-fact-row{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-3);
-  font-size:.8rem;padding-bottom:6px}
-.overview-fact-row:last-child{padding-bottom:0}
+  font-size:.8rem;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.overview-fact-row:last-child{padding-bottom:0;border-bottom:none}
 .overview-fact-label{color:var(--text-muted)}
 .overview-fact-value{display:inline-flex;align-items:baseline;gap:6px;
   color:var(--text-primary);font-weight:600;font-variant-numeric:tabular-nums;text-align:right}

@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from ... import _coerce
-from ..._html_badges import _tab_empty
+from ..._html_badges import _micro_badges, _stat_card, _tab_empty
 from ..._html_data_attrs import _build_data_attrs
 from ..._html_escape import _escape_html
 from ..._html_filters import SPREAD_OPTIONS, _render_select
@@ -31,6 +31,7 @@ from ...domain.findings import (
 from ...domain.quality import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING
 from ...report._source_kinds import SOURCE_KIND_FILTER_VALUES, source_kind_label
 from .._components import insight_block
+from .._glossary import glossary_tip
 
 if TYPE_CHECKING:
     from ...models import Suggestion
@@ -241,6 +242,39 @@ def render_suggestions_panel(ctx: ReportContext) -> str:
         tone="risk" if critical > 0 else "warn",
     )
 
+    # Stat cards
+    easy_wins = sum(1 for s in rows if s.effort == "easy" and s.severity != "info")
+    sug_cards = [
+        _stat_card(
+            "Total suggestions",
+            len(rows),
+            detail=_micro_badges(("actionable", len(rows) - info)),
+            value_tone="warn" if len(rows) > 0 else "good",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Critical",
+            critical,
+            detail=_micro_badges(("of total", len(rows))),
+            value_tone="bad" if critical > 0 else "good",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Warning",
+            warning,
+            value_tone="warn" if warning > 0 else "muted",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Easy wins",
+            easy_wins,
+            detail=_micro_badges(("effort", "easy")),
+            value_tone="good" if easy_wins > 0 else "muted",
+            glossary_tip_fn=glossary_tip,
+        ),
+    ]
+    sug_cards_html = f'<div class="stat-cards">{"".join(sug_cards)}</div>'
+
     cards_html = "".join(_render_card(s, ctx) for s in rows)
     sev_opts = tuple(
         (s, s) for s in (SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO)
@@ -262,6 +296,7 @@ def render_suggestions_panel(ctx: ReportContext) -> str:
 
     return (
         intro
+        + sug_cards_html
         + '<div class="toolbar suggestions-toolbar" role="toolbar" aria-label="Suggestion filters">'
         '<div class="suggestions-toolbar-row">'
         '<label class="muted" for="suggestions-severity">Severity:</label>'

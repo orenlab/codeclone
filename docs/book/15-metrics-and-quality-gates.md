@@ -67,7 +67,7 @@ Refs:
   `skip_dead_code=true`, `skip_dependencies=true`.
 - `--fail-dead-code` forces dead-code analysis on (even if metrics are skipped).
 - `--fail-cycles` forces dependency analysis on (even if metrics are skipped).
-- Type/docstring adoption metrics are computed by default in full mode.
+- Type/docstring adoption metrics are computed in full mode.
 - `--coverage` joins an external Cobertura XML file to current-run function
   spans with stdlib XML parsing only. This signal is not metrics-baseline truth,
   is not written to `codeclone.baseline.json`, and does not affect fingerprint

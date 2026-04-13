@@ -72,7 +72,7 @@
     },
     {
       "name": "help",
-      "description": "Semantic guide for workflow, analysis profile, baseline, and review state."
+      "description": "Semantic guide for workflow, analysis profile, baseline, coverage, and review state."
     }
   ],
   "tools_generated": true,

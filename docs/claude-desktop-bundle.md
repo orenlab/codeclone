@@ -8,6 +8,11 @@ surface used by CLI, VS Code, Codex, and Claude Code. The manifest includes
 pre-loaded instructions that guide Claude toward conservative-first,
 production-first structural review.
 
+Because the bundle is only a launcher wrapper, newly added canonical MCP
+surfaces from the local `codeclone-mcp` version flow through directly,
+including current-run `Coverage Join` facts and the optional `coverage` help
+topic when supported by that server.
+
 ## Install
 
 The bundle prefers the current workspace launcher first:

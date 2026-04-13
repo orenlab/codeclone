@@ -16,7 +16,7 @@
   <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main&style=flat-square" alt="Tests"></a>
   <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml/badge.svg?style=flat-square" alt="Benchmark"></a>
   <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone.svg?style=flat-square" alt="Python"></a>
-  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-87%20(B)-green" alt="codeclone 89 (B)"></a>
+  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-89%20(B)-green" alt="codeclone 89 (B)"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MPL--2.0-brightgreen?style=flat-square" alt="License"></a>
 </p>
 
@@ -50,7 +50,8 @@ Live sample report:
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
 - **MCP server** — optional read-only surface for AI agents and IDEs, designed as a budget-aware guided control
   surface for agentic development
-- **VS Code extension** — preview native client for CodeClone MCP with triage-first structural review
+- **VS Code extension** — preview native client for CodeClone MCP with triage-first structural review, factual
+  `Coverage Join` overview support, and bounded in-IDE help topics
 - **Native client surfaces** — preview Claude Desktop bundle and Codex plugin over the same canonical MCP contract
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Fast** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage

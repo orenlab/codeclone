@@ -56,8 +56,6 @@ _CONFIG_KEY_SPECS: Final[dict[str, _ConfigKeySpec]] = {
     "fail_dead_code": _ConfigKeySpec(bool),
     "fail_health": _ConfigKeySpec(int),
     "fail_on_new_metrics": _ConfigKeySpec(bool),
-    "typing_coverage": _ConfigKeySpec(bool),
-    "docstring_coverage": _ConfigKeySpec(bool),
     "api_surface": _ConfigKeySpec(bool),
     "coverage_xml": _ConfigKeySpec(str, allow_none=True),
     "fail_on_typing_regression": _ConfigKeySpec(bool),

@@ -78,12 +78,14 @@ The extension currently supports:
 - changed-files analysis against a configured git diff reference
 - conservative default analysis with an explicit deeper-review or custom-threshold
   follow-up profile
-- compact overview of structural health, current run state, and baseline drift
+- compact overview of structural health, current run state, baseline drift, and
+  current-run `Coverage Join` facts when MCP exposes `metrics.coverage_join`
 - review queues for new regressions, production hotspots, changed-scope
   findings, and report-only `Overloaded Modules`
 - source reveal, peek, canonical finding detail, remediation detail, and
   session-local reviewed markers
-- bounded MCP help topics inside the IDE
+- bounded MCP help topics inside the IDE, with the optional `coverage` topic on
+  newer CodeClone/MCP servers
 - explicit HTML-report bridge when a local HTML report already exists
 
 These capabilities must remain clients of MCP and canonical report truth rather

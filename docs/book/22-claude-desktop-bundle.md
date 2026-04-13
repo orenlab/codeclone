@@ -26,6 +26,11 @@ analysis.
 
 The bundle delegates to the existing `codeclone-mcp` launcher.
 
+That means newly added canonical MCP surfaces flow through from the resolved
+local server version. The bundle does not need a second feature switch for
+surfaces such as current-run `Coverage Join` facts or the optional `coverage`
+help topic.
+
 It must not:
 
 - run a second analysis engine
@@ -39,6 +44,8 @@ The bundle currently provides:
 
 - one installable `.mcpb` package
 - one local Node launcher wrapper
+- the same canonical MCP tool/help surface exposed by the resolved local
+  `codeclone-mcp` version
 - two user settings:
     - launcher command
     - advanced launcher args as a JSON array

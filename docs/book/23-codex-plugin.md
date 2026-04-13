@@ -23,6 +23,10 @@ The Codex plugin is:
 The plugin delegates analysis to the existing `codeclone-mcp` launcher and
 guides usage through a plugin-bundled skill.
 
+New canonical MCP surfaces flow through from the resolved local server version.
+That includes current-run metric families such as `Coverage Join` and the
+optional `coverage` help topic when that server supports them.
+
 It must not:
 
 - run a second analysis engine
@@ -37,8 +41,9 @@ The plugin currently provides:
 - `.codex-plugin/plugin.json`
 - `.mcp.json`
 - `README.md`
-- one bundled skill:
+- two bundled skills:
     - `codeclone-review`
+    - `codeclone-hotspots`
 - a repo-local marketplace entry in `.agents/plugins/marketplace.json`
 
 ## Runtime model
@@ -47,7 +52,7 @@ The plugin surface is additive:
 
 - `.mcp.json` contributes a local stdio MCP server definition
 - that launcher prefers a workspace `.venv`, then a Poetry env, then `PATH`
-- the skill contributes workflow guidance and starter prompts
+- the skills contribute workflow guidance and starter prompts
 - `README.md` documents local usage and boundaries inside the repository tree
 - Codex remains free to use direct `mcp add` config alongside or instead of the
   plugin

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ... import _coerce
-from ..._html_badges import _stat_card, _tab_empty_info
+from ..._html_badges import _micro_badges, _stat_card, _tab_empty_info
 from ..._html_escape import _escape_html
 from .._glossary import glossary_tip
 from .._tables import render_rows_table
@@ -75,7 +75,7 @@ def render_coverage_join_panel(ctx: ReportContext) -> str:
     ]
 
     return (
-        f'<div class="dep-stats">{"".join(cards)}</div>'
+        f'<div class="stat-cards">{"".join(cards)}</div>'
         + '<h3 class="subsection-title">Coverage review items</h3>'
         + render_rows_table(
             headers=("Function", "Location", "CC", "Status", "Coverage", "Risk"),
@@ -233,16 +233,6 @@ def _coverage_cell_label(item: Mapping[str, object]) -> str:
     if bool(item.get("scope_gap_hotspot")):
         return "n/a"
     return _format_permille_pct(item.get("coverage_permille"))
-
-
-def _micro_badges(*pairs: tuple[str, object]) -> str:
-    return "".join(
-        f'<span class="kpi-micro">'
-        f'<span class="kpi-micro-val">{_escape_html(str(value))}</span>'
-        f'<span class="kpi-micro-lbl">{_escape_html(label)}</span></span>'
-        for label, value in pairs
-        if value is not None and str(value) != "n/a"
-    )
 
 
 def _format_permille_pct(value: object) -> str:

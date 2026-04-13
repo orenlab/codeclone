@@ -42,8 +42,6 @@ class _RuntimeArgs(Protocol):
     min_typing_coverage: int
     min_docstring_coverage: int
     coverage_min: int
-    typing_coverage: bool
-    docstring_coverage: bool
     api_surface: bool
     update_metrics_baseline: bool
     skip_metrics: bool
@@ -181,10 +179,7 @@ def metrics_computed(args: _RuntimeArgs) -> tuple[str, ...]:
         computed.append("dependencies")
     if not args.skip_dead_code:
         computed.append("dead_code")
-    if bool(getattr(args, "typing_coverage", True)) or bool(
-        getattr(args, "docstring_coverage", True)
-    ):
-        computed.append("coverage_adoption")
+    computed.append("coverage_adoption")
     if bool(getattr(args, "api_surface", False)):
         computed.append("api_surface")
     if bool(getattr(args, "coverage_xml", None)):

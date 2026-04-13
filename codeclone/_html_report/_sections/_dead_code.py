@@ -11,7 +11,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ... import _coerce
+from ..._html_badges import _micro_badges, _stat_card
 from .._components import Tone, insight_block
+from .._glossary import glossary_tip
 from .._tables import render_rows_table
 from .._tabs import render_split_tabs
 
@@ -102,14 +104,51 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
         ctx=ctx,
     )
 
-    return insight_block(
-        question="Do we have actionable unused code?",
-        answer=answer,
-        tone=tone,
-    ) + render_split_tabs(
-        group_id="dead-code",
-        tabs=(
-            ("active", "Active", dead_total, active_panel),
-            ("suppressed", "Suppressed", dead_suppressed_total, suppressed_panel),
+    # Stat cards
+    pct = (dead_high_conf / max(1, dead_total)) * 100 if dead_total > 0 else 0
+    dead_cards = [
+        _stat_card(
+            "Candidates",
+            dead_total,
+            detail=_micro_badges(("active", dead_total - dead_suppressed_total)),
+            value_tone="warn" if dead_total > 0 else "good",
+            glossary_tip_fn=glossary_tip,
         ),
+        _stat_card(
+            "High confidence",
+            dead_high_conf,
+            detail=_micro_badges(("of total", dead_total)),
+            value_tone="bad" if dead_high_conf > 0 else "good",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Suppressed",
+            dead_suppressed_total,
+            value_tone="muted",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Hit rate",
+            f"{pct:.0f}%",
+            detail=_micro_badges(("high vs total", "")),
+            value_tone="bad" if pct > 50 else "warn" if pct > 20 else "good",
+            glossary_tip_fn=glossary_tip,
+        ),
+    ]
+    cards_html = f'<div class="stat-cards">{"".join(dead_cards)}</div>'
+
+    return (
+        insight_block(
+            question="Do we have actionable unused code?",
+            answer=answer,
+            tone=tone,
+        )
+        + cards_html
+        + render_split_tabs(
+            group_id="dead-code",
+            tabs=(
+                ("active", "Active", dead_total, active_panel),
+                ("suppressed", "Suppressed", dead_suppressed_total, suppressed_panel),
+            ),
+        )
     )

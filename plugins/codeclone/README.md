@@ -4,6 +4,8 @@ Native Codex plugin for structural code quality analysis over `codeclone-mcp`.
 
 Same canonical MCP surface used by CLI, VS Code, Claude Desktop, and Claude Code.
 Read-only, baseline-aware, local stdio only.
+Current-run metric surfaces from the local `codeclone-mcp` version flow through
+directly, including `Coverage Join` facts and the optional `coverage` help topic.
 
 ## What ships here
 
@@ -52,10 +54,11 @@ codex mcp add codeclone -- codeclone-mcp --transport stdio
 ## Skills
 
 **codeclone-review** — full structural review: conservative first pass,
-baseline-aware triage, changed-files review, deeper exploratory follow-up.
+baseline-aware triage, changed-files review, deeper exploratory follow-up,
+current-run metrics surfaces.
 
 **codeclone-hotspots** — quick quality snapshot: health check, top risks,
-single-metric queries, pre-merge sanity checks.
+single-metric queries, pre-merge sanity checks, coverage/adoption/API snapshots.
 
 ## Links
 

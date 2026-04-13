@@ -19,6 +19,7 @@ The extension helps you:
 - focus on new regressions and production hotspots first
 - jump directly to source locations
 - open canonical finding or remediation detail only when needed
+- inspect current-run `Coverage Join` facts without inventing extension-local interpretations
 - inspect report-only Overloaded Module candidates without treating them like findings
 
 It does not create a second truth model and it does not mutate the repository.
@@ -55,6 +56,8 @@ codeclone-mcp --help
 ### Overview
 
 Compact health, current run state, baseline drift, and next-best review action.
+When the current run includes external Cobertura join facts, Overview also
+shows a factual `Coverage Join` section sourced from canonical MCP metrics.
 
 ### Hotspots
 
@@ -72,7 +75,8 @@ Session-local state:
 - local server availability
 - current run identity
 - reviewed findings
-- MCP help topics
+- MCP help topics, including the optional `coverage` topic on newer
+  CodeClone/MCP servers
 
 ## Review model
 

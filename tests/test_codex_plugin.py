@@ -94,6 +94,8 @@ def test_codex_plugin_skill_exists() -> None:
         "name: codeclone-review",
         "conservative first pass",
         'help(topic="analysis_profile")',
+        'help(topic="coverage")',
+        'get_report_section(section="metrics")',
         "Use MCP tools only",
         "Do not fall back to CLI or local report files.",
     ):
@@ -101,12 +103,16 @@ def test_codex_plugin_skill_exists() -> None:
 
     for needle in (
         "name: codeclone-hotspots",
+        'get_report_section(section="metrics")',
+        'help(topic="coverage")',
         "Use MCP tools only",
         "Do not fall back to CLI or local report files.",
     ):
         assert needle in hotspot_skill_text
 
     assert "Use MCP tools only." in manifest["instructions"]
+    assert 'get_report_section(section="metrics")' in manifest["instructions"]
+    assert 'help(topic="coverage")' in manifest["instructions"]
     assert "never fall back to CLI, local report files" in manifest["instructions"]
 
 

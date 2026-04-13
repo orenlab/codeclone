@@ -14,7 +14,8 @@ Main ownership layers:
 - Report model and projections: canonical JSON + deterministic TXT/Markdown/SARIF + explainability facts.
 - MCP agent surface: read-only server layer over the same pipeline/report contracts.
 - VS Code extension surface: native IDE client over the MCP layer and the same canonical report semantics, with
-  limited Restricted Mode and source-first review flow.
+  limited Restricted Mode, source-first review flow, and factual overview surfaces such as `Coverage Join` when MCP
+  exposes them.
 - Claude Desktop bundle surface: installable local `.mcpb` wrapper that launches the same `codeclone-mcp` server for
   Claude Desktop without introducing a second MCP or analysis layer.
 - Codex plugin surface: repo-local Codex plugin under `plugins/` and `.agents/plugins/marketplace.json` that adds

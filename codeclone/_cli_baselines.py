@@ -62,8 +62,6 @@ class _BaselineArgs(Protocol):
     fail_on_typing_regression: bool
     fail_on_docstring_regression: bool
     fail_on_api_break: bool
-    typing_coverage: bool
-    docstring_coverage: bool
     api_surface: bool
     ci: bool
 
@@ -388,7 +386,7 @@ def _update_metrics_baseline_if_requested(
     new_metrics_baseline = MetricsBaseline.from_project_metrics(
         project_metrics=project_metrics,
         path=metrics_baseline_path,
-        include_adoption=args.typing_coverage or args.docstring_coverage,
+        include_adoption=True,
         include_api_surface=args.api_surface,
     )
     try:

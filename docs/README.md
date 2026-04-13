@@ -50,6 +50,10 @@ repository build:
 - [Codex plugin contract](book/23-codex-plugin.md)
 - [HTML report rendering contract](book/10-html-render.md)
 
+The VS Code extension docs cover the native IDE surface for canonical review
+facts, including optional `Coverage Join` overview data and version-gated MCP
+help topics when the connected server exposes them.
+
 ## System Properties
 
 - [Security model and threat boundaries](book/11-security-model.md)
