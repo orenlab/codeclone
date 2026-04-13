@@ -61,6 +61,8 @@ Embedded metrics contract:
 - The default runtime flow is unified: clone baseline and metrics baseline
   usually share the same `codeclone.baseline.json` file unless the metrics path
   is explicitly overridden.
+- In unified rewrite mode, disabled optional metric surfaces are omitted from
+  the rewritten embedded payload instead of being preserved as stale baggage.
 
 Integrity payload includes only:
 

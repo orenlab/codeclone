@@ -20,8 +20,8 @@ Current contract versions:
 
 - `BASELINE_SCHEMA_VERSION = "2.1"`
 - `BASELINE_FINGERPRINT_VERSION = "1"`
-- `CACHE_VERSION = "2.3"`
-- `REPORT_SCHEMA_VERSION = "2.5"`
+- `CACHE_VERSION = "2.4"`
+- `REPORT_SCHEMA_VERSION = "2.8"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.2"` (used only when metrics are stored
   in a dedicated metrics-baseline file instead of the default unified baseline)
 
@@ -69,9 +69,13 @@ Version bump rules:
   `report_schema_version` because they alter canonical report semantics and
   integrity payload.
 - The same is true for additive canonical metrics families such as
-  `metrics.families.overloaded_modules`: even though the layer is report-only and does
-  not affect health/gates/findings, it still changes canonical report schema
-  and integrity payload, so it requires a report-schema bump.
+  `metrics.families.overloaded_modules`, `coverage_adoption`, `api_surface`,
+  or `coverage_join`: even when the layer is report-only or current-run only,
+  it still changes canonical report schema and integrity payload, so it
+  requires a report-schema bump.
+- The same rule applies to new canonical suppressed-finding buckets such as
+  `findings.groups.clones.suppressed.*`: even though they are non-active
+  review facts, they still change canonical report shape and integrity payload.
 - CodeClone does not currently define a separate health-model version constant.
   Health-score semantics are package-versioned and must be documented in the
   Health Score chapter and release notes when they change.

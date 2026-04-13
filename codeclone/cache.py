@@ -1407,18 +1407,15 @@ def _canonicalize_cache_entry(entry: CacheEntry) -> CacheEntry:
                 kind=symbol["kind"],
                 start_line=symbol["start_line"],
                 end_line=symbol["end_line"],
-                params=sorted(
-                    [
-                        ApiParamSpecDict(
-                            name=param["name"],
-                            kind=param["kind"],
-                            has_default=param["has_default"],
-                            annotation_hash=param["annotation_hash"],
-                        )
-                        for param in symbol.get("params", [])
-                    ],
-                    key=lambda item: (item["kind"], item["name"]),
-                ),
+                params=[
+                    ApiParamSpecDict(
+                        name=param["name"],
+                        kind=param["kind"],
+                        has_default=param["has_default"],
+                        annotation_hash=param["annotation_hash"],
+                    )
+                    for param in symbol.get("params", [])
+                ],
                 returns_hash=symbol.get("returns_hash", ""),
                 exported_via=symbol.get("exported_via", "name"),
             )

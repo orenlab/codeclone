@@ -940,6 +940,7 @@ def test_print_summary_invariant_warning(
         func_clones_count=0,
         block_clones_count=0,
         segment_clones_count=0,
+        suppressed_golden_fixture_groups=0,
         suppressed_segment_groups=0,
         new_clones_count=0,
     )
@@ -969,6 +970,51 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
         == "Metrics  cc=2.8/21  cbo=0.6/8  lcom4=1.2/4"
         "  cycles=0  dead_code=1  health=85(B)  overloaded_modules=3"
     )
+    assert (
+        ui.fmt_summary_compact_adoption(
+            param_permille=750,
+            return_permille=500,
+            docstring_permille=667,
+            any_annotation_count=1,
+        )
+        == "Adoption  params=75.0%  returns=50.0%  docstrings=66.7%  any=1"
+    )
+    assert (
+        ui.fmt_summary_compact_api_surface(
+            public_symbols=3,
+            modules=2,
+            breaking=1,
+            added=4,
+        )
+        == "Public API  symbols=3  modules=2  breaking=1  added=4"
+    )
+    assert (
+        ui.fmt_summary_compact_clones(
+            function=1,
+            block=2,
+            segment=0,
+            suppressed=3,
+            fixture_excluded=2,
+            new=4,
+        )
+        == "Clones   func=1  block=2  seg=0  suppressed=3  fixtures=2  new=4"
+    )
+    assert (
+        ui.fmt_summary_compact_coverage_join(
+            status="ok",
+            overall_permille=735,
+            coverage_hotspots=2,
+            scope_gap_hotspots=1,
+            threshold_percent=50,
+            source_label="coverage.xml",
+        )
+        == "Coverage  status=ok  overall=73.5%  coverage_hotspots=2"
+        "  threshold=50  scope_gaps=1  source=coverage.xml"
+    )
+    assert (
+        ui.fmt_coverage_join_ignored("bad xml")
+        == "[warning]Coverage join ignored: bad xml[/warning]"
+    )
 
 
 def test_ui_summary_formatters_cover_optional_branches() -> None:
@@ -986,9 +1032,11 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
         block=2,
         segment=3,
         suppressed=1,
+        fixture_excluded=2,
         new=0,
     )
     assert "[bold yellow]3[/bold yellow] seg" in clones
+    assert "[yellow]2[/yellow] fixtures" in clones
 
     assert "5 detected" in ui.fmt_metrics_cycles(5)
     dead_with_suppressed = ui.fmt_metrics_dead_code(447, suppressed=9)
@@ -1036,6 +1084,34 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
         added=4,
     )
     assert_contains_all(api_surface, "symbols", "modules", "breaking", "added")
+    coverage_join = ui.fmt_metrics_coverage_join(
+        status="ok",
+        overall_permille=735,
+        coverage_hotspots=2,
+        scope_gap_hotspots=1,
+        threshold_percent=50,
+        source_label="coverage.xml",
+    )
+    assert_contains_all(
+        coverage_join,
+        "73.5% overall",
+        "[bold red]2[/bold red] hotspots < 50%",
+        "[bold yellow]1[/bold yellow] scope gaps",
+        "coverage.xml",
+    )
+    coverage_join_unavailable = ui.fmt_metrics_coverage_join(
+        status="invalid",
+        overall_permille=0,
+        coverage_hotspots=0,
+        scope_gap_hotspots=0,
+        threshold_percent=50,
+        source_label="coverage.xml",
+    )
+    assert_contains_all(
+        coverage_join_unavailable,
+        "join unavailable",
+        "coverage.xml",
+    )
     changed_paths = ui.fmt_changed_scope_paths(count=45)
     assert "45" in changed_paths
     assert "from git diff" in changed_paths
@@ -1124,7 +1200,60 @@ def test_print_metrics_in_quiet_mode_includes_overloaded_modules(
     assert "Public API" not in out
 
 
-def test_print_metrics_in_normal_mode_includes_adoption_and_public_api(
+def test_print_metrics_in_quiet_mode_includes_adoption_public_api_and_coverage(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    cli_summary._print_metrics(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=True,
+        metrics=cli_summary.MetricsSnapshot(
+            complexity_avg=2.8,
+            complexity_max=20,
+            high_risk_count=0,
+            coupling_avg=0.5,
+            coupling_max=9,
+            cohesion_avg=1.2,
+            cohesion_max=4,
+            cycles_count=0,
+            dead_code_count=0,
+            health_total=85,
+            health_grade="B",
+            adoption_param_permille=750,
+            adoption_return_permille=500,
+            adoption_docstring_permille=667,
+            adoption_any_annotation_count=1,
+            api_surface_enabled=True,
+            api_surface_modules=2,
+            api_surface_public_symbols=3,
+            api_surface_added=4,
+            api_surface_breaking=1,
+            coverage_join_status="ok",
+            coverage_join_overall_permille=735,
+            coverage_join_coverage_hotspots=2,
+            coverage_join_scope_gap_hotspots=1,
+            coverage_join_threshold_percent=50,
+            coverage_join_source_label="coverage.xml",
+            overloaded_modules_candidates=3,
+            overloaded_modules_total=158,
+            overloaded_modules_population_status="ok",
+            overloaded_modules_top_score=0.98,
+        ),
+    )
+    out = capsys.readouterr().out
+    assert_contains_all(
+        out,
+        "Adoption",
+        "params=75.0%",
+        "Public API",
+        "breaking=1",
+        "Coverage",
+        "coverage_hotspots=2",
+        "source=coverage.xml",
+    )
+
+
+def test_print_metrics_in_normal_mode_includes_adoption_public_api_and_coverage(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
@@ -1152,6 +1281,12 @@ def test_print_metrics_in_normal_mode_includes_adoption_and_public_api(
             api_surface_public_symbols=3,
             api_surface_added=4,
             api_surface_breaking=1,
+            coverage_join_status="ok",
+            coverage_join_overall_permille=735,
+            coverage_join_coverage_hotspots=2,
+            coverage_join_scope_gap_hotspots=1,
+            coverage_join_threshold_percent=50,
+            coverage_join_source_label="coverage.xml",
             overloaded_modules_candidates=3,
             overloaded_modules_total=158,
             overloaded_modules_population_status="ok",
@@ -1167,6 +1302,9 @@ def test_print_metrics_in_normal_mode_includes_adoption_and_public_api(
         "Public API",
         "3 symbols",
         "1 breaking",
+        "Coverage",
+        "73.5% overall",
+        "2 hotspots < 50%",
     )
 
 
@@ -1209,6 +1347,36 @@ def test_configure_metrics_mode_forces_dependency_and_dead_code_when_gated() -> 
     cli._configure_metrics_mode(args=args, metrics_baseline_exists=True)
     assert args.skip_dead_code is False
     assert args.skip_dependencies is False
+
+
+def test_configure_metrics_mode_does_not_force_api_surface_for_baseline_update() -> (
+    None
+):
+    args = Namespace(
+        skip_metrics=False,
+        fail_complexity=-1,
+        fail_coupling=-1,
+        fail_cohesion=-1,
+        fail_cycles=False,
+        fail_dead_code=False,
+        fail_health=-1,
+        fail_on_new_metrics=False,
+        fail_on_typing_regression=False,
+        fail_on_docstring_regression=False,
+        fail_on_api_break=False,
+        fail_on_untested_hotspots=False,
+        min_typing_coverage=-1,
+        min_docstring_coverage=-1,
+        update_metrics_baseline=True,
+        skip_dead_code=False,
+        skip_dependencies=False,
+        api_surface=False,
+        coverage_xml=None,
+    )
+
+    cli._configure_metrics_mode(args=args, metrics_baseline_exists=True)
+
+    assert args.api_surface is False
 
 
 def test_probe_metrics_baseline_section_for_non_object_payload(tmp_path: Path) -> None:
@@ -1268,6 +1436,94 @@ def test_metrics_computed_includes_api_surface_only_when_enabled() -> None:
         "coverage_adoption",
         "api_surface",
     )
+
+
+def test_metrics_computed_includes_coverage_join_only_with_xml() -> None:
+    assert cli._metrics_computed(
+        Namespace(
+            skip_metrics=False,
+            skip_dependencies=True,
+            skip_dead_code=True,
+            api_surface=False,
+            coverage_xml=None,
+        )
+    ) == ("complexity", "coupling", "cohesion", "health", "coverage_adoption")
+    assert cli._metrics_computed(
+        Namespace(
+            skip_metrics=False,
+            skip_dependencies=True,
+            skip_dead_code=True,
+            api_surface=False,
+            coverage_xml="coverage.xml",
+        )
+    ) == (
+        "complexity",
+        "coupling",
+        "cohesion",
+        "health",
+        "coverage_adoption",
+        "coverage_join",
+    )
+
+
+def test_enforce_gating_requires_coverage_input_for_hotspot_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cli.console = cli._make_console(no_color=True)
+    monkeypatch.setattr(cli, "gate", lambda **_kwargs: pipeline.GatingResult(0, ()))
+    with pytest.raises(SystemExit) as exc:
+        cli._enforce_gating(
+            args=Namespace(
+                fail_on_untested_hotspots=True,
+                fail_threshold=-1,
+                verbose=False,
+            ),
+            boot=cast("pipeline.BootstrapResult", object()),
+            analysis=cast(Any, SimpleNamespace(coverage_join=None)),
+            processing=cast(Any, Namespace(source_read_failures=[])),
+            source_read_contract_failure=False,
+            baseline_failure_code=None,
+            metrics_baseline_failure_code=None,
+            new_func=set(),
+            new_block=set(),
+            metrics_diff=None,
+            html_report_path=None,
+        )
+    assert exc.value.code == 2
+
+
+def test_enforce_gating_requires_valid_coverage_input_for_hotspot_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cli.console = cli._make_console(no_color=True)
+    monkeypatch.setattr(cli, "gate", lambda **_kwargs: pipeline.GatingResult(0, ()))
+    with pytest.raises(SystemExit) as exc:
+        cli._enforce_gating(
+            args=Namespace(
+                fail_on_untested_hotspots=True,
+                fail_threshold=-1,
+                verbose=False,
+            ),
+            boot=cast("pipeline.BootstrapResult", object()),
+            analysis=cast(
+                Any,
+                SimpleNamespace(
+                    coverage_join=SimpleNamespace(
+                        status="invalid",
+                        invalid_reason="broken xml",
+                    )
+                ),
+            ),
+            processing=cast(Any, Namespace(source_read_failures=[])),
+            source_read_contract_failure=False,
+            baseline_failure_code=None,
+            metrics_baseline_failure_code=None,
+            new_func=set(),
+            new_block=set(),
+            metrics_diff=None,
+            html_report_path=None,
+        )
+    assert exc.value.code == 2
 
 
 def test_main_impl_exits_on_invalid_pyproject_config(

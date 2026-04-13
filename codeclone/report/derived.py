@@ -25,6 +25,12 @@ from ..domain.source_scope import (
     SOURCE_KIND_ORDER as _SOURCE_KIND_ORDER,
 )
 from ..models import ReportLocation, SourceKind, StructuralFindingOccurrence
+from ..paths import (
+    classify_source_kind as _classify_source_kind,
+)
+from ..paths import (
+    relative_repo_path as _relative_repo_path,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -56,37 +62,19 @@ SOURCE_KIND_ORDER: dict[SourceKind, int] = {
 }
 
 
-def _normalize_path(value: str) -> str:
-    return value.replace("\\", "/").strip()
-
-
 def relative_report_path(filepath: str, *, scan_root: str = "") -> str:
-    normalized_path = _normalize_path(filepath)
-    normalized_root = _normalize_path(scan_root).rstrip("/")
-    if not normalized_path:
-        return normalized_path
-    if not normalized_root:
-        return normalized_path
-    prefix = f"{normalized_root}/"
-    if normalized_path.startswith(prefix):
-        return normalized_path[len(prefix) :]
-    if normalized_path == normalized_root:
-        return normalized_path.rsplit("/", maxsplit=1)[-1]
-    return normalized_path
+    return _relative_repo_path(filepath, scan_root=scan_root)
 
 
 def classify_source_kind(filepath: str, *, scan_root: str = "") -> SourceKind:
-    rel = relative_report_path(filepath, scan_root=scan_root)
-    parts = [part for part in rel.lower().split("/") if part and part != "."]
-    if not parts:
-        return SOURCE_KIND_OTHER
-    for idx, part in enumerate(parts):
-        if part != SOURCE_KIND_TESTS:
-            continue
-        if idx + 1 < len(parts) and parts[idx + 1] == SOURCE_KIND_FIXTURES:
-            return SOURCE_KIND_FIXTURES
+    normalized = _classify_source_kind(filepath, scan_root=scan_root)
+    if normalized == SOURCE_KIND_PRODUCTION:
+        return SOURCE_KIND_PRODUCTION
+    if normalized == SOURCE_KIND_TESTS:
         return SOURCE_KIND_TESTS
-    return SOURCE_KIND_PRODUCTION
+    if normalized == SOURCE_KIND_FIXTURES:
+        return SOURCE_KIND_FIXTURES
+    return SOURCE_KIND_OTHER
 
 
 def source_kind_breakdown(

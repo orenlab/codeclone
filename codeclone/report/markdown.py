@@ -15,7 +15,7 @@ from ._formatting import format_spread_text
 from .json_contract import build_report_document
 
 if TYPE_CHECKING:
-    from ..models import StructuralFindingGroup, Suggestion
+    from ..models import StructuralFindingGroup, Suggestion, SuppressedCloneGroup
     from .types import GroupMapLike
 
 MARKDOWN_SCHEMA_VERSION = "1.0"
@@ -43,6 +43,7 @@ _ANCHORS: tuple[tuple[str, str, int], ...] = (
     ("complexity", "Complexity", 3),
     ("coupling", "Coupling", 3),
     ("cohesion", "Cohesion", 3),
+    ("coverage-join", "Coverage Join", 3),
     ("overloaded-modules", "Overloaded Modules", 3),
     ("dependencies", "Dependencies", 3),
     ("dead-code-metrics", "Dead Code", 3),
@@ -183,6 +184,59 @@ def _append_findings_section(
         lines.append("")
 
 
+def _append_suppressed_clone_findings(
+    lines: list[str],
+    *,
+    groups: Sequence[object],
+) -> None:
+    finding_rows = [_as_mapping(group) for group in groups]
+    if not finding_rows:
+        lines.append("_None._")
+        lines.append("")
+        return
+    for group in finding_rows:
+        lines.append("#### Suppressed clone group")
+        lines.append("")
+        _append_kv_bullets(
+            lines,
+            (
+                ("Finding ID", f"`{_text(group.get('id'))}`"),
+                ("Category", group.get("category")),
+                ("Clone Type", group.get("clone_type")),
+                ("Severity", group.get("severity")),
+                ("Scope", _source_scope_text(_as_mapping(group.get("source_scope")))),
+                ("Spread", _spread_text(_as_mapping(group.get("spread")))),
+                ("Occurrences", group.get("count")),
+                ("Suppression Rule", group.get("suppression_rule")),
+                ("Suppression Source", group.get("suppression_source")),
+                (
+                    "Matched Patterns",
+                    ", ".join(
+                        str(item).strip()
+                        for item in _as_sequence(group.get("matched_patterns"))
+                        if str(item).strip()
+                    )
+                    or "(none)",
+                ),
+            ),
+        )
+        facts = _as_mapping(group.get("facts"))
+        display_facts = _as_mapping(group.get("display_facts"))
+        if facts or display_facts:
+            _append_facts_block(lines, title="Facts", facts=facts)
+            _append_facts_block(lines, title="Presentation facts", facts=display_facts)
+            lines.append("")
+        items = list(map(_as_mapping, _as_sequence(group.get("items"))))
+        lines.append("- Locations:")
+        visible_items = items[:_MAX_FINDING_LOCATIONS]
+        lines.extend(f"  - {_location_text(item)}" for item in visible_items)
+        if len(items) > len(visible_items):
+            lines.append(
+                f"  - ... and {len(items) - len(visible_items)} more occurrence(s)"
+            )
+        lines.append("")
+
+
 def _append_metric_items(
     lines: list[str],
     *,
@@ -215,6 +269,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     findings_summary = _as_mapping(findings.get("summary"))
     findings_groups = _as_mapping(findings.get("groups"))
     clone_groups = _as_mapping(findings_groups.get("clones"))
+    suppressed_clone_groups = _as_mapping(clone_groups.get("suppressed"))
     overview = _as_mapping(derived.get("overview"))
     hotlists = _as_mapping(derived.get("hotlists"))
     suggestions = _as_sequence(derived.get("suggestions"))
@@ -390,6 +445,17 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             *_as_sequence(clone_groups.get("segments")),
         ],
     )
+    if suppressed_clone_groups:
+        lines.append("#### Suppressed Golden Fixture Clone Groups")
+        lines.append("")
+        _append_suppressed_clone_findings(
+            lines,
+            groups=[
+                *_as_sequence(suppressed_clone_groups.get("functions")),
+                *_as_sequence(suppressed_clone_groups.get("blocks")),
+                *_as_sequence(suppressed_clone_groups.get("segments")),
+            ],
+        )
 
     _append_anchor(lines, *_anchor("structural-findings"))
     _append_findings_section(
@@ -435,6 +501,30 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             ("lcom4", "method_count", "instance_var_count", "risk"),
         ),
         (
+            "coverage-join",
+            "Coverage Join",
+            (
+                "status",
+                "source",
+                "units",
+                "measured_units",
+                "overall_permille",
+                "coverage_hotspots",
+                "scope_gap_hotspots",
+                "hotspot_threshold_percent",
+            ),
+            (
+                "coverage_status",
+                "risk",
+                "coverage_permille",
+                "cyclomatic_complexity",
+                "covered_lines",
+                "executable_lines",
+                "coverage_hotspot",
+                "scope_gap_hotspot",
+            ),
+        ),
+        (
             "overloaded-modules",
             "Overloaded Modules",
             (
@@ -474,9 +564,13 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
                 "overloaded_modules" if anchor_id == "overloaded-modules" else anchor_id
             )
         )
+        if family_key == "coverage-join":
+            family_key = "coverage_join"
         family_payload = _as_mapping(metrics_families.get(family_key))
         if not family_payload and family_key == "overloaded_modules":
             family_payload = _as_mapping(metrics_families.get("god_modules"))
+        if not family_payload and family_key == "coverage_join":
+            continue
         family_summary_map = _as_mapping(family_payload.get("summary"))
         _append_anchor(lines, anchor_id, title, 3)
         _append_kv_bullets(
@@ -542,6 +636,7 @@ def to_markdown_report(
     new_function_group_keys: Collection[str] | None = None,
     new_block_group_keys: Collection[str] | None = None,
     new_segment_group_keys: Collection[str] | None = None,
+    suppressed_clone_groups: Sequence[SuppressedCloneGroup] | None = None,
     metrics: Mapping[str, object] | None = None,
     suggestions: Collection[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
@@ -556,6 +651,7 @@ def to_markdown_report(
         new_function_group_keys=new_function_group_keys,
         new_block_group_keys=new_block_group_keys,
         new_segment_group_keys=new_segment_group_keys,
+        suppressed_clone_groups=suppressed_clone_groups,
         metrics=metrics,
         suggestions=tuple(suggestions or ()),
         structural_findings=tuple(structural_findings or ()),

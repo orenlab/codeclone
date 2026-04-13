@@ -36,9 +36,15 @@ from .contracts import ExitCode
 from .domain.findings import CATEGORY_COHESION, CATEGORY_COMPLEXITY, CATEGORY_COUPLING
 from .domain.quality import CONFIDENCE_HIGH, RISK_HIGH, RISK_LOW
 from .extractor import extract_units_and_stats_from_source
+from .golden_fixtures import (
+    build_suppressed_clone_groups,
+    split_clone_groups_for_golden_fixtures,
+)
 from .grouping import build_block_groups, build_groups, build_segment_groups
 from .metrics import (
+    CoverageJoinParseError,
     HealthInputs,
+    build_coverage_join,
     build_dep_graph,
     build_overloaded_modules_payload,
     compute_health,
@@ -51,6 +57,7 @@ from .models import (
     ApiSurfaceSnapshot,
     BlockUnit,
     ClassMetrics,
+    CoverageJoinResult,
     DeadCandidate,
     DeadItem,
     DepGraph,
@@ -69,6 +76,7 @@ from .models import (
     StructuralFindingGroup,
     StructuralFindingOccurrence,
     Suggestion,
+    SuppressedCloneGroup,
     Unit,
 )
 from .normalize import NormalizationConfig
@@ -202,6 +210,8 @@ class AnalysisResult:
     metrics_payload: dict[str, object] | None
     suggestions: tuple[Suggestion, ...]
     segment_groups_raw_digest: str
+    suppressed_clone_groups: tuple[SuppressedCloneGroup, ...] = ()
+    coverage_join: CoverageJoinResult | None = None
     suppressed_dead_code_items: int = 0
     structural_findings: tuple[StructuralFindingGroup, ...] = ()
 
@@ -234,8 +244,10 @@ class MetricGateConfig:
     fail_on_typing_regression: bool = False
     fail_on_docstring_regression: bool = False
     fail_on_api_break: bool = False
+    fail_on_untested_hotspots: bool = False
     min_typing_coverage: int = -1
     min_docstring_coverage: int = -1
+    coverage_min: int = 50
 
 
 def _as_sorted_str_tuple(value: object) -> tuple[str, ...]:
@@ -454,6 +466,18 @@ def bootstrap(
         output_paths=output_paths,
         cache_path=cache_path,
     )
+
+
+def _resolve_optional_runtime_path(value: object, *, root: Path) -> Path | None:
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return None
+    candidate = Path(text).expanduser()
+    resolved = candidate if candidate.is_absolute() else root / candidate
+    try:
+        return resolved.resolve()
+    except OSError:
+        return resolved.absolute()
 
 
 def _cache_entry_has_metrics(entry: CacheEntry) -> bool:
@@ -1029,6 +1053,62 @@ def process_file(
         )
 
 
+def _invoke_process_file(
+    filepath: str,
+    root: str,
+    cfg: NormalizationConfig,
+    min_loc: int,
+    min_stmt: int,
+    *,
+    collect_structural_findings: bool,
+    collect_typing_coverage: bool,
+    collect_docstring_coverage: bool,
+    collect_api_surface: bool,
+    api_include_private_modules: bool,
+    block_min_loc: int,
+    block_min_stmt: int,
+    segment_min_loc: int,
+    segment_min_stmt: int,
+) -> FileProcessResult:
+    optional_kwargs: dict[str, object] = {
+        "collect_structural_findings": collect_structural_findings,
+        "collect_typing_coverage": collect_typing_coverage,
+        "collect_docstring_coverage": collect_docstring_coverage,
+        "collect_api_surface": collect_api_surface,
+        "api_include_private_modules": api_include_private_modules,
+        "block_min_loc": block_min_loc,
+        "block_min_stmt": block_min_stmt,
+        "segment_min_loc": segment_min_loc,
+        "segment_min_stmt": segment_min_stmt,
+    }
+    try:
+        signature = inspect.signature(process_file)
+    except (TypeError, ValueError):
+        supported_kwargs = optional_kwargs
+    else:
+        parameters = tuple(signature.parameters.values())
+        if any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters
+        ):
+            supported_kwargs = optional_kwargs
+        else:
+            supported_names = {parameter.name for parameter in parameters}
+            supported_kwargs = {
+                key: value
+                for key, value in optional_kwargs.items()
+                if key in supported_names
+            }
+    process_callable = cast("Callable[..., FileProcessResult]", process_file)
+    return process_callable(
+        filepath,
+        root,
+        cfg,
+        min_loc,
+        min_stmt,
+        **supported_kwargs,
+    )
+
+
 def process(
     *,
     boot: BootstrapResult,
@@ -1215,49 +1295,26 @@ def process(
 
     def _run_sequential(files: Sequence[str]) -> None:
         for filepath in files:
-            _accept_result(_invoke_process_file(filepath))
+            _accept_result(
+                _invoke_process_file(
+                    filepath,
+                    root_str,
+                    boot.config,
+                    min_loc,
+                    min_stmt,
+                    collect_structural_findings=collect_structural_findings,
+                    collect_typing_coverage=collect_typing_coverage,
+                    collect_docstring_coverage=collect_docstring_coverage,
+                    collect_api_surface=collect_api_surface,
+                    api_include_private_modules=api_include_private_modules,
+                    block_min_loc=block_min_loc,
+                    block_min_stmt=block_min_stmt,
+                    segment_min_loc=segment_min_loc,
+                    segment_min_stmt=segment_min_stmt,
+                )
+            )
             if on_advance is not None:
                 on_advance()
-
-    def _invoke_process_file(filepath: str) -> FileProcessResult:
-        optional_kwargs: dict[str, object] = {
-            "collect_structural_findings": collect_structural_findings,
-            "collect_typing_coverage": collect_typing_coverage,
-            "collect_docstring_coverage": collect_docstring_coverage,
-            "collect_api_surface": collect_api_surface,
-            "api_include_private_modules": api_include_private_modules,
-            "block_min_loc": block_min_loc,
-            "block_min_stmt": block_min_stmt,
-            "segment_min_loc": segment_min_loc,
-            "segment_min_stmt": segment_min_stmt,
-        }
-        try:
-            signature = inspect.signature(process_file)
-        except (TypeError, ValueError):
-            supported_kwargs = optional_kwargs
-        else:
-            parameters = tuple(signature.parameters.values())
-            if any(
-                parameter.kind == inspect.Parameter.VAR_KEYWORD
-                for parameter in parameters
-            ):
-                supported_kwargs = optional_kwargs
-            else:
-                supported_names = {parameter.name for parameter in parameters}
-                supported_kwargs = {
-                    key: value
-                    for key, value in optional_kwargs.items()
-                    if key in supported_names
-                }
-        process_callable = cast("Callable[..., FileProcessResult]", process_file)
-        return process_callable(
-            filepath,
-            root_str,
-            boot.config,
-            min_loc,
-            min_stmt,
-            **supported_kwargs,
-        )
 
     if _should_use_parallel(len(files_to_process), processes):
         try:
@@ -1268,6 +1325,19 @@ def process(
                         executor.submit(
                             _invoke_process_file,
                             filepath,
+                            root_str,
+                            boot.config,
+                            min_loc,
+                            min_stmt,
+                            collect_structural_findings=collect_structural_findings,
+                            collect_typing_coverage=collect_typing_coverage,
+                            collect_docstring_coverage=collect_docstring_coverage,
+                            collect_api_surface=collect_api_surface,
+                            api_include_private_modules=api_include_private_modules,
+                            block_min_loc=block_min_loc,
+                            block_min_stmt=block_min_stmt,
+                            segment_min_loc=segment_min_loc,
+                            segment_min_stmt=segment_min_stmt,
                         )
                         for filepath in batch
                     ]
@@ -1531,6 +1601,91 @@ def _permille(numerator: int, denominator: int) -> int:
     return round((1000.0 * float(numerator)) / float(denominator))
 
 
+def _coverage_join_summary(
+    coverage_join: CoverageJoinResult | None,
+) -> dict[str, object]:
+    if coverage_join is None:
+        return {}
+    return {
+        "status": coverage_join.status,
+        "source": coverage_join.coverage_xml,
+        "files": coverage_join.files,
+        "units": len(coverage_join.units),
+        "measured_units": coverage_join.measured_units,
+        "overall_executable_lines": coverage_join.overall_executable_lines,
+        "overall_covered_lines": coverage_join.overall_covered_lines,
+        "overall_permille": _permille(
+            coverage_join.overall_covered_lines,
+            coverage_join.overall_executable_lines,
+        ),
+        "missing_from_report_units": sum(
+            1
+            for fact in coverage_join.units
+            if fact.coverage_status == "missing_from_report"
+        ),
+        "coverage_hotspots": coverage_join.coverage_hotspots,
+        "scope_gap_hotspots": coverage_join.scope_gap_hotspots,
+        "hotspot_threshold_percent": coverage_join.hotspot_threshold_percent,
+        "invalid_reason": coverage_join.invalid_reason,
+    }
+
+
+def _coverage_join_rows(
+    coverage_join: CoverageJoinResult | None,
+) -> list[dict[str, object]]:
+    if coverage_join is None or coverage_join.status != "ok":
+        return []
+    return sorted(
+        (
+            {
+                "qualname": fact.qualname,
+                "filepath": fact.filepath,
+                "start_line": fact.start_line,
+                "end_line": fact.end_line,
+                "cyclomatic_complexity": fact.cyclomatic_complexity,
+                "risk": fact.risk,
+                "executable_lines": fact.executable_lines,
+                "covered_lines": fact.covered_lines,
+                "coverage_permille": fact.coverage_permille,
+                "coverage_status": fact.coverage_status,
+                "coverage_hotspot": (
+                    fact.risk in {"medium", "high"}
+                    and fact.coverage_status == "measured"
+                    and (fact.coverage_permille / 10.0)
+                    < float(coverage_join.hotspot_threshold_percent)
+                ),
+                "scope_gap_hotspot": (
+                    fact.risk in {"medium", "high"}
+                    and fact.coverage_status == "missing_from_report"
+                ),
+                "coverage_review_item": (
+                    (
+                        fact.risk in {"medium", "high"}
+                        and fact.coverage_status == "measured"
+                        and (fact.coverage_permille / 10.0)
+                        < float(coverage_join.hotspot_threshold_percent)
+                    )
+                    or (
+                        fact.risk in {"medium", "high"}
+                        and fact.coverage_status == "missing_from_report"
+                    )
+                ),
+            }
+            for fact in coverage_join.units
+        ),
+        key=lambda item: (
+            0 if bool(item.get("coverage_hotspot")) else 1,
+            0 if bool(item.get("scope_gap_hotspot")) else 1,
+            {"high": 0, "medium": 1, "low": 2}.get(_as_str(item.get("risk")), 3),
+            _as_int(item.get("coverage_permille"), 0),
+            -_as_int(item.get("cyclomatic_complexity"), 0),
+            _as_str(item.get("filepath")),
+            _as_int(item.get("start_line")),
+            _as_str(item.get("qualname")),
+        ),
+    )
+
+
 def _coverage_adoption_rows(
     project_metrics: ProjectMetrics,
 ) -> list[dict[str, object]]:
@@ -1699,6 +1854,8 @@ def _enrich_metrics_report_payload(
     *,
     metrics_payload: Mapping[str, object],
     metrics_diff: MetricsDiff | None,
+    coverage_adoption_diff_available: bool,
+    api_surface_diff_available: bool,
 ) -> dict[str, object]:
     enriched = {
         key: (dict(value) if isinstance(value, Mapping) else value)
@@ -1711,20 +1868,20 @@ def _enrich_metrics_report_payload(
         cast("Mapping[str, object]", coverage_adoption.get("summary", {}))
     )
     if coverage_summary:
-        coverage_summary["baseline_diff_available"] = metrics_diff is not None
+        coverage_summary["baseline_diff_available"] = coverage_adoption_diff_available
         coverage_summary["param_delta"] = (
             int(metrics_diff.typing_param_permille_delta)
-            if metrics_diff is not None
+            if metrics_diff is not None and coverage_adoption_diff_available
             else 0
         )
         coverage_summary["return_delta"] = (
             int(metrics_diff.typing_return_permille_delta)
-            if metrics_diff is not None
+            if metrics_diff is not None and coverage_adoption_diff_available
             else 0
         )
         coverage_summary["docstring_delta"] = (
             int(metrics_diff.docstring_permille_delta)
-            if metrics_diff is not None
+            if metrics_diff is not None and coverage_adoption_diff_available
             else 0
         )
         coverage_adoption["summary"] = coverage_summary
@@ -1734,17 +1891,23 @@ def _enrich_metrics_report_payload(
     api_summary = dict(cast("Mapping[str, object]", api_surface.get("summary", {})))
     api_items = list(cast("Sequence[object]", api_surface.get("items", ())))
     if api_summary:
-        api_summary["baseline_diff_available"] = metrics_diff is not None
+        api_summary["baseline_diff_available"] = api_surface_diff_available
         api_summary["added"] = (
-            len(metrics_diff.new_api_symbols) if metrics_diff is not None else 0
+            len(metrics_diff.new_api_symbols)
+            if metrics_diff is not None and api_surface_diff_available
+            else 0
         )
         api_summary["breaking"] = (
             len(metrics_diff.new_api_breaking_changes)
-            if metrics_diff is not None
+            if metrics_diff is not None and api_surface_diff_available
             else 0
         )
         api_surface["summary"] = api_summary
-    if metrics_diff is not None and metrics_diff.new_api_breaking_changes:
+    if (
+        metrics_diff is not None
+        and api_surface_diff_available
+        and metrics_diff.new_api_breaking_changes
+    ):
         api_items.extend(
             _breaking_api_surface_rows(metrics_diff.new_api_breaking_changes)
         )
@@ -1758,6 +1921,7 @@ def build_metrics_report_payload(
     *,
     scan_root: str = "",
     project_metrics: ProjectMetrics,
+    coverage_join: CoverageJoinResult | None = None,
     units: Sequence[GroupItemLike],
     class_metrics: Sequence[ClassMetrics],
     module_deps: Sequence[ModuleDep] = (),
@@ -1820,6 +1984,8 @@ def build_metrics_report_payload(
     coverage_adoption_rows = _coverage_adoption_rows(project_metrics)
     api_surface_summary = _api_surface_summary(project_metrics.api_surface)
     api_surface_items = _api_surface_rows(project_metrics.api_surface)
+    coverage_join_summary = _coverage_join_summary(coverage_join)
+    coverage_join_items = _coverage_join_rows(coverage_join)
 
     def _serialize_dead_item(
         item: DeadItem,
@@ -1843,7 +2009,7 @@ def build_metrics_report_payload(
             ]
         return payload
 
-    return {
+    payload = {
         CATEGORY_COMPLEXITY: {
             "functions": complexity_rows,
             "summary": {
@@ -1952,6 +2118,12 @@ def build_metrics_report_payload(
             module_deps=module_deps,
         ),
     }
+    if coverage_join is not None:
+        payload["coverage_join"] = {
+            "summary": dict(coverage_join_summary),
+            "items": coverage_join_items,
+        }
+    return payload
 
 
 def analyze(
@@ -1960,9 +2132,34 @@ def analyze(
     discovery: DiscoveryResult,
     processing: ProcessingResult,
 ) -> AnalysisResult:
-    func_groups = build_groups(processing.units)
-    block_groups = build_block_groups(processing.blocks)
-    segment_groups_raw = build_segment_groups(processing.segments)
+    golden_fixture_paths = tuple(
+        str(pattern).strip()
+        for pattern in getattr(boot.args, "golden_fixture_paths", ())
+        if str(pattern).strip()
+    )
+
+    func_split = split_clone_groups_for_golden_fixtures(
+        groups=build_groups(processing.units),
+        kind="function",
+        golden_fixture_paths=golden_fixture_paths,
+        scan_root=str(boot.root),
+    )
+    block_split = split_clone_groups_for_golden_fixtures(
+        groups=build_block_groups(processing.blocks),
+        kind="block",
+        golden_fixture_paths=golden_fixture_paths,
+        scan_root=str(boot.root),
+    )
+    segment_split = split_clone_groups_for_golden_fixtures(
+        groups=build_segment_groups(processing.segments),
+        kind="segment",
+        golden_fixture_paths=golden_fixture_paths,
+        scan_root=str(boot.root),
+    )
+
+    func_groups = func_split.active_groups
+    block_groups = block_split.active_groups
+    segment_groups_raw = segment_split.active_groups
     segment_groups_raw_digest = _segment_groups_digest(segment_groups_raw)
     cached_projection = discovery.cached_segment_report_projection
     if (
@@ -1992,7 +2189,38 @@ def analyze(
         )
 
     block_groups_report = prepare_block_report_groups(block_groups)
-    block_group_facts = build_block_group_facts(block_groups_report)
+    suppressed_block_groups_report = prepare_block_report_groups(
+        block_split.suppressed_groups
+    )
+    if segment_split.suppressed_groups:
+        suppressed_segment_groups_report, _ = prepare_segment_report_groups(
+            segment_split.suppressed_groups
+        )
+    else:
+        suppressed_segment_groups_report = {}
+    suppressed_clone_groups = (
+        *build_suppressed_clone_groups(
+            kind="function",
+            groups=func_split.suppressed_groups,
+            matched_patterns=func_split.matched_patterns,
+        ),
+        *build_suppressed_clone_groups(
+            kind="block",
+            groups=suppressed_block_groups_report,
+            matched_patterns=block_split.matched_patterns,
+        ),
+        *build_suppressed_clone_groups(
+            kind="segment",
+            groups=suppressed_segment_groups_report,
+            matched_patterns=segment_split.matched_patterns,
+        ),
+    )
+    block_group_facts = build_block_group_facts(
+        {
+            **block_groups_report,
+            **suppressed_block_groups_report,
+        }
+    )
 
     func_clones_count = len(func_groups)
     block_clones_count = len(block_groups)
@@ -2003,6 +2231,7 @@ def analyze(
     metrics_payload: dict[str, object] | None = None
     suggestions: tuple[Suggestion, ...] = ()
     suppressed_dead_items: tuple[DeadItem, ...] = ()
+    coverage_join: CoverageJoinResult | None = None
     cohort_structural_findings: tuple[StructuralFindingGroup, ...] = ()
     if _should_collect_structural_findings(boot.output_paths):
         cohort_structural_findings = build_clone_cohort_structural_findings(
@@ -2048,9 +2277,33 @@ def analyze(
             structural_findings=combined_structural_findings,
             scan_root=str(boot.root),
         )
+        coverage_xml_path = _resolve_optional_runtime_path(
+            getattr(boot.args, "coverage_xml", None),
+            root=boot.root,
+        )
+        if coverage_xml_path is not None:
+            try:
+                coverage_join = build_coverage_join(
+                    coverage_xml=coverage_xml_path,
+                    root_path=boot.root,
+                    units=processing.units,
+                    hotspot_threshold_percent=int(
+                        getattr(boot.args, "coverage_min", 50)
+                    ),
+                )
+            except CoverageJoinParseError as exc:
+                coverage_join = CoverageJoinResult(
+                    coverage_xml=str(coverage_xml_path),
+                    status="invalid",
+                    hotspot_threshold_percent=int(
+                        getattr(boot.args, "coverage_min", 50)
+                    ),
+                    invalid_reason=str(exc),
+                )
         metrics_payload = build_metrics_report_payload(
             scan_root=str(boot.root),
             project_metrics=project_metrics,
+            coverage_join=coverage_join,
             units=processing.units,
             class_metrics=processing.class_metrics,
             module_deps=processing.module_deps,
@@ -2063,6 +2316,7 @@ def analyze(
         block_groups=block_groups,
         block_groups_report=block_groups_report,
         segment_groups=segment_groups,
+        suppressed_clone_groups=tuple(suppressed_clone_groups),
         suppressed_segment_groups=suppressed_segment_groups,
         block_group_facts=block_group_facts,
         func_clones_count=func_clones_count,
@@ -2073,6 +2327,7 @@ def analyze(
         metrics_payload=metrics_payload,
         suggestions=suggestions,
         segment_groups_raw_digest=segment_groups_raw_digest,
+        coverage_join=coverage_join,
         suppressed_dead_code_items=len(suppressed_dead_items),
         structural_findings=combined_structural_findings,
     )
@@ -2101,6 +2356,8 @@ def report(
     new_block: Collection[str],
     html_builder: Callable[..., str] | None = None,
     metrics_diff: object | None = None,
+    coverage_adoption_diff_available: bool = False,
+    api_surface_diff_available: bool = False,
     include_report_document: bool = False,
 ) -> ReportArtifacts:
     contents: dict[str, str | None] = {
@@ -2148,6 +2405,8 @@ def report(
             _enrich_metrics_report_payload(
                 metrics_payload=analysis.metrics_payload,
                 metrics_diff=cast("MetricsDiff | None", metrics_diff),
+                coverage_adoption_diff_available=coverage_adoption_diff_available,
+                api_surface_diff_available=api_surface_diff_available,
             )
             if analysis.metrics_payload is not None
             else None
@@ -2156,6 +2415,7 @@ def report(
             func_groups=analysis.func_groups,
             block_groups=analysis.block_groups_report,
             segment_groups=analysis.segment_groups,
+            suppressed_clone_groups=analysis.suppressed_clone_groups,
             meta=report_meta,
             inventory=report_inventory,
             block_facts=analysis.block_group_facts,
@@ -2172,6 +2432,8 @@ def report(
             _enrich_metrics_report_payload(
                 metrics_payload=analysis.metrics_payload,
                 metrics_diff=cast("MetricsDiff | None", metrics_diff),
+                coverage_adoption_diff_available=coverage_adoption_diff_available,
+                api_surface_diff_available=api_surface_diff_available,
             )
             if analysis.metrics_payload is not None
             else None
@@ -2251,6 +2513,7 @@ def report(
 def metric_gate_reasons(
     *,
     project_metrics: ProjectMetrics,
+    coverage_join: CoverageJoinResult | None,
     metrics_diff: MetricsDiff | None,
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
@@ -2269,6 +2532,11 @@ def metric_gate_reasons(
         reasons=reasons,
         metrics_diff=metrics_diff,
         project_metrics=project_metrics,
+        config=config,
+    )
+    _append_coverage_join_reasons(
+        reasons=reasons,
+        coverage_join=coverage_join,
         config=config,
     )
     return tuple(reasons)
@@ -2441,6 +2709,24 @@ def _append_adoption_metric_reasons(
     )
 
 
+def _append_coverage_join_reasons(
+    *,
+    reasons: list[str],
+    coverage_join: CoverageJoinResult | None,
+    config: MetricGateConfig,
+) -> None:
+    if not config.fail_on_untested_hotspots or coverage_join is None:
+        return
+    if coverage_join.status != "ok":
+        return
+    if coverage_join.coverage_hotspots > 0:
+        reasons.append(
+            "Coverage hotspots detected: "
+            f"hotspots={coverage_join.coverage_hotspots}, "
+            f"threshold={config.coverage_min}%."
+        )
+
+
 def _high_confidence_dead_code_count(items: Sequence[DeadItem]) -> int:
     return sum(1 for item in items if item.confidence == "high")
 
@@ -2458,6 +2744,7 @@ def gate(
     if analysis.project_metrics is not None:
         metric_reasons = metric_gate_reasons(
             project_metrics=analysis.project_metrics,
+            coverage_join=analysis.coverage_join,
             metrics_diff=metrics_diff,
             config=MetricGateConfig(
                 fail_complexity=boot.args.fail_complexity,
@@ -2474,10 +2761,14 @@ def gate(
                     getattr(boot.args, "fail_on_docstring_regression", False)
                 ),
                 fail_on_api_break=bool(getattr(boot.args, "fail_on_api_break", False)),
+                fail_on_untested_hotspots=bool(
+                    getattr(boot.args, "fail_on_untested_hotspots", False)
+                ),
                 min_typing_coverage=int(getattr(boot.args, "min_typing_coverage", -1)),
                 min_docstring_coverage=int(
                     getattr(boot.args, "min_docstring_coverage", -1)
                 ),
+                coverage_min=int(getattr(boot.args, "coverage_min", 50)),
             ),
         )
         reasons.extend(f"metric:{reason}" for reason in metric_reasons)

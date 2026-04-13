@@ -48,6 +48,47 @@ GLOSSARY: dict[str, str] = {
     "edges": "Total number of import relationships between modules",
     "max depth": "Longest chain of transitive imports",
     "cycles": "Number of circular import dependencies detected",
+    # Complexity stat cards
+    "high-risk functions": (
+        "Functions with cyclomatic complexity above the high-risk threshold"
+    ),
+    "max cc": "Highest cyclomatic complexity value among all analyzed functions",
+    "avg cc": "Average cyclomatic complexity across all analyzed functions",
+    "deep nesting": (
+        "Functions with nesting depth exceeding recommended threshold (> 4)"
+    ),
+    # Coupling stat cards
+    "high-coupling classes": "Classes with CBO above the high-risk threshold",
+    "max cbo": "Highest Coupling Between Objects value among all classes",
+    "avg cbo": "Average CBO across all analyzed classes",
+    "medium risk": "Items at medium risk level — worth reviewing but not critical",
+    # Cohesion stat cards
+    "low-cohesion classes": (
+        "Classes with LCOM4 > 1, indicating multiple responsibilities"
+    ),
+    "max lcom4": "Highest Lack of Cohesion value among all classes",
+    "high risk": "Items at high risk level requiring attention",
+    # Overloaded module stat cards
+    "overloaded": (
+        "Modules exceeding acceptable thresholds for size, complexity, or coupling"
+    ),
+    "critical": "Items with critical status requiring immediate attention",
+    "max score": "Highest overload score among all modules",
+    "avg loc": "Average lines of code per module",
+    # Dead code stat cards
+    "candidates": "Total dead code candidates detected by static analysis",
+    "high confidence": "Dead code items detected with high or critical confidence",
+    "suppressed": "Dead code candidates excluded by suppression rules",
+    "hit rate": "Percentage of high-confidence items among all candidates",
+    # Clone stat cards
+    "clone groups": "Distinct duplication patterns, each containing 2+ code fragments",
+    "instances": "Total duplicated code fragments across all groups",
+    "new groups": "Clone groups not present in the previous baseline",
+    "high spread": "Clone groups spanning multiple files",
+    # Suggestion stat cards
+    "total suggestions": "Total actionable improvement suggestions generated",
+    "warning": "Suggestions with warning severity worth reviewing",
+    "easy wins": "Actionable suggestions with low estimated effort",
 }
 
 

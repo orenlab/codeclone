@@ -59,6 +59,7 @@ _DIRECTORY_KIND_LABELS: dict[str, str] = {
     "cohesion": "cohesion",
     "coupling": "coupling",
     "dead_code": "dead code",
+    "coverage": "coverage",
     "dependency": "dependency",
 }
 
@@ -433,104 +434,98 @@ def _format_permille_delta(value: object) -> str:
     return f"{sign}{delta / 10.0:.1f}pt"
 
 
-def _overview_stat(value: str, label: str) -> str:
+def _fact_row(
+    label: str,
+    value: str,
+    *,
+    delta: str | None = None,
+    value_cls: str = "",
+) -> str:
+    cls = f" overview-fact-value--{value_cls}" if value_cls else ""
+    delta_html = (
+        f' <span class="overview-fact-delta">{_escape_html(delta)}</span>'
+        if delta
+        else ""
+    )
     return (
-        '<div class="overview-stat">'
-        f'<div class="overview-stat-value">{_escape_html(value)}</div>'
-        f'<div class="overview-stat-label">{_escape_html(label)}</div>'
+        '<div class="overview-fact-row">'
+        f'<span class="overview-fact-label">{_escape_html(label)}</span>'
+        f'<span class="overview-fact-value{cls}">'
+        f"{_escape_html(value)}{delta_html}</span>"
         "</div>"
     )
 
 
-def _overview_stat_row(*stats: tuple[str, str]) -> str:
-    return (
-        '<div class="overview-stat-row">'
-        + "".join(_overview_stat(value, label) for value, label in stats)
-        + "</div>"
-    )
-
-
 def _adoption_card_html(adoption_summary: Mapping[str, object]) -> str:
-    params_pct = _format_permille_pct(adoption_summary.get("param_permille"))
-    returns_pct = _format_permille_pct(adoption_summary.get("return_permille"))
-    docs_pct = _format_permille_pct(adoption_summary.get("docstring_permille"))
-    stats_html = _overview_stat_row(
-        (params_pct, "params"),
-        (returns_pct, "returns"),
-        (docs_pct, "docstrings"),
-    )
+    has_baseline = bool(adoption_summary.get("baseline_diff_available"))
 
-    deltas_html = ""
-    if bool(adoption_summary.get("baseline_diff_available")):
-        deltas_html = _mb(
-            (
-                "\u0394 params",
-                _format_permille_delta(adoption_summary.get("param_delta")),
-            ),
-            (
-                "\u0394 returns",
-                _format_permille_delta(adoption_summary.get("return_delta")),
-            ),
-            (
-                "\u0394 docs",
-                _format_permille_delta(adoption_summary.get("docstring_delta")),
-            ),
-        )
-        if deltas_html:
-            deltas_html = f'<div class="kpi-detail">{deltas_html}</div>'
+    def _delta_or_none(key: str) -> str | None:
+        if not has_baseline:
+            return None
+        return _format_permille_delta(adoption_summary.get(key))
+
+    rows = [
+        _fact_row(
+            "Param annotations",
+            _format_permille_pct(adoption_summary.get("param_permille")),
+            delta=_delta_or_none("param_delta"),
+        ),
+        _fact_row(
+            "Return annotations",
+            _format_permille_pct(adoption_summary.get("return_permille")),
+            delta=_delta_or_none("return_delta"),
+        ),
+        _fact_row(
+            "Docstrings",
+            _format_permille_pct(adoption_summary.get("docstring_permille")),
+            delta=_delta_or_none("docstring_delta"),
+        ),
+    ]
 
     any_count = _as_int(adoption_summary.get("typing_any_count"))
-    if any_count > 0:
-        noun = "symbol" if any_count == 1 else "symbols"
-        caption_html = (
-            '<div class="overview-stat-caption">'
-            f"{_format_count(any_count)} {noun} typed as <code>Any</code>"
-            "</div>"
+    rows.append(
+        _fact_row(
+            "Typed as Any",
+            _format_count(any_count),
+            value_cls="good" if any_count == 0 else "warn",
         )
-    else:
-        caption_html = (
-            '<div class="overview-stat-caption">'
-            "No symbols fall back to <code>Any</code>."
-            "</div>"
-        )
+    )
 
-    return stats_html + deltas_html + caption_html
+    return '<div class="overview-fact-list">' + "".join(rows) + "</div>"
 
 
 def _api_card_html(api_summary: Mapping[str, object]) -> str:
     if not bool(api_summary.get("enabled")):
         return (
             '<div class="overview-summary-value">Disabled in this run.</div>'
-            '<div class="overview-stat-caption">'
-            "Enable with <code>--api-surface</code> to track public symbols."
-            "</div>"
+            '<div class="overview-fact-list">'
+            + _fact_row("Enable via", "--api-surface")
+            + "</div>"
         )
 
     symbols = _as_int(api_summary.get("public_symbols"))
     modules = _as_int(api_summary.get("modules"))
-    stats_html = _overview_stat_row(
-        (_format_count(symbols), "public symbols"),
-        (_format_count(modules), "modules"),
-    )
+    rows = [
+        _fact_row("Public symbols", _format_count(symbols)),
+        _fact_row("Modules", _format_count(modules)),
+    ]
 
-    chips_html = ""
     if bool(api_summary.get("baseline_diff_available")):
         breaking = _as_int(api_summary.get("breaking"))
         added = _as_int(api_summary.get("added"))
-        chips_html = _mb(("breaking", breaking), ("added", added))
-        if chips_html:
-            chips_html = f'<div class="kpi-detail">{chips_html}</div>'
+        rows.append(
+            _fact_row(
+                "Breaking changes",
+                _format_count(breaking),
+                value_cls="warn" if breaking > 0 else "good",
+            )
+        )
+        rows.append(_fact_row("Added symbols", _format_count(added)))
 
     if bool(api_summary.get("strict_types")):
-        caption_html = (
-            '<div class="overview-stat-caption">'
-            "Strict type check enabled for the public surface."
-            "</div>"
-        )
-    else:
-        caption_html = ""
+        rows.append(_fact_row("Strict mode", "enabled", value_cls="good"))
 
-    return stats_html + chips_html + caption_html
+    return '<div class="overview-fact-list">' + "".join(rows) + "</div>"
 
 
 def _adoption_and_api_section(ctx: ReportContext) -> str:
@@ -1055,6 +1050,12 @@ def _analytics_section(ctx: ReportContext) -> str:
         return ""
 
     radar_html = _health_radar_svg(dimensions)
+    radar_legend = (
+        '<div class="health-radar-legend">'
+        "Higher values indicate better code health."
+        " Red labels highlight dimensions below 60."
+        "</div>"
+    )
 
     return (
         '<section class="overview-cluster">'
@@ -1063,6 +1064,8 @@ def _analytics_section(ctx: ReportContext) -> str:
             "Dimension scores across all quality axes.",
         )
         + '<div class="overview-summary-grid">'
-        + overview_summary_item_html(label="Health profile", body_html=radar_html)
+        + overview_summary_item_html(
+            label="Health profile", body_html=radar_html + radar_legend
+        )
         + "</div></section>"
     )

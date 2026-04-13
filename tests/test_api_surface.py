@@ -9,7 +9,6 @@ from __future__ import annotations
 import ast
 from typing import Literal, cast
 
-from codeclone import extractor
 from codeclone.metrics import api_surface as api_surface_mod
 from codeclone.metrics._visibility import ModuleVisibility
 from codeclone.metrics.api_surface import (
@@ -22,28 +21,11 @@ from codeclone.models import (
     ModuleApiSurface,
     PublicSymbol,
 )
-from codeclone.qualnames import QualnameCollector
-
-
-def _tree_collector_and_imports(
-    source: str,
-    *,
-    module_name: str,
-) -> tuple[ast.Module, QualnameCollector, frozenset[str]]:
-    tree = ast.parse(source)
-    collector = QualnameCollector()
-    collector.visit(tree)
-    walk = extractor._collect_module_walk_data(
-        tree=tree,
-        module_name=module_name,
-        collector=collector,
-        collect_referenced_names=True,
-    )
-    return tree, collector, walk.import_names
+from tests._ast_metrics_helpers import tree_collector_and_imports
 
 
 def test_collect_module_api_surface_skips_self_and_collects_public_symbols() -> None:
-    tree, collector, import_names = _tree_collector_and_imports(
+    tree, collector, import_names = tree_collector_and_imports(
         """
 __all__ = ["run", "Public", "VALUE"]
 
@@ -227,7 +209,7 @@ def _public_symbol(
 
 
 def test_collect_module_api_surface_skips_private_or_empty_modules() -> None:
-    private_tree, private_collector, private_imports = _tree_collector_and_imports(
+    private_tree, private_collector, private_imports = tree_collector_and_imports(
         """
 def hidden():
     return 1
@@ -245,7 +227,7 @@ def hidden():
         is None
     )
 
-    empty_tree, empty_collector, empty_imports = _tree_collector_and_imports(
+    empty_tree, empty_collector, empty_imports = tree_collector_and_imports(
         """
 def _hidden():
     return 1

@@ -27,6 +27,7 @@ from ..domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
     CATEGORY_COUPLING,
+    CATEGORY_COVERAGE,
     CATEGORY_DEAD_CODE,
     CATEGORY_DEPENDENCY,
     CLONE_KIND_BLOCK,
@@ -39,6 +40,8 @@ from ..domain.findings import (
     FAMILY_DEAD_CODE,
     FAMILY_DESIGN,
     FAMILY_STRUCTURAL,
+    FINDING_KIND_COVERAGE_HOTSPOT,
+    FINDING_KIND_COVERAGE_SCOPE_GAP,
 )
 from ..domain.quality import (
     CONFIDENCE_HIGH,
@@ -91,6 +94,7 @@ if TYPE_CHECKING:
         SourceKind,
         StructuralFindingGroup,
         Suggestion,
+        SuppressedCloneGroup,
     )
 
 __all__ = [
@@ -104,6 +108,7 @@ __all__ = [
 _OVERLOADED_MODULES_FAMILY = "overloaded_modules"
 _COVERAGE_ADOPTION_FAMILY = "coverage_adoption"
 _API_SURFACE_FAMILY = "api_surface"
+_COVERAGE_JOIN_FAMILY = "coverage_join"
 
 
 def _optional_str(value: object) -> str | None:
@@ -390,6 +395,12 @@ def _collect_paths_from_metrics(metrics: Mapping[str, object]) -> set[str]:
         filepath = _optional_str(item_map.get("filepath"))
         if filepath is not None:
             paths.add(filepath)
+    coverage_join = _as_mapping(metrics.get(_COVERAGE_JOIN_FAMILY))
+    for item in _as_sequence(coverage_join.get("items")):
+        item_map = _as_mapping(item)
+        filepath = _optional_str(item_map.get("filepath"))
+        if filepath is not None:
+            paths.add(filepath)
     return paths
 
 
@@ -399,6 +410,7 @@ def _collect_report_file_list(
     func_groups: GroupMapLike,
     block_groups: GroupMapLike,
     segment_groups: GroupMapLike,
+    suppressed_clone_groups: Sequence[SuppressedCloneGroup] | None = None,
     metrics: Mapping[str, object] | None,
     structural_findings: Sequence[StructuralFindingGroup] | None,
 ) -> list[str]:
@@ -414,11 +426,16 @@ def _collect_report_file_list(
                 filepath = _optional_str(item.get("filepath"))
                 if filepath is not None:
                     files.add(filepath)
+    for suppressed_group in suppressed_clone_groups or ():
+        for item in suppressed_group.items:
+            filepath = _optional_str(item.get("filepath"))
+            if filepath is not None:
+                files.add(filepath)
     if metrics is not None:
         files.update(_collect_paths_from_metrics(metrics))
     if structural_findings:
-        for group in normalize_structural_findings(structural_findings):
-            for occurrence in group.items:
+        for structural_group in normalize_structural_findings(structural_findings):
+            for occurrence in structural_group.items:
                 filepath = _optional_str(occurrence.file_path)
                 if filepath is not None:
                     files.add(filepath)
@@ -813,6 +830,45 @@ def _normalize_metrics_families(
             item["record_kind"],
         ),
     )
+    coverage_join = _as_mapping(metrics_map.get(_COVERAGE_JOIN_FAMILY))
+    coverage_join_summary = _as_mapping(coverage_join.get("summary"))
+    coverage_join_items = sorted(
+        (
+            {
+                "relative_path": _contract_path(
+                    item_map.get("filepath", ""),
+                    scan_root=scan_root,
+                )[0]
+                or "",
+                "qualname": str(item_map.get("qualname", "")).strip(),
+                "start_line": _as_int(item_map.get("start_line")),
+                "end_line": _as_int(item_map.get("end_line")),
+                "cyclomatic_complexity": _as_int(
+                    item_map.get("cyclomatic_complexity"),
+                    1,
+                ),
+                "risk": str(item_map.get("risk", RISK_LOW)).strip() or RISK_LOW,
+                "executable_lines": _as_int(item_map.get("executable_lines")),
+                "covered_lines": _as_int(item_map.get("covered_lines")),
+                "coverage_permille": _as_int(item_map.get("coverage_permille")),
+                "coverage_status": str(item_map.get("coverage_status", "")).strip(),
+                "coverage_hotspot": bool(item_map.get("coverage_hotspot")),
+                "scope_gap_hotspot": bool(item_map.get("scope_gap_hotspot")),
+            }
+            for item in _as_sequence(coverage_join.get("items"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: (
+            0 if bool(item["coverage_hotspot"]) else 1,
+            0 if bool(item["scope_gap_hotspot"]) else 1,
+            {"high": 0, "medium": 1, "low": 2}.get(str(item["risk"]), 3),
+            _as_int(item["coverage_permille"]),
+            -_as_int(item["cyclomatic_complexity"]),
+            item["relative_path"],
+            _as_int(item["start_line"]),
+            item["qualname"],
+        ),
+    )
     dead_high_confidence = sum(
         1
         for item in dead_items
@@ -1004,6 +1060,45 @@ def _normalize_metrics_families(
             "items_truncated": False,
         },
     }
+    if coverage_join_summary or coverage_join_items or coverage_join:
+        normalized[_COVERAGE_JOIN_FAMILY] = {
+            "summary": {
+                "status": str(coverage_join_summary.get("status", "")),
+                "source": _contract_path(
+                    coverage_join_summary.get("source", ""),
+                    scan_root=scan_root,
+                )[0],
+                "files": _as_int(coverage_join_summary.get("files")),
+                "units": _as_int(coverage_join_summary.get("units")),
+                "measured_units": _as_int(coverage_join_summary.get("measured_units")),
+                "overall_executable_lines": _as_int(
+                    coverage_join_summary.get("overall_executable_lines")
+                ),
+                "overall_covered_lines": _as_int(
+                    coverage_join_summary.get("overall_covered_lines")
+                ),
+                "overall_permille": _as_int(
+                    coverage_join_summary.get("overall_permille")
+                ),
+                "missing_from_report_units": _as_int(
+                    coverage_join_summary.get("missing_from_report_units")
+                ),
+                "coverage_hotspots": _as_int(
+                    coverage_join_summary.get("coverage_hotspots")
+                ),
+                "scope_gap_hotspots": _as_int(
+                    coverage_join_summary.get("scope_gap_hotspots")
+                ),
+                "hotspot_threshold_percent": _as_int(
+                    coverage_join_summary.get("hotspot_threshold_percent")
+                ),
+                "invalid_reason": _optional_str(
+                    coverage_join_summary.get("invalid_reason")
+                ),
+            },
+            "items": coverage_join_items,
+            "items_truncated": False,
+        }
     return normalized
 
 
@@ -1390,6 +1485,83 @@ def _build_clone_groups(
         key=lambda group: (-_as_int(group.get("count")), str(group["id"]))
     )
     return encoded_groups
+
+
+def _build_suppressed_clone_groups(
+    *,
+    groups: Sequence[SuppressedCloneGroup] | None,
+    block_facts: Mapping[str, Mapping[str, str]],
+    scan_root: str,
+) -> dict[str, list[dict[str, object]]]:
+    buckets: dict[str, list[dict[str, object]]] = {
+        CLONE_KIND_FUNCTION: [],
+        CLONE_KIND_BLOCK: [],
+        CLONE_KIND_SEGMENT: [],
+    }
+    for group in groups or ():
+        items = group.items
+        clone_type = classify_clone_type(items=items, kind=group.kind)
+        severity, priority = _clone_group_assessment(
+            count=len(items),
+            clone_type=clone_type,
+        )
+        locations = tuple(
+            report_location_from_group_item(item, scan_root=scan_root) for item in items
+        )
+        source_scope = _source_scope_from_locations(
+            [
+                {
+                    "source_kind": location.source_kind,
+                }
+                for location in locations
+            ]
+        )
+        spread_files, spread_functions = group_spread(locations)
+        rows = sorted(
+            [
+                _clone_item_payload(
+                    item,
+                    kind=group.kind,
+                    scan_root=scan_root,
+                )
+                for item in items
+            ],
+            key=_item_sort_key,
+        )
+        facts, display_facts = _build_clone_group_facts(
+            group_key=group.group_key,
+            kind=group.kind,
+            items=items,
+            block_facts=block_facts,
+        )
+        encoded: dict[str, object] = {
+            "id": clone_group_id(group.kind, group.group_key),
+            "family": FAMILY_CLONE,
+            "category": group.kind,
+            "kind": "clone_group",
+            "severity": severity,
+            "confidence": CONFIDENCE_HIGH,
+            "priority": priority,
+            "clone_kind": group.kind,
+            "clone_type": clone_type,
+            "count": len(items),
+            "source_scope": source_scope,
+            "spread": {
+                "files": spread_files,
+                "functions": spread_functions,
+            },
+            "items": rows,
+            "facts": facts,
+            "suppression_rule": group.suppression_rule,
+            "suppression_source": group.suppression_source,
+            "matched_patterns": list(group.matched_patterns),
+        }
+        if display_facts:
+            encoded["display_facts"] = display_facts
+        buckets[group.kind].append(encoded)
+    for bucket in buckets.values():
+        bucket.sort(key=lambda group: (-_as_int(group.get("count")), str(group["id"])))
+    return buckets
 
 
 def _structural_group_assessment(
@@ -1878,6 +2050,80 @@ def _dependency_design_group(
     }
 
 
+def _coverage_design_group(
+    item_map: Mapping[str, object],
+    *,
+    threshold_percent: int,
+    scan_root: str,
+) -> dict[str, object] | None:
+    coverage_hotspot = bool(item_map.get("coverage_hotspot"))
+    scope_gap_hotspot = bool(item_map.get("scope_gap_hotspot"))
+    if not coverage_hotspot and not scope_gap_hotspot:
+        return None
+    qualname = str(item_map.get("qualname", "")).strip()
+    filepath = str(item_map.get("relative_path", "")).strip()
+    if not filepath:
+        return None
+    start_line = _as_int(item_map.get("start_line"))
+    end_line = _as_int(item_map.get("end_line"))
+    subject_key = qualname or f"{filepath}:{start_line}:{end_line}"
+    risk = str(item_map.get("risk", RISK_LOW)).strip() or RISK_LOW
+    coverage_status = str(item_map.get("coverage_status", "")).strip()
+    coverage_permille = _as_int(item_map.get("coverage_permille"))
+    covered_lines = _as_int(item_map.get("covered_lines"))
+    executable_lines = _as_int(item_map.get("executable_lines"))
+    complexity = _as_int(item_map.get("cyclomatic_complexity"), 1)
+    severity = SEVERITY_CRITICAL if risk == "high" else SEVERITY_WARNING
+    if scope_gap_hotspot:
+        kind = FINDING_KIND_COVERAGE_SCOPE_GAP
+        detail = "The supplied coverage.xml did not map to this function's file."
+    else:
+        kind = FINDING_KIND_COVERAGE_HOTSPOT
+        detail = "Joined line coverage is below the configured hotspot threshold."
+    return {
+        "id": design_group_id(CATEGORY_COVERAGE, subject_key),
+        "family": FAMILY_DESIGN,
+        "category": CATEGORY_COVERAGE,
+        "kind": kind,
+        "severity": severity,
+        "confidence": CONFIDENCE_HIGH,
+        "priority": _priority(severity, EFFORT_MODERATE),
+        "count": 1,
+        "source_scope": _single_location_source_scope(
+            filepath,
+            scan_root=scan_root,
+        ),
+        "spread": {"files": 1, "functions": 1},
+        "items": [
+            {
+                "relative_path": filepath,
+                "qualname": qualname,
+                "start_line": start_line,
+                "end_line": end_line,
+                "risk": risk,
+                "cyclomatic_complexity": complexity,
+                "coverage_permille": coverage_permille,
+                "coverage_status": coverage_status,
+                "covered_lines": covered_lines,
+                "executable_lines": executable_lines,
+                "coverage_hotspot": coverage_hotspot,
+                "scope_gap_hotspot": scope_gap_hotspot,
+            }
+        ],
+        "facts": {
+            "coverage_permille": coverage_permille,
+            "hotspot_threshold_percent": threshold_percent,
+            "coverage_status": coverage_status,
+            "covered_lines": covered_lines,
+            "executable_lines": executable_lines,
+            "cyclomatic_complexity": complexity,
+            "coverage_hotspot": coverage_hotspot,
+            "scope_gap_hotspot": scope_gap_hotspot,
+            "detail": detail,
+        },
+    }
+
+
 def _build_design_groups(
     metrics_payload: Mapping[str, object],
     *,
@@ -1897,6 +2143,11 @@ def _build_design_groups(
     cohesion_threshold = _coerced_nonnegative_threshold(
         _as_mapping(thresholds.get(CATEGORY_COHESION)).get("value"),
         default=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+    )
+    coverage_join = _as_mapping(families.get(_COVERAGE_JOIN_FAMILY))
+    coverage_threshold = _as_int(
+        _as_mapping(coverage_join.get("summary")).get("hotspot_threshold_percent"),
+        50,
     )
     groups: list[dict[str, object]] = []
 
@@ -1936,6 +2187,15 @@ def _build_design_groups(
         if group is not None:
             groups.append(group)
 
+    for item in _as_sequence(coverage_join.get("items")):
+        group = _coverage_design_group(
+            _as_mapping(item),
+            threshold_percent=coverage_threshold,
+            scan_root=scan_root,
+        )
+        if group is not None:
+            groups.append(group)
+
     groups.sort(key=lambda group: (-_as_float(group["priority"]), str(group["id"])))
     return groups
 
@@ -1948,6 +2208,7 @@ def _findings_summary(
     structural_groups: Sequence[Mapping[str, object]],
     dead_code_groups: Sequence[Mapping[str, object]],
     design_groups: Sequence[Mapping[str, object]],
+    suppressed_clone_groups: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
     dead_code_suppressed: int = 0,
 ) -> dict[str, object]:
     flat_groups = [
@@ -1979,6 +2240,42 @@ def _findings_summary(
         if impact_scope in source_scope_counts:
             source_scope_counts[impact_scope] += 1
     clone_groups = [*clone_functions, *clone_blocks, *clone_segments]
+    clone_suppressed_map = _as_mapping(suppressed_clone_groups)
+    suppressed_functions = len(_as_sequence(clone_suppressed_map.get("function")))
+    suppressed_blocks = len(_as_sequence(clone_suppressed_map.get("block")))
+    suppressed_segments = len(_as_sequence(clone_suppressed_map.get("segment")))
+    suppressed_clone_total = (
+        suppressed_functions + suppressed_blocks + suppressed_segments
+    )
+    clones_summary: dict[str, object] = {
+        "functions": len(clone_functions),
+        "blocks": len(clone_blocks),
+        "segments": len(clone_segments),
+        CLONE_NOVELTY_NEW: sum(
+            1
+            for group in clone_groups
+            if str(group.get("novelty", "")) == CLONE_NOVELTY_NEW
+        ),
+        CLONE_NOVELTY_KNOWN: sum(
+            1
+            for group in clone_groups
+            if str(group.get("novelty", "")) == CLONE_NOVELTY_KNOWN
+        ),
+    }
+    if suppressed_clone_total > 0:
+        clones_summary.update(
+            {
+                "suppressed": suppressed_clone_total,
+                "suppressed_functions": suppressed_functions,
+                "suppressed_blocks": suppressed_blocks,
+                "suppressed_segments": suppressed_segments,
+            }
+        )
+    suppressed_summary = {
+        FAMILY_DEAD_CODE: max(0, dead_code_suppressed),
+    }
+    if suppressed_clone_total > 0:
+        suppressed_summary[FAMILY_CLONES] = suppressed_clone_total
     return {
         "total": len(flat_groups),
         "families": {
@@ -1989,24 +2286,8 @@ def _findings_summary(
         },
         "severity": severity_counts,
         "impact_scope": source_scope_counts,
-        "clones": {
-            "functions": len(clone_functions),
-            "blocks": len(clone_blocks),
-            "segments": len(clone_segments),
-            CLONE_NOVELTY_NEW: sum(
-                1
-                for group in clone_groups
-                if str(group.get("novelty", "")) == CLONE_NOVELTY_NEW
-            ),
-            CLONE_NOVELTY_KNOWN: sum(
-                1
-                for group in clone_groups
-                if str(group.get("novelty", "")) == CLONE_NOVELTY_KNOWN
-            ),
-        },
-        "suppressed": {
-            FAMILY_DEAD_CODE: max(0, dead_code_suppressed),
-        },
+        "clones": clones_summary,
+        "suppressed": suppressed_summary,
     }
 
 
@@ -2389,6 +2670,7 @@ def _build_findings_payload(
     new_function_group_keys: Collection[str] | None,
     new_block_group_keys: Collection[str] | None,
     new_segment_group_keys: Collection[str] | None,
+    suppressed_clone_groups: Sequence[SuppressedCloneGroup] | None,
     design_thresholds: Mapping[str, object] | None,
     scan_root: str,
 ) -> dict[str, object]:
@@ -2439,6 +2721,22 @@ def _build_findings_payload(
         design_thresholds=design_thresholds,
         scan_root=scan_root,
     )
+    suppressed_clone_payload = _build_suppressed_clone_groups(
+        groups=suppressed_clone_groups,
+        block_facts=block_facts,
+        scan_root=scan_root,
+    )
+    clone_groups_payload: dict[str, object] = {
+        "functions": clone_functions,
+        "blocks": clone_blocks,
+        "segments": clone_segments,
+    }
+    if any(suppressed_clone_payload.values()):
+        clone_groups_payload["suppressed"] = {
+            "functions": suppressed_clone_payload[CLONE_KIND_FUNCTION],
+            "blocks": suppressed_clone_payload[CLONE_KIND_BLOCK],
+            "segments": suppressed_clone_payload[CLONE_KIND_SEGMENT],
+        }
     return {
         "summary": _findings_summary(
             clone_functions=clone_functions,
@@ -2447,14 +2745,11 @@ def _build_findings_payload(
             structural_groups=structural_groups,
             dead_code_groups=dead_code_groups,
             design_groups=design_groups,
+            suppressed_clone_groups=suppressed_clone_payload,
             dead_code_suppressed=dead_code_suppressed,
         ),
         "groups": {
-            FAMILY_CLONES: {
-                "functions": clone_functions,
-                "blocks": clone_blocks,
-                "segments": clone_segments,
-            },
+            FAMILY_CLONES: clone_groups_payload,
             FAMILY_STRUCTURAL: {
                 "groups": structural_groups,
             },
@@ -2554,6 +2849,7 @@ def build_report_document(
     new_function_group_keys: Collection[str] | None = None,
     new_block_group_keys: Collection[str] | None = None,
     new_segment_group_keys: Collection[str] | None = None,
+    suppressed_clone_groups: Sequence[SuppressedCloneGroup] | None = None,
     metrics: Mapping[str, object] | None = None,
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
@@ -2570,6 +2866,7 @@ def build_report_document(
         func_groups=func_groups,
         block_groups=block_groups,
         segment_groups=segment_groups,
+        suppressed_clone_groups=suppressed_clone_groups,
         metrics=metrics,
         structural_findings=structural_findings,
     )
@@ -2590,6 +2887,7 @@ def build_report_document(
         new_function_group_keys=new_function_group_keys,
         new_block_group_keys=new_block_group_keys,
         new_segment_group_keys=new_segment_group_keys,
+        suppressed_clone_groups=suppressed_clone_groups,
         design_thresholds=design_thresholds,
         scan_root=scan_root,
     )

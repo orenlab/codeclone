@@ -14,6 +14,11 @@ def assert_contains_all(text: str, *needles: str) -> None:
         assert needle in text
 
 
+def assert_contains_none(text: str, *needles: str) -> None:
+    for needle in needles:
+        assert needle not in text
+
+
 def assert_mapping_entries(
     mapping: Mapping[str, object],
     /,
@@ -21,6 +26,11 @@ def assert_mapping_entries(
 ) -> None:
     for key, value in expected.items():
         assert mapping[key] == value
+
+
+def assert_missing_keys(mapping: Mapping[str, object], /, *keys: str) -> None:
+    for key in keys:
+        assert key not in mapping
 
 
 def snapshot_python_tag(snapshot: Mapping[str, object]) -> str:

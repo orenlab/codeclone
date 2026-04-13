@@ -26,6 +26,7 @@ from codeclone.models import (
     StructuralFindingGroup,
     StructuralFindingOccurrence,
     Suggestion,
+    SuppressedCloneGroup,
 )
 from codeclone.report import (
     GroupMap,
@@ -81,6 +82,7 @@ def to_json_report(
     new_function_group_keys: Collection[str] | None = None,
     new_block_group_keys: Collection[str] | None = None,
     new_segment_group_keys: Collection[str] | None = None,
+    suppressed_clone_groups: Sequence[SuppressedCloneGroup] | None = None,
     metrics: Mapping[str, object] | None = None,
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
@@ -95,6 +97,7 @@ def to_json_report(
         new_function_group_keys=new_function_group_keys,
         new_block_group_keys=new_block_group_keys,
         new_segment_group_keys=new_segment_group_keys,
+        suppressed_clone_groups=suppressed_clone_groups,
         metrics=metrics,
         suggestions=suggestions or (),
         structural_findings=structural_findings or (),
@@ -113,6 +116,7 @@ def to_text_report(
     new_function_group_keys: Collection[str] | None = None,
     new_block_group_keys: Collection[str] | None = None,
     new_segment_group_keys: Collection[str] | None = None,
+    suppressed_clone_groups: Sequence[SuppressedCloneGroup] | None = None,
     metrics: Mapping[str, object] | None = None,
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
@@ -127,6 +131,7 @@ def to_text_report(
         new_function_group_keys=new_function_group_keys,
         new_block_group_keys=new_block_group_keys,
         new_segment_group_keys=new_segment_group_keys,
+        suppressed_clone_groups=suppressed_clone_groups,
         metrics=metrics,
         suggestions=suggestions or (),
         structural_findings=structural_findings or (),
@@ -1253,6 +1258,64 @@ def test_report_json_dead_code_suppressed_items_are_reported_separately() -> Non
     ]
     assert payload["findings"]["groups"]["dead_code"]["groups"] == []
     assert payload["findings"]["summary"]["suppressed"] == {"dead_code": 1}
+
+
+def test_report_json_clone_groups_can_include_suppressed_golden_fixture_bucket() -> (
+    None
+):
+    payload = json.loads(
+        to_json_report(
+            {},
+            {},
+            {},
+            {"codeclone_version": "1.4.0", "scan_root": "/root"},
+            suppressed_clone_groups=(
+                SuppressedCloneGroup(
+                    kind="function",
+                    group_key="golden-group",
+                    items=(
+                        {
+                            "qualname": "tests.fixtures.golden.a:run",
+                            "filepath": "/root/tests/fixtures/golden_project/a.py",
+                            "start_line": 10,
+                            "end_line": 12,
+                            "loc": 3,
+                            "stmt_count": 2,
+                            "fingerprint": "fp-a",
+                            "loc_bucket": "0-19",
+                        },
+                        {
+                            "qualname": "tests.fixtures.golden.b:run",
+                            "filepath": "/root/tests/fixtures/golden_project/b.py",
+                            "start_line": 10,
+                            "end_line": 12,
+                            "loc": 3,
+                            "stmt_count": 2,
+                            "fingerprint": "fp-a",
+                            "loc_bucket": "0-19",
+                        },
+                    ),
+                    matched_patterns=("tests/fixtures/golden_*",),
+                    suppression_rule="golden_fixture",
+                    suppression_source="project_config",
+                ),
+            ),
+        )
+    )
+
+    suppressed = payload["findings"]["groups"]["clones"]["suppressed"]
+    assert suppressed["functions"][0]["suppression_rule"] == "golden_fixture"
+    assert suppressed["functions"][0]["suppression_source"] == "project_config"
+    assert suppressed["functions"][0]["matched_patterns"] == ["tests/fixtures/golden_*"]
+    assert payload["findings"]["summary"]["clones"]["suppressed"] == 1
+    assert payload["findings"]["summary"]["suppressed"] == {
+        "dead_code": 0,
+        "clones": 1,
+    }
+    assert (
+        "tests/fixtures/golden_project/a.py"
+        in payload["inventory"]["file_registry"]["items"]
+    )
 
 
 def test_report_json_integrity_ignores_runtime_report_timestamp() -> None:
@@ -2616,6 +2679,65 @@ def test_text_and_markdown_report_include_suppressed_dead_code_sections() -> Non
     )
     assert '<a id="dead-code-suppressed"></a>' in markdown
     assert "suppression_rule=dead-code" in markdown
+
+
+def test_text_and_markdown_report_include_suppressed_golden_fixture_clones() -> None:
+    suppressed_group = SuppressedCloneGroup(
+        kind="function",
+        group_key="golden-group",
+        items=(
+            {
+                "qualname": "tests.fixtures.golden.a:run",
+                "filepath": "/root/tests/fixtures/golden_project/a.py",
+                "start_line": 10,
+                "end_line": 12,
+                "loc": 3,
+                "stmt_count": 2,
+                "fingerprint": "fp-a",
+                "loc_bucket": "0-19",
+            },
+            {
+                "qualname": "tests.fixtures.golden.b:run",
+                "filepath": "/root/tests/fixtures/golden_project/b.py",
+                "start_line": 10,
+                "end_line": 12,
+                "loc": 3,
+                "stmt_count": 2,
+                "fingerprint": "fp-a",
+                "loc_bucket": "0-19",
+            },
+        ),
+        matched_patterns=("tests/fixtures/golden_*",),
+        suppression_rule="golden_fixture",
+        suppression_source="project_config",
+    )
+
+    text = to_text_report(
+        meta={"codeclone_version": "1.4.0", "scan_root": "/root"},
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        suppressed_clone_groups=(suppressed_group,),
+    )
+    markdown = to_markdown_report(
+        meta={"codeclone_version": "1.4.0", "scan_root": "/root"},
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        suppressed_clone_groups=(suppressed_group,),
+    )
+
+    assert_contains_all(
+        text,
+        "SUPPRESSED FUNCTION CLONES (groups=1)",
+        "suppressed_by=golden_fixture@project_config",
+        "tests/fixtures/golden_*",
+    )
+    assert_contains_all(
+        markdown,
+        "Suppressed Golden Fixture Clone Groups",
+        "Suppression Rule: golden_fixture",
+    )
 
 
 # ---------------------------------------------------------------------------

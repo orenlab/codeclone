@@ -48,6 +48,7 @@ from codeclone._html_report._tabs import render_split_tabs
 from codeclone._html_snippets import _FileCache
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import MetricsDiff, ReportLocation, Suggestion
+from tests._assertions import assert_contains_none
 
 
 def test_summary_helpers_cover_empty_and_non_clone_context_branches() -> None:
@@ -407,10 +408,13 @@ def test_suggestion_helpers_cover_empty_summary_breakdown_and_optional_sections(
         ),
         cast(Any, _section_ctx()),
     )
-    assert "suggestion-chip" not in card_html
-    assert "suggestion-summary" not in card_html
-    assert "Locations (" not in card_html
-    assert "Refactoring steps" not in card_html
+    assert_contains_none(
+        card_html,
+        "suggestion-chip",
+        "suggestion-summary",
+        "Locations (",
+        "Refactoring steps",
+    )
 
 
 def test_suggestion_context_labels_prefer_specific_clone_kind() -> None:

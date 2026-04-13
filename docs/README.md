@@ -37,9 +37,9 @@ repository build:
 - [Exit codes and failure policy](book/03-contracts-exit-codes.md)
 - [Config and defaults](book/04-config-and-defaults.md)
 - [Core pipeline and invariants](book/05-core-pipeline.md)
-- [Baseline contract (schema v2.0)](book/06-baseline.md)
-- [Cache contract (schema v2.3)](book/07-cache.md)
-- [Report contract (schema v2.5)](book/08-report.md)
+- [Baseline contract (schema v2.1)](book/06-baseline.md)
+- [Cache contract (schema v2.4)](book/07-cache.md)
+- [Report contract (schema v2.8)](book/08-report.md)
 
 ## Interfaces
 

@@ -16,7 +16,7 @@
   <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main&style=flat-square" alt="Tests"></a>
   <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml/badge.svg?style=flat-square" alt="Benchmark"></a>
   <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone.svg?style=flat-square" alt="Python"></a>
-  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-87%20(B)-green" alt="codeclone 87 (B)"></a>
+  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-87%20(B)-green" alt="codeclone 89 (B)"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MPL--2.0-brightgreen?style=flat-square" alt="License"></a>
 </p>
 
@@ -43,8 +43,8 @@ Live sample report:
 - **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
 - **Structural findings** — duplicated branch families, clone guard/exit divergence and clone-cohort drift (report-only)
 - **Quality metrics** — cyclomatic complexity, coupling (`CBO`), cohesion (`LCOM4`), dependency cycles, dead code,
-  health score, type/docstring adoption coverage, public API surface diff, and report-only `Overloaded Modules`
-  profiling
+  health score, type/docstring adoption coverage, current-run Cobertura coverage join, public API surface diff, and
+  report-only `Overloaded Modules` profiling
 - **Baseline governance** — separates accepted **legacy** debt from **new regressions** and lets CI fail **only** on
   what changed
 - **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
@@ -148,11 +148,17 @@ codeclone . --min-typing-coverage 80 --min-docstring-coverage 60
 codeclone . --fail-on-typing-regression --fail-on-docstring-regression
 codeclone . --api-surface --update-metrics-baseline
 codeclone . --fail-on-api-break
+
+# Current-run Cobertura hotspot gate
+codeclone . --coverage coverage.xml --fail-on-untested-hotspots --coverage-min 50
 ```
 
 In normal full-mode CLI output, CodeClone now surfaces adoption coverage
 (`params`, `returns`, `docstrings`, `Any`) in the main `Metrics` block, and it
-adds a `Public API` line when `--api-surface` facts are collected.
+adds a `Public API` line when `--api-surface` facts are collected. Passing
+`--coverage FILE` adds a `Coverage` line from external Cobertura XML, surfaces
+joined details under HTML `Quality -> Coverage Join` and MCP/report
+`coverage_join`, and does not update the clone baseline.
 
 ### Pre-commit
 
@@ -208,6 +214,7 @@ CodeClone can load project-level configuration from `pyproject.toml`:
 min_loc = 10
 min_stmt = 6
 baseline = "codeclone.baseline.json"
+golden_fixture_paths = ["tests/fixtures/golden_*"]
 skip_metrics = false
 quiet = false
 html_out = ".cache/codeclone/report.html"
@@ -288,11 +295,11 @@ class Middleware:  # codeclone: ignore[dead-code]
 Dynamic/runtime false positives are resolved via explicit inline suppressions, not via broad heuristics.
 
 <details>
-<summary>Canonical JSON report shape (v2.5)</summary>
+<summary>Canonical JSON report shape (v2.8)</summary>
 
 ```json
 {
-  "report_schema_version": "2.5",
+  "report_schema_version": "2.8",
   "meta": {
     "codeclone_version": "2.0.0b5",
     "project_name": "...",
@@ -362,11 +369,13 @@ Dynamic/runtime false positives are resolved via explicit inline suppressions, n
     "summary": {
       "...": "...",
       "coverage_adoption": { "...": "..." },
+      "coverage_join": { "...": "..." },
       "api_surface": { "...": "..." }
     },
     "families": {
       "...": "...",
       "coverage_adoption": { "...": "..." },
+      "coverage_join": { "...": "..." },
       "api_surface": { "...": "..." }
     }
   },

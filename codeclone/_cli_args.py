@@ -126,6 +126,7 @@ def build_parser(version: str) -> _ArgumentParser:
         block_min_stmt=DEFAULT_BLOCK_MIN_STMT,
         segment_min_loc=DEFAULT_SEGMENT_MIN_LOC,
         segment_min_stmt=DEFAULT_SEGMENT_MIN_STMT,
+        golden_fixture_paths=(),
     )
     analysis_group.add_argument(
         "--processes",
@@ -230,6 +231,13 @@ def build_parser(version: str) -> _ArgumentParser:
         flag="--api-surface",
         help_text=ui.HELP_API_SURFACE,
     )
+    baselines_ci_group.add_argument(
+        "--coverage",
+        dest="coverage_xml",
+        metavar="FILE",
+        default=None,
+        help=ui.HELP_COVERAGE,
+    )
 
     quality_group = ap.add_argument_group("Quality gates")
     _add_bool_optional_argument(
@@ -310,6 +318,11 @@ def build_parser(version: str) -> _ArgumentParser:
         flag="--fail-on-api-break",
         help_text=ui.HELP_FAIL_ON_API_BREAK,
     )
+    _add_bool_optional_argument(
+        quality_group,
+        flag="--fail-on-untested-hotspots",
+        help_text=ui.HELP_FAIL_ON_UNTESTED_HOTSPOTS,
+    )
     quality_group.add_argument(
         "--min-typing-coverage",
         type=int,
@@ -323,6 +336,13 @@ def build_parser(version: str) -> _ArgumentParser:
         default=-1,
         metavar="PERCENT",
         help=ui.HELP_MIN_DOCSTRING_COVERAGE,
+    )
+    quality_group.add_argument(
+        "--coverage-min",
+        type=int,
+        default=50,
+        metavar="PERCENT",
+        help=ui.HELP_COVERAGE_MIN,
     )
 
     stages_group = ap.add_argument_group("Analysis stages")

@@ -8,35 +8,18 @@ from __future__ import annotations
 
 import ast
 
-from codeclone import extractor
 from codeclone.metrics import _visibility as visibility_mod
 from codeclone.metrics import adoption as adoption_mod
 from codeclone.metrics._visibility import build_module_visibility
 from codeclone.metrics.adoption import collect_module_adoption
 from codeclone.qualnames import QualnameCollector
-
-
-def _tree_collector_and_imports(
-    source: str,
-    *,
-    module_name: str,
-) -> tuple[ast.Module, QualnameCollector, frozenset[str]]:
-    tree = ast.parse(source)
-    collector = QualnameCollector()
-    collector.visit(tree)
-    walk = extractor._collect_module_walk_data(
-        tree=tree,
-        module_name=module_name,
-        collector=collector,
-        collect_referenced_names=True,
-    )
-    return tree, collector, walk.import_names
+from tests._ast_metrics_helpers import tree_collector_and_imports
 
 
 def test_build_module_visibility_supports_strict_dunder_all_for_private_modules() -> (
     None
 ):
-    tree, collector, import_names = _tree_collector_and_imports(
+    tree, collector, import_names = tree_collector_and_imports(
         """
 __all__ = ["public_fn", "PublicClass"]
 
@@ -66,7 +49,7 @@ class PublicClass:
 
 
 def test_collect_module_adoption_counts_annotations_docstrings_and_any() -> None:
-    tree, collector, import_names = _tree_collector_and_imports(
+    tree, collector, import_names = tree_collector_and_imports(
         """
 from typing import Any
 
@@ -120,7 +103,7 @@ class Public:
 
 
 def test_visibility_helpers_cover_private_modules_and_declared_all_edges() -> None:
-    tree, collector, import_names = _tree_collector_and_imports(
+    tree, collector, import_names = tree_collector_and_imports(
         """
 items: list[str] = []
 _private = 1

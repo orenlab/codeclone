@@ -28,6 +28,7 @@ from ...report.json_contract import clone_group_id
 from ...report.suggestions import classify_clone_type
 from .._components import Tone, insight_block
 from .._icons import ICONS
+from .._tables import render_rows_table
 from .._tabs import render_split_tabs
 
 if TYPE_CHECKING:
@@ -35,8 +36,15 @@ if TYPE_CHECKING:
     from .._context import ReportContext
 
 _as_int = _coerce.as_int
+_as_mapping = _coerce.as_mapping
+_as_sequence = _coerce.as_sequence
 
 _HEX_SET = frozenset("0123456789abcdefABCDEF")
+_SUPPRESSED_KIND_LABELS = {
+    "function": "Function",
+    "block": "Block",
+    "segment": "Segment",
+}
 
 
 def _looks_like_hash(text: str) -> bool:
@@ -167,6 +175,77 @@ def _render_group_explanation(meta: Mapping[str, object]) -> str:
             f'<p class="group-explain-note">{_escape_html(str(meta["hint_note"]))}</p>'
         )
     return f'<div class="group-explain" {attr_html}>{"".join(parts)}{note}</div>'
+
+
+def _flatten_suppressed_clone_groups(
+    ctx: ReportContext,
+) -> tuple[Mapping[str, object], ...]:
+    findings = _as_mapping(ctx.report_document.get("findings"))
+    groups = _as_mapping(findings.get("groups"))
+    clones = _as_mapping(groups.get("clones"))
+    suppressed = _as_mapping(clones.get("suppressed"))
+    flattened: list[Mapping[str, object]] = []
+    for bucket_key in ("functions", "blocks", "segments"):
+        for group in _as_sequence(suppressed.get(bucket_key)):
+            group_mapping = _as_mapping(group)
+            if group_mapping:
+                flattened.append(group_mapping)
+    return tuple(flattened)
+
+
+def _suppressed_group_label(
+    group: Mapping[str, object],
+    ctx: ReportContext,
+) -> tuple[str, str]:
+    items = _as_sequence(group.get("items"))
+    first_item = _as_mapping(items[0]) if items else {}
+    filepath = str(first_item.get("filepath", ""))
+    qualname = str(first_item.get("qualname", ""))
+    label = ctx.bare_qualname(qualname, filepath) or ctx.relative_path(filepath)
+    if not label:
+        label = str(group.get("id", ""))
+    return label, filepath
+
+
+def _render_suppressed_clone_panel(
+    ctx: ReportContext,
+    groups: Sequence[Mapping[str, object]],
+) -> str:
+    rows: list[tuple[str, str, str, str, str, str, str]] = []
+    for group in groups[:200]:
+        label, filepath = _suppressed_group_label(group, ctx)
+        matched_patterns = ", ".join(
+            str(pattern).strip()
+            for pattern in _as_sequence(group.get("matched_patterns"))
+            if str(pattern).strip()
+        )
+        suppression_rule = str(group.get("suppression_rule", "")).strip()
+        suppression_source = str(group.get("suppression_source", "")).strip()
+        rule_text = suppression_rule
+        if suppression_source:
+            rule_text = (
+                f"{rule_text}@{suppression_source}" if rule_text else suppression_source
+            )
+        rows.append(
+            (
+                _SUPPRESSED_KIND_LABELS.get(
+                    str(group.get("clone_kind", "")).strip().lower(),
+                    "Clone",
+                ),
+                label,
+                filepath,
+                str(group.get("clone_type", "")),
+                str(group.get("count", "")),
+                rule_text,
+                matched_patterns or "-",
+            )
+        )
+    return render_rows_table(
+        headers=("Kind", "Group", "File", "Type", "Occurrences", "Rule", "Pattern"),
+        rows=rows,
+        empty_message="No suppressed clone groups.",
+        ctx=ctx,
+    )
 
 
 def _render_section_toolbar(
@@ -554,8 +633,11 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
 
     Returns ``(panel_html, novelty_enabled, total_new, total_known)``.
     """
+    suppressed_clone_groups = _flatten_suppressed_clone_groups(ctx)
+    suppressed_total = len(suppressed_clone_groups)
+
     # Empty state
-    if not ctx.has_any_clones:
+    if not ctx.has_any_clones and suppressed_total == 0:
         empty = (
             '<div class="empty"><div class="empty-card">'
             f'<div class="empty-icon">{ICONS["check"]}</div>'
@@ -630,6 +712,15 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
         sub_tabs.append(
             ("segments", "Segments", len(ctx.segment_sorted), segment_section)
         )
+    if suppressed_total > 0:
+        sub_tabs.append(
+            (
+                "suppressed",
+                "Suppressed",
+                suppressed_total,
+                _render_suppressed_clone_panel(ctx, suppressed_clone_groups),
+            )
+        )
 
     panel = global_novelty_html + render_split_tabs(
         group_id="clones", tabs=sub_tabs, emit_clone_counters=True
@@ -643,6 +734,11 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
         )
     else:
         clones_answer = f"{ctx.clone_groups_total} groups and {ctx.clone_instances_total} instances."
+    if suppressed_total > 0:
+        clones_answer += (
+            f" {suppressed_total} suppressed golden-fixture groups are excluded "
+            "from active review."
+        )
     clones_tone: Tone = "warn" if ctx.clone_groups_total > 0 else "ok"
     panel = (
         insight_block(

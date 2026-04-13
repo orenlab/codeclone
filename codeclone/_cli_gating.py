@@ -21,6 +21,7 @@ class _GatingArgs(Protocol):
     fail_on_typing_regression: bool
     fail_on_docstring_regression: bool
     fail_on_api_break: bool
+    fail_on_untested_hotspots: bool
     fail_complexity: int
     fail_coupling: int
     fail_cohesion: int
@@ -29,6 +30,7 @@ class _GatingArgs(Protocol):
     fail_health: int
     min_typing_coverage: int
     min_docstring_coverage: int
+    coverage_min: int
     fail_on_new: bool
     fail_threshold: int
 
@@ -90,6 +92,13 @@ def parse_metric_reason_entry(reason: str) -> tuple[str, str]:
         return "api_breaking_changes", tail(
             "Public API breaking changes vs metrics baseline: "
         )
+    coverage_detail = _parse_two_part_metric_detail(
+        trimmed,
+        prefix="Coverage hotspots detected: ",
+        right_label="threshold",
+    )
+    if coverage_detail is not None:
+        return "coverage_hotspots", coverage_detail
 
     if trimmed.startswith("Dependency cycles detected: "):
         return "dependency_cycles", tail("Dependency cycles detected: ").replace(
@@ -157,11 +166,17 @@ def policy_context(*, args: _GatingArgs, gate_kind: str) -> str:
                 "fail-on-api-break"
                 if bool(getattr(args, "fail_on_api_break", False))
                 else None,
+                "fail-on-untested-hotspots"
+                if bool(getattr(args, "fail_on_untested_hotspots", False))
+                else None,
                 f"min-typing-coverage={getattr(args, 'min_typing_coverage', -1)}"
                 if int(getattr(args, "min_typing_coverage", -1)) >= 0
                 else None,
                 f"min-docstring-coverage={getattr(args, 'min_docstring_coverage', -1)}"
                 if int(getattr(args, "min_docstring_coverage", -1)) >= 0
+                else None,
+                f"coverage-min={getattr(args, 'coverage_min', -1)}"
+                if bool(getattr(args, "fail_on_untested_hotspots", False))
                 else None,
             )
         case "new-clones":

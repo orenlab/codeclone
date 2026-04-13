@@ -107,6 +107,15 @@ def build_html_report(
     structural_count = len(
         tuple(normalize_structural_findings(ctx.structural_findings))
     )
+    coverage_join_summary = _as_mapping(
+        _as_mapping(ctx.metrics_map.get("coverage_join")).get("summary")
+    )
+    coverage_review_items = (
+        _as_int(coverage_join_summary.get("coverage_hotspots"))
+        + _as_int(coverage_join_summary.get("scope_gap_hotspots"))
+        if str(coverage_join_summary.get("status", "")).strip() == "ok"
+        else 0
+    )
     quality_issues = (
         _as_int(_as_mapping(ctx.complexity_map.get("summary")).get("high_risk"))
         + _as_int(_as_mapping(ctx.coupling_map.get("summary")).get("high_risk"))
@@ -114,6 +123,7 @@ def build_html_report(
         + _as_int(
             _as_mapping(ctx.overloaded_modules_map.get("summary")).get("candidates")
         )
+        + coverage_review_items
     )
 
     def _tab_badge(count: int) -> str:

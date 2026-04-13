@@ -20,6 +20,9 @@ Metrics gate inputs:
   `--fail-complexity`, `--fail-coupling`, `--fail-cohesion`, `--fail-health`
 - adoption threshold gates:
   `--min-typing-coverage`, `--min-docstring-coverage`
+- external Cobertura coverage join:
+  `--coverage FILE`, `--coverage-min PERCENT`,
+  `--fail-on-untested-hotspots`
 - boolean structural gates:
   `--fail-cycles`, `--fail-dead-code`
 - baseline-aware delta gates:
@@ -54,6 +57,10 @@ Refs:
 
 - `--skip-metrics` is incompatible with metrics gating/update flags and is a
   contract error.
+- `golden_fixture_paths` is a separate project-level clone policy:
+  clone groups fully contained in matching `tests/` / `tests/fixtures/` paths
+  are excluded before health/gate/suggestion evaluation, but remain visible as
+  suppressed report facts.
 - If metrics are not explicitly requested and no metrics baseline exists,
   runtime auto-enables clone-only mode (`skip_metrics=true`).
 - In clone-only mode:
@@ -61,12 +68,21 @@ Refs:
 - `--fail-dead-code` forces dead-code analysis on (even if metrics are skipped).
 - `--fail-cycles` forces dependency analysis on (even if metrics are skipped).
 - Type/docstring adoption metrics are computed by default in full mode.
+- `--coverage` joins an external Cobertura XML file to current-run function
+  spans with stdlib XML parsing only. This signal is not metrics-baseline truth,
+  is not written to `codeclone.baseline.json`, and does not affect fingerprint
+  or clone identity semantics.
+- Invalid Cobertura XML downgrades to a current-run
+  `coverage_join.status="invalid"` signal in normal analysis. It does not fail
+  the run or update any baseline; only `--fail-on-untested-hotspots` upgrades
+  invalid input into a contract error.
 - `--api-surface` is opt-in in normal runs, but runtime auto-enables it when
   `--fail-on-api-break` or `--update-metrics-baseline` needs a public API
   snapshot.
 - In the normal CLI `Metrics` block, adoption coverage is shown whenever metrics
   are computed, and the public API surface line appears when `api_surface`
-  facts were collected.
+  facts were collected. A coverage line appears when `--coverage` produced a
+  joined coverage summary.
 - `--update-baseline` in full mode implies metrics-baseline update in the same
   run.
 - If metrics baseline path equals clone baseline path and clone baseline file is
@@ -78,6 +94,11 @@ Refs:
   metrics baseline that already contains adoption coverage data.
 - `--fail-on-api-break` requires a metrics baseline that already contains
   `api_surface` data.
+- `--fail-on-untested-hotspots` requires `--coverage` and a valid Cobertura XML
+  input. It evaluates current-run `coverage_join` facts only for measured
+  medium/high-risk functions below the configured threshold; scope gaps are
+  surfaced separately and do not require or update a metrics baseline. The
+  flag name is retained for CLI compatibility.
 - In CI mode, if metrics baseline was loaded and trusted, runtime enables
   `fail_on_new_metrics=true`.
 
@@ -93,7 +114,7 @@ Refs:
   metrics were computed and metrics baseline is trusted.
 - Metric gate reasons are emitted in deterministic order:
   threshold checks -> cycles/dead/health -> NEW-vs-baseline diffs ->
-  adoption/API baseline diffs.
+  adoption/API baseline diffs -> coverage-join hotspot gate.
 - Metric gate reasons are namespaced as `metric:*` in gate output.
 
 Refs:
@@ -103,13 +124,16 @@ Refs:
 
 ## Failure modes
 
-| Condition                                                   | Behavior                 |
-|-------------------------------------------------------------|--------------------------|
-| `--skip-metrics` with metrics flags                         | Contract error, exit `2` |
-| `--fail-on-new-metrics` without trusted baseline            | Contract error, exit `2` |
-| Coverage/API regression gate without required baseline data | Contract error, exit `2` |
-| `--update-metrics-baseline` when metrics were not computed  | Contract error, exit `2` |
-| Threshold breach or NEW-vs-baseline metric regressions      | Gating failure, exit `3` |
+| Condition                                                   | Behavior                             |
+|-------------------------------------------------------------|--------------------------------------|
+| `--skip-metrics` with metrics flags                         | Contract error, exit `2`             |
+| `--fail-on-new-metrics` without trusted baseline            | Contract error, exit `2`             |
+| Coverage/API regression gate without required baseline data | Contract error, exit `2`             |
+| Invalid Cobertura XML without hotspot gate                  | Current-run invalid signal, exit `0` |
+| Coverage hotspot gate without valid `--coverage` input      | Contract error, exit `2`             |
+| `--update-metrics-baseline` when metrics were not computed  | Contract error, exit `2`             |
+| Threshold breach or NEW-vs-baseline metric regressions      | Gating failure, exit `3`             |
+| Coverage hotspots from current-run coverage join            | Gating failure, exit `3`             |
 
 ## Determinism / canonicalization
 

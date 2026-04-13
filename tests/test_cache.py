@@ -21,6 +21,7 @@ from codeclone.cache_io import sign_cache_payload
 from codeclone.cache_paths import runtime_filepath_from_wire, wire_filepath_from_runtime
 from codeclone.errors import CacheError
 from codeclone.extractor import Unit
+from codeclone.models import ApiParamSpec, FileMetrics, ModuleApiSurface, PublicSymbol
 
 
 def _make_unit(filepath: str) -> Unit:
@@ -108,6 +109,61 @@ def test_cache_roundtrip_preserves_empty_structural_findings(tmp_path: Path) -> 
     assert entry is not None
     assert "structural_findings" in entry
     assert entry["structural_findings"] == []
+
+
+def test_cache_roundtrip_preserves_api_surface_parameter_order(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    cache.put_file_entry(
+        "x.py",
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        file_metrics=FileMetrics(
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=frozenset(),
+            import_names=frozenset(),
+            class_names=frozenset(),
+            api_surface=ModuleApiSurface(
+                module="pkg.mod",
+                filepath="x.py",
+                all_declared=("run",),
+                symbols=(
+                    PublicSymbol(
+                        qualname="pkg.mod:run",
+                        kind="function",
+                        start_line=1,
+                        end_line=2,
+                        params=(
+                            ApiParamSpec(
+                                name="beta",
+                                kind="pos_or_kw",
+                                has_default=False,
+                            ),
+                            ApiParamSpec(
+                                name="alpha",
+                                kind="pos_or_kw",
+                                has_default=False,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    cache.save()
+
+    loaded = Cache(cache_path)
+    loaded.load()
+    entry = loaded.get_file_entry("x.py")
+    assert entry is not None
+    params = entry["api_surface"]["symbols"][0]["params"]
+    assert [param["name"] for param in params] == ["beta", "alpha"]
 
 
 def test_cache_load_normalizes_stale_structural_findings(tmp_path: Path) -> None:

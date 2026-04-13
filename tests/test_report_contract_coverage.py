@@ -103,7 +103,7 @@ from codeclone.report.serialize import (
     _structural_kind_label,
     render_text_report_document,
 )
-from tests._assertions import assert_mapping_entries
+from tests._assertions import assert_contains_all, assert_mapping_entries
 
 
 def _rich_report_document() -> dict[str, object]:
@@ -649,6 +649,7 @@ def test_report_document_rich_invariants_and_renderers() -> None:
         "complexity": 2,
         "coupling": 1,
         "cohesion": 1,
+        "coverage": 0,
         "dependency": 0,
     }
 
@@ -904,6 +905,7 @@ def test_directory_hotspots_collapses_test_scope_roots_for_overview() -> None:
                 "complexity": 0,
                 "coupling": 0,
                 "cohesion": 0,
+                "coverage": 0,
                 "dependency": 0,
             },
         },
@@ -930,6 +932,7 @@ def test_directory_hotspots_collapses_test_scope_roots_for_overview() -> None:
                 "complexity": 0,
                 "coupling": 0,
                 "cohesion": 1,
+                "coverage": 0,
                 "dependency": 0,
             },
         },
@@ -1008,6 +1011,51 @@ def test_directory_hotspot_helpers_cover_fallback_paths() -> None:
     )
     assert unknown_family_card["title"] == "Finding"
     assert unknown_family_card["summary"] == ""
+    missing_file_coverage_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "design",
+            "category": "coverage",
+            "kind": "coverage_scope_gap",
+            "severity": "warning",
+            "confidence": "high",
+            "count": 1,
+            "source_scope": {"dominant_kind": "production"},
+            "spread": {"files": 1, "functions": 1},
+            "items": [{"relative_path": "pkg/mod.py", "start_line": 10}],
+            "facts": {
+                "coverage_status": "missing_from_report",
+                "hotspot_threshold_percent": 50,
+            },
+        }
+    )
+    assert (
+        missing_file_coverage_card["title"]
+        == "Include risky function in coverage input"
+    )
+    assert (
+        missing_file_coverage_card["summary"]
+        == "coverage.xml did not include this function's file"
+    )
+    measured_coverage_card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "design",
+            "category": "coverage",
+            "severity": "warning",
+            "confidence": "high",
+            "count": 1,
+            "source_scope": {"dominant_kind": "production"},
+            "spread": {"files": 1, "functions": 1},
+            "items": [
+                {"relative_path": "pkg/mod.py", "start_line": 20, "end_line": 22}
+            ],
+            "facts": {
+                "coverage_status": "measured",
+                "coverage_permille": 375,
+                "hotspot_threshold_percent": 50,
+            },
+        }
+    )
+    assert measured_coverage_card["summary"] == "coverage=37.5%, threshold=50%"
 
 
 def test_markdown_and_sarif_reuse_prebuilt_report_document() -> None:
@@ -1243,6 +1291,56 @@ def test_report_contract_renderers_include_overloaded_modules_section() -> None:
     assert "candidate_status=candidate" in markdown
 
 
+def test_report_contract_renderers_include_coverage_join_section_when_present() -> None:
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics={
+            "coverage_join": {
+                "summary": {
+                    "status": "ok",
+                    "source": "/repo/coverage.xml",
+                    "units": 1,
+                    "measured_units": 1,
+                    "overall_permille": 250,
+                    "coverage_hotspots": 1,
+                    "scope_gap_hotspots": 0,
+                    "hotspot_threshold_percent": 50,
+                },
+                "items": [
+                    {
+                        "qualname": "pkg.mod:run",
+                        "filepath": "/repo/pkg/mod.py",
+                        "start_line": 10,
+                        "end_line": 20,
+                        "cyclomatic_complexity": 18,
+                        "risk": "high",
+                        "executable_lines": 4,
+                        "covered_lines": 1,
+                        "coverage_permille": 250,
+                        "coverage_status": "measured",
+                        "coverage_hotspot": True,
+                        "scope_gap_hotspot": False,
+                    }
+                ],
+            }
+        },
+    )
+
+    text = render_text_report_document(payload)
+    markdown = render_markdown_report_document(payload)
+
+    assert_contains_all(text, "COVERAGE JOIN (top 10)", "qualname=pkg.mod:run")
+    assert_contains_all(
+        markdown,
+        '<a id="coverage-join"></a>',
+        "### Coverage Join",
+        "coverage_status=measured",
+    )
+
+
 def test_report_contract_includes_canonical_overloaded_modules_family() -> None:
     payload = _rich_report_document()
 
@@ -1415,6 +1513,101 @@ def test_report_contract_includes_canonical_adoption_and_api_surface_families() 
         api_items[1]["record_kind"],
         api_items[1]["change_kind"],
     ) == ("symbol", "pkg/mod.py", "breaking_change", "removed")
+
+
+def test_report_contract_includes_canonical_coverage_join_family() -> None:
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics={
+            "coverage_join": {
+                "summary": {
+                    "status": "ok",
+                    "source": "/repo/coverage.xml",
+                    "files": 1,
+                    "units": 2,
+                    "measured_units": 1,
+                    "overall_executable_lines": 10,
+                    "overall_covered_lines": 7,
+                    "overall_permille": 700,
+                    "missing_from_report_units": 1,
+                    "coverage_hotspots": 1,
+                    "scope_gap_hotspots": 0,
+                    "hotspot_threshold_percent": 50,
+                },
+                "items": [
+                    {
+                        "qualname": "pkg.mod:run",
+                        "filepath": "/repo/pkg/mod.py",
+                        "start_line": 10,
+                        "end_line": 20,
+                        "cyclomatic_complexity": 18,
+                        "risk": "high",
+                        "executable_lines": 4,
+                        "covered_lines": 1,
+                        "coverage_permille": 250,
+                        "coverage_status": "measured",
+                        "coverage_hotspot": True,
+                        "scope_gap_hotspot": False,
+                    },
+                    {
+                        "qualname": "pkg.other:skip",
+                        "filepath": "/repo/pkg/other.py",
+                        "start_line": 1,
+                        "end_line": 4,
+                        "cyclomatic_complexity": 2,
+                        "risk": "low",
+                        "executable_lines": 0,
+                        "covered_lines": 0,
+                        "coverage_permille": 0,
+                        "coverage_status": "missing_from_report",
+                        "coverage_hotspot": False,
+                        "scope_gap_hotspot": False,
+                    },
+                ],
+            }
+        },
+    )
+
+    summary, coverage_join, items = _metric_family_payload(payload, "coverage_join")
+    coverage_summary = cast(dict[str, object], coverage_join["summary"])
+    assert summary["coverage_join"] == coverage_summary
+    assert coverage_summary == {
+        "status": "ok",
+        "source": "coverage.xml",
+        "files": 1,
+        "units": 2,
+        "measured_units": 1,
+        "overall_executable_lines": 10,
+        "overall_covered_lines": 7,
+        "overall_permille": 700,
+        "missing_from_report_units": 1,
+        "coverage_hotspots": 1,
+        "scope_gap_hotspots": 0,
+        "hotspot_threshold_percent": 50,
+        "invalid_reason": None,
+    }
+    assert (
+        items[0]["relative_path"],
+        items[0]["qualname"],
+        items[0]["coverage_hotspot"],
+        items[0]["scope_gap_hotspot"],
+    ) == ("pkg/mod.py", "pkg.mod:run", True, False)
+
+    design_family = cast(
+        dict[str, object],
+        cast(dict[str, object], cast(dict[str, object], payload["findings"])["groups"])[
+            "design"
+        ],
+    )
+    design_groups = cast(list[dict[str, object]], design_family["groups"])
+    coverage_group = next(
+        group for group in design_groups if str(group["category"]) == "coverage"
+    )
+    assert coverage_group["kind"] == "coverage_hotspot"
+    assert cast(dict[str, object], coverage_group["facts"])["coverage_permille"] == 250
 
 
 def test_sarif_helper_level_mapping() -> None:
@@ -1770,6 +1963,7 @@ def test_sarif_private_helper_family_dispatches() -> None:
     design_cohesion = _sarif_rule_spec({"family": "design", "category": "cohesion"})
     design_complexity = _sarif_rule_spec({"family": "design", "category": "complexity"})
     design_coupling = _sarif_rule_spec({"family": "design", "category": "coupling"})
+    design_coverage = _sarif_rule_spec({"family": "design", "category": "coverage"})
     design_dependency = _sarif_rule_spec({"family": "design", "category": "dependency"})
     assert (
         clone_function.rule_id,
@@ -1779,6 +1973,7 @@ def test_sarif_private_helper_family_dispatches() -> None:
         design_cohesion.rule_id,
         design_complexity.rule_id,
         design_coupling.rule_id,
+        design_coverage.rule_id,
         design_dependency.rule_id,
     ) == (
         "CCLONE001",
@@ -1788,6 +1983,7 @@ def test_sarif_private_helper_family_dispatches() -> None:
         "CDESIGN001",
         "CDESIGN002",
         "CDESIGN003",
+        "CDESIGN005",
         "CDESIGN004",
     )
 
@@ -1844,6 +2040,28 @@ def test_sarif_private_helper_family_dispatches() -> None:
             "family": "design",
             "category": "dependency",
             "items": [{"module": "pkg.a"}, {"module": "pkg.b"}],
+        }
+    )
+    assert "not in coverage.xml" in _sarif_result_message(
+        {
+            "family": "design",
+            "category": "coverage",
+            "kind": "coverage_scope_gap",
+            "facts": {"coverage_status": "missing_from_report"},
+            "items": [{"qualname": "pkg.mod:run"}],
+        }
+    )
+    assert "25.0% < 50%" in _sarif_result_message(
+        {
+            "family": "design",
+            "category": "coverage",
+            "kind": "coverage_hotspot",
+            "facts": {
+                "coverage_status": "measured",
+                "coverage_permille": 250,
+                "hotspot_threshold_percent": 50,
+            },
+            "items": [{"qualname": "pkg.mod:run"}],
         }
     )
 
@@ -2103,12 +2321,19 @@ def test_collect_paths_from_metrics_covers_all_metric_families_and_skips_missing
                 {"filepath": ""},
             ]
         },
+        "coverage_join": {
+            "items": [
+                {"filepath": "/repo/coverage.py"},
+                {"filepath": None},
+            ]
+        },
     }
 
     assert _collect_paths_from_metrics(metrics) == {
         "/repo/adoption.py",
         "/repo/api.py",
         "/repo/complexity.py",
+        "/repo/coverage.py",
         "/repo/coupling.py",
         "/repo/cohesion.py",
         "/repo/dead.py",

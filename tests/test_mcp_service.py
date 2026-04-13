@@ -11,6 +11,7 @@ import json
 import subprocess
 from collections import OrderedDict
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -156,6 +157,7 @@ def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -2500,6 +2502,7 @@ def test_mcp_service_additional_projection_and_error_branches(
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -2611,6 +2614,7 @@ def test_mcp_service_additional_projection_and_error_branches(
         func_clones_count=record.func_clones_count,
         block_clones_count=record.block_clones_count,
         project_metrics=record.project_metrics,
+        coverage_join=record.coverage_join,
         suggestions=record.suggestions,
         new_func=record.new_func,
         new_block=record.new_block,
@@ -2751,6 +2755,7 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -2779,6 +2784,7 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset({"clone:new"}),
         new_block=frozenset(),
@@ -2842,6 +2848,7 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -2863,6 +2870,7 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -2876,6 +2884,148 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         )
         is None
     )
+
+
+def test_mcp_service_summary_and_gate_contract_for_coverage_join(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    request = MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False)
+    record = MCPRunRecord(
+        run_id="coverage",
+        root=tmp_path,
+        request=request,
+        comparison_settings=(),
+        report_document={
+            "metrics": {
+                "families": {
+                    "coverage_join": {
+                        "summary": {
+                            "status": "ok",
+                            "source": "coverage.xml",
+                            "overall_permille": 700,
+                            "coverage_hotspots": 1,
+                            "scope_gap_hotspots": 0,
+                            "hotspot_threshold_percent": 50,
+                        },
+                        "items": [],
+                    }
+                }
+            }
+        },
+        summary={
+            "run_id": "coverage",
+            "health": {"score": 80, "grade": "B"},
+            "inventory": {},
+            "baseline": {},
+            "metrics_baseline": {},
+            "cache": {},
+            "findings_summary": {},
+            "baseline_diff": {},
+            "metrics_diff": {},
+            "warnings": [],
+            "failures": [],
+        },
+        changed_paths=(),
+        changed_projection=None,
+        warnings=(),
+        failures=(),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        coverage_join=None,
+        suggestions=(),
+        new_func=frozenset(),
+        new_block=frozenset(),
+        metrics_diff=None,
+    )
+    payload = service._summary_payload(record.summary, record=record)
+    assert cast(dict[str, object], payload["coverage_join"]) == {
+        "status": "ok",
+        "overall_permille": 700,
+        "coverage_hotspots": 1,
+        "scope_gap_hotspots": 0,
+        "hotspot_threshold_percent": 50,
+        "source": "coverage.xml",
+    }
+    empty_report_record = replace(
+        record,
+        report_document={"metrics": {"families": {}}},
+    )
+    assert "coverage_join" not in service._summary_payload(
+        empty_report_record.summary,
+        record=empty_report_record,
+    )
+    with pytest.raises(MCPServiceContractError, match="coverage_xml"):
+        service._evaluate_gate_snapshot(
+            record=record,
+            request=MCPGateRequest(fail_on_untested_hotspots=True),
+        )
+
+    invalid_record = MCPRunRecord(
+        run_id="coverage-invalid",
+        root=tmp_path,
+        request=request,
+        comparison_settings=(),
+        report_document=record.report_document,
+        summary=record.summary,
+        changed_paths=(),
+        changed_projection=None,
+        warnings=(),
+        failures=(),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        coverage_join=cast(
+            Any,
+            SimpleNamespace(status="invalid", invalid_reason="broken xml"),
+        ),
+        suggestions=(),
+        new_func=frozenset(),
+        new_block=frozenset(),
+        metrics_diff=None,
+    )
+    with pytest.raises(MCPServiceContractError, match="broken xml"):
+        service._evaluate_gate_snapshot(
+            record=invalid_record,
+            request=MCPGateRequest(fail_on_untested_hotspots=True),
+        )
+    invalid_summary_record = replace(
+        record,
+        report_document={
+            "metrics": {
+                "families": {
+                    "coverage_join": {
+                        "summary": {
+                            "status": "invalid",
+                            "source": "coverage.xml",
+                            "overall_permille": 0,
+                            "coverage_hotspots": 0,
+                            "scope_gap_hotspots": 0,
+                            "hotspot_threshold_percent": 50,
+                            "invalid_reason": "broken xml",
+                        }
+                    }
+                }
+            }
+        },
+    )
+    invalid_payload = service._summary_payload(
+        invalid_summary_record.summary,
+        record=invalid_summary_record,
+    )
+    assert (
+        cast(dict[str, object], invalid_payload["coverage_join"])["invalid_reason"]
+        == "broken xml"
+    )
+    with pytest.raises(MCPServiceContractError, match="analysis_mode='full'"):
+        service._validate_analysis_request(
+            MCPAnalysisRequest(
+                root=str(tmp_path),
+                analysis_mode="clones_only",
+                coverage_xml="coverage.xml",
+            )
+        )
 
 
 def test_mcp_service_short_id_and_comparison_helper_branches(
@@ -2957,6 +3107,7 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
         func_clones_count=0,
         block_clones_count=2,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -3083,6 +3234,7 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -3280,6 +3432,7 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=cast(Any, (suggestion,)),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -3473,6 +3626,48 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
                 "score": 0.12,
                 "candidate_status": "non_candidate",
             },
+        ],
+    }
+    coverage_join_payload = service._metrics_detail_payload(
+        metrics={
+            "summary": {},
+            "families": {
+                "coverage_join": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/mod.py",
+                            "qualname": "pkg.mod:run",
+                            "coverage_status": "measured",
+                            "coverage_permille": 250,
+                            "coverage_hotspot": True,
+                            "scope_gap_hotspot": False,
+                        }
+                    ]
+                }
+            },
+        },
+        family="coverage_join",
+        path=None,
+        offset=0,
+        limit=5,
+    )
+    assert coverage_join_payload == {
+        "family": "coverage_join",
+        "path": None,
+        "offset": 0,
+        "limit": 5,
+        "returned": 1,
+        "total": 1,
+        "has_more": False,
+        "items": [
+            {
+                "path": "pkg/mod.py",
+                "qualname": "pkg.mod:run",
+                "coverage_status": "measured",
+                "coverage_permille": 250,
+                "coverage_hotspot": True,
+                "scope_gap_hotspot": False,
+            }
         ],
     }
     coverage_adoption_payload = service._metrics_detail_payload(

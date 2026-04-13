@@ -91,11 +91,11 @@ Notes:
 }
 ```
 
-## Cache schema (`2.3`)
+## Cache schema (`2.4`)
 
 ```json
 {
-  "v": "2.3",
+  "v": "2.4",
   "payload": {
     "py": "cp313",
     "fp": "1",
@@ -140,14 +140,16 @@ Notes:
 - `ss` stores per-file source stats and is required for full cache-hit accounting
   in discovery.
 - `rn`/`rq` are optional and decode to empty arrays when absent.
+- Cached public-API symbol payloads preserve declaration order for `params`;
+  canonicalization must not rewrite callable signature order.
 - `u` row decoder accepts both legacy 11-column rows and canonical 17-column rows
   (legacy rows map new structural fields to neutral defaults).
 
-## Report schema (`2.5`)
+## Report schema (`2.8`)
 
 ```json
 {
-  "report_schema_version": "2.5",
+  "report_schema_version": "2.8",
   "meta": {
     "codeclone_version": "2.0.0b5",
     "project_name": "codeclone",
@@ -199,14 +201,24 @@ Notes:
     "summary": {
       "...": "...",
       "suppressed": {
-        "dead_code": 0
+        "dead_code": 0,
+        "clones": 1
       }
     },
     "groups": {
       "clones": {
         "functions": [],
         "blocks": [],
-        "segments": []
+        "segments": [],
+        "suppressed": {
+          "functions": [
+            {
+              "...": "..."
+            }
+          ],
+          "blocks": [],
+          "segments": []
+        }
       },
       "structural": {
         "groups": [
@@ -259,6 +271,21 @@ Notes:
         "public_symbol_documented": 0,
         "docstring_permille": 0,
         "typing_any_count": 0
+      },
+      "coverage_join": {
+        "status": "ok",
+        "source": "coverage.xml",
+        "files": 0,
+        "units": 0,
+        "measured_units": 0,
+        "overall_executable_lines": 0,
+        "overall_covered_lines": 0,
+        "overall_permille": 0,
+        "missing_from_report_units": 0,
+        "coverage_hotspots": 0,
+        "scope_gap_hotspots": 0,
+        "hotspot_threshold_percent": 50,
+        "invalid_reason": null
       },
       "api_surface": {
         "enabled": false,
@@ -319,6 +346,24 @@ Notes:
           "docstring_permille": 0,
           "docstring_delta": 0,
           "typing_any_count": 0
+        },
+        "items": []
+      },
+      "coverage_join": {
+        "summary": {
+          "status": "ok",
+          "source": "coverage.xml",
+          "files": 0,
+          "units": 0,
+          "measured_units": 0,
+          "overall_executable_lines": 0,
+          "overall_covered_lines": 0,
+          "overall_permille": 0,
+          "missing_from_report_units": 0,
+          "coverage_hotspots": 0,
+          "scope_gap_hotspots": 0,
+          "hotspot_threshold_percent": 50,
+          "invalid_reason": null
         },
         "items": []
       },
@@ -393,7 +438,7 @@ Notes:
 ```text
 # CodeClone Report
 - Markdown schema: 1.0
-- Source report schema: 2.5
+- Source report schema: 2.8
 ...
 ## Overview
 ## Inventory
@@ -479,7 +524,7 @@ Notes:
       ],
       "properties": {
         "profileVersion": "1.0",
-        "reportSchemaVersion": "2.5"
+        "reportSchemaVersion": "2.8"
       },
       "results": [
         {

@@ -100,6 +100,22 @@ addopts = "-ra"
 branch = true
 source = ["codeclone"]
 
+[tool.codeclone]
+baseline = "codeclone.baseline.json"
+min_loc = 6
+min_stmt = 4
+fail_on_new = true
+fail_cycles = true
+fail_dead_code = true
+fail_health = 87
+fail_on_new_metrics = true
+typing_coverage = false
+docstring_coverage = false
+api_surface = false
+golden_fixture_paths = ["tests/fixtures/golden_*"]
+min_typing_coverage = 99
+
+
 [tool.coverage.report]
 show_missing = true
 fail_under = 99

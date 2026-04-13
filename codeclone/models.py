@@ -311,6 +311,45 @@ class ModuleDocstringCoverage:
     public_symbol_documented: int
 
 
+@dataclass(frozen=True, slots=True)
+class UnitCoverageFact:
+    qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    cyclomatic_complexity: int
+    risk: Literal["low", "medium", "high"]
+    executable_lines: int
+    covered_lines: int
+    coverage_permille: int
+    coverage_status: Literal["measured", "missing_from_report", "no_executable_lines"]
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageJoinResult:
+    coverage_xml: str
+    status: Literal["ok", "invalid"]
+    hotspot_threshold_percent: int
+    files: int = 0
+    measured_units: int = 0
+    overall_executable_lines: int = 0
+    overall_covered_lines: int = 0
+    coverage_hotspots: int = 0
+    scope_gap_hotspots: int = 0
+    units: tuple[UnitCoverageFact, ...] = ()
+    invalid_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SuppressedCloneGroup:
+    kind: Literal["function", "block", "segment"]
+    group_key: str
+    items: tuple[GroupItem, ...]
+    matched_patterns: tuple[str, ...] = ()
+    suppression_rule: str = ""
+    suppression_source: str = ""
+
+
 GroupItem = dict[str, object]
 GroupItemLike = Mapping[str, object]
 GroupItemsLike = Sequence[GroupItemLike]

@@ -144,7 +144,7 @@ gating decisions.
 Detected findings can be rendered as:
 
 - interactive HTML (`--html`),
-- canonical JSON (`--json`, schema `2.5`),
+- canonical JSON (`--json`, schema `2.8`),
 - deterministic text projection (`--text`),
 - deterministic Markdown projection (`--md`),
 - deterministic SARIF projection (`--sarif`).

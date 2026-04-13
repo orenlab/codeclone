@@ -671,6 +671,42 @@ _IDE_LINKS = r"""
 """
 
 # ---------------------------------------------------------------------------
+# Tooltips (fixed-position, escapes overflow containers)
+# ---------------------------------------------------------------------------
+
+_TOOLTIPS = """\
+(function initTooltips(){
+  let tip=null;
+  function show(e){
+    const el=e.target;
+    const text=el.getAttribute('data-tip');
+    if(!text)return;
+    tip=document.createElement('div');
+    tip.className='kpi-tooltip';
+    tip.textContent=text;
+    document.body.appendChild(tip);
+    const r=el.getBoundingClientRect();
+    const tw=tip.offsetWidth;
+    const th=tip.offsetHeight;
+    let left=r.left+r.width/2-tw/2;
+    let top=r.bottom+6;
+    if(left<4)left=4;
+    if(left+tw>window.innerWidth-4)left=window.innerWidth-tw-4;
+    if(top+th>window.innerHeight-4){top=r.top-th-6}
+    tip.style.left=left+'px';
+    tip.style.top=top+'px';
+  }
+  function hide(){if(tip){tip.remove();tip=null}}
+  document.addEventListener('mouseenter',function(e){
+    if(e.target.matches('.kpi-help[data-tip]'))show(e);
+  },true);
+  document.addEventListener('mouseleave',function(e){
+    if(e.target.matches('.kpi-help[data-tip]'))hide();
+  },true);
+})();
+"""
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -692,6 +728,7 @@ _ALL_MODULES = (
     _SCOPE_COUNTERS,
     _LAZY_HIGHLIGHT,
     _IDE_LINKS,
+    _TOOLTIPS,
 )
 
 

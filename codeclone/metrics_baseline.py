@@ -26,6 +26,7 @@ from .contracts import BASELINE_SCHEMA_VERSION, METRICS_BASELINE_SCHEMA_VERSION
 from .errors import BaselineValidationError
 from .metrics.api_surface import compare_api_surfaces
 from .models import (
+    ApiBreakingChange,
     ApiParamSpec,
     ApiSurfaceSnapshot,
     MetricsDiff,
@@ -356,6 +357,7 @@ class MetricsBaseline:
             generator_name=self.generator_name or METRICS_BASELINE_GENERATOR,
             generator_version=self.generator_version or __version__,
             created_at=self.created_at or _now_utc_z(),
+            include_adoption=self.has_coverage_adoption_snapshot,
             api_surface_snapshot=self.api_surface_snapshot,
             api_surface_root=self.path.parent,
         )
@@ -413,7 +415,6 @@ class MetricsBaseline:
             self.payload_sha256 = _require_str(
                 merged_meta, _METRICS_PAYLOAD_SHA256_KEY, path=self.path
             )
-            self.has_coverage_adoption_snapshot = True
             self.api_surface_payload_sha256 = _optional_require_str(
                 merged_meta,
                 _API_SURFACE_PAYLOAD_SHA256_KEY,
@@ -433,7 +434,6 @@ class MetricsBaseline:
         self.python_tag = _require_str(payload_meta, "python_tag", path=self.path)
         self.created_at = _require_str(payload_meta, "created_at", path=self.path)
         self.payload_sha256 = payload_metrics_hash
-        self.has_coverage_adoption_snapshot = True
         self.api_surface_payload_sha256 = payload_api_surface_hash
 
     def verify_compatibility(self, *, runtime_python_tag: str) -> None:
@@ -542,6 +542,8 @@ class MetricsBaseline:
         schema_version: str | None = None,
         python_tag: str | None = None,
         generator_version: str | None = None,
+        include_adoption: bool = True,
+        include_api_surface: bool = True,
     ) -> MetricsBaseline:
         baseline = MetricsBaseline(path)
         baseline.generator_name = METRICS_BASELINE_GENERATOR
@@ -550,15 +552,20 @@ class MetricsBaseline:
         baseline.python_tag = python_tag or current_python_tag()
         baseline.created_at = _now_utc_z()
         baseline.snapshot = snapshot_from_project_metrics(project_metrics)
-        baseline.payload_sha256 = _compute_payload_sha256(baseline.snapshot)
-        baseline.has_coverage_adoption_snapshot = True
-        baseline.api_surface_snapshot = project_metrics.api_surface
+        baseline.payload_sha256 = _compute_payload_sha256(
+            baseline.snapshot,
+            include_adoption=include_adoption,
+        )
+        baseline.has_coverage_adoption_snapshot = include_adoption
+        baseline.api_surface_snapshot = (
+            project_metrics.api_surface if include_api_surface else None
+        )
         baseline.api_surface_payload_sha256 = (
             _compute_api_surface_payload_sha256(
-                project_metrics.api_surface,
+                baseline.api_surface_snapshot,
                 root=baseline.path.parent,
             )
-            if project_metrics.api_surface is not None
+            if baseline.api_surface_snapshot is not None
             else None
         )
         return baseline
@@ -610,11 +617,17 @@ class MetricsBaseline:
                 set(current_snapshot.dead_code_items) - set(snapshot.dead_code_items)
             )
         )
-        added_api_symbols, api_breaking_changes = compare_api_surfaces(
-            baseline=self.api_surface_snapshot,
-            current=current.api_surface,
-            strict_types=False,
-        )
+        added_api_symbols: tuple[str, ...]
+        api_breaking_changes: tuple[ApiBreakingChange, ...]
+        if self.api_surface_snapshot is None:
+            added_api_symbols = ()
+            api_breaking_changes = ()
+        else:
+            added_api_symbols, api_breaking_changes = compare_api_surfaces(
+                baseline=self.api_surface_snapshot,
+                current=current.api_surface,
+                strict_types=False,
+            )
 
         return MetricsDiff(
             new_high_risk_functions=new_high_risk_functions,
@@ -1252,10 +1265,14 @@ def _build_payload(
     generator_name: str,
     generator_version: str,
     created_at: str,
+    include_adoption: bool = True,
     api_surface_snapshot: ApiSurfaceSnapshot | None = None,
     api_surface_root: Path | None = None,
 ) -> dict[str, Any]:
-    payload_sha256 = _compute_payload_sha256(snapshot)
+    payload_sha256 = _compute_payload_sha256(
+        snapshot,
+        include_adoption=include_adoption,
+    )
     payload: dict[str, Any] = {
         "meta": {
             "generator": {
@@ -1267,7 +1284,10 @@ def _build_payload(
             "created_at": created_at,
             "payload_sha256": payload_sha256,
         },
-        "metrics": _snapshot_payload(snapshot),
+        "metrics": _snapshot_payload(
+            snapshot,
+            include_adoption=include_adoption,
+        ),
     }
     if api_surface_snapshot is not None:
         payload["meta"][_API_SURFACE_PAYLOAD_SHA256_KEY] = (

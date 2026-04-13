@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define report contracts in `2.0.0b5`: canonical JSON (`report_schema_version=2.5`)
+Define report contracts in `2.0.0b5`: canonical JSON (`report_schema_version=2.8`)
 plus deterministic TXT/Markdown/SARIF projections.
 
 ## Public surface
@@ -16,7 +16,7 @@ plus deterministic TXT/Markdown/SARIF projections.
 
 ## Data model
 
-JSON report top-level (v2.5):
+JSON report top-level (v2.8):
 
 - `report_schema_version`
 - `meta`
@@ -45,9 +45,19 @@ Canonical report-only metrics additions:
 - `metrics.families.api_surface` records the current public symbol inventory
   and compact baseline diff facts (`added`, `breaking`) when
   `--api-surface` is enabled
-- the family is canonical report truth, but it does **not** participate in
-  findings totals, health, gates, baseline NEW/KNOWN semantics, or SARIF in
-  `b4`
+- `metrics.families.coverage_join` records an optional current-run join between
+  external Cobertura line coverage and CodeClone function spans. Its summary
+  carries `status`, `source`, unit/line counts, `overall_permille`,
+  `missing_from_report_units`, `coverage_hotspots`, `scope_gap_hotspots`,
+  `hotspot_threshold_percent`, and optional `invalid_reason`; the same compact
+  summary is mirrored in `metrics.summary.coverage_join`; its items carry
+  per-function joined coverage facts, including `coverage_status`,
+  `coverage_hotspot`, and `scope_gap_hotspot`.
+- coverage join facts are canonical report truth for that run, but they are
+  **not** baseline truth and do not update `codeclone.baseline.json`
+- adoption/API/coverage-join metrics do **not** participate in clone baseline
+  NEW/KNOWN semantics; coverage join also does not participate in health scoring
+  and gates only when explicitly requested
 - `Overloaded Modules` is a report-only experimental layer rather than a second
   complexity metric:
     - complexity reports local control-flow hotspots in functions and methods
@@ -60,6 +70,12 @@ Coverage/API role split:
 
 - `coverage_adoption` is a canonical metrics family, not a style linter. It
   reports observable adoption facts only.
+- `coverage_join` is a canonical current-run signal over an external Cobertura
+  XML file. It reports joined line facts and may materialize
+  `design` findings with `category="coverage"` and kinds
+  `coverage_hotspot` (measured below threshold) or `coverage_scope_gap`
+  (outside the supplied coverage scope); it does not infer branch coverage or
+  execute tests.
 - `api_surface` is a canonical metrics/gating family, not a second finding
   engine. It reports public API inventory plus baseline-diff facts when the
   run opted into API collection.
@@ -89,10 +105,14 @@ Derived projection layer:
 Finding families:
 
 - `findings.groups.clones.{functions,blocks,segments}`
+- optional `findings.groups.clones.suppressed.{functions,blocks,segments}` for
+  clone groups excluded by project policy such as `golden_fixture_paths`
 - `findings.groups.structural.groups`
 - `findings.groups.dead_code.groups`
 - `findings.groups.design.groups`
 - `findings.summary.suppressed.dead_code` (suppressed counter, non-active findings)
+- optional `findings.summary.suppressed.clones` plus clone-summary suppressed
+  counters when clone groups were excluded from active findings
 
 Important role split:
 
@@ -132,6 +152,10 @@ Per-group common axes (family-specific fields may extend):
 - Design findings are built once in the canonical report using the effective
   threshold policy recorded in `meta.analysis_thresholds.design_findings`; MCP
   and HTML must not re-synthesize them post-hoc from raw metric rows.
+- Coverage design findings are built from canonical `coverage_join` rows only
+  when a valid join is present. Invalid coverage input is represented as
+  `metrics.families.coverage_join.summary.status="invalid"` with no hotspot
+  item rows.
 - HTML overview cards are materialized from canonical findings plus
   `derived.overview` + `derived.hotlists`; pre-expanded overview card payloads are
   not part of the report contract.
@@ -160,6 +184,9 @@ Per-group common axes (family-specific fields may extend):
 - Dead-code suppressed candidates are carried only under metrics
   (`metrics.families.dead_code.suppressed_items`) and never promoted to
   active `findings.groups.dead_code`.
+- Clone groups excluded by `golden_fixture_paths` are carried only under
+  `findings.groups.clones.suppressed.*`; they do not contribute to active
+  findings totals, health scoring, clone gating, or suggestion generation.
 - A lower score after upgrade may reflect a broader health model, not only
   worse code. Report renderers may surface the score, but health-model
   expansion is documented separately in [15-health-score.md](15-health-score.md)

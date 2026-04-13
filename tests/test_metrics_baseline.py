@@ -28,6 +28,7 @@ from codeclone.models import (
     ProjectMetrics,
     PublicSymbol,
 )
+from tests._assertions import assert_missing_keys
 
 
 def _snapshot() -> MetricsSnapshot:
@@ -142,6 +143,21 @@ def _api_surface_snapshot_with_filepath(filepath: str) -> ApiSurfaceSnapshot:
     )
 
 
+def _assert_metrics_baseline_reload_state(
+    baseline: MetricsBaseline,
+    *,
+    embedded: bool,
+    has_adoption: bool,
+    has_api_surface: bool,
+) -> None:
+    assert baseline.is_embedded_in_clone_baseline is embedded
+    assert baseline.has_coverage_adoption_snapshot is has_adoption
+    if has_api_surface:
+        assert baseline.api_surface_snapshot is not None
+    else:
+        assert baseline.api_surface_snapshot is None
+
+
 def _save_metrics_baseline_with_api_surface(
     path: Path,
     *,
@@ -187,6 +203,13 @@ def _project_metrics_with_adoption_and_api(
 
 def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), "utf-8")
+
+
+def _load_written_metrics_baseline(path: Path, payload: object) -> MetricsBaseline:
+    _write_json(path, payload)
+    baseline = MetricsBaseline(path)
+    baseline.load()
+    return baseline
 
 
 def _valid_payload(
@@ -659,14 +682,54 @@ def test_metrics_baseline_load_tracks_adoption_snapshot_presence(
         _snapshot(),
         include_adoption=False,
     )
-    _write_json(path, payload)
-
-    baseline = MetricsBaseline(path)
-    baseline.load()
+    baseline = _load_written_metrics_baseline(path, payload)
 
     assert baseline.snapshot is not None
     assert baseline.has_coverage_adoption_snapshot is False
     baseline.verify_integrity()
+
+
+def test_metrics_baseline_from_project_metrics_can_omit_optional_surfaces(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "metrics-baseline.json"
+    baseline = MetricsBaseline.from_project_metrics(
+        project_metrics=_project_metrics_with_adoption_and_api(
+            api_surface=_api_surface_snapshot(include_added=True),
+        ),
+        path=path,
+        include_adoption=False,
+        include_api_surface=False,
+    )
+
+    assert baseline.has_coverage_adoption_snapshot is False
+    assert baseline.api_surface_snapshot is None
+    assert baseline.api_surface_payload_sha256 is None
+
+    baseline.save()
+
+    payload = json.loads(path.read_text("utf-8"))
+    meta = cast(dict[str, object], payload["meta"])
+    metrics = cast(dict[str, object], payload["metrics"])
+    assert_missing_keys(
+        metrics,
+        "typing_param_permille",
+        "typing_return_permille",
+        "docstring_permille",
+        "typing_any_count",
+    )
+    assert_missing_keys(payload, "api_surface")
+    assert_missing_keys(meta, "api_surface_payload_sha256")
+
+    reloaded = MetricsBaseline(path)
+    reloaded.load()
+    _assert_metrics_baseline_reload_state(
+        reloaded,
+        embedded=False,
+        has_adoption=False,
+        has_api_surface=False,
+    )
+    reloaded.verify_integrity()
 
 
 def test_metrics_baseline_save_embedded_clone_baseline_preserves_api_surface(
@@ -690,9 +753,12 @@ def test_metrics_baseline_save_embedded_clone_baseline_preserves_api_surface(
 
     reloaded = MetricsBaseline(path)
     reloaded.load()
-    assert reloaded.is_embedded_in_clone_baseline is True
-    assert reloaded.has_coverage_adoption_snapshot is True
-    assert reloaded.api_surface_snapshot is not None
+    _assert_metrics_baseline_reload_state(
+        reloaded,
+        embedded=True,
+        has_adoption=True,
+        has_api_surface=True,
+    )
 
 
 def test_metrics_baseline_load_accepts_legacy_api_surface_qualnames(
@@ -723,10 +789,7 @@ def test_metrics_baseline_load_accepts_legacy_api_surface_qualnames(
             root=path.parent,
         )
     )
-    _write_json(path, payload)
-
-    baseline = MetricsBaseline(path)
-    baseline.load()
+    baseline = _load_written_metrics_baseline(path, payload)
 
     assert baseline.api_surface_snapshot is not None
     assert [
@@ -762,10 +825,7 @@ def test_metrics_baseline_load_accepts_absolute_api_surface_filepaths(
     meta["api_surface_payload_sha256"] = mb_mod._compute_api_surface_payload_sha256(
         api_surface_snapshot
     )
-    _write_json(path, payload)
-
-    baseline = MetricsBaseline(path)
-    baseline.load()
+    baseline = _load_written_metrics_baseline(path, payload)
 
     assert baseline.api_surface_snapshot is not None
     assert baseline.api_surface_snapshot.modules[0].filepath == absolute_filepath

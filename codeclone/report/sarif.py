@@ -23,6 +23,7 @@ from ..domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
     CATEGORY_COUPLING,
+    CATEGORY_COVERAGE,
     CATEGORY_DEPENDENCY,
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
@@ -33,6 +34,8 @@ from ..domain.findings import (
     FAMILY_STRUCTURAL,
     FINDING_KIND_CLASS_HOTSPOT,
     FINDING_KIND_CLONE_GROUP,
+    FINDING_KIND_COVERAGE_HOTSPOT,
+    FINDING_KIND_COVERAGE_SCOPE_GAP,
     FINDING_KIND_CYCLE,
     FINDING_KIND_FUNCTION_HOTSPOT,
     FINDING_KIND_UNUSED_SYMBOL,
@@ -346,6 +349,28 @@ def _design_rule_spec(category: str, kind: str) -> _RuleSpec:
             kind or FINDING_KIND_CLASS_HOTSPOT,
             CONFIDENCE_HIGH,
         )
+    if category == CATEGORY_COVERAGE:
+        if kind == FINDING_KIND_COVERAGE_SCOPE_GAP:
+            return _RuleSpec(
+                "CDESIGN006",
+                "Coverage scope gap",
+                "A medium/high-risk function is outside the supplied joined "
+                "coverage scope.",
+                SEVERITY_WARNING,
+                FAMILY_DESIGN,
+                kind,
+                CONFIDENCE_HIGH,
+            )
+        return _RuleSpec(
+            "CDESIGN005",
+            "Coverage hotspot",
+            "A medium/high-risk function falls below the configured joined "
+            "coverage threshold.",
+            SEVERITY_WARNING,
+            FAMILY_DESIGN,
+            kind or FINDING_KIND_COVERAGE_HOTSPOT,
+            CONFIDENCE_HIGH,
+        )
     return _RuleSpec(
         "CDESIGN004",
         "Dependency cycle",
@@ -452,6 +477,13 @@ def _design_result_message(
         fact_key, label, metric_label = spec
         value = _as_int(facts.get(fact_key))
         return f"{label} ({metric_label}={value}): {qualname}."
+    if category == CATEGORY_COVERAGE:
+        coverage_status = _text(facts.get("coverage_status"))
+        threshold = _as_int(facts.get("hotspot_threshold_percent"))
+        if coverage_status == "missing_from_report":
+            return f"Coverage scope gap (not in coverage.xml): {qualname}."
+        coverage_pct = _as_int(facts.get("coverage_permille")) / 10.0
+        return f"Coverage hotspot ({coverage_pct:.1f}% < {threshold}%): {qualname}."
     modules = [_text(item.get("module")) for item in items if _text(item.get("module"))]
     return f"Dependency cycle ({len(modules)} modules): {' -> '.join(modules)}."
 
@@ -658,6 +690,11 @@ def _design_result_properties(
         "cyclomatic_complexity",
         "nesting_depth",
         "cycle_length",
+        "coverage_permille",
+        "covered_lines",
+        "executable_lines",
+        "hotspot_threshold_percent",
+        "coverage_status",
     ):
         if key in facts:
             props[key] = facts[key]

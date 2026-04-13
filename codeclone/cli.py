@@ -490,6 +490,8 @@ def report(
     new_block: set[str],
     html_builder: Callable[..., str] | None = None,
     metrics_diff: MetricsDiff | None = None,
+    coverage_adoption_diff_available: bool = False,
+    api_surface_diff_available: bool = False,
     include_report_document: bool = False,
 ) -> ReportArtifacts:
     return cast(
@@ -504,6 +506,8 @@ def report(
             new_block=new_block,
             html_builder=html_builder,
             metrics_diff=metrics_diff,
+            coverage_adoption_diff_available=coverage_adoption_diff_available,
+            api_surface_diff_available=api_surface_diff_available,
             include_report_document=include_report_document,
         ),
     )
@@ -955,6 +959,14 @@ def _run_analysis_stages(
         except CacheError as exc:
             console.print(ui.fmt_cache_save_failed(exc))
 
+    coverage_join = getattr(analysis_result, "coverage_join", None)
+    if (
+        coverage_join is not None
+        and coverage_join.status != "ok"
+        and coverage_join.invalid_reason
+    ):
+        console.print(ui.fmt_coverage_join_ignored(coverage_join.invalid_reason))
+
     return discovery_result, processing_result, analysis_result
 
 
@@ -1014,6 +1026,24 @@ def _enforce_gating(
             )
         )
         sys.exit(metrics_baseline_failure_code)
+
+    if bool(getattr(args, "fail_on_untested_hotspots", False)):
+        if analysis.coverage_join is None:
+            console.print(
+                ui.fmt_contract_error(
+                    "--fail-on-untested-hotspots requires --coverage."
+                )
+            )
+            sys.exit(ExitCode.CONTRACT_ERROR)
+        if analysis.coverage_join.status != "ok":
+            detail = analysis.coverage_join.invalid_reason or "invalid coverage input"
+            console.print(
+                ui.fmt_contract_error(
+                    "Coverage gating requires a valid Cobertura XML input.\n"
+                    f"Reason: {detail}"
+                )
+            )
+            sys.exit(ExitCode.CONTRACT_ERROR)
 
     gate_result = gate(
         boot=boot,
@@ -1443,6 +1473,19 @@ def _main_impl() -> None:
         metrics_diff = metrics_baseline_state.baseline.diff(
             analysis_result.project_metrics
         )
+    coverage_adoption_diff_available = bool(
+        metrics_baseline_state.trusted_for_diff
+        and getattr(
+            metrics_baseline_state.baseline,
+            "has_coverage_adoption_snapshot",
+            False,
+        )
+    )
+    api_surface_diff_available = bool(
+        metrics_baseline_state.trusted_for_diff
+        and getattr(metrics_baseline_state.baseline, "api_surface_snapshot", None)
+        is not None
+    )
 
     _print_summary(
         console=cast("_PrinterLike", console),
@@ -1470,6 +1513,9 @@ def _main_impl() -> None:
         func_clones_count=analysis_result.func_clones_count,
         block_clones_count=analysis_result.block_clones_count,
         segment_clones_count=analysis_result.segment_clones_count,
+        suppressed_golden_fixture_groups=len(
+            getattr(analysis_result, "suppressed_clone_groups", ())
+        ),
         suppressed_segment_groups=analysis_result.suppressed_segment_groups,
         new_clones_count=new_clones_count,
     )
@@ -1486,12 +1532,11 @@ def _main_impl() -> None:
         api_surface_summary = _as_mapping(
             _as_mapping(metrics_payload_map.get("api_surface")).get("summary")
         )
-        api_surface_diff_available = bool(
-            metrics_baseline_state.trusted_for_diff
-            and getattr(metrics_baseline_state.baseline, "api_surface_snapshot", None)
-            is not None
+        coverage_join_summary = _as_mapping(
+            _as_mapping(metrics_payload_map.get("coverage_join")).get("summary")
         )
         overloaded_modules_summary_map = _as_mapping(overloaded_modules_summary)
+        coverage_join_source = str(coverage_join_summary.get("source", "")).strip()
         _print_metrics(
             console=cast("_PrinterLike", console),
             quiet=args.quiet,
@@ -1553,6 +1598,24 @@ def _main_impl() -> None:
                     if metrics_diff is not None and api_surface_diff_available
                     else 0
                 ),
+                coverage_join_status=str(
+                    coverage_join_summary.get("status", "")
+                ).strip(),
+                coverage_join_overall_permille=_as_int(
+                    coverage_join_summary.get("overall_permille")
+                ),
+                coverage_join_coverage_hotspots=_as_int(
+                    coverage_join_summary.get("coverage_hotspots")
+                ),
+                coverage_join_scope_gap_hotspots=_as_int(
+                    coverage_join_summary.get("scope_gap_hotspots")
+                ),
+                coverage_join_threshold_percent=_as_int(
+                    coverage_join_summary.get("hotspot_threshold_percent")
+                ),
+                coverage_join_source_label=(
+                    Path(coverage_join_source).name if coverage_join_source else ""
+                ),
             ),
         )
 
@@ -1566,6 +1629,8 @@ def _main_impl() -> None:
         new_block=new_block,
         html_builder=build_html_report,
         metrics_diff=metrics_diff,
+        coverage_adoption_diff_available=coverage_adoption_diff_available,
+        api_surface_diff_available=api_surface_diff_available,
         include_report_document=bool(changed_paths),
     )
     changed_clone_gate = (

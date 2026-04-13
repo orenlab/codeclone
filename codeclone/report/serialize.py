@@ -160,6 +160,54 @@ def _append_clone_section(
         lines.pop()
 
 
+def _append_suppressed_clone_section(
+    lines: list[str],
+    *,
+    title: str,
+    groups: Sequence[object],
+    metric_name: str,
+) -> None:
+    section_groups = [_as_mapping(group) for group in groups]
+    lines.append(f"{title} (groups={len(section_groups)})")
+    if not section_groups:
+        lines.append("(none)")
+        return
+    for idx, group in enumerate(section_groups, start=1):
+        lines.append(f"=== Suppressed clone group #{idx} ===")
+        lines.append(
+            "id="
+            f"{format_meta_text_value(group.get('id'))} "
+            f"clone_type={format_meta_text_value(group.get('clone_type'))} "
+            f"severity={format_meta_text_value(group.get('severity'))} "
+            f"count={format_meta_text_value(group.get('count'))} "
+            f"spread={_spread_text(_as_mapping(group.get('spread')))} "
+            f"scope={_scope_text(_as_mapping(group.get('source_scope')))} "
+            "suppressed_by="
+            f"{format_meta_text_value(group.get('suppression_rule'))}"
+            "@"
+            f"{format_meta_text_value(group.get('suppression_source'))} "
+            "matched_patterns="
+            f"{format_meta_text_value(group.get('matched_patterns'))}"
+        )
+        facts = _as_mapping(group.get("facts"))
+        if facts:
+            lines.append(
+                "facts: "
+                + _format_key_values(
+                    facts,
+                    tuple(sorted(str(key) for key in facts)),
+                    skip_empty=True,
+                )
+            )
+        lines.extend(
+            _location_line(item, metric_name=metric_name)
+            for item in map(_as_mapping, _as_sequence(group.get("items")))
+        )
+        lines.append("")
+    if lines[-1] == "":
+        lines.pop()
+
+
 def _append_structural_findings(lines: list[str], groups: Sequence[object]) -> None:
     structural_groups = [_as_mapping(group) for group in groups]
     lines.append(f"STRUCTURAL FINDINGS (groups={len(structural_groups)})")
@@ -479,7 +527,14 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
     digest = _as_mapping(integrity.get("digest"))
     findings_groups = _as_mapping(findings.get("groups"))
     clone_groups = _as_mapping(findings_groups.get("clones"))
+    suppressed_clone_groups = _as_mapping(clone_groups.get("suppressed"))
     runtime_meta = _as_mapping(meta_payload.get("runtime"))
+    clone_summary_keys: list[str] = ["functions", "blocks", "segments", "new", "known"]
+    if "suppressed" in findings_clones:
+        clone_summary_keys.append("suppressed")
+    suppressed_summary_keys: list[str] = ["dead_code"]
+    if "clones" in findings_suppressed:
+        suppressed_summary_keys.append("clones")
 
     lines = [
         "REPORT METADATA",
@@ -581,12 +636,12 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
             "Clones: "
             + _format_key_values(
                 findings_clones,
-                ("functions", "blocks", "segments", "new", "known"),
+                tuple(clone_summary_keys),
             ),
             "Suppressed: "
             + _format_key_values(
                 findings_suppressed,
-                ("dead_code",),
+                tuple(suppressed_summary_keys),
             ),
             "",
             "METRICS SUMMARY",
@@ -596,18 +651,32 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         "complexity",
         "coupling",
         "cohesion",
+        "coverage_join",
         "overloaded_modules",
         "dependencies",
         "dead_code",
         "health",
     ):
         family_summary = _as_mapping(metrics_summary.get(family_name))
+        if family_name == "coverage_join" and not family_summary:
+            continue
         keys: Sequence[str]
         match family_name:
             case "complexity" | "coupling":
                 keys = ("total", "average", "max", "high_risk")
             case "cohesion":
                 keys = ("total", "average", "max", "low_cohesion")
+            case "coverage_join":
+                keys = (
+                    "status",
+                    "source",
+                    "units",
+                    "measured_units",
+                    "overall_permille",
+                    "coverage_hotspots",
+                    "scope_gap_hotspots",
+                    "hotspot_threshold_percent",
+                )
             case "dependencies":
                 keys = ("modules", "edges", "cycles", "max_depth")
             case "overloaded_modules":
@@ -623,6 +692,36 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
             case _:
                 keys = ("score", "grade")
         lines.append(f"{family_name}: {_format_key_values(family_summary, keys)}")
+
+    coverage_join_family = _as_mapping(metrics_families.get("coverage_join"))
+    coverage_join_items = _as_sequence(coverage_join_family.get("items"))
+    if coverage_join_family:
+        lines.extend(
+            [
+                "",
+                "COVERAGE JOIN (top 10)",
+            ]
+        )
+        if not coverage_join_items:
+            lines.append("(none)")
+        else:
+            lines.extend(
+                "- "
+                + _format_key_values(
+                    item,
+                    (
+                        "relative_path",
+                        "qualname",
+                        "coverage_status",
+                        "risk",
+                        "coverage_permille",
+                        "cyclomatic_complexity",
+                        "coverage_hotspot",
+                        "scope_gap_hotspot",
+                    ),
+                )
+                for item in map(_as_mapping, coverage_join_items[:10])
+            )
 
     overloaded_modules_family = _as_mapping(metrics_families.get("overloaded_modules"))
     if not overloaded_modules_family:
@@ -710,6 +809,28 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         novelty="known",
         metric_name="size",
     )
+    if suppressed_clone_groups:
+        lines.append("")
+        _append_suppressed_clone_section(
+            lines,
+            title="SUPPRESSED FUNCTION CLONES",
+            groups=_as_sequence(suppressed_clone_groups.get("functions")),
+            metric_name="loc",
+        )
+        lines.append("")
+        _append_suppressed_clone_section(
+            lines,
+            title="SUPPRESSED BLOCK CLONES",
+            groups=_as_sequence(suppressed_clone_groups.get("blocks")),
+            metric_name="size",
+        )
+        lines.append("")
+        _append_suppressed_clone_section(
+            lines,
+            title="SUPPRESSED SEGMENT CLONES",
+            groups=_as_sequence(suppressed_clone_groups.get("segments")),
+            metric_name="size",
+        )
     lines.append("")
     _append_structural_findings(
         lines,

@@ -47,8 +47,19 @@ Refs:
     - Hotspots by Directory: render-only view over `derived.overview.directory_hotspots`
     - Health Profile: full-width radar chart of dimension scores
     - Get Badge modal: grade-only / score+grade variants with shields.io embed
+- Quality UI is also a report projection:
+    - deterministic subtabs for complexity, coupling, cohesion, overloaded
+      modules, and `Coverage Join` when canonical join facts exist
+    - `Coverage Join` uses the same stat-card and table patterns as other
+      quality surfaces; it separates measured coverage hotspots from coverage
+      scope gaps, and invalid joins render a factual unavailable state instead
+      of a success-style empty message
 - Dead-code UI is a single top-level `Dead Code` tab with deterministic split
   sub-tabs: `Active` and `Suppressed`.
+- Clones UI may append a `Suppressed` sub-tab when canonical report data
+  includes `findings.groups.clones.suppressed.*`; those rows are factual
+  projections of policy-excluded clone groups such as `golden_fixture_paths`
+  and do not become active clone findings.
 - IDE deep links:
     - An IDE picker in the topbar lets users choose their IDE. The selection is
       persisted in `localStorage` (key `codeclone-ide`).

@@ -2,56 +2,43 @@
 
 ## [2.0.0b5]
 
+Expands the canonical contract with adoption, API-surface, and coverage-join layers; clarifies run interpretation
+across MCP/HTML/clients; tightens MCP launcher/runtime behavior.
+
 ### Contracts, metrics, and review surfaces
 
-- Bump canonical report schema to `2.5` for `metrics.families.coverage_adoption`
-  and `metrics.families.api_surface`.
-- Bump clone baseline schema to `2.1` and standalone metrics-baseline schema to
-  `1.2` for compact `api_surface` wire payloads (`local_name` on disk,
-  reconstructed full qualnames in runtime) while keeping read-compatibility for
-  earlier `2.0` / `1.1` baseline files in the current b5 line.
-- Add shared public/private visibility classification for public-symbol-aware
-  metrics, without changing clone/fingerprint semantics.
-- Add canonical type/docstring adoption coverage:
-  parameter coverage, return coverage, public docstring coverage, and explicit
-  `Any` counts.
-- Add opt-in public API surface inventory and baseline diff:
-  public symbol snapshots, added symbols, and breaking changes against a
-  trusted metrics baseline.
-- Add new gates:
-  `--min-typing-coverage`, `--min-docstring-coverage`,
-  `--fail-on-typing-regression`, `--fail-on-docstring-regression`,
-  `--fail-on-api-break`.
-- Surface adoption and API metrics compactly in MCP summaries/detail, the HTML
-  Overview tab, and canonical report payloads without adding a new HTML tab.
-- Extend the normal CLI `Metrics` block with adoption coverage and public API
-  facts, while keeping the quiet compact metrics line unchanged.
-- Make unified clone baselines preserve embedded metrics and optional
-  `api_surface` payloads safely across saves.
+- Report schema `2.8`: add `coverage_adoption`, `api_surface`, `coverage_join`, and optional
+  `clones.suppressed.*` (for `golden_fixture_paths`); separate coverage hotspots vs scope gaps.
+- Baselines: clone `2.1`, metrics `1.2`; compact `api_surface` payload (`local_name` on disk, qualnames at runtime);
+  read-compatible with `2.0` / `1.1`.
+- Add public/private visibility classification for public-symbol metrics (no clone/fingerprint changes).
+- Add annotation/docstring adoption coverage: parameter, return, public docstrings, explicit `Any`.
+- Add opt-in API surface inventory + baseline diff (snapshots, additions, breaking changes).
+- Add coverage join (`--coverage`): per-function facts + findings for below-threshold or missing-in-scope functions;
+  current-run only (not baseline truth, no fingerprint impact).
+- Add `golden_fixture_paths`: exclude matching clone groups from health/gates while keeping suppressed facts.
+- Add gates: `--min-typing-coverage`, `--min-docstring-coverage`, `--fail-on-typing-regression`,
+  `--fail-on-docstring-regression`, `--fail-on-api-break`, `--fail-on-untested-hotspots`, `--coverage-min`.
+- Surface adoption/API/coverage-join in MCP, CLI Metrics, report payloads, and HTML (Overview + Quality subtab).
+- Preserve embedded metrics and optional `api_surface` in unified baselines.
+- Cache `2.4`: drop stale API-surface entries; preserve parameter order; align warm/cold API diffs.
 
-### MCP, HTML, and docs
+### MCP, HTML, and client interpretation
 
-- Surface the effective runtime analysis profile (`min_loc`, `min_stmt`, block, and segment thresholds) in canonical
-  report metadata, MCP summary/triage projections, and the HTML Executive Summary subtitle.
-- Clarify MCP interpretation with compact `health_scope`, `focus`, and `new_by_source_kind` fields in summary/triage
-  projections.
-- Make baseline mismatch handling more explicit in MCP and the VS Code client by surfacing baseline/runtime python tags
-  and whether comparison is proceeding without a valid baseline.
-- Make the Claude Desktop bundle and Codex plugin prefer workspace-local launchers before `PATH`, with Poetry environment fallback for
-  python-tag-safe MCP startup.
-- Add `workspace_root` user-config field to the Claude Desktop bundle: setting it to the project directory forces the
-  launcher to prefer `.venv` inside that path even when Claude Desktop starts with a different working directory
-  (fixes python-tag mismatch caused by system-wide interpreter fallback).
-- Validate `git_diff_ref` inputs as safe single revision expressions in both
-  CLI and MCP before invoking `git diff`.
-- Replace the segment-group raw digest `repr()` payload with canonical JSON
-  bytes for cross-version-safe determinism.
-- Align the tests workflow coverage gate with the canonical `fail_under = 99`
-  policy and refresh the remaining `actions/checkout` pin in `codeclone.yml`.
-- Refresh branch metadata and client docs for the `2.0.0b5` line.
-- Update the README repository health badge to `87 (B)`.
+- Surface effective analysis profile in report meta, MCP summary/triage, and HTML subtitle.
+- Add `health_scope`, `focus`, `new_by_source_kind` to MCP summary/triage.
+- Make baseline mismatch explicit (python tags + no-valid-baseline signal).
+- Prefer workspace-local launchers over `PATH` (Poetry fallback).
+- Add `workspace_root` to force project `.venv` selection.
 
-## [2.0.0b4]
+### Safety and maintenance
+
+- Validate `git_diff_ref` as safe single-revision expressions.
+- Replace segment digest `repr()` with canonical JSON bytes (determinism).
+- Align CI coverage gate (`fail_under = 99`) and refresh `actions/checkout` pin.
+- Refresh branch metadata/docs for `2.0.0b5`; update README badge to `89 (B)`.
+
+## [2.0.0b4] - 2026-04-05
 
 ### MCP server
 

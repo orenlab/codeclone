@@ -15,6 +15,11 @@ from ..._html_badges import _render_chain_flow
 from .._components import Tone, insight_block
 from .._tables import render_rows_table
 from .._tabs import render_split_tabs
+from ._coverage_join import (
+    coverage_join_quality_count,
+    coverage_join_quality_summary,
+    render_coverage_join_panel,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -54,11 +59,16 @@ def render_quality_panel(ctx: ReportContext) -> str:
     cohesion_summary = _as_mapping(ctx.cohesion_map.get("summary"))
     complexity_summary = _as_mapping(ctx.complexity_map.get("summary"))
     overloaded_modules_summary = _as_mapping(ctx.overloaded_modules_map.get("summary"))
+    coverage_join_summary = coverage_join_quality_summary(ctx)
 
     coupling_high_risk = _as_int(coupling_summary.get("high_risk"))
     cohesion_low = _as_int(cohesion_summary.get("low_cohesion"))
     complexity_high_risk = _as_int(complexity_summary.get("high_risk"))
     overloaded_module_candidates = _as_int(overloaded_modules_summary.get("candidates"))
+    coverage_review_items = coverage_join_quality_count(ctx)
+    coverage_hotspots = _as_int(coverage_join_summary.get("coverage_hotspots"))
+    coverage_scope_gaps = _as_int(coverage_join_summary.get("scope_gap_hotspots"))
+    coverage_join_status = str(coverage_join_summary.get("status", "")).strip()
     cc_max = _as_int(complexity_summary.get("max"))
 
     # Insight
@@ -77,11 +87,24 @@ def render_quality_panel(ctx: ReportContext) -> str:
             f"max CBO {coupling_summary.get('max', 'n/a')}; "
             f"max LCOM4 {cohesion_summary.get('max', 'n/a')}."
         )
+        if coverage_join_summary:
+            if coverage_join_status == "ok":
+                answer += (
+                    f" Coverage hotspots: {coverage_hotspots}; "
+                    f"scope gaps: {coverage_scope_gaps}."
+                )
+            else:
+                answer += " Coverage join unavailable."
         if overloaded_module_candidates > 0 or (
             coupling_high_risk > 0 and cohesion_low > 0
         ):
             tone = "risk"
-        elif coupling_high_risk > 0 or cohesion_low > 0 or complexity_high_risk > 0:
+        elif (
+            coupling_high_risk > 0
+            or cohesion_low > 0
+            or complexity_high_risk > 0
+            or coverage_review_items > 0
+        ):
             tone = "warn"
         else:
             tone = "ok"
@@ -197,6 +220,16 @@ def render_quality_panel(ctx: ReportContext) -> str:
             gm_panel,
         ),
     ]
+    coverage_join_panel = render_coverage_join_panel(ctx)
+    if coverage_join_panel:
+        sub_tabs.append(
+            (
+                "coverage-join",
+                "Coverage Join",
+                coverage_review_items,
+                coverage_join_panel,
+            )
+        )
 
     return insight_block(
         question="Are there quality hotspots in the codebase?",

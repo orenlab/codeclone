@@ -30,6 +30,8 @@ Stages:
 5. Report-layer post-processing:
     - merge block windows to maximal regions
     - merge/suppress segment report groups
+    - optionally split out clone groups fully contained in configured
+      `golden_fixture_paths`
 6. Structural report findings:
     - duplicated branch families from per-function AST structure facts
     - clone cohort drift families built from existing function groups (no rescan)
@@ -42,20 +44,28 @@ Stages:
     - seven dimension scores: clones, complexity, coupling, cohesion,
       dead code, dependencies, coverage
     - weighted blend → composite score (0–100) and grade (A–F)
-9. Design finding extraction:
-    - threshold-aware findings for complexity, coupling, cohesion
-    - thresholds recorded in `meta.analysis_thresholds.design_findings`
-10. Suggestion generation:
+9. Suggestion generation:
     - advisory cards from clone groups, structural findings, metric violations
     - deterministic priority sort, never gates CI
-11. Derived overview and hotlists:
+10. Current-run coverage join (optional):
+    - when `--coverage` is present, join external Cobertura XML to discovered
+      function spans
+    - invalid XML becomes `coverage_join.status="invalid"` for that run rather
+      than mutating baseline state
+11. Design finding extraction:
+    - threshold-aware findings for complexity, coupling, cohesion
+    - coverage `coverage_hotspot` / `coverage_scope_gap` findings from valid
+      coverage-join rows only
+    - thresholds recorded in `meta.analysis_thresholds.design_findings`
+12. Derived overview and hotlists:
     - overview families, top risks, source breakdown, health snapshot
     - directory hotspots by category (`derived.overview.directory_hotspots`)
     - hotlists: most actionable, highest spread, production/test-fixture hotspots
-12. Gate evaluation:
+13. Gate evaluation:
     - clone-baseline diff (NEW vs KNOWN)
     - metric threshold gates (`--fail-complexity`, `--fail-coupling`, etc.)
     - metric regression gates (`--fail-on-new-metrics`)
+    - coverage hotspot gate (`--fail-on-untested-hotspots`)
     - gate reasons emitted in deterministic order
 
 Refs:
@@ -65,6 +75,7 @@ Refs:
 - `codeclone/report/blocks.py:prepare_block_report_groups`
 - `codeclone/report/segments.py:prepare_segment_report_groups`
 - `codeclone/metrics/health.py:compute_health`
+- `codeclone/metrics/coverage_join.py:build_coverage_join`
 - `codeclone/report/json_contract.py:_build_design_groups`
 - `codeclone/report/suggestions.py:generate_suggestions`
 - `codeclone/report/overview.py:build_directory_hotspots`
@@ -76,6 +87,12 @@ Refs:
 - Report-layer transformations do not change function/block grouping keys used for baseline diff.
 - Segment groups are report-only and do not participate in baseline diff/gating.
 - Structural findings are report-only and do not participate in baseline diff/gating.
+- `golden_fixture_paths` is a project-level clone exclusion policy, not a
+  fingerprint/baseline rule:
+    - it applies only to clone groups fully contained in matching
+      `tests/` / `tests/fixtures/` paths
+    - excluded groups do not affect health, clone gates, or suggestions
+    - excluded groups remain observable as suppressed canonical report facts
 - Dead-code liveness references from test paths are excluded at extraction/cache-load boundaries for both
   local-name references and canonical qualname references.
 
