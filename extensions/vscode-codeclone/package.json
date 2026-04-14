@@ -636,6 +636,7 @@
       "properties": {
         "codeclone.mcp.command": {
           "type": "string",
+          "scope": "machine",
           "default": "auto",
           "description": "Command used to launch the local CodeClone MCP server. Use 'auto' to detect a sensible local default."
         },
@@ -644,6 +645,7 @@
           "items": {
             "type": "string"
           },
+          "scope": "machine",
           "default": [],
           "description": "Additional command-line arguments passed to the CodeClone MCP launcher."
         },
@@ -653,11 +655,13 @@
             "reuse",
             "off"
           ],
+          "scope": "resource",
           "default": "reuse",
           "description": "Default cache policy for workspace analysis requests."
         },
         "codeclone.analysis.changedDiffRef": {
           "type": "string",
+          "scope": "resource",
           "default": "HEAD",
           "description": "Git revision used for changed-files analysis."
         },
@@ -668,47 +672,55 @@
             "deeperReview",
             "custom"
           ],
+          "scope": "resource",
           "default": "defaults",
           "description": "Analysis sensitivity profile. Start with conservative defaults, then lower thresholds only for an explicit deeper pass."
         },
         "codeclone.analysis.minLoc": {
           "type": "integer",
+          "scope": "resource",
           "default": 10,
           "minimum": 0,
           "description": "Custom function minimum LOC. Used only when analysis.profile is set to custom."
         },
         "codeclone.analysis.minStmt": {
           "type": "integer",
+          "scope": "resource",
           "default": 6,
           "minimum": 0,
           "description": "Custom function minimum statement count. Used only when analysis.profile is set to custom."
         },
         "codeclone.analysis.blockMinLoc": {
           "type": "integer",
+          "scope": "resource",
           "default": 20,
           "minimum": 0,
           "description": "Custom block minimum LOC. Used only when analysis.profile is set to custom."
         },
         "codeclone.analysis.blockMinStmt": {
           "type": "integer",
+          "scope": "resource",
           "default": 8,
           "minimum": 0,
           "description": "Custom block minimum statement count. Used only when analysis.profile is set to custom."
         },
         "codeclone.analysis.segmentMinLoc": {
           "type": "integer",
+          "scope": "resource",
           "default": 20,
           "minimum": 0,
           "description": "Custom segment minimum LOC. Used only when analysis.profile is set to custom."
         },
         "codeclone.analysis.segmentMinStmt": {
           "type": "integer",
+          "scope": "resource",
           "default": 10,
           "minimum": 0,
           "description": "Custom segment minimum statement count. Used only when analysis.profile is set to custom."
         },
         "codeclone.ui.showStatusBar": {
           "type": "boolean",
+          "scope": "window",
           "default": true,
           "description": "Show a single workspace-level CodeClone status bar item."
         }

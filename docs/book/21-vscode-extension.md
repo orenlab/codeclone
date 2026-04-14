@@ -127,6 +127,10 @@ The extension runs as a workspace extension and requires:
 In `auto` mode, launcher resolution prefers the current workspace virtualenv
 before `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.
 
+Launcher override settings (`codeclone.mcp.command`, `codeclone.mcp.args`) are
+machine-scoped. Analysis-depth settings are resource-scoped so they can vary by
+workspace or folder.
+
 For this reason:
 
 - Restricted Mode support is `limited`

@@ -119,6 +119,23 @@ function trimTail(value, maxChars) {
     return text.length <= maxChars ? text : text.slice(-maxChars);
 }
 
+function logChannelMessage(channel, level, message, ...args) {
+    const text = String(message || "");
+    if (!channel || !text) {
+        return;
+    }
+    const method =
+        typeof channel[level] === "function"
+            ? channel[level].bind(channel)
+            : typeof channel.appendLine === "function"
+                ? channel.appendLine.bind(channel)
+                : null;
+    if (!method) {
+        return;
+    }
+    method(text, ...args);
+}
+
 function resolveWorkspacePath(rootPath, relativePath) {
     const root = String(rootPath || "").trim();
     const candidate = String(relativePath || "").trim();
@@ -387,6 +404,7 @@ module.exports = {
     parseUtcTimestamp,
     parseCodeCloneVersion,
     revealLineSpan,
+    logChannelMessage,
     resolveWorkspacePath,
     resolveAnalysisSettings,
     sameAnalysisSettings,

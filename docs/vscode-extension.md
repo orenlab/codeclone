@@ -133,8 +133,12 @@ the local MCP launcher.
 
 ## Settings that shape analysis depth
 
+- `codeclone.mcp.command` and `codeclone.mcp.args` are machine-scoped launcher
+  settings, so they belong in user or remote settings.
 - `codeclone.analysis.profile` keeps the default conservative first pass
   explicit and exposes `Deeper review` and `Custom` as deliberate follow-ups
+- `codeclone.analysis.cachePolicy` and the threshold settings below are
+  resource-scoped, so they can vary by workspace or folder
 - `codeclone.analysis.minLoc`
 - `codeclone.analysis.minStmt`
 - `codeclone.analysis.blockMinLoc`
@@ -143,6 +147,8 @@ the local MCP launcher.
 - `codeclone.analysis.segmentMinStmt`
 
 Custom thresholds apply only when the profile is set to `custom`.
+
+`codeclone.ui.showStatusBar` is a window-scoped presentation setting.
 
 ## Source of truth
 

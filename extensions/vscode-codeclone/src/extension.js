@@ -96,13 +96,16 @@ const {
     staleMessage,
     unsupportedVersionMessage,
     workspaceLocalLauncherCandidates,
+    logChannelMessage,
 } = require("./support");
 
 class CodeCloneController {
     constructor(context) {
         this.context = context;
         this.disposed = false;
-        this.outputChannel = vscode.window.createOutputChannel("CodeClone");
+        this.outputChannel = vscode.window.createOutputChannel("CodeClone", {
+            log: true,
+        });
         this.client = new CodeCloneMcpClient(this.outputChannel);
         this.states = new Map();
         this.hotspotFocusMode = this.loadHotspotFocusMode();
@@ -450,9 +453,15 @@ class CodeCloneController {
         }
         const folders = vscode.workspace.workspaceFolders || [];
         if (folders.length === 0) {
-            await vscode.window.showErrorMessage(
-                "Open a workspace folder before using CodeClone."
+            const choice = await vscode.window.showErrorMessage(
+                "Open a workspace folder before using CodeClone.",
+                "Open Folder"
             );
+            if (choice === "Open Folder") {
+                await vscode.commands.executeCommand(
+                    "workbench.action.files.openFolder"
+                );
+            }
             return null;
         }
         if (folders.length === 1) {
@@ -658,7 +667,9 @@ class CodeCloneController {
             connection = await this.client.connect(launchSpec);
         } catch (error) {
             if (launchSpec.fallback) {
-                this.outputChannel.appendLine(
+                logChannelMessage(
+                    this.outputChannel,
+                    "warn",
                     "[codeclone] primary MCP launch failed, trying fallback launcher."
                 );
                 effectiveLaunchSpec = launchSpec.fallback;
@@ -3300,12 +3311,18 @@ class CodeCloneController {
                 ? error.message
                 : fallbackMessage;
         this.outputChannel.show(true);
-        this.outputChannel.appendLine(`[codeclone] error: ${message}`);
+        logChannelMessage(this.outputChannel, "error", `[codeclone] error: ${message}`);
         if (this.isCodeCloneSetupError(message)) {
             void this.showSetupGuidance(message);
             return;
         }
-        void vscode.window.showErrorMessage(message || fallbackMessage);
+        void vscode.window
+            .showErrorMessage(message || fallbackMessage, "Show Logs")
+            .then((choice) => {
+                if (choice === "Show Logs") {
+                    this.outputChannel.show(true);
+                }
+            });
     }
 
     isCodeCloneSetupError(message) {

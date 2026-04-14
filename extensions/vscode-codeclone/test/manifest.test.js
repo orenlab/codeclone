@@ -58,3 +58,21 @@ test("primary user-facing command titles stay verb-first", () => {
     assert.equal(commands.get("codeclone.setAnalysisProfile"), "Set Analysis Depth");
     assert.equal(commands.get("codeclone.openSetupHelp"), "Open Setup Help");
 });
+
+test("configuration settings declare explicit scopes that match their usage", () => {
+    const pkg = loadPackageJson();
+    const properties = pkg.contributes.configuration.properties;
+
+    assert.equal(properties["codeclone.mcp.command"].scope, "machine");
+    assert.equal(properties["codeclone.mcp.args"].scope, "machine");
+    assert.equal(properties["codeclone.analysis.cachePolicy"].scope, "resource");
+    assert.equal(properties["codeclone.analysis.changedDiffRef"].scope, "resource");
+    assert.equal(properties["codeclone.analysis.profile"].scope, "resource");
+    assert.equal(properties["codeclone.analysis.minLoc"].scope, "resource");
+    assert.equal(properties["codeclone.analysis.minStmt"].scope, "resource");
+    assert.equal(properties["codeclone.analysis.blockMinLoc"].scope, "resource");
+    assert.equal(properties["codeclone.analysis.blockMinStmt"].scope, "resource");
+    assert.equal(properties["codeclone.analysis.segmentMinLoc"].scope, "resource");
+    assert.equal(properties["codeclone.analysis.segmentMinStmt"].scope, "resource");
+    assert.equal(properties["codeclone.ui.showStatusBar"].scope, "window");
+});

@@ -161,15 +161,17 @@ opening raw JSON-like details by default.
 ### `codeclone.mcp.command`
 
 Launcher used to start the local CodeClone server. Leave it as `auto` for the
-default behavior.
+default behavior. This is a machine-scoped setting, so it belongs in user or
+remote settings rather than workspace settings.
 
 ### `codeclone.mcp.args`
 
-Extra arguments passed to the configured launcher.
+Extra arguments passed to the configured launcher. This is also machine-scoped.
 
 ### `codeclone.analysis.cachePolicy`
 
-Default cache policy for analysis requests.
+Default cache policy for analysis requests. Analysis settings are resource-scoped,
+so they can differ per workspace or folder.
 
 ### `codeclone.analysis.changedDiffRef`
 
@@ -187,7 +189,7 @@ Function, block, and segment thresholds used only when
 
 ### `codeclone.ui.showStatusBar`
 
-Show or hide the workspace-level status bar item.
+Show or hide the workspace-level status bar item for the current VS Code window.
 
 ## Trust and workspace model
 
