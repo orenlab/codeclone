@@ -135,6 +135,22 @@ uv run pytest -q tests/test_codex_plugin.py
 
 ## 4) Baseline contract (v2, stable)
 
+### Versioned constants (single source of truth)
+
+All schema/version constants live in `codeclone/contracts.py`. **Always read them from code, never copy
+from another doc.** Current values (verified at write time):
+
+| Constant                          | Source                       | Current value |
+|-----------------------------------|------------------------------|---------------|
+| `BASELINE_SCHEMA_VERSION`         | `codeclone/contracts.py`     | `2.1`         |
+| `BASELINE_FINGERPRINT_VERSION`    | `codeclone/contracts.py`     | `1`           |
+| `CACHE_VERSION`                   | `codeclone/contracts.py`     | `2.4`         |
+| `REPORT_SCHEMA_VERSION`           | `codeclone/contracts.py`     | `2.8`         |
+| `METRICS_BASELINE_SCHEMA_VERSION` | `codeclone/contracts.py`     | `1.2`         |
+
+When updating any doc that mentions a version, re-read `codeclone/contracts.py` first. Do not derive
+versions from another document.
+
 ### Baseline file structure (canonical)
 
 ```json
@@ -144,7 +160,7 @@ uv run pytest -q tests/test_codex_plugin.py
       "name": "codeclone",
       "version": "X.Y.Z"
     },
-    "schema_version": "2.0",
+    "schema_version": "2.1",
     "fingerprint_version": "1",
     "python_tag": "cp313",
     "created_at": "2026-02-08T14:20:15Z",
@@ -163,8 +179,9 @@ uv run pytest -q tests/test_codex_plugin.py
 ### Rules
 
 - `schema_version` is **baseline schema**, not package version.
-- Runtime writes baseline schema `2.0`.
-- Runtime accepts baseline schema `1.x` and `2.x` for compatibility checks.
+- Runtime writes baseline schema `2.1`.
+- Runtime accepts baseline schema `1.0` and `2.0`–`2.1` (governed by
+  `_BASELINE_SCHEMA_MAX_MINOR_BY_MAJOR` in `codeclone/baseline.py`).
 - Compatibility is tied to:
     - `fingerprint_version`
     - `python_tag`
@@ -358,8 +375,8 @@ Architecture is layered, but grounded in current code (not aspirational diagrams
   `codeclone/grouping.py`, `codeclone/scanner.py`) produces normalized structural facts and clone candidates.
 - **Domain/contracts layer** (`codeclone/models.py`, `codeclone/contracts.py`, `codeclone/errors.py`,
   `codeclone/domain/*.py`) defines typed entities and stable enums/constants used across layers.
-- **Persistence contracts** (`codeclone/baseline.py`, `codeclone/cache.py`, `codeclone/metrics_baseline.py`) store
-  trusted comparison state and optimization state.
+- **Persistence contracts** (`codeclone/baseline.py`, `codeclone/cache.py`, `codeclone/cache_io.py`,
+  `codeclone/metrics_baseline.py`) store trusted comparison state and optimization state.
 - **Canonical report + projections** (`codeclone/report/json_contract.py`, `codeclone/report/*.py`) converts analysis
   facts to deterministic, contract-shaped outputs.
 - **HTML/UI rendering** (`codeclone/html_report.py`, `codeclone/_html_report/*`, `codeclone/_html_*.py`,
@@ -411,8 +428,12 @@ Use this map to route changes to the right owner module.
   deterministic.
 - `codeclone/baseline.py` — baseline schema/trust/integrity/compatibility contract; all baseline format changes go here
   with explicit contract process.
-- `codeclone/cache.py` — cache schema/integrity/profile compatibility and serialization; cache remains
+- `codeclone/cache.py` — cache schema/status/profile compatibility and high-level serialization policy; cache remains
   optimization-only.
+- `codeclone/cache_io.py` — IO-layer helpers for the cache: atomic JSON read/write
+  (`read_json_document`, `write_json_document_atomically`), canonical JSON (`canonical_json`), and
+  HMAC signing/verification (`sign_cache_payload`, `verify_cache_payload_signature`); attribute these
+  functions to `cache_io.py`, not `cache.py`.
 - `codeclone/report/json_contract.py` — canonical report schema builder/integrity payload; any JSON contract shape
   change belongs here.
 - `codeclone/report/*.py` (other modules) — deterministic projections/format transforms (
@@ -529,7 +550,7 @@ Policy:
 ### Public / contract-sensitive surfaces
 
 - CLI flags, defaults, exit codes, and stable script-facing messages.
-- Baseline schema/trust semantics/integrity compatibility (`2.0` baseline contract family).
+- Baseline schema/trust semantics/integrity compatibility (`BASELINE_SCHEMA_VERSION` contract family).
 - Cache schema/status/profile compatibility/integrity (`CACHE_VERSION` contract family).
 - Canonical report JSON schema/payload semantics (`REPORT_SCHEMA_VERSION` contract family).
 - Documented report projections and their machine/user-facing semantics (HTML/Markdown/SARIF/Text).
@@ -621,7 +642,68 @@ Avoid deep package hierarchies unless they clearly reduce coupling.
 
 ---
 
-## 20) Minimal checklist for PRs (agents)
+## 20) Agent safety rules
+
+These rules exist because of real incidents in this repo. They are non-negotiable.
+
+### Scope discipline
+
+- Touch only files directly related to your current task.
+- Do not "clean up", reformat, or refactor code in files outside your task scope.
+- Do not delete functions, classes, blocks, or whole files written by other contributors unless
+  deletion is the explicit goal of your task.
+- If you discover unrelated issues, report them in your final message — do not fix them silently.
+- Before starting work, run `git status` and review uncommitted/untracked changes. They may belong
+  to a parallel agent or to the maintainer; do not delete or overwrite them without explicit approval.
+
+### Documentation hygiene
+
+- Every doc claim about code (schema version, module path, function name, MCP tool count, exit code,
+  CLI flag) must be verified against the **current** code before writing or editing.
+- Always read version constants from `codeclone/contracts.py` (see Section 4 table), never from
+  another doc.
+- When updating a file that mentions schema versions, verify **every** version reference in that
+  file — not only the one you came to change.
+- Do not remove narrative content from docs you did not author. Add or correct only.
+- Do not replace a multi-section doc with a "pointer" stub unless the maintainer explicitly asks for it.
+- Do not create new `*.md` design specs ("PROPOSED", "FUTURE", "RFC") inside `docs/`. Use the
+  maintainer's planning channel instead — orphaned specs become stale and misleading.
+
+### Audit completeness
+
+- When the maintainer asks to audit "all" of something, list every file you actually opened in your
+  final report. Selective audits silently skip the most error-prone files.
+- Prefer parallel `Explore` agents partitioned by file group over a single sequential pass —
+  coverage is the contract, not effort.
+
+### Shared helpers
+
+- HTML/UI helpers (`_html_badges.py`, `_html_css.py`, `_html_js.py`, `_html_escape.py`,
+  `_html_report/_glossary.py`) are imported, not duplicated locally inside `_html_report/_sections/*`.
+  If you need a helper that doesn't exist, add it to the shared module.
+- Glossary terms used in stat-card labels live in `codeclone/_html_report/_glossary.py`. Adding a
+  new label without a glossary entry is a contract gap.
+
+### Conflict avoidance
+
+- Do not force-push, `git reset --hard`, or `git checkout --` over uncommitted work without
+  explicit maintainer approval.
+- If your changes conflict with recent commits or other agents' work, rebase or merge cleanly —
+  never silently drop the other side.
+- Never use `--no-verify` to bypass pre-commit hooks; fix the underlying issue.
+
+### Verification before "done"
+
+- A task that touches HTML rendering is not complete until
+  `pytest tests/test_html_report.py -x -q` is green.
+- A task that touches MCP is not complete until
+  `pytest tests/test_mcp_service.py tests/test_mcp_server.py -x -q` is green.
+- A task that touches docs schema/version claims is not complete until you have grep'd the whole
+  file for *all* version-shaped strings and verified each against `codeclone/contracts.py`.
+
+---
+
+## 21) Minimal checklist for PRs (agents)
 
 - [ ] Change is deterministic.
 - [ ] Contracts preserved or versioned.

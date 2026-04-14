@@ -92,11 +92,11 @@ Refs:
 - Structural finding cards may render a compact inline suggested action when a
   low-signal local hint intentionally has no separate suggestion card.
 - IDE link `data-file` and `data-line` attributes are escaped via
-  `_escape_attr` before insertion into HTML.
+  `_escape_html` before insertion into HTML.
 
 Refs:
 
-- `codeclone/_html_escape.py:_escape_attr`
+- `codeclone/_html_escape.py:_escape_html`
 - `codeclone/_html_snippets.py:_render_code_block`
 - `codeclone/_html_report/_sections/_clones.py:render_clones_panel`
 - `codeclone/_html_report/_tables.py` (path cell IDE links)

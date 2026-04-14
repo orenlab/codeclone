@@ -138,10 +138,10 @@ CodeClone maintains several versioned schema contracts:
 
 | Schema           | Current version | Owner                               |
 |------------------|-----------------|-------------------------------------|
-| Baseline         | `2.0`           | `codeclone/baseline.py`             |
-| Report           | `2.1`           | `codeclone/report/json_contract.py` |
-| Cache            | `2.2`           | `codeclone/cache.py`                |
-| Metrics baseline | `1.0`           | `codeclone/metrics_baseline.py`     |
+| Baseline         | `2.1`           | `codeclone/baseline.py`             |
+| Report           | `2.8`           | `codeclone/report/json_contract.py` |
+| Cache            | `2.4`           | `codeclone/cache_io.py`             |
+| Metrics baseline | `1.2`           | `codeclone/metrics_baseline.py`     |
 
 Any change to schema shape or semantics requires version review, documentation, and tests.
 
