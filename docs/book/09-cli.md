@@ -108,6 +108,9 @@ Refs:
   `api_surface` data.
 - `--coverage` is a current-run external Cobertura input. It does not update or
   compare against `codeclone.baseline.json`.
+- Relative clone-baseline and metrics-baseline paths from defaults or
+  `pyproject.toml` resolve from the analysis root. Explicit CLI paths are used
+  as provided.
 - Invalid Cobertura XML is warning-only in normal runs: CLI prints
   `Coverage join ignored`, keeps exit `0`, and shows `Coverage` as unavailable
   in the normal `Metrics` block. It becomes a contract error only when

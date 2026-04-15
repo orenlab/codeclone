@@ -546,3 +546,35 @@ def test_meta_snippet_and_assembly_helpers_cover_empty_optional_paths(
         report_document={},
     )
     assert '[data-theme="light"] .codebox span' not in html_without_light_rules
+
+
+def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
+    meta_html = render_meta_panel(
+        cast(
+            Any,
+            SimpleNamespace(
+                meta={
+                    "python_tag": "cp313",
+                    "baseline_python_tag": "cp312",
+                    "cache_status": "stale",
+                    "metrics_baseline_loaded": True,
+                    "metrics_baseline_payload_sha256_verified": True,
+                },
+                baseline_meta={"status": "FAILED"},
+                cache_meta={},
+                metrics_baseline_meta={},
+                runtime_meta={},
+                integrity_map={},
+                report_schema_version="2.8",
+                report_generated_at="2026-04-15T12:00:00Z",
+            ),
+        )
+    )
+    assert "meta-status--err" in meta_html
+    assert ">FAILED<" in meta_html
+    assert "meta-status--neutral" in meta_html
+    assert ">stale<" in meta_html
+    assert "prov-match--mismatch" in meta_html
+    assert "differs from runtime (cp313)" in meta_html
+    assert '<span class="prov-badge-val">verified</span>' in meta_html
+    assert '<span class="prov-badge-lbl">Metrics baseline</span>' in meta_html

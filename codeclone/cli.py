@@ -1150,6 +1150,17 @@ def _main_impl() -> None:
     analysis_started_at_utc = _current_report_timestamp_utc()
     ap = build_parser(__version__)
 
+    def _resolve_runtime_path_arg(
+        *,
+        root_path: Path,
+        raw_path: str,
+        from_cli: bool,
+    ) -> Path:
+        candidate_path = Path(raw_path).expanduser()
+        if from_cli or candidate_path.is_absolute():
+            return candidate_path.resolve()
+        return (root_path / candidate_path).resolve()
+
     def _prepare_run_inputs() -> tuple[
         Namespace,
         Path,
@@ -1173,6 +1184,9 @@ def _main_impl() -> None:
             arg in {"--cache-dir", "--cache-path"}
             or arg.startswith(("--cache-dir=", "--cache-path="))
             for arg in sys.argv
+        )
+        baseline_path_from_args = any(
+            arg == "--baseline" or arg.startswith("--baseline=") for arg in sys.argv
         )
         metrics_path_from_args = any(
             arg == "--metrics-baseline" or arg.startswith("--metrics-baseline=")
@@ -1235,7 +1249,11 @@ def _main_impl() -> None:
 
         baseline_arg_path = Path(args.baseline).expanduser()
         try:
-            baseline_path = baseline_arg_path.resolve()
+            baseline_path = _resolve_runtime_path_arg(
+                root_path=root_path,
+                raw_path=args.baseline,
+                from_cli=baseline_path_from_args,
+            )
             baseline_exists = baseline_path.exists()
         except OSError as exc:
             console.print(
@@ -1254,7 +1272,13 @@ def _main_impl() -> None:
             args.metrics_baseline if metrics_path_overridden else args.baseline
         ).expanduser()
         try:
-            metrics_baseline_path = metrics_baseline_arg_path.resolve()
+            metrics_baseline_path = _resolve_runtime_path_arg(
+                root_path=root_path,
+                raw_path=(
+                    args.metrics_baseline if metrics_path_overridden else args.baseline
+                ),
+                from_cli=metrics_path_from_args,
+            )
             if metrics_baseline_path == baseline_path:
                 probe = _probe_metrics_baseline_section(metrics_baseline_path)
                 metrics_baseline_exists = probe.has_metrics_section

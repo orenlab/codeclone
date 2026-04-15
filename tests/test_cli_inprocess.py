@@ -3367,9 +3367,9 @@ def test_cli_summary_format_stable(
     out = capsys.readouterr().out
     assert "Summary" in out
     assert out.count("Summary") == 1
-    assert "Metrics" in out
-    assert "Adoption" in out
-    assert "Overloaded" in out
+    assert "Metrics" not in out
+    assert "Adoption" not in out
+    assert "Overloaded" not in out
     assert "callables" in out
     assert "Files parsed" not in out
     assert "Input" not in out
@@ -3381,6 +3381,39 @@ def test_cli_summary_format_stable(
     assert _summary_metric(out, "Block clones") >= 0
     assert _summary_metric(out, "suppressed") >= 0
     assert _summary_metric(out, "New vs baseline") >= 0
+
+
+def test_cli_summary_with_metrics_baseline_shows_metrics_section(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    metrics_baseline_path = tmp_path / "metrics-baseline.json"
+    src.write_text("def f(value: int) -> int:\n    return value\n", "utf-8")
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--metrics-baseline",
+            str(metrics_baseline_path),
+            "--update-metrics-baseline",
+        ],
+    )
+    _ = capsys.readouterr()
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--metrics-baseline",
+            str(metrics_baseline_path),
+        ],
+    )
+    out = capsys.readouterr().out
+    assert_contains_all(out, "Metrics", "Adoption", "Overloaded")
 
 
 def test_cli_summary_with_api_surface_shows_public_api_line(
@@ -3436,10 +3469,7 @@ def test_cli_ci_summary_includes_adoption_and_public_api_lines(
         ],
     )
     out = capsys.readouterr().out
-    assert "Adoption" in out
-    assert "Public API" in out
-    assert "symbols=" in out
-    assert "docstrings=" in out
+    assert_contains_all(out, "Adoption", "Public API", "symbols=", "docstrings=")
 
 
 def test_cli_pyproject_golden_fixture_paths_exclude_fixture_clone_groups(
@@ -3450,6 +3480,7 @@ def test_cli_pyproject_golden_fixture_paths_exclude_fixture_clone_groups(
     fixtures_dir.mkdir(parents=True)
     _write_duplicate_function_module(fixtures_dir, "a.py")
     _write_duplicate_function_module(fixtures_dir, "b.py")
+    _write_current_python_baseline(tmp_path / "codeclone.baseline.json")
     report_path = tmp_path / "report.json"
     (tmp_path / "pyproject.toml").write_text(
         """

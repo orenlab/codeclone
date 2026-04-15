@@ -166,6 +166,8 @@ Current-run coverage join config:
 
 Metrics baseline path selection contract:
 
+- Relative `baseline` / `metrics_baseline` paths coming from defaults or
+  `pyproject.toml` resolve from the analysis root.
 - If `--metrics-baseline` is explicitly set, that path is used.
 - If `metrics_baseline` in `pyproject.toml` differs from parser default, that
   configured path is used even without explicit CLI flag.

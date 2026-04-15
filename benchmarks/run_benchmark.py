@@ -25,6 +25,30 @@ from codeclone import __version__ as codeclone_version
 from codeclone.baseline import current_python_tag
 
 BENCHMARK_SCHEMA_VERSION = "1.0"
+BENCHMARK_NEUTRAL_ARGS: tuple[str, ...] = (
+    "--no-fail-on-new",
+    "--no-fail-on-new-metrics",
+    "--no-fail-cycles",
+    "--no-fail-dead-code",
+    "--no-fail-on-typing-regression",
+    "--no-fail-on-docstring-regression",
+    "--no-fail-on-api-break",
+    "--no-fail-on-untested-hotspots",
+    "--fail-threshold",
+    "-1",
+    "--fail-complexity",
+    "-1",
+    "--fail-coupling",
+    "-1",
+    "--fail-cohesion",
+    "-1",
+    "--fail-health",
+    "-1",
+    "--min-typing-coverage",
+    "-1",
+    "--min-docstring-coverage",
+    "-1",
+)
 
 
 @dataclass(frozen=True)
@@ -139,6 +163,7 @@ def _run_cli_once(
         "-m",
         "codeclone.cli",
         str(target),
+        *BENCHMARK_NEUTRAL_ARGS,
         "--json",
         str(report_path),
         "--cache-path",

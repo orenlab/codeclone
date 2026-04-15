@@ -169,6 +169,11 @@ def test_validate_config_value_accepts_expected_types(
         ("min_loc", True, "expected int"),
         ("baseline", 1, "expected str"),
         ("golden_fixture_paths", "tests/fixtures/golden_*", "expected list\\[str\\]"),
+        (
+            "golden_fixture_paths",
+            ["tests/fixtures/golden_*", 1],
+            "expected list\\[str\\]",
+        ),
         ("golden_fixture_paths", ["pkg/*"], "must target tests/"),
     ],
 )

@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from benchmarks.run_benchmark import (
+    BENCHMARK_NEUTRAL_ARGS,
     RunMeasurement,
     Scenario,
     _validate_inventory_sample,
@@ -41,6 +42,17 @@ def test_benchmark_inventory_validation_accepts_valid_cold_and_warm_samples() ->
         scenario=Scenario(name="warm_full", mode="warm", extra_args=()),
         measurement=_measurement(found=10, analyzed=0, cached=10),
     )
+
+
+def test_benchmark_neutral_args_disable_repo_quality_gates() -> None:
+    assert "--no-fail-on-new" in BENCHMARK_NEUTRAL_ARGS
+    assert "--no-fail-on-new-metrics" in BENCHMARK_NEUTRAL_ARGS
+    assert "--no-fail-cycles" in BENCHMARK_NEUTRAL_ARGS
+    assert "--no-fail-dead-code" in BENCHMARK_NEUTRAL_ARGS
+    assert "--fail-health" in BENCHMARK_NEUTRAL_ARGS
+    assert "--min-typing-coverage" in BENCHMARK_NEUTRAL_ARGS
+    assert "--min-docstring-coverage" in BENCHMARK_NEUTRAL_ARGS
+    assert "--skip-metrics" not in BENCHMARK_NEUTRAL_ARGS
 
 
 @pytest.mark.parametrize(

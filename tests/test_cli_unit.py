@@ -1379,6 +1379,34 @@ def test_configure_metrics_mode_does_not_force_api_surface_for_baseline_update()
     assert args.api_surface is False
 
 
+def test_configure_metrics_mode_forces_api_surface_for_api_break_gate() -> None:
+    args = Namespace(
+        skip_metrics=False,
+        fail_complexity=-1,
+        fail_coupling=-1,
+        fail_cohesion=-1,
+        fail_cycles=False,
+        fail_dead_code=False,
+        fail_health=-1,
+        fail_on_new_metrics=False,
+        fail_on_typing_regression=False,
+        fail_on_docstring_regression=False,
+        fail_on_api_break=True,
+        fail_on_untested_hotspots=False,
+        min_typing_coverage=-1,
+        min_docstring_coverage=-1,
+        update_metrics_baseline=False,
+        skip_dead_code=False,
+        skip_dependencies=False,
+        api_surface=False,
+        coverage_xml=None,
+    )
+
+    cli._configure_metrics_mode(args=args, metrics_baseline_exists=True)
+
+    assert args.api_surface is True
+
+
 def test_probe_metrics_baseline_section_for_non_object_payload(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
     path.write_text("[]", "utf-8")

@@ -101,6 +101,7 @@ def _metrics_flags_requested(args: _RuntimeArgs) -> bool:
         or args.fail_on_untested_hotspots
         or args.min_typing_coverage >= 0
         or args.min_docstring_coverage >= 0
+        or args.api_surface
         or args.update_metrics_baseline
         or bool(getattr(args, "coverage_xml", None))
     )
