@@ -608,6 +608,18 @@ def _prepare_source_and_baseline(tmp_path: Path) -> tuple[Path, Path]:
     return src, baseline_path
 
 
+def _prepare_api_surface_cache_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    source: str,
+) -> tuple[Path, Path, Path]:
+    src = tmp_path / "pkg.py"
+    src.write_text(source, "utf-8")
+    _patch_parallel(monkeypatch)
+    return src, tmp_path / "metrics-baseline.json", tmp_path / "cache.json"
+
+
 def _run_json_report(
     *,
     tmp_path: Path,
@@ -3527,14 +3539,11 @@ def test_cli_public_api_breaking_count_stable_across_warm_cache(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    src = tmp_path / "pkg.py"
-    metrics_baseline_path = tmp_path / "metrics-baseline.json"
-    cache_path = tmp_path / "cache.json"
-    src.write_text(
-        "def run(alpha: int, beta: int) -> int:\n    return alpha + beta\n",
-        "utf-8",
+    src, metrics_baseline_path, cache_path = _prepare_api_surface_cache_case(
+        tmp_path,
+        monkeypatch,
+        source="def run(alpha: int, beta: int) -> int:\n    return alpha + beta\n",
     )
-    _patch_parallel(monkeypatch)
     _run_main(
         monkeypatch,
         [
@@ -3583,6 +3592,55 @@ def test_cli_public_api_breaking_count_stable_across_warm_cache(
 
     assert "1 breaking" in cold_out
     assert "1 breaking" in warm_out
+
+
+def test_cli_api_surface_ignores_non_api_warm_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, _, cache_path = _prepare_api_surface_cache_case(
+        tmp_path,
+        monkeypatch,
+        source="def run(value: int) -> int:\n    return value\n",
+    )
+    report_path = tmp_path / "report.json"
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--cache-path",
+            str(cache_path),
+        ],
+    )
+    _ = capsys.readouterr()
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--api-surface",
+            "--cache-path",
+            str(cache_path),
+            "--json",
+            str(report_path),
+        ],
+    )
+    out = capsys.readouterr().out
+    payload = json.loads(report_path.read_text("utf-8"))
+    api_surface_summary = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", payload["metrics"])["summary"],
+    )["api_surface"]
+
+    assert _summary_metric(out, "analyzed") == 1
+    assert _summary_metric(out, "from cache") == 0
+    assert "Public API" in out
+    assert cast("dict[str, object]", api_surface_summary)["enabled"] is True
+    assert cast("dict[str, object]", api_surface_summary)["public_symbols"] == 1
+    assert cast("dict[str, object]", api_surface_summary)["modules"] == 1
 
 
 def test_cli_summary_no_color_has_no_ansi(

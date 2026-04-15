@@ -280,7 +280,7 @@ def build_html_report(
         f'<a href="{REPOSITORY_URL}" target="_blank" rel="noopener">CodeClone</a> '
         f'<span class="muted">v{_escape_html(version)}</span> · '
         f'<a href="{DOCS_URL}" target="_blank" rel="noopener">Docs</a> · '
-        f'<a href="{ISSUES_URL}" target="_blank" rel="noopener">Issues</a>'
+        f'<a href="{ISSUES_URL}" target="_blank" rel="noopener">Report Issue</a>'
         "</div>"
         f"{_schema_line}"
         "</footer>"

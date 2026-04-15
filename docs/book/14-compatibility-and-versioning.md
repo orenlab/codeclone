@@ -20,7 +20,7 @@ Current contract versions:
 
 - `BASELINE_SCHEMA_VERSION = "2.1"`
 - `BASELINE_FINGERPRINT_VERSION = "1"`
-- `CACHE_VERSION = "2.4"`
+- `CACHE_VERSION = "2.5"`
 - `REPORT_SCHEMA_VERSION = "2.8"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.2"` (used only when metrics are stored
   in a dedicated metrics-baseline file instead of the default unified baseline)

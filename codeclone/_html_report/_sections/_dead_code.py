@@ -110,7 +110,7 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
         _stat_card(
             "Candidates",
             dead_total,
-            detail=_micro_badges(("active", dead_total - dead_suppressed_total)),
+            detail=_micro_badges(("active", dead_total)),
             value_tone="warn" if dead_total > 0 else "good",
             glossary_tip_fn=glossary_tip,
         ),

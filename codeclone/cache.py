@@ -238,6 +238,7 @@ class AnalysisProfile(TypedDict):
     block_min_stmt: int
     segment_min_loc: int
     segment_min_stmt: int
+    collect_api_surface: bool
 
 
 class CacheData(TypedDict):
@@ -344,6 +345,7 @@ class Cache:
         block_min_stmt: int = 8,
         segment_min_loc: int = 20,
         segment_min_stmt: int = 10,
+        collect_api_surface: bool = False,
     ):
         self.path = Path(path)
         self.root = _resolve_root(root)
@@ -355,6 +357,7 @@ class Cache:
             "block_min_stmt": block_min_stmt,
             "segment_min_loc": segment_min_loc,
             "segment_min_stmt": segment_min_stmt,
+            "collect_api_surface": collect_api_surface,
         }
         self.data: CacheData = _empty_cache_data(
             version=self._CACHE_VERSION,
@@ -557,9 +560,13 @@ class Cache:
             return self._reject_cache_load(
                 "Cache analysis profile mismatch "
                 f"(found min_loc={analysis_profile['min_loc']}, "
-                f"min_stmt={analysis_profile['min_stmt']}; "
+                f"min_stmt={analysis_profile['min_stmt']}, "
+                "collect_api_surface="
+                f"{str(analysis_profile['collect_api_surface']).lower()}; "
                 f"expected min_loc={self.analysis_profile['min_loc']}, "
-                f"min_stmt={self.analysis_profile['min_stmt']}); "
+                f"min_stmt={self.analysis_profile['min_stmt']}, "
+                "collect_api_surface="
+                f"{str(self.analysis_profile['collect_api_surface']).lower()}); "
                 "ignoring cache.",
                 status=CacheStatus.ANALYSIS_PROFILE_MISMATCH,
                 schema_version=version,
@@ -1482,6 +1489,10 @@ def _as_analysis_profile(value: object) -> AnalysisProfile | None:
     block_min_stmt = _as_int(obj.get("block_min_stmt"))
     segment_min_loc = _as_int(obj.get("segment_min_loc"))
     segment_min_stmt = _as_int(obj.get("segment_min_stmt"))
+    collect_api_surface_raw = obj.get("collect_api_surface", False)
+    collect_api_surface = (
+        collect_api_surface_raw if isinstance(collect_api_surface_raw, bool) else None
+    )
     if (
         min_loc is None
         or min_stmt is None
@@ -1489,6 +1500,7 @@ def _as_analysis_profile(value: object) -> AnalysisProfile | None:
         or block_min_stmt is None
         or segment_min_loc is None
         or segment_min_stmt is None
+        or collect_api_surface is None
     ):
         return None
 
@@ -1499,6 +1511,7 @@ def _as_analysis_profile(value: object) -> AnalysisProfile | None:
         block_min_stmt=block_min_stmt,
         segment_min_loc=segment_min_loc,
         segment_min_stmt=segment_min_stmt,
+        collect_api_surface=collect_api_surface,
     )
 
 

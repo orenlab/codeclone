@@ -869,6 +869,18 @@ def test_html_report_narrow_kpi_cards_keep_badges_inside_card() -> None:
     )
 
 
+def test_html_report_mobile_directory_hotspots_wrap_inside_summary_cards() -> None:
+    html = build_html_report(func_groups={}, block_groups={}, segment_groups={})
+    _assert_html_contains(
+        html,
+        "@media(max-width:768px){",
+        ".dir-hotspot-head{flex-wrap:wrap;align-items:flex-start}",
+        ".dir-hotspot-detail{flex-wrap:wrap;align-items:flex-start}",
+        ".dir-hotspot-bar-track{width:min(148px,42%);min-width:96px}",
+        ".dir-hotspot-meta{width:100%}",
+    )
+
+
 def test_html_report_table_css_matches_rendered_column_classes() -> None:
     html = build_html_report(func_groups={}, block_groups={}, segment_groups={})
     _assert_html_contains(
@@ -2708,6 +2720,41 @@ def test_html_report_provenance_badges_cover_mismatch_and_untrusted_metrics() ->
     )
 
 
+def test_html_report_provenance_table_values_use_unified_badges() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={
+            "python_tag": "cp313",
+            "baseline_python_tag": "cp312",
+            "baseline_loaded": False,
+            "baseline_status": "missing",
+            "baseline_payload_sha256_verified": False,
+            "metrics_baseline_loaded": True,
+            "metrics_baseline_status": "missing",
+            "metrics_baseline_payload_sha256_verified": False,
+            "cache_status": "ok",
+            "cache_used": True,
+        },
+    )
+    _assert_html_contains(
+        html,
+        'class="prov-badge prov-badge--amber prov-badge--inline"',
+        'class="prov-badge prov-badge--red prov-badge--inline"',
+        'class="prov-badge prov-badge--green prov-badge--inline"',
+        '<span class="prov-badge-val">missing</span>',
+        '<span class="prov-badge-val">not loaded</span>',
+        '<span class="prov-badge-val">unverified</span>',
+        '<span class="prov-badge-val">ok</span>',
+        '<span class="prov-badge-val">hit</span>',
+        '<span class="prov-badge-val">runtime cp313</span>',
+    )
+    assert 'class="meta-status' not in html
+    assert 'class="meta-bool' not in html
+    assert 'class="prov-match' not in html
+
+
 def test_html_report_provenance_handles_non_boolean_baseline_loaded() -> None:
     html = build_html_report(
         func_groups={},
@@ -2725,6 +2772,160 @@ def test_html_report_provenance_handles_non_boolean_baseline_loaded() -> None:
         '<span class="prov-badge-lbl">Schema</span>',
     )
     assert '<span class="prov-badge-lbl">Baseline</span>' not in html
+
+
+def test_html_report_footer_uses_report_issue_link_text() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    _assert_html_contains(html, ">Docs</a> · ", ">Report Issue</a>")
+    assert ">Issues</a>" not in html
+
+
+def test_html_report_uses_numeric_font_for_overview_card_values() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    numeric_font_stack = (
+        '--font-numeric:"JetBrains Mono",ui-monospace,'
+        'SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;'
+    )
+    _assert_html_contains(
+        html,
+        numeric_font_stack,
+        ".health-ring-score{font-family:var(--font-numeric);",
+        ".meta-item .meta-value{font-family:var(--font-numeric);",
+        ".overview-stat-value{font-family:var(--font-numeric);",
+    )
+
+
+def test_html_report_uses_jetbrains_mono_for_stat_card_content() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    _assert_html_contains(
+        html,
+        ".meta-item{padding:var(--sp-3) var(--sp-4);",
+        "font-family:var(--font-mono)}",
+        ".kpi-micro{display:inline-flex;align-items:center;gap:3px;",
+        "font-family:inherit}",
+        ".kpi-micro-val{font-family:inherit;font-weight:500;",
+        ".overview-summary-item{background:var(--bg-surface);",
+        "border:1px solid color-mix(in srgb,var(--border) 78%,transparent);",
+        "padding:var(--sp-4)}",
+        ".overview-summary-label{display:flex;align-items:center;gap:var(--sp-2);",
+        ("border-bottom:1px solid color-mix(in srgb,var(--border) 58%,transparent);"),
+        "font-family:var(--font-display)}",
+        (
+            ".overview-summary-item > :not(.overview-summary-label)"
+            "{font-family:var(--font-mono)}"
+        ),
+    )
+
+
+def test_html_report_uses_jetbrains_mono_for_health_radar_labels() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    _assert_html_contains(
+        html,
+        ".health-radar text{font-size:10.5px;font-family:var(--font-mono);",
+        ".health-radar .radar-score{font-weight:600;font-variant-numeric:tabular-nums;",
+    )
+
+
+def test_html_report_empty_states_use_ui_font_stack() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    _assert_html_contains(
+        html,
+        ".tab-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;",
+        "font-family:var(--font-sans)}",
+        ".tab-empty-title{font-size:1rem;font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-1);",
+        "font-family:var(--font-display)}",
+        ".tab-empty-desc{font-size:.85rem;color:var(--text-muted);max-width:320px;font-family:var(--font-sans)}",
+        ".inline-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;",
+        "font-family:var(--font-sans)}",
+    )
+
+
+def test_html_report_uses_shared_card_micro_interactions() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    _assert_html_contains(
+        html,
+        ".meta-item,.overview-row,.overview-summary-item,.group,.suggestion-card,.sf-card,.prov-section{",
+        "--card-hover-accent:var(--accent-primary);",
+        "@media (hover:hover) and (pointer:fine){",
+        "transform:translateY(-2px);",
+        (
+            "border-color:color-mix(in oklch,var(--card-hover-accent) "
+            "22%,var(--border-strong));"
+        ),
+        "@media (prefers-reduced-motion:reduce){",
+        "transform:none}",
+    )
+
+
+def test_html_report_dead_code_cards_do_not_render_negative_active_count() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=_metrics_payload(
+            health_score=90,
+            health_grade="A",
+            complexity_max=1,
+            complexity_high_risk=0,
+            coupling_high_risk=0,
+            cohesion_low=0,
+            dep_cycles=[],
+            dep_max_depth=0,
+            dead_total=0,
+            dead_critical=0,
+            dead_suppressed=1,
+        ),
+    )
+    _assert_html_contains(
+        html,
+        '<span class="kpi-micro-val">0</span><span class="kpi-micro-lbl">active</span>',
+    )
+    assert (
+        '<span class="kpi-micro-val">-1</span><span class="kpi-micro-lbl">active</span>'
+        not in html
+    )
+
+
+def test_html_report_findings_empty_state_keeps_intro_banner() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    _assert_html_contains(
+        html,
+        "What are structural findings?",
+        (
+            "Repeated non-overlapping branch-body shapes detected inside "
+            "individual functions."
+        ),
+        "No structural findings detected.",
+    )
 
 
 def test_html_report_dependency_hubs_deterministic_tie_order() -> None:

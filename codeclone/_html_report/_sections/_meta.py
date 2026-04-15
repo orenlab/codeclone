@@ -63,11 +63,19 @@ def _truncate_middle(value: str, head: int, tail: int) -> str:
     return f"{value[:head]}\u2026{value[-tail:]}"
 
 
-def _prov_badge_html(label: str, value: str, color: str) -> str:
-    return (
-        f'<span class="prov-badge prov-badge--{color}">'
-        f'<span class="prov-badge-val">{_escape_html(value)}</span>'
+def _prov_badge_html(label: str | None, value: str, color: str) -> str:
+    classes = ["prov-badge", f"prov-badge--{color}"]
+    if label is None:
+        classes.append("prov-badge--inline")
+    label_html = (
         f'<span class="prov-badge-lbl">{_escape_html(label)}</span>'
+        if label is not None
+        else ""
+    )
+    return (
+        f'<span class="{" ".join(classes)}">'
+        f'<span class="prov-badge-val">{_escape_html(value)}</span>'
+        f"{label_html}"
         "</span>"
     )
 
@@ -365,45 +373,34 @@ def render_meta_panel(ctx: ReportContext) -> str:
     _STATUS_LABELS = frozenset(
         {"Baseline status", "Metrics baseline status", "Cache status"}
     )
+    _prov_badge = _prov_badge_html
 
     runtime_python_tag = str(python_tag_value or "").strip()
 
     def _val_html(label: str, value: object) -> str:
         if label in _BOOL_LABELS and isinstance(value, bool):
             true_text, false_text = _BOOL_LABELS[label]
-            if value:
-                return (
-                    '<span class="meta-bool meta-bool-true">'
-                    f'<span class="meta-bool-icon">\u2713</span>'
-                    f'<span class="meta-bool-text">{true_text}</span>'
-                    "</span>"
-                )
-            return (
-                '<span class="meta-bool meta-bool-false">'
-                f'<span class="meta-bool-icon">\u2717</span>'
-                f'<span class="meta-bool-text">{false_text}</span>'
-                "</span>"
+            return _prov_badge(
+                None,
+                true_text if value else false_text,
+                "green" if value else "red",
             )
         if label in _STATUS_LABELS and isinstance(value, str) and value.strip():
             raw = value.strip()
             key = raw.lower()
             if key == "ok":
-                tone = "ok"
+                color = "green"
                 text = "ok"
             elif key in {"error", "failed", "fail"}:
-                tone = "err"
+                color = "red"
                 text = raw
             elif key in {"missing", "absent", "none"}:
-                tone = "warn"
+                color = "amber"
                 text = raw
             else:
-                tone = "neutral"
+                color = "neutral"
                 text = raw
-            return (
-                f'<span class="meta-status meta-status--{tone}">'
-                f'<span class="meta-status-dot"></span>'
-                f"{_escape_html(text)}</span>"
-            )
+            return _prov_badge(None, text, color)
         # Long path/hash values: middle-truncate with copy button + full title
         if (
             isinstance(value, str)
@@ -437,18 +434,9 @@ def render_meta_panel(ctx: ReportContext) -> str:
         ):
             text = _escape_html(value)
             if value.strip() == runtime_python_tag:
-                badge = (
-                    '<span class="prov-match prov-match--ok" '
-                    'title="Matches runtime Python tag">'
-                    "\u2713 matches runtime</span>"
-                )
+                badge = _prov_badge(None, "matches runtime", "green")
             else:
-                badge = (
-                    '<span class="prov-match prov-match--mismatch" '
-                    f'title="Runtime is {runtime_python_tag}">'
-                    f"\u26a0 differs from runtime ({_escape_html(runtime_python_tag)})"
-                    "</span>"
-                )
+                badge = _prov_badge(None, f"runtime {runtime_python_tag}", "amber")
             return f"{text} {badge}"
         return _escape_html(_meta_display(value))
 
@@ -504,8 +492,6 @@ def render_meta_panel(ctx: ReportContext) -> str:
     meta_rows_html = "".join(
         _section_html(st, rows) for st, rows in meta_sections if rows
     )
-
-    _prov_badge = _prov_badge_html
 
     badges: list[str] = []
     if _bl_verified is True:

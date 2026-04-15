@@ -4026,6 +4026,7 @@ class CodeCloneMCPService:
                 args.segment_min_stmt,
                 DEFAULT_SEGMENT_MIN_STMT,
             ),
+            collect_api_surface=bool(getattr(args, "api_surface", False)),
         )
         if policy != "off":
             cache.load()

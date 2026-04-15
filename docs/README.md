@@ -38,7 +38,7 @@ repository build:
 - [Config and defaults](book/04-config-and-defaults.md)
 - [Core pipeline and invariants](book/05-core-pipeline.md)
 - [Baseline contract (schema v2.1)](book/06-baseline.md)
-- [Cache contract (schema v2.4)](book/07-cache.md)
+- [Cache contract (schema v2.5)](book/07-cache.md)
 - [Report contract (schema v2.8)](book/08-report.md)
 
 ## Interfaces

@@ -1372,6 +1372,7 @@ def _main_impl() -> None:
         block_min_stmt=args.block_min_stmt,
         segment_min_loc=args.segment_min_loc,
         segment_min_stmt=args.segment_min_stmt,
+        collect_api_surface=bool(args.api_surface),
     )
     cache.load()
     if cache.load_warning:

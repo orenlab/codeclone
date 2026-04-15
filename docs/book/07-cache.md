@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define cache schema v2.4, integrity verification, and fail-open behavior.
+Define cache schema v2.5, integrity verification, and fail-open behavior.
 
 ## Public surface
 
@@ -13,7 +13,7 @@ Define cache schema v2.4, integrity verification, and fail-open behavior.
 
 ## Data model
 
-On-disk schema (`v == "2.4"`):
+On-disk schema (`v == "2.5"`):
 
 - Top-level: `v`, `payload`, `sig`
 - `payload` keys: `py`, `fp`, `ap`, `files`, optional `sr`
@@ -21,6 +21,7 @@ On-disk schema (`v == "2.4"`):
     - `min_loc`, `min_stmt`
     - `block_min_loc`, `block_min_stmt`
     - `segment_min_loc`, `segment_min_stmt`
+    - `collect_api_surface`
 - `files` map stores compact per-file entries:
     - `st`: `[mtime_ns, size]`
     - `ss`: `[lines, functions, methods, classes]` (source stats snapshot)
@@ -54,9 +55,9 @@ Refs:
     - version `v == CACHE_VERSION`
     - `payload.py == current_python_tag()`
     - `payload.fp == BASELINE_FINGERPRINT_VERSION`
-    - `payload.ap` matches the current six-threshold analysis profile
+    - `payload.ap` matches the current analysis profile
       (`min_loc`, `min_stmt`, `block_min_loc`, `block_min_stmt`,
-      `segment_min_loc`, `segment_min_stmt`)
+      `segment_min_loc`, `segment_min_stmt`, `collect_api_surface`)
     - `sig` equals deterministic hash of canonical payload
 - Cache schema must also be bumped when cached analysis semantics change in a
   way that could leave syntactically valid but semantically stale per-file

@@ -21,7 +21,7 @@ across MCP/HTML/clients; tightens MCP launcher/runtime behavior.
   `--fail-on-docstring-regression`, `--fail-on-api-break`, `--fail-on-untested-hotspots`, `--coverage-min`.
 - Surface adoption/API/coverage-join in MCP, CLI Metrics, report payloads, and HTML (Overview + Quality subtab).
 - Preserve embedded metrics and optional `api_surface` in unified baselines.
-- Cache `2.4`: drop stale API-surface entries; preserve parameter order; align warm/cold API diffs.
+- Cache `2.5`: make analysis-profile compatibility API-surface-aware; invalidate stale non-API warm caches; preserve parameter order; align warm/cold API diffs.
 
 ### MCP, HTML, and client interpretation
 

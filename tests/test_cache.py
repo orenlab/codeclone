@@ -1077,6 +1077,26 @@ def test_cache_load_analysis_profile_mismatch(tmp_path: Path) -> None:
     assert loaded.cache_schema_version == Cache._CACHE_VERSION
 
 
+def test_cache_load_analysis_profile_mismatch_collect_api_surface(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path, collect_api_surface=False)
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    loaded = Cache(cache_path, collect_api_surface=True)
+    loaded.load()
+
+    assert loaded.load_warning is not None
+    assert "analysis profile mismatch" in loaded.load_warning
+    assert "collect_api_surface=false" in loaded.load_warning
+    assert "collect_api_surface=true" in loaded.load_warning
+    assert loaded.data["files"] == {}
+    assert loaded.load_status == CacheStatus.ANALYSIS_PROFILE_MISMATCH
+    assert loaded.cache_schema_version == Cache._CACHE_VERSION
+
+
 def test_cache_load_missing_analysis_profile_in_payload(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)

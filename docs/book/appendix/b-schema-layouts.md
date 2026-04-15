@@ -91,11 +91,11 @@ Notes:
 }
 ```
 
-## Cache schema (`2.4`)
+## Cache schema (`2.5`)
 
 ```json
 {
-  "v": "2.4",
+  "v": "2.5",
   "payload": {
     "py": "cp313",
     "fp": "1",
@@ -105,7 +105,8 @@ Notes:
       "block_min_loc": 20,
       "block_min_stmt": 8,
       "segment_min_loc": 20,
-      "segment_min_stmt": 10
+      "segment_min_stmt": 10,
+      "collect_api_surface": false
     },
     "files": {
       "codeclone/cache.py": {

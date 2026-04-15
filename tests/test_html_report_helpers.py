@@ -570,11 +570,11 @@ def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
             ),
         )
     )
-    assert "meta-status--err" in meta_html
-    assert ">FAILED<" in meta_html
-    assert "meta-status--neutral" in meta_html
-    assert ">stale<" in meta_html
-    assert "prov-match--mismatch" in meta_html
-    assert "differs from runtime (cp313)" in meta_html
+    assert 'class="prov-badge prov-badge--red prov-badge--inline"' in meta_html
+    assert 'class="prov-badge prov-badge--neutral prov-badge--inline"' in meta_html
+    assert 'class="prov-badge prov-badge--amber prov-badge--inline"' in meta_html
+    assert '<span class="prov-badge-val">FAILED</span>' in meta_html
+    assert '<span class="prov-badge-val">stale</span>' in meta_html
+    assert '<span class="prov-badge-val">runtime cp313</span>' in meta_html
     assert '<span class="prov-badge-val">verified</span>' in meta_html
     assert '<span class="prov-badge-lbl">Metrics baseline</span>' in meta_html
