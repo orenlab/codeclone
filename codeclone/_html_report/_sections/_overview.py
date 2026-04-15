@@ -13,7 +13,12 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from ... import _coerce
-from ..._html_badges import _micro_badges, _source_kind_badge_html, _stat_card
+from ..._html_badges import (
+    _inline_empty,
+    _micro_badges,
+    _source_kind_badge_html,
+    _stat_card,
+)
 from ..._html_escape import _escape_html
 from .._components import (
     Tone,
@@ -325,7 +330,7 @@ def _issue_breakdown_html(
         (key, label, count, color) for key, label, count, color in raw_rows if count > 0
     ]
     if not rows:
-        return '<div class="overview-summary-value muted">No issues detected.</div>'
+        return _inline_empty("No issues detected", tone="good")
 
     max_count = max(c for _, _, c, _ in rows)
     parts: list[str] = []
@@ -1013,7 +1018,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
 
     return (
         insight_block(
-            question="What is the current code-health snapshot?",
+            question="Current health snapshot",
             answer=overview_answer,
             tone=overview_tone,
         )

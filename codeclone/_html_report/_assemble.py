@@ -26,7 +26,7 @@ from ._sections._clones import render_clones_panel
 from ._sections._coupling import render_quality_panel
 from ._sections._dead_code import render_dead_code_panel
 from ._sections._dependencies import render_dependencies_panel
-from ._sections._meta import render_meta_panel
+from ._sections._meta import build_topbar_provenance_summary, render_meta_panel
 from ._sections._overview import render_overview_panel
 from ._sections._structural import render_structural_panel
 from ._sections._suggestions import render_suggestions_panel
@@ -197,23 +197,10 @@ def build_html_report(
     )
     panels_html = "".join(tab_panels)
 
-    # -- Provenance dot color --
-    _bl_verified = _meta_pick(
-        ctx.meta.get("baseline_payload_sha256_verified"),
-        ctx.baseline_meta.get("payload_sha256_verified"),
+    # -- Provenance summary for topbar pill --
+    prov_status_label, prov_status_color, prov_tooltip = (
+        build_topbar_provenance_summary(ctx)
     )
-    _bl_loaded = _meta_pick(
-        ctx.meta.get("baseline_loaded"),
-        ctx.baseline_meta.get("loaded"),
-    )
-    if _bl_verified:
-        prov_dot_cls = "dot-green"
-    elif _bl_loaded is True and _bl_verified is not True:
-        prov_dot_cls = "dot-red"
-    elif _bl_loaded is False or _bl_loaded is None:
-        prov_dot_cls = "dot-amber"
-    else:
-        prov_dot_cls = "dot-neutral"
 
     # -- IDE picker menu --
     ide_options = [
@@ -246,21 +233,56 @@ def build_html_report(
         f'aria-haspopup="true" title="Open in IDE">{ICONS["ide"]}'
         '<span class="ide-picker-label">IDE</span></button>'
         f'<ul class="ide-menu" role="menu">{ide_menu_items}</ul></div>'
-        f'<button class="btn btn-prov" type="button" data-prov-open>'
-        f'<span class="prov-dot {prov_dot_cls}"></span>Report Provenance</button>'
-        f'<button class="theme-toggle" type="button" title="Toggle theme">'
-        f"{ICONS['theme']}Theme</button>"
+        f'<button class="btn btn-prov prov-pill prov-pill--{prov_status_color}" '
+        f'type="button" data-prov-open '
+        f'aria-label="Report Provenance" '
+        f'title="Report Provenance \u2014 {_escape_html(prov_tooltip)}">'
+        f'<svg class="prov-pill-icon" viewBox="0 0 16 16" width="16" height="16" '
+        f'fill="none" stroke="currentColor" stroke-width="1.6" '
+        f'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<path d="M8 1.5L2.5 3.5v4.2c0 3.3 2.3 5.7 5.5 6.8 3.2-1.1 5.5-3.5 '
+        '5.5-6.8V3.5z"/>'
+        f'<path d="M5.5 8l1.8 1.8L10.5 6"/></svg>'
+        f'<span class="prov-pill-label">{_escape_html(prov_status_label)}</span>'
+        f"</button>"
+        f'<button class="theme-toggle" type="button" title="Toggle theme" '
+        f'aria-label="Toggle theme">'
+        f"{ICONS['theme_sun']}{ICONS['theme_moon']}Theme</button>"
         "</div></div></header>"
     )
 
     # -- Footer --
     version = str(ctx.meta.get("codeclone_version", __version__))
+    _report_schema = ctx.report_schema_version
+    _baseline_schema = _meta_pick(
+        ctx.meta.get("baseline_schema_version"),
+        ctx.baseline_meta.get("schema_version"),
+    )
+    _cache_schema = _meta_pick(
+        ctx.meta.get("cache_schema_version"),
+        ctx.cache_meta.get("schema_version"),
+    )
+    _schema_parts: list[str] = []
+    if _report_schema:
+        _schema_parts.append(f"Report schema {_escape_html(str(_report_schema))}")
+    if _baseline_schema:
+        _schema_parts.append(f"Baseline schema {_escape_html(str(_baseline_schema))}")
+    if _cache_schema:
+        _schema_parts.append(f"Cache schema {_escape_html(str(_cache_schema))}")
+    _schema_line = (
+        f'<div class="report-footer-schemas muted">{" · ".join(_schema_parts)}</div>'
+        if _schema_parts
+        else ""
+    )
     footer_html = (
         '<footer class="report-footer">'
+        '<div class="report-footer-main">'
         f'<a href="{REPOSITORY_URL}" target="_blank" rel="noopener">CodeClone</a> '
         f'<span class="muted">v{_escape_html(version)}</span> · '
         f'<a href="{DOCS_URL}" target="_blank" rel="noopener">Docs</a> · '
         f'<a href="{ISSUES_URL}" target="_blank" rel="noopener">Issues</a>'
+        "</div>"
+        f"{_schema_line}"
         "</footer>"
     )
 

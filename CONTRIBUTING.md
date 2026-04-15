@@ -209,6 +209,27 @@ uv run pytest -q tests/test_mcp_service.py tests/test_mcp_server.py
 
 ---
 
+## Commit Messages
+
+Use the repository's existing **Conventional Commits** style:
+
+- format: `type(scope): imperative summary`
+- keep `type` lowercase (`feat`, `fix`, `docs`, `chore`, ...)
+- keep the summary short, imperative, and specific to the user-visible change
+- use a narrow scope when it helps (`metrics`, `mcp,vscode`, `core,ci`, ...)
+- split unrelated changes into separate commits instead of writing one broad summary
+
+Examples from the current history:
+
+- `fix(core,ci): harden git diff validation, make segment digests canonical, and align CI policy`
+- `feat(metrics): add adoption and public API baselines with compact schema-aware storage`
+- `chore(docs): align AGENTS and contract docs with current code`
+
+If a commit needs extra context, keep the subject line concise and explain the
+rest in the commit body.
+
+---
+
 ## Code Style
 
 - Python **3.10 – 3.14**

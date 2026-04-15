@@ -162,6 +162,10 @@ _LAYOUT = """\
   font-weight:500;font-family:inherit;transition:all var(--dur-fast) var(--ease)}
 .theme-toggle:hover{color:var(--text-primary);background:var(--bg-raised);border-color:var(--border-strong)}
 .theme-toggle svg{width:16px;height:16px}
+/* Adaptive icon: show sun in light mode, moon in dark mode. */
+.theme-icon{display:none}
+:root[data-theme="light"] .theme-icon-sun{display:inline-flex}
+:root[data-theme="dark"] .theme-icon-moon{display:inline-flex}
 
 /* Main tabs — full-width pill bar */
 .main-tabs-wrap{position:sticky;top:var(--topbar-h);z-index:90;padding:var(--sp-3) 0 0;
@@ -206,8 +210,29 @@ _CONTROLS = """\
 .btn-prov .prov-dot.dot-amber{background:var(--warning)}
 .btn-prov .prov-dot.dot-red{background:var(--error)}
 .btn-prov .prov-dot.dot-neutral{background:var(--text-muted)}
+
+/* Provenance pill — single compact status chip in topbar */
+.prov-pill{display:inline-flex;align-items:center;gap:var(--sp-1);
+  padding:var(--sp-1) var(--sp-3);background:none;
+  border:1px solid var(--border);border-radius:var(--radius-md);cursor:pointer;
+  color:var(--text-muted);transition:all var(--dur-fast) var(--ease);
+  font-size:.85rem;font-weight:500;font-family:inherit}
+.prov-pill:hover{background:var(--bg-raised);border-color:var(--border-strong);
+  color:var(--text-primary)}
+.prov-pill:focus-visible{outline:2px solid var(--accent-primary);outline-offset:1px}
+.prov-pill-icon{flex-shrink:0;opacity:.75}
+.prov-pill:hover .prov-pill-icon{opacity:1}
+.prov-pill-label{font-size:.85rem;font-weight:500;white-space:nowrap}
+.prov-pill--green .prov-pill-icon{color:var(--success)}
+.prov-pill--green:hover{border-color:color-mix(in srgb,var(--success) 55%,var(--border))}
+.prov-pill--amber .prov-pill-icon{color:var(--warning)}
+.prov-pill--amber:hover{border-color:color-mix(in srgb,var(--warning) 55%,var(--border))}
+.prov-pill--red .prov-pill-icon{color:var(--error)}
+.prov-pill--red:hover{border-color:color-mix(in srgb,var(--error) 60%,var(--border))}
+.prov-pill--neutral .prov-pill-icon{color:var(--text-muted)}
 .btn.ghost{background:none;border-color:transparent}
 .btn.ghost:hover{background:var(--bg-raised);border-color:var(--border)}
+.btn.btn-icon{padding:var(--sp-1);min-width:28px;justify-content:center}
 .btn svg{width:14px;height:14px}
 
 /* Inputs */
@@ -263,11 +288,38 @@ _TOOLBAR = """\
 .pagination{display:flex;align-items:center;gap:var(--sp-1)}
 .page-meta{font-size:.8rem;color:var(--text-muted);white-space:nowrap;min-width:100px;text-align:center}
 
-/* Suggestions toolbar */
-.suggestions-toolbar{flex-direction:column;align-items:stretch}
-.suggestions-toolbar-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2)}
-.suggestions-toolbar-row--secondary{padding-top:var(--sp-2);border-top:1px solid var(--border)}
-.suggestions-count-label{margin-left:auto;font-size:.8rem;color:var(--text-muted);font-weight:500}
+/* Filters popover: one button collapses Context/Type/Spread/min-occ into a menu */
+.filters-popover{position:relative}
+.filters-btn{display:inline-flex;align-items:center;gap:var(--sp-1);white-space:nowrap}
+.filters-btn-ico{flex:none}
+.filters-count{display:inline-flex;align-items:center;justify-content:center;
+  min-width:18px;height:18px;padding:0 5px;border-radius:999px;
+  background:var(--accent-primary);color:#fff;font-size:.68rem;font-weight:600;
+  line-height:1}
+.filters-btn[aria-expanded="true"]{border-color:var(--accent-primary);
+  color:var(--accent-primary)}
+.filters-menu{position:absolute;top:calc(100% + var(--sp-1));left:0;z-index:20;
+  min-width:240px;display:flex;flex-direction:column;gap:var(--sp-2);
+  padding:var(--sp-3);background:var(--bg-surface);
+  border:1px solid var(--border);border-radius:var(--radius-md);
+  box-shadow:var(--shadow-lg)}
+.filters-menu[hidden]{display:none}
+.filters-row{display:flex;align-items:center;gap:var(--sp-2)}
+.filters-row .select{flex:1;min-width:0}
+.filters-label{font-size:.75rem;color:var(--text-muted);min-width:60px;
+  font-weight:500}
+.filters-row.inline-check{gap:var(--sp-2);font-size:.82rem;color:var(--text-secondary);
+  cursor:pointer}
+.filters-row.inline-check input[type="checkbox"]{margin:0}
+
+/* Expand/collapse toggle — single button that flips state */
+.expand-toggle{white-space:nowrap}
+.expand-toggle[data-expanded="true"]{background:var(--bg-overlay);
+  border-color:var(--border-strong)}
+
+/* Suggestions count pill (right side of the shared toolbar). */
+.suggestions-count-label{font-size:.8rem;color:var(--text-muted);font-weight:500;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
 """
 
 # ---------------------------------------------------------------------------
@@ -586,7 +638,7 @@ _OVERVIEW = """\
 .kpi-micro{display:inline-flex;align-items:center;gap:2px;font-size:.62rem;
   padding:1px 5px;border-radius:var(--radius-sm);background:var(--bg-raised);
   white-space:nowrap;line-height:1.3}
-.kpi-micro-val{font-weight:500;font-variant-numeric:tabular-nums;color:var(--text-muted)}
+.kpi-micro-val{font-weight:600;font-variant-numeric:tabular-nums;color:var(--text-secondary)}
 .kpi-micro-lbl{font-weight:400;color:var(--text-muted);text-transform:lowercase}
 .kpi-micro--baselined{color:var(--success);font-weight:500;font-size:.6rem}
 .kpi-delta{font-size:.62rem;font-weight:700;margin-left:auto;
@@ -725,11 +777,12 @@ _OVERVIEW = """\
 /* Health radar chart */
 .health-radar{display:flex;justify-content:center;padding:var(--sp-3) 0}
 .health-radar svg{width:100%;max-width:520px;height:auto;overflow:visible}
-.health-radar text{font-size:10px;font-family:var(--font-sans);fill:var(--text-muted)}
+.health-radar text{font-size:10.5px;font-family:var(--font-sans);fill:var(--text-secondary);
+  font-weight:500}
 .health-radar .radar-score{font-weight:600;font-variant-numeric:tabular-nums;fill:var(--text-secondary)}
 .health-radar .radar-label--weak{fill:var(--error)}
 .health-radar .radar-label--weak .radar-score{fill:var(--error)}
-.health-radar-legend{font-size:.75rem;color:var(--text-muted);text-align:center;
+.health-radar-legend{font-size:.78rem;color:var(--text-secondary);text-align:center;
   margin-top:var(--sp-2);max-width:520px;margin-left:auto;margin-right:auto}
 /* Findings by family bars */
 .families-list{display:flex;flex-direction:column;gap:var(--sp-2)}
@@ -795,11 +848,12 @@ _DEPENDENCIES = """\
 # ---------------------------------------------------------------------------
 
 _NOVELTY = """\
-.global-novelty{margin-bottom:var(--sp-4);padding:var(--sp-4) var(--sp-5);
-  background:var(--bg-raised);border:1px solid var(--border);border-radius:var(--radius-lg)}
-.global-novelty-head{display:flex;align-items:center;gap:var(--sp-4);flex-wrap:wrap}
-.global-novelty-head h2{font-size:1rem;white-space:nowrap}
-.novelty-tabs{display:flex;gap:var(--sp-2)}
+/* Slim inline baseline-split bar (replaces the old boxed section chrome). */
+.novelty-bar{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
+  margin-bottom:var(--sp-3);padding:var(--sp-2) 0;
+  border-bottom:1px solid var(--border)}
+.novelty-bar-tabs{display:inline-flex;gap:var(--sp-1)}
+.novelty-bar-note{font-size:.78rem;color:var(--text-muted);line-height:1.4}
 .novelty-tab{transition:all var(--dur-fast) var(--ease)}
 .novelty-tab.active{background:var(--accent-primary);color:white;border-color:var(--accent-primary)}
 .novelty-tab[data-novelty-state="good"]{color:var(--success);border-color:var(--success);background:var(--success-muted)}
@@ -808,7 +862,6 @@ _NOVELTY = """\
 .novelty-tab[data-novelty-state="bad"].active{background:var(--error);color:white;border-color:var(--error)}
 .novelty-count{font-size:.72rem;font-weight:600;background:rgba(255,255,255,.15);padding:0 var(--sp-1);
   border-radius:var(--radius-sm);margin-left:var(--sp-1)}
-.novelty-note{font-size:.8rem;color:var(--text-muted);margin-top:var(--sp-2)}
 
 /* Hidden by novelty filter */
 .group[data-novelty-hidden="true"]{display:none}
@@ -983,27 +1036,58 @@ _STRUCTURAL = """\
 
 _META_PANEL = """\
 /* Provenance section cards */
-.prov-section{margin-bottom:var(--sp-3);background:var(--bg-raised);
-  border-radius:var(--radius-md);padding:var(--sp-3) var(--sp-3) var(--sp-2);
-  border:1px solid color-mix(in srgb,var(--border) 50%,transparent)}
+.prov-section{margin-bottom:var(--sp-3);background:var(--bg-surface);
+  border-radius:var(--radius-md);padding:var(--sp-3) var(--sp-4) var(--sp-2);
+  border:1px solid var(--border);
+  box-shadow:0 1px 2px color-mix(in srgb,var(--text-primary) 3%,transparent)}
 .prov-section:last-child{margin-bottom:0}
-.prov-section-title{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
-  color:var(--text-muted);margin:0 0 var(--sp-2);padding:0;border:none;
-  display:flex;align-items:center;gap:var(--sp-1)}
-.prov-section-title svg{width:12px;height:12px;opacity:.5;flex-shrink:0}
+.prov-section-title{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--text-secondary);margin:0 calc(-1*var(--sp-4)) var(--sp-2);
+  padding:0 var(--sp-4) var(--sp-2);border:none;
+  border-bottom:1px solid color-mix(in srgb,var(--border) 60%,transparent);
+  display:flex;align-items:center;gap:6px}
+.prov-section-title svg{width:13px;height:13px;opacity:.7;flex-shrink:0;
+  color:var(--accent-primary)}
 .prov-table{width:100%;border-collapse:collapse;font-size:.8rem}
-.prov-table tr:not(:last-child){border-bottom:1px solid color-mix(in srgb,var(--border) 30%,transparent)}
-.prov-table tr:hover{background:color-mix(in srgb,var(--accent-primary) 4%,transparent)}
-.prov-td-label{padding:5px 0;color:var(--text-muted);white-space:nowrap;width:40%;
-  vertical-align:top;font-weight:500;font-size:.78rem}
-.prov-td-value{padding:5px 0 5px var(--sp-2);color:var(--text-primary);word-break:break-all;
-  font-family:var(--font-mono);font-size:.72rem}
+.prov-table tr:not(:last-child){border-bottom:1px solid color-mix(in srgb,var(--border) 25%,transparent)}
+.prov-table tr:hover{background:color-mix(in srgb,var(--accent-primary) 3%,transparent)}
+.prov-td-label{padding:6px 0;color:var(--text-muted);white-space:nowrap;width:40%;
+  vertical-align:top;font-weight:500;font-size:.76rem;letter-spacing:.002em}
+.prov-td-value{padding:6px 0 6px var(--sp-2);color:var(--text-primary);word-break:break-all;
+  font-family:var(--font-mono);font-size:.72rem;vertical-align:top}
 
 /* Boolean check/cross badges */
-.meta-bool{font-size:.68rem;font-weight:600;padding:2px var(--sp-2);border-radius:var(--radius-sm);
-  display:inline-flex;align-items:center;gap:3px}
-.meta-bool-true{background:var(--success-muted);color:var(--success)}
-.meta-bool-false{background:var(--error-muted);color:var(--error)}
+.meta-bool{font-size:.7rem;font-weight:600;padding:2px 8px 2px 6px;
+  border-radius:999px;display:inline-flex;align-items:center;gap:4px;
+  letter-spacing:.005em;line-height:1.3}
+.meta-bool-icon{font-size:.78rem;font-weight:700;line-height:1}
+.meta-bool-text{font-family:var(--font-sans);font-size:.7rem;font-weight:500}
+.meta-bool-true{background:var(--success-muted);color:var(--success);
+  border:1px solid color-mix(in srgb,var(--success) 30%,transparent)}
+.meta-bool-false{background:var(--error-muted);color:var(--error);
+  border:1px solid color-mix(in srgb,var(--error) 30%,transparent)}
+
+/* Text status pills (ok / error / missing) in provenance tables */
+.meta-status{display:inline-flex;align-items:center;gap:5px;
+  font-family:var(--font-sans);font-size:.7rem;font-weight:600;
+  padding:2px 8px 2px 7px;border-radius:999px;letter-spacing:.01em;
+  text-transform:uppercase;line-height:1.3;
+  border:1px solid color-mix(in srgb,var(--border) 55%,transparent);
+  background:var(--bg-raised);color:var(--text-secondary)}
+.meta-status-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;
+  background:var(--text-muted)}
+.meta-status--ok{color:var(--success);
+  background:color-mix(in srgb,var(--success) 10%,var(--bg-surface));
+  border-color:color-mix(in srgb,var(--success) 32%,transparent)}
+.meta-status--ok .meta-status-dot{background:var(--success)}
+.meta-status--warn{color:var(--warning);
+  background:color-mix(in srgb,var(--warning) 10%,var(--bg-surface));
+  border-color:color-mix(in srgb,var(--warning) 32%,transparent)}
+.meta-status--warn .meta-status-dot{background:var(--warning)}
+.meta-status--err{color:var(--error);
+  background:color-mix(in srgb,var(--error) 10%,var(--bg-surface));
+  border-color:color-mix(in srgb,var(--error) 35%,transparent)}
+.meta-status--err .meta-status-dot{background:var(--error)}
 
 /* Provenance summary badges */
 .prov-summary{display:flex;flex-wrap:wrap;align-items:center;gap:6px;
@@ -1022,6 +1106,32 @@ _META_PANEL = """\
 .prov-badge--neutral{background:var(--bg-overlay);border-color:color-mix(in srgb,var(--border) 75%,transparent)}
 .prov-badge--neutral .prov-badge-val{color:var(--text-secondary)}
 .prov-explain{font-size:.62rem;color:var(--text-muted);margin-left:auto;font-style:italic}
+
+/* Truncated long values (paths, sha256) in provenance table */
+.prov-mono-trunc{font-family:var(--font-mono);font-size:.72rem;color:var(--text-primary);
+  background:var(--bg-body);padding:2px 6px;border-radius:var(--radius-sm);
+  border:1px solid color-mix(in srgb,var(--border) 45%,transparent);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  max-width:100%;vertical-align:middle;letter-spacing:.01em}
+.prov-td-value:has(.prov-mono-trunc){display:flex;align-items:center;gap:var(--sp-1);flex-wrap:nowrap;
+  min-width:0}
+.prov-copy-btn{display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;padding:0;background:none;border:1px solid transparent;
+  border-radius:var(--radius-sm);color:var(--text-muted);cursor:pointer;
+  transition:all var(--dur-fast) var(--ease);flex-shrink:0}
+.prov-copy-btn:hover{color:var(--text-primary);background:var(--bg-overlay);
+  border-color:color-mix(in srgb,var(--border) 70%,transparent)}
+.prov-copy-btn:focus-visible{outline:2px solid var(--accent-primary);outline-offset:1px}
+.prov-copy-btn--ok{color:var(--success);background:var(--success-muted);
+  border-color:color-mix(in srgb,var(--success) 30%,transparent)}
+.prov-copy-btn svg{width:12px;height:12px}
+
+/* Runtime-match chip for baseline python tag */
+.prov-match{display:inline-flex;align-items:center;font-size:.62rem;font-weight:600;
+  padding:1px 6px;margin-left:var(--sp-1);border-radius:var(--radius-sm);
+  letter-spacing:.01em;vertical-align:middle;line-height:1.45}
+.prov-match--ok{background:var(--success-muted);color:var(--success)}
+.prov-match--mismatch{background:var(--warning-muted);color:var(--warning)}
 """
 
 # ---------------------------------------------------------------------------
@@ -1043,6 +1153,17 @@ _EMPTY = """\
 .tab-empty-desc-detail{text-align:left;max-width:520px;font-size:.8rem;word-break:break-word}
 .tab-empty-reason{display:block;margin-top:var(--sp-1);font-size:.75rem;color:var(--text-muted);
   opacity:.7;word-break:break-all;font-family:var(--font-mono, monospace)}
+
+/* Inline empty state — compact stacked variant for cards/summary items.
+   No background/border — sits inside its parent card. Icon color carries tone. */
+.inline-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:var(--sp-2);padding:var(--sp-4) var(--sp-3);min-height:72px;
+  color:var(--text-muted);font-size:.82rem;font-weight:500;
+  text-align:center;letter-spacing:.005em;line-height:1.4}
+.inline-empty-icon{flex-shrink:0;opacity:.5;color:var(--text-muted)}
+.inline-empty-text{max-width:260px}
+.inline-empty--good .inline-empty-icon{color:var(--success);opacity:.7}
+.inline-empty--neutral .inline-empty-icon{color:var(--text-muted);opacity:.5}
 """
 
 # ---------------------------------------------------------------------------
@@ -1089,13 +1210,42 @@ dialog::backdrop{background:rgba(0,0,0,.5);backdrop-filter:blur(4px);-webkit-bac
   font-family:var(--font-mono)}
 
 /* Provenance modal */
-dialog.prov-modal{max-width:660px;width:92vw;max-height:85vh}
-.prov-modal-head{display:flex;align-items:center;justify-content:space-between;
-  padding:var(--sp-3) var(--sp-5);border-bottom:none;flex-shrink:0}
-.prov-modal-head h2{font-size:1rem;font-weight:700;letter-spacing:-.01em}
-.prov-modal-body{padding:0 var(--sp-4) var(--sp-4);overflow-y:auto;flex:1 1 auto}
-.prov-modal .prov-summary{border-top:none;padding:0 var(--sp-5) var(--sp-3);
-  border-bottom:1px solid var(--border);flex-shrink:0}
+dialog.prov-modal{max-width:720px;width:92vw;max-height:86vh;padding:0;overflow:hidden;
+  border-radius:var(--radius-lg)}
+.prov-modal-body{padding:var(--sp-4) var(--sp-5) var(--sp-5);overflow-y:auto;flex:1 1 auto}
+.prov-modal .prov-summary{padding:var(--sp-2) var(--sp-5) var(--sp-3);
+  border-top:none;border-bottom:1px solid var(--border);flex-shrink:0;
+  background:color-mix(in srgb,var(--bg-raised) 50%,transparent)}
+
+/* Provenance hero — status header at top of modal */
+.prov-hero{position:relative;display:flex;align-items:center;gap:var(--sp-4);
+  padding:var(--sp-4) var(--sp-5);flex-shrink:0;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,
+    color-mix(in srgb,var(--bg-raised) 55%,transparent) 0%,
+    var(--bg-surface) 100%)}
+.prov-hero-badge{display:inline-flex;align-items:center;gap:7px;
+  padding:6px 12px 6px 10px;border-radius:999px;font-weight:700;font-size:.78rem;
+  letter-spacing:.005em;white-space:nowrap;flex-shrink:0;
+  border:1px solid var(--border);background:var(--bg-surface)}
+.prov-hero-icon{flex-shrink:0}
+.prov-hero-label{line-height:1}
+.prov-hero--green .prov-hero-badge{color:var(--success);
+  background:color-mix(in srgb,var(--success) 10%,var(--bg-surface));
+  border-color:color-mix(in srgb,var(--success) 45%,var(--border))}
+.prov-hero--amber .prov-hero-badge{color:var(--warning);
+  background:color-mix(in srgb,var(--warning) 10%,var(--bg-surface));
+  border-color:color-mix(in srgb,var(--warning) 45%,var(--border))}
+.prov-hero--red .prov-hero-badge{color:var(--error);
+  background:color-mix(in srgb,var(--error) 10%,var(--bg-surface));
+  border-color:color-mix(in srgb,var(--error) 50%,var(--border))}
+.prov-hero--neutral .prov-hero-badge{color:var(--text-secondary)}
+.prov-hero-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.prov-hero-title{font-size:1.02rem;font-weight:700;letter-spacing:-.01em;
+  color:var(--text-primary);margin:0;line-height:1.25}
+.prov-hero-sub{font-size:.8rem;color:var(--text-secondary);margin:0;line-height:1.35;
+  overflow:hidden;text-overflow:ellipsis}
+.prov-hero-close{flex-shrink:0;align-self:flex-start}
 
 """
 
@@ -1148,9 +1298,10 @@ _UTILITY = """\
   .brand-project-name{font-size:.78em;padding:0 3px}
   .brand-meta{display:none}
   .topbar-actions{flex-shrink:0;gap:var(--sp-1)}
-  .topbar-actions .btn-prov{font-size:0;gap:0;width:32px;height:32px;
+  .topbar-actions .prov-pill{font-size:0;gap:0;width:32px;height:32px;
     padding:0;align-items:center;justify-content:center}
-  .topbar-actions .btn-prov .prov-dot{width:10px;height:10px}
+  .topbar-actions .prov-pill-label{display:none}
+  .topbar-actions .prov-pill-icon{opacity:1}
   .theme-toggle{font-size:0;gap:0;width:32px;height:32px;
     padding:0;align-items:center;justify-content:center}
   .theme-toggle svg{width:16px;height:16px}
@@ -1225,6 +1376,9 @@ _FOOTER = """\
 .report-footer{margin-top:var(--sp-8);padding:var(--sp-4) 0;border-top:1px solid var(--border);
   text-align:center;font-size:.78rem;color:var(--text-muted)}
 .report-footer a{color:var(--accent-primary)}
+.report-footer-main{display:block}
+.report-footer-schemas{margin-top:var(--sp-1);font-size:.72rem;letter-spacing:.01em;
+  font-variant-numeric:tabular-nums;opacity:.85}
 """
 
 

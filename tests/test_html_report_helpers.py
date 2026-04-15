@@ -52,9 +52,9 @@ from tests._assertions import assert_contains_none
 
 
 def test_summary_helpers_cover_empty_and_non_clone_context_branches() -> None:
-    assert overview_source_breakdown_html({}) == (
-        '<div class="overview-summary-value">n/a</div>'
-    )
+    empty_html = overview_source_breakdown_html({})
+    assert 'class="inline-empty inline-empty--neutral"' in empty_html
+    assert "No source data available" in empty_html
 
 
 def test_summary_helpers_cover_breakdown_bars_and_clone_badges() -> None:

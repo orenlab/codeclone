@@ -35,6 +35,93 @@ def _path_basename(value: object) -> str | None:
     return normalized.rsplit("/", maxsplit=1)[-1]
 
 
+_PATH_LABELS = frozenset(
+    {
+        "Scan root",
+        "Baseline path",
+        "Metrics baseline path",
+        "Cache path",
+        "Scan root absolute",
+        "Baseline path absolute",
+        "Cache path absolute",
+        "Metrics baseline path absolute",
+    }
+)
+_HASH_LABELS = frozenset(
+    {
+        "Baseline payload sha256",
+        "Metrics baseline payload sha256",
+        "Digest value",
+    }
+)
+
+
+def _truncate_middle(value: str, head: int, tail: int) -> str:
+    """Shorten *value* with a middle ellipsis when it exceeds head+tail+1."""
+    if len(value) <= head + tail + 1:
+        return value
+    return f"{value[:head]}\u2026{value[-tail:]}"
+
+
+def _prov_badge_html(label: str, value: str, color: str) -> str:
+    return (
+        f'<span class="prov-badge prov-badge--{color}">'
+        f'<span class="prov-badge-val">{_escape_html(value)}</span>'
+        f'<span class="prov-badge-lbl">{_escape_html(label)}</span>'
+        "</span>"
+    )
+
+
+def build_topbar_provenance_summary(ctx: ReportContext) -> tuple[str, str, str]:
+    """Return (status_label, status_color, tooltip_text) for the topbar pill.
+
+    Collapses the full provenance state into a single word + colour +
+    hover tooltip. The detail lives in the modal, not the topbar.
+    """
+    meta = ctx.meta
+    baseline_meta = ctx.baseline_meta
+    cache_meta = ctx.cache_meta
+
+    bl_verified = _meta_pick(
+        meta.get("baseline_payload_sha256_verified"),
+        baseline_meta.get("payload_sha256_verified"),
+    )
+    bl_loaded = _meta_pick(meta.get("baseline_loaded"), baseline_meta.get("loaded"))
+    cache_used = _meta_pick(meta.get("cache_used"), cache_meta.get("used"))
+    analysis_mode = str(_meta_pick(meta.get("analysis_mode")) or "").strip()
+
+    bl_part: str
+    bl_color: str
+    if bl_verified is True:
+        bl_part, bl_color = "Baseline verified", "green"
+    elif bl_loaded is True and bl_verified is not True:
+        bl_part, bl_color = "Baseline untrusted", "red"
+    elif bl_loaded is False or bl_loaded is None:
+        bl_part, bl_color = "No baseline", "amber"
+    else:
+        bl_part, bl_color = "Baseline state unknown", "neutral"
+
+    cache_part = ""
+    if cache_used is True:
+        cache_part = "cache hit"
+    elif cache_used is False:
+        cache_part = "cache miss"
+
+    mode_part = f"{analysis_mode} mode" if analysis_mode else ""
+
+    tooltip_bits = [p for p in (bl_part, cache_part, mode_part) if p]
+    tooltip = " \u00b7 ".join(tooltip_bits) if tooltip_bits else "Report provenance"
+
+    label_map = {
+        "green": "Verified",
+        "amber": "Partial",
+        "red": "Unverified",
+        "neutral": "Provenance",
+    }
+    status_label = label_map[bl_color]
+    return status_label, bl_color, tooltip
+
+
 def render_meta_panel(ctx: ReportContext) -> str:
     """Build the collapsible Report Provenance panel."""
     meta = ctx.meta
@@ -267,20 +354,102 @@ def render_meta_panel(ctx: ReportContext) -> str:
         }
     )
 
-    _BOOL = {
-        "Baseline payload verified",
-        "Baseline loaded",
-        "Cache used",
-        "Metrics baseline loaded",
-        "Metrics baseline payload verified",
-        "Digest verified",
+    _BOOL_LABELS: dict[str, tuple[str, str]] = {
+        "Baseline payload verified": ("verified", "unverified"),
+        "Baseline loaded": ("loaded", "not loaded"),
+        "Cache used": ("hit", "miss"),
+        "Metrics baseline loaded": ("loaded", "not loaded"),
+        "Metrics baseline payload verified": ("verified", "unverified"),
+        "Digest verified": ("verified", "unverified"),
     }
+    _STATUS_LABELS = frozenset(
+        {"Baseline status", "Metrics baseline status", "Cache status"}
+    )
+
+    runtime_python_tag = str(python_tag_value or "").strip()
 
     def _val_html(label: str, value: object) -> str:
-        if label in _BOOL and isinstance(value, bool):
-            icon = "\u2713" if value else "\u2717"
-            badge_cls = "meta-bool-true" if value else "meta-bool-false"
-            return f'<span class="meta-bool {badge_cls}">{icon}</span>'
+        if label in _BOOL_LABELS and isinstance(value, bool):
+            true_text, false_text = _BOOL_LABELS[label]
+            if value:
+                return (
+                    '<span class="meta-bool meta-bool-true">'
+                    f'<span class="meta-bool-icon">\u2713</span>'
+                    f'<span class="meta-bool-text">{true_text}</span>'
+                    "</span>"
+                )
+            return (
+                '<span class="meta-bool meta-bool-false">'
+                f'<span class="meta-bool-icon">\u2717</span>'
+                f'<span class="meta-bool-text">{false_text}</span>'
+                "</span>"
+            )
+        if label in _STATUS_LABELS and isinstance(value, str) and value.strip():
+            raw = value.strip()
+            key = raw.lower()
+            if key == "ok":
+                tone = "ok"
+                text = "ok"
+            elif key in {"error", "failed", "fail"}:
+                tone = "err"
+                text = raw
+            elif key in {"missing", "absent", "none"}:
+                tone = "warn"
+                text = raw
+            else:
+                tone = "neutral"
+                text = raw
+            return (
+                f'<span class="meta-status meta-status--{tone}">'
+                f'<span class="meta-status-dot"></span>'
+                f"{_escape_html(text)}</span>"
+            )
+        # Long path/hash values: middle-truncate with copy button + full title
+        if (
+            isinstance(value, str)
+            and value
+            and (label in _PATH_LABELS or label in _HASH_LABELS)
+        ):
+            full = value.strip()
+            if label in _HASH_LABELS:
+                short = _truncate_middle(full, 8, 8)
+            else:
+                short = _truncate_middle(full, 24, 28)
+            title = _escape_html(full)
+            copy_payload = _escape_html(full)
+            return (
+                '<span class="prov-mono-trunc" '
+                f'title="{title}">{_escape_html(short)}</span>'
+                f'<button type="button" class="prov-copy-btn" '
+                f'data-prov-copy="{copy_payload}" '
+                f'aria-label="Copy {_escape_html(label)}">'
+                '<svg viewBox="0 0 16 16" width="12" height="12" '
+                'fill="none" stroke="currentColor" stroke-width="1.5">'
+                '<rect x="4" y="4" width="9" height="9" rx="1.2"/>'
+                '<path d="M3 11V3.5C3 2.7 3.7 2 4.5 2H11"/></svg>'
+                "</button>"
+            )
+        # Runtime-match badge for baseline python tag
+        if (
+            label == "Baseline Python tag"
+            and isinstance(value, str)
+            and runtime_python_tag
+        ):
+            text = _escape_html(value)
+            if value.strip() == runtime_python_tag:
+                badge = (
+                    '<span class="prov-match prov-match--ok" '
+                    'title="Matches runtime Python tag">'
+                    "\u2713 matches runtime</span>"
+                )
+            else:
+                badge = (
+                    '<span class="prov-match prov-match--mismatch" '
+                    f'title="Runtime is {runtime_python_tag}">'
+                    f"\u26a0 differs from runtime ({_escape_html(runtime_python_tag)})"
+                    "</span>"
+                )
+            return f"{text} {badge}"
         return _escape_html(_meta_display(value))
 
     _SECTION_ICONS: dict[str, str] = {
@@ -336,13 +505,7 @@ def render_meta_panel(ctx: ReportContext) -> str:
         _section_html(st, rows) for st, rows in meta_sections if rows
     )
 
-    def _prov_badge(label: str, value: str, color: str) -> str:
-        return (
-            f'<span class="prov-badge prov-badge--{color}">'
-            f'<span class="prov-badge-val">{_escape_html(value)}</span>'
-            f'<span class="prov-badge-lbl">{_escape_html(label)}</span>'
-            "</span>"
-        )
+    _prov_badge = _prov_badge_html
 
     badges: list[str] = []
     if _bl_verified is True:
@@ -372,6 +535,27 @@ def render_meta_panel(ctx: ReportContext) -> str:
     elif _mbl_loaded is True and _mbl_verified is not True:
         badges.append(_prov_badge("Metrics baseline", "untrusted", "red"))
 
+    status_label, status_color, tooltip = build_topbar_provenance_summary(ctx)
+    hero_icon = (
+        '<svg class="prov-hero-icon" viewBox="0 0 24 24" width="22" height="22" '
+        'fill="none" stroke="currentColor" stroke-width="1.8" '
+        'stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M12 2.5L4 5.5v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10v-6z"/>'
+        '<path d="M8.5 12l2.5 2.5L16 9"/></svg>'
+    )
+    hero_html = (
+        f'<div class="prov-hero prov-hero--{status_color}">'
+        f'<div class="prov-hero-badge">{hero_icon}'
+        f'<span class="prov-hero-label">{_escape_html(status_label)}</span></div>'
+        f'<div class="prov-hero-text">'
+        f'<h2 class="prov-hero-title">Report Provenance</h2>'
+        f'<p class="prov-hero-sub">{_escape_html(tooltip)}</p>'
+        "</div>"
+        '<button class="modal-close prov-hero-close" type="button" data-prov-close '
+        'aria-label="Close">&times;</button>'
+        "</div>"
+    )
+
     prov_summary = (
         f'<div class="prov-summary">{"".join(badges)}'
         '<span class="prov-explain">Baseline-aware \u00b7 contract-verified</span></div>'
@@ -381,10 +565,7 @@ def render_meta_panel(ctx: ReportContext) -> str:
 
     return (
         f'<dialog class="prov-modal" id="prov-modal"{meta_attrs}>'
-        '<div class="prov-modal-head">'
-        "<h2>Report Provenance</h2>"
-        '<button class="modal-close" type="button" data-prov-close '
-        'aria-label="Close">&times;</button></div>'
+        f"{hero_html}"
         f"{prov_summary}"
         f'<div class="prov-modal-body">{meta_rows_html}</div>'
         "</dialog>"

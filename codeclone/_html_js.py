@@ -15,6 +15,37 @@ from __future__ import annotations
 _CORE = """\
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
+
+/* Shared Filters popover wiring: one button opens a menu, outside-click +
+   Escape dismiss it. Reused by Clones (per-section) and Suggestions (global). */
+function wireFiltersPopover(toggleEl){
+  if(!toggleEl)return;
+  const popover=toggleEl.parentElement;
+  if(!popover)return;
+  const menu=popover.querySelector('.filters-menu');
+  if(!menu)return;
+  function setOpen(open){
+    toggleEl.setAttribute('aria-expanded',open?'true':'false');
+    if(open)menu.removeAttribute('hidden');
+    else menu.setAttribute('hidden','');
+  }
+  toggleEl.addEventListener('click',e=>{
+    e.stopPropagation();
+    setOpen(toggleEl.getAttribute('aria-expanded')!=='true');
+  });
+  document.addEventListener('click',e=>{
+    if(toggleEl.getAttribute('aria-expanded')!=='true')return;
+    if(popover.contains(e.target))return;
+    setOpen(false);
+  });
+  document.addEventListener('keydown',e=>{
+    if(e.key!=='Escape')return;
+    if(toggleEl.getAttribute('aria-expanded')!=='true')return;
+    setOpen(false);
+    toggleEl.focus();
+  });
+}
+window.wireFiltersPopover=wireFiltersPopover;
 """
 
 # ---------------------------------------------------------------------------
@@ -26,15 +57,16 @@ _THEME = """\
   const key='codeclone-theme';
   const root=document.documentElement;
   const saved=localStorage.getItem(key);
-  if(saved)root.setAttribute('data-theme',saved);
+  // Always resolve + set data-theme so icon CSS selectors always match.
+  const initial=saved==='light'||saved==='dark'
+    ?saved
+    :(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+  root.setAttribute('data-theme',initial);
 
   const btn=$('.theme-toggle');
   if(!btn)return;
   btn.addEventListener('click',()=>{
-    const has=root.getAttribute('data-theme');
-    const isDark=has?has==='dark'
-      :matchMedia('(prefers-color-scheme:light)').matches?false:true;
-    const next=isDark?'light':'dark';
+    const next=root.getAttribute('data-theme')==='dark'?'light':'dark';
     root.setAttribute('data-theme',next);
     localStorage.setItem(key,next);
   });
@@ -124,6 +156,23 @@ _SECTIONS = """\
 
     function isAll(v){return !v||v==='all'}
 
+    function activeFilterCount(){
+      let n=0;
+      if(!isAll(sourceKindFilter?.value))n++;
+      if(!isAll(cloneTypeFilter?.value))n++;
+      if(!isAll(spreadFilter?.value))n++;
+      if(minOccCheck?.checked)n++;
+      return n;
+    }
+
+    function updateFiltersBadge(){
+      const badge=sec.querySelector('[data-filters-count="'+id+'"]');
+      if(!badge)return;
+      const n=activeFilterCount();
+      if(n>0){badge.hidden=false;badge.textContent=String(n)}
+      else{badge.hidden=true;badge.textContent='0'}
+    }
+
     function applyFilters(){
       const q=(searchInput?.value||'').toLowerCase().trim();
       const sk=sourceKindFilter?.value||'';
@@ -142,6 +191,7 @@ _SECTIONS = """\
         if(minOcc&&parseInt(g.dataset.groupArity||'0',10)<4)show=false;
         g.style.display=show?'':'none';
       });
+      updateFiltersBadge();
       page=1;
       paginate();
     }
@@ -187,19 +237,33 @@ _SECTIONS = """\
       const vis=visible();const tp=Math.max(1,Math.ceil(vis.length/pageSize));
       if(page<tp){page++;paginate()}});
 
-    // Collapse/Expand all
-    const colBtn=sec.querySelector('[data-collapse-all="'+id+'"]');
-    const expBtn=sec.querySelector('[data-expand-all="'+id+'"]');
-    if(colBtn)colBtn.addEventListener('click',()=>{
-      groups.forEach(g=>{
-        const body=g.querySelector('.group-body');if(body)body.classList.remove('expanded');
-        const toggle=g.querySelector('.group-toggle');if(toggle)toggle.classList.remove('expanded');
-      })});
-    if(expBtn)expBtn.addEventListener('click',()=>{
-      groups.filter(g=>g.style.display!=='none').forEach(g=>{
-        const body=g.querySelector('.group-body');if(body)body.classList.add('expanded');
-        const toggle=g.querySelector('.group-toggle');if(toggle)toggle.classList.add('expanded');
-      })});
+    // Expand/collapse toggle (single button, flips state)
+    const expandToggle=sec.querySelector('[data-expand-toggle="'+id+'"]');
+    if(expandToggle){
+      expandToggle.addEventListener('click',()=>{
+        const expanded=expandToggle.dataset.expanded==='true';
+        const target=!expanded;
+        const scope=target
+          ? groups.filter(g=>g.style.display!=='none')
+          : groups;
+        scope.forEach(g=>{
+          const body=g.querySelector('.group-body');
+          const toggle=g.querySelector('.group-toggle');
+          if(target){
+            if(body)body.classList.add('expanded');
+            if(toggle)toggle.classList.add('expanded');
+          }else{
+            if(body)body.classList.remove('expanded');
+            if(toggle)toggle.classList.remove('expanded');
+          }
+        });
+        expandToggle.dataset.expanded=target?'true':'false';
+        expandToggle.textContent=target?'Collapse all':'Expand all';
+      });
+    }
+
+    // Filters popover (shared helper handles open/close + dismiss)
+    wireFiltersPopover(sec.querySelector('[data-filters-toggle="'+id+'"]'));
 
     // Initial
     applyFilters();
@@ -323,6 +387,23 @@ _SUGGESTIONS = """\
   const spSel=$('[data-suggestions-spread]');
   const actCheck=$('[data-suggestions-actionable]');
   const countLabel=$('[data-suggestions-count]');
+  const filtersBadge=$('[data-filters-count="suggestions"]');
+
+  function activeFilterCount(){
+    let n=0;
+    [sevSel,catSel,famSel,skSel,spSel].forEach(el=>{
+      if(el&&el.value)n++;
+    });
+    if(actCheck?.checked)n++;
+    return n;
+  }
+
+  function updateFiltersBadge(){
+    if(!filtersBadge)return;
+    const n=activeFilterCount();
+    if(n>0){filtersBadge.hidden=false;filtersBadge.textContent=String(n)}
+    else{filtersBadge.hidden=true;filtersBadge.textContent='0'}
+  }
 
   function apply(){
     const sev=sevSel?.value||'';
@@ -344,10 +425,17 @@ _SUGGESTIONS = """\
       if(!hide)shown++;
     });
     if(countLabel)countLabel.textContent=shown+' shown';
+    updateFiltersBadge();
   }
 
   [sevSel,catSel,famSel,skSel,spSel].forEach(el=>{if(el)el.addEventListener('change',apply)});
   if(actCheck)actCheck.addEventListener('change',apply);
+
+  // Popover wiring (shared helper)
+  wireFiltersPopover($('[data-filters-toggle="suggestions"]'));
+
+  // Initial
+  apply();
 })();
 """
 
@@ -466,7 +554,24 @@ _META_PANEL = """\
   const closeBtn=dlg.querySelector('[data-prov-close]');
   if(openBtn)openBtn.addEventListener('click',()=>dlg.showModal());
   if(closeBtn)closeBtn.addEventListener('click',()=>dlg.close());
-  dlg.addEventListener('click',e=>{if(e.target===dlg)dlg.close()});
+  dlg.addEventListener('click',function(e){
+    if(e.target===dlg){dlg.close();return}
+    var copyBtn=e.target.closest('[data-prov-copy]');
+    if(!copyBtn)return;
+    e.stopPropagation();
+    var payload=copyBtn.getAttribute('data-prov-copy')||'';
+    if(!payload||!navigator.clipboard)return;
+    navigator.clipboard.writeText(payload).then(function(){
+      copyBtn.classList.add('prov-copy-btn--ok');
+      var original=copyBtn.innerHTML;
+      copyBtn.innerHTML='<svg viewBox="0 0 16 16" width="12" height="12" fill="none"'
+        +' stroke="currentColor" stroke-width="1.8"><path d="M3 8.5l3 3 7-7"/></svg>';
+      setTimeout(function(){
+        copyBtn.classList.remove('prov-copy-btn--ok');
+        copyBtn.innerHTML=original;
+      },1400);
+    });
+  });
 })();
 (function initFindingWhy(){
   var dlg=$('#finding-why-modal');

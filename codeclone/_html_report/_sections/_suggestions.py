@@ -294,50 +294,81 @@ def render_suggestions_panel(ctx: ReportContext) -> str:
     fam_opts = tuple((f, f) for f in (FAMILY_CLONES, FAMILY_STRUCTURAL, FAMILY_METRICS))
     sk_opts = tuple((k, k) for k in SOURCE_KIND_FILTER_VALUES)
 
-    return (
-        intro
-        + sug_cards_html
-        + '<div class="toolbar suggestions-toolbar" role="toolbar" aria-label="Suggestion filters">'
-        '<div class="suggestions-toolbar-row">'
-        '<label class="muted" for="suggestions-severity">Severity:</label>'
+    filters_menu = (
+        '<div class="filters-menu" role="group" hidden>'
+        '<div class="filters-row">'
+        '<label class="filters-label" for="suggestions-severity">Severity</label>'
         + _render_select(
             element_id="suggestions-severity",
             data_attr="data-suggestions-severity",
             options=sev_opts,
             all_label="All",
         )
-        + '<label class="muted" for="suggestions-category">Category:</label>'
+        + "</div>"
+        '<div class="filters-row">'
+        '<label class="filters-label" for="suggestions-category">Category</label>'
         + _render_select(
             element_id="suggestions-category",
             data_attr="data-suggestions-category",
             options=cat_opts,
             all_label="All",
         )
-        + '<label class="muted" for="suggestions-family">Family:</label>'
+        + "</div>"
+        '<div class="filters-row">'
+        '<label class="filters-label" for="suggestions-family">Family</label>'
         + _render_select(
             element_id="suggestions-family",
             data_attr="data-suggestions-family",
             options=fam_opts,
             all_label="All",
         )
-        + '<label class="inline-check"><input type="checkbox" data-suggestions-actionable/><span>Only actionable</span></label>'
-        "</div>"
-        '<div class="suggestions-toolbar-row suggestions-toolbar-row--secondary">'
-        '<label class="muted" for="suggestions-source-kind">Context:</label>'
+        + "</div>"
+        '<div class="filters-row">'
+        '<label class="filters-label" for="suggestions-source-kind">Context</label>'
         + _render_select(
             element_id="suggestions-source-kind",
             data_attr="data-suggestions-source-kind",
             options=sk_opts,
             all_label="All",
         )
-        + '<label class="muted" for="suggestions-spread">Spread:</label>'
+        + "</div>"
+        '<div class="filters-row">'
+        '<label class="filters-label" for="suggestions-spread">Spread</label>'
         + _render_select(
             element_id="suggestions-spread",
             data_attr="data-suggestions-spread",
             options=SPREAD_OPTIONS,
             all_label="All",
         )
-        + f'<span class="suggestions-count-label" data-suggestions-count>{len(rows)} shown</span>'
+        + "</div>"
+        '<label class="filters-row inline-check">'
+        '<input type="checkbox" data-suggestions-actionable/>'
+        "<span>Only actionable</span></label>"
+        "</div>"
+    )
+    toolbar_html = (
+        '<div class="toolbar" role="toolbar" aria-label="Suggestion filters">'
+        '<div class="toolbar-left">'
+        '<div class="filters-popover">'
+        '<button class="btn filters-btn" type="button" '
+        'data-filters-toggle="suggestions" aria-expanded="false" '
+        'aria-haspopup="true" title="Filter suggestions">'
+        '<svg class="filters-btn-ico" viewBox="0 0 16 16" width="13" height="13" '
+        'fill="none" stroke="currentColor" stroke-width="1.7" '
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<path d="M2 3.5h12M4 8h8M6.5 12.5h3"/></svg>'
+        "<span>Filters</span>"
+        '<span class="filters-count" data-filters-count="suggestions" hidden>0</span>'
+        "</button>"
+        f"{filters_menu}"
         "</div></div>"
-        f'<div class="suggestions-list" data-suggestions-body>{cards_html}</div>'
+        '<div class="toolbar-right">'
+        f'<span class="suggestions-count-label" data-suggestions-count>{len(rows)} shown</span>'
+        "</div></div>"
+    )
+    return (
+        intro
+        + sug_cards_html
+        + toolbar_html
+        + f'<div class="suggestions-list" data-suggestions-body>{cards_html}</div>'
     )

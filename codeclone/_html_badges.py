@@ -35,6 +35,7 @@ from .report._source_kinds import normalize_source_kind, source_kind_label
 __all__ = [
     "CHECK_CIRCLE_SVG",
     "INFO_CIRCLE_SVG",
+    "_inline_empty",
     "_micro_badges",
     "_quality_badge_html",
     "_render_chain_flow",
@@ -106,6 +107,45 @@ def _source_kind_badge_html(source_kind: str) -> str:
     return (
         f'<span class="source-kind-badge source-kind-{_escape_html(normalized)}">'
         f"{_escape_html(source_kind_label(normalized))}</span>"
+    )
+
+
+_INLINE_EMPTY_ICONS: dict[str, str] = {
+    "good": (
+        '<svg class="inline-empty-icon" viewBox="0 0 24 24" width="22" height="22" '
+        'fill="none" stroke="currentColor" stroke-width="1.6" '
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<circle cx="12" cy="12" r="9.5"/>'
+        '<polyline points="16.5 9.5 10.5 15.5 7.5 12.5"/></svg>'
+    ),
+    "neutral": (
+        '<svg class="inline-empty-icon" viewBox="0 0 24 24" width="22" height="22" '
+        'fill="none" stroke="currentColor" stroke-width="1.6" '
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<circle cx="12" cy="12" r="9.5"/>'
+        '<line x1="12" y1="16" x2="12" y2="11"/>'
+        '<circle cx="12" cy="8" r=".45" fill="currentColor" stroke="none"/></svg>'
+    ),
+}
+
+
+def _inline_empty(message: str, *, tone: str = "neutral") -> str:
+    """Compact single-row empty-state for inline/card contexts.
+
+    Use for summary items, breakdown panels, and other small cards where a
+    full ``.tab-empty`` would be too heavy.
+
+    *tone*:
+      - ``"good"``  — green check (positive: "nothing to report").
+      - ``"neutral"`` — muted info dot (missing or unavailable data).
+    """
+    tone_key = tone if tone in _INLINE_EMPTY_ICONS else "neutral"
+    icon = _INLINE_EMPTY_ICONS[tone_key]
+    return (
+        f'<div class="inline-empty inline-empty--{tone_key}">'
+        f"{icon}"
+        f'<span class="inline-empty-text">{_escape_html(message)}</span>'
+        "</div>"
     )
 
 

@@ -254,6 +254,44 @@ def _render_section_toolbar(
     section_title: str,
     group_count: int,
 ) -> str:
+    """Slim toolbar: search + combined filters popover + expand toggle + pagination.
+
+    Filter controls (Context / Type / Spread / 4+ occurrences) are collapsed
+    into a single "Filters" popover to reduce horizontal noise. The underlying
+    ``data-*-filter`` attributes are preserved so the existing filter JS picks
+    them up unchanged.
+    """
+    filters_menu = (
+        '<div class="filters-menu" role="group" hidden>'
+        f'<div class="filters-row">'
+        f'<label class="filters-label" for="source-kind-{section_id}">Context</label>'
+        + _render_select(
+            element_id=f"source-kind-{section_id}",
+            data_attr=f'data-source-kind-filter="{section_id}"',
+            options=tuple((k, k) for k in SOURCE_KIND_FILTER_VALUES),
+        )
+        + "</div>"
+        f'<div class="filters-row">'
+        f'<label class="filters-label" for="clone-type-{section_id}">Type</label>'
+        + _render_select(
+            element_id=f"clone-type-{section_id}",
+            data_attr=f'data-clone-type-filter="{section_id}"',
+            options=CLONE_TYPE_OPTIONS,
+        )
+        + "</div>"
+        f'<div class="filters-row">'
+        f'<label class="filters-label" for="spread-{section_id}">Spread</label>'
+        + _render_select(
+            element_id=f"spread-{section_id}",
+            data_attr=f'data-spread-filter="{section_id}"',
+            options=SPREAD_OPTIONS,
+        )
+        + "</div>"
+        '<label class="filters-row inline-check">'
+        f'<input type="checkbox" data-min-occurrences-filter="{section_id}"/>'
+        "<span>Only groups with 4+ occurrences</span></label>"
+        "</div>"
+    )
     return (
         f'<div class="toolbar" role="toolbar" aria-label="{_escape_html(section_title)} controls">'
         '<div class="toolbar-left">'
@@ -262,36 +300,31 @@ def _render_section_toolbar(
         f'<input type="text" id="search-{section_id}" placeholder="Search..." autocomplete="off"/>'
         f'<button class="clear-btn" type="button" data-clear="{section_id}" title="Clear search">'
         f"{ICONS['clear']}</button></div>"
-        f'<button class="btn" type="button" data-collapse-all="{section_id}">Collapse</button>'
-        f'<button class="btn" type="button" data-expand-all="{section_id}">Expand</button>'
-        f'<label class="muted" for="source-kind-{section_id}">Context:</label>'
-        + _render_select(
-            element_id=f"source-kind-{section_id}",
-            data_attr=f'data-source-kind-filter="{section_id}"',
-            options=tuple((k, k) for k in SOURCE_KIND_FILTER_VALUES),
-        )
-        + f'<label class="muted" for="clone-type-{section_id}">Type:</label>'
-        + _render_select(
-            element_id=f"clone-type-{section_id}",
-            data_attr=f'data-clone-type-filter="{section_id}"',
-            options=CLONE_TYPE_OPTIONS,
-        )
-        + f'<label class="muted" for="spread-{section_id}">Spread:</label>'
-        + _render_select(
-            element_id=f"spread-{section_id}",
-            data_attr=f'data-spread-filter="{section_id}"',
-            options=SPREAD_OPTIONS,
-        )
-        + f'<label class="inline-check">'
-        f'<input type="checkbox" data-min-occurrences-filter="{section_id}"/>'
-        "<span>4+ occurrences</span></label>"
+        '<div class="filters-popover">'
+        '<button class="btn filters-btn" type="button" '
+        f'data-filters-toggle="{section_id}" aria-expanded="false" '
+        'aria-haspopup="true" title="Filter clone groups">'
+        '<svg class="filters-btn-ico" viewBox="0 0 16 16" width="13" height="13" '
+        'fill="none" stroke="currentColor" stroke-width="1.7" '
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<path d="M2 3.5h12M4 8h8M6.5 12.5h3"/></svg>'
+        "<span>Filters</span>"
+        f'<span class="filters-count" data-filters-count="{section_id}" hidden>0</span>'
+        "</button>"
+        f"{filters_menu}"
+        "</div>"
+        '<button class="btn expand-toggle" type="button" '
+        f'data-expand-toggle="{section_id}" data-expanded="false" '
+        'title="Expand all visible groups">Expand all</button>'
         "</div>"
         '<div class="toolbar-right">'
         '<div class="pagination">'
-        f'<button class="btn" type="button" data-prev="{section_id}">{ICONS["prev"]}</button>'
+        f'<button class="btn btn-icon" type="button" data-prev="{section_id}" '
+        f'aria-label="Previous page">{ICONS["prev"]}</button>'
         f'<span class="page-meta" data-page-meta="{section_id}">'
         f"Page 1 / 1 \u2022 {group_count} groups</span>"
-        f'<button class="btn" type="button" data-next="{section_id}">{ICONS["next"]}</button>'
+        f'<button class="btn btn-icon" type="button" data-next="{section_id}" '
+        f'aria-label="Next page">{ICONS["next"]}</button>'
         "</div>"
         f'<select class="select" data-pagesize="{section_id}" aria-label="Items per page" '
         'title="Groups per page">'
@@ -668,19 +701,19 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
     global_novelty_html = ""
     if novelty_enabled:
         global_novelty_html = (
-            '<section class="global-novelty" id="global-novelty-controls" '
-            f'data-default-novelty="{default_novelty}">'
-            '<div class="global-novelty-head">'
-            "<h2>Duplicate Scope</h2>"
-            '<div class="novelty-tabs" role="tablist" aria-label="Baseline split filter">'
+            '<div class="novelty-bar" id="global-novelty-controls" '
+            f'data-default-novelty="{default_novelty}" '
+            'role="group" aria-label="Baseline split filter">'
+            '<div class="novelty-bar-tabs" role="tablist">'
             '<button class="btn novelty-tab" type="button" data-global-novelty="new" '
             f'data-novelty-state="{"good" if total_new == 0 else "bad"}">'
             f'New duplicates <span class="novelty-count">{total_new}</span></button>'
             '<button class="btn novelty-tab" type="button" data-global-novelty="known">'
             f'Known duplicates <span class="novelty-count">{total_known}</span></button>'
-            "</div></div>"
-            f'<p class="novelty-note">{_escape_html(ctx.baseline_split_note)}</p>'
-            "</section>"
+            "</div>"
+            '<span class="novelty-bar-note">'
+            f"{_escape_html(ctx.baseline_split_note)}</span>"
+            "</div>"
         )
 
     func_section = _render_section(
