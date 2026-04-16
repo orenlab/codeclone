@@ -22,7 +22,7 @@ requires-python = ">=3.10"
 dependencies = [
     "orjson>=3.11.8",
     "pygments>=2.20.0",
-    "rich>=14.3.2",
+    "rich>=15.0.0",
     "tomli>=2.0.1; python_version < '3.11'",
 ]
 
@@ -63,15 +63,15 @@ Documentation = "https://orenlab.github.io/codeclone/"
 
 [project.optional-dependencies]
 mcp = [
-    "mcp>=1.26.0,<2",
+    "mcp>=1.27.0,<2",
 ]
 dev = [
-    "pytest>=9.0.0",
+    "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
-    "build>=1.4.1",
-    "twine>=5.0.0",
-    "mypy>=1.19.1",
-    "ruff>=0.15.8",
+    "build>=1.4.3",
+    "twine>=6.2.0",
+    "mypy>=1.20.1",
+    "ruff>=0.15.10",
     "pre-commit>=4.5.1",
 ]
 
