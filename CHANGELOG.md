@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.0b5]
+## [2.0.0b5] - 2026-04-16
 
 Expands the canonical contract with adoption, API-surface, and coverage-join layers; clarifies run interpretation
 across MCP/HTML/clients; tightens MCP launcher/runtime behavior.
