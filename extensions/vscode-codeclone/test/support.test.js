@@ -18,6 +18,7 @@ const {
     customAnalysisThresholds,
     isMinimumSupportedCodeCloneVersion,
     launchSpecOrigin,
+    logChannelMessage,
     locationsNeedDetailHydration,
     normalizedLaunchSpec,
     normalizeAnalysisProfile,
@@ -173,6 +174,26 @@ test("trimTail keeps the newest part of long strings", () => {
     assert.equal(trimTail("abcdef", 4), "cdef");
     assert.equal(trimTail("abc", 10), "abc");
     assert.equal(trimTail("abc", 0), "");
+});
+
+test("logChannelMessage prefers structured log methods and falls back to appendLine", () => {
+    const calls = [];
+    const logChannel = {
+        warn(message) {
+            calls.push(["warn", message]);
+        },
+    };
+    logChannelMessage(logChannel, "warn", "structured warning");
+    assert.deepEqual(calls, [["warn", "structured warning"]]);
+
+    const fallbackCalls = [];
+    const plainChannel = {
+        appendLine(message) {
+            fallbackCalls.push(message);
+        },
+    };
+    logChannelMessage(plainChannel, "error", "plain fallback");
+    assert.deepEqual(fallbackCalls, ["plain fallback"]);
 });
 
 test("workspaceLocalLauncherCandidates prefer workspace virtual environments", () => {

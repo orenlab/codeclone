@@ -59,6 +59,10 @@ class _BaselineArgs(Protocol):
     skip_metrics: bool
     update_metrics_baseline: bool
     fail_on_new_metrics: bool
+    fail_on_typing_regression: bool
+    fail_on_docstring_regression: bool
+    fail_on_api_break: bool
+    api_surface: bool
     ci: bool
 
 
@@ -274,7 +278,13 @@ def _metrics_mode_short_circuit(
 ) -> bool:
     if not args.skip_metrics:
         return False
-    if args.update_metrics_baseline or args.fail_on_new_metrics:
+    if (
+        args.update_metrics_baseline
+        or args.fail_on_new_metrics
+        or args.fail_on_typing_regression
+        or args.fail_on_docstring_regression
+        or args.fail_on_api_break
+    ):
         console.print(
             ui.fmt_contract_error(
                 "Metrics baseline operations require metrics analysis. "
@@ -294,12 +304,12 @@ def _load_metrics_baseline_for_diff(
     shared_baseline_payload: dict[str, object] | None = None,
 ) -> None:
     if not metrics_baseline_exists:
-        if args.fail_on_new_metrics and not args.update_metrics_baseline:
+        if _metrics_baseline_gate_requested(args) and not args.update_metrics_baseline:
             state.failure_code = ExitCode.CONTRACT_ERROR
             console.print(
                 ui.fmt_contract_error(
-                    "Metrics baseline file is required for --fail-on-new-metrics. "
-                    "Run codeclone . --update-metrics-baseline first."
+                    "Metrics baseline file is required for metrics baseline-aware "
+                    "gates. Run codeclone . --update-metrics-baseline first."
                 )
             )
         return
@@ -334,6 +344,11 @@ def _load_metrics_baseline_for_diff(
         state.loaded = True
         state.status = MetricsBaselineStatus.OK
         state.trusted_for_diff = True
+        _enforce_metrics_gate_schema_requirements(
+            args=args,
+            state=state,
+            console=console,
+        )
 
 
 def _apply_metrics_baseline_untrusted_policy(
@@ -345,7 +360,7 @@ def _apply_metrics_baseline_untrusted_policy(
         return
     state.loaded = False
     state.trusted_for_diff = False
-    if args.fail_on_new_metrics and not args.update_metrics_baseline:
+    if _metrics_baseline_gate_requested(args) and not args.update_metrics_baseline:
         state.failure_code = ExitCode.CONTRACT_ERROR
 
 
@@ -371,6 +386,8 @@ def _update_metrics_baseline_if_requested(
     new_metrics_baseline = MetricsBaseline.from_project_metrics(
         project_metrics=project_metrics,
         path=metrics_baseline_path,
+        include_adoption=True,
+        include_api_surface=args.api_surface,
     )
     try:
         new_metrics_baseline.save()
@@ -392,3 +409,51 @@ def _update_metrics_baseline_if_requested(
     state.loaded = True
     state.status = MetricsBaselineStatus.OK
     state.trusted_for_diff = True
+
+
+def _metrics_baseline_gate_requested(args: _BaselineArgs) -> bool:
+    return bool(
+        args.fail_on_new_metrics
+        or args.fail_on_typing_regression
+        or args.fail_on_docstring_regression
+        or args.fail_on_api_break
+    )
+
+
+def _enforce_metrics_gate_schema_requirements(
+    *,
+    args: _BaselineArgs,
+    state: _MetricsBaselineRuntime,
+    console: _PrinterLike,
+) -> None:
+    baseline = state.baseline
+    needs_adoption_snapshot = bool(
+        args.fail_on_typing_regression or args.fail_on_docstring_regression
+    )
+    if needs_adoption_snapshot and not getattr(
+        baseline, "has_coverage_adoption_snapshot", False
+    ):
+        state.loaded = False
+        state.trusted_for_diff = False
+        state.status = MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION
+        state.failure_code = ExitCode.CONTRACT_ERROR
+        console.print(
+            ui.fmt_contract_error(
+                "Typing/docstring regression gates require a metrics baseline "
+                "that includes coverage adoption data. Run codeclone . "
+                "--update-metrics-baseline first."
+            )
+        )
+        return
+    if args.fail_on_api_break and baseline.api_surface_snapshot is None:
+        state.loaded = False
+        state.trusted_for_diff = False
+        state.status = MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION
+        state.failure_code = ExitCode.CONTRACT_ERROR
+        console.print(
+            ui.fmt_contract_error(
+                "API break gating requires a metrics baseline with public API "
+                "surface data. Run codeclone . --api-surface "
+                "--update-metrics-baseline first."
+            )
+        )

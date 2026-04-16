@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from hashlib import sha256
 from pathlib import Path
 from typing import cast
 
+import orjson
 import pytest
 
 import codeclone.cli as cli
@@ -500,6 +502,20 @@ def test_pipeline_analyze_uses_cached_segment_projection(
             ]
         },
     }
+
+    expected_payload = orjson.dumps(
+        (
+            (
+                "seg-hash|pkg.a:f",
+                (
+                    ("/tmp/a.py", "pkg.a:f", 10, 15, 6, "seg-hash", "seg-sig"),
+                    ("/tmp/a.py", "pkg.a:f", 20, 25, 6, "seg-hash", "seg-sig"),
+                ),
+            ),
+        ),
+        option=orjson.OPT_SORT_KEYS,
+    )
+    assert digest == sha256(expected_payload).hexdigest()
 
     def _must_not_run(
         _segment_groups: object,

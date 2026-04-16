@@ -30,6 +30,21 @@ class MetricsSnapshot:
     overloaded_modules_total: int = 0
     overloaded_modules_population_status: str = ""
     overloaded_modules_top_score: float = 0.0
+    adoption_param_permille: int | None = None
+    adoption_return_permille: int | None = None
+    adoption_docstring_permille: int | None = None
+    adoption_any_annotation_count: int = 0
+    api_surface_enabled: bool = False
+    api_surface_modules: int = 0
+    api_surface_public_symbols: int = 0
+    api_surface_added: int = 0
+    api_surface_breaking: int = 0
+    coverage_join_status: str = ""
+    coverage_join_overall_permille: int = 0
+    coverage_join_coverage_hotspots: int = 0
+    coverage_join_scope_gap_hotspots: int = 0
+    coverage_join_threshold_percent: int = 0
+    coverage_join_source_label: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +74,7 @@ def _print_summary(
     func_clones_count: int,
     block_clones_count: int,
     segment_clones_count: int,
+    suppressed_golden_fixture_groups: int,
     suppressed_segment_groups: int,
     new_clones_count: int,
 ) -> None:
@@ -79,6 +95,7 @@ def _print_summary(
                 block=block_clones_count,
                 segment=segment_clones_count,
                 suppressed=suppressed_segment_groups,
+                fixture_excluded=suppressed_golden_fixture_groups,
                 new=new_clones_count,
             )
         )
@@ -109,6 +126,7 @@ def _print_summary(
                 block=block_clones_count,
                 segment=segment_clones_count,
                 suppressed=suppressed_segment_groups,
+                fixture_excluded=suppressed_golden_fixture_groups,
                 new=new_clones_count,
             )
         )
@@ -139,6 +157,39 @@ def _print_metrics(
                 overloaded_modules=metrics.overloaded_modules_candidates,
             )
         )
+        if (
+            metrics.adoption_param_permille is not None
+            and metrics.adoption_return_permille is not None
+            and metrics.adoption_docstring_permille is not None
+        ):
+            console.print(
+                ui.fmt_summary_compact_adoption(
+                    param_permille=metrics.adoption_param_permille,
+                    return_permille=metrics.adoption_return_permille,
+                    docstring_permille=metrics.adoption_docstring_permille,
+                    any_annotation_count=metrics.adoption_any_annotation_count,
+                )
+            )
+        if metrics.api_surface_enabled:
+            console.print(
+                ui.fmt_summary_compact_api_surface(
+                    public_symbols=metrics.api_surface_public_symbols,
+                    modules=metrics.api_surface_modules,
+                    added=metrics.api_surface_added,
+                    breaking=metrics.api_surface_breaking,
+                )
+            )
+        if metrics.coverage_join_status:
+            console.print(
+                ui.fmt_summary_compact_coverage_join(
+                    status=metrics.coverage_join_status,
+                    overall_permille=metrics.coverage_join_overall_permille,
+                    coverage_hotspots=metrics.coverage_join_coverage_hotspots,
+                    scope_gap_hotspots=metrics.coverage_join_scope_gap_hotspots,
+                    threshold_percent=metrics.coverage_join_threshold_percent,
+                    source_label=metrics.coverage_join_source_label,
+                )
+            )
     else:
         from rich.rule import Rule
 
@@ -165,6 +216,39 @@ def _print_metrics(
                 suppressed=metrics.suppressed_dead_code_count,
             )
         )
+        if (
+            metrics.adoption_param_permille is not None
+            and metrics.adoption_return_permille is not None
+            and metrics.adoption_docstring_permille is not None
+        ):
+            console.print(
+                ui.fmt_metrics_adoption(
+                    param_permille=metrics.adoption_param_permille,
+                    return_permille=metrics.adoption_return_permille,
+                    docstring_permille=metrics.adoption_docstring_permille,
+                    any_annotation_count=metrics.adoption_any_annotation_count,
+                )
+            )
+        if metrics.api_surface_enabled:
+            console.print(
+                ui.fmt_metrics_api_surface(
+                    public_symbols=metrics.api_surface_public_symbols,
+                    modules=metrics.api_surface_modules,
+                    added=metrics.api_surface_added,
+                    breaking=metrics.api_surface_breaking,
+                )
+            )
+        if metrics.coverage_join_status:
+            console.print(
+                ui.fmt_metrics_coverage_join(
+                    status=metrics.coverage_join_status,
+                    overall_permille=metrics.coverage_join_overall_permille,
+                    coverage_hotspots=metrics.coverage_join_coverage_hotspots,
+                    scope_gap_hotspots=metrics.coverage_join_scope_gap_hotspots,
+                    threshold_percent=metrics.coverage_join_threshold_percent,
+                    source_label=metrics.coverage_join_source_label,
+                )
+            )
         console.print(
             ui.fmt_metrics_overloaded_modules(
                 candidates=metrics.overloaded_modules_candidates,

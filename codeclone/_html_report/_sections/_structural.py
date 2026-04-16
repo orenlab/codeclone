@@ -488,10 +488,6 @@ def build_structural_findings_html_panel(
     context_lines: int = 3,
     max_snippet_lines: int = 220,
 ) -> str:
-    normalized_groups = normalize_structural_findings(groups)
-    if not normalized_groups:
-        return _tab_empty("No structural findings detected.")
-
     intro = (
         '<div class="insight-banner insight-info">'
         '<div class="insight-question">What are structural findings?</div>'
@@ -500,6 +496,9 @@ def build_structural_findings_html_panel(
         "refactoring hints and do not affect clone detection or CI verdicts.</div>"
         "</div>"
     )
+    normalized_groups = normalize_structural_findings(groups)
+    if not normalized_groups:
+        return intro + _tab_empty("No structural findings detected.")
 
     resolved_file_cache = file_cache if file_cache is not None else _FileCache()
     why_templates: list[str] = []

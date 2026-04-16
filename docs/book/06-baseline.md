@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Specify baseline schema v2, trust/compatibility checks, integrity hashing, and
+Specify baseline schema v2.1, trust/compatibility checks, integrity hashing, and
 runtime behavior.
 
 ## Public surface
@@ -17,7 +17,7 @@ runtime behavior.
 Canonical baseline shape:
 
 - Required top-level keys: `meta`, `clones`
-- Optional top-level key: `metrics` (unified baseline flow)
+- Optional top-level keys: `metrics`, `api_surface` (unified baseline flow)
 - `meta` required keys:
   `generator`, `schema_version`, `fingerprint_version`, `python_tag`,
   `created_at`, `payload_sha256`
@@ -42,14 +42,27 @@ Compatibility gates (`verify_compatibility`):
 - `python_tag == current_python_tag()`
 - integrity verified via `payload_sha256`
 
+Current runtime policy:
+
+- New clone baseline saves write schema `2.1`.
+- Runtime still accepts `2.0` and `2.1` within baseline major `2`.
+
 Embedded metrics contract:
 
 - Top-level `metrics` is allowed only for baseline schema `>= 2.0`.
-- Clone baseline save preserves existing embedded `metrics` payload and
-  `meta.metrics_payload_sha256`.
+- Clone baseline save preserves existing embedded `metrics` payload,
+  optional `api_surface` payload, and the corresponding
+  `meta.metrics_payload_sha256` / `meta.api_surface_payload_sha256` values.
+- Embedded `api_surface` snapshots use a compact wire format: each symbol stores
+  `local_name` relative to its containing `module`, and each module row stores
+  `filepath` relative to the baseline directory when possible. Runtime
+  reconstructs canonical full qualnames and runtime filepaths in memory before
+  diffing.
 - The default runtime flow is unified: clone baseline and metrics baseline
   usually share the same `codeclone.baseline.json` file unless the metrics path
   is explicitly overridden.
+- In unified rewrite mode, disabled optional metric surfaces are omitted from
+  the rewritten embedded payload instead of being preserved as stale baggage.
 
 Integrity payload includes only:
 

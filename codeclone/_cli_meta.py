@@ -23,6 +23,15 @@ if TYPE_CHECKING:
     from .metrics_baseline import MetricsBaseline
 
 
+class AnalysisProfileMeta(TypedDict):
+    min_loc: int
+    min_stmt: int
+    block_min_loc: int
+    block_min_stmt: int
+    segment_min_loc: int
+    segment_min_stmt: int
+
+
 def _current_python_version() -> str:
     return f"{sys.version_info.major}.{sys.version_info.minor}"
 
@@ -75,6 +84,7 @@ class ReportMeta(TypedDict):
     health_grade: str | None
     analysis_mode: str
     metrics_computed: list[str]
+    analysis_profile: AnalysisProfileMeta
     design_complexity_threshold: int
     design_coupling_threshold: int
     design_cohesion_threshold: int
@@ -103,6 +113,12 @@ def _build_report_meta(
     health_grade: str | None,
     analysis_mode: str,
     metrics_computed: tuple[str, ...],
+    min_loc: int,
+    min_stmt: int,
+    block_min_loc: int,
+    block_min_stmt: int,
+    segment_min_loc: int,
+    segment_min_stmt: int,
     design_complexity_threshold: int = DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
     design_coupling_threshold: int = DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
     design_cohesion_threshold: int = DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
@@ -149,6 +165,14 @@ def _build_report_meta(
         "health_grade": health_grade,
         "analysis_mode": analysis_mode,
         "metrics_computed": list(metrics_computed),
+        "analysis_profile": {
+            "min_loc": min_loc,
+            "min_stmt": min_stmt,
+            "block_min_loc": block_min_loc,
+            "block_min_stmt": block_min_stmt,
+            "segment_min_loc": segment_min_loc,
+            "segment_min_stmt": segment_min_stmt,
+        },
         "design_complexity_threshold": design_complexity_threshold,
         "design_coupling_threshold": design_coupling_threshold,
         "design_cohesion_threshold": design_cohesion_threshold,

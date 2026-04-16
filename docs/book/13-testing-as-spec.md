@@ -11,9 +11,13 @@ Contract tests are concentrated in:
 - `tests/test_baseline.py`
 - `tests/test_cache.py`
 - `tests/test_report.py`
+- `tests/test_report_contract_coverage.py`
 - `tests/test_cli_inprocess.py`
 - `tests/test_cli_unit.py`
+- `tests/test_coverage_join.py`
+- `tests/test_golden_fixtures.py`
 - `tests/test_html_report.py`
+- `tests/test_mcp_service.py`
 - `tests/test_detector_golden.py`
 - `tests/test_golden_v2.py`
 
@@ -29,14 +33,16 @@ Test classes by role:
 
 The following matrix is treated as executable contract:
 
-| Contract                                                                       | Tests                                                                                                         |
-|--------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| Baseline schema/integrity/compat gates                                         | `tests/test_baseline.py`                                                                                      |
-| Cache v2.3 fail-open + status mapping                                          | `tests/test_cache.py`, `tests/test_cli_inprocess.py::test_cli_reports_cache_too_large_respects_max_size_flag` |
-| Exit code categories and markers                                               | `tests/test_cli_unit.py`, `tests/test_cli_inprocess.py`                                                       |
-| Report schema v2.3 canonical/derived/integrity + JSON/TXT/MD/SARIF projections | `tests/test_report.py`, `tests/test_report_contract_coverage.py`, `tests/test_report_branch_invariants.py`    |
-| HTML render-only explainability + escaping                                     | `tests/test_html_report.py`                                                                                   |
-| Scanner traversal safety                                                       | `tests/test_scanner_extra.py`, `tests/test_security.py`                                                       |
+| Contract                                                                       | Tests                                                                                                                                               |
+|--------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| Baseline schema/integrity/compat gates                                         | `tests/test_baseline.py`                                                                                                                            |
+| Cache v2.5 fail-open + status mapping + API-surface-aware reuse + API signature order preservation | `tests/test_cache.py`, `tests/test_cli_inprocess.py::test_cli_reports_cache_too_large_respects_max_size_flag`, `tests/test_cli_inprocess.py::test_cli_public_api_breaking_count_stable_across_warm_cache`, `tests/test_cli_inprocess.py::test_cli_api_surface_ignores_non_api_warm_cache` |
+| Exit code categories and markers                                               | `tests/test_cli_unit.py`, `tests/test_cli_inprocess.py`                                                                                             |
+| Report schema v2.8 canonical/derived/integrity + JSON/TXT/MD/SARIF projections | `tests/test_report.py`, `tests/test_report_contract_coverage.py`, `tests/test_report_branch_invariants.py`                                          |
+| HTML render-only explainability + escaping                                     | `tests/test_html_report.py`                                                                                                                         |
+| Current-run Cobertura coverage join parsing, gating, and projections           | `tests/test_coverage_join.py`, `tests/test_pipeline_metrics.py`, `tests/test_cli_unit.py`, `tests/test_mcp_service.py`, `tests/test_html_report.py` |
+| Golden fixture clone exclusion policy                                          | `tests/test_golden_fixtures.py`, `tests/test_cli_inprocess.py::test_cli_pyproject_golden_fixture_paths_exclude_fixture_clone_groups`, `tests/test_report.py::test_report_json_clone_groups_can_include_suppressed_golden_fixture_bucket` |
+| Scanner traversal safety                                                       | `tests/test_scanner_extra.py`, `tests/test_security.py`                                                                                             |
 
 ## Invariants (MUST)
 
@@ -73,6 +79,7 @@ Refs:
 - `tests/test_baseline.py::test_baseline_payload_fields_contract_invariant`
 - `tests/test_cache.py::test_cache_v13_missing_optional_sections_default_empty`
 - `tests/test_report.py::test_report_json_compact_v21_contract`
+- `tests/test_coverage_join.py::test_build_coverage_join_maps_cobertura_lines_to_function_spans`
 - `tests/test_cli_inprocess.py::test_cli_contract_error_priority_over_gating_failure_for_unreadable_source`
 - `tests/test_html_report.py::test_html_and_json_group_order_consistent`
 - `tests/test_detector_golden.py::test_detector_output_matches_golden_fixture`

@@ -12,6 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
+from .golden_fixtures import (
+    GoldenFixturePatternError,
+    normalize_golden_fixture_patterns,
+)
+
 if TYPE_CHECKING:
     import argparse
     from collections.abc import Mapping, Sequence
@@ -25,6 +30,7 @@ class ConfigValidationError(ValueError):
 class _ConfigKeySpec:
     expected_type: type[object]
     allow_none: bool = False
+    expected_name: str | None = None
 
 
 _CONFIG_KEY_SPECS: Final[dict[str, _ConfigKeySpec]] = {
@@ -50,11 +56,21 @@ _CONFIG_KEY_SPECS: Final[dict[str, _ConfigKeySpec]] = {
     "fail_dead_code": _ConfigKeySpec(bool),
     "fail_health": _ConfigKeySpec(int),
     "fail_on_new_metrics": _ConfigKeySpec(bool),
+    "api_surface": _ConfigKeySpec(bool),
+    "coverage_xml": _ConfigKeySpec(str, allow_none=True),
+    "fail_on_typing_regression": _ConfigKeySpec(bool),
+    "fail_on_docstring_regression": _ConfigKeySpec(bool),
+    "fail_on_api_break": _ConfigKeySpec(bool),
+    "fail_on_untested_hotspots": _ConfigKeySpec(bool),
+    "min_typing_coverage": _ConfigKeySpec(int),
+    "min_docstring_coverage": _ConfigKeySpec(int),
+    "coverage_min": _ConfigKeySpec(int),
     "update_metrics_baseline": _ConfigKeySpec(bool),
     "metrics_baseline": _ConfigKeySpec(str),
     "skip_metrics": _ConfigKeySpec(bool),
     "skip_dead_code": _ConfigKeySpec(bool),
     "skip_dependencies": _ConfigKeySpec(bool),
+    "golden_fixture_paths": _ConfigKeySpec(list, expected_name="list[str]"),
     "html_out": _ConfigKeySpec(str, allow_none=True),
     "json_out": _ConfigKeySpec(str, allow_none=True),
     "md_out": _ConfigKeySpec(str, allow_none=True),
@@ -71,6 +87,7 @@ _PATH_CONFIG_KEYS: Final[frozenset[str]] = frozenset(
         "cache_path",
         "baseline",
         "metrics_baseline",
+        "coverage_xml",
         "html_out",
         "json_out",
         "md_out",
@@ -179,7 +196,7 @@ def _validate_config_value(*, key: str, value: object) -> object:
             return None
         raise ConfigValidationError(
             "Invalid value type for tool.codeclone."
-            f"{key}: expected {spec.expected_type.__name__}"
+            f"{key}: expected {spec.expected_name or spec.expected_type.__name__}"
         )
 
     expected_type = spec.expected_type
@@ -207,6 +224,8 @@ def _validate_config_value(*, key: str, value: object) -> object:
             expected_type=str,
             expected_name="str",
         )
+    if expected_type is list:
+        return _validated_string_list(key=key, value=value)
 
     raise ConfigValidationError(f"Unsupported config key spec for tool.codeclone.{key}")
 
@@ -226,6 +245,21 @@ def _validated_config_instance(
     raise ConfigValidationError(
         f"Invalid value type for tool.codeclone.{key}: expected {expected_name}"
     )
+
+
+def _validated_string_list(*, key: str, value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ConfigValidationError(
+            f"Invalid value type for tool.codeclone.{key}: expected list[str]"
+        )
+    if not all(isinstance(item, str) for item in value):
+        raise ConfigValidationError(
+            f"Invalid value type for tool.codeclone.{key}: expected list[str]"
+        )
+    try:
+        return normalize_golden_fixture_patterns(value)
+    except GoldenFixturePatternError as exc:
+        raise ConfigValidationError(str(exc)) from exc
 
 
 def _load_toml(path: Path) -> object:

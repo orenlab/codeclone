@@ -144,7 +144,7 @@ gating decisions.
 Detected findings can be rendered as:
 
 - interactive HTML (`--html`),
-- canonical JSON (`--json`, schema `2.3`),
+- canonical JSON (`--json`, schema `2.8`),
 - deterministic text projection (`--text`),
 - deterministic Markdown projection (`--md`),
 - deterministic SARIF projection (`--sarif`).
@@ -158,6 +158,7 @@ Reporting uses a layered model:
 Provenance is carried through `meta` and includes:
 
 - runtime/context (`codeclone_version`, `python_version`, `python_tag`, `analysis_mode`, `report_mode`)
+- analysis profile (`meta.analysis_profile`)
 - analysis thresholds (`meta.analysis_thresholds.design_findings`)
 - baseline status block (`meta.baseline.*`)
 - cache status block (`meta.cache.*`)
@@ -223,7 +224,8 @@ Security boundaries:
 - `cache_policy=refresh` rejected to preserve read-only semantics.
 - Review markers are session-local in-memory state, never persisted.
 - Run history bounded by `--history-limit` to prevent unbounded memory growth.
-- `git_diff_ref` validated against strict regex to prevent injection.
+- `git_diff_ref` validated as a safe single revision expression before any
+  `git diff` subprocess call.
 
 ---
 
@@ -232,7 +234,7 @@ Security boundaries:
 Baseline comparison allows CI to fail **only on new clones**,
 enabling gradual architectural improvement.
 
-Baseline files use a stable v2 contract (schema `2.0`, with compatibility
+Baseline files use a stable v2 contract (current schema `2.1`, with compatibility
 support for major `1` legacy schema checks where applicable). Compatibility is checked by
 `schema_version`, `fingerprint_version`, `python_tag`, and `generator.name`,
 not package patch/minor version.

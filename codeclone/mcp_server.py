@@ -39,9 +39,10 @@ _SERVER_INSTRUCTIONS = (
     "them only for an explicit higher-sensitivity follow-up when needed. Use "
     "get_report_section(section='metrics_detail', family=..., limit=...) for "
     "bounded metrics drill-down, and prefer generate_pr_summary(format='markdown') "
-    "unless machine JSON is required. Pass an absolute repository root to "
-    "analysis tools. This server never updates baselines and never mutates "
-    "source files."
+    "unless machine JSON is required. Coverage join accepts external Cobertura "
+    "XML as a current-run signal and does not become baseline truth. Pass an "
+    "absolute repository root to analysis tools. This server never updates "
+    "baselines and never mutates source files."
 )
 _MCP_INSTALL_HINT = (
     "CodeClone MCP support requires the optional 'mcp' extra. "
@@ -158,6 +159,9 @@ def build_mcp_server(
         block_min_stmt: int | None = None,
         segment_min_loc: int | None = None,
         segment_min_stmt: int | None = None,
+        api_surface: bool | None = None,
+        coverage_xml: str | None = None,
+        coverage_min: int | None = None,
         complexity_threshold: int | None = None,
         coupling_threshold: int | None = None,
         cohesion_threshold: int | None = None,
@@ -182,6 +186,9 @@ def build_mcp_server(
                 block_min_stmt=block_min_stmt,
                 segment_min_loc=segment_min_loc,
                 segment_min_stmt=segment_min_stmt,
+                api_surface=api_surface,
+                coverage_xml=coverage_xml,
+                coverage_min=coverage_min,
                 complexity_threshold=complexity_threshold,
                 coupling_threshold=coupling_threshold,
                 cohesion_threshold=cohesion_threshold,
@@ -222,6 +229,9 @@ def build_mcp_server(
         block_min_stmt: int | None = None,
         segment_min_loc: int | None = None,
         segment_min_stmt: int | None = None,
+        api_surface: bool | None = None,
+        coverage_xml: str | None = None,
+        coverage_min: int | None = None,
         complexity_threshold: int | None = None,
         coupling_threshold: int | None = None,
         cohesion_threshold: int | None = None,
@@ -246,6 +256,9 @@ def build_mcp_server(
                 block_min_stmt=block_min_stmt,
                 segment_min_loc=segment_min_loc,
                 segment_min_stmt=segment_min_stmt,
+                api_surface=api_surface,
+                coverage_xml=coverage_xml,
+                coverage_min=coverage_min,
                 complexity_threshold=complexity_threshold,
                 coupling_threshold=coupling_threshold,
                 cohesion_threshold=cohesion_threshold,
@@ -300,7 +313,7 @@ def build_mcp_server(
             "canonical doc links. Use this when workflow or contract meaning "
             "is unclear. This is bounded guidance, not a full manual. "
             "Supported topics: workflow, analysis_profile, suppressions, "
-            "baseline, latest_runs, review_state, changed_scope."
+            "baseline, coverage, latest_runs, review_state, changed_scope."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -334,6 +347,13 @@ def build_mcp_server(
         fail_dead_code: bool = False,
         fail_health: int = -1,
         fail_on_new_metrics: bool = False,
+        fail_on_typing_regression: bool = False,
+        fail_on_docstring_regression: bool = False,
+        fail_on_api_break: bool = False,
+        fail_on_untested_hotspots: bool = False,
+        min_typing_coverage: int = -1,
+        min_docstring_coverage: int = -1,
+        coverage_min: int = 50,
     ) -> dict[str, object]:
         return service.evaluate_gates(
             MCPGateRequest(
@@ -347,6 +367,13 @@ def build_mcp_server(
                 fail_dead_code=fail_dead_code,
                 fail_health=fail_health,
                 fail_on_new_metrics=fail_on_new_metrics,
+                fail_on_typing_regression=fail_on_typing_regression,
+                fail_on_docstring_regression=fail_on_docstring_regression,
+                fail_on_api_break=fail_on_api_break,
+                fail_on_untested_hotspots=fail_on_untested_hotspots,
+                min_typing_coverage=min_typing_coverage,
+                min_docstring_coverage=min_docstring_coverage,
+                coverage_min=coverage_min,
             )
         )
 

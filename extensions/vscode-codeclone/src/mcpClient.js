@@ -4,13 +4,28 @@ const {spawn} = require("node:child_process");
 const {EventEmitter} = require("node:events");
 
 const {version: EXTENSION_VERSION} = require("../package.json");
-const {trimTail} = require("./support");
+const {logChannelMessage, trimTail} = require("./support");
 
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_STDOUT_BUFFER_CHARS = 4 * 1024 * 1024;
 const MAX_STDERR_BUFFER_CHARS = 256 * 1024;
 const MAX_LOG_LINE_CHARS = 4096;
+
+function normalizeLogLevel(value, fallback = "info") {
+    switch (String(value || "").toLowerCase()) {
+        case "trace":
+        case "debug":
+        case "info":
+        case "warn":
+        case "error":
+            return String(value).toLowerCase();
+        case "warning":
+            return "warn";
+        default:
+            return fallback;
+    }
+}
 
 class MCPClientError extends Error {
     constructor(message) {
@@ -232,7 +247,9 @@ class CodeCloneMcpClient extends EventEmitter {
                 );
             });
             child.once("spawn", () => {
-                this.outputChannel.appendLine(
+                logChannelMessage(
+                    this.outputChannel,
+                    "info",
                     `[codeclone] MCP spawned: ${launchSpec.command} ${launchSpec.args.join(
                         " "
                     )}`.trim()
@@ -240,7 +257,9 @@ class CodeCloneMcpClient extends EventEmitter {
                 resolve(undefined);
             });
             child.on("exit", (code, signal) => {
-                this.outputChannel.appendLine(
+                logChannelMessage(
+                    this.outputChannel,
+                    "warn",
                     `[codeclone] MCP exited (code=${code ?? "null"}, signal=${signal ?? "null"})`
                 );
                 const wasConnected = this.connected;
@@ -285,7 +304,9 @@ class CodeCloneMcpClient extends EventEmitter {
             try {
                 message = JSON.parse(line);
             } catch {
-                this.outputChannel.appendLine(
+                logChannelMessage(
+                    this.outputChannel,
+                    "debug",
                     `[codeclone] stdout: ${trimTail(line, MAX_LOG_LINE_CHARS)}`
                 );
                 continue;
@@ -317,7 +338,9 @@ class CodeCloneMcpClient extends EventEmitter {
                 message.params &&
                 typeof message.params.data === "string"
             ) {
-                this.outputChannel.appendLine(
+                logChannelMessage(
+                    this.outputChannel,
+                    normalizeLogLevel(message.params.level),
                     `[codeclone] ${message.params.level || "info"}: ${message.params.data}`
                 );
             }
@@ -337,7 +360,9 @@ class CodeCloneMcpClient extends EventEmitter {
             const line = rawLine.trim();
             if (line) {
                 this._rememberDiagnostic(line);
-                this.outputChannel.appendLine(
+                logChannelMessage(
+                    this.outputChannel,
+                    "warn",
                     `[codeclone] stderr: ${trimTail(line, MAX_LOG_LINE_CHARS)}`
                 );
             }
@@ -381,7 +406,9 @@ class CodeCloneMcpClient extends EventEmitter {
         this._rememberDiagnostic(
             `CodeClone MCP ${streamName} buffer exceeded ${maxChars} characters and was truncated.`
         );
-        this.outputChannel.appendLine(
+        logChannelMessage(
+            this.outputChannel,
+            "warn",
             `[codeclone] ${streamName} buffer exceeded ${maxChars} characters; keeping the most recent output.`
         );
         return truncated;

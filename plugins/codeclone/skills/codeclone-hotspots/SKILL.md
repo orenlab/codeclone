@@ -30,6 +30,15 @@ That's the cheapest useful path. Stop there unless the user asks for more.
 analyze_repository → check_complexity | check_coupling | check_cohesion | check_dead_code | check_clones
 ```
 
+For adoption, API-surface, or current-run coverage join questions:
+
+```
+analyze_repository → get_report_section(section="metrics")
+```
+
+If external coverage semantics are unclear, call `help(topic="coverage")`
+before interpreting `coverage_hotspots` or `scope_gap_hotspots`.
+
 ### If the user wants a gate preview
 
 ```

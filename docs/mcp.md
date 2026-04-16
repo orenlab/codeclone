@@ -81,34 +81,34 @@ Run retention is bounded: default `4`, max `10` (`--history-limit`).
 If a tool request omits `processes`, MCP defers process-count policy to the
 core CodeClone runtime.
 
-Current `b4` MCP surface: `21` tools, `7` fixed resources, and `3`
+Current `b5` MCP surface: `21` tools, `7` fixed resources, and `3`
 run-scoped URI templates.
 
 ## Tool surface
 
-| Tool                     | Purpose                                                                                             |
-|--------------------------|-----------------------------------------------------------------------------------------------------|
-| `analyze_repository`     | Full analysis → compact summary; use `get_run_summary` or `get_production_triage` as the first pass |
-| `analyze_changed_paths`  | Diff-aware analysis via `changed_paths` or `git_diff_ref`; compact changed-files snapshot           |
-| `get_run_summary`        | Cheapest run snapshot: health, findings, baseline, inventory                                        |
-| `get_production_triage`  | Production-first view: health, hotspots, suggestions; best first pass for noisy repos               |
-| `help`                   | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope  |
-| `compare_runs`           | Run-to-run delta: regressions, improvements, health change                                          |
-| `list_findings`          | Filtered, paginated findings; use after hotspots or `check_*`                                       |
-| `get_finding`            | Single finding detail by id; defaults to `normal` detail level                                      |
-| `get_remediation`        | Remediation payload for one finding                                                                 |
-| `list_hotspots`          | Priority-ranked hotspot views; preferred before broad listing                                       |
-| `get_report_section`     | Read report sections; `metrics_detail` is paginated with family/path filters                        |
-| `evaluate_gates`         | Preview CI gating decisions                                                                         |
-| `check_clones`           | Clone findings only; narrower than `list_findings`                                                  |
-| `check_complexity`       | Complexity hotspots only                                                                            |
-| `check_coupling`         | Coupling hotspots only                                                                              |
-| `check_cohesion`         | Cohesion hotspots only                                                                              |
-| `check_dead_code`        | Dead-code findings only                                                                             |
-| `generate_pr_summary`    | PR-friendly markdown or JSON summary                                                                |
-| `mark_finding_reviewed`  | Session-local review marker (in-memory)                                                             |
-| `list_reviewed_findings` | List reviewed findings for a run                                                                    |
-| `clear_session_runs`     | Reset in-memory runs and session state                                                              |
+| Tool                     | Purpose                                                                                                  |
+|--------------------------|----------------------------------------------------------------------------------------------------------|
+| `analyze_repository`     | Full analysis → compact summary; use `get_run_summary` or `get_production_triage` as the first pass      |
+| `analyze_changed_paths`  | Diff-aware analysis via `changed_paths` or `git_diff_ref`; compact changed-files snapshot                |
+| `get_run_summary`        | Cheapest run snapshot: health, findings, baseline, inventory, active thresholds                          |
+| `get_production_triage`  | Production-first view: health, hotspots, suggestions, active thresholds; best first pass for noisy repos |
+| `help`                   | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope       |
+| `compare_runs`           | Run-to-run delta: regressions, improvements, health change                                               |
+| `list_findings`          | Filtered, paginated findings; use after hotspots or `check_*`                                            |
+| `get_finding`            | Single finding detail by id; defaults to `normal` detail level                                           |
+| `get_remediation`        | Remediation payload for one finding                                                                      |
+| `list_hotspots`          | Priority-ranked hotspot views; preferred before broad listing                                            |
+| `get_report_section`     | Read report sections; `metrics_detail` is paginated with family/path filters                             |
+| `evaluate_gates`         | Preview CI gating decisions                                                                              |
+| `check_clones`           | Clone findings only; narrower than `list_findings`                                                       |
+| `check_complexity`       | Complexity hotspots only                                                                                 |
+| `check_coupling`         | Coupling hotspots only                                                                                   |
+| `check_cohesion`         | Cohesion hotspots only                                                                                   |
+| `check_dead_code`        | Dead-code findings only                                                                                  |
+| `generate_pr_summary`    | PR-friendly markdown or JSON summary                                                                     |
+| `mark_finding_reviewed`  | Session-local review marker (in-memory)                                                                  |
+| `list_reviewed_findings` | List reviewed findings for a run                                                                         |
+| `clear_session_runs`     | Reset in-memory runs and session state                                                                   |
 
 > `check_*` tools query stored runs only. Call `analyze_repository` or
 > `analyze_changed_paths` first.
@@ -116,12 +116,37 @@ run-scoped URI templates.
 **Payload conventions:**
 
 - `check_*` responses include only the relevant health dimension.
+- Empty design `check_*` responses may also include a compact
+  `threshold_context` (`metric`, `threshold`, `measured_units`,
+  `highest_below_threshold`) to show whether the run is genuinely quiet or
+  simply below the active threshold.
 - Finding responses use short MCP IDs and relative paths by default;
   `detail_level=full` restores the compatibility payload with URIs.
+- Summary and triage projections keep interpretation compact: `health_scope`
+  explains what the health score covers, `focus` explains the active view, and
+  `new_by_source_kind` attributes new findings without widening the payload.
+- When baseline comparison is untrusted, summary and triage also expose
+  `baseline.compared_without_valid_baseline` plus baseline/runtime python tags.
+- Summary `diff` also carries compact adoption/API deltas:
+  `typing_param_permille_delta`, `typing_return_permille_delta`,
+  `docstring_permille_delta`, `api_breaking_changes`, and `new_api_symbols`.
+- When `analyze_repository` or `analyze_changed_paths` receives
+  `coverage_xml`, summaries include compact `coverage_join` facts. The XML path
+  may be absolute or relative to the analysis root, and the join remains a
+  current-run signal rather than baseline truth.
+- When `respect_pyproject=true`, MCP also applies `golden_fixture_paths`.
+  Fully matching golden-fixture clone groups are excluded from active clone and
+  gate projections but remain visible in the canonical report under the
+  optional `findings.groups.clones.suppressed.*` bucket.
+- Invalid Cobertura XML does not fail `analyze_*`; summaries expose
+  `coverage_join.status="invalid"` plus `invalid_reason`. Coverage hotspot gate
+  preview still requires a valid join.
 - Run IDs are 8-char hex handles; finding IDs are short prefixed forms.
   Both accept the full canonical form as input.
 - `metrics_detail(family="overloaded_modules")` exposes the report-only
   module-hotspot layer without turning it into findings or gate data.
+- `metrics_detail` also accepts `coverage_adoption`, `coverage_join`, and
+  `api_surface`.
 - `help(topic=...)` is static: meaning, anti-patterns, next step, doc links.
 - Start with repo defaults or `pyproject`-resolved thresholds, then lower them
   only for an explicit higher-sensitivity exploratory pass.
@@ -169,7 +194,7 @@ analyze_repository → get_run_summary or get_production_triage
 ### Semantic uncertainty recovery
 
 ```
-help(topic="workflow" | "analysis_profile" | "baseline" | "suppressions" | "latest_runs" | "review_state" | "changed_scope")
+help(topic="workflow" | "analysis_profile" | "baseline" | "coverage" | "suppressions" | "latest_runs" | "review_state" | "changed_scope")
 ```
 
 ### Full repository review
@@ -182,10 +207,21 @@ analyze_repository → get_production_triage
 ### Conservative first pass, then deeper review
 
 ```
-analyze_repository
+analyze_repository(api_surface=true)     # when you need API inventory/diff
 → help(topic="analysis_profile") when you need finer-grained local review
 → analyze_repository(min_loc=..., min_stmt=..., ...) as an explicit higher-sensitivity pass
 → compare_runs
+```
+
+### Coverage hotspot review
+
+```
+analyze_repository(coverage_xml="coverage.xml")
+→ metrics_detail(family="coverage_join")
+→ evaluate_gates(fail_on_untested_hotspots=true, coverage_min=50)
+
+Coverage Join in MCP separates measured `coverage_hotspots` from
+`scope_gap_hotspots` (functions outside the supplied `coverage.xml` scope).
 ```
 
 ### Changed-files review (PR / patch)
@@ -231,7 +267,11 @@ Separate accepted baseline debt from new regressions.
 - Prefer `list_hotspots` or narrow `check_*` tools before broad `list_findings`.
 - Use `get_finding` / `get_remediation` for one finding instead of raising
   `detail_level` on larger lists.
+- Keep `git_diff_ref` to a safe single revision expression; option-like,
+  whitespace-containing, and punctuated shell-style inputs are rejected.
 - Pass an absolute `root` — MCP rejects relative roots like `.`.
+- Use `coverage_xml` only with `analysis_mode="full"`; clones-only analysis does
+  not collect the function-span facts needed for coverage join.
 - Use `"production-only"` / `source_kind` filters to cut test/fixture noise.
 - Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
 

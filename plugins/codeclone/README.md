@@ -4,6 +4,8 @@ Native Codex plugin for structural code quality analysis over `codeclone-mcp`.
 
 Same canonical MCP surface used by CLI, VS Code, Claude Desktop, and Claude Code.
 Read-only, baseline-aware, local stdio only.
+Current-run metric surfaces from the local `codeclone-mcp` version flow through
+directly, including `Coverage Join` facts and the optional `coverage` help topic.
 
 ## What ships here
 
@@ -17,15 +19,28 @@ Read-only, baseline-aware, local stdio only.
 
 ## Install
 
-`codeclone-mcp` must be on `PATH`:
+The plugin prefers a workspace launcher first:
+
+1. `./.venv/bin/codeclone-mcp`
+2. the current Poetry environment launcher
+3. `codeclone-mcp` from `PATH`
+
+Recommended workspace-local setup:
 
 ```bash
-uv tool install --pre "codeclone[mcp]"
-codeclone-mcp --help                       # verify
+uv venv
+uv pip install --python .venv/bin/python "codeclone[mcp]>=2.0.0b4"
+.venv/bin/codeclone-mcp --help
 ```
 
-If you want to keep the launcher inside an existing environment instead, use
-`uv pip install --pre "codeclone[mcp]"`.
+If your workspace uses Poetry, install CodeClone into that Poetry environment.
+
+Global fallback:
+
+```bash
+uv tool install "codeclone[mcp]>=2.0.0b4"
+codeclone-mcp --help
+```
 
 Codex discovers the plugin from `.agents/plugins/marketplace.json`.
 It does not rewrite `~/.codex/config.toml`.
@@ -39,10 +54,11 @@ codex mcp add codeclone -- codeclone-mcp --transport stdio
 ## Skills
 
 **codeclone-review** — full structural review: conservative first pass,
-baseline-aware triage, changed-files review, deeper exploratory follow-up.
+baseline-aware triage, changed-files review, deeper exploratory follow-up,
+current-run metrics surfaces.
 
 **codeclone-hotspots** — quick quality snapshot: health check, top risks,
-single-metric queries, pre-merge sanity checks.
+single-metric queries, pre-merge sanity checks, coverage/adoption/API snapshots.
 
 ## Links
 

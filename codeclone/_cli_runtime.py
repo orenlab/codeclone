@@ -26,6 +26,7 @@ __all__ = [
 
 class _RuntimeArgs(Protocol):
     cache_path: str | None
+    coverage_xml: str | None
     max_baseline_size_mb: int
     max_cache_size_mb: int
     fail_threshold: int
@@ -34,6 +35,14 @@ class _RuntimeArgs(Protocol):
     fail_cohesion: int
     fail_health: int
     fail_on_new_metrics: bool
+    fail_on_typing_regression: bool
+    fail_on_docstring_regression: bool
+    fail_on_api_break: bool
+    fail_on_untested_hotspots: bool
+    min_typing_coverage: int
+    min_docstring_coverage: int
+    coverage_min: int
+    api_surface: bool
     update_metrics_baseline: bool
     skip_metrics: bool
     fail_cycles: bool
@@ -67,6 +76,12 @@ def validate_numeric_args(args: _RuntimeArgs) -> bool:
             or args.fail_coupling < -1
             or args.fail_cohesion < -1
             or args.fail_health < -1
+            or args.min_typing_coverage < -1
+            or args.min_typing_coverage > 100
+            or args.min_docstring_coverage < -1
+            or args.min_docstring_coverage > 100
+            or args.coverage_min < 0
+            or args.coverage_min > 100
         )
     )
 
@@ -80,7 +95,15 @@ def _metrics_flags_requested(args: _RuntimeArgs) -> bool:
         or args.fail_dead_code
         or args.fail_health >= 0
         or args.fail_on_new_metrics
+        or args.fail_on_typing_regression
+        or args.fail_on_docstring_regression
+        or args.fail_on_api_break
+        or args.fail_on_untested_hotspots
+        or args.min_typing_coverage >= 0
+        or args.min_docstring_coverage >= 0
+        or args.api_surface
         or args.update_metrics_baseline
+        or bool(getattr(args, "coverage_xml", None))
     )
 
 
@@ -117,6 +140,8 @@ def configure_metrics_mode(
         args.skip_dead_code = False
     if args.fail_cycles:
         args.skip_dependencies = False
+    if bool(getattr(args, "fail_on_api_break", False)):
+        args.api_surface = True
 
 
 def resolve_cache_path(
@@ -155,6 +180,11 @@ def metrics_computed(args: _RuntimeArgs) -> tuple[str, ...]:
         computed.append("dependencies")
     if not args.skip_dead_code:
         computed.append("dead_code")
+    computed.append("coverage_adoption")
+    if bool(getattr(args, "api_surface", False)):
+        computed.append("api_surface")
+    if bool(getattr(args, "coverage_xml", None)):
+        computed.append("coverage_join")
     return tuple(computed)
 
 

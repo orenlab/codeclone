@@ -7,10 +7,15 @@ const {CodeCloneMcpClient} = require("../src/mcpClient");
 
 function outputChannelStub() {
     const lines = [];
+    const warnings = [];
     return {
         lines,
+        warnings,
         appendLine(line) {
             lines.push(String(line));
+        },
+        warn(line) {
+            warnings.push(String(line));
         },
     };
 }
@@ -24,8 +29,8 @@ test("bounded stream append truncates oversized buffers and records a diagnostic
     assert.equal(result, "defgh");
     assert.equal(client.diagnostics.length, 1);
     assert.match(client.diagnostics[0], /stdout buffer exceeded 5 characters/);
-    assert.equal(outputChannel.lines.length, 1);
-    assert.match(outputChannel.lines[0], /stdout buffer exceeded 5 characters/);
+    assert.equal(outputChannel.warnings.length, 1);
+    assert.match(outputChannel.warnings[0], /stdout buffer exceeded 5 characters/);
 });
 
 test("diagnostic history stays bounded", () => {
@@ -48,6 +53,25 @@ test("diagnostics trim very long lines to the supported maximum", () => {
 
     assert.equal(client.diagnostics.length, 1);
     assert.equal(client.diagnostics[0].length, 4096);
+});
+
+test("warning-level MCP messages map to warn logs", () => {
+    const outputChannel = outputChannelStub();
+    const client = new CodeCloneMcpClient(outputChannel);
+
+    client._handleStdout(
+        JSON.stringify({
+            jsonrpc: "2.0",
+            method: "notifications/message",
+            params: {
+                level: "warning",
+                data: "coverage join ignored",
+            },
+        }) + "\n"
+    );
+
+    assert.equal(outputChannel.warnings.length, 1);
+    assert.match(outputChannel.warnings[0], /coverage join ignored/);
 });
 
 test("concurrent connect calls with the same launch spec share one in-flight connection", async () => {

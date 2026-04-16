@@ -93,6 +93,42 @@ HELP_FAIL_ON_NEW_METRICS = (
     "Exit with code 3 if new metrics violations appear relative to the\n"
     "metrics baseline."
 )
+HELP_API_SURFACE = (
+    "Collect public API surface facts for baseline-aware compatibility review.\n"
+    "Disabled by default."
+)
+HELP_COVERAGE = (
+    "Join external Cobertura XML line coverage to function spans.\n"
+    "Pass a `coverage xml` report path."
+)
+HELP_FAIL_ON_TYPING_REGRESSION = (
+    "Exit with code 3 if typing adoption coverage regresses relative to the\n"
+    "metrics baseline."
+)
+HELP_FAIL_ON_DOCSTRING_REGRESSION = (
+    "Exit with code 3 if public docstring coverage regresses relative to the\n"
+    "metrics baseline."
+)
+HELP_FAIL_ON_API_BREAK = (
+    "Exit with code 3 if public API removals or signature breaks are detected\n"
+    "relative to the metrics baseline."
+)
+HELP_FAIL_ON_UNTESTED_HOTSPOTS = (
+    "Exit with code 3 if medium/high-risk functions measured by Coverage Join\n"
+    "fall below the joined coverage threshold.\nRequires --coverage."
+)
+HELP_MIN_TYPING_COVERAGE = (
+    "Exit with code 3 if parameter typing coverage falls below the threshold.\n"
+    "Threshold is a whole percent from 0 to 100."
+)
+HELP_MIN_DOCSTRING_COVERAGE = (
+    "Exit with code 3 if public docstring coverage falls below the threshold.\n"
+    "Threshold is a whole percent from 0 to 100."
+)
+HELP_COVERAGE_MIN = (
+    "Coverage threshold for untested hotspot detection.\n"
+    "Threshold is a whole percent from 0 to 100.\nDefault: 50."
+)
 HELP_CI = (
     "Enable CI preset.\n"
     "Equivalent to: --fail-on-new --no-color --quiet.\n"
@@ -205,6 +241,7 @@ WARN_CACHE_SAVE_FAILED = "[warning]Failed to save cache: {error}[/warning]"
 WARN_HTML_REPORT_OPEN_FAILED = (
     "[warning]Failed to open HTML report in browser: {path} ({error}).[/warning]"
 )
+WARN_COVERAGE_JOIN_IGNORED = "[warning]Coverage join ignored: {error}[/warning]"
 
 ERR_INVALID_OUTPUT_EXT = (
     "[error]Invalid {label} output extension: {path} "
@@ -320,6 +357,10 @@ def fmt_html_report_open_failed(*, path: Path, error: object) -> str:
     return WARN_HTML_REPORT_OPEN_FAILED.format(path=path, error=error)
 
 
+def fmt_coverage_join_ignored(error: object) -> str:
+    return WARN_COVERAGE_JOIN_IGNORED.format(error=error)
+
+
 def fmt_unreadable_source_in_gating(*, count: int) -> str:
     return ERR_UNREADABLE_SOURCE_IN_GATING.format(count=count)
 
@@ -374,15 +415,19 @@ def fmt_summary_compact_clones(
     block: int,
     segment: int,
     suppressed: int,
+    fixture_excluded: int,
     new: int,
 ) -> str:
-    return SUMMARY_COMPACT_CLONES.format(
-        function=function,
-        block=block,
-        segment=segment,
-        suppressed=suppressed,
-        new=new,
-    )
+    parts = [
+        f"Clones   func={function}",
+        f"block={block}",
+        f"seg={segment}",
+        f"suppressed={suppressed}",
+    ]
+    if fixture_excluded > 0:
+        parts.append(f"fixtures={fixture_excluded}")
+    parts.append(f"new={new}")
+    return "  ".join(parts)
 
 
 def fmt_summary_compact_metrics(
@@ -412,6 +457,63 @@ def fmt_summary_compact_metrics(
         grade=grade,
         overloaded_modules=overloaded_modules,
     )
+
+
+def fmt_summary_compact_adoption(
+    *,
+    param_permille: int,
+    return_permille: int,
+    docstring_permille: int,
+    any_annotation_count: int,
+) -> str:
+    return (
+        "Adoption"
+        f"  params={_format_permille_pct(param_permille)}"
+        f"  returns={_format_permille_pct(return_permille)}"
+        f"  docstrings={_format_permille_pct(docstring_permille)}"
+        f"  any={any_annotation_count}"
+    )
+
+
+def fmt_summary_compact_api_surface(
+    *,
+    public_symbols: int,
+    modules: int,
+    added: int,
+    breaking: int,
+) -> str:
+    return (
+        "Public API"
+        f"  symbols={public_symbols}"
+        f"  modules={modules}"
+        f"  breaking={breaking}"
+        f"  added={added}"
+    )
+
+
+def fmt_summary_compact_coverage_join(
+    *,
+    status: str,
+    overall_permille: int,
+    coverage_hotspots: int,
+    scope_gap_hotspots: int,
+    threshold_percent: int,
+    source_label: str,
+) -> str:
+    parts = [f"Coverage  status={status or 'unknown'}"]
+    if status == "ok":
+        parts.extend(
+            [
+                f"overall={_format_permille_pct(overall_permille)}",
+                f"coverage_hotspots={coverage_hotspots}",
+                f"threshold={threshold_percent}",
+            ]
+        )
+        if scope_gap_hotspots > 0:
+            parts.append(f"scope_gaps={scope_gap_hotspots}")
+    if source_label:
+        parts.append(f"source={source_label}")
+    return "  ".join(parts)
 
 
 _HEALTH_GRADE_STYLE: dict[str, str] = {
@@ -474,7 +576,13 @@ def fmt_summary_parsed(
 
 
 def fmt_summary_clones(
-    *, func: int, block: int, segment: int, suppressed: int, new: int
+    *,
+    func: int,
+    block: int,
+    segment: int,
+    suppressed: int,
+    fixture_excluded: int,
+    new: int,
 ) -> str:
     clone_parts = [
         f"{_v(func, 'bold yellow')} func",
@@ -485,8 +593,10 @@ def fmt_summary_clones(
     main = " \u00b7 ".join(clone_parts)
     quals = [
         f"{_v(suppressed, 'yellow')} suppressed",
-        f"{_v(new, 'bold red')} new",
     ]
+    if fixture_excluded > 0:
+        quals.append(f"{_v(fixture_excluded, 'yellow')} fixtures")
+    quals.append(f"{_v(new, 'bold red')} new")
     return f"  {'Clones':<{_L}}{main} ({', '.join(quals)})"
 
 
@@ -534,6 +644,74 @@ def fmt_metrics_dead_code(count: int, *, suppressed: int = 0) -> str:
                 f"  {'Dead code':<{_L}}[bold red]{count} found[/bold red]"
                 f"{suppressed_suffix}"
             )
+
+
+def _format_permille_pct(value: int) -> str:
+    return f"{value / 10.0:.1f}%"
+
+
+def fmt_metrics_adoption(
+    *,
+    param_permille: int,
+    return_permille: int,
+    docstring_permille: int,
+    any_annotation_count: int,
+) -> str:
+    parts = [
+        f"params {_format_permille_pct(param_permille)}",
+        f"returns {_format_permille_pct(return_permille)}",
+        f"docstrings {_format_permille_pct(docstring_permille)}",
+        f"Any {_v(any_annotation_count)}",
+    ]
+    return f"  {'Adoption':<{_L}}{' · '.join(parts)}"
+
+
+def fmt_metrics_api_surface(
+    *,
+    public_symbols: int,
+    modules: int,
+    added: int,
+    breaking: int,
+) -> str:
+    parts = [
+        f"{_v(public_symbols, 'bold cyan')} symbols",
+        f"{_v(modules, 'bold cyan')} modules",
+    ]
+    if breaking > 0 or added > 0:
+        parts.append(
+            " / ".join(
+                [
+                    f"{_v(breaking, 'bold red')} breaking",
+                    f"{_v(added, 'bold cyan')} added",
+                ]
+            )
+        )
+    return f"  {'Public API':<{_L}}{' · '.join(parts)}"
+
+
+def fmt_metrics_coverage_join(
+    *,
+    status: str,
+    overall_permille: int,
+    coverage_hotspots: int,
+    scope_gap_hotspots: int,
+    threshold_percent: int,
+    source_label: str,
+) -> str:
+    if status != "ok":
+        parts = ["join unavailable"]
+        if source_label:
+            parts.append(source_label)
+        return f"  {'Coverage':<{_L}}[yellow]{' · '.join(parts)}[/yellow]"
+    parts = [
+        f"{_format_permille_pct(overall_permille)} overall",
+        f"{_v(coverage_hotspots, 'bold red')} hotspots < {threshold_percent}%",
+    ]
+    if scope_gap_hotspots > 0:
+        parts.append(f"{_v(scope_gap_hotspots, 'bold yellow')} scope gaps")
+    if source_label:
+        parts.append(source_label)
+    return f"  {'Coverage':<{_L}}{' · '.join(parts)}"
 
 
 def fmt_metrics_overloaded_modules(

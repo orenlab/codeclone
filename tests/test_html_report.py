@@ -12,6 +12,7 @@ from typing import Any, cast
 
 import pytest
 
+from codeclone._html_badges import _tab_empty_info
 from codeclone.contracts import (
     CACHE_VERSION,
     DOCS_URL,
@@ -33,6 +34,7 @@ from codeclone.models import (
     StructuralFindingGroup,
     StructuralFindingOccurrence,
     Suggestion,
+    SuppressedCloneGroup,
 )
 from codeclone.report import build_block_group_facts
 from codeclone.report.json_contract import (
@@ -41,6 +43,7 @@ from codeclone.report.json_contract import (
     structural_group_id,
 )
 from codeclone.report.serialize import render_json_report_document
+from tests._assertions import assert_contains_all
 from tests._report_fixtures import (
     REPEATED_ASSERT_SOURCE,
     repeated_block_group_key,
@@ -866,6 +869,18 @@ def test_html_report_narrow_kpi_cards_keep_badges_inside_card() -> None:
     )
 
 
+def test_html_report_mobile_directory_hotspots_wrap_inside_summary_cards() -> None:
+    html = build_html_report(func_groups={}, block_groups={}, segment_groups={})
+    _assert_html_contains(
+        html,
+        "@media(max-width:768px){",
+        ".dir-hotspot-head{flex-wrap:wrap;align-items:flex-start}",
+        ".dir-hotspot-detail{flex-wrap:wrap;align-items:flex-start}",
+        ".dir-hotspot-bar-track{width:min(148px,42%);min-width:96px}",
+        ".dir-hotspot-meta{width:100%}",
+    )
+
+
 def test_html_report_table_css_matches_rendered_column_classes() -> None:
     html = build_html_report(func_groups={}, block_groups={}, segment_groups={})
     _assert_html_contains(
@@ -1356,6 +1371,66 @@ def test_html_report_segments_section(tmp_path: Path) -> None:
     assert "Segment clones" in html
 
 
+def test_html_report_clone_tab_renders_suppressed_golden_fixture_groups(
+    tmp_path: Path,
+) -> None:
+    fixture_file = tmp_path / "tests" / "fixtures" / "golden_project" / "alpha.py"
+    fixture_file_2 = tmp_path / "tests" / "fixtures" / "golden_project" / "beta.py"
+    fixture_file.parent.mkdir(parents=True, exist_ok=True)
+    fixture_file.write_text("def run():\n    return 1\n", "utf-8")
+    fixture_file_2.write_text("def run():\n    return 2\n", "utf-8")
+
+    suppressed_group = SuppressedCloneGroup(
+        kind="function",
+        group_key="tests.fixtures.golden.alpha:run",
+        items=(
+            {
+                "qualname": "tests.fixtures.golden.alpha:run",
+                "filepath": str(fixture_file),
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+                "stmt_count": 1,
+                "fingerprint": "fp-run",
+                "loc_bucket": "0-19",
+            },
+            {
+                "qualname": "tests.fixtures.golden.beta:run",
+                "filepath": str(fixture_file_2),
+                "start_line": 1,
+                "end_line": 2,
+                "loc": 2,
+                "stmt_count": 1,
+                "fingerprint": "fp-run",
+                "loc_bucket": "0-19",
+            },
+        ),
+        matched_patterns=("tests/fixtures/golden_*",),
+        suppression_rule="golden_fixture",
+        suppression_source="project_config",
+    )
+    report_document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": str(tmp_path)},
+        suppressed_clone_groups=(suppressed_group,),
+    )
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": str(tmp_path)},
+        report_document=report_document,
+    )
+
+    assert "Suppressed" in html
+    assert "golden_fixture@project_config" in html
+    assert "tests/fixtures/golden_*" in html
+    assert "No code clones detected" not in html
+
+
 def test_html_report_single_item_group(tmp_path: Path) -> None:
     f = tmp_path / "a.py"
     f.write_text("def f():\n    x = 1\n", "utf-8")
@@ -1641,15 +1716,15 @@ def test_html_report_metrics_risk_branches() -> None:
             dead_critical=2,
         ),
     )
-    assert "insight-risk" in html
-    assert 'stroke="var(--error)"' in html
-    assert "Cycles: 1; max dependency depth: 4." in html
-    assert "5 candidates total; 2 high-confidence items; 0 suppressed." in html
-    assert '<button class="main-tab" role="tab" data-tab="dead-code"' in html
-    assert '<svg class="main-tab-icon"' in html
-    assert (
-        '<span class="main-tab-label">Dead Code</span><span class="tab-count">2</span>'
-        in html
+    assert_contains_all(
+        html,
+        "insight-risk",
+        'stroke="var(--error)"',
+        "Cycles: 1; max dependency depth: 4.",
+        "5 candidates total; 2 high-confidence items; 0 suppressed.",
+        '<button class="main-tab" role="tab" data-tab="dead-code"',
+        '<svg class="main-tab-icon"',
+        '<span class="main-tab-label">Dead Code</span><span class="tab-count">2</span>',
     )
 
 
@@ -1826,6 +1901,423 @@ def test_html_report_renders_run_snapshot_from_canonical_inventory() -> None:
         expected_summary,
     )
     assert "Scan scope" not in html
+
+
+def test_html_report_executive_summary_includes_effective_analysis_profile() -> None:
+    report_document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={
+            "scan_root": "/repo/project",
+            "project_name": "project",
+            "min_loc": 5,
+            "min_stmt": 2,
+            "block_min_loc": 8,
+            "block_min_stmt": 3,
+            "segment_min_loc": 13,
+            "segment_min_stmt": 4,
+        },
+        metrics=_metrics_payload(
+            health_score=82,
+            health_grade="B",
+            complexity_max=12,
+            complexity_high_risk=0,
+            coupling_high_risk=0,
+            cohesion_low=0,
+            dep_cycles=[],
+            dep_max_depth=2,
+            dead_total=0,
+            dead_critical=0,
+        ),
+        inventory={
+            "files": {"total_found": 1, "analyzed": 1, "cached": 0, "skipped": 0},
+            "code": {"parsed_lines": 20, "functions": 1, "methods": 0, "classes": 0},
+            "file_list": ["/repo/project/pkg/a.py"],
+        },
+    )
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta=report_document["meta"],
+        metrics=report_document["metrics"],
+        report_document=report_document,
+    )
+
+    _assert_html_contains(
+        html,
+        "Executive Summary",
+        "Thresholds: func 5/2 · block 8/3 · seg 13/4",
+    )
+
+
+def test_html_report_overview_includes_adoption_and_api_summary_cluster() -> None:
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["coverage_adoption"] = {
+        "summary": {
+            "params_total": 4,
+            "params_annotated": 3,
+            "param_permille": 750,
+            "baseline_diff_available": True,
+            "param_delta": 125,
+            "returns_total": 2,
+            "returns_annotated": 1,
+            "return_permille": 500,
+            "return_delta": 250,
+            "public_symbol_total": 3,
+            "public_symbol_documented": 2,
+            "docstring_permille": 667,
+            "docstring_delta": 167,
+            "typing_any_count": 1,
+        },
+        "items": [],
+    }
+    metrics["api_surface"] = {
+        "summary": {
+            "enabled": True,
+            "baseline_diff_available": True,
+            "modules": 1,
+            "public_symbols": 2,
+            "added": 1,
+            "breaking": 1,
+            "strict_types": False,
+        },
+        "items": [],
+    }
+
+    html = _render_metrics_html(metrics)
+
+    _assert_html_contains(
+        html,
+        "Adoption &amp; API",
+        "Adoption coverage",
+        "overview-fact-list",
+        "Param annotations",
+        "75.0%",
+        "+12.5pt",
+        "Return annotations",
+        "50.0%",
+        "+25.0pt",
+        "Docstrings",
+        "66.7%",
+        "+16.7pt",
+        "Typed as Any",
+        "Public API surface",
+        "Public symbols",
+        "Modules",
+        "Breaking changes",
+        "Added symbols",
+    )
+
+
+def test_html_report_quality_includes_coverage_join_subtab() -> None:
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["coverage_join"] = {
+        "summary": {
+            "status": "ok",
+            "source": "/outside/project/coverage.xml",
+            "files": 1,
+            "units": 2,
+            "measured_units": 1,
+            "overall_executable_lines": 10,
+            "overall_covered_lines": 7,
+            "overall_permille": 700,
+            "missing_from_report_units": 1,
+            "coverage_hotspots": 1,
+            "scope_gap_hotspots": 0,
+            "hotspot_threshold_percent": 50,
+        },
+        "items": [
+            {
+                "relative_path": "pkg/mod.py",
+                "qualname": "pkg.mod:run",
+                "start_line": 10,
+                "end_line": 20,
+                "cyclomatic_complexity": 18,
+                "risk": "high",
+                "executable_lines": 4,
+                "covered_lines": 1,
+                "coverage_permille": 250,
+                "coverage_status": "measured",
+                "coverage_hotspot": True,
+                "scope_gap_hotspot": False,
+            },
+            {
+                "relative_path": "pkg/other.py",
+                "qualname": "pkg.other:skip",
+                "start_line": 1,
+                "end_line": 4,
+                "cyclomatic_complexity": 2,
+                "risk": "low",
+                "executable_lines": 0,
+                "covered_lines": 0,
+                "coverage_permille": 0,
+                "coverage_status": "missing_from_report",
+                "coverage_hotspot": False,
+                "scope_gap_hotspot": False,
+            },
+        ],
+    }
+
+    html = _render_metrics_html(metrics)
+
+    _assert_html_contains(
+        html,
+        'data-subtab-group="quality"',
+        'data-clone-tab="coverage-join"',
+        "Coverage Join",
+        "Status",
+        "Joined",
+        "Overall coverage",
+        "Coverage hotspots",
+        "Scope gaps",
+        "Measured units",
+        "70.0%",
+        "coverage.xml",
+        "pkg.mod:run",
+        "Coverage hotspots: 1; scope gaps: 0.",
+    )
+    assert (
+        '<span class="main-tab-label">Quality</span><span class="tab-count">1</span>'
+        in html
+    )
+
+
+def test_html_report_quality_coverage_join_empty_and_invalid_states() -> None:
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["coverage_join"] = {
+        "summary": {
+            "status": "invalid",
+            "source": "coverage.xml",
+            "invalid_reason": "broken xml",
+            "hotspot_threshold_percent": 50,
+        },
+        "items": [],
+    }
+
+    invalid_html = _render_metrics_html(metrics)
+
+    _assert_html_contains(
+        invalid_html,
+        'data-clone-tab="coverage-join"',
+        "Coverage Join is unavailable for this run.",
+        "Source: coverage.xml",
+        "broken xml",
+        "Coverage join unavailable.",
+    )
+    invalid_panel = invalid_html.split('data-clone-panel="coverage-join"', 1)[1]
+    invalid_panel = invalid_panel.split(
+        '<div class="tab-panel" id="panel-dependencies"',
+        1,
+    )[0]
+    assert "Nothing to report - keep up the good work." not in invalid_panel
+
+    metrics["coverage_join"] = {
+        "summary": {
+            "status": "ok",
+            "source": "",
+            "measured_units": 0,
+            "overall_permille": 0,
+            "missing_from_report_units": 0,
+            "coverage_hotspots": 0,
+            "scope_gap_hotspots": 0,
+            "hotspot_threshold_percent": 80,
+        },
+        "items": [],
+    }
+
+    empty_html = _render_metrics_html(metrics)
+
+    _assert_html_contains(
+        empty_html,
+        'data-clone-tab="coverage-join"',
+        "Joined",
+        "0.0%",
+        "Measured units",
+        "No medium/high-risk functions need joined-coverage follow-up.",
+        "&lt; 80%",
+        (
+            "No risky functions were below threshold or missing from the "
+            "supplied coverage.xml."
+        ),
+    )
+
+
+def test_html_report_quality_coverage_join_edge_states() -> None:
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["coverage_join"] = {
+        "summary": {
+            "status": "invalid",
+            "source": "",
+            "invalid_reason": None,
+        },
+        "items": [],
+    }
+
+    invalid_html = _render_metrics_html(metrics)
+    coverage_join_panel = invalid_html.split('data-clone-panel="coverage-join"', 1)[1]
+    coverage_join_panel = coverage_join_panel.split(
+        '<div class="tab-panel" id="panel-dependencies"',
+        1,
+    )[0]
+    assert "Source:" not in coverage_join_panel
+    assert "tab-empty-desc" not in coverage_join_panel
+
+    metrics["coverage_join"] = {
+        "summary": {
+            "status": "ok",
+            "source": "/outside/project/coverage.xml",
+            "files": 1,
+            "units": 1,
+            "measured_units": 0,
+            "overall_executable_lines": 0,
+            "overall_covered_lines": 0,
+            "overall_permille": 0,
+            "missing_from_report_units": 1,
+            "coverage_hotspots": 0,
+            "scope_gap_hotspots": 1,
+            "hotspot_threshold_percent": 50,
+        },
+        "items": [
+            {
+                "relative_path": "pkg/mod.py",
+                "qualname": "pkg.mod:run",
+                "start_line": 10,
+                "end_line": 10,
+                "cyclomatic_complexity": 12,
+                "risk": "high",
+                "executable_lines": 0,
+                "covered_lines": 0,
+                "coverage_permille": 0,
+                "coverage_status": "missing_from_report",
+                "coverage_hotspot": False,
+                "scope_gap_hotspot": True,
+            }
+        ],
+    }
+
+    missing_html = _render_metrics_html(metrics)
+    _assert_html_contains(
+        missing_html,
+        "pkg.mod:run",
+        "pkg/mod.py:10",
+        "not in coverage.xml",
+        "n/a",
+        ">high</span>",
+    )
+    assert "pkg/mod.py:10-10" not in missing_html
+
+
+def test_tab_empty_info_description_and_empty_variants() -> None:
+    desc_html = _tab_empty_info(
+        "Coverage Join is unavailable for this run.",
+        description="Run with --coverage to populate this section.",
+    )
+    _assert_html_contains(
+        desc_html,
+        "Coverage Join is unavailable for this run.",
+        "Run with --coverage to populate this section.",
+        "tab-empty-desc-detail",
+    )
+
+    empty_html = _tab_empty_info("Coverage Join is unavailable for this run.")
+    _assert_html_contains(empty_html, "Coverage Join is unavailable for this run.")
+    assert "tab-empty-desc" not in empty_html
+
+
+def test_html_report_overview_adoption_and_api_empty_state_branches() -> None:
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["coverage_adoption"] = {
+        "summary": {
+            "param_permille": 1000,
+            "return_permille": 1000,
+            "docstring_permille": 1000,
+            "typing_any_count": 0,
+        },
+        "items": [],
+    }
+    metrics["api_surface"] = {"summary": {"enabled": False}, "items": []}
+
+    disabled_html = _render_metrics_html(metrics)
+
+    _assert_html_contains(
+        disabled_html,
+        "Typed as Any",
+        "overview-fact-value--good",
+        "Disabled in this run.",
+        "Enable via",
+        "--api-surface",
+    )
+
+    metrics["api_surface"] = {
+        "summary": {
+            "enabled": True,
+            "modules": 1,
+            "public_symbols": 2,
+            "strict_types": True,
+        },
+        "items": [],
+    }
+
+    strict_html = _render_metrics_html(metrics)
+    _assert_html_contains(strict_html, "Strict mode", "enabled")
 
 
 def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
@@ -2228,6 +2720,41 @@ def test_html_report_provenance_badges_cover_mismatch_and_untrusted_metrics() ->
     )
 
 
+def test_html_report_provenance_table_values_use_unified_badges() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={
+            "python_tag": "cp313",
+            "baseline_python_tag": "cp312",
+            "baseline_loaded": False,
+            "baseline_status": "missing",
+            "baseline_payload_sha256_verified": False,
+            "metrics_baseline_loaded": True,
+            "metrics_baseline_status": "missing",
+            "metrics_baseline_payload_sha256_verified": False,
+            "cache_status": "ok",
+            "cache_used": True,
+        },
+    )
+    _assert_html_contains(
+        html,
+        'class="prov-badge prov-badge--amber prov-badge--inline"',
+        'class="prov-badge prov-badge--red prov-badge--inline"',
+        'class="prov-badge prov-badge--green prov-badge--inline"',
+        '<span class="prov-badge-val">missing</span>',
+        '<span class="prov-badge-val">not loaded</span>',
+        '<span class="prov-badge-val">unverified</span>',
+        '<span class="prov-badge-val">ok</span>',
+        '<span class="prov-badge-val">hit</span>',
+        '<span class="prov-badge-val">runtime cp313</span>',
+    )
+    assert 'class="meta-status' not in html
+    assert 'class="meta-bool' not in html
+    assert 'class="prov-match' not in html
+
+
 def test_html_report_provenance_handles_non_boolean_baseline_loaded() -> None:
     html = build_html_report(
         func_groups={},
@@ -2245,6 +2772,160 @@ def test_html_report_provenance_handles_non_boolean_baseline_loaded() -> None:
         '<span class="prov-badge-lbl">Schema</span>',
     )
     assert '<span class="prov-badge-lbl">Baseline</span>' not in html
+
+
+def test_html_report_footer_uses_report_issue_link_text() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    _assert_html_contains(html, ">Docs</a> · ", ">Report Issue</a>")
+    assert ">Issues</a>" not in html
+
+
+def test_html_report_uses_numeric_font_for_overview_card_values() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    numeric_font_stack = (
+        '--font-numeric:"JetBrains Mono",ui-monospace,'
+        'SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;'
+    )
+    _assert_html_contains(
+        html,
+        numeric_font_stack,
+        ".health-ring-score{font-family:var(--font-numeric);",
+        ".meta-item .meta-value{font-family:var(--font-numeric);",
+        ".overview-stat-value{font-family:var(--font-numeric);",
+    )
+
+
+def test_html_report_uses_jetbrains_mono_for_stat_card_content() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    _assert_html_contains(
+        html,
+        ".meta-item{padding:var(--sp-3) var(--sp-4);",
+        "font-family:var(--font-mono)}",
+        ".kpi-micro{display:inline-flex;align-items:center;gap:3px;",
+        "font-family:inherit}",
+        ".kpi-micro-val{font-family:inherit;font-weight:500;",
+        ".overview-summary-item{background:var(--bg-surface);",
+        "border:1px solid color-mix(in srgb,var(--border) 78%,transparent);",
+        "padding:var(--sp-4)}",
+        ".overview-summary-label{display:flex;align-items:center;gap:var(--sp-2);",
+        ("border-bottom:1px solid color-mix(in srgb,var(--border) 58%,transparent);"),
+        "font-family:var(--font-display)}",
+        (
+            ".overview-summary-item > :not(.overview-summary-label)"
+            "{font-family:var(--font-mono)}"
+        ),
+    )
+
+
+def test_html_report_uses_jetbrains_mono_for_health_radar_labels() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    _assert_html_contains(
+        html,
+        ".health-radar text{font-size:10.5px;font-family:var(--font-mono);",
+        ".health-radar .radar-score{font-weight:600;font-variant-numeric:tabular-nums;",
+    )
+
+
+def test_html_report_empty_states_use_ui_font_stack() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    _assert_html_contains(
+        html,
+        ".tab-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;",
+        "font-family:var(--font-sans)}",
+        ".tab-empty-title{font-size:1rem;font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-1);",
+        "font-family:var(--font-display)}",
+        ".tab-empty-desc{font-size:.85rem;color:var(--text-muted);max-width:320px;font-family:var(--font-sans)}",
+        ".inline-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;",
+        "font-family:var(--font-sans)}",
+    )
+
+
+def test_html_report_uses_shared_card_micro_interactions() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    _assert_html_contains(
+        html,
+        ".meta-item,.overview-row,.overview-summary-item,.group,.suggestion-card,.sf-card,.prov-section{",
+        "--card-hover-accent:var(--accent-primary);",
+        "@media (hover:hover) and (pointer:fine){",
+        "transform:translateY(-2px);",
+        (
+            "border-color:color-mix(in oklch,var(--card-hover-accent) "
+            "22%,var(--border-strong));"
+        ),
+        "@media (prefers-reduced-motion:reduce){",
+        "transform:none}",
+    )
+
+
+def test_html_report_dead_code_cards_do_not_render_negative_active_count() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=_metrics_payload(
+            health_score=90,
+            health_grade="A",
+            complexity_max=1,
+            complexity_high_risk=0,
+            coupling_high_risk=0,
+            cohesion_low=0,
+            dep_cycles=[],
+            dep_max_depth=0,
+            dead_total=0,
+            dead_critical=0,
+            dead_suppressed=1,
+        ),
+    )
+    _assert_html_contains(
+        html,
+        '<span class="kpi-micro-val">0</span><span class="kpi-micro-lbl">active</span>',
+    )
+    assert (
+        '<span class="kpi-micro-val">-1</span><span class="kpi-micro-lbl">active</span>'
+        not in html
+    )
+
+
+def test_html_report_findings_empty_state_keeps_intro_banner() -> None:
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+    _assert_html_contains(
+        html,
+        "What are structural findings?",
+        (
+            "Repeated non-overlapping branch-body shapes detected inside "
+            "individual functions."
+        ),
+        "No structural findings detected.",
+    )
 
 
 def test_html_report_dependency_hubs_deterministic_tie_order() -> None:

@@ -68,6 +68,12 @@ For clone results, CodeClone also carries novelty-aware metadata when known:
 This improves usefulness in IDE/code-scanning flows that distinguish new vs
 known findings.
 
+Coverage join can materialize `coverage` / `coverage_hotspot` and
+`coverage_scope_gap` design findings when the canonical report already
+contains valid `metrics.families.coverage_join` facts. SARIF projects those
+findings like other design findings; it does not parse Cobertura XML or create
+coverage-specific analysis truth.
+
 ## Rule metadata
 
 Rule records are intentionally richer than a minimal SARIF export.

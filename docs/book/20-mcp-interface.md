@@ -55,18 +55,31 @@ Current server characteristics:
     - `off`
       `refresh` is rejected in MCP because the server is read-only.
 - summary payload:
-    - `run_id`, `version`, `schema`, `mode`
+    - `run_id`, `version`, `schema`, `mode`, compact `analysis_profile`
+    - `health_scope` explains what the health score covers
+    - `focus` explains the active summary/triage lens
     - `baseline`, `metrics_baseline`, `cache`
+    - untrusted baseline comparisons stay compact but explicit through
+      `baseline.compared_without_valid_baseline`,
+      `baseline.baseline_python_tag`, and `baseline.runtime_python_tag`
     - `cache.freshness` classifies summary cache reuse as `fresh`, `mixed`,
       or `reused`
     - flattened `inventory` (`files`, `lines`, `functions`, `classes`)
-    - flattened `findings` (`total`, `new`, `known`, `by_family`, `production`)
-    - flattened `diff` (`new_clones`, `health_delta`)
+    - flattened `findings` (`total`, `new`, `known`, `by_family`, `production`,
+      `new_by_source_kind`)
+    - flattened `diff` (`new_clones`, `health_delta`,
+      `typing_param_permille_delta`, `typing_return_permille_delta`,
+      `docstring_permille_delta`, `api_breaking_changes`, `new_api_symbols`)
+    - optional `coverage_join` when an analysis request included
+      `coverage_xml` (`status`, `overall_permille`, `coverage_hotspots`,
+      `scope_gap_hotspots`, `hotspot_threshold_percent`)
     - `warnings`, `failures`
     - `analyze_changed_paths` is intentionally more compact than `get_run_summary`:
-      it returns `changed_files`, `health`, `health_delta`, `verdict`,
-      `new_findings`, `resolved_findings`, and an empty `changed_findings`
-      placeholder, while detailed changed payload stays in
+      it returns `changed_files`, compact `baseline`, `focus`, `health_scope`,
+      `health`, `health_delta`, `verdict`, `new_findings`,
+      `new_by_source_kind`, `resolved_findings`, and an empty
+      `changed_findings` placeholder, while
+      detailed changed payload stays in
       `get_report_section(section="changed")`
 - workflow guidance:
     - the MCP surface is intentionally agent-guiding rather than list-first
@@ -83,6 +96,10 @@ Current server characteristics:
       locations plus remediation
     - `detail_level="full"` keeps the compatibility-oriented payload,
       including `priority_factors`, `items`, and per-location `uri`
+    - empty design `check_*` responses may include a compact
+      `threshold_context` (`metric`, `threshold`, `measured_units`,
+      `highest_below_threshold`) so agents can tell whether the run is truly
+      quiet or just below the active threshold
 
 The MCP layer does not introduce a separate analysis engine. It calls the
 current CodeClone pipeline and reuses the canonical report document already
@@ -92,29 +109,29 @@ produced by the report contract.
 
 Current tool set (`21` tools):
 
-| Tool                     | Key parameters                                                                          | Purpose                                                                                            |
-|--------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
-| `analyze_repository`     | absolute `root`, `analysis_mode`, thresholds, cache/baseline paths                      | Full analysis → compact summary; then `get_run_summary` or `get_production_triage`                 |
-| `analyze_changed_paths`  | absolute `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`                     | Diff-aware analysis → compact changed-files snapshot                                               |
-| `get_run_summary`        | `run_id`                                                                                | Cheapest run snapshot: health, findings, baseline, inventory                                       |
-| `get_production_triage`  | `run_id`, `max_hotspots`, `max_suggestions`                                             | Production-first view: health, hotspots, suggestions                                               |
-| `help`                   | `topic`, `detail`                                                                       | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope |
-| `compare_runs`           | `run_id_before`, `run_id_after`, `focus`                                                | Run-to-run delta: regressions, improvements, health change                                         |
-| `evaluate_gates`         | `run_id`, gate thresholds                                                               | Preview CI gating decisions                                                                        |
-| `get_report_section`     | `run_id`, `section`, `family`, `path`, `offset`, `limit`                                | Read report sections; `metrics_detail` is paginated with family/path filters                       |
-| `list_findings`          | `family`, `severity`, `novelty`, `sort_by`, `detail_level`, `changed_paths`, pagination | Filtered, paginated findings; use after hotspots or `check_*`                                      |
-| `get_finding`            | `finding_id`, `run_id`, `detail_level`                                                  | Single finding detail by id; defaults to `normal`                                                  |
-| `get_remediation`        | `finding_id`, `run_id`, `detail_level`                                                  | Remediation payload for one finding                                                                |
-| `list_hotspots`          | `kind`, `run_id`, `detail_level`, `changed_paths`, `limit`                              | Priority-ranked hotspot views; preferred before broad listing                                      |
-| `check_clones`           | `run_id`, `root`, `path`, `clone_type`, `source_kind`, `detail_level`                   | Clone findings only; `health.dimensions` includes only `clones`                                    |
-| `check_complexity`       | `run_id`, `root`, `path`, `min_complexity`, `detail_level`                              | Complexity hotspots only                                                                           |
-| `check_coupling`         | `run_id`, `root`, `path`, `detail_level`                                                | Coupling hotspots only                                                                             |
-| `check_cohesion`         | `run_id`, `root`, `path`, `detail_level`                                                | Cohesion hotspots only                                                                             |
-| `check_dead_code`        | `run_id`, `root`, `path`, `min_severity`, `detail_level`                                | Dead-code findings only                                                                            |
-| `generate_pr_summary`    | `run_id`, `changed_paths`, `git_diff_ref`, `format`                                     | PR-friendly markdown or JSON summary                                                               |
-| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note`                                                          | Session-local review marker (in-memory)                                                            |
-| `list_reviewed_findings` | `run_id`                                                                                | List reviewed findings for a run                                                                   |
-| `clear_session_runs`     | none                                                                                    | Reset in-memory runs and session state                                                             |
+| Tool                     | Key parameters                                                                                     | Purpose                                                                                                      |
+|--------------------------|----------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|
+| `analyze_repository`     | absolute `root`, `analysis_mode`, thresholds, `api_surface`, `coverage_xml`, cache/baseline paths  | Full analysis → compact summary; then `get_run_summary` or `get_production_triage`                           |
+| `analyze_changed_paths`  | absolute `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, `api_surface`, `coverage_xml` | Diff-aware analysis → compact changed-files snapshot                                                         |
+| `get_run_summary`        | `run_id`                                                                                           | Cheapest run snapshot: health, findings, baseline, inventory, active thresholds                              |
+| `get_production_triage`  | `run_id`, `max_hotspots`, `max_suggestions`                                                        | Production-first view: health, hotspots, suggestions, active thresholds                                      |
+| `help`                   | `topic`, `detail`                                                                                  | Semantic guide for workflow, analysis profile, baseline, coverage, suppressions, review state, changed-scope |
+| `compare_runs`           | `run_id_before`, `run_id_after`, `focus`                                                           | Run-to-run delta: regressions, improvements, health change                                                   |
+| `evaluate_gates`         | `run_id`, gate thresholds, `fail_on_untested_hotspots`, `coverage_min`                             | Preview CI gating decisions                                                                                  |
+| `get_report_section`     | `run_id`, `section`, `family`, `path`, `offset`, `limit`                                           | Read report sections; `metrics_detail` is paginated with family/path filters                                 |
+| `list_findings`          | `family`, `severity`, `novelty`, `sort_by`, `detail_level`, `changed_paths`, pagination            | Filtered, paginated findings; use after hotspots or `check_*`                                                |
+| `get_finding`            | `finding_id`, `run_id`, `detail_level`                                                             | Single finding detail by id; defaults to `normal`                                                            |
+| `get_remediation`        | `finding_id`, `run_id`, `detail_level`                                                             | Remediation payload for one finding                                                                          |
+| `list_hotspots`          | `kind`, `run_id`, `detail_level`, `changed_paths`, `limit`                                         | Priority-ranked hotspot views; preferred before broad listing                                                |
+| `check_clones`           | `run_id`, `root`, `path`, `clone_type`, `source_kind`, `detail_level`                              | Clone findings only; `health.dimensions` includes only `clones`                                              |
+| `check_complexity`       | `run_id`, `root`, `path`, `min_complexity`, `detail_level`                                         | Complexity hotspots only                                                                                     |
+| `check_coupling`         | `run_id`, `root`, `path`, `detail_level`                                                           | Coupling hotspots only                                                                                       |
+| `check_cohesion`         | `run_id`, `root`, `path`, `detail_level`                                                           | Cohesion hotspots only                                                                                       |
+| `check_dead_code`        | `run_id`, `root`, `path`, `min_severity`, `detail_level`                                           | Dead-code findings only                                                                                      |
+| `generate_pr_summary`    | `run_id`, `changed_paths`, `git_diff_ref`, `format`                                                | PR-friendly markdown or JSON summary                                                                         |
+| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note`                                                                     | Session-local review marker (in-memory)                                                                      |
+| `list_reviewed_findings` | `run_id`                                                                                           | List reviewed findings for a run                                                                             |
+| `clear_session_runs`     | none                                                                                               | Reset in-memory runs and session state                                                                       |
 
 All tools are read-only except `mark_finding_reviewed` and `clear_session_runs`
 (session-local, in-memory). `check_*` tools query stored runs — call
@@ -127,6 +144,10 @@ Recommended workflow:
 3. `list_hotspots` or `check_*`
 4. `get_finding` → `get_remediation`
 5. `generate_pr_summary(format="markdown")`
+
+`metrics_detail` families currently include canonical health/quality families
+plus `overloaded_modules`, `coverage_adoption`, `coverage_join`, and
+`api_surface`.
 
 For analysis sensitivity, the intended model is:
 
@@ -187,6 +208,17 @@ state behind `codeclone://latest/...`.
     - baseline trust semantics
     - cache semantics
     - canonical report contract
+- `coverage_xml` is resolved relative to the absolute root when it is not
+  already absolute. It is a current-run Cobertura input only; MCP must never
+  write it to baseline/cache/report artifacts or treat it as baseline truth.
+- When `respect_pyproject=true`, MCP also respects `golden_fixture_paths`.
+  Clone groups excluded by that policy are omitted from active clone/gate
+  projections but remain available in the canonical report under the optional
+  `findings.groups.clones.suppressed.*` bucket.
+- Invalid Cobertura XML during `analyze_*` does not fail analysis; the stored
+  run carries `coverage_join.status="invalid"` plus `invalid_reason`.
+  `evaluate_gates(fail_on_untested_hotspots=true)` on that run is a contract
+  error because hotspot gating requires a valid join.
 - Inline MCP design-threshold parameters (`complexity_threshold`,
   `coupling_threshold`, `cohesion_threshold`) define the canonical design
   finding universe of that run and are recorded in
@@ -204,6 +236,10 @@ state behind `codeclone://latest/...`.
 - `metrics_detail(family="overloaded_modules")` exposes the canonical report-only
   module-hotspot layer, but does not promote it into findings, hotlists, or
   gate semantics.
+- `metrics_detail(family="coverage_join")` exposes the canonical current-run
+  coverage join summary/items, including measured coverage hotspots and
+  coverage scope gaps. `evaluate_gates(fail_on_untested_hotspots=true)`
+  requires a stored run created with valid `coverage_xml`.
 - `get_remediation` is a deterministic MCP projection over existing
   suggestions/explainability data, not a second remediation engine.
 - `analysis_mode="clones_only"` must mirror the same metric/dependency
@@ -220,6 +256,8 @@ state behind `codeclone://latest/...`.
 - `analyze_changed_paths` requires `changed_paths` or `git_diff_ref`.
 - `analyze_repository` and `analyze_changed_paths` require an absolute `root`;
   relative roots like `.` are rejected.
+- `git_diff_ref` is validated as a safe single revision expression before
+  invoking `git diff`.
 - `changed_paths` is a structured `list[str]` of repo-relative paths, not a
   comma-separated string payload.
 - `analyze_changed_paths` may return the same `run_id` as a previous run when
@@ -261,18 +299,22 @@ state behind `codeclone://latest/...`.
   it returns `mixed` when run-to-run finding deltas and `health_delta` disagree.
 - `analysis_mode="clones_only"` keeps clone findings fully usable, but MCP
   surfaces mark `health` as unavailable instead of fabricating zeroed metrics.
+- `coverage_xml` requires `analysis_mode="full"` because coverage join depends
+  on function-span metrics.
 - `codeclone://latest/triage` is a latest-only resource; run-specific triage is
   available via the tool, not via a `codeclone://runs/{run_id}/...` resource URI.
 
 ## Failure modes
 
-| Condition                                  | Behavior                                          |
-|--------------------------------------------|---------------------------------------------------|
-| `mcp` extra not installed                  | `codeclone-mcp` prints install hint and exits `2` |
-| Invalid root path / invalid numeric config | service raises contract error                     |
-| Requested run missing                      | service raises run-not-found error                |
-| Requested finding missing                  | service raises finding-not-found error            |
-| Unsupported report section/resource suffix | service raises contract error                     |
+| Condition                                         | Behavior                                          |
+|---------------------------------------------------|---------------------------------------------------|
+| `mcp` extra not installed                         | `codeclone-mcp` prints install hint and exits `2` |
+| Invalid root path / invalid numeric config        | service raises contract error                     |
+| `coverage_xml` with `analysis_mode="clones_only"` | service raises contract error                     |
+| Coverage hotspot gate without valid coverage join | service raises contract error                     |
+| Requested run missing                             | service raises run-not-found error                |
+| Requested finding missing                         | service raises finding-not-found error            |
+| Unsupported report section/resource suffix        | service raises contract error                     |
 
 ## Determinism / canonicalization
 
@@ -282,6 +324,8 @@ state behind `codeclone://latest/...`.
 - No MCP-only heuristics may change analysis or gating semantics.
 - MCP must not re-synthesize design findings from raw metrics after the run;
   threshold-aware design findings belong to the canonical report document.
+- Coverage join ordering and hotspot gates are inherited from canonical
+  `metrics.families.coverage_join` facts.
 
 ## Locked by tests
 

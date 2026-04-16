@@ -10,6 +10,15 @@ const HELP_TOPICS = [
     "changed_scope",
 ];
 
+const OPTIONAL_HELP_TOPICS = [
+    {topic: "coverage", minimumVersion: "2.0.0b5"},
+];
+
+const KNOWN_HELP_TOPICS = [
+    ...HELP_TOPICS,
+    ...OPTIONAL_HELP_TOPICS.map((entry) => entry.topic),
+];
+
 const HOTSPOT_GROUPS = [
     {id: "newRegressions", label: "New Regressions", icon: "diff-added"},
     {id: "productionHotspots", label: "Production Hotspots", icon: "target"},
@@ -104,6 +113,8 @@ const WORKSPACE_STATE_LAST_HELP_TOPIC = "codeclone.lastHelpTopic";
 
 module.exports = {
     HELP_TOPICS,
+    KNOWN_HELP_TOPICS,
+    OPTIONAL_HELP_TOPICS,
     ANALYSIS_PROFILE_OPTIONS,
     HOTSPOT_GROUPS,
     HOTSPOT_FOCUS_MODES,

@@ -291,6 +291,21 @@ def test_process_parallel_failure_large_batch_invokes_fallback_callback(
     assert result.files_skipped == 0
 
 
+def test_process_parallel_executor_analyzes_real_files(tmp_path: Path) -> None:
+    boot, discovery, cache, filepaths = _build_large_batch_case(tmp_path)
+
+    result = pipeline.process(
+        boot=boot,
+        discovery=discovery,
+        cache=cache,
+    )
+
+    assert result.files_analyzed == len(filepaths)
+    assert result.files_skipped == 0
+    assert result.failed_files == ()
+    assert cache.get_file_entry(filepaths[0]) is not None
+
+
 def test_process_cache_put_file_entry_fallback_without_source_stats_support(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

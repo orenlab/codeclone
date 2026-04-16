@@ -1,6 +1,6 @@
 {
   "name": "codeclone",
-  "version": "2.0.0-b4.0",
+  "version": "2.0.0-b5.0",
   "description": "Baseline-aware structural code quality analysis for Codex through the local CodeClone MCP server.",
   "author": {
     "name": "Den Rozhnovskiy",
@@ -21,7 +21,7 @@
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
-  "instructions": "You have access to CodeClone through the local CodeClone MCP server. Use MCP tools only. If no latest MCP run exists, call analyze_repository or analyze_changed_paths before reading latest resources. Start with the default profile, prefer get_production_triage after analysis, use analyze_changed_paths for diffs, and never fall back to CLI, local report files, or repository mutation.",
+  "instructions": "You have access to CodeClone through the local CodeClone MCP server. Use MCP tools only. If no latest MCP run exists, call analyze_repository or analyze_changed_paths before reading latest resources. Start with the default profile, prefer get_production_triage after analysis, use analyze_changed_paths for diffs, use get_report_section(section=\"metrics\") for adoption/API/coverage facts, call help(topic=\"coverage\") when external coverage semantics matter, and never fall back to CLI, local report files, or repository mutation.",
   "interface": {
     "displayName": "CodeClone",
     "shortDescription": "Structural code quality analysis for Python.",

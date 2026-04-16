@@ -47,6 +47,7 @@ from ._cli_runtime import (
 )
 from ._coerce import as_float as _as_float
 from ._coerce import as_int as _as_int
+from ._git_diff import validate_git_diff_ref
 from .baseline import Baseline
 from .cache import Cache, CacheStatus
 from .contracts import (
@@ -91,7 +92,7 @@ from .domain.source_scope import (
     SOURCE_KIND_PRODUCTION,
     SOURCE_KIND_TESTS,
 )
-from .models import MetricsDiff, ProjectMetrics, Suggestion
+from .models import CoverageJoinResult, MetricsDiff, ProjectMetrics, Suggestion
 from .pipeline import (
     GatingResult,
     MetricGateConfig,
@@ -131,6 +132,7 @@ HelpTopic = Literal[
     "analysis_profile",
     "suppressions",
     "baseline",
+    "coverage",
     "latest_runs",
     "review_state",
     "changed_scope",
@@ -140,8 +142,11 @@ MetricsDetailFamily = Literal[
     "complexity",
     "coupling",
     "cohesion",
+    "coverage_adoption",
+    "coverage_join",
     "dependencies",
     "dead_code",
+    "api_surface",
     "god_modules",
     "overloaded_modules",
     "health",
@@ -157,9 +162,15 @@ ReportSection = Literal[
     "changed",
     "integrity",
 ]
+HealthScope = Literal["repository"]
+SummaryFocus = Literal["repository", "production", "changed_paths"]
 
 _LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
 _REPORT_DUMMY_PATH = Path(".cache/codeclone/report.json")
+_HEALTH_SCOPE_REPOSITORY: Final[HealthScope] = "repository"
+_FOCUS_REPOSITORY: Final[SummaryFocus] = "repository"
+_FOCUS_PRODUCTION: Final[SummaryFocus] = "production"
+_FOCUS_CHANGED_PATHS: Final[SummaryFocus] = "changed_paths"
 _MCP_CONFIG_KEYS = frozenset(
     {
         "min_loc",
@@ -174,6 +185,10 @@ _MCP_CONFIG_KEYS = frozenset(
         "baseline",
         "max_baseline_size_mb",
         "metrics_baseline",
+        "api_surface",
+        "coverage_xml",
+        "coverage_min",
+        "golden_fixture_paths",
     }
 )
 _RESOURCE_SECTION_MAP: Final[dict[str, ReportSection]] = {
@@ -224,6 +239,7 @@ _VALID_HELP_TOPICS = frozenset(
         "analysis_profile",
         "suppressions",
         "baseline",
+        "coverage",
         "latest_runs",
         "review_state",
         "changed_scope",
@@ -279,13 +295,36 @@ _CHECK_TO_DIMENSION: Final[dict[str, str]] = {
     "complexity": "complexity",
     "clones": "clones",
 }
+_DESIGN_CHECK_CONTEXT: Final[dict[str, dict[str, object]]] = {
+    "complexity": {
+        "category": CATEGORY_COMPLEXITY,
+        "metric": "cyclomatic_complexity",
+        "operator": ">",
+        "default_threshold": DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+    },
+    "coupling": {
+        "category": CATEGORY_COUPLING,
+        "metric": "cbo",
+        "operator": ">",
+        "default_threshold": DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+    },
+    "cohesion": {
+        "category": CATEGORY_COHESION,
+        "metric": "lcom4",
+        "operator": ">=",
+        "default_threshold": DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+    },
+}
 _VALID_METRICS_DETAIL_FAMILIES = frozenset(
     {
         "complexity",
         "coupling",
         "cohesion",
+        "coverage_adoption",
+        "coverage_join",
         "dependencies",
         "dead_code",
+        "api_surface",
         "god_modules",
         "overloaded_modules",
         "health",
@@ -321,6 +360,14 @@ _BASELINE_DOC_LINK: Final[tuple[str, str]] = (
 _CONFIG_DOC_LINK: Final[tuple[str, str]] = (
     "Config and defaults",
     f"{_MCP_BOOK_URL}04-config-and-defaults/",
+)
+_REPORT_DOC_LINK: Final[tuple[str, str]] = (
+    "Report contract",
+    f"{_MCP_BOOK_URL}08-report/",
+)
+_CLI_DOC_LINK: Final[tuple[str, str]] = (
+    "CLI contract",
+    f"{_MCP_BOOK_URL}09-cli/",
 )
 _PIPELINE_DOC_LINK: Final[tuple[str, str]] = (
     "Core pipeline",
@@ -524,6 +571,49 @@ _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         anti_patterns=(
             "Treating baseline as mutable MCP session state.",
             "Assuming an untrusted baseline is only cosmetic in CI contexts.",
+        ),
+    ),
+    "coverage": MCPHelpTopicSpec(
+        summary=(
+            "Coverage join is an external current-run signal: CodeClone reads "
+            "an existing Cobertura XML report and joins line hits to risky "
+            "function spans."
+        ),
+        key_points=(
+            "Use Cobertura XML such as `coverage xml` output from coverage.py.",
+            "Coverage join does not become baseline truth and does not affect health.",
+            (
+                "Coverage hotspot gating is current-run only and focuses on "
+                "medium/high-risk functions measured below the configured "
+                "threshold."
+            ),
+            (
+                "Functions missing from the supplied coverage.xml are surfaced "
+                "as scope gaps, not labeled as untested."
+            ),
+            "Use metrics_detail(family='coverage_join') for bounded drill-down.",
+        ),
+        recommended_tools=(
+            "analyze_repository",
+            "analyze_changed_paths",
+            "get_run_summary",
+            "get_report_section",
+            "evaluate_gates",
+        ),
+        doc_links=(
+            _MCP_INTERFACE_DOC_LINK,
+            _CLI_DOC_LINK,
+            _REPORT_DOC_LINK,
+        ),
+        warnings=(
+            "Coverage join is only as accurate as the external XML path mapping.",
+            "It does not infer branch coverage and does not execute tests.",
+            "Use fail-on-untested-hotspots only with a valid joined coverage input.",
+        ),
+        anti_patterns=(
+            "Treating missing coverage XML as zero coverage without stating it.",
+            "Reading coverage join as a baseline-aware trend signal.",
+            "Assuming dynamic runtime dispatch is visible through a static line join.",
         ),
     ),
     "latest_runs": MCPHelpTopicSpec(
@@ -787,13 +877,13 @@ def _git_diff_lines_payload(
     root_path: Path,
     git_diff_ref: str,
 ) -> tuple[str, ...]:
-    if git_diff_ref.startswith("-"):
-        raise MCPGitDiffError(
-            f"Invalid git diff ref '{git_diff_ref}': must not start with '-'."
-        )
+    try:
+        validated_ref = validate_git_diff_ref(git_diff_ref)
+    except ValueError as exc:
+        raise MCPGitDiffError(str(exc)) from exc
     try:
         completed = subprocess.run(
-            ["git", "diff", "--name-only", git_diff_ref, "--"],
+            ["git", "diff", "--name-only", validated_ref, "--"],
             cwd=root_path,
             check=True,
             capture_output=True,
@@ -802,7 +892,7 @@ def _git_diff_lines_payload(
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise MCPGitDiffError(
-            f"Unable to resolve changed paths from git diff ref '{git_diff_ref}'."
+            f"Unable to resolve changed paths from git diff ref '{validated_ref}'."
         ) from exc
     return tuple(
         sorted({line.strip() for line in completed.stdout.splitlines() if line.strip()})
@@ -873,6 +963,9 @@ class MCPAnalysisRequest:
     block_min_stmt: int | None = None
     segment_min_loc: int | None = None
     segment_min_stmt: int | None = None
+    api_surface: bool | None = None
+    coverage_xml: str | None = None
+    coverage_min: int | None = None
     complexity_threshold: int | None = None
     coupling_threshold: int | None = None
     cohesion_threshold: int | None = None
@@ -896,6 +989,13 @@ class MCPGateRequest:
     fail_dead_code: bool = False
     fail_health: int = -1
     fail_on_new_metrics: bool = False
+    fail_on_typing_regression: bool = False
+    fail_on_docstring_regression: bool = False
+    fail_on_api_break: bool = False
+    fail_on_untested_hotspots: bool = False
+    min_typing_coverage: int = -1
+    min_docstring_coverage: int = -1
+    coverage_min: int = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -913,6 +1013,7 @@ class MCPRunRecord:
     func_clones_count: int
     block_clones_count: int
     project_metrics: ProjectMetrics | None
+    coverage_join: CoverageJoinResult | None
     suggestions: tuple[Suggestion, ...]
     new_func: frozenset[str]
     new_block: frozenset[str]
@@ -1076,6 +1177,12 @@ class CodeCloneMCPService:
             ),
             analysis_mode=request.analysis_mode,
             metrics_computed=self._metrics_computed(request.analysis_mode),
+            min_loc=_as_int(args.min_loc, DEFAULT_MIN_LOC),
+            min_stmt=_as_int(args.min_stmt, DEFAULT_MIN_STMT),
+            block_min_loc=_as_int(args.block_min_loc, DEFAULT_BLOCK_MIN_LOC),
+            block_min_stmt=_as_int(args.block_min_stmt, DEFAULT_BLOCK_MIN_STMT),
+            segment_min_loc=_as_int(args.segment_min_loc, DEFAULT_SEGMENT_MIN_LOC),
+            segment_min_stmt=_as_int(args.segment_min_stmt, DEFAULT_SEGMENT_MIN_STMT),
             design_complexity_threshold=_as_int(
                 getattr(
                     args,
@@ -1180,6 +1287,7 @@ class CodeCloneMCPService:
             func_clones_count=analysis_result.func_clones_count,
             block_clones_count=analysis_result.block_clones_count,
             project_metrics=analysis_result.project_metrics,
+            coverage_join=analysis_result.coverage_join,
             suggestions=analysis_result.suggestions,
             new_func=frozenset(new_func),
             new_block=frozenset(new_block),
@@ -1205,6 +1313,7 @@ class CodeCloneMCPService:
             func_clones_count=analysis_result.func_clones_count,
             block_clones_count=analysis_result.block_clones_count,
             project_metrics=analysis_result.project_metrics,
+            coverage_join=analysis_result.coverage_join,
             suggestions=analysis_result.suggestions,
             new_func=frozenset(new_func),
             new_block=frozenset(new_block),
@@ -1332,6 +1441,13 @@ class CodeCloneMCPService:
                 "fail_dead_code": request.fail_dead_code,
                 "fail_health": request.fail_health,
                 "fail_on_new_metrics": request.fail_on_new_metrics,
+                "fail_on_typing_regression": request.fail_on_typing_regression,
+                "fail_on_docstring_regression": request.fail_on_docstring_regression,
+                "fail_on_api_break": request.fail_on_api_break,
+                "fail_on_untested_hotspots": request.fail_on_untested_hotspots,
+                "min_typing_coverage": request.min_typing_coverage,
+                "min_docstring_coverage": request.min_docstring_coverage,
+                "coverage_min": request.coverage_min,
             },
         }
         with self._state_lock:
@@ -1345,9 +1461,21 @@ class CodeCloneMCPService:
         request: MCPGateRequest,
     ) -> GatingResult:
         reasons: list[str] = []
+        if request.fail_on_untested_hotspots:
+            if record.coverage_join is None:
+                raise MCPServiceContractError(
+                    "Coverage gating requires a run created with coverage_xml."
+                )
+            if record.coverage_join.status != "ok":
+                detail = record.coverage_join.invalid_reason or "invalid coverage input"
+                raise MCPServiceContractError(
+                    "Coverage gating requires a valid Cobertura XML input. "
+                    f"Reason: {detail}"
+                )
         if record.project_metrics is not None:
             metric_reasons = metric_gate_reasons(
                 project_metrics=record.project_metrics,
+                coverage_join=record.coverage_join,
                 metrics_diff=record.metrics_diff,
                 config=MetricGateConfig(
                     fail_complexity=request.fail_complexity,
@@ -1357,6 +1485,13 @@ class CodeCloneMCPService:
                     fail_dead_code=request.fail_dead_code,
                     fail_health=request.fail_health,
                     fail_on_new_metrics=request.fail_on_new_metrics,
+                    fail_on_typing_regression=request.fail_on_typing_regression,
+                    fail_on_docstring_regression=request.fail_on_docstring_regression,
+                    fail_on_api_break=request.fail_on_api_break,
+                    fail_on_untested_hotspots=request.fail_on_untested_hotspots,
+                    min_typing_coverage=request.min_typing_coverage,
+                    min_docstring_coverage=request.min_docstring_coverage,
+                    coverage_min=request.coverage_min,
                 ),
             )
             reasons.extend(f"metric:{reason}" for reason in metric_reasons)
@@ -1654,13 +1789,23 @@ class CodeCloneMCPService:
             for row in suggestion_rows
             if str(row.get("source_kind", "")) == SOURCE_KIND_PRODUCTION
         ]
-        return {
+        payload: dict[str, object] = {
             "run_id": self._short_run_id(record.run_id),
+            "focus": _FOCUS_PRODUCTION,
+            "health_scope": _HEALTH_SCOPE_REPOSITORY,
+            "baseline": dict(self._as_mapping(summary.get("baseline"))),
             "health": dict(self._summary_health_payload(summary)),
             "cache": dict(self._as_mapping(summary.get("cache"))),
             "findings": {
                 "total": len(findings),
                 "by_source_kind": findings_breakdown,
+                "new_by_source_kind": dict(
+                    self._as_mapping(
+                        self._as_mapping(summary.get("findings")).get(
+                            "new_by_source_kind"
+                        )
+                    )
+                ),
                 "outside_focus": len(findings)
                 - findings_breakdown[SOURCE_KIND_PRODUCTION],
             },
@@ -1685,6 +1830,13 @@ class CodeCloneMCPService:
                 "items": production_suggestions[:suggestion_limit],
             },
         }
+        analysis_profile = self._summary_analysis_profile_payload(summary)
+        if analysis_profile:
+            payload["analysis_profile"] = analysis_profile
+        coverage_join = self._summary_coverage_join_payload(record)
+        if coverage_join:
+            payload["coverage_join"] = coverage_join
+        return payload
 
     def get_help(
         self,
@@ -1913,6 +2065,13 @@ class CodeCloneMCPService:
             detail_level=validated_detail,
             max_results=max_results,
             path=path,
+            threshold_context=self._design_threshold_context(
+                record=record,
+                check="complexity",
+                path=path,
+                items=findings,
+                requested_min=min_complexity,
+            ),
         )
 
     def check_clones(
@@ -2031,6 +2190,12 @@ class CodeCloneMCPService:
             detail_level=validated_detail,
             max_results=max_results,
             path=path,
+            threshold_context=self._design_threshold_context(
+                record=record,
+                check=check,
+                path=path,
+                items=findings,
+            ),
         )
 
     def check_dead_code(
@@ -3218,6 +3383,11 @@ class CodeCloneMCPService:
         known_count = sum(
             1 for item in items if str(item.get("novelty", "")) == "known"
         )
+        new_by_source_kind = self._source_kind_breakdown(
+            item.get("source_kind")
+            for item in items
+            if str(item.get("novelty", "")) == "new"
+        )
         health_delta = self._summary_health_delta(record.summary)
         return {
             "run_id": self._short_run_id(record.run_id),
@@ -3225,6 +3395,7 @@ class CodeCloneMCPService:
             "total": len(items),
             "new": new_count,
             "known": known_count,
+            "new_by_source_kind": new_by_source_kind,
             "items": items,
             "health": dict(self._summary_health_payload(record.summary)),
             "health_delta": health_delta,
@@ -3250,8 +3421,12 @@ class CodeCloneMCPService:
         )
         return {
             "run_id": self._short_run_id(record.run_id),
+            "focus": _FOCUS_CHANGED_PATHS,
+            "health_scope": _HEALTH_SCOPE_REPOSITORY,
+            "baseline": dict(self._summary_baseline_payload(record.summary)),
             "changed_files": len(record.changed_paths),
             "health": health_payload,
+            "analysis_profile": self._summary_analysis_profile_payload(record.summary),
             "health_delta": (
                 _as_int(changed_projection.get("health_delta", 0), 0)
                 if changed_projection.get("health_delta") is not None
@@ -3259,8 +3434,12 @@ class CodeCloneMCPService:
             ),
             "verdict": str(changed_projection.get("verdict", "stable")),
             "new_findings": _as_int(changed_projection.get("new", 0), 0),
+            "new_by_source_kind": dict(
+                self._as_mapping(changed_projection.get("new_by_source_kind"))
+            ),
             "resolved_findings": 0,
             "changed_findings": [],
+            "coverage_join": self._summary_coverage_join_payload(record),
         }
 
     def _augment_summary_with_changed(
@@ -3469,6 +3648,7 @@ class CodeCloneMCPService:
         detail_level: DetailLevel,
         max_results: int,
         path: str | None,
+        threshold_context: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         bounded_items = [dict(item) for item in items[: max(1, max_results)]]
         full_health = dict(self._as_mapping(record.summary.get("health")))
@@ -3479,7 +3659,7 @@ class CodeCloneMCPService:
             if relevant_dimension and relevant_dimension in dimensions
             else dict(dimensions)
         )
-        return {
+        payload: dict[str, object] = {
             "run_id": self._short_run_id(record.run_id),
             "check": check,
             "detail_level": detail_level,
@@ -3493,6 +3673,108 @@ class CodeCloneMCPService:
             },
             "items": bounded_items,
         }
+        if threshold_context:
+            payload["threshold_context"] = dict(threshold_context)
+        return payload
+
+    def _design_threshold_context(
+        self,
+        *,
+        record: MCPRunRecord,
+        check: str,
+        path: str | None,
+        items: Sequence[Mapping[str, object]],
+        requested_min: int | None = None,
+    ) -> dict[str, object] | None:
+        if items:
+            return None
+        spec = _DESIGN_CHECK_CONTEXT.get(check)
+        if spec is None:
+            return None
+        category = str(spec["category"])
+        metric = str(spec["metric"])
+        operator = str(spec["operator"])
+        normalized_path = self._normalize_relative_path(path or "")
+        metrics = self._as_mapping(record.report_document.get("metrics"))
+        families = self._as_mapping(metrics.get("families"))
+        family = self._as_mapping(families.get(category))
+        metric_items = [
+            self._as_mapping(item)
+            for item in self._as_sequence(family.get("items"))
+            if not normalized_path
+            or self._metric_item_matches_path(
+                self._as_mapping(item),
+                normalized_path,
+            )
+        ]
+        if not metric_items:
+            return None
+        values = [_as_int(item.get(metric), 0) for item in metric_items]
+        finding_threshold = self._design_finding_threshold(
+            record=record,
+            check=check,
+        )
+        threshold = finding_threshold
+        threshold_kind = "finding_threshold"
+        if requested_min is not None and requested_min > finding_threshold:
+            threshold = requested_min
+            threshold_kind = "requested_min"
+        highest_below = self._highest_below_threshold(
+            values=values,
+            operator=operator,
+            threshold=threshold,
+        )
+        payload: dict[str, object] = {
+            "metric": metric,
+            "threshold": threshold,
+            "threshold_kind": threshold_kind,
+            "measured_units": len(metric_items),
+        }
+        if threshold_kind != "finding_threshold":
+            payload["finding_threshold"] = finding_threshold
+        if highest_below is not None:
+            payload["highest_below_threshold"] = highest_below
+        return payload
+
+    def _design_finding_threshold(
+        self,
+        *,
+        record: MCPRunRecord,
+        check: str,
+    ) -> int:
+        spec = _DESIGN_CHECK_CONTEXT[check]
+        category = str(spec["category"])
+        default_threshold = _as_int(spec["default_threshold"])
+        findings = self._as_mapping(record.report_document.get("findings"))
+        thresholds = self._as_mapping(
+            self._as_mapping(findings.get("thresholds")).get("design_findings")
+        )
+        threshold_payload = self._as_mapping(thresholds.get(category))
+        if threshold_payload:
+            return _as_int(threshold_payload.get("value"), default_threshold)
+        request_value = {
+            "complexity": record.request.complexity_threshold,
+            "coupling": record.request.coupling_threshold,
+            "cohesion": record.request.cohesion_threshold,
+        }.get(check)
+        return _as_int(request_value, default_threshold)
+
+    @staticmethod
+    def _highest_below_threshold(
+        *,
+        values: Sequence[int],
+        operator: str,
+        threshold: int,
+    ) -> int | None:
+        if operator == ">":
+            below = [value for value in values if value <= threshold]
+        elif operator == ">=":
+            below = [value for value in values if value < threshold]
+        else:
+            return None
+        if not below:
+            return None
+        return max(below)
 
     @staticmethod
     def _normalized_source_kind(value: object) -> str:
@@ -3618,6 +3900,11 @@ class CodeCloneMCPService:
                 "cache_policy='refresh' is not supported by the read-only "
                 "CodeClone MCP server. Use 'reuse' or 'off'."
             )
+        if request.analysis_mode == "clones_only" and request.coverage_xml is not None:
+            raise MCPServiceContractError(
+                "coverage_xml requires analysis_mode='full' because coverage join "
+                "depends on metrics-enabled analysis."
+            )
 
     @staticmethod
     def _validate_choice(
@@ -3702,6 +3989,15 @@ class CodeCloneMCPService:
             fail_dead_code=False,
             fail_health=-1,
             fail_on_new_metrics=False,
+            fail_on_typing_regression=False,
+            fail_on_docstring_regression=False,
+            fail_on_api_break=False,
+            min_typing_coverage=-1,
+            min_docstring_coverage=-1,
+            api_surface=False,
+            coverage_xml=None,
+            fail_on_untested_hotspots=False,
+            coverage_min=50,
             design_complexity_threshold=DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
             design_coupling_threshold=DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
             design_cohesion_threshold=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
@@ -3710,6 +4006,7 @@ class CodeCloneMCPService:
             skip_metrics=False,
             skip_dead_code=False,
             skip_dependencies=False,
+            golden_fixture_paths=(),
             html_out=None,
             json_out=None,
             md_out=None,
@@ -3745,7 +4042,7 @@ class CodeCloneMCPService:
         if not validate_numeric_args(args):
             raise MCPServiceContractError(
                 "Numeric analysis settings must be non-negative and thresholds "
-                "must be >= -1."
+                "must be >= -1. Coverage thresholds must be between 0 and 100."
             )
 
         return args
@@ -3765,6 +4062,8 @@ class CodeCloneMCPService:
             "block_min_stmt": request.block_min_stmt,
             "segment_min_loc": request.segment_min_loc,
             "segment_min_stmt": request.segment_min_stmt,
+            "api_surface": request.api_surface,
+            "coverage_min": request.coverage_min,
             "max_baseline_size_mb": request.max_baseline_size_mb,
             "max_cache_size_mb": request.max_cache_size_mb,
             "design_complexity_threshold": request.complexity_threshold,
@@ -3786,6 +4085,10 @@ class CodeCloneMCPService:
         if request.cache_path is not None:
             args.cache_path = str(
                 self._resolve_optional_path(request.cache_path, root_path)
+            )
+        if request.coverage_xml is not None:
+            args.coverage_xml = str(
+                self._resolve_optional_path(request.coverage_xml, root_path)
             )
 
     @staticmethod
@@ -3859,6 +4162,7 @@ class CodeCloneMCPService:
                 args.segment_min_stmt,
                 DEFAULT_SEGMENT_MIN_STMT,
             ),
+            collect_api_surface=bool(getattr(args, "api_surface", False)),
         )
         if policy != "off":
             cache.load()
@@ -3916,11 +4220,13 @@ class CodeCloneMCPService:
         metrics = self._as_mapping(report_document.get("metrics"))
         metrics_summary = self._as_mapping(metrics.get("summary"))
         summary = self._as_mapping(findings.get("summary"))
+        analysis_profile = self._summary_analysis_profile_payload(meta)
         payload = {
             "run_id": run_id,
             "root": str(root_path),
             "analysis_mode": request.analysis_mode,
             "codeclone_version": meta.get("codeclone_version", __version__),
+            "python_tag": str(meta.get("python_tag", "")),
             "report_schema_version": report_document.get(
                 "report_schema_version",
                 REPORT_SCHEMA_VERSION,
@@ -3933,6 +4239,7 @@ class CodeCloneMCPService:
                 "loaded": bool(meta_baseline.get("loaded", baseline_state.loaded)),
                 "status": str(meta_baseline.get("status", baseline_state.status.value)),
                 "trusted_for_diff": baseline_state.trusted_for_diff,
+                "python_tag": meta_baseline.get("python_tag"),
             },
             "metrics_baseline": {
                 "path": meta_metrics_baseline.get(
@@ -3971,6 +4278,8 @@ class CodeCloneMCPService:
             "warnings": list(warnings),
             "failures": list(failures),
         }
+        if analysis_profile:
+            payload["analysis_profile"] = analysis_profile
         payload["cache"] = self._summary_cache_payload(payload)
         payload["health"] = self._summary_health_payload(payload)
         return payload
@@ -3989,6 +4298,8 @@ class CodeCloneMCPService:
             and not summary.get("baseline")
         ):
             return {
+                "focus": _FOCUS_REPOSITORY,
+                "health_scope": _HEALTH_SCOPE_REPOSITORY,
                 "inventory": self._summary_inventory_payload(inventory),
                 "health": self._summary_health_payload(summary),
             }
@@ -3997,6 +4308,8 @@ class CodeCloneMCPService:
         )
         payload: dict[str, object] = {
             "run_id": self._short_run_id(resolved_run_id) if resolved_run_id else "",
+            "focus": _FOCUS_REPOSITORY,
+            "health_scope": _HEALTH_SCOPE_REPOSITORY,
             "version": str(summary.get("codeclone_version", __version__)),
             "schema": str(summary.get("report_schema_version", REPORT_SCHEMA_VERSION)),
             "mode": str(summary.get("analysis_mode", "")),
@@ -4010,7 +4323,32 @@ class CodeCloneMCPService:
             "warnings": list(self._as_sequence(summary.get("warnings"))),
             "failures": list(self._as_sequence(summary.get("failures"))),
         }
+        analysis_profile = self._summary_analysis_profile_payload(summary)
+        if analysis_profile:
+            payload["analysis_profile"] = analysis_profile
+        if record is not None:
+            coverage_join = self._summary_coverage_join_payload(record)
+            if coverage_join:
+                payload["coverage_join"] = coverage_join
         return payload
+
+    def _summary_analysis_profile_payload(
+        self,
+        summary: Mapping[str, object],
+    ) -> dict[str, int]:
+        analysis_profile = self._as_mapping(summary.get("analysis_profile"))
+        if not analysis_profile:
+            return {}
+        keys = (
+            "min_loc",
+            "min_stmt",
+            "block_min_loc",
+            "block_min_stmt",
+            "segment_min_loc",
+            "segment_min_stmt",
+        )
+        payload = {key: _as_int(analysis_profile.get(key), -1) for key in keys}
+        return {key: value for key, value in payload.items() if value >= 0}
 
     def _summary_baseline_payload(
         self,
@@ -4031,11 +4369,21 @@ class CodeCloneMCPService:
         key: str,
     ) -> dict[str, object]:
         baseline = self._as_mapping(summary.get(key))
-        return {
+        trusted = bool(baseline.get("trusted_for_diff", False))
+        payload: dict[str, object] = {
             "loaded": bool(baseline.get("loaded", False)),
             "status": str(baseline.get("status", "")),
-            "trusted": bool(baseline.get("trusted_for_diff", False)),
+            "trusted": trusted,
         }
+        if key == "baseline":
+            payload["compared_without_valid_baseline"] = not trusted
+            baseline_python_tag = baseline.get("python_tag")
+            runtime_python_tag = summary.get("python_tag")
+            if isinstance(baseline_python_tag, str) and baseline_python_tag.strip():
+                payload["baseline_python_tag"] = baseline_python_tag
+            if isinstance(runtime_python_tag, str) and runtime_python_tag.strip():
+                payload["runtime_python_tag"] = runtime_python_tag
+        return payload
 
     def _summary_cache_payload(
         self,
@@ -4114,6 +4462,7 @@ class CodeCloneMCPService:
                 "known": 0,
                 "by_family": {},
                 "production": 0,
+                "new_by_source_kind": self._source_kind_breakdown(()),
             }
         findings = self._base_findings(record)
         by_family: dict[str, int] = {
@@ -4125,6 +4474,11 @@ class CodeCloneMCPService:
         new_count = 0
         known_count = 0
         production_count = 0
+        new_by_source_kind = self._source_kind_breakdown(
+            self._finding_source_kind(finding)
+            for finding in findings
+            if str(finding.get("novelty", "")).strip() == "new"
+        )
         for finding in findings:
             family = str(finding.get("family", "")).strip()
             family_key = "clones" if family == FAMILY_CLONE else family
@@ -4142,6 +4496,7 @@ class CodeCloneMCPService:
             "known": known_count,
             "by_family": {key: value for key, value in by_family.items() if value > 0},
             "production": production_count,
+            "new_by_source_kind": new_by_source_kind,
         }
 
     def _summary_diff_payload(
@@ -4158,7 +4513,61 @@ class CodeCloneMCPService:
                 and self._summary_health_payload(summary).get("available") is not False
                 else None
             ),
+            "typing_param_permille_delta": _as_int(
+                metrics_diff.get("typing_param_permille_delta", 0),
+                0,
+            ),
+            "typing_return_permille_delta": _as_int(
+                metrics_diff.get("typing_return_permille_delta", 0),
+                0,
+            ),
+            "docstring_permille_delta": _as_int(
+                metrics_diff.get("docstring_permille_delta", 0),
+                0,
+            ),
+            "api_breaking_changes": _as_int(
+                metrics_diff.get("api_breaking_changes", 0),
+                0,
+            ),
+            "new_api_symbols": _as_int(
+                metrics_diff.get("new_api_symbols", 0),
+                0,
+            ),
         }
+
+    def _summary_coverage_join_payload(
+        self,
+        record: MCPRunRecord,
+    ) -> dict[str, object]:
+        metrics = self._as_mapping(record.report_document.get("metrics"))
+        families = self._as_mapping(metrics.get("families"))
+        coverage_join = self._as_mapping(families.get("coverage_join"))
+        summary = self._as_mapping(coverage_join.get("summary"))
+        if not summary:
+            return {}
+        payload: dict[str, object] = {
+            "status": str(summary.get("status", "")).strip(),
+            "overall_permille": _as_int(summary.get("overall_permille", 0), 0),
+            "coverage_hotspots": _as_int(summary.get("coverage_hotspots", 0), 0),
+            "scope_gap_hotspots": _as_int(summary.get("scope_gap_hotspots", 0), 0),
+            "hotspot_threshold_percent": _as_int(
+                summary.get("hotspot_threshold_percent", 0),
+                0,
+            ),
+        }
+        source_value = summary.get("source")
+        source = source_value.strip() if isinstance(source_value, str) else ""
+        if source:
+            payload["source"] = source
+        invalid_reason_value = summary.get("invalid_reason")
+        invalid_reason = (
+            invalid_reason_value.strip()
+            if isinstance(invalid_reason_value, str)
+            else ""
+        )
+        if invalid_reason:
+            payload["invalid_reason"] = invalid_reason
+        return payload
 
     def _metrics_detail_payload(
         self,
@@ -4278,6 +4687,27 @@ class CodeCloneMCPService:
             "new_cycles": len(new_cycles),
             "new_dead_code": len(new_dead_code),
             "health_delta": _as_int(health_delta, 0),
+            "typing_param_permille_delta": _as_int(
+                getattr(metrics_diff, "typing_param_permille_delta", 0),
+                0,
+            ),
+            "typing_return_permille_delta": _as_int(
+                getattr(metrics_diff, "typing_return_permille_delta", 0),
+                0,
+            ),
+            "docstring_permille_delta": _as_int(
+                getattr(metrics_diff, "docstring_permille_delta", 0),
+                0,
+            ),
+            "api_breaking_changes": len(
+                tuple(
+                    cast(
+                        Sequence[object],
+                        getattr(metrics_diff, "new_api_breaking_changes", ()),
+                    )
+                )
+            ),
+            "new_api_symbols": len(tuple(getattr(metrics_diff, "new_api_symbols", ()))),
         }
 
     def _dict_list(self, value: object) -> list[dict[str, object]]:

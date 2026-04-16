@@ -9,6 +9,7 @@ from __future__ import annotations
 from .cohesion import cohesion_risk, compute_lcom4
 from .complexity import cyclomatic_complexity, nesting_depth, risk_level
 from .coupling import compute_cbo, coupling_risk
+from .coverage_join import CoverageJoinParseError, build_coverage_join
 from .dead_code import find_suppressed_unused, find_unused
 from .dependencies import (
     build_dep_graph,
@@ -21,7 +22,9 @@ from .health import HealthInputs, compute_health
 from .overloaded_modules import build_overloaded_modules_payload
 
 __all__ = [
+    "CoverageJoinParseError",
     "HealthInputs",
+    "build_coverage_join",
     "build_dep_graph",
     "build_import_graph",
     "build_overloaded_modules_payload",

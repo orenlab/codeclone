@@ -21,6 +21,7 @@ from codeclone.cache_io import sign_cache_payload
 from codeclone.cache_paths import runtime_filepath_from_wire, wire_filepath_from_runtime
 from codeclone.errors import CacheError
 from codeclone.extractor import Unit
+from codeclone.models import ApiParamSpec, FileMetrics, ModuleApiSurface, PublicSymbol
 
 
 def _make_unit(filepath: str) -> Unit:
@@ -108,6 +109,61 @@ def test_cache_roundtrip_preserves_empty_structural_findings(tmp_path: Path) -> 
     assert entry is not None
     assert "structural_findings" in entry
     assert entry["structural_findings"] == []
+
+
+def test_cache_roundtrip_preserves_api_surface_parameter_order(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    cache.put_file_entry(
+        "x.py",
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        file_metrics=FileMetrics(
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=frozenset(),
+            import_names=frozenset(),
+            class_names=frozenset(),
+            api_surface=ModuleApiSurface(
+                module="pkg.mod",
+                filepath="x.py",
+                all_declared=("run",),
+                symbols=(
+                    PublicSymbol(
+                        qualname="pkg.mod:run",
+                        kind="function",
+                        start_line=1,
+                        end_line=2,
+                        params=(
+                            ApiParamSpec(
+                                name="beta",
+                                kind="pos_or_kw",
+                                has_default=False,
+                            ),
+                            ApiParamSpec(
+                                name="alpha",
+                                kind="pos_or_kw",
+                                has_default=False,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    cache.save()
+
+    loaded = Cache(cache_path)
+    loaded.load()
+    entry = loaded.get_file_entry("x.py")
+    assert entry is not None
+    params = entry["api_surface"]["symbols"][0]["params"]
+    assert [param["name"] for param in params] == ["beta", "alpha"]
 
 
 def test_cache_load_normalizes_stale_structural_findings(tmp_path: Path) -> None:
@@ -260,6 +316,87 @@ def test_store_canonical_file_entry_marks_dirty_only_when_entry_changes(
         canonical_entry=canonical_entry,
     )
     assert cache._dirty is True
+
+
+def test_cache_helper_type_guards_and_wire_api_decoders_cover_invalid_inputs() -> None:
+    assert cache_mod._as_module_typing_coverage_dict({"module": "pkg"}) is None
+    assert cache_mod._as_module_docstring_coverage_dict({"module": "pkg"}) is None
+    assert cache_mod._as_module_api_surface_dict({"module": "pkg"}) is None
+    assert (
+        cache_mod._has_cache_entry_container_shape(
+            {
+                "stat": {"mtime_ns": 1, "size": 1},
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "typing_coverage": {"module": "pkg"},
+            }
+        )
+        is False
+    )
+    assert (
+        cache_mod._has_cache_entry_container_shape(
+            {
+                "stat": {"mtime_ns": 1, "size": 1},
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "docstring_coverage": {"module": "pkg"},
+            }
+        )
+        is False
+    )
+    assert (
+        cache_mod._has_cache_entry_container_shape(
+            {
+                "stat": {"mtime_ns": 1, "size": 1},
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "api_surface": {"module": "pkg"},
+            }
+        )
+        is False
+    )
+    assert (
+        cache_mod._decode_optional_wire_api_surface(
+            obj={"as": ["pkg.mod", ["run"], [None]]},
+            filepath="pkg/mod.py",
+        )
+        is None
+    )
+    assert (
+        cache_mod._decode_optional_wire_module_ints(
+            obj={"tc": ["pkg.mod", "bad"]},
+            key="tc",
+            expected_len=2,
+            int_indexes=(1,),
+        )
+        is None
+    )
+    assert cache_mod._decode_wire_api_surface_symbol(["pkg.mod:run"]) is None
+    assert (
+        cache_mod._decode_wire_api_surface_symbol(
+            ["pkg.mod:run", "function", 1, 2, "name", "", [None]]
+        )
+        is None
+    )
+    assert cache_mod._decode_wire_api_param_spec(["value"]) is None
+    assert cache_mod._is_api_param_spec_dict([]) is False
+    assert cache_mod._is_public_symbol_dict([]) is False
+    assert (
+        cache_mod._is_public_symbol_dict(
+            {
+                "qualname": "pkg.mod:run",
+                "kind": "function",
+                "exported_via": "name",
+                "start_line": 1,
+                "end_line": 2,
+                "params": "bad",
+            }
+        )
+        is False
+    )
 
 
 def test_get_file_entry_missing_after_fallback_returns_none(tmp_path: Path) -> None:
@@ -935,6 +1072,26 @@ def test_cache_load_analysis_profile_mismatch(tmp_path: Path) -> None:
 
     assert loaded.load_warning is not None
     assert "analysis profile mismatch" in loaded.load_warning
+    assert loaded.data["files"] == {}
+    assert loaded.load_status == CacheStatus.ANALYSIS_PROFILE_MISMATCH
+    assert loaded.cache_schema_version == Cache._CACHE_VERSION
+
+
+def test_cache_load_analysis_profile_mismatch_collect_api_surface(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path, collect_api_surface=False)
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    loaded = Cache(cache_path, collect_api_surface=True)
+    loaded.load()
+
+    assert loaded.load_warning is not None
+    assert "analysis profile mismatch" in loaded.load_warning
+    assert "collect_api_surface=false" in loaded.load_warning
+    assert "collect_api_surface=true" in loaded.load_warning
     assert loaded.data["files"] == {}
     assert loaded.load_status == CacheStatus.ANALYSIS_PROFILE_MISMATCH
     assert loaded.cache_schema_version == Cache._CACHE_VERSION

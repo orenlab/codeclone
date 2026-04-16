@@ -14,7 +14,8 @@ Main ownership layers:
 - Report model and projections: canonical JSON + deterministic TXT/Markdown/SARIF + explainability facts.
 - MCP agent surface: read-only server layer over the same pipeline/report contracts.
 - VS Code extension surface: native IDE client over the MCP layer and the same canonical report semantics, with
-  limited Restricted Mode and source-first review flow.
+  limited Restricted Mode, source-first review flow, and factual overview surfaces such as `Coverage Join` when MCP
+  exposes them.
 - Claude Desktop bundle surface: installable local `.mcpb` wrapper that launches the same `codeclone-mcp` server for
   Claude Desktop without introducing a second MCP or analysis layer.
 - Codex plugin surface: repo-local Codex plugin under `plugins/` and `.agents/plugins/marketplace.json` that adds
@@ -68,6 +69,9 @@ Refs:
 - The same rule applies to summary cache convenience fields such as
   `freshness` and to production-first triage projections built from
   canonical hotlists/suggestions.
+- The same rule also applies to compact interpretation hints such as
+  `health_scope`, `focus`, and `new_by_source_kind`: they clarify projection
+  meaning without introducing a second report truth.
 - MCP finding lists may also expose short run/finding ids and slimmer relative
   location projections, while keeping `get_finding(detail_level="full")` as the
   richer per-finding inspection path.

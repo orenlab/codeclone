@@ -31,7 +31,11 @@ from codeclone.contracts import (
 )
 from codeclone.errors import CacheError
 from codeclone.models import Unit
-from tests._assertions import assert_contains_all, assert_mapping_entries
+from tests._assertions import (
+    assert_contains_all,
+    assert_mapping_entries,
+    assert_missing_keys,
+)
 from tests._report_access import (
     report_clone_groups as _report_clone_groups,
 )
@@ -225,6 +229,19 @@ def f2():
     y = 1
     return y
 """,
+    )
+
+
+def _write_duplicate_function_module(directory: Path, filename: str) -> Path:
+    return _write_python_module(
+        directory,
+        filename,
+        """
+def duplicated():
+    value = 1
+    return value
+""".strip()
+        + "\n",
     )
 
 
@@ -589,6 +606,18 @@ def _prepare_source_and_baseline(tmp_path: Path) -> tuple[Path, Path]:
         python_version=_current_py_minor(),
     )
     return src, baseline_path
+
+
+def _prepare_api_surface_cache_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    source: str,
+) -> tuple[Path, Path, Path]:
+    src = tmp_path / "pkg.py"
+    src.write_text(source, "utf-8")
+    _patch_parallel(monkeypatch)
+    return src, tmp_path / "metrics-baseline.json", tmp_path / "cache.json"
 
 
 def _run_json_report(
@@ -2305,6 +2334,65 @@ def test_cli_update_baseline_report_meta_uses_updated_payload_hash(
     assert baseline_meta["payload_sha256_verified"] is True
 
 
+def test_cli_update_baseline_rewrites_embedded_metrics_to_current_surfaces(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_python_module(
+        tmp_path,
+        "a.py",
+        """
+def public(value: int) -> int:
+    return value
+""",
+    )
+    baseline = tmp_path / "codeclone.baseline.json"
+
+    _run_parallel_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--baseline",
+            str(baseline),
+            "--update-baseline",
+            "--api-surface",
+            "--no-progress",
+        ],
+    )
+    initial_payload = json.loads(baseline.read_text("utf-8"))
+    assert "api_surface" in initial_payload
+    assert "typing_param_permille" in initial_payload["metrics"]
+
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[tool.codeclone]
+baseline = "codeclone.baseline.json"
+api_surface = false
+""".strip()
+        + "\n",
+        "utf-8",
+    )
+
+    _run_parallel_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--update-baseline",
+            "--no-progress",
+        ],
+    )
+
+    payload = json.loads(baseline.read_text("utf-8"))
+    meta = cast(dict[str, object], payload["meta"])
+    metrics = cast(dict[str, object], payload["metrics"])
+    assert_missing_keys(payload, "api_surface")
+    assert_missing_keys(meta, "api_surface_payload_sha256")
+    assert cast(int, metrics["typing_param_permille"]) >= 0
+    assert cast(int, metrics["typing_return_permille"]) >= 0
+    assert cast(int, metrics["docstring_permille"]) >= 0
+    assert cast(int, metrics["typing_any_count"]) >= 0
+
+
 def test_cli_update_baseline_write_error_is_contract_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3291,8 +3379,9 @@ def test_cli_summary_format_stable(
     out = capsys.readouterr().out
     assert "Summary" in out
     assert out.count("Summary") == 1
-    assert "Metrics" in out
-    assert "Overloaded" in out
+    assert "Metrics" not in out
+    assert "Adoption" not in out
+    assert "Overloaded" not in out
     assert "callables" in out
     assert "Files parsed" not in out
     assert "Input" not in out
@@ -3304,6 +3393,254 @@ def test_cli_summary_format_stable(
     assert _summary_metric(out, "Block clones") >= 0
     assert _summary_metric(out, "suppressed") >= 0
     assert _summary_metric(out, "New vs baseline") >= 0
+
+
+def test_cli_summary_with_metrics_baseline_shows_metrics_section(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    metrics_baseline_path = tmp_path / "metrics-baseline.json"
+    src.write_text("def f(value: int) -> int:\n    return value\n", "utf-8")
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--metrics-baseline",
+            str(metrics_baseline_path),
+            "--update-metrics-baseline",
+        ],
+    )
+    _ = capsys.readouterr()
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--metrics-baseline",
+            str(metrics_baseline_path),
+        ],
+    )
+    out = capsys.readouterr().out
+    assert_contains_all(out, "Metrics", "Adoption", "Overloaded")
+
+
+def test_cli_summary_with_api_surface_shows_public_api_line(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    src.write_text("def f(value: int) -> int:\n    return value\n", "utf-8")
+    _patch_parallel(monkeypatch)
+    _run_main(monkeypatch, [str(tmp_path), "--no-progress", "--api-surface"])
+    out = capsys.readouterr().out
+    assert "Public API" in out
+    assert "symbols" in out
+    assert "modules" in out
+
+
+def test_cli_ci_summary_includes_adoption_and_public_api_lines(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = tmp_path / "a.py"
+    metrics_baseline_path = tmp_path / "metrics-baseline.json"
+    src.write_text("def f(value: int) -> int:\n    return value\n", "utf-8")
+    baseline_path = _write_baseline(
+        tmp_path / "baseline.json",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    _patch_parallel(monkeypatch)
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--api-surface",
+            "--metrics-baseline",
+            str(metrics_baseline_path),
+            "--update-metrics-baseline",
+        ],
+    )
+    _ = capsys.readouterr()
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--ci",
+            "--baseline",
+            str(baseline_path),
+            "--metrics-baseline",
+            str(metrics_baseline_path),
+            "--api-surface",
+        ],
+    )
+    out = capsys.readouterr().out
+    assert_contains_all(out, "Adoption", "Public API", "symbols=", "docstrings=")
+
+
+def test_cli_pyproject_golden_fixture_paths_exclude_fixture_clone_groups(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixtures_dir = tmp_path / "tests" / "fixtures" / "golden_project"
+    fixtures_dir.mkdir(parents=True)
+    _write_duplicate_function_module(fixtures_dir, "a.py")
+    _write_duplicate_function_module(fixtures_dir, "b.py")
+    _write_current_python_baseline(tmp_path / "codeclone.baseline.json")
+    report_path = tmp_path / "report.json"
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[tool.codeclone]
+min_loc = 1
+min_stmt = 1
+fail_on_new = true
+skip_metrics = true
+golden_fixture_paths = ["tests/fixtures/golden_*"]
+""".strip()
+        + "\n",
+        "utf-8",
+    )
+
+    _run_parallel_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--json",
+            str(report_path),
+        ],
+    )
+
+    payload = json.loads(report_path.read_text("utf-8"))
+    clone_groups = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", payload["findings"])["groups"],
+    )["clones"]
+    clone_groups_map = cast("dict[str, object]", clone_groups)
+    assert clone_groups_map["functions"] == []
+    suppressed = cast("dict[str, object]", clone_groups_map["suppressed"])
+    suppressed_functions = cast("list[dict[str, object]]", suppressed["functions"])
+    assert len(suppressed_functions) == 1
+    assert suppressed_functions[0]["suppression_rule"] == "golden_fixture"
+    assert (
+        cast("dict[str, int]", payload["findings"]["summary"]["clones"])["suppressed"]
+        == 1
+    )
+
+
+def test_cli_public_api_breaking_count_stable_across_warm_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src, metrics_baseline_path, cache_path = _prepare_api_surface_cache_case(
+        tmp_path,
+        monkeypatch,
+        source="def run(alpha: int, beta: int) -> int:\n    return alpha + beta\n",
+    )
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--api-surface",
+            "--metrics-baseline",
+            str(metrics_baseline_path),
+            "--update-metrics-baseline",
+        ],
+    )
+    _ = capsys.readouterr()
+
+    src.write_text(
+        "def run(beta: int, alpha: int) -> int:\n    return alpha + beta\n",
+        "utf-8",
+    )
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--api-surface",
+            "--metrics-baseline",
+            str(metrics_baseline_path),
+            "--cache-path",
+            str(cache_path),
+        ],
+    )
+    cold_out = capsys.readouterr().out
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--api-surface",
+            "--metrics-baseline",
+            str(metrics_baseline_path),
+            "--cache-path",
+            str(cache_path),
+        ],
+    )
+    warm_out = capsys.readouterr().out
+
+    assert "1 breaking" in cold_out
+    assert "1 breaking" in warm_out
+
+
+def test_cli_api_surface_ignores_non_api_warm_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, _, cache_path = _prepare_api_surface_cache_case(
+        tmp_path,
+        monkeypatch,
+        source="def run(value: int) -> int:\n    return value\n",
+    )
+    report_path = tmp_path / "report.json"
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--cache-path",
+            str(cache_path),
+        ],
+    )
+    _ = capsys.readouterr()
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--api-surface",
+            "--cache-path",
+            str(cache_path),
+            "--json",
+            str(report_path),
+        ],
+    )
+    out = capsys.readouterr().out
+    payload = json.loads(report_path.read_text("utf-8"))
+    api_surface_summary = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", payload["metrics"])["summary"],
+    )["api_surface"]
+
+    assert _summary_metric(out, "analyzed") == 1
+    assert _summary_metric(out, "from cache") == 0
+    assert "Public API" in out
+    assert cast("dict[str, object]", api_surface_summary)["enabled"] is True
+    assert cast("dict[str, object]", api_surface_summary)["public_symbols"] == 1
+    assert cast("dict[str, object]", api_surface_summary)["modules"] == 1
 
 
 def test_cli_summary_no_color_has_no_ansi(

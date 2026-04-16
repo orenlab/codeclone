@@ -47,8 +47,19 @@ Refs:
     - Hotspots by Directory: render-only view over `derived.overview.directory_hotspots`
     - Health Profile: full-width radar chart of dimension scores
     - Get Badge modal: grade-only / score+grade variants with shields.io embed
+- Quality UI is also a report projection:
+    - deterministic subtabs for complexity, coupling, cohesion, overloaded
+      modules, and `Coverage Join` when canonical join facts exist
+    - `Coverage Join` uses the same stat-card and table patterns as other
+      quality surfaces; it separates measured coverage hotspots from coverage
+      scope gaps, and invalid joins render a factual unavailable state instead
+      of a success-style empty message
 - Dead-code UI is a single top-level `Dead Code` tab with deterministic split
   sub-tabs: `Active` and `Suppressed`.
+- Clones UI may append a `Suppressed` sub-tab when canonical report data
+  includes `findings.groups.clones.suppressed.*`; those rows are factual
+  projections of policy-excluded clone groups such as `golden_fixture_paths`
+  and do not become active clone findings.
 - IDE deep links:
     - An IDE picker in the topbar lets users choose their IDE. The selection is
       persisted in `localStorage` (key `codeclone-ide`).
@@ -81,11 +92,11 @@ Refs:
 - Structural finding cards may render a compact inline suggested action when a
   low-signal local hint intentionally has no separate suggestion card.
 - IDE link `data-file` and `data-line` attributes are escaped via
-  `_escape_attr` before insertion into HTML.
+  `_escape_html` before insertion into HTML.
 
 Refs:
 
-- `codeclone/_html_escape.py:_escape_attr`
+- `codeclone/_html_escape.py:_escape_html`
 - `codeclone/_html_snippets.py:_render_code_block`
 - `codeclone/_html_report/_sections/_clones.py:render_clones_panel`
 - `codeclone/_html_report/_tables.py` (path cell IDE links)

@@ -126,6 +126,9 @@ class FileMetrics:
     import_names: frozenset[str]
     class_names: frozenset[str]
     referenced_qualnames: frozenset[str] = field(default_factory=frozenset)
+    typing_coverage: ModuleTypingCoverage | None = None
+    docstring_coverage: ModuleDocstringCoverage | None = None
+    api_surface: ModuleApiSurface | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +203,16 @@ class ProjectMetrics:
     dependency_longest_chains: tuple[tuple[str, ...], ...]
     dead_code: tuple[DeadItem, ...]
     health: HealthScore
+    typing_param_total: int = 0
+    typing_param_annotated: int = 0
+    typing_return_total: int = 0
+    typing_return_annotated: int = 0
+    typing_any_count: int = 0
+    docstring_public_total: int = 0
+    docstring_public_documented: int = 0
+    typing_modules: tuple[ModuleTypingCoverage, ...] = ()
+    docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
+    api_surface: ApiSurfaceSnapshot | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,6 +228,10 @@ class MetricsSnapshot:
     dead_code_items: tuple[str, ...]
     health_score: int
     health_grade: Literal["A", "B", "C", "D", "F"]
+    typing_param_permille: int = 0
+    typing_return_permille: int = 0
+    docstring_permille: int = 0
+    typing_any_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +241,113 @@ class MetricsDiff:
     new_cycles: tuple[tuple[str, ...], ...]
     new_dead_code: tuple[str, ...]
     health_delta: int
+    typing_param_permille_delta: int = 0
+    typing_return_permille_delta: int = 0
+    docstring_permille_delta: int = 0
+    new_api_symbols: tuple[str, ...] = ()
+    new_api_breaking_changes: tuple[ApiBreakingChange, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ApiParamSpec:
+    name: str
+    kind: Literal["pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg"]
+    has_default: bool
+    annotation_hash: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class PublicSymbol:
+    qualname: str
+    kind: Literal["function", "class", "method", "constant"]
+    start_line: int
+    end_line: int
+    params: tuple[ApiParamSpec, ...] = ()
+    returns_hash: str = ""
+    exported_via: Literal["all", "name"] = "name"
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleApiSurface:
+    module: str
+    filepath: str
+    symbols: tuple[PublicSymbol, ...]
+    all_declared: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ApiSurfaceSnapshot:
+    modules: tuple[ModuleApiSurface, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ApiBreakingChange:
+    qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    symbol_kind: Literal["function", "class", "method", "constant"]
+    change_kind: Literal["removed", "signature_break"]
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleTypingCoverage:
+    module: str
+    filepath: str
+    callable_count: int
+    params_total: int
+    params_annotated: int
+    returns_total: int
+    returns_annotated: int
+    any_annotation_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleDocstringCoverage:
+    module: str
+    filepath: str
+    public_symbol_total: int
+    public_symbol_documented: int
+
+
+@dataclass(frozen=True, slots=True)
+class UnitCoverageFact:
+    qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    cyclomatic_complexity: int
+    risk: Literal["low", "medium", "high"]
+    executable_lines: int
+    covered_lines: int
+    coverage_permille: int
+    coverage_status: Literal["measured", "missing_from_report", "no_executable_lines"]
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageJoinResult:
+    coverage_xml: str
+    status: Literal["ok", "invalid"]
+    hotspot_threshold_percent: int
+    files: int = 0
+    measured_units: int = 0
+    overall_executable_lines: int = 0
+    overall_covered_lines: int = 0
+    coverage_hotspots: int = 0
+    scope_gap_hotspots: int = 0
+    units: tuple[UnitCoverageFact, ...] = ()
+    invalid_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SuppressedCloneGroup:
+    kind: Literal["function", "block", "segment"]
+    group_key: str
+    items: tuple[GroupItem, ...]
+    matched_patterns: tuple[str, ...] = ()
+    suppression_rule: str = ""
+    suppression_source: str = ""
 
 
 GroupItem = dict[str, object]

@@ -13,7 +13,12 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from ... import _coerce
-from ..._html_badges import _source_kind_badge_html, _stat_card
+from ..._html_badges import (
+    _inline_empty,
+    _micro_badges,
+    _source_kind_badge_html,
+    _stat_card,
+)
 from ..._html_escape import _escape_html
 from .._components import (
     Tone,
@@ -59,6 +64,7 @@ _DIRECTORY_KIND_LABELS: dict[str, str] = {
     "cohesion": "cohesion",
     "coupling": "coupling",
     "dead_code": "dead code",
+    "coverage": "coverage",
     "dependency": "dependency",
 }
 
@@ -324,7 +330,7 @@ def _issue_breakdown_html(
         (key, label, count, color) for key, label, count, color in raw_rows if count > 0
     ]
     if not rows:
-        return '<div class="overview-summary-value muted">No issues detected.</div>'
+        return _inline_empty("No issues detected", tone="good")
 
     max_count = max(c for _, _, c, _ in rows)
     parts: list[str] = []
@@ -412,14 +418,144 @@ def _format_count(value: int | float) -> str:
     return f"{int(value):,}"
 
 
-def _mb(*pairs: tuple[str, object]) -> str:
-    """Render compact micro-badges for stat-card detail rows."""
-    return "".join(
-        f'<span class="kpi-micro">'
-        f'<span class="kpi-micro-val">{_escape_html(str(v))}</span>'
-        f'<span class="kpi-micro-lbl">{_escape_html(label)}</span></span>'
-        for label, v in pairs
-        if v is not None and str(v) != "n/a"
+def _format_permille_pct(value: object) -> str:
+    return f"{_as_int(value) / 10.0:.1f}%"
+
+
+def _format_permille_delta(value: object) -> str:
+    delta = _as_int(value)
+    sign = "+" if delta > 0 else ""
+    return f"{sign}{delta / 10.0:.1f}pt"
+
+
+def _fact_row(
+    label: str,
+    value: str,
+    *,
+    delta: str | None = None,
+    value_cls: str = "",
+) -> str:
+    cls = f" overview-fact-value--{value_cls}" if value_cls else ""
+    delta_html = (
+        f' <span class="overview-fact-delta">{_escape_html(delta)}</span>'
+        if delta
+        else ""
+    )
+    return (
+        '<div class="overview-fact-row">'
+        f'<span class="overview-fact-label">{_escape_html(label)}</span>'
+        f'<span class="overview-fact-value{cls}">'
+        f"{_escape_html(value)}{delta_html}</span>"
+        "</div>"
+    )
+
+
+def _adoption_card_html(adoption_summary: Mapping[str, object]) -> str:
+    has_baseline = bool(adoption_summary.get("baseline_diff_available"))
+
+    def _delta_or_none(key: str) -> str | None:
+        if not has_baseline:
+            return None
+        return _format_permille_delta(adoption_summary.get(key))
+
+    rows = [
+        _fact_row(
+            "Param annotations",
+            _format_permille_pct(adoption_summary.get("param_permille")),
+            delta=_delta_or_none("param_delta"),
+        ),
+        _fact_row(
+            "Return annotations",
+            _format_permille_pct(adoption_summary.get("return_permille")),
+            delta=_delta_or_none("return_delta"),
+        ),
+        _fact_row(
+            "Docstrings",
+            _format_permille_pct(adoption_summary.get("docstring_permille")),
+            delta=_delta_or_none("docstring_delta"),
+        ),
+    ]
+
+    any_count = _as_int(adoption_summary.get("typing_any_count"))
+    rows.append(
+        _fact_row(
+            "Typed as Any",
+            _format_count(any_count),
+            value_cls="good" if any_count == 0 else "warn",
+        )
+    )
+
+    return '<div class="overview-fact-list">' + "".join(rows) + "</div>"
+
+
+def _api_card_html(api_summary: Mapping[str, object]) -> str:
+    if not bool(api_summary.get("enabled")):
+        return (
+            '<div class="overview-summary-value">Disabled in this run.</div>'
+            '<div class="overview-fact-list">'
+            + _fact_row("Enable via", "--api-surface")
+            + "</div>"
+        )
+
+    symbols = _as_int(api_summary.get("public_symbols"))
+    modules = _as_int(api_summary.get("modules"))
+    rows = [
+        _fact_row("Public symbols", _format_count(symbols)),
+        _fact_row("Modules", _format_count(modules)),
+    ]
+
+    if bool(api_summary.get("baseline_diff_available")):
+        breaking = _as_int(api_summary.get("breaking"))
+        added = _as_int(api_summary.get("added"))
+        rows.append(
+            _fact_row(
+                "Breaking changes",
+                _format_count(breaking),
+                value_cls="warn" if breaking > 0 else "good",
+            )
+        )
+        rows.append(_fact_row("Added symbols", _format_count(added)))
+
+    if bool(api_summary.get("strict_types")):
+        rows.append(_fact_row("Strict mode", "enabled", value_cls="good"))
+
+    return '<div class="overview-fact-list">' + "".join(rows) + "</div>"
+
+
+def _adoption_and_api_section(ctx: ReportContext) -> str:
+    metrics_map = _as_mapping(getattr(ctx, "metrics_map", {}))
+    adoption = _as_mapping(metrics_map.get("coverage_adoption"))
+    adoption_summary = _as_mapping(adoption.get("summary"))
+    api_surface = _as_mapping(metrics_map.get("api_surface"))
+    api_summary = _as_mapping(api_surface.get("summary"))
+    if not adoption_summary and not api_summary:
+        return ""
+
+    cards: list[str] = []
+    if adoption_summary:
+        cards.append(
+            overview_summary_item_html(
+                label="Adoption coverage",
+                body_html=_adoption_card_html(adoption_summary),
+            )
+        )
+    if api_summary:
+        cards.append(
+            overview_summary_item_html(
+                label="Public API surface",
+                body_html=_api_card_html(api_summary),
+            )
+        )
+
+    return (
+        '<section class="overview-cluster">'
+        + overview_cluster_header(
+            "Adoption & API",
+            "Type/docstring adoption and public API surface are shown as facts, not style pressure.",
+        )
+        + '<div class="overview-summary-grid overview-summary-grid--2col">'
+        + "".join(cards)
+        + "</div></section>"
     )
 
 
@@ -438,11 +574,24 @@ def _scan_scope_subtitle(ctx: ReportContext) -> str:
     classes = _as_int(code.get("classes"))
     callable_total = functions + methods
 
-    return (
+    scope_summary = (
         f"{_format_count(total_found)} files \u00b7 "
         f"{_format_count(parsed_lines)} lines \u00b7 "
         f"{_format_count(callable_total)} callables \u00b7 "
         f"{_format_count(classes)} classes"
+    )
+    analysis_profile = _as_mapping(ctx.meta.get("analysis_profile"))
+    if not analysis_profile:
+        return scope_summary
+    return (
+        f"{scope_summary}. "
+        "Thresholds: "
+        f"func {_as_int(analysis_profile.get('min_loc'))}/"
+        f"{_as_int(analysis_profile.get('min_stmt'))} \u00b7 "
+        f"block {_as_int(analysis_profile.get('block_min_loc'))}/"
+        f"{_as_int(analysis_profile.get('block_min_stmt'))} \u00b7 "
+        f"seg {_as_int(analysis_profile.get('segment_min_loc'))}/"
+        f"{_as_int(analysis_profile.get('segment_min_stmt'))}"
     )
 
 
@@ -721,14 +870,14 @@ def render_overview_panel(ctx: ReportContext) -> str:
         baselined = total - delta
         extra = ""
         if baselined > 0:
-            extra = _mb(("baselined", baselined))
+            extra = _micro_badges(("baselined", baselined))
         return detail + extra, "bad"
 
     # KPI cards — compute detail + tone with baseline awareness
     _clone_detail, _clone_tone = _baselined_detail(
         ctx.clone_groups_total,
         _new_clones,
-        _mb(
+        _micro_badges(
             ("func", len(ctx.func_sorted)),
             ("block", len(ctx.block_sorted)),
             ("seg", len(ctx.segment_sorted)),
@@ -737,7 +886,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
     _cx_detail, _cx_tone = _baselined_detail(
         complexity_high_risk,
         _new_complexity,
-        _mb(
+        _micro_badges(
             ("avg", complexity_summary.get("average", "n/a")),
             ("max", complexity_summary.get("max", "n/a")),
         ),
@@ -745,7 +894,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
     _cp_detail, _cp_tone = _baselined_detail(
         coupling_high_risk,
         _new_coupling,
-        _mb(
+        _micro_badges(
             ("avg", coupling_summary.get("average", "n/a")),
             ("max", coupling_summary.get("max", "n/a")),
         ),
@@ -753,12 +902,12 @@ def render_overview_panel(ctx: ReportContext) -> str:
     _cy_detail, _cy_tone = _baselined_detail(
         dependency_cycle_count,
         _new_cycles,
-        _mb(("depth", dependency_max_depth)),
+        _micro_badges(("depth", dependency_max_depth)),
     )
     _dc_detail, _dc_tone = _baselined_detail(
         dead_total,
         _new_dead,
-        _mb(("high-conf", dead_high_conf)),
+        _micro_badges(("high-conf", dead_high_conf)),
     )
 
     kpis = [
@@ -789,7 +938,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
         _stat_card(
             "Low Cohesion",
             cohesion_low,
-            detail=_mb(
+            detail=_micro_badges(
                 ("avg", cohesion_summary.get("average", "n/a")),
                 ("max", cohesion_summary.get("max", "n/a")),
             ),
@@ -815,14 +964,14 @@ def render_overview_panel(ctx: ReportContext) -> str:
         _stat_card(
             "Findings",
             structural_count,
-            detail=_mb(("kinds", structural_kind_count)),
+            detail=_micro_badges(("kinds", structural_kind_count)),
             tip="Active structural findings reported in production code",
             value_tone="good" if structural_count == 0 else "warn",
         ),
         _stat_card(
             "Suggestions",
             len(ctx.suggestions),
-            detail=_mb(
+            detail=_micro_badges(
                 ("clone", clone_suggestion_count),
                 ("struct", structural_suggestion_count),
                 ("metric", metrics_suggestion_count),
@@ -869,7 +1018,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
 
     return (
         insight_block(
-            question="What is the current code-health snapshot?",
+            question="Current health snapshot",
             answer=overview_answer,
             tone=overview_tone,
         )
@@ -880,6 +1029,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
         + "</div>"
         + "</div>"
         + executive
+        + _adoption_and_api_section(ctx)
         + _directory_hotspots_section(ctx)
         + _overloaded_modules_section(ctx)
         + _analytics_section(ctx)
@@ -894,6 +1044,12 @@ def _analytics_section(ctx: ReportContext) -> str:
         return ""
 
     radar_html = _health_radar_svg(dimensions)
+    radar_legend = (
+        '<div class="health-radar-legend">'
+        "Higher values indicate better code health."
+        " Red labels highlight dimensions below 60."
+        "</div>"
+    )
 
     return (
         '<section class="overview-cluster">'
@@ -902,6 +1058,8 @@ def _analytics_section(ctx: ReportContext) -> str:
             "Dimension scores across all quality axes.",
         )
         + '<div class="overview-summary-grid">'
-        + overview_summary_item_html(label="Health profile", body_html=radar_html)
+        + overview_summary_item_html(
+            label="Health profile", body_html=radar_html + radar_legend
+        )
         + "</div></section>"
     )

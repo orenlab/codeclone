@@ -1,6 +1,46 @@
 # Changelog
 
-## [2.0.0b4]
+## [2.0.0b5] - 2026-04-16
+
+Expands the canonical contract with adoption, API-surface, and coverage-join layers; clarifies run interpretation
+across MCP/HTML/clients; tightens MCP launcher/runtime behavior.
+
+### Contracts, metrics, and review surfaces
+
+- Report schema `2.8`: add `coverage_adoption`, `api_surface`, `coverage_join`, and optional
+  `clones.suppressed.*` (for `golden_fixture_paths`); separate coverage hotspots vs scope gaps.
+- Baselines: clone `2.1`, metrics `1.2`; compact `api_surface` payload (`local_name` on disk, qualnames at runtime);
+  read-compatible with `2.0` / `1.1`.
+- Add public/private visibility classification for public-symbol metrics (no clone/fingerprint changes).
+- Add annotation/docstring adoption coverage: parameter, return, public docstrings, explicit `Any`.
+- Add opt-in API surface inventory + baseline diff (snapshots, additions, breaking changes).
+- Add coverage join (`--coverage`): per-function facts + findings for below-threshold or missing-in-scope functions;
+  current-run only (not baseline truth, no fingerprint impact).
+- Add `golden_fixture_paths`: exclude matching clone groups from health/gates while keeping suppressed facts.
+- Add gates: `--min-typing-coverage`, `--min-docstring-coverage`, `--fail-on-typing-regression`,
+  `--fail-on-docstring-regression`, `--fail-on-api-break`, `--fail-on-untested-hotspots`, `--coverage-min`.
+- Surface adoption/API/coverage-join in MCP, CLI Metrics, report payloads, and HTML (Overview + Quality subtab).
+- Preserve embedded metrics and optional `api_surface` in unified baselines.
+- Cache `2.5`: make analysis-profile compatibility API-surface-aware; invalidate stale non-API warm caches; preserve parameter order; align warm/cold API diffs.
+
+### MCP, HTML, and client interpretation
+
+- Surface effective analysis profile in report meta, MCP summary/triage, and HTML subtitle.
+- Add `health_scope`, `focus`, `new_by_source_kind` to MCP summary/triage.
+- Make baseline mismatch explicit (python tags + no-valid-baseline signal).
+- Surface `Coverage Join` facts and the optional `coverage` MCP help topic in
+  the VS Code extension when the connected server supports them.
+- Prefer workspace-local launchers over `PATH` (Poetry fallback).
+- Add `workspace_root` to force project `.venv` selection.
+
+### Safety and maintenance
+
+- Validate `git_diff_ref` as safe single-revision expressions.
+- Replace segment digest `repr()` with canonical JSON bytes (determinism).
+- Align CI coverage gate (`fail_under = 99`) and refresh `actions/checkout` pin.
+- Refresh branch metadata/docs for `2.0.0b5`; update README badge to `89 (B)`.
+
+## [2.0.0b4] - 2026-04-05
 
 ### MCP server
 

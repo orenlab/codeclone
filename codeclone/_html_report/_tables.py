@@ -72,12 +72,13 @@ def render_rows_table(
     headers: Sequence[str],
     rows: Sequence[Sequence[str]],
     empty_message: str,
+    empty_description: str | None = "Nothing to report - keep up the good work.",
     raw_html_headers: Collection[str] = (),
     ctx: ReportContext | None = None,
 ) -> str:
     """Render a data table with badges, tooltips, and col sizing."""
     if not rows:
-        return _tab_empty(empty_message)
+        return _tab_empty(empty_message, description=empty_description)
 
     lower_headers = [h.lower() for h in headers]
     raw_html_set = {h.lower() for h in raw_html_headers}

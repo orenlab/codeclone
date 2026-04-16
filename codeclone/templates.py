@@ -16,7 +16,13 @@ from string import Template
 
 FONT_CSS_URL = (
     "https://fonts.googleapis.com/css2?"
-    "family=Inter:wght@400;500;600;700&"
+    # Inter Variable — single file, full weight axis (100..900), smoother
+    # rendering than static cuts. Used for body text AND display (KPI numbers,
+    # headings). Google Fonts' Inter Tight subset drops the `zero` OT feature,
+    # so we stick to a single Inter family and apply display weight/tracking
+    # via CSS instead of a sibling family.
+    "family=Inter:wght@100..900&"
+    # JetBrains Mono — code/monospace surfaces.
     "family=JetBrains+Mono:wght@400;500&"
     "display=swap"
 )

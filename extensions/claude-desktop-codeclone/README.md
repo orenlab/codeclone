@@ -5,18 +5,30 @@ instead of manual JSON editing.
 
 Same canonical MCP surface used by CLI, VS Code, Codex, and Claude Code.
 Read-only, baseline-aware, local stdio only.
+As the local `codeclone-mcp` server gains new canonical surfaces, the bundle
+exposes them without adding a second client-side interpretation layer.
 
 ## Install
 
+The bundle prefers the current workspace launcher first:
+
+1. `./.venv/bin/codeclone-mcp`
+2. the current Poetry environment launcher
+3. user-local install paths and `PATH`
+
+Recommended workspace-local setup:
+
 ```bash
-uv tool install --pre "codeclone[mcp]"
-codeclone-mcp --help                       # verify launcher
+uv venv
+uv pip install --python .venv/bin/python "codeclone[mcp]>=2.0.0b4"
+.venv/bin/codeclone-mcp --help
 ```
 
-If you want to keep the launcher inside an existing environment instead, use:
+Global fallback:
 
 ```bash
-uv pip install --pre "codeclone[mcp]"
+uv tool install "codeclone[mcp]>=2.0.0b4"
+codeclone-mcp --help
 ```
 
 Build and install the bundle:
@@ -29,8 +41,8 @@ node scripts/build-mcpb.mjs
 Then in Claude Desktop: **Settings → Extensions → Install Extension** → select
 the `.mcpb` from `dist/`.
 
-If `codeclone-mcp` is not on `PATH`, set **CodeClone launcher command** in the
-extension settings to an absolute path.
+If you want to bypass auto-discovery entirely, set **CodeClone launcher
+command** in the extension settings to an absolute path.
 
 ## Configuration
 
@@ -50,6 +62,9 @@ Use CodeClone for a changed-files review of my current diff.
 
 # Deeper follow-up
 Run a default CodeClone pass first. If clean, do a second higher-sensitivity pass.
+
+# Coverage-aware follow-up
+If the current run includes coverage data, explain the Coverage Join facts and any scope gaps.
 ```
 
 ## Privacy

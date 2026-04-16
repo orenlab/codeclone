@@ -2,7 +2,7 @@
   "meta": {
     "python_tag": "cp313"
   },
-  "report_schema_version": "2.3",
+  "report_schema_version": "2.8",
   "project_name": "pyproject_defaults",
   "scan_root": ".",
   "baseline_status": "missing",

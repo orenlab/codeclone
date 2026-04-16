@@ -48,12 +48,13 @@ from codeclone._html_report._tabs import render_split_tabs
 from codeclone._html_snippets import _FileCache
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import MetricsDiff, ReportLocation, Suggestion
+from tests._assertions import assert_contains_none
 
 
 def test_summary_helpers_cover_empty_and_non_clone_context_branches() -> None:
-    assert overview_source_breakdown_html({}) == (
-        '<div class="overview-summary-value">n/a</div>'
-    )
+    empty_html = overview_source_breakdown_html({})
+    assert 'class="inline-empty inline-empty--neutral"' in empty_html
+    assert "No source data available" in empty_html
 
 
 def test_summary_helpers_cover_breakdown_bars_and_clone_badges() -> None:
@@ -407,10 +408,13 @@ def test_suggestion_helpers_cover_empty_summary_breakdown_and_optional_sections(
         ),
         cast(Any, _section_ctx()),
     )
-    assert "suggestion-chip" not in card_html
-    assert "suggestion-summary" not in card_html
-    assert "Locations (" not in card_html
-    assert "Refactoring steps" not in card_html
+    assert_contains_none(
+        card_html,
+        "suggestion-chip",
+        "suggestion-summary",
+        "Locations (",
+        "Refactoring steps",
+    )
 
 
 def test_suggestion_context_labels_prefer_specific_clone_kind() -> None:
@@ -542,3 +546,35 @@ def test_meta_snippet_and_assembly_helpers_cover_empty_optional_paths(
         report_document={},
     )
     assert '[data-theme="light"] .codebox span' not in html_without_light_rules
+
+
+def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
+    meta_html = render_meta_panel(
+        cast(
+            Any,
+            SimpleNamespace(
+                meta={
+                    "python_tag": "cp313",
+                    "baseline_python_tag": "cp312",
+                    "cache_status": "stale",
+                    "metrics_baseline_loaded": True,
+                    "metrics_baseline_payload_sha256_verified": True,
+                },
+                baseline_meta={"status": "FAILED"},
+                cache_meta={},
+                metrics_baseline_meta={},
+                runtime_meta={},
+                integrity_map={},
+                report_schema_version="2.8",
+                report_generated_at="2026-04-15T12:00:00Z",
+            ),
+        )
+    )
+    assert 'class="prov-badge prov-badge--red prov-badge--inline"' in meta_html
+    assert 'class="prov-badge prov-badge--neutral prov-badge--inline"' in meta_html
+    assert 'class="prov-badge prov-badge--amber prov-badge--inline"' in meta_html
+    assert '<span class="prov-badge-val">FAILED</span>' in meta_html
+    assert '<span class="prov-badge-val">stale</span>' in meta_html
+    assert '<span class="prov-badge-val">runtime cp313</span>' in meta_html
+    assert '<span class="prov-badge-val">verified</span>' in meta_html
+    assert '<span class="prov-badge-lbl">Metrics baseline</span>' in meta_html

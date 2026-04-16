@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Literal
 
 from ... import _coerce
-from ..._html_badges import _source_kind_badge_html
+from ..._html_badges import _micro_badges, _source_kind_badge_html, _stat_card
 from ..._html_data_attrs import _build_data_attrs
 from ..._html_escape import _escape_html
 from ..._html_filters import CLONE_TYPE_OPTIONS, SPREAD_OPTIONS, _render_select
@@ -27,7 +27,9 @@ from ...report.explain_contract import format_group_instance_compare_meta
 from ...report.json_contract import clone_group_id
 from ...report.suggestions import classify_clone_type
 from .._components import Tone, insight_block
+from .._glossary import glossary_tip
 from .._icons import ICONS
+from .._tables import render_rows_table
 from .._tabs import render_split_tabs
 
 if TYPE_CHECKING:
@@ -35,8 +37,15 @@ if TYPE_CHECKING:
     from .._context import ReportContext
 
 _as_int = _coerce.as_int
+_as_mapping = _coerce.as_mapping
+_as_sequence = _coerce.as_sequence
 
 _HEX_SET = frozenset("0123456789abcdefABCDEF")
+_SUPPRESSED_KIND_LABELS = {
+    "function": "Function",
+    "block": "Block",
+    "segment": "Segment",
+}
 
 
 def _looks_like_hash(text: str) -> bool:
@@ -169,11 +178,120 @@ def _render_group_explanation(meta: Mapping[str, object]) -> str:
     return f'<div class="group-explain" {attr_html}>{"".join(parts)}{note}</div>'
 
 
+def _flatten_suppressed_clone_groups(
+    ctx: ReportContext,
+) -> tuple[Mapping[str, object], ...]:
+    findings = _as_mapping(ctx.report_document.get("findings"))
+    groups = _as_mapping(findings.get("groups"))
+    clones = _as_mapping(groups.get("clones"))
+    suppressed = _as_mapping(clones.get("suppressed"))
+    flattened: list[Mapping[str, object]] = []
+    for bucket_key in ("functions", "blocks", "segments"):
+        for group in _as_sequence(suppressed.get(bucket_key)):
+            group_mapping = _as_mapping(group)
+            if group_mapping:
+                flattened.append(group_mapping)
+    return tuple(flattened)
+
+
+def _suppressed_group_label(
+    group: Mapping[str, object],
+    ctx: ReportContext,
+) -> tuple[str, str]:
+    items = _as_sequence(group.get("items"))
+    first_item = _as_mapping(items[0]) if items else {}
+    filepath = str(first_item.get("filepath", ""))
+    qualname = str(first_item.get("qualname", ""))
+    label = ctx.bare_qualname(qualname, filepath) or ctx.relative_path(filepath)
+    if not label:
+        label = str(group.get("id", ""))
+    return label, filepath
+
+
+def _render_suppressed_clone_panel(
+    ctx: ReportContext,
+    groups: Sequence[Mapping[str, object]],
+) -> str:
+    rows: list[tuple[str, str, str, str, str, str, str]] = []
+    for group in groups[:200]:
+        label, filepath = _suppressed_group_label(group, ctx)
+        matched_patterns = ", ".join(
+            str(pattern).strip()
+            for pattern in _as_sequence(group.get("matched_patterns"))
+            if str(pattern).strip()
+        )
+        suppression_rule = str(group.get("suppression_rule", "")).strip()
+        suppression_source = str(group.get("suppression_source", "")).strip()
+        rule_text = suppression_rule
+        if suppression_source:
+            rule_text = (
+                f"{rule_text}@{suppression_source}" if rule_text else suppression_source
+            )
+        rows.append(
+            (
+                _SUPPRESSED_KIND_LABELS.get(
+                    str(group.get("clone_kind", "")).strip().lower(),
+                    "Clone",
+                ),
+                label,
+                filepath,
+                str(group.get("clone_type", "")),
+                str(group.get("count", "")),
+                rule_text,
+                matched_patterns or "-",
+            )
+        )
+    return render_rows_table(
+        headers=("Kind", "Group", "File", "Type", "Occurrences", "Rule", "Pattern"),
+        rows=rows,
+        empty_message="No suppressed clone groups.",
+        ctx=ctx,
+    )
+
+
 def _render_section_toolbar(
     section_id: str,
     section_title: str,
     group_count: int,
 ) -> str:
+    """Slim toolbar: search + combined filters popover + expand toggle + pagination.
+
+    Filter controls (Context / Type / Spread / 4+ occurrences) are collapsed
+    into a single "Filters" popover to reduce horizontal noise. The underlying
+    ``data-*-filter`` attributes are preserved so the existing filter JS picks
+    them up unchanged.
+    """
+    filters_menu = (
+        '<div class="filters-menu" role="group" hidden>'
+        f'<div class="filters-row">'
+        f'<label class="filters-label" for="source-kind-{section_id}">Context</label>'
+        + _render_select(
+            element_id=f"source-kind-{section_id}",
+            data_attr=f'data-source-kind-filter="{section_id}"',
+            options=tuple((k, k) for k in SOURCE_KIND_FILTER_VALUES),
+        )
+        + "</div>"
+        f'<div class="filters-row">'
+        f'<label class="filters-label" for="clone-type-{section_id}">Type</label>'
+        + _render_select(
+            element_id=f"clone-type-{section_id}",
+            data_attr=f'data-clone-type-filter="{section_id}"',
+            options=CLONE_TYPE_OPTIONS,
+        )
+        + "</div>"
+        f'<div class="filters-row">'
+        f'<label class="filters-label" for="spread-{section_id}">Spread</label>'
+        + _render_select(
+            element_id=f"spread-{section_id}",
+            data_attr=f'data-spread-filter="{section_id}"',
+            options=SPREAD_OPTIONS,
+        )
+        + "</div>"
+        '<label class="filters-row inline-check">'
+        f'<input type="checkbox" data-min-occurrences-filter="{section_id}"/>'
+        "<span>Only groups with 4+ occurrences</span></label>"
+        "</div>"
+    )
     return (
         f'<div class="toolbar" role="toolbar" aria-label="{_escape_html(section_title)} controls">'
         '<div class="toolbar-left">'
@@ -182,36 +300,31 @@ def _render_section_toolbar(
         f'<input type="text" id="search-{section_id}" placeholder="Search..." autocomplete="off"/>'
         f'<button class="clear-btn" type="button" data-clear="{section_id}" title="Clear search">'
         f"{ICONS['clear']}</button></div>"
-        f'<button class="btn" type="button" data-collapse-all="{section_id}">Collapse</button>'
-        f'<button class="btn" type="button" data-expand-all="{section_id}">Expand</button>'
-        f'<label class="muted" for="source-kind-{section_id}">Context:</label>'
-        + _render_select(
-            element_id=f"source-kind-{section_id}",
-            data_attr=f'data-source-kind-filter="{section_id}"',
-            options=tuple((k, k) for k in SOURCE_KIND_FILTER_VALUES),
-        )
-        + f'<label class="muted" for="clone-type-{section_id}">Type:</label>'
-        + _render_select(
-            element_id=f"clone-type-{section_id}",
-            data_attr=f'data-clone-type-filter="{section_id}"',
-            options=CLONE_TYPE_OPTIONS,
-        )
-        + f'<label class="muted" for="spread-{section_id}">Spread:</label>'
-        + _render_select(
-            element_id=f"spread-{section_id}",
-            data_attr=f'data-spread-filter="{section_id}"',
-            options=SPREAD_OPTIONS,
-        )
-        + f'<label class="inline-check">'
-        f'<input type="checkbox" data-min-occurrences-filter="{section_id}"/>'
-        "<span>4+ occurrences</span></label>"
+        '<div class="filters-popover">'
+        '<button class="btn filters-btn" type="button" '
+        f'data-filters-toggle="{section_id}" aria-expanded="false" '
+        'aria-haspopup="true" title="Filter clone groups">'
+        '<svg class="filters-btn-ico" viewBox="0 0 16 16" width="13" height="13" '
+        'fill="none" stroke="currentColor" stroke-width="1.7" '
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<path d="M2 3.5h12M4 8h8M6.5 12.5h3"/></svg>'
+        "<span>Filters</span>"
+        f'<span class="filters-count" data-filters-count="{section_id}" hidden>0</span>'
+        "</button>"
+        f"{filters_menu}"
+        "</div>"
+        '<button class="btn expand-toggle" type="button" '
+        f'data-expand-toggle="{section_id}" data-expanded="false" '
+        'title="Expand all visible groups">Expand all</button>'
         "</div>"
         '<div class="toolbar-right">'
         '<div class="pagination">'
-        f'<button class="btn" type="button" data-prev="{section_id}">{ICONS["prev"]}</button>'
+        f'<button class="btn btn-icon" type="button" data-prev="{section_id}" '
+        f'aria-label="Previous page">{ICONS["prev"]}</button>'
         f'<span class="page-meta" data-page-meta="{section_id}">'
         f"Page 1 / 1 \u2022 {group_count} groups</span>"
-        f'<button class="btn" type="button" data-next="{section_id}">{ICONS["next"]}</button>'
+        f'<button class="btn btn-icon" type="button" data-next="{section_id}" '
+        f'aria-label="Next page">{ICONS["next"]}</button>'
         "</div>"
         f'<select class="select" data-pagesize="{section_id}" aria-label="Items per page" '
         'title="Groups per page">'
@@ -554,8 +667,11 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
 
     Returns ``(panel_html, novelty_enabled, total_new, total_known)``.
     """
+    suppressed_clone_groups = _flatten_suppressed_clone_groups(ctx)
+    suppressed_total = len(suppressed_clone_groups)
+
     # Empty state
-    if not ctx.has_any_clones:
+    if not ctx.has_any_clones and suppressed_total == 0:
         empty = (
             '<div class="empty"><div class="empty-card">'
             f'<div class="empty-icon">{ICONS["check"]}</div>'
@@ -585,19 +701,19 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
     global_novelty_html = ""
     if novelty_enabled:
         global_novelty_html = (
-            '<section class="global-novelty" id="global-novelty-controls" '
-            f'data-default-novelty="{default_novelty}">'
-            '<div class="global-novelty-head">'
-            "<h2>Duplicate Scope</h2>"
-            '<div class="novelty-tabs" role="tablist" aria-label="Baseline split filter">'
+            '<div class="novelty-bar" id="global-novelty-controls" '
+            f'data-default-novelty="{default_novelty}" '
+            'role="group" aria-label="Baseline split filter">'
+            '<div class="novelty-bar-tabs" role="tablist">'
             '<button class="btn novelty-tab" type="button" data-global-novelty="new" '
             f'data-novelty-state="{"good" if total_new == 0 else "bad"}">'
             f'New duplicates <span class="novelty-count">{total_new}</span></button>'
             '<button class="btn novelty-tab" type="button" data-global-novelty="known">'
             f'Known duplicates <span class="novelty-count">{total_known}</span></button>'
-            "</div></div>"
-            f'<p class="novelty-note">{_escape_html(ctx.baseline_split_note)}</p>'
-            "</section>"
+            "</div>"
+            '<span class="novelty-bar-note">'
+            f"{_escape_html(ctx.baseline_split_note)}</span>"
+            "</div>"
         )
 
     func_section = _render_section(
@@ -630,6 +746,15 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
         sub_tabs.append(
             ("segments", "Segments", len(ctx.segment_sorted), segment_section)
         )
+    if suppressed_total > 0:
+        sub_tabs.append(
+            (
+                "suppressed",
+                "Suppressed",
+                suppressed_total,
+                _render_suppressed_clone_panel(ctx, suppressed_clone_groups),
+            )
+        )
 
     panel = global_novelty_html + render_split_tabs(
         group_id="clones", tabs=sub_tabs, emit_clone_counters=True
@@ -643,13 +768,72 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
         )
     else:
         clones_answer = f"{ctx.clone_groups_total} groups and {ctx.clone_instances_total} instances."
+    if suppressed_total > 0:
+        clones_answer += (
+            f" {suppressed_total} suppressed golden-fixture groups are excluded "
+            "from active review."
+        )
     clones_tone: Tone = "warn" if ctx.clone_groups_total > 0 else "ok"
+
+    # Stat cards
+    avg_per_group = (
+        f"{ctx.clone_instances_total / max(1, ctx.clone_groups_total):.1f}"
+        if ctx.clone_groups_total > 0
+        else "0"
+    )
+    high_spread = sum(
+        1
+        for gs in (ctx.func_sorted, ctx.block_sorted, ctx.segment_sorted)
+        for _, items in gs
+        if len({str(it.get("filepath", "")) for it in items}) > 1
+    )
+    clone_cards = [
+        _stat_card(
+            "Clone groups",
+            ctx.clone_groups_total,
+            detail=_micro_badges(
+                ("functions", len(ctx.func_sorted)),
+                ("blocks", len(ctx.block_sorted)),
+                ("segments", len(ctx.segment_sorted)),
+            ),
+            value_tone="warn" if ctx.clone_groups_total > 0 else "good",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Instances",
+            ctx.clone_instances_total,
+            detail=_micro_badges(("avg/group", avg_per_group)),
+            value_tone="warn" if ctx.clone_instances_total > 0 else "good",
+            glossary_tip_fn=glossary_tip,
+        ),
+    ]
+    if novelty_enabled:
+        clone_cards.append(
+            _stat_card(
+                "New groups",
+                total_new,
+                detail=_micro_badges(("known", total_known)),
+                value_tone="bad" if total_new > 0 else "good",
+                glossary_tip_fn=glossary_tip,
+            ),
+        )
+    clone_cards.append(
+        _stat_card(
+            "High spread",
+            high_spread,
+            value_tone="warn" if high_spread > 0 else "muted",
+            glossary_tip_fn=glossary_tip,
+        ),
+    )
+    clone_cards_html = f'<div class="stat-cards">{"".join(clone_cards)}</div>'
+
     panel = (
         insight_block(
             question="Where is duplication concentrated right now?",
             answer=clones_answer,
             tone=clones_tone,
         )
+        + clone_cards_html
         + panel
     )
 

@@ -25,6 +25,30 @@ from codeclone import __version__ as codeclone_version
 from codeclone.baseline import current_python_tag
 
 BENCHMARK_SCHEMA_VERSION = "1.0"
+BENCHMARK_NEUTRAL_ARGS: tuple[str, ...] = (
+    "--no-fail-on-new",
+    "--no-fail-on-new-metrics",
+    "--no-fail-cycles",
+    "--no-fail-dead-code",
+    "--no-fail-on-typing-regression",
+    "--no-fail-on-docstring-regression",
+    "--no-fail-on-api-break",
+    "--no-fail-on-untested-hotspots",
+    "--fail-threshold",
+    "-1",
+    "--fail-complexity",
+    "-1",
+    "--fail-coupling",
+    "-1",
+    "--fail-cohesion",
+    "-1",
+    "--fail-health",
+    "-1",
+    "--min-typing-coverage",
+    "-1",
+    "--min-docstring-coverage",
+    "-1",
+)
 
 
 @dataclass(frozen=True)
@@ -139,6 +163,7 @@ def _run_cli_once(
         "-m",
         "codeclone.cli",
         str(target),
+        *BENCHMARK_NEUTRAL_ARGS,
         "--json",
         str(report_path),
         "--cache-path",
@@ -174,6 +199,45 @@ def _run_cli_once(
         files_cached=files["cached"],
         files_skipped=files["skipped"],
     )
+
+
+def _validate_inventory_sample(
+    *,
+    scenario: Scenario,
+    measurement: RunMeasurement,
+) -> None:
+    if measurement.files_found <= 0:
+        raise RuntimeError(
+            f"scenario {scenario.name} produced an empty inventory sample; "
+            "benchmark target is invalid"
+        )
+    if measurement.files_skipped > 0:
+        raise RuntimeError(
+            f"scenario {scenario.name} skipped {measurement.files_skipped} files; "
+            "benchmark run is invalid"
+        )
+    if scenario.mode == "cold":
+        if measurement.files_cached != 0:
+            raise RuntimeError(
+                f"cold scenario {scenario.name} unexpectedly used cache: "
+                f"cached={measurement.files_cached}"
+            )
+        if measurement.files_analyzed <= 0:
+            raise RuntimeError(
+                f"cold scenario {scenario.name} analyzed no files: "
+                f"found={measurement.files_found} analyzed={measurement.files_analyzed}"
+            )
+        return
+    if measurement.files_cached <= 0:
+        raise RuntimeError(
+            f"warm scenario {scenario.name} did not use cache: "
+            f"cached={measurement.files_cached}"
+        )
+    if measurement.files_analyzed != 0:
+        raise RuntimeError(
+            f"warm scenario {scenario.name} analyzed files unexpectedly: "
+            f"analyzed={measurement.files_analyzed}"
+        )
 
 
 def _scenario_result(
@@ -230,6 +294,7 @@ def _scenario_result(
             report_path=scenario_dir / f"run-report-{idx}.json",
             extra_args=scenario.extra_args,
         )
+        _validate_inventory_sample(scenario=scenario, measurement=measurement)
         measurements.append(measurement)
 
     digests = sorted({m.digest for m in measurements})

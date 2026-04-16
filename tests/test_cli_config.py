@@ -148,6 +148,11 @@ def test_apply_pyproject_config_overrides_respects_explicit_cli_flags() -> None:
         ("min_loc", 10, 10),
         ("baseline", "codeclone.baseline.json", "codeclone.baseline.json"),
         ("cache_path", None, None),
+        (
+            "golden_fixture_paths",
+            ["tests/fixtures/golden_*", "tests/fixtures/golden_*"],
+            ("tests/fixtures/golden_*",),
+        ),
     ],
 )
 def test_validate_config_value_accepts_expected_types(
@@ -163,6 +168,13 @@ def test_validate_config_value_accepts_expected_types(
         ("update_baseline", "yes", "expected bool"),
         ("min_loc", True, "expected int"),
         ("baseline", 1, "expected str"),
+        ("golden_fixture_paths", "tests/fixtures/golden_*", "expected list\\[str\\]"),
+        (
+            "golden_fixture_paths",
+            ["tests/fixtures/golden_*", 1],
+            "expected list\\[str\\]",
+        ),
+        ("golden_fixture_paths", ["pkg/*"], "must target tests/"),
     ],
 )
 def test_validate_config_value_rejects_invalid_types(
@@ -214,6 +226,30 @@ def test_normalize_path_config_value_behaviour(tmp_path: Path) -> None:
         )
         == "/tmp/absolute-cache.json"
     )
+    patterns = ("tests/fixtures/golden_*",)
+    assert (
+        cfg_mod._normalize_path_config_value(
+            key="golden_fixture_paths",
+            value=patterns,
+            root_path=tmp_path,
+        )
+        == patterns
+    )
+
+
+def test_load_pyproject_config_accepts_golden_fixture_paths(tmp_path: Path) -> None:
+    _write_pyproject(
+        tmp_path / "pyproject.toml",
+        """
+[tool.codeclone]
+golden_fixture_paths = [
+  "./tests/fixtures/golden_*",
+  "tests/fixtures/golden_*",
+]
+""".strip(),
+    )
+    loaded = cfg_mod.load_pyproject_config(tmp_path)
+    assert loaded["golden_fixture_paths"] == ("tests/fixtures/golden_*",)
 
 
 def test_load_toml_py310_missing_tomli_raises(

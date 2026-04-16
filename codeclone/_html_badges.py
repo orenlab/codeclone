@@ -34,12 +34,16 @@ from .report._source_kinds import normalize_source_kind, source_kind_label
 
 __all__ = [
     "CHECK_CIRCLE_SVG",
+    "INFO_CIRCLE_SVG",
+    "_inline_empty",
+    "_micro_badges",
     "_quality_badge_html",
     "_render_chain_flow",
     "_short_label",
     "_source_kind_badge_html",
     "_stat_card",
     "_tab_empty",
+    "_tab_empty_info",
 ]
 
 _EFFORT_CSS: dict[str, str] = {
@@ -56,6 +60,27 @@ CHECK_CIRCLE_SVG = (
     '<polyline points="16 9 10.5 15 8 12.5"/>'
     "</svg>"
 )
+
+INFO_CIRCLE_SVG = (
+    '<svg class="tab-empty-icon" viewBox="0 0 24 24" fill="none" '
+    'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" '
+    'stroke-linejoin="round">'
+    '<circle cx="12" cy="12" r="10"/>'
+    '<line x1="12" y1="16" x2="12" y2="12"/>'
+    '<line x1="12" y1="8" x2="12.01" y2="8"/>'
+    "</svg>"
+)
+
+
+def _micro_badges(*pairs: tuple[str, object]) -> str:
+    """Render compact label:value micro-badge pairs for stat card details."""
+    return "".join(
+        f'<span class="kpi-micro">'
+        f'<span class="kpi-micro-val">{_escape_html(str(value))}</span>'
+        f'<span class="kpi-micro-lbl">{_escape_html(label)}</span></span>'
+        for label, value in pairs
+        if value is not None and str(value) != "n/a"
+    )
 
 
 def _quality_badge_html(text: str) -> str:
@@ -85,14 +110,86 @@ def _source_kind_badge_html(source_kind: str) -> str:
     )
 
 
-def _tab_empty(message: str) -> str:
+_INLINE_EMPTY_ICONS: dict[str, str] = {
+    "good": (
+        '<svg class="inline-empty-icon" viewBox="0 0 24 24" width="22" height="22" '
+        'fill="none" stroke="currentColor" stroke-width="1.6" '
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<circle cx="12" cy="12" r="9.5"/>'
+        '<polyline points="16.5 9.5 10.5 15.5 7.5 12.5"/></svg>'
+    ),
+    "neutral": (
+        '<svg class="inline-empty-icon" viewBox="0 0 24 24" width="22" height="22" '
+        'fill="none" stroke="currentColor" stroke-width="1.6" '
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<circle cx="12" cy="12" r="9.5"/>'
+        '<line x1="12" y1="16" x2="12" y2="11"/>'
+        '<circle cx="12" cy="8" r=".45" fill="currentColor" stroke="none"/></svg>'
+    ),
+}
+
+
+def _inline_empty(message: str, *, tone: str = "neutral") -> str:
+    """Compact single-row empty-state for inline/card contexts.
+
+    Use for summary items, breakdown panels, and other small cards where a
+    full ``.tab-empty`` would be too heavy.
+
+    *tone*:
+      - ``"good"``  — green check (positive: "nothing to report").
+      - ``"neutral"`` — muted info dot (missing or unavailable data).
+    """
+    tone_key = tone if tone in _INLINE_EMPTY_ICONS else "neutral"
+    icon = _INLINE_EMPTY_ICONS[tone_key]
+    return (
+        f'<div class="inline-empty inline-empty--{tone_key}">'
+        f"{icon}"
+        f'<span class="inline-empty-text">{_escape_html(message)}</span>'
+        "</div>"
+    )
+
+
+def _tab_empty(
+    message: str,
+    *,
+    description: str | None = "Nothing to report - keep up the good work.",
+) -> str:
+    desc_html = (
+        f'<div class="tab-empty-desc">{_escape_html(description)}</div>'
+        if description
+        else ""
+    )
     return (
         '<div class="tab-empty">'
         f"{CHECK_CIRCLE_SVG}"
         f'<div class="tab-empty-title">{_escape_html(message)}</div>'
-        '<div class="tab-empty-desc">'
-        "Nothing to report - keep up the good work."
+        f"{desc_html}"
         "</div>"
+    )
+
+
+def _tab_empty_info(
+    message: str,
+    *,
+    description: str | None = None,
+    detail_html: str | None = None,
+) -> str:
+    if detail_html:
+        desc_block = (
+            f'<div class="tab-empty-desc tab-empty-desc-detail">{detail_html}</div>'
+        )
+    elif description:
+        desc_block = (
+            f'<div class="tab-empty-desc tab-empty-desc-detail">'
+            f"{_escape_html(description)}</div>"
+        )
+    else:
+        desc_block = ""
+    return (
+        '<div class="tab-empty">'
+        f"{INFO_CIRCLE_SVG}"
+        f'<div class="tab-empty-title">{_escape_html(message)}</div>'
+        f"{desc_block}"
         "</div>"
     )
 

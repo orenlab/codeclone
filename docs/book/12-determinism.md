@@ -32,7 +32,7 @@ Refs:
 - `codeclone/report/json_contract.py:build_report_document`
 - `codeclone/report/serialize.py:render_text_report_document`
 - `codeclone/baseline.py:_compute_payload_sha256`
-- `codeclone/cache.py:_sign_data`
+- `codeclone/cache_io.py:sign_cache_payload`
 
 ## Invariants (MUST)
 
@@ -67,7 +67,7 @@ Primary canonicalization points:
 Refs:
 
 - `codeclone/baseline.py:_compute_payload_sha256`
-- `codeclone/cache.py:_canonical_json`
+- `codeclone/cache_io.py:canonical_json`
 - `codeclone/report/json_contract.py:_build_integrity_payload`
 
 ## Locked by tests

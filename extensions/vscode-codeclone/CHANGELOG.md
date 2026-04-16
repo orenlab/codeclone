@@ -1,5 +1,15 @@
 # Change Log
 
+## 0.2.3
+
+- explain baseline mismatch runs more clearly with compact baseline/runtime tag context
+- surface runtime source in the session view and alongside baseline-mismatch run details
+
+## 0.2.2
+
+- surface repository-vs-focus semantics more clearly in triage and summary UX
+- explain new findings by source kind without widening the review flow
+
 ## 0.2.1
 
 - refresh packaged extension metadata for prerelease validation

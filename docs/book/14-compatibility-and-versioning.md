@@ -18,11 +18,11 @@ compatibility is enforced.
 
 Current contract versions:
 
-- `BASELINE_SCHEMA_VERSION = "2.0"`
+- `BASELINE_SCHEMA_VERSION = "2.1"`
 - `BASELINE_FINGERPRINT_VERSION = "1"`
-- `CACHE_VERSION = "2.3"`
-- `REPORT_SCHEMA_VERSION = "2.3"`
-- `METRICS_BASELINE_SCHEMA_VERSION = "1.0"` (used only when metrics are stored
+- `CACHE_VERSION = "2.5"`
+- `REPORT_SCHEMA_VERSION = "2.8"`
+- `METRICS_BASELINE_SCHEMA_VERSION = "1.2"` (used only when metrics are stored
   in a dedicated metrics-baseline file instead of the default unified baseline)
 
 Refs:
@@ -56,7 +56,8 @@ Version bump rules:
   short MCP ids, slim summary locations, or omitting `priority_factors`
   outside `detail_level="full"`.
 - Additive MCP-only convenience fields/projections such as
-  `cache.freshness` or production-first triage also do not change
+  `cache.freshness`, production-first triage, `health_scope`, `focus`, or
+  `new_by_source_kind` also do not change
   `report_schema_version` when they are derived from unchanged canonical report
   and summary data.
 - The same rule applies to bounded MCP semantic guidance such as
@@ -68,9 +69,13 @@ Version bump rules:
   `report_schema_version` because they alter canonical report semantics and
   integrity payload.
 - The same is true for additive canonical metrics families such as
-  `metrics.families.overloaded_modules`: even though the layer is report-only and does
-  not affect health/gates/findings, it still changes canonical report schema
-  and integrity payload, so it requires a report-schema bump.
+  `metrics.families.overloaded_modules`, `coverage_adoption`, `api_surface`,
+  or `coverage_join`: even when the layer is report-only or current-run only,
+  it still changes canonical report schema and integrity payload, so it
+  requires a report-schema bump.
+- The same rule applies to new canonical suppressed-finding buckets such as
+  `findings.groups.clones.suppressed.*`: even though they are non-active
+  review facts, they still change canonical report shape and integrity payload.
 - CodeClone does not currently define a separate health-model version constant.
   Health-score semantics are package-versioned and must be documented in the
   Health Score chapter and release notes when they change.
@@ -78,8 +83,27 @@ Version bump rules:
 Baseline compatibility rules:
 
 - Runtime accepts baseline schema majors `1` and `2` with supported minors.
-- Runtime writes current schema (`2.0`) on new/updated baseline saves.
+- Runtime writes current schema (`2.1`) on new/updated baseline saves.
 - Embedded top-level `metrics` is valid only for baseline schema `>= 2.0`.
+- Unified clone baselines may also embed top-level `api_surface` when metrics
+  baseline data is stored in the same file.
+- Embedded and standalone `api_surface` snapshots now use compact symbol wire
+  layout (`local_name` relative to `module`, `filepath` relative to the
+  baseline directory when possible) while runtime reconstructs full canonical
+  qualnames and runtime filepaths before comparison. This is a schema change
+  for baseline `2.1` / metrics-baseline `1.2`, not a silent serialization
+  detail.
+- Capability-sensitive metrics gates (for example adoption regression or API
+  break gating) must check for the required embedded data, not only the clone
+  baseline schema version.
+
+Metrics-baseline compatibility rules:
+
+- Runtime writes standalone metrics-baseline schema `1.2`.
+- Runtime accepts standalone metrics-baseline `1.1` and `1.2`.
+- When metrics are embedded into the unified clone baseline, the embedded
+  metrics section follows the clone baseline schema compatibility window
+  instead (`2.0` and `2.1` in the current runtime).
 
 Baseline regeneration rules:
 
@@ -148,7 +172,7 @@ Refs:
 
 ## Locked by tests
 
-- `tests/test_baseline.py::test_baseline_verify_schema_incompatibilities[schema_too_new]`
+- `tests/test_baseline.py::test_baseline_verify_schema_incompatibilities`
 - `tests/test_baseline.py::test_baseline_verify_schema_incompatibilities[schema_major_mismatch]`
 - `tests/test_baseline.py::test_baseline_verify_fingerprint_mismatch`
 - `tests/test_cache.py::test_cache_v_field_version_mismatch_warns`

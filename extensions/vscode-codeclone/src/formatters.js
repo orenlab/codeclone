@@ -61,7 +61,25 @@ function formatBooleanWord(value) {
 function formatBaselineState(payload) {
     const entry = safeObject(payload);
     const status = String(entry.status || "unknown");
-    return entry.trusted ? `${status} · trusted` : `${status} · untrusted`;
+    const parts = [status, entry.trusted ? "trusted" : "untrusted"];
+    if (entry.compared_without_valid_baseline) {
+        parts.push("comparing without valid baseline");
+    }
+    return parts.join(" · ");
+}
+
+function formatBaselineTags(payload) {
+    const entry = safeObject(payload);
+    const baselinePythonTag = String(entry.baseline_python_tag || "").trim();
+    const runtimePythonTag = String(entry.runtime_python_tag || "").trim();
+    const parts = [];
+    if (baselinePythonTag) {
+        parts.push(`baseline ${baselinePythonTag}`);
+    }
+    if (runtimePythonTag) {
+        parts.push(`runtime ${runtimePythonTag}`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : "unknown";
 }
 
 function formatCacheSummary(payload) {
@@ -69,6 +87,85 @@ function formatCacheSummary(payload) {
     const usage = entry.used ? "used" : "fresh";
     const freshness = entry.freshness ? String(entry.freshness) : "unknown";
     return `${usage} · ${freshness}`;
+}
+
+function coverageJoinPayload(metricsSummary) {
+    return safeObject(safeObject(metricsSummary).coverage_join);
+}
+
+function countedNoun(value, singular, plural = `${singular}s`) {
+    const normalized =
+        typeof value === "number" && !Number.isNaN(value) ? value : 0;
+    return `${number(normalized)} ${normalized === 1 ? singular : plural}`;
+}
+
+function formatCoverageJoinStatus(payload) {
+    const status = String(safeObject(payload).status || "").trim().toLowerCase();
+    switch (status) {
+        case "ok":
+            return "joined";
+        case "missing":
+            return "unavailable";
+        case "invalid":
+            return "invalid";
+        default:
+            return status ? status.replace(/_/g, " ") : "unavailable";
+    }
+}
+
+function formatCoverageJoinPercent(payload) {
+    const permille = safeObject(payload).overall_permille;
+    if (typeof permille !== "number" || Number.isNaN(permille)) {
+        return "n/a";
+    }
+    return `${compactDecimal(permille / 10)}%`;
+}
+
+function formatCoverageJoinMeasuredUnits(payload) {
+    const entry = safeObject(payload);
+    const measuredUnits =
+        typeof entry.measured_units === "number" && !Number.isNaN(entry.measured_units)
+            ? entry.measured_units
+            : null;
+    const totalUnits =
+        typeof entry.units === "number" && !Number.isNaN(entry.units)
+            ? entry.units
+            : null;
+    if (measuredUnits === null && totalUnits === null) {
+        return "n/a";
+    }
+    if (measuredUnits !== null && totalUnits !== null) {
+        return `${number(measuredUnits)} / ${number(totalUnits)}`;
+    }
+    return number(measuredUnits !== null ? measuredUnits : totalUnits);
+}
+
+function formatCoverageJoinSummary(payload) {
+    const entry = safeObject(payload);
+    if (Object.keys(entry).length === 0) {
+        return "";
+    }
+    if (String(entry.status || "").trim().toLowerCase() === "ok") {
+        const parts = [
+            `${formatCoverageJoinPercent(entry)} overall`,
+            countedNoun(entry.coverage_hotspots, "hotspot"),
+        ];
+        const scopeGaps =
+            typeof entry.scope_gap_hotspots === "number" &&
+            !Number.isNaN(entry.scope_gap_hotspots)
+                ? entry.scope_gap_hotspots
+                : 0;
+        if (scopeGaps > 0) {
+            parts.push(countedNoun(scopeGaps, "scope gap"));
+        }
+        return parts.join(" · ");
+    }
+    const parts = [formatCoverageJoinStatus(entry)];
+    const source = String(entry.source || "").trim();
+    if (source) {
+        parts.push(path.basename(source));
+    }
+    return parts.join(" · ");
 }
 
 function formatRunScope(value) {
@@ -80,7 +177,7 @@ function formatSourceKindSummary(value) {
         .filter(([, count]) => typeof count === "number" && count > 0)
         .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey));
     if (entries.length === 0) {
-        return "No production findings by source kind.";
+        return "none";
     }
     return entries
         .map(([key, count]) => `${capitalize(key)} ${count}`)
@@ -294,9 +391,15 @@ module.exports = {
     findingIcon,
     firstNormalizedLocation,
     focusModeSpec,
+    formatBaselineTags,
     formatBaselineState,
     formatBooleanWord,
     formatCacheSummary,
+    coverageJoinPayload,
+    formatCoverageJoinMeasuredUnits,
+    formatCoverageJoinPercent,
+    formatCoverageJoinStatus,
+    formatCoverageJoinSummary,
     formatKind,
     formatNovelty,
     formatRunScope,

@@ -19,6 +19,7 @@ The extension helps you:
 - focus on new regressions and production hotspots first
 - jump directly to source locations
 - open canonical finding or remediation detail only when needed
+- inspect current-run `Coverage Join` facts without inventing extension-local interpretations
 - inspect report-only Overloaded Module candidates without treating them like findings
 
 It does not create a second truth model and it does not mutate the repository.
@@ -30,18 +31,18 @@ The extension needs a local `codeclone-mcp` launcher.
 Minimum supported CodeClone version: `2.0.0b4`.
 
 In `auto` mode, it checks the current workspace virtualenv before falling back
-to `PATH`.
+to `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.
 
 Recommended install for the preview extension:
 
 ```bash
-uv tool install --pre "codeclone[mcp]"
+uv tool install "codeclone[mcp]>=2.0.0b4"
 ```
 
 If you want the launcher inside the current environment instead:
 
 ```bash
-uv pip install --pre "codeclone[mcp]"
+uv pip install "codeclone[mcp]>=2.0.0b4"
 ```
 
 Verify the launcher:
@@ -55,6 +56,8 @@ codeclone-mcp --help
 ### Overview
 
 Compact health, current run state, baseline drift, and next-best review action.
+When the current run includes external Cobertura join facts, Overview also
+shows a factual `Coverage Join` section sourced from canonical MCP metrics.
 
 ### Hotspots
 
@@ -72,7 +75,8 @@ Session-local state:
 - local server availability
 - current run identity
 - reviewed findings
-- MCP help topics
+- MCP help topics, including the optional `coverage` topic on newer
+  CodeClone/MCP servers
 
 ## Review model
 
@@ -129,8 +133,12 @@ the local MCP launcher.
 
 ## Settings that shape analysis depth
 
+- `codeclone.mcp.command` and `codeclone.mcp.args` are machine-scoped launcher
+  settings, so they belong in user or remote settings.
 - `codeclone.analysis.profile` keeps the default conservative first pass
   explicit and exposes `Deeper review` and `Custom` as deliberate follow-ups
+- `codeclone.analysis.cachePolicy` and the threshold settings below are
+  resource-scoped, so they can vary by workspace or folder
 - `codeclone.analysis.minLoc`
 - `codeclone.analysis.minStmt`
 - `codeclone.analysis.blockMinLoc`
@@ -139,6 +147,8 @@ the local MCP launcher.
 - `codeclone.analysis.segmentMinStmt`
 
 Custom thresholds apply only when the profile is set to `custom`.
+
+`codeclone.ui.showStatusBar` is a window-scoped presentation setting.
 
 ## Source of truth
 

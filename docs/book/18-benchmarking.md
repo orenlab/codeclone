@@ -89,8 +89,9 @@ Permissions note:
 
 - Workflow: `.github/workflows/benchmark.yml`
 - Triggers:
-    - manual (`workflow_dispatch`)
-    - pull requests targeting `feat/2.0.0`
+    - `push` on all branches
+    - `pull_request` (all targets)
+    - manual (`workflow_dispatch`) with profile choice (`smoke` / `extended`)
 - Job behavior:
     - runs Docker benchmark with pinned runner limits
     - uploads `.cache/benchmarks/codeclone-benchmark.json` as artifact

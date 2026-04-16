@@ -119,6 +119,23 @@ function trimTail(value, maxChars) {
     return text.length <= maxChars ? text : text.slice(-maxChars);
 }
 
+function logChannelMessage(channel, level, message, ...args) {
+    const text = String(message || "");
+    if (!channel || !text) {
+        return;
+    }
+    const method =
+        typeof channel[level] === "function"
+            ? channel[level].bind(channel)
+            : typeof channel.appendLine === "function"
+                ? channel.appendLine.bind(channel)
+                : null;
+    if (!method) {
+        return;
+    }
+    method(text, ...args);
+}
+
 function resolveWorkspacePath(rootPath, relativePath) {
     const root = String(rootPath || "").trim();
     const candidate = String(relativePath || "").trim();
@@ -217,6 +234,18 @@ function isMinimumSupportedCodeCloneVersion(
     return comparison !== null && comparison >= 0;
 }
 
+/**
+ * @typedef {{
+ *   command?: string,
+ *   args?: string[],
+ *   cwd?: string,
+ *   source?: string,
+ * }} LaunchSpecLike
+ */
+
+/**
+ * @param {LaunchSpecLike | null | undefined} spec
+ */
 function launchSpecOrigin(spec) {
     const launchSpec = spec || {};
     const command = String(launchSpec.command || "").trim() || "codeclone-mcp";
@@ -237,6 +266,11 @@ function launchSpecOrigin(spec) {
     }
 }
 
+/**
+ * @param {string} reportedVersion
+ * @param {string} [minimum]
+ * @param {LaunchSpecLike | null | undefined} [launchSpec]
+ */
 function unsupportedVersionMessage(
     reportedVersion,
     minimum = MINIMUM_SUPPORTED_CODECLONE_VERSION,
@@ -370,6 +404,7 @@ module.exports = {
     parseUtcTimestamp,
     parseCodeCloneVersion,
     revealLineSpan,
+    logChannelMessage,
     resolveWorkspacePath,
     resolveAnalysisSettings,
     sameAnalysisSettings,

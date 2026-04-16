@@ -138,10 +138,10 @@ CodeClone maintains several versioned schema contracts:
 
 | Schema           | Current version | Owner                               |
 |------------------|-----------------|-------------------------------------|
-| Baseline         | `2.0`           | `codeclone/baseline.py`             |
-| Report           | `2.1`           | `codeclone/report/json_contract.py` |
-| Cache            | `2.2`           | `codeclone/cache.py`                |
-| Metrics baseline | `1.0`           | `codeclone/metrics_baseline.py`     |
+| Baseline         | `2.1`           | `codeclone/baseline.py`             |
+| Report           | `2.8`           | `codeclone/report/json_contract.py` |
+| Cache            | `2.4`           | `codeclone/cache_io.py`             |
+| Metrics baseline | `1.2`           | `codeclone/metrics_baseline.py`     |
 
 Any change to schema shape or semantics requires version review, documentation, and tests.
 
@@ -206,6 +206,27 @@ Run MCP tests (if you touched `mcp_service.py` or `mcp_server.py`):
 ```bash
 uv run pytest -q tests/test_mcp_service.py tests/test_mcp_server.py
 ```
+
+---
+
+## Commit Messages
+
+Use the repository's existing **Conventional Commits** style:
+
+- format: `type(scope): imperative summary`
+- keep `type` lowercase (`feat`, `fix`, `docs`, `chore`, ...)
+- keep the summary short, imperative, and specific to the user-visible change
+- use a narrow scope when it helps (`metrics`, `mcp,vscode`, `core,ci`, ...)
+- split unrelated changes into separate commits instead of writing one broad summary
+
+Examples from the current history:
+
+- `fix(core,ci): harden git diff validation, make segment digests canonical, and align CI policy`
+- `feat(metrics): add adoption and public API baselines with compact schema-aware storage`
+- `chore(docs): align AGENTS and contract docs with current code`
+
+If a commit needs extra context, keep the subject line concise and explain the
+rest in the commit body.
 
 ---
 

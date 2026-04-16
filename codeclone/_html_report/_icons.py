@@ -55,10 +55,25 @@ ICONS: dict[str, str] = {
         "2.5",
         '<polyline points="6 9 12 15 18 9"/>',
     ),
-    "theme": _svg(
+    "theme_moon": _svg_with_class(
         16,
         "2",
         '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+        class_name="theme-icon theme-icon-moon",
+    ),
+    "theme_sun": _svg_with_class(
+        16,
+        "2",
+        '<circle cx="12" cy="12" r="4"/>'
+        '<line x1="12" y1="2" x2="12" y2="4"/>'
+        '<line x1="12" y1="20" x2="12" y2="22"/>'
+        '<line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>'
+        '<line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>'
+        '<line x1="2" y1="12" x2="4" y2="12"/>'
+        '<line x1="20" y1="12" x2="22" y2="12"/>'
+        '<line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>'
+        '<line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+        class_name="theme-icon theme-icon-sun",
     ),
     "check": _svg(
         48,
@@ -172,6 +187,16 @@ _SECTION_ICON_BODIES: dict[str, tuple[str, str]] = {
         '<rect x="4" y="5" width="6" height="14" rx="1.5"/>'
         '<rect x="14" y="5" width="6" height="14" rx="1.5"/>'
         '<path d="M10 12h4"/>',
+    ),
+    "coverage-adoption": (
+        "2",
+        '<path d="M21 12a9 9 0 1 1-6.22-8.56"/>'
+        '<polyline points="22 4 12 14.01 9 11.01"/>',
+    ),
+    "api-surface": (
+        "2",
+        '<path d="M4 4h7v7H4z"/><path d="M13 4h7v7h-7z"/>'
+        '<path d="M4 13h7v7H4z"/><path d="M13 13h7v7h-7z"/>',
     ),
 }
 

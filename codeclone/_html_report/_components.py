@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from typing import Literal
 
 from .._coerce import as_int as _as_int
-from .._html_badges import _source_kind_badge_html
+from .._html_badges import _inline_empty, _source_kind_badge_html
 from .._html_escape import _escape_html
 from ._icons import section_icon_html
 
@@ -60,6 +60,9 @@ _SUMMARY_ICON_KEYS: dict[str, tuple[str, str]] = {
     "top candidates": ("quality", "summary-icon summary-icon--info"),
     "more candidates": ("quality", "summary-icon summary-icon--info"),
     "health profile": ("health-profile", "summary-icon summary-icon--info"),
+    "adoption coverage": ("coverage-adoption", "summary-icon summary-icon--info"),
+    "public api surface": ("api-surface", "summary-icon summary-icon--info"),
+    "coverage join": ("quality", "summary-icon summary-icon--info"),
 }
 
 
@@ -86,7 +89,7 @@ def overview_source_breakdown_html(breakdown: Mapping[str, object]) -> str:
     )
     rows = [(kind, count) for kind, count in sorted_items if count > 0]
     if not rows:
-        return '<div class="overview-summary-value">n/a</div>'
+        return _inline_empty("No source data available", tone="neutral")
 
     total = sum(c for _, c in rows)
     parts: list[str] = []

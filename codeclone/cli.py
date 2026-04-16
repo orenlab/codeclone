@@ -92,6 +92,7 @@ from ._cli_summary import (
     _print_metrics,
     _print_summary,
 )
+from ._git_diff import validate_git_diff_ref
 from .baseline import Baseline
 from .cache import Cache, CacheStatus, build_segment_report_projection
 from .contracts import (
@@ -138,6 +139,7 @@ if TYPE_CHECKING:
 MAX_FILE_SIZE = 10 * 1024 * 1024
 __all__ = [
     "MAX_FILE_SIZE",
+    "ExitCode",
     "ProcessingResult",
     "analyze",
     "bootstrap",
@@ -270,16 +272,14 @@ def _normalize_changed_paths(
 
 
 def _git_diff_changed_paths(*, root_path: Path, git_diff_ref: str) -> tuple[str, ...]:
-    if git_diff_ref.startswith("-"):
-        console.print(
-            ui.fmt_contract_error(
-                f"Invalid git diff ref '{git_diff_ref}': must not start with '-'."
-            )
-        )
+    try:
+        validated_ref = validate_git_diff_ref(git_diff_ref)
+    except ValueError as exc:
+        console.print(ui.fmt_contract_error(str(exc)))
         sys.exit(ExitCode.CONTRACT_ERROR)
     try:
         completed = subprocess.run(
-            ["git", "diff", "--name-only", git_diff_ref, "--"],
+            ["git", "diff", "--name-only", validated_ref, "--"],
             cwd=str(root_path),
             check=True,
             capture_output=True,
@@ -294,7 +294,7 @@ def _git_diff_changed_paths(*, root_path: Path, git_diff_ref: str) -> tuple[str,
         console.print(
             ui.fmt_contract_error(
                 "Unable to resolve changed files from git diff ref "
-                f"'{git_diff_ref}': {exc}"
+                f"'{validated_ref}': {exc}"
             )
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
@@ -490,6 +490,8 @@ def report(
     new_block: set[str],
     html_builder: Callable[..., str] | None = None,
     metrics_diff: MetricsDiff | None = None,
+    coverage_adoption_diff_available: bool = False,
+    api_surface_diff_available: bool = False,
     include_report_document: bool = False,
 ) -> ReportArtifacts:
     return cast(
@@ -504,6 +506,8 @@ def report(
             new_block=new_block,
             html_builder=html_builder,
             metrics_diff=metrics_diff,
+            coverage_adoption_diff_available=coverage_adoption_diff_available,
+            api_surface_diff_available=api_surface_diff_available,
             include_report_document=include_report_document,
         ),
     )
@@ -955,6 +959,14 @@ def _run_analysis_stages(
         except CacheError as exc:
             console.print(ui.fmt_cache_save_failed(exc))
 
+    coverage_join = getattr(analysis_result, "coverage_join", None)
+    if (
+        coverage_join is not None
+        and coverage_join.status != "ok"
+        and coverage_join.invalid_reason
+    ):
+        console.print(ui.fmt_coverage_join_ignored(coverage_join.invalid_reason))
+
     return discovery_result, processing_result, analysis_result
 
 
@@ -1014,6 +1026,24 @@ def _enforce_gating(
             )
         )
         sys.exit(metrics_baseline_failure_code)
+
+    if bool(getattr(args, "fail_on_untested_hotspots", False)):
+        if analysis.coverage_join is None:
+            console.print(
+                ui.fmt_contract_error(
+                    "--fail-on-untested-hotspots requires --coverage."
+                )
+            )
+            sys.exit(ExitCode.CONTRACT_ERROR)
+        if analysis.coverage_join.status != "ok":
+            detail = analysis.coverage_join.invalid_reason or "invalid coverage input"
+            console.print(
+                ui.fmt_contract_error(
+                    "Coverage gating requires a valid Cobertura XML input.\n"
+                    f"Reason: {detail}"
+                )
+            )
+            sys.exit(ExitCode.CONTRACT_ERROR)
 
     gate_result = gate(
         boot=boot,
@@ -1120,6 +1150,17 @@ def _main_impl() -> None:
     analysis_started_at_utc = _current_report_timestamp_utc()
     ap = build_parser(__version__)
 
+    def _resolve_runtime_path_arg(
+        *,
+        root_path: Path,
+        raw_path: str,
+        from_cli: bool,
+    ) -> Path:
+        candidate_path = Path(raw_path).expanduser()
+        if from_cli or candidate_path.is_absolute():
+            return candidate_path.resolve()
+        return (root_path / candidate_path).resolve()
+
     def _prepare_run_inputs() -> tuple[
         Namespace,
         Path,
@@ -1143,6 +1184,9 @@ def _main_impl() -> None:
             arg in {"--cache-dir", "--cache-path"}
             or arg.startswith(("--cache-dir=", "--cache-path="))
             for arg in sys.argv
+        )
+        baseline_path_from_args = any(
+            arg == "--baseline" or arg.startswith("--baseline=") for arg in sys.argv
         )
         metrics_path_from_args = any(
             arg == "--metrics-baseline" or arg.startswith("--metrics-baseline=")
@@ -1197,14 +1241,19 @@ def _main_impl() -> None:
             console.print(
                 ui.fmt_contract_error(
                     "Size limits must be non-negative integers (MB), "
-                    "threshold flags must be >= 0 or -1."
+                    "threshold flags must be >= 0 or -1, and coverage thresholds "
+                    "must be between 0 and 100."
                 )
             )
             sys.exit(ExitCode.CONTRACT_ERROR)
 
         baseline_arg_path = Path(args.baseline).expanduser()
         try:
-            baseline_path = baseline_arg_path.resolve()
+            baseline_path = _resolve_runtime_path_arg(
+                root_path=root_path,
+                raw_path=args.baseline,
+                from_cli=baseline_path_from_args,
+            )
             baseline_exists = baseline_path.exists()
         except OSError as exc:
             console.print(
@@ -1223,7 +1272,13 @@ def _main_impl() -> None:
             args.metrics_baseline if metrics_path_overridden else args.baseline
         ).expanduser()
         try:
-            metrics_baseline_path = metrics_baseline_arg_path.resolve()
+            metrics_baseline_path = _resolve_runtime_path_arg(
+                root_path=root_path,
+                raw_path=(
+                    args.metrics_baseline if metrics_path_overridden else args.baseline
+                ),
+                from_cli=metrics_path_from_args,
+            )
             if metrics_baseline_path == baseline_path:
                 probe = _probe_metrics_baseline_section(metrics_baseline_path)
                 metrics_baseline_exists = probe.has_metrics_section
@@ -1317,6 +1372,7 @@ def _main_impl() -> None:
         block_min_stmt=args.block_min_stmt,
         segment_min_loc=args.segment_min_loc,
         segment_min_stmt=args.segment_min_stmt,
+        collect_api_surface=bool(args.api_surface),
     )
     cache.load()
     if cache.load_warning:
@@ -1344,6 +1400,11 @@ def _main_impl() -> None:
         or args.fail_dead_code
         or args.fail_health >= 0
         or args.fail_on_new_metrics
+        or args.fail_on_typing_regression
+        or args.fail_on_docstring_regression
+        or args.fail_on_api_break
+        or args.min_typing_coverage >= 0
+        or args.min_docstring_coverage >= 0
     )
     source_read_contract_failure = (
         bool(processing_result.source_read_failures)
@@ -1405,6 +1466,12 @@ def _main_impl() -> None:
         ),
         analysis_mode=("clones_only" if args.skip_metrics else "full"),
         metrics_computed=_metrics_computed(args),
+        min_loc=args.min_loc,
+        min_stmt=args.min_stmt,
+        block_min_loc=args.block_min_loc,
+        block_min_stmt=args.block_min_stmt,
+        segment_min_loc=args.segment_min_loc,
+        segment_min_stmt=args.segment_min_stmt,
         design_complexity_threshold=DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
         design_coupling_threshold=DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
         design_cohesion_threshold=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
@@ -1431,6 +1498,19 @@ def _main_impl() -> None:
         metrics_diff = metrics_baseline_state.baseline.diff(
             analysis_result.project_metrics
         )
+    coverage_adoption_diff_available = bool(
+        metrics_baseline_state.trusted_for_diff
+        and getattr(
+            metrics_baseline_state.baseline,
+            "has_coverage_adoption_snapshot",
+            False,
+        )
+    )
+    api_surface_diff_available = bool(
+        metrics_baseline_state.trusted_for_diff
+        and getattr(metrics_baseline_state.baseline, "api_surface_snapshot", None)
+        is not None
+    )
 
     _print_summary(
         console=cast("_PrinterLike", console),
@@ -1458,16 +1538,30 @@ def _main_impl() -> None:
         func_clones_count=analysis_result.func_clones_count,
         block_clones_count=analysis_result.block_clones_count,
         segment_clones_count=analysis_result.segment_clones_count,
+        suppressed_golden_fixture_groups=len(
+            getattr(analysis_result, "suppressed_clone_groups", ())
+        ),
         suppressed_segment_groups=analysis_result.suppressed_segment_groups,
         new_clones_count=new_clones_count,
     )
 
     if analysis_result.project_metrics is not None:
         pm = analysis_result.project_metrics
+        metrics_payload_map = _as_mapping(analysis_result.metrics_payload)
         overloaded_modules_summary = _as_mapping(
-            _as_mapping(analysis_result.metrics_payload).get("overloaded_modules")
-        ).get("summary")
+            _as_mapping(metrics_payload_map.get("overloaded_modules")).get("summary")
+        )
+        adoption_summary = _as_mapping(
+            _as_mapping(metrics_payload_map.get("coverage_adoption")).get("summary")
+        )
+        api_surface_summary = _as_mapping(
+            _as_mapping(metrics_payload_map.get("api_surface")).get("summary")
+        )
+        coverage_join_summary = _as_mapping(
+            _as_mapping(metrics_payload_map.get("coverage_join")).get("summary")
+        )
         overloaded_modules_summary_map = _as_mapping(overloaded_modules_summary)
+        coverage_join_source = str(coverage_join_summary.get("source", "")).strip()
         _print_metrics(
             console=cast("_PrinterLike", console),
             quiet=args.quiet,
@@ -1496,6 +1590,57 @@ def _main_impl() -> None:
                 overloaded_modules_top_score=_coerce.as_float(
                     overloaded_modules_summary_map.get("top_score")
                 ),
+                adoption_param_permille=(
+                    _as_int(adoption_summary.get("param_permille"))
+                    if adoption_summary
+                    else None
+                ),
+                adoption_return_permille=(
+                    _as_int(adoption_summary.get("return_permille"))
+                    if adoption_summary
+                    else None
+                ),
+                adoption_docstring_permille=(
+                    _as_int(adoption_summary.get("docstring_permille"))
+                    if adoption_summary
+                    else None
+                ),
+                adoption_any_annotation_count=_as_int(
+                    adoption_summary.get("typing_any_count")
+                ),
+                api_surface_enabled=bool(api_surface_summary.get("enabled")),
+                api_surface_modules=_as_int(api_surface_summary.get("modules")),
+                api_surface_public_symbols=_as_int(
+                    api_surface_summary.get("public_symbols")
+                ),
+                api_surface_added=(
+                    len(metrics_diff.new_api_symbols)
+                    if metrics_diff is not None and api_surface_diff_available
+                    else 0
+                ),
+                api_surface_breaking=(
+                    len(metrics_diff.new_api_breaking_changes)
+                    if metrics_diff is not None and api_surface_diff_available
+                    else 0
+                ),
+                coverage_join_status=str(
+                    coverage_join_summary.get("status", "")
+                ).strip(),
+                coverage_join_overall_permille=_as_int(
+                    coverage_join_summary.get("overall_permille")
+                ),
+                coverage_join_coverage_hotspots=_as_int(
+                    coverage_join_summary.get("coverage_hotspots")
+                ),
+                coverage_join_scope_gap_hotspots=_as_int(
+                    coverage_join_summary.get("scope_gap_hotspots")
+                ),
+                coverage_join_threshold_percent=_as_int(
+                    coverage_join_summary.get("hotspot_threshold_percent")
+                ),
+                coverage_join_source_label=(
+                    Path(coverage_join_source).name if coverage_join_source else ""
+                ),
             ),
         )
 
@@ -1509,6 +1654,8 @@ def _main_impl() -> None:
         new_block=new_block,
         html_builder=build_html_report,
         metrics_diff=metrics_diff,
+        coverage_adoption_diff_available=coverage_adoption_diff_available,
+        api_surface_diff_available=api_surface_diff_available,
         include_report_document=bool(changed_paths),
     )
     changed_clone_gate = (

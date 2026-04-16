@@ -18,6 +18,7 @@ from ..domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
     CATEGORY_COUPLING,
+    CATEGORY_COVERAGE,
     CATEGORY_DEAD_CODE,
     CATEGORY_DEPENDENCY,
     CLONE_KIND_BLOCK,
@@ -119,6 +120,7 @@ _DIRECTORY_KIND_BREAKDOWN_KEYS: tuple[str, ...] = (
     CATEGORY_COMPLEXITY,
     CATEGORY_COUPLING,
     CATEGORY_COHESION,
+    CATEGORY_COVERAGE,
     CATEGORY_DEPENDENCY,
 )
 
@@ -155,6 +157,7 @@ def _directory_kind_breakdown_key(group: Mapping[str, object]) -> str | None:
         CATEGORY_COMPLEXITY,
         CATEGORY_COUPLING,
         CATEGORY_COHESION,
+        CATEGORY_COVERAGE,
         CATEGORY_DEPENDENCY,
     }:
         return category
@@ -504,6 +507,19 @@ def serialize_finding_group_card(group: Mapping[str, object]) -> dict[str, objec
                 _as_int(group.get("count")),
             )
             summary = f"{cycle_length} modules participate in this cycle"
+        elif category == CATEGORY_COVERAGE:
+            kind = str(group.get("kind", "")).strip()
+            coverage_status = str(facts.get("coverage_status", "")).strip()
+            threshold = _as_int(facts.get("hotspot_threshold_percent"))
+            if kind == "coverage_scope_gap" or coverage_status == "missing_from_report":
+                title = "Include risky function in coverage input"
+                summary = "coverage.xml did not include this function's file"
+            else:
+                title = "Increase coverage for risky function"
+                summary = (
+                    f"coverage={_as_int(facts.get('coverage_permille')) / 10.0:.1f}%, "
+                    f"threshold={threshold}%"
+                )
 
     return {
         "title": title,

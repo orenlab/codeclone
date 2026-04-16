@@ -11,6 +11,7 @@ import json
 import subprocess
 from collections import OrderedDict
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -19,6 +20,7 @@ import pytest
 
 from codeclone import mcp_service as mcp_service_mod
 from codeclone._cli_config import ConfigValidationError
+from codeclone.baseline import Baseline, current_python_tag
 from codeclone.cache import Cache
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.mcp_service import (
@@ -155,6 +157,7 @@ def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -254,8 +257,65 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
     latest = service.get_run_summary()
     assert summary["run_id"] == latest["run_id"]
     assert len(str(summary["run_id"])) == 8
+    assert summary["focus"] == "repository"
+    assert summary["health_scope"] == "repository"
     assert summary["mode"] == "full"
     assert summary["schema"] == REPORT_SCHEMA_VERSION
+    assert cast("dict[str, int]", summary["analysis_profile"]) == {
+        "min_loc": 10,
+        "min_stmt": 6,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
+    }
+    assert cast("dict[str, int]", latest["analysis_profile"]) == cast(
+        "dict[str, int]",
+        summary["analysis_profile"],
+    )
+    assert (
+        cast("dict[str, object]", summary["findings"])["new_by_source_kind"]
+        == cast(
+            "dict[str, object]",
+            latest["findings"],
+        )["new_by_source_kind"]
+    )
+
+
+def test_mcp_service_summary_explains_untrusted_baseline_python_tag_mismatch(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    baseline = Baseline(tmp_path / "codeclone.baseline.json")
+    baseline.generator = "codeclone"
+    baseline.schema_version = "2.0"
+    baseline.fingerprint_version = "1"
+    baseline.python_tag = "cp313" if current_python_tag() != "cp313" else "cp314"
+    baseline.created_at = "2026-04-07T00:00:00Z"
+    baseline.save()
+
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+
+    baseline_payload = cast("dict[str, object]", summary["baseline"])
+    assert baseline_payload["status"] == "mismatch_python_version"
+    assert baseline_payload["trusted"] is False
+    assert baseline_payload["compared_without_valid_baseline"] is True
+    assert baseline_payload["baseline_python_tag"] == baseline.python_tag
+    assert baseline_payload["runtime_python_tag"] == current_python_tag()
+    assert any(
+        "Baseline python tag mismatch" in warning
+        for warning in cast("list[str]", summary["warnings"])
+    )
+
+    triage = service.get_production_triage()
+    assert cast("dict[str, object]", triage["baseline"]) == baseline_payload
 
 
 def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
@@ -416,7 +476,20 @@ def test_mcp_service_summary_inventory_is_compact_and_report_inventory_stays_can
         "classes",
     }
     assert "inventory" not in changed_summary
+    assert changed_summary["focus"] == "changed_paths"
+    assert changed_summary["health_scope"] == "repository"
     assert cast(int, changed_summary["changed_files"]) == 1
+    assert cast("dict[str, int]", changed_summary["analysis_profile"]) == {
+        "min_loc": 10,
+        "min_stmt": 6,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
+    }
+    assert sum(
+        cast("dict[str, int]", changed_summary["new_by_source_kind"]).values()
+    ) == cast(int, changed_summary["new_findings"])
     assert isinstance(
         cast("dict[str, object]", report_inventory["file_registry"])["items"],
         list,
@@ -497,9 +570,17 @@ def test_mcp_service_hotspot_resources_and_triage_are_production_first(
     production_items = cast("list[dict[str, object]]", production_hotspots["items"])
 
     assert triage["run_id"] == summary["run_id"]
+    assert triage["focus"] == "production"
+    assert triage["health_scope"] == "repository"
     assert _mapping_child(triage, "cache")["freshness"] == "fresh"
     assert findings_breakdown["production"] >= 1
     assert findings_breakdown["tests"] >= 1
+    assert sum(
+        cast("dict[str, int]", triage_findings["new_by_source_kind"]).values()
+    ) == cast(
+        int,
+        cast("dict[str, object]", summary["findings"])["new"],
+    )
     assert cast(int, triage_findings["outside_focus"]) >= 1
     assert suggestions_breakdown["production"] >= 1
     assert suggestions_breakdown["tests"] >= 1
@@ -517,6 +598,14 @@ def test_mcp_service_hotspot_resources_and_triage_are_production_first(
         for item in cast("list[dict[str, object]]", top_suggestions["items"])
     )
     assert latest_triage["run_id"] == summary["run_id"]
+    assert cast("dict[str, int]", triage["analysis_profile"]) == {
+        "min_loc": 10,
+        "min_stmt": 6,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
+    }
     with pytest.raises(
         MCPServiceContractError,
         match="only as codeclone://latest/triage",
@@ -680,9 +769,21 @@ def test_mcp_service_granular_checks_pr_summary_and_resources(
         "dict[str, object]",
         service.get_run_summary(run_id=run_id)["health"],
     )
+    summary_analysis_profile = cast(
+        "dict[str, int]",
+        service.get_run_summary(run_id=run_id)["analysis_profile"],
+    )
     summary_dimensions = cast("dict[str, object]", summary_health["dimensions"])
     assert clones["check"] == "clones"
     assert cast(int, clones["total"]) >= 1
+    assert summary_analysis_profile == {
+        "min_loc": 10,
+        "min_stmt": 6,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
+    }
 
     complexity = service.check_complexity(
         run_id=run_id,
@@ -811,6 +912,14 @@ def test_mcp_service_clones_only_health_is_marked_unavailable(
     assert summary["health"] == expected
     assert stored_summary["health"] == expected
     assert triage["health"] == expected
+    assert cast("dict[str, int]", stored_summary["analysis_profile"]) == {
+        "min_loc": 10,
+        "min_stmt": 6,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
+    }
     assert latest_health == expected
 
 
@@ -1261,6 +1370,11 @@ def test_mcp_service_helper_filters_and_metrics_payload() -> None:
         "new_cycles": 1,
         "new_dead_code": 1,
         "health_delta": -3,
+        "typing_param_permille_delta": 0,
+        "typing_return_permille_delta": 0,
+        "docstring_permille_delta": 0,
+        "new_api_symbols": 0,
+        "api_breaking_changes": 0,
     }
     assert service._metrics_diff_payload(None) is None
 
@@ -1308,10 +1422,16 @@ def test_mcp_service_git_diff_and_helper_branch_edges(
 ) -> None:
     service = CodeCloneMCPService(history_limit=4)
 
-    with pytest.raises(MCPGitDiffError, match="must not start with '-'"):
+    with pytest.raises(MCPGitDiffError, match="Invalid git diff ref"):
         mcp_service_mod._git_diff_lines_payload(
             root_path=tmp_path,
             git_diff_ref="--cached",
+        )
+
+    with pytest.raises(MCPGitDiffError, match="safe revision expression"):
+        mcp_service_mod._git_diff_lines_payload(
+            root_path=tmp_path,
+            git_diff_ref="HEAD:path",
         )
 
     assert service._normalize_relative_path("./.github/workflows/docs.yml") == (
@@ -2315,9 +2435,9 @@ def test_mcp_service_additional_projection_and_error_branches(
         request=MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            complexity_threshold=1,
-            coupling_threshold=1,
-            cohesion_threshold=1,
+            complexity_threshold=5,
+            coupling_threshold=5,
+            cohesion_threshold=4,
         ),
         comparison_settings=(),
         report_document={
@@ -2382,6 +2502,7 @@ def test_mcp_service_additional_projection_and_error_branches(
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -2393,6 +2514,143 @@ def test_mcp_service_additional_projection_and_error_branches(
         if str(finding.get("family", "")) == "design"
     ]
     assert design_findings == []
+    service._runs.register(fake_design_record)
+    empty_complexity = service.check_complexity(
+        run_id="design",
+        path="pkg/quality.py",
+        detail_level="summary",
+    )
+    requested_complexity = service.check_complexity(
+        run_id="design",
+        path="pkg/quality.py",
+        min_complexity=8,
+        detail_level="summary",
+    )
+    empty_coupling = service.check_coupling(
+        run_id="design",
+        path="pkg/quality.py",
+        detail_level="summary",
+    )
+    empty_cohesion = service.check_cohesion(
+        run_id="design",
+        path="pkg/quality.py",
+        detail_level="summary",
+    )
+    assert empty_complexity["total"] == 0
+    assert empty_complexity["threshold_context"] == {
+        "metric": "cyclomatic_complexity",
+        "threshold": 5,
+        "threshold_kind": "finding_threshold",
+        "measured_units": 1,
+        "highest_below_threshold": 3,
+    }
+    assert requested_complexity["threshold_context"] == {
+        "metric": "cyclomatic_complexity",
+        "threshold": 8,
+        "threshold_kind": "requested_min",
+        "finding_threshold": 5,
+        "measured_units": 1,
+        "highest_below_threshold": 3,
+    }
+    assert empty_coupling["threshold_context"] == {
+        "metric": "cbo",
+        "threshold": 5,
+        "threshold_kind": "finding_threshold",
+        "measured_units": 1,
+        "highest_below_threshold": 2,
+    }
+    assert empty_cohesion["threshold_context"] == {
+        "metric": "lcom4",
+        "threshold": 4,
+        "threshold_kind": "finding_threshold",
+        "measured_units": 1,
+        "highest_below_threshold": 2,
+    }
+    assert (
+        service._design_threshold_context(
+            record=fake_design_record,
+            check="complexity",
+            path="pkg/quality.py",
+            items=({"id": "existing"},),
+        )
+        is None
+    )
+    assert (
+        service._design_threshold_context(
+            record=fake_design_record,
+            check="unknown",
+            path="pkg/quality.py",
+            items=(),
+        )
+        is None
+    )
+    thresholded_report_document = dict(fake_design_record.report_document)
+    thresholded_findings = dict(
+        cast("dict[str, object]", thresholded_report_document["findings"])
+    )
+    thresholded_findings["thresholds"] = {
+        "design_findings": {
+            "complexity": {
+                "metric": "cyclomatic_complexity",
+                "operator": ">",
+                "value": 6,
+            }
+        }
+    }
+    thresholded_report_document["findings"] = thresholded_findings
+    thresholded_record = replace(
+        fake_design_record,
+        report_document=thresholded_report_document,
+    )
+    assert (
+        service._design_finding_threshold(
+            record=thresholded_record,
+            check="complexity",
+        )
+        == 6
+    )
+    no_below_report_document = dict(fake_design_record.report_document)
+    no_below_metrics = dict(
+        cast("dict[str, object]", no_below_report_document["metrics"])
+    )
+    no_below_families = dict(cast("dict[str, object]", no_below_metrics["families"]))
+    no_below_families["complexity"] = {
+        "items": [
+            {
+                "qualname": "pkg.quality:very_hot",
+                "relative_path": "pkg/quality.py",
+                "start_line": 10,
+                "end_line": 20,
+                "cyclomatic_complexity": 9,
+                "nesting_depth": 2,
+                "risk": "high",
+            }
+        ]
+    }
+    no_below_metrics["families"] = no_below_families
+    no_below_report_document["metrics"] = no_below_metrics
+    no_below_record = replace(
+        fake_design_record,
+        report_document=no_below_report_document,
+    )
+    assert service._design_threshold_context(
+        record=no_below_record,
+        check="complexity",
+        path="pkg/quality.py",
+        items=(),
+    ) == {
+        "metric": "cyclomatic_complexity",
+        "threshold": 5,
+        "threshold_kind": "finding_threshold",
+        "measured_units": 1,
+    }
+    assert (
+        service._highest_below_threshold(values=(9,), operator=">", threshold=5) is None
+    )
+    assert (
+        service._highest_below_threshold(values=(1, 2), operator="!=", threshold=5)
+        is None
+    )
     detail_payload = service._project_finding_detail(
         fake_design_record,
         {
@@ -2493,6 +2751,7 @@ def test_mcp_service_additional_projection_and_error_branches(
         func_clones_count=record.func_clones_count,
         block_clones_count=record.block_clones_count,
         project_metrics=record.project_metrics,
+        coverage_join=record.coverage_join,
         suggestions=record.suggestions,
         new_func=record.new_func,
         new_block=record.new_block,
@@ -2633,6 +2892,7 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -2661,6 +2921,7 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset({"clone:new"}),
         new_block=frozenset(),
@@ -2682,6 +2943,8 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         service.get_report_section(run_id="helpers", section="findings")
 
     assert service._summary_payload({"inventory": {}}) == {
+        "focus": "repository",
+        "health_scope": "repository",
         "inventory": {},
         "health": {"available": False, "reason": "unavailable"},
     }
@@ -2722,6 +2985,7 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -2743,6 +3007,7 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -2756,6 +3021,148 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
         )
         is None
     )
+
+
+def test_mcp_service_summary_and_gate_contract_for_coverage_join(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    request = MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False)
+    record = MCPRunRecord(
+        run_id="coverage",
+        root=tmp_path,
+        request=request,
+        comparison_settings=(),
+        report_document={
+            "metrics": {
+                "families": {
+                    "coverage_join": {
+                        "summary": {
+                            "status": "ok",
+                            "source": "coverage.xml",
+                            "overall_permille": 700,
+                            "coverage_hotspots": 1,
+                            "scope_gap_hotspots": 0,
+                            "hotspot_threshold_percent": 50,
+                        },
+                        "items": [],
+                    }
+                }
+            }
+        },
+        summary={
+            "run_id": "coverage",
+            "health": {"score": 80, "grade": "B"},
+            "inventory": {},
+            "baseline": {},
+            "metrics_baseline": {},
+            "cache": {},
+            "findings_summary": {},
+            "baseline_diff": {},
+            "metrics_diff": {},
+            "warnings": [],
+            "failures": [],
+        },
+        changed_paths=(),
+        changed_projection=None,
+        warnings=(),
+        failures=(),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        coverage_join=None,
+        suggestions=(),
+        new_func=frozenset(),
+        new_block=frozenset(),
+        metrics_diff=None,
+    )
+    payload = service._summary_payload(record.summary, record=record)
+    assert cast(dict[str, object], payload["coverage_join"]) == {
+        "status": "ok",
+        "overall_permille": 700,
+        "coverage_hotspots": 1,
+        "scope_gap_hotspots": 0,
+        "hotspot_threshold_percent": 50,
+        "source": "coverage.xml",
+    }
+    empty_report_record = replace(
+        record,
+        report_document={"metrics": {"families": {}}},
+    )
+    assert "coverage_join" not in service._summary_payload(
+        empty_report_record.summary,
+        record=empty_report_record,
+    )
+    with pytest.raises(MCPServiceContractError, match="coverage_xml"):
+        service._evaluate_gate_snapshot(
+            record=record,
+            request=MCPGateRequest(fail_on_untested_hotspots=True),
+        )
+
+    invalid_record = MCPRunRecord(
+        run_id="coverage-invalid",
+        root=tmp_path,
+        request=request,
+        comparison_settings=(),
+        report_document=record.report_document,
+        summary=record.summary,
+        changed_paths=(),
+        changed_projection=None,
+        warnings=(),
+        failures=(),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        coverage_join=cast(
+            Any,
+            SimpleNamespace(status="invalid", invalid_reason="broken xml"),
+        ),
+        suggestions=(),
+        new_func=frozenset(),
+        new_block=frozenset(),
+        metrics_diff=None,
+    )
+    with pytest.raises(MCPServiceContractError, match="broken xml"):
+        service._evaluate_gate_snapshot(
+            record=invalid_record,
+            request=MCPGateRequest(fail_on_untested_hotspots=True),
+        )
+    invalid_summary_record = replace(
+        record,
+        report_document={
+            "metrics": {
+                "families": {
+                    "coverage_join": {
+                        "summary": {
+                            "status": "invalid",
+                            "source": "coverage.xml",
+                            "overall_permille": 0,
+                            "coverage_hotspots": 0,
+                            "scope_gap_hotspots": 0,
+                            "hotspot_threshold_percent": 50,
+                            "invalid_reason": "broken xml",
+                        }
+                    }
+                }
+            }
+        },
+    )
+    invalid_payload = service._summary_payload(
+        invalid_summary_record.summary,
+        record=invalid_summary_record,
+    )
+    assert (
+        cast(dict[str, object], invalid_payload["coverage_join"])["invalid_reason"]
+        == "broken xml"
+    )
+    with pytest.raises(MCPServiceContractError, match="analysis_mode='full'"):
+        service._validate_analysis_request(
+            MCPAnalysisRequest(
+                root=str(tmp_path),
+                analysis_mode="clones_only",
+                coverage_xml="coverage.xml",
+            )
+        )
 
 
 def test_mcp_service_short_id_and_comparison_helper_branches(
@@ -2837,6 +3244,7 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
         func_clones_count=0,
         block_clones_count=2,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -2963,6 +3371,7 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=(),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -3160,6 +3569,7 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         func_clones_count=0,
         block_clones_count=0,
         project_metrics=None,
+        coverage_join=None,
         suggestions=cast(Any, (suggestion,)),
         new_func=frozenset(),
         new_block=frozenset(),
@@ -3223,6 +3633,13 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
         "known": 0,
         "by_family": {},
         "production": 0,
+        "new_by_source_kind": {
+            "production": 0,
+            "tests": 0,
+            "fixtures": 0,
+            "mixed": 0,
+            "other": 0,
+        },
     }
 
     record = _dummy_run_record(tmp_path, "summary-helper")
@@ -3244,6 +3661,13 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
         "known": 1,
         "by_family": {},
         "production": 0,
+        "new_by_source_kind": {
+            "production": 0,
+            "tests": 0,
+            "fixtures": 0,
+            "mixed": 0,
+            "other": 0,
+        },
     }
 
     metrics_payload = service._metrics_detail_payload(
@@ -3338,6 +3762,144 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
                 "module": "pkg.alpha",
                 "score": 0.12,
                 "candidate_status": "non_candidate",
+            },
+        ],
+    }
+    coverage_join_payload = service._metrics_detail_payload(
+        metrics={
+            "summary": {},
+            "families": {
+                "coverage_join": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/mod.py",
+                            "qualname": "pkg.mod:run",
+                            "coverage_status": "measured",
+                            "coverage_permille": 250,
+                            "coverage_hotspot": True,
+                            "scope_gap_hotspot": False,
+                        }
+                    ]
+                }
+            },
+        },
+        family="coverage_join",
+        path=None,
+        offset=0,
+        limit=5,
+    )
+    assert coverage_join_payload == {
+        "family": "coverage_join",
+        "path": None,
+        "offset": 0,
+        "limit": 5,
+        "returned": 1,
+        "total": 1,
+        "has_more": False,
+        "items": [
+            {
+                "path": "pkg/mod.py",
+                "qualname": "pkg.mod:run",
+                "coverage_status": "measured",
+                "coverage_permille": 250,
+                "coverage_hotspot": True,
+                "scope_gap_hotspot": False,
+            }
+        ],
+    }
+    coverage_adoption_payload = service._metrics_detail_payload(
+        metrics={
+            "summary": {},
+            "families": {
+                "coverage_adoption": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/mod.py",
+                            "module": "pkg.mod",
+                            "param_permille": 750,
+                            "docstring_permille": 667,
+                        }
+                    ]
+                }
+            },
+        },
+        family="coverage_adoption",
+        path=None,
+        offset=0,
+        limit=5,
+    )
+    assert coverage_adoption_payload == {
+        "family": "coverage_adoption",
+        "path": None,
+        "offset": 0,
+        "limit": 5,
+        "returned": 1,
+        "total": 1,
+        "has_more": False,
+        "items": [
+            {
+                "path": "pkg/mod.py",
+                "module": "pkg.mod",
+                "param_permille": 750,
+                "docstring_permille": 667,
+            }
+        ],
+    }
+    api_surface_payload = service._metrics_detail_payload(
+        metrics={
+            "summary": {},
+            "families": {
+                "api_surface": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/mod.py",
+                            "module": "pkg.mod",
+                            "qualname": "pkg.mod:run",
+                            "record_kind": "symbol",
+                            "symbol_kind": "function",
+                            "params_total": 1,
+                        },
+                        {
+                            "relative_path": "pkg/mod.py",
+                            "module": "pkg.mod",
+                            "qualname": "pkg.mod:old",
+                            "record_kind": "breaking_change",
+                            "change_kind": "removed",
+                            "detail": "Removed from the public API surface.",
+                        },
+                    ]
+                }
+            },
+        },
+        family="api_surface",
+        path=None,
+        offset=0,
+        limit=5,
+    )
+    assert api_surface_payload == {
+        "family": "api_surface",
+        "path": None,
+        "offset": 0,
+        "limit": 5,
+        "returned": 2,
+        "total": 2,
+        "has_more": False,
+        "items": [
+            {
+                "path": "pkg/mod.py",
+                "module": "pkg.mod",
+                "qualname": "pkg.mod:run",
+                "record_kind": "symbol",
+                "symbol_kind": "function",
+                "params_total": 1,
+            },
+            {
+                "path": "pkg/mod.py",
+                "module": "pkg.mod",
+                "qualname": "pkg.mod:old",
+                "record_kind": "breaking_change",
+                "change_kind": "removed",
+                "detail": "Removed from the public API surface.",
             },
         ],
     }

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define cache schema v2.3, integrity verification, and fail-open behavior.
+Define cache schema v2.5, integrity verification, and fail-open behavior.
 
 ## Public surface
 
@@ -13,7 +13,7 @@ Define cache schema v2.3, integrity verification, and fail-open behavior.
 
 ## Data model
 
-On-disk schema (`v == "2.3"`):
+On-disk schema (`v == "2.5"`):
 
 - Top-level: `v`, `payload`, `sig`
 - `payload` keys: `py`, `fp`, `ap`, `files`, optional `sr`
@@ -21,6 +21,7 @@ On-disk schema (`v == "2.3"`):
     - `min_loc`, `min_stmt`
     - `block_min_loc`, `block_min_stmt`
     - `segment_min_loc`, `segment_min_stmt`
+    - `collect_api_surface`
 - `files` map stores compact per-file entries:
     - `st`: `[mtime_ns, size]`
     - `ss`: `[lines, functions, methods, classes]` (source stats snapshot)
@@ -54,9 +55,9 @@ Refs:
     - version `v == CACHE_VERSION`
     - `payload.py == current_python_tag()`
     - `payload.fp == BASELINE_FINGERPRINT_VERSION`
-    - `payload.ap` matches the current six-threshold analysis profile
+    - `payload.ap` matches the current analysis profile
       (`min_loc`, `min_stmt`, `block_min_loc`, `block_min_stmt`,
-      `segment_min_loc`, `segment_min_stmt`)
+      `segment_min_loc`, `segment_min_stmt`, `collect_api_surface`)
     - `sig` equals deterministic hash of canonical payload
 - Cache schema must also be bumped when cached analysis semantics change in a
   way that could leave syntactically valid but semantically stale per-file
@@ -73,6 +74,8 @@ Refs:
 - Cache save writes canonical JSON and atomically replaces target file.
 - Empty sections (`u`, `b`, `s`) are omitted from written wire entries.
 - `rn`/`rq` are serialized as sorted unique arrays and omitted when empty.
+- Cached public-API symbol payloads preserve declared parameter order; cache
+  canonicalization must not reorder callable signatures.
 - `ss` is written when source stats are available and is required for full cache-hit
   accounting in discovery stage.
 - Legacy secret file `.cache_secret` is never used for trust; warning only.

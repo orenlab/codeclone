@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codeclone"
-version = "2.0.0b4"
+version = "2.0.0b5"
 description = "Structural code quality analysis for Python"
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "MPL-2.0 AND MIT"
@@ -22,7 +22,7 @@ requires-python = ">=3.10"
 dependencies = [
     "orjson>=3.11.8",
     "pygments>=2.20.0",
-    "rich>=14.3.2",
+    "rich>=15.0.0",
     "tomli>=2.0.1; python_version < '3.11'",
 ]
 
@@ -63,15 +63,15 @@ Documentation = "https://orenlab.github.io/codeclone/"
 
 [project.optional-dependencies]
 mcp = [
-    "mcp>=1.26.0,<2",
+    "mcp>=1.27.0,<2",
 ]
 dev = [
-    "pytest>=9.0.0",
+    "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
-    "build>=1.4.1",
-    "twine>=5.0.0",
-    "mypy>=1.19.1",
-    "ruff>=0.15.8",
+    "build>=1.4.3",
+    "twine>=6.2.0",
+    "mypy>=1.20.1",
+    "ruff>=0.15.10",
     "pre-commit>=4.5.1",
 ]
 
@@ -99,6 +99,20 @@ addopts = "-ra"
 [tool.coverage.run]
 branch = true
 source = ["codeclone"]
+
+[tool.codeclone]
+baseline = "codeclone.baseline.json"
+min_loc = 6
+min_stmt = 4
+fail_on_new = true
+fail_cycles = true
+fail_dead_code = true
+fail_health = 87
+fail_on_new_metrics = true
+api_surface = false
+golden_fixture_paths = ["tests/fixtures/golden_*"]
+min_typing_coverage = 99
+
 
 [tool.coverage.report]
 show_missing = true

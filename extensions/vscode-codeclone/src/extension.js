@@ -8,9 +8,11 @@ const vscode = require("vscode");
 const {
     ANALYSIS_PROFILE_OPTIONS,
     HELP_TOPICS,
+    KNOWN_HELP_TOPICS,
     HOTSPOT_GROUPS,
     HOTSPOT_FOCUS_MODES,
     HOTSPOT_GROUPS_BY_MODE,
+    OPTIONAL_HELP_TOPICS,
     REVIEW_DECORATION_THEMES,
     WORKSPACE_STATE_HOTSPOT_FOCUS_MODE,
     WORKSPACE_STATE_LAST_HELP_TOPIC,
@@ -18,14 +20,20 @@ const {
 const {
     capitalize,
     compactDecimal,
+    coverageJoinPayload,
     decimal,
     emptyReviewArtifacts,
     findingIcon,
     firstNormalizedLocation,
     focusModeSpec,
+    formatBaselineTags,
     formatBaselineState,
     formatBooleanWord,
     formatCacheSummary,
+    formatCoverageJoinMeasuredUnits,
+    formatCoverageJoinPercent,
+    formatCoverageJoinStatus,
+    formatCoverageJoinSummary,
     formatKind,
     formatNovelty,
     formatRunScope,
@@ -76,6 +84,7 @@ const {
     STALE_REASON_EDITOR,
     STALE_REASON_WORKSPACE,
     isMinimumSupportedCodeCloneVersion,
+    launchSpecOrigin,
     resolveAnalysisSettings,
     sameAnalysisSettings,
     locationsNeedDetailHydration,
@@ -87,13 +96,16 @@ const {
     staleMessage,
     unsupportedVersionMessage,
     workspaceLocalLauncherCandidates,
+    logChannelMessage,
 } = require("./support");
 
 class CodeCloneController {
     constructor(context) {
         this.context = context;
         this.disposed = false;
-        this.outputChannel = vscode.window.createOutputChannel("CodeClone");
+        this.outputChannel = vscode.window.createOutputChannel("CodeClone", {
+            log: true,
+        });
         this.client = new CodeCloneMcpClient(this.outputChannel);
         this.states = new Map();
         this.hotspotFocusMode = this.loadHotspotFocusMode();
@@ -101,7 +113,7 @@ class CodeCloneController {
             WORKSPACE_STATE_LAST_HELP_TOPIC,
             HELP_TOPICS[0]
         );
-        this.lastHelpTopic = HELP_TOPICS.includes(storedHelpTopic)
+        this.lastHelpTopic = KNOWN_HELP_TOPICS.includes(storedHelpTopic)
             ? storedHelpTopic
             : HELP_TOPICS[0];
         this.activeReviewTarget = null;
@@ -397,11 +409,29 @@ class CodeCloneController {
     }
 
     async persistLastHelpTopic(topic) {
-        this.lastHelpTopic = HELP_TOPICS.includes(topic) ? topic : HELP_TOPICS[0];
+        this.lastHelpTopic = KNOWN_HELP_TOPICS.includes(topic) ? topic : HELP_TOPICS[0];
         await this.context.workspaceState.update(
             WORKSPACE_STATE_LAST_HELP_TOPIC,
             this.lastHelpTopic
         );
+    }
+
+    availableHelpTopics() {
+        const detectedVersion =
+            this.connectionInfo.serverInfo?.version ||
+            this.getPrimaryState()?.latestSummary?.version ||
+            "";
+        return [
+            ...HELP_TOPICS,
+            ...OPTIONAL_HELP_TOPICS
+                .filter((entry) =>
+                    isMinimumSupportedCodeCloneVersion(
+                        detectedVersion,
+                        entry.minimumVersion
+                    )
+                )
+                .map((entry) => entry.topic),
+        ];
     }
 
     async manageWorkspaceTrust() {
@@ -423,9 +453,15 @@ class CodeCloneController {
         }
         const folders = vscode.workspace.workspaceFolders || [];
         if (folders.length === 0) {
-            await vscode.window.showErrorMessage(
-                "Open a workspace folder before using CodeClone."
+            const choice = await vscode.window.showErrorMessage(
+                "Open a workspace folder before using CodeClone.",
+                "Open Folder"
             );
+            if (choice === "Open Folder") {
+                await vscode.commands.executeCommand(
+                    "workbench.action.files.openFolder"
+                );
+            }
             return null;
         }
         if (folders.length === 1) {
@@ -631,7 +667,9 @@ class CodeCloneController {
             connection = await this.client.connect(launchSpec);
         } catch (error) {
             if (launchSpec.fallback) {
-                this.outputChannel.appendLine(
+                logChannelMessage(
+                    this.outputChannel,
+                    "warn",
                     "[codeclone] primary MCP launch failed, trying fallback launcher."
                 );
                 effectiveLaunchSpec = launchSpec.fallback;
@@ -1275,7 +1313,12 @@ class CodeCloneController {
         if (drift.healthDelta !== null) {
             parts.push(`${signedInteger(drift.healthDelta)} health`);
         }
-        return parts.length > 0 ? parts.join(" · ") : "baseline unavailable";
+        if (parts.length > 0) {
+            return parts.join(" · ");
+        }
+        return safeObject(state?.latestSummary?.baseline).compared_without_valid_baseline
+            ? "comparing without valid baseline"
+            : "baseline unavailable";
     }
 
     async inspectLocalHtmlReport(state) {
@@ -2160,8 +2203,9 @@ class CodeCloneController {
     }
 
     async pickHelpTopic() {
+        const topics = this.availableHelpTopics();
         const picked = await vscode.window.showQuickPick(
-            HELP_TOPICS.map((topic) => ({
+            topics.map((topic) => ({
                 label: topic.replace(/_/g, " "),
                 description:
                     topic === this.lastHelpTopic ? "Last opened" : "CodeClone MCP help topic",
@@ -2297,12 +2341,16 @@ class CodeCloneController {
             overloadedModules: this.reviewArtifactCount(state, "overloadedModules"),
         };
         const baselineDrift = this.baselineDrift(state);
+        const coverageJoin = coverageJoinPayload(state.metricsSummary);
         if (!node) {
             const sections = [
                 {
                     nodeType: "section",
                     id: "overview.health",
-                    label: "Structural Health",
+                    label:
+                        String(state.latestSummary.health_scope || "repository") === "repository"
+                            ? "Repository Health"
+                            : "Structural Health",
                     description:
                         baselineDrift.healthDelta !== null
                             ? `${state.latestSummary.health.score}/${state.latestSummary.health.grade} · ${signedInteger(
@@ -2349,11 +2397,24 @@ class CodeCloneController {
                     icon: new vscode.ThemeIcon("symbol-module"),
                 });
             }
+            if (Object.keys(coverageJoin).length > 0) {
+                sections.push({
+                    nodeType: "section",
+                    id: "overview.coverageJoin",
+                    label: "Coverage Join",
+                    description: formatCoverageJoinSummary(coverageJoin),
+                    icon: new vscode.ThemeIcon("shield"),
+                });
+            }
             return sections;
         }
         if (node.id === "overview.health") {
             const dimensions = safeObject(state.latestSummary.health.dimensions);
             return [
+                this.detailNode(
+                    "Scope",
+                    capitalize(String(state.latestSummary.health_scope || "repository"))
+                ),
                 this.detailNode("Score", `${state.latestSummary.health.score}/${state.latestSummary.health.grade}`),
                 this.detailNode("Clones", number(dimensions.clones)),
                 this.detailNode("Complexity", number(dimensions.complexity)),
@@ -2372,6 +2433,9 @@ class CodeCloneController {
         }
         if (node.id === "overview.run") {
             const inventory = safeObject(state.latestSummary.inventory);
+            const baseline = safeObject(state.latestSummary.baseline);
+            const baselineTags = formatBaselineTags(baseline);
+            const launch = this.connectionInfo.launchSpec;
             return [
                 this.detailNode("Workspace", state.folder.name),
                 this.detailNode("Run ID", state.currentRunId),
@@ -2401,7 +2465,14 @@ class CodeCloneController {
                 this.detailNode("Parsed lines", number(inventory.lines)),
                 this.detailNode("Callables", number(inventory.functions)),
                 this.detailNode("Classes", number(inventory.classes)),
-                this.detailNode("Baseline", formatBaselineState(state.latestSummary.baseline)),
+                this.detailNode("Baseline", formatBaselineState(baseline)),
+                ...(baseline.compared_without_valid_baseline &&
+                baselineTags !== "unknown"
+                    ? [this.detailNode("Baseline tags", baselineTags)]
+                    : []),
+                ...(baseline.compared_without_valid_baseline && launch
+                    ? [this.detailNode("Runtime source", launchSpecOrigin(launch))]
+                    : []),
                 this.detailNode(
                     "Metrics baseline",
                     formatBaselineState(state.latestSummary.metrics_baseline)
@@ -2412,15 +2483,30 @@ class CodeCloneController {
         }
         if (node.id === "overview.triage") {
             const nextAction = this.describeNextBestAction(state);
+            const triageFindings = safeObject(state.latestTriage?.findings);
+            const summaryFindings = safeObject(state.latestSummary.findings);
             return [
                 this.detailNode("Next best action", nextAction.label),
                 this.detailNode("Focus mode", focusModeSpec(this.hotspotFocusMode).label),
+                this.detailNode(
+                    "Focus",
+                    capitalize(String(state.latestTriage?.focus || "production").replace(/_/g, " "))
+                ),
+                this.detailNode(
+                    "Health scope",
+                    capitalize(String(state.latestSummary.health_scope || "repository"))
+                ),
                 this.detailNode(
                     "Analysis depth",
                     currentAnalysisSettings ? currentAnalysisSettings.label : "unknown"
                 ),
                 this.detailNode("New regressions", number(reviewCounts.new)),
+                this.detailNode(
+                    "New by source kind",
+                    formatSourceKindSummary(summaryFindings.new_by_source_kind)
+                ),
                 this.detailNode("Production hotspots", number(reviewCounts.production)),
+                this.detailNode("Outside focus", number(triageFindings.outside_focus)),
                 this.detailNode(
                     "New clones",
                     baselineDrift.newClones !== null
@@ -2438,9 +2524,17 @@ class CodeCloneController {
         }
         if (node.id === "overview.changed") {
             return [
+                this.detailNode(
+                    "Focus",
+                    capitalize(String(state.changedSummary.focus || "changed_paths").replace(/_/g, " "))
+                ),
                 this.detailNode("Changed files", number(state.changedSummary.changed_files)),
                 this.detailNode("Verdict", String(state.changedSummary.verdict)),
                 this.detailNode("New findings", number(state.changedSummary.new_findings)),
+                this.detailNode(
+                    "New by source kind",
+                    formatSourceKindSummary(state.changedSummary.new_by_source_kind)
+                ),
                 this.detailNode("Resolved findings", number(state.changedSummary.resolved_findings)),
                 this.detailNode(
                     "Health delta",
@@ -2462,6 +2556,39 @@ class CodeCloneController {
                     "Review surface",
                     `${number(reviewCounts.overloadedModules)} visible in Hotspots`
                 ),
+            ];
+        }
+        if (node.id === "overview.coverageJoin") {
+            return [
+                this.detailNode("Status", capitalize(formatCoverageJoinStatus(coverageJoin))),
+                this.detailNode(
+                    "Source",
+                    String(coverageJoin.source || "not configured")
+                ),
+                this.detailNode("Overall", formatCoverageJoinPercent(coverageJoin)),
+                this.detailNode(
+                    "Measured units",
+                    formatCoverageJoinMeasuredUnits(coverageJoin)
+                ),
+                this.detailNode(
+                    "Coverage hotspots",
+                    number(coverageJoin.coverage_hotspots)
+                ),
+                this.detailNode("Scope gaps", number(coverageJoin.scope_gap_hotspots)),
+                this.detailNode(
+                    "Threshold",
+                    typeof coverageJoin.hotspot_threshold_percent === "number"
+                        ? `${coverageJoin.hotspot_threshold_percent}%`
+                        : "n/a"
+                ),
+                ...(coverageJoin.invalid_reason
+                    ? [
+                        this.detailNode(
+                            "Reason",
+                            String(coverageJoin.invalid_reason)
+                        ),
+                    ]
+                    : []),
             ];
         }
         return [];
@@ -2537,7 +2664,7 @@ class CodeCloneController {
                     nodeType: "section",
                     id: "session.help",
                     label: "Help Topics",
-                    description: `${HELP_TOPICS.length} topics`,
+                    description: `${this.availableHelpTopics().length} topics`,
                     icon: new vscode.ThemeIcon("question"),
                 },
             ];
@@ -2551,6 +2678,10 @@ class CodeCloneController {
                     this.connectionInfo.serverInfo ? this.connectionInfo.serverInfo.version : "unknown"
                 ),
                 this.detailNode("Available tools", number(this.connectionInfo.toolCount)),
+                this.detailNode(
+                    "Runtime source",
+                    launch ? launchSpecOrigin(launch) : "not started"
+                ),
                 this.detailNode(
                     "Launcher",
                     launch ? `${launch.command} ${launch.args.join(" ")}`.trim() : "not started"
@@ -2615,7 +2746,7 @@ class CodeCloneController {
             });
         }
         if (node.id === "session.help") {
-            return HELP_TOPICS.map((topic) => ({
+            return this.availableHelpTopics().map((topic) => ({
                 nodeType: "helpTopic",
                 topic,
                 label: topic,
@@ -3180,12 +3311,18 @@ class CodeCloneController {
                 ? error.message
                 : fallbackMessage;
         this.outputChannel.show(true);
-        this.outputChannel.appendLine(`[codeclone] error: ${message}`);
+        logChannelMessage(this.outputChannel, "error", `[codeclone] error: ${message}`);
         if (this.isCodeCloneSetupError(message)) {
             void this.showSetupGuidance(message);
             return;
         }
-        void vscode.window.showErrorMessage(message || fallbackMessage);
+        void vscode.window
+            .showErrorMessage(message || fallbackMessage, "Show Logs")
+            .then((choice) => {
+                if (choice === "Show Logs") {
+                    this.outputChannel.show(true);
+                }
+            });
     }
 
     isCodeCloneSetupError(message) {

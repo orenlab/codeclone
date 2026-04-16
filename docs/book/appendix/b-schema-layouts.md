@@ -2,34 +2,100 @@
 
 ## Purpose
 
-Compact structural layouts for baseline/cache/report contracts in `2.0.0b4`.
+Compact structural layouts for baseline/cache/report contracts in `2.0.0b5`.
 
-## Baseline schema (`2.0`)
+## Baseline schema (`2.1`)
 
 ```json
 {
   "meta": {
-    "generator": { "name": "codeclone", "version": "2.0.0b4" },
-    "schema_version": "2.0",
+    "generator": { "name": "codeclone", "version": "2.0.0b5" },
+    "schema_version": "2.1",
     "fingerprint_version": "1",
     "python_tag": "cp313",
     "created_at": "2026-03-11T00:00:00Z",
     "payload_sha256": "...",
-    "metrics_payload_sha256": "..."
+    "metrics_payload_sha256": "...",
+    "api_surface_payload_sha256": "..."
   },
   "clones": {
     "functions": ["<fingerprint>|<loc_bucket>"],
     "blocks": ["<block_hash>|<block_hash>|<block_hash>|<block_hash>"]
   },
-  "metrics": { "...": "optional embedded metrics snapshot" }
+  "metrics": { "...": "optional embedded metrics snapshot" },
+  "api_surface": { "...": "optional embedded public API snapshot" }
 }
 ```
 
-## Cache schema (`2.3`)
+Compact embedded `api_surface` symbol layout:
 
 ```json
 {
-  "v": "2.3",
+  "module": "pkg.mod",
+  "filepath": "pkg/mod.py",
+  "symbols": [
+    {
+      "local_name": "PublicClass.method",
+      "kind": "method",
+      "start_line": 10,
+      "end_line": 14,
+      "params": [],
+      "returns_hash": "",
+      "exported_via": "name"
+    }
+  ]
+}
+```
+
+Notes:
+
+- `local_name` is stored on disk to avoid repeating the containing module path.
+- `filepath` is stored as a baseline-directory-relative wire path when
+  possible, rather than as a machine-local absolute path.
+- Runtime reconstructs canonical full qualnames as `module:local_name` before
+  API-surface diffing and restores runtime filepaths from the wire path.
+
+## Standalone metrics-baseline schema (`1.2`)
+
+```json
+{
+  "meta": {
+    "generator": { "name": "codeclone", "version": "2.0.0b5" },
+    "schema_version": "1.2",
+    "python_tag": "cp313",
+    "created_at": "2026-03-11T00:00:00Z",
+    "payload_sha256": "...",
+    "api_surface_payload_sha256": "..."
+  },
+  "metrics": { "...": "metrics snapshot" },
+  "api_surface": {
+    "modules": [
+      {
+        "module": "pkg.mod",
+        "filepath": "pkg/mod.py",
+        "all_declared": [],
+        "symbols": [
+          {
+            "local_name": "run",
+            "kind": "function",
+            "start_line": 10,
+            "end_line": 14,
+            "params": [],
+            "returns_hash": "",
+            "exported_via": "name"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+## Cache schema (`2.5`)
+
+```json
+{
+  "v": "2.5",
   "payload": {
     "py": "cp313",
     "fp": "1",
@@ -39,7 +105,8 @@ Compact structural layouts for baseline/cache/report contracts in `2.0.0b4`.
       "block_min_loc": 20,
       "block_min_stmt": 8,
       "segment_min_loc": 20,
-      "segment_min_stmt": 10
+      "segment_min_stmt": 10,
+      "collect_api_surface": false
     },
     "files": {
       "codeclone/cache.py": {
@@ -74,20 +141,30 @@ Notes:
 - `ss` stores per-file source stats and is required for full cache-hit accounting
   in discovery.
 - `rn`/`rq` are optional and decode to empty arrays when absent.
+- Cached public-API symbol payloads preserve declaration order for `params`;
+  canonicalization must not rewrite callable signature order.
 - `u` row decoder accepts both legacy 11-column rows and canonical 17-column rows
   (legacy rows map new structural fields to neutral defaults).
 
-## Report schema (`2.3`)
+## Report schema (`2.8`)
 
 ```json
 {
-  "report_schema_version": "2.3",
+  "report_schema_version": "2.8",
   "meta": {
-    "codeclone_version": "2.0.0b4",
+    "codeclone_version": "2.0.0b5",
     "project_name": "codeclone",
     "scan_root": ".",
     "analysis_mode": "full",
     "report_mode": "full",
+    "analysis_profile": {
+      "min_loc": 10,
+      "min_stmt": 6,
+      "block_min_loc": 20,
+      "block_min_stmt": 8,
+      "segment_min_loc": 20,
+      "segment_min_stmt": 10
+    },
     "analysis_thresholds": {
       "design_findings": {
         "complexity": { "metric": "cyclomatic_complexity", "operator": ">", "value": 20 },
@@ -125,14 +202,24 @@ Notes:
     "summary": {
       "...": "...",
       "suppressed": {
-        "dead_code": 0
+        "dead_code": 0,
+        "clones": 1
       }
     },
     "groups": {
       "clones": {
         "functions": [],
         "blocks": [],
-        "segments": []
+        "segments": [],
+        "suppressed": {
+          "functions": [
+            {
+              "...": "..."
+            }
+          ],
+          "blocks": [],
+          "segments": []
+        }
       },
       "structural": {
         "groups": [
@@ -172,6 +259,42 @@ Notes:
         "population_status": "limited",
         "top_score": 0.0,
         "average_score": 0.0
+      },
+      "coverage_adoption": {
+        "modules": 0,
+        "params_total": 0,
+        "params_annotated": 0,
+        "param_permille": 0,
+        "returns_total": 0,
+        "returns_annotated": 0,
+        "return_permille": 0,
+        "public_symbol_total": 0,
+        "public_symbol_documented": 0,
+        "docstring_permille": 0,
+        "typing_any_count": 0
+      },
+      "coverage_join": {
+        "status": "ok",
+        "source": "coverage.xml",
+        "files": 0,
+        "units": 0,
+        "measured_units": 0,
+        "overall_executable_lines": 0,
+        "overall_covered_lines": 0,
+        "overall_permille": 0,
+        "missing_from_report_units": 0,
+        "coverage_hotspots": 0,
+        "scope_gap_hotspots": 0,
+        "hotspot_threshold_percent": 50,
+        "invalid_reason": null
+      },
+      "api_surface": {
+        "enabled": false,
+        "modules": 0,
+        "public_symbols": 0,
+        "added": 0,
+        "breaking": 0,
+        "strict_types": false
       }
     },
     "families": {
@@ -204,6 +327,56 @@ Notes:
           "version": "1",
           "scope": "report_only",
           "strategy": "project_relative_composite"
+        },
+        "items": []
+      },
+      "coverage_adoption": {
+        "summary": {
+          "modules": 0,
+          "params_total": 0,
+          "params_annotated": 0,
+          "param_permille": 0,
+          "baseline_diff_available": false,
+          "param_delta": 0,
+          "returns_total": 0,
+          "returns_annotated": 0,
+          "return_permille": 0,
+          "return_delta": 0,
+          "public_symbol_total": 0,
+          "public_symbol_documented": 0,
+          "docstring_permille": 0,
+          "docstring_delta": 0,
+          "typing_any_count": 0
+        },
+        "items": []
+      },
+      "coverage_join": {
+        "summary": {
+          "status": "ok",
+          "source": "coverage.xml",
+          "files": 0,
+          "units": 0,
+          "measured_units": 0,
+          "overall_executable_lines": 0,
+          "overall_covered_lines": 0,
+          "overall_permille": 0,
+          "missing_from_report_units": 0,
+          "coverage_hotspots": 0,
+          "scope_gap_hotspots": 0,
+          "hotspot_threshold_percent": 50,
+          "invalid_reason": null
+        },
+        "items": []
+      },
+      "api_surface": {
+        "summary": {
+          "enabled": false,
+          "baseline_diff_available": false,
+          "modules": 0,
+          "public_symbols": 0,
+          "added": 0,
+          "breaking": 0,
+          "strict_types": false
         },
         "items": []
       },
@@ -266,7 +439,7 @@ Notes:
 ```text
 # CodeClone Report
 - Markdown schema: 1.0
-- Source report schema: 2.3
+- Source report schema: 2.8
 ...
 ## Overview
 ## Inventory
@@ -297,7 +470,7 @@ Notes:
       "tool": {
         "driver": {
           "name": "codeclone",
-          "version": "2.0.0b4",
+          "version": "2.0.0b5",
           "rules": [
             {
               "id": "CCLONE001",
@@ -352,7 +525,7 @@ Notes:
       ],
       "properties": {
         "profileVersion": "1.0",
-        "reportSchemaVersion": "2.3"
+        "reportSchemaVersion": "2.8"
       },
       "results": [
         {

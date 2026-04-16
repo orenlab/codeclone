@@ -39,3 +39,4 @@ site/
 /.uv-cache/
 /package-lock.json
 extensions/vscode-codeclone/node_modules
+/coverage.xml
