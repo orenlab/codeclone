@@ -96,6 +96,10 @@ Current server characteristics:
       locations plus remediation
     - `detail_level="full"` keeps the compatibility-oriented payload,
       including `priority_factors`, `items`, and per-location `uri`
+    - empty design `check_*` responses may include a compact
+      `threshold_context` (`metric`, `threshold`, `measured_units`,
+      `highest_below_threshold`) so agents can tell whether the run is truly
+      quiet or just below the active threshold
 
 The MCP layer does not introduce a separate analysis engine. It calls the
 current CodeClone pipeline and reuses the canonical report document already

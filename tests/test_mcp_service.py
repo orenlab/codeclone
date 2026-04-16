@@ -2435,9 +2435,9 @@ def test_mcp_service_additional_projection_and_error_branches(
         request=MCPAnalysisRequest(
             root=str(tmp_path),
             respect_pyproject=False,
-            complexity_threshold=1,
-            coupling_threshold=1,
-            cohesion_threshold=1,
+            complexity_threshold=5,
+            coupling_threshold=5,
+            cohesion_threshold=4,
         ),
         comparison_settings=(),
         report_document={
@@ -2514,6 +2514,143 @@ def test_mcp_service_additional_projection_and_error_branches(
         if str(finding.get("family", "")) == "design"
     ]
     assert design_findings == []
+    service._runs.register(fake_design_record)
+    empty_complexity = service.check_complexity(
+        run_id="design",
+        path="pkg/quality.py",
+        detail_level="summary",
+    )
+    requested_complexity = service.check_complexity(
+        run_id="design",
+        path="pkg/quality.py",
+        min_complexity=8,
+        detail_level="summary",
+    )
+    empty_coupling = service.check_coupling(
+        run_id="design",
+        path="pkg/quality.py",
+        detail_level="summary",
+    )
+    empty_cohesion = service.check_cohesion(
+        run_id="design",
+        path="pkg/quality.py",
+        detail_level="summary",
+    )
+    assert empty_complexity["total"] == 0
+    assert empty_complexity["threshold_context"] == {
+        "metric": "cyclomatic_complexity",
+        "threshold": 5,
+        "threshold_kind": "finding_threshold",
+        "measured_units": 1,
+        "highest_below_threshold": 3,
+    }
+    assert requested_complexity["threshold_context"] == {
+        "metric": "cyclomatic_complexity",
+        "threshold": 8,
+        "threshold_kind": "requested_min",
+        "finding_threshold": 5,
+        "measured_units": 1,
+        "highest_below_threshold": 3,
+    }
+    assert empty_coupling["threshold_context"] == {
+        "metric": "cbo",
+        "threshold": 5,
+        "threshold_kind": "finding_threshold",
+        "measured_units": 1,
+        "highest_below_threshold": 2,
+    }
+    assert empty_cohesion["threshold_context"] == {
+        "metric": "lcom4",
+        "threshold": 4,
+        "threshold_kind": "finding_threshold",
+        "measured_units": 1,
+        "highest_below_threshold": 2,
+    }
+    assert (
+        service._design_threshold_context(
+            record=fake_design_record,
+            check="complexity",
+            path="pkg/quality.py",
+            items=({"id": "existing"},),
+        )
+        is None
+    )
+    assert (
+        service._design_threshold_context(
+            record=fake_design_record,
+            check="unknown",
+            path="pkg/quality.py",
+            items=(),
+        )
+        is None
+    )
+    thresholded_report_document = dict(fake_design_record.report_document)
+    thresholded_findings = dict(
+        cast("dict[str, object]", thresholded_report_document["findings"])
+    )
+    thresholded_findings["thresholds"] = {
+        "design_findings": {
+            "complexity": {
+                "metric": "cyclomatic_complexity",
+                "operator": ">",
+                "value": 6,
+            }
+        }
+    }
+    thresholded_report_document["findings"] = thresholded_findings
+    thresholded_record = replace(
+        fake_design_record,
+        report_document=thresholded_report_document,
+    )
+    assert (
+        service._design_finding_threshold(
+            record=thresholded_record,
+            check="complexity",
+        )
+        == 6
+    )
+    no_below_report_document = dict(fake_design_record.report_document)
+    no_below_metrics = dict(
+        cast("dict[str, object]", no_below_report_document["metrics"])
+    )
+    no_below_families = dict(cast("dict[str, object]", no_below_metrics["families"]))
+    no_below_families["complexity"] = {
+        "items": [
+            {
+                "qualname": "pkg.quality:very_hot",
+                "relative_path": "pkg/quality.py",
+                "start_line": 10,
+                "end_line": 20,
+                "cyclomatic_complexity": 9,
+                "nesting_depth": 2,
+                "risk": "high",
+            }
+        ]
+    }
+    no_below_metrics["families"] = no_below_families
+    no_below_report_document["metrics"] = no_below_metrics
+    no_below_record = replace(
+        fake_design_record,
+        report_document=no_below_report_document,
+    )
+    assert service._design_threshold_context(
+        record=no_below_record,
+        check="complexity",
+        path="pkg/quality.py",
+        items=(),
+    ) == {
+        "metric": "cyclomatic_complexity",
+        "threshold": 5,
+        "threshold_kind": "finding_threshold",
+        "measured_units": 1,
+    }
+    assert (
+        service._highest_below_threshold(values=(9,), operator=">", threshold=5) is None
+    )
+    assert (
+        service._highest_below_threshold(values=(1, 2), operator="!=", threshold=5)
+        is None
+    )
     detail_payload = service._project_finding_detail(
         fake_design_record,
         {

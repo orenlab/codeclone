@@ -295,6 +295,26 @@ _CHECK_TO_DIMENSION: Final[dict[str, str]] = {
     "complexity": "complexity",
     "clones": "clones",
 }
+_DESIGN_CHECK_CONTEXT: Final[dict[str, dict[str, object]]] = {
+    "complexity": {
+        "category": CATEGORY_COMPLEXITY,
+        "metric": "cyclomatic_complexity",
+        "operator": ">",
+        "default_threshold": DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
+    },
+    "coupling": {
+        "category": CATEGORY_COUPLING,
+        "metric": "cbo",
+        "operator": ">",
+        "default_threshold": DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
+    },
+    "cohesion": {
+        "category": CATEGORY_COHESION,
+        "metric": "lcom4",
+        "operator": ">=",
+        "default_threshold": DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
+    },
+}
 _VALID_METRICS_DETAIL_FAMILIES = frozenset(
     {
         "complexity",
@@ -2045,6 +2065,13 @@ class CodeCloneMCPService:
             detail_level=validated_detail,
             max_results=max_results,
             path=path,
+            threshold_context=self._design_threshold_context(
+                record=record,
+                check="complexity",
+                path=path,
+                items=findings,
+                requested_min=min_complexity,
+            ),
         )
 
     def check_clones(
@@ -2163,6 +2190,12 @@ class CodeCloneMCPService:
             detail_level=validated_detail,
             max_results=max_results,
             path=path,
+            threshold_context=self._design_threshold_context(
+                record=record,
+                check=check,
+                path=path,
+                items=findings,
+            ),
         )
 
     def check_dead_code(
@@ -3615,6 +3648,7 @@ class CodeCloneMCPService:
         detail_level: DetailLevel,
         max_results: int,
         path: str | None,
+        threshold_context: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         bounded_items = [dict(item) for item in items[: max(1, max_results)]]
         full_health = dict(self._as_mapping(record.summary.get("health")))
@@ -3625,7 +3659,7 @@ class CodeCloneMCPService:
             if relevant_dimension and relevant_dimension in dimensions
             else dict(dimensions)
         )
-        return {
+        payload: dict[str, object] = {
             "run_id": self._short_run_id(record.run_id),
             "check": check,
             "detail_level": detail_level,
@@ -3639,6 +3673,108 @@ class CodeCloneMCPService:
             },
             "items": bounded_items,
         }
+        if threshold_context:
+            payload["threshold_context"] = dict(threshold_context)
+        return payload
+
+    def _design_threshold_context(
+        self,
+        *,
+        record: MCPRunRecord,
+        check: str,
+        path: str | None,
+        items: Sequence[Mapping[str, object]],
+        requested_min: int | None = None,
+    ) -> dict[str, object] | None:
+        if items:
+            return None
+        spec = _DESIGN_CHECK_CONTEXT.get(check)
+        if spec is None:
+            return None
+        category = str(spec["category"])
+        metric = str(spec["metric"])
+        operator = str(spec["operator"])
+        normalized_path = self._normalize_relative_path(path or "")
+        metrics = self._as_mapping(record.report_document.get("metrics"))
+        families = self._as_mapping(metrics.get("families"))
+        family = self._as_mapping(families.get(category))
+        metric_items = [
+            self._as_mapping(item)
+            for item in self._as_sequence(family.get("items"))
+            if not normalized_path
+            or self._metric_item_matches_path(
+                self._as_mapping(item),
+                normalized_path,
+            )
+        ]
+        if not metric_items:
+            return None
+        values = [_as_int(item.get(metric), 0) for item in metric_items]
+        finding_threshold = self._design_finding_threshold(
+            record=record,
+            check=check,
+        )
+        threshold = finding_threshold
+        threshold_kind = "finding_threshold"
+        if requested_min is not None and requested_min > finding_threshold:
+            threshold = requested_min
+            threshold_kind = "requested_min"
+        highest_below = self._highest_below_threshold(
+            values=values,
+            operator=operator,
+            threshold=threshold,
+        )
+        payload: dict[str, object] = {
+            "metric": metric,
+            "threshold": threshold,
+            "threshold_kind": threshold_kind,
+            "measured_units": len(metric_items),
+        }
+        if threshold_kind != "finding_threshold":
+            payload["finding_threshold"] = finding_threshold
+        if highest_below is not None:
+            payload["highest_below_threshold"] = highest_below
+        return payload
+
+    def _design_finding_threshold(
+        self,
+        *,
+        record: MCPRunRecord,
+        check: str,
+    ) -> int:
+        spec = _DESIGN_CHECK_CONTEXT[check]
+        category = str(spec["category"])
+        default_threshold = _as_int(spec["default_threshold"])
+        findings = self._as_mapping(record.report_document.get("findings"))
+        thresholds = self._as_mapping(
+            self._as_mapping(findings.get("thresholds")).get("design_findings")
+        )
+        threshold_payload = self._as_mapping(thresholds.get(category))
+        if threshold_payload:
+            return _as_int(threshold_payload.get("value"), default_threshold)
+        request_value = {
+            "complexity": record.request.complexity_threshold,
+            "coupling": record.request.coupling_threshold,
+            "cohesion": record.request.cohesion_threshold,
+        }.get(check)
+        return _as_int(request_value, default_threshold)
+
+    @staticmethod
+    def _highest_below_threshold(
+        *,
+        values: Sequence[int],
+        operator: str,
+        threshold: int,
+    ) -> int | None:
+        if operator == ">":
+            below = [value for value in values if value <= threshold]
+        elif operator == ">=":
+            below = [value for value in values if value < threshold]
+        else:
+            return None
+        if not below:
+            return None
+        return max(below)
 
     @staticmethod
     def _normalized_source_kind(value: object) -> str:

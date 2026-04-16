@@ -116,6 +116,10 @@ run-scoped URI templates.
 **Payload conventions:**
 
 - `check_*` responses include only the relevant health dimension.
+- Empty design `check_*` responses may also include a compact
+  `threshold_context` (`metric`, `threshold`, `measured_units`,
+  `highest_below_threshold`) to show whether the run is genuinely quiet or
+  simply below the active threshold.
 - Finding responses use short MCP IDs and relative paths by default;
   `detail_level=full` restores the compatibility payload with URIs.
 - Summary and triage projections keep interpretation compact: `health_scope`
