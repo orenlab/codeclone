@@ -41,20 +41,17 @@ Live sample report:
 ## Features
 
 - **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
-- **Structural findings** — duplicated branch families, clone guard/exit divergence and clone-cohort drift (report-only)
-- **Quality metrics** — cyclomatic complexity, coupling (`CBO`), cohesion (`LCOM4`), dependency cycles, dead code,
-  health score, type/docstring adoption coverage, current-run Cobertura coverage join, public API surface diff, and
-  report-only `Overloaded Modules` profiling
-- **Baseline governance** — separates accepted **legacy** debt from **new regressions** and lets CI fail **only** on
-  what changed
-- **Reports** — interactive HTML, deterministic JSON/TXT plus Markdown and SARIF projections from one canonical report
-- **MCP server** — optional read-only surface for AI agents and IDEs, designed as a budget-aware guided control
-  surface for agentic development
-- **VS Code extension** — preview native client for CodeClone MCP with triage-first structural review, factual
-  `Coverage Join` overview support, and bounded in-IDE help topics
-- **Native client surfaces** — preview Claude Desktop bundle and Codex plugin over the same canonical MCP contract
+- **Structural findings** — duplicated branch families, clone guard/exit divergence, and clone-cohort drift
+- **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, dead code,
+  health score, and overloaded-module profiling
+- **Adoption & API** — type/docstring annotation coverage, public API surface inventory and baseline diff
+- **Coverage Join** — fuse external Cobertura XML into the current run to surface coverage hotspots and scope gaps
+- **Baseline governance** — separates accepted **legacy** debt from **new regressions**; CI fails only on what changed
+- **Reports** — interactive HTML, JSON, Markdown, SARIF, and text from one canonical report
+- **MCP server** — optional read-only surface for AI agents and IDEs
+- **IDE & agent clients** — VS Code extension, Claude Desktop bundle, and Codex plugin over the same MCP contract
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
-- **Fast** — incremental caching, parallel processing, warm-run optimization, and reproducible benchmark coverage
+- **Fast** — incremental caching, parallel processing, warm-run optimization
 
 ## Quick Start
 
@@ -150,16 +147,12 @@ codeclone . --fail-on-typing-regression --fail-on-docstring-regression
 codeclone . --api-surface --update-metrics-baseline
 codeclone . --fail-on-api-break
 
-# Current-run Cobertura hotspot gate
+# Coverage Join — fuse external Cobertura XML into the review
 codeclone . --coverage coverage.xml --fail-on-untested-hotspots --coverage-min 50
 ```
 
-In normal full-mode CLI output, CodeClone now surfaces adoption coverage
-(`params`, `returns`, `docstrings`, `Any`) in the main `Metrics` block, and it
-adds a `Public API` line when `--api-surface` facts are collected. Passing
-`--coverage FILE` adds a `Coverage` line from external Cobertura XML, surfaces
-joined details under HTML `Quality -> Coverage Join` and MCP/report
-`coverage_join`, and does not update the clone baseline.
+Gate details:
+[Metrics and quality gates](https://orenlab.github.io/codeclone/book/15-metrics-and-quality-gates/)
 
 ### Pre-commit
 
@@ -179,10 +172,7 @@ repos:
 ## MCP Server
 
 Optional read-only MCP server for AI agents and IDE clients.
-21 tools + 10 resources — never mutates source, baselines, or repo state.
-Compact summary and triage payloads make scope explicit: repository-wide health,
-current focus, new-finding source-kind attribution, and when comparison is
-proceeding without a valid baseline.
+Never mutates source, baselines, or repo state.
 
 ```bash
 uv tool install --pre "codeclone[mcp]"       # or: uv pip install --pre "codeclone[mcp]"
@@ -191,9 +181,7 @@ codeclone-mcp --transport stdio            # local (Claude Code, Codex, Copilot,
 codeclone-mcp --transport streamable-http  # remote / HTTP-only clients
 ```
 
-Docs:
-[MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
-·
+[MCP usage guide](https://orenlab.github.io/codeclone/mcp/) ·
 [MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
 
 ### Native Client Surfaces
@@ -205,6 +193,10 @@ Docs:
 | **Codex plugin**          | [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone)                                     | Native discovery, two skills, and MCP definition   |
 
 All three are thin wrappers over the same `codeclone-mcp` contract — no second analysis engine.
+
+[VS Code extension docs](https://orenlab.github.io/codeclone/book/21-vscode-extension/) ·
+[Claude Desktop docs](https://orenlab.github.io/codeclone/book/22-claude-desktop-bundle/) ·
+[Codex plugin docs](https://orenlab.github.io/codeclone/book/23-codex-plugin/)
 
 ## Configuration
 
@@ -231,6 +223,9 @@ segment_min_stmt = 10
 
 Precedence: CLI flags > `pyproject.toml` > built-in defaults.
 
+Config reference:
+[Config and defaults](https://orenlab.github.io/codeclone/book/04-config-and-defaults/)
+
 ## Baseline Workflow
 
 Baselines capture the current duplication state. Once committed, they become the CI reference point.
@@ -253,6 +248,8 @@ Full contract: [Baseline contract](https://orenlab.github.io/codeclone/book/06-b
 
 Contract errors (`2`) take precedence over gating failures (`3`).
 
+Full policy: [Exit codes and failure policy](https://orenlab.github.io/codeclone/book/03-contracts-exit-codes/)
+
 ## Reports
 
 | Format   | Flag      | Default path                    |
@@ -263,37 +260,12 @@ Contract errors (`2`) take precedence over gating failures (`3`).
 | SARIF    | `--sarif` | `.cache/codeclone/report.sarif` |
 | Text     | `--text`  | `.cache/codeclone/report.txt`   |
 
-All report formats are rendered from one canonical JSON report document.
+All formats are rendered from one canonical JSON report.
+`--open-html-report` opens the HTML in the default browser.
+`--timestamped-report-paths` appends a UTC timestamp to default filenames.
 
-- `--open-html-report` opens the generated HTML report in the default browser and requires `--html`.
-- `--timestamped-report-paths` appends a UTC timestamp to default report filenames for bare report flags such as
-  `--html` or `--json`. Explicit report paths are not rewritten.
-
-The docs site also includes live example HTML/JSON/SARIF reports generated from the current `codeclone` repository.
-
-Structural findings include:
-
-- `duplicated_branches`
-- `clone_guard_exit_divergence`
-- `clone_cohort_drift`
-
-### Inline Suppressions
-
-CodeClone keeps dead-code detection deterministic and static by default. When a symbol is intentionally
-invoked through runtime dynamics (for example framework callbacks, plugin loading, or reflection), suppress
-the known false positive explicitly at the declaration site:
-
-```python
-# codeclone: ignore[dead-code]
-def handle_exception(exc: Exception) -> None:
-    ...
-
-
-class Middleware:  # codeclone: ignore[dead-code]
-    ...
-```
-
-Dynamic/runtime false positives are resolved via explicit inline suppressions, not via broad heuristics.
+Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-report/) ·
+[HTML render](https://orenlab.github.io/codeclone/book/10-html-render/)
 
 <details>
 <summary>Canonical JSON report shape (v2.8)</summary>
@@ -410,10 +382,28 @@ Dynamic/runtime false positives are resolved via explicit inline suppressions, n
 }
 ```
 
-Canonical contract: [Report contract](https://orenlab.github.io/codeclone/book/08-report/) and
-[Dead-code contract](https://orenlab.github.io/codeclone/book/16-dead-code-contract/)
+Full contract: [Report contract](https://orenlab.github.io/codeclone/book/08-report/)
 
 </details>
+
+## Inline Suppressions
+
+When a symbol is invoked through runtime dynamics (framework callbacks, plugin loading, reflection),
+suppress the known false positive at the declaration site:
+
+```python
+# codeclone: ignore[dead-code]
+def handle_exception(exc: Exception) -> None:
+    ...
+
+
+class Middleware:  # codeclone: ignore[dead-code]
+    ...
+```
+
+Suppression contract:
+[Inline suppressions](https://orenlab.github.io/codeclone/book/19-inline-suppressions/) ·
+[Dead-code contract](https://orenlab.github.io/codeclone/book/16-dead-code-contract/)
 
 ## How It Works
 
@@ -430,18 +420,14 @@ CFG semantics: [CFG semantics](https://orenlab.github.io/codeclone/cfg/)
 
 ## Documentation
 
-| Topic                      | Link                                                                                                |
-|----------------------------|-----------------------------------------------------------------------------------------------------|
-| Contract book (start here) | [Contracts and guarantees](https://orenlab.github.io/codeclone/book/00-intro/)                      |
-| Exit codes                 | [Exit codes and failure policy](https://orenlab.github.io/codeclone/book/03-contracts-exit-codes/)  |
-| Configuration              | [Config and defaults](https://orenlab.github.io/codeclone/book/04-config-and-defaults/)             |
-| Baseline contract          | [Baseline contract](https://orenlab.github.io/codeclone/book/06-baseline/)                          |
-| Cache contract             | [Cache contract](https://orenlab.github.io/codeclone/book/07-cache/)                                |
-| Report contract            | [Report contract](https://orenlab.github.io/codeclone/book/08-report/)                              |
-| Metrics & quality gates    | [Metrics and quality gates](https://orenlab.github.io/codeclone/book/15-metrics-and-quality-gates/) |
-| Dead code                  | [Dead-code contract](https://orenlab.github.io/codeclone/book/16-dead-code-contract/)               |
-| Docker benchmark contract  | [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmarking/)                  |
-| Determinism                | [Determinism policy](https://orenlab.github.io/codeclone/book/12-determinism/)                      |
+Full docs and contract book: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/)
+
+Quick links:
+[Baseline](https://orenlab.github.io/codeclone/book/06-baseline/) ·
+[Report](https://orenlab.github.io/codeclone/book/08-report/) ·
+[Metrics & gates](https://orenlab.github.io/codeclone/book/15-metrics-and-quality-gates/) ·
+[MCP](https://orenlab.github.io/codeclone/book/20-mcp-interface/) ·
+[CLI](https://orenlab.github.io/codeclone/book/09-cli/)
 
 ## Benchmarking Notes
 
@@ -476,6 +462,7 @@ Versions released before this change remain under their original license terms.
 
 ## Links
 
+- **Docs:** <https://orenlab.github.io/codeclone/>
 - **Issues:** <https://github.com/orenlab/codeclone/issues>
 - **PyPI:** <https://pypi.org/project/codeclone/>
 - **Licenses:** [MPL-2.0](LICENSE) · [MIT docs](LICENSE-docs)
