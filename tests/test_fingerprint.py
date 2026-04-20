@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-from codeclone.fingerprint import bucket_loc, sha1
+from codeclone.analysis.fingerprint import bucket_loc, sha1
 
 
 def test_sha1_stable() -> None:

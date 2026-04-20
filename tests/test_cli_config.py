@@ -13,8 +13,10 @@ from typing import Any
 
 import pytest
 
-import codeclone._cli_config as cfg_mod
-from codeclone._cli_config import ConfigValidationError
+import codeclone.config.pyproject_loader as loader_mod
+import codeclone.config.resolver as resolver_mod
+import codeclone.config.spec as spec_mod
+from codeclone.config.pyproject_loader import ConfigValidationError
 
 
 def _write_pyproject(path: Path, content: str) -> None:
@@ -26,7 +28,7 @@ def test_collect_explicit_cli_dests_stops_on_double_dash() -> None:
     parser.add_argument("--min-loc", dest="min_loc", type=int, default=20)
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--json", dest="json_out")
-    explicit = cfg_mod.collect_explicit_cli_dests(
+    explicit = resolver_mod.collect_explicit_cli_dests(
         parser,
         argv=("--min-loc=10", "--quiet", "--", "--json", "report.json"),
     )
@@ -34,7 +36,7 @@ def test_collect_explicit_cli_dests_stops_on_double_dash() -> None:
 
 
 def test_load_pyproject_config_missing_file_returns_empty(tmp_path: Path) -> None:
-    assert cfg_mod.load_pyproject_config(tmp_path) == {}
+    assert loader_mod.load_pyproject_config(tmp_path) == {}
 
 
 def test_load_pyproject_config_raises_on_loader_errors(
@@ -46,19 +48,19 @@ def test_load_pyproject_config_raises_on_loader_errors(
     def _raise_oserror(_path: Path) -> object:
         raise OSError("denied")
 
-    monkeypatch.setattr(cfg_mod, "_load_toml", _raise_oserror)
+    monkeypatch.setattr(loader_mod, "_load_toml", _raise_oserror)
     with pytest.raises(
         ConfigValidationError,
         match=r"Cannot read pyproject\.toml",
     ):
-        cfg_mod.load_pyproject_config(tmp_path)
+        loader_mod.load_pyproject_config(tmp_path)
 
     def _raise_value_error(_path: Path) -> object:
         raise ValueError("broken")
 
-    monkeypatch.setattr(cfg_mod, "_load_toml", _raise_value_error)
+    monkeypatch.setattr(loader_mod, "_load_toml", _raise_value_error)
     with pytest.raises(ConfigValidationError, match="Invalid TOML"):
-        cfg_mod.load_pyproject_config(tmp_path)
+        loader_mod.load_pyproject_config(tmp_path)
 
 
 def test_load_pyproject_config_validates_tool_structure(
@@ -67,31 +69,37 @@ def test_load_pyproject_config_validates_tool_structure(
     pyproject = tmp_path / "pyproject.toml"
     _write_pyproject(pyproject, "[tool]\n")
 
-    monkeypatch.setattr(cfg_mod, "_load_toml", lambda _path: [])
+    monkeypatch.setattr(loader_mod, "_load_toml", lambda _path: [])
     with pytest.raises(ConfigValidationError, match="root must be object"):
-        cfg_mod.load_pyproject_config(tmp_path)
+        loader_mod.load_pyproject_config(tmp_path)
 
-    monkeypatch.setattr(cfg_mod, "_load_toml", lambda _path: {"tool": "bad"})
+    monkeypatch.setattr(loader_mod, "_load_toml", lambda _path: {"tool": "bad"})
     with pytest.raises(ConfigValidationError, match="'tool' must be object"):
-        cfg_mod.load_pyproject_config(tmp_path)
+        loader_mod.load_pyproject_config(tmp_path)
 
     monkeypatch.setattr(
-        cfg_mod, "_load_toml", lambda _path: {"tool": {"codeclone": []}}
+        loader_mod,
+        "_load_toml",
+        lambda _path: {"tool": {"codeclone": []}},
     )
     with pytest.raises(
         ConfigValidationError,
         match=r"'tool\.codeclone' must be object",
     ):
-        cfg_mod.load_pyproject_config(tmp_path)
+        loader_mod.load_pyproject_config(tmp_path)
 
-    monkeypatch.setattr(cfg_mod, "_load_toml", lambda _path: {"tool": {}})
-    assert cfg_mod.load_pyproject_config(tmp_path) == {}
+    monkeypatch.setattr(loader_mod, "_load_toml", lambda _path: {"tool": {}})
+    assert loader_mod.load_pyproject_config(tmp_path) == {}
 
-    monkeypatch.setattr(cfg_mod, "_load_toml", lambda _path: {"tool": None})
-    assert cfg_mod.load_pyproject_config(tmp_path) == {}
+    monkeypatch.setattr(loader_mod, "_load_toml", lambda _path: {"tool": None})
+    assert loader_mod.load_pyproject_config(tmp_path) == {}
 
-    monkeypatch.setattr(cfg_mod, "_load_toml", lambda _path: {"tool": {"other": {}}})
-    assert cfg_mod.load_pyproject_config(tmp_path) == {}
+    monkeypatch.setattr(
+        loader_mod,
+        "_load_toml",
+        lambda _path: {"tool": {"other": {}}},
+    )
+    assert loader_mod.load_pyproject_config(tmp_path) == {}
 
 
 def test_load_pyproject_config_unknown_key_rejected(
@@ -100,12 +108,12 @@ def test_load_pyproject_config_unknown_key_rejected(
     pyproject = tmp_path / "pyproject.toml"
     _write_pyproject(pyproject, "[tool]\n")
     monkeypatch.setattr(
-        cfg_mod,
+        loader_mod,
         "_load_toml",
         lambda _path: {"tool": {"codeclone": {"unknown_option": 1}}},
     )
     with pytest.raises(ConfigValidationError, match="Unknown key\\(s\\)"):
-        cfg_mod.load_pyproject_config(tmp_path)
+        loader_mod.load_pyproject_config(tmp_path)
 
 
 def test_load_pyproject_config_normalizes_relative_and_absolute_paths(
@@ -122,7 +130,7 @@ md_out = "reports/report.md"
 sarif_out = "reports/report.sarif"
 """.strip(),
     )
-    loaded = cfg_mod.load_pyproject_config(tmp_path)
+    loaded = loader_mod.load_pyproject_config(tmp_path)
     assert loaded["min_loc"] == 5
     assert loaded["cache_path"] == str(tmp_path / ".cache/codeclone/cache.json")
     assert loaded["json_out"] == "/tmp/report.json"
@@ -132,7 +140,7 @@ sarif_out = "reports/report.sarif"
 
 def test_apply_pyproject_config_overrides_respects_explicit_cli_flags() -> None:
     args = argparse.Namespace(min_loc=10, quiet=False)
-    cfg_mod.apply_pyproject_config_overrides(
+    resolver_mod.apply_pyproject_config_overrides(
         args=args,
         config_values={"min_loc": 42, "quiet": True},
         explicit_cli_dests={"quiet"},
@@ -158,7 +166,7 @@ def test_apply_pyproject_config_overrides_respects_explicit_cli_flags() -> None:
 def test_validate_config_value_accepts_expected_types(
     key: str, value: object, expected: object
 ) -> None:
-    assert cfg_mod._validate_config_value(key=key, value=value) == expected
+    assert loader_mod.validate_config_value(key=key, value=value) == expected
 
 
 @pytest.mark.parametrize(
@@ -168,7 +176,11 @@ def test_validate_config_value_accepts_expected_types(
         ("update_baseline", "yes", "expected bool"),
         ("min_loc", True, "expected int"),
         ("baseline", 1, "expected str"),
-        ("golden_fixture_paths", "tests/fixtures/golden_*", "expected list\\[str\\]"),
+        (
+            "golden_fixture_paths",
+            "tests/fixtures/golden_*",
+            "expected list\\[str\\]",
+        ),
         (
             "golden_fixture_paths",
             ["tests/fixtures/golden_*", 1],
@@ -181,24 +193,24 @@ def test_validate_config_value_rejects_invalid_types(
     key: str, value: object, error_fragment: str
 ) -> None:
     with pytest.raises(ConfigValidationError, match=error_fragment):
-        cfg_mod._validate_config_value(key=key, value=value)
+        loader_mod.validate_config_value(key=key, value=value)
 
 
 def test_validate_config_value_unsupported_spec_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(
-        cfg_mod._CONFIG_KEY_SPECS,
+        loader_mod.CONFIG_KEY_SPECS,
         "_unsupported",
-        cfg_mod._ConfigKeySpec(tuple),
+        spec_mod.ConfigKeySpec(tuple),
     )
     with pytest.raises(ConfigValidationError, match="Unsupported config key spec"):
-        cfg_mod._validate_config_value(key="_unsupported", value=("x",))
+        loader_mod.validate_config_value(key="_unsupported", value=("x",))
 
 
 def test_normalize_path_config_value_behaviour(tmp_path: Path) -> None:
     assert (
-        cfg_mod._normalize_path_config_value(
+        loader_mod.normalize_path_config_value(
             key="min_loc",
             value=10,
             root_path=tmp_path,
@@ -206,20 +218,20 @@ def test_normalize_path_config_value_behaviour(tmp_path: Path) -> None:
         == 10
     )
     assert (
-        cfg_mod._normalize_path_config_value(
+        loader_mod.normalize_path_config_value(
             key="cache_path",
             value=123,
             root_path=tmp_path,
         )
         == 123
     )
-    assert cfg_mod._normalize_path_config_value(
+    assert loader_mod.normalize_path_config_value(
         key="cache_path",
         value="relative/cache.json",
         root_path=tmp_path,
     ) == str(tmp_path / "relative/cache.json")
     assert (
-        cfg_mod._normalize_path_config_value(
+        loader_mod.normalize_path_config_value(
             key="cache_path",
             value="/tmp/absolute-cache.json",
             root_path=tmp_path,
@@ -228,7 +240,7 @@ def test_normalize_path_config_value_behaviour(tmp_path: Path) -> None:
     )
     patterns = ("tests/fixtures/golden_*",)
     assert (
-        cfg_mod._normalize_path_config_value(
+        loader_mod.normalize_path_config_value(
             key="golden_fixture_paths",
             value=patterns,
             root_path=tmp_path,
@@ -248,7 +260,7 @@ golden_fixture_paths = [
 ]
 """.strip(),
     )
-    loaded = cfg_mod.load_pyproject_config(tmp_path)
+    loaded = loader_mod.load_pyproject_config(tmp_path)
     assert loaded["golden_fixture_paths"] == ("tests/fixtures/golden_*",)
 
 
@@ -257,18 +269,18 @@ def test_load_toml_py310_missing_tomli_raises(
 ) -> None:
     toml_path = tmp_path / "pyproject.toml"
     _write_pyproject(toml_path, "[tool]\n")
-    monkeypatch.setattr(cfg_mod, "sys", SimpleNamespace(version_info=(3, 10, 14)))
+    monkeypatch.setattr(loader_mod, "sys", SimpleNamespace(version_info=(3, 10, 14)))
 
     def _raise_module_not_found(_name: str) -> object:
         raise ModuleNotFoundError("tomli")
 
     monkeypatch.setattr(
-        cfg_mod,
+        loader_mod,
         "importlib",
         SimpleNamespace(import_module=_raise_module_not_found),
     )
     with pytest.raises(ConfigValidationError, match="requires dependency 'tomli'"):
-        cfg_mod._load_toml(toml_path)
+        loader_mod._load_toml(toml_path)
 
 
 def test_load_toml_py310_invalid_tomli_module_raises(
@@ -276,14 +288,14 @@ def test_load_toml_py310_invalid_tomli_module_raises(
 ) -> None:
     toml_path = tmp_path / "pyproject.toml"
     _write_pyproject(toml_path, "[tool]\n")
-    monkeypatch.setattr(cfg_mod, "sys", SimpleNamespace(version_info=(3, 10, 14)))
+    monkeypatch.setattr(loader_mod, "sys", SimpleNamespace(version_info=(3, 10, 14)))
     monkeypatch.setattr(
-        cfg_mod,
+        loader_mod,
         "importlib",
         SimpleNamespace(import_module=lambda _name: object()),
     )
     with pytest.raises(ConfigValidationError, match="missing callable 'load'"):
-        cfg_mod._load_toml(toml_path)
+        loader_mod._load_toml(toml_path)
 
 
 def test_load_toml_py310_uses_tomli_load(
@@ -291,7 +303,7 @@ def test_load_toml_py310_uses_tomli_load(
 ) -> None:
     toml_path = tmp_path / "pyproject.toml"
     _write_pyproject(toml_path, "[tool]\n")
-    monkeypatch.setattr(cfg_mod, "sys", SimpleNamespace(version_info=(3, 10, 14)))
+    monkeypatch.setattr(loader_mod, "sys", SimpleNamespace(version_info=(3, 10, 14)))
 
     class _FakeTomli:
         @staticmethod
@@ -301,8 +313,8 @@ def test_load_toml_py310_uses_tomli_load(
             return {"tool": {}}
 
     monkeypatch.setattr(
-        cfg_mod,
+        loader_mod,
         "importlib",
         SimpleNamespace(import_module=lambda _name: _FakeTomli),
     )
-    assert cfg_mod._load_toml(toml_path) == {"tool": {}}
+    assert loader_mod._load_toml(toml_path) == {"tool": {}}

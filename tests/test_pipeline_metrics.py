@@ -18,6 +18,32 @@ from codeclone.cache import (
     ModuleApiSurfaceDict,
     PublicSymbolDict,
 )
+from codeclone.core._types import (
+    _as_sorted_str_tuple,
+    _class_metric_sort_key,
+    _module_dep_sort_key,
+    _module_names_from_units,
+)
+from codeclone.core.bootstrap import _resolve_optional_runtime_path
+from codeclone.core.coverage_payload import _coverage_join_rows, _coverage_join_summary
+from codeclone.core.discovery_cache import (
+    _api_param_spec_from_cache_dict,
+    _api_surface_from_cache_dict,
+    _cache_dict_int_fields,
+    _cache_dict_module_fields,
+    _docstring_coverage_from_cache_dict,
+    _public_symbol_from_cache_dict,
+    _typing_coverage_from_cache_dict,
+)
+from codeclone.core.discovery_cache import (
+    load_cached_metrics_extended as _load_cached_metrics_extended,
+)
+from codeclone.core.metrics_payload import (
+    _enrich_metrics_report_payload,
+    build_metrics_report_payload,
+)
+from codeclone.core.parallelism import _should_use_parallel
+from codeclone.core.pipeline import compute_project_metrics
 from codeclone.metrics import build_overloaded_modules_payload
 from codeclone.models import (
     ApiBreakingChange,
@@ -37,31 +63,13 @@ from codeclone.models import (
     PublicSymbol,
     UnitCoverageFact,
 )
-from codeclone.pipeline import (
+from codeclone.report.gates import (
     MetricGateConfig,
-    _api_param_spec_from_cache_dict,
-    _api_surface_from_cache_dict,
-    _as_int,
-    _as_sorted_str_tuple,
-    _as_str,
-    _cache_dict_int_fields,
-    _cache_dict_module_fields,
-    _class_metric_sort_key,
-    _coverage_join_rows,
-    _coverage_join_summary,
-    _docstring_coverage_from_cache_dict,
-    _enrich_metrics_report_payload,
-    _load_cached_metrics_extended,
-    _module_dep_sort_key,
-    _module_names_from_units,
-    _public_symbol_from_cache_dict,
-    _resolve_optional_runtime_path,
-    _should_use_parallel,
-    _typing_coverage_from_cache_dict,
-    build_metrics_report_payload,
-    compute_project_metrics,
-    metric_gate_reasons,
+    gate_state_from_project_metrics,
+    metric_gate_reasons_for_state,
 )
+from codeclone.utils.coerce import as_int as _as_int
+from codeclone.utils.coerce import as_str as _as_str
 
 
 def _project_metrics(*, dead_confidence: str = "high") -> ProjectMetrics:
@@ -153,6 +161,21 @@ def _project_metrics_with_adoption_and_api() -> ProjectMetrics:
             )
         ),
     )
+
+
+def _metric_gate_reasons_from_metrics(
+    *,
+    project_metrics: ProjectMetrics,
+    coverage_join: CoverageJoinResult | None,
+    metrics_diff: MetricsDiff | None,
+    config: MetricGateConfig,
+) -> tuple[str, ...]:
+    state = gate_state_from_project_metrics(
+        project_metrics=project_metrics,
+        coverage_join=coverage_join,
+        metrics_diff=metrics_diff,
+    )
+    return metric_gate_reasons_for_state(state=state, config=config)
 
 
 def test_pipeline_basic_helpers_and_sort_keys() -> None:
@@ -722,7 +745,7 @@ def test_load_cached_metrics_extended_decodes_adoption_and_api_surface() -> None
 
 
 def test_metric_gate_reasons_collects_all_enabled_reasons() -> None:
-    reasons = metric_gate_reasons(
+    reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="high"),
         coverage_join=None,
         metrics_diff=MetricsDiff(
@@ -865,7 +888,7 @@ def test_enrich_metrics_report_payload_hides_api_diff_without_api_baseline() -> 
 
 
 def test_metric_gate_reasons_skip_disabled_and_non_critical_paths() -> None:
-    reasons = metric_gate_reasons(
+    reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="medium"),
         coverage_join=None,
         metrics_diff=None,
@@ -883,7 +906,7 @@ def test_metric_gate_reasons_skip_disabled_and_non_critical_paths() -> None:
 
 
 def test_metric_gate_reasons_partial_new_metrics_paths() -> None:
-    reasons = metric_gate_reasons(
+    reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="medium"),
         coverage_join=None,
         metrics_diff=MetricsDiff(
@@ -910,7 +933,7 @@ def test_metric_gate_reasons_partial_new_metrics_paths() -> None:
 
 
 def test_metric_gate_reasons_new_metrics_optional_buckets_empty() -> None:
-    reasons = metric_gate_reasons(
+    reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="medium"),
         coverage_join=None,
         metrics_diff=MetricsDiff(
@@ -937,7 +960,7 @@ def test_metric_gate_reasons_new_metrics_optional_buckets_empty() -> None:
 
 
 def test_metric_gate_reasons_include_adoption_and_api_surface_contracts() -> None:
-    reasons = metric_gate_reasons(
+    reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="medium"),
         coverage_join=None,
         metrics_diff=MetricsDiff(
@@ -1066,7 +1089,7 @@ def test_coverage_join_summary_rows_and_gate_reasons() -> None:
         == []
     )
 
-    reasons = metric_gate_reasons(
+    reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="medium"),
         coverage_join=coverage_join,
         metrics_diff=None,
@@ -1084,7 +1107,7 @@ def test_coverage_join_summary_rows_and_gate_reasons() -> None:
     )
     assert reasons == ("Coverage hotspots detected: hotspots=1, threshold=50%.",)
 
-    invalid_reasons = metric_gate_reasons(
+    invalid_reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="medium"),
         coverage_join=CoverageJoinResult(
             coverage_xml="/repo/broken.xml",

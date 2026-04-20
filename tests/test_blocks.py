@@ -6,8 +6,8 @@
 
 import ast
 
+from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.blocks import extract_blocks
-from codeclone.normalize import NormalizationConfig
 
 
 def test_extracts_non_overlapping_blocks() -> None:

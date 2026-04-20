@@ -33,7 +33,7 @@ def run_cli(
         [
             executable,
             "-m",
-            "codeclone.cli",
+            "codeclone.main",
             *args,
             "--processes",
             "1",

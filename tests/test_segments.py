@@ -6,8 +6,8 @@
 
 import ast
 
+from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.blocks import extract_segments
-from codeclone.normalize import NormalizationConfig
 
 
 def test_extract_segments_windows() -> None:

@@ -14,13 +14,13 @@ from typing import Any, cast
 
 import pytest
 
-import codeclone.structural_findings as sf
-from codeclone import _coerce
-from codeclone.models import StructuralFindingGroup, StructuralFindingOccurrence
-from codeclone.structural_findings import (
+import codeclone.findings.structural.detectors as sf
+from codeclone.findings.structural.detectors import (
     build_clone_cohort_structural_findings,
     scan_function_structure,
 )
+from codeclone.models import StructuralFindingGroup, StructuralFindingOccurrence
+from codeclone.utils import coerce as _coerce
 
 # ---------------------------------------------------------------------------
 # Helpers

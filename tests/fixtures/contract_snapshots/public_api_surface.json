@@ -1,0 +1,99 @@
+{
+  "main_exports": [
+    "main"
+  ],
+  "main_signature": "() -> 'None'",
+  "codeclone_exports": [
+    "__version__"
+  ],
+  "mcp_service_public_methods": [
+    {
+      "name": "analyze_changed_paths",
+      "signature": "(self, request: 'MCPAnalysisRequest') -> 'dict[str, object]'"
+    },
+    {
+      "name": "analyze_repository",
+      "signature": "(self, request: 'MCPAnalysisRequest') -> 'dict[str, object]'"
+    },
+    {
+      "name": "check_clones",
+      "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, path: 'str | None' = None, clone_type: 'str | None' = None, source_kind: 'str | None' = None, max_results: 'int' = 10, detail_level: 'DetailLevel' = 'summary') -> 'dict[str, object]'"
+    },
+    {
+      "name": "check_cohesion",
+      "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, path: 'str | None' = None, max_results: 'int' = 10, detail_level: 'DetailLevel' = 'summary') -> 'dict[str, object]'"
+    },
+    {
+      "name": "check_complexity",
+      "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, path: 'str | None' = None, min_complexity: 'int | None' = None, max_results: 'int' = 10, detail_level: 'DetailLevel' = 'summary') -> 'dict[str, object]'"
+    },
+    {
+      "name": "check_coupling",
+      "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, path: 'str | None' = None, max_results: 'int' = 10, detail_level: 'DetailLevel' = 'summary') -> 'dict[str, object]'"
+    },
+    {
+      "name": "check_dead_code",
+      "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, path: 'str | None' = None, min_severity: 'str | None' = None, max_results: 'int' = 10, detail_level: 'DetailLevel' = 'summary') -> 'dict[str, object]'"
+    },
+    {
+      "name": "clear_session_runs",
+      "signature": "(self) -> 'dict[str, object]'"
+    },
+    {
+      "name": "compare_runs",
+      "signature": "(self, *, run_id_before: 'str', run_id_after: 'str | None' = None, focus: 'ComparisonFocus' = 'all') -> 'dict[str, object]'"
+    },
+    {
+      "name": "evaluate_gates",
+      "signature": "(self, request: 'MCPGateRequest') -> 'dict[str, object]'"
+    },
+    {
+      "name": "generate_pr_summary",
+      "signature": "(self, *, run_id: 'str | None' = None, changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, format: 'PRSummaryFormat' = 'markdown') -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_finding",
+      "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, detail_level: 'DetailLevel' = 'normal') -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_help",
+      "signature": "(self, *, topic: 'HelpTopic', detail: 'HelpDetail' = 'compact') -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_production_triage",
+      "signature": "(self, *, run_id: 'str | None' = None, max_hotspots: 'int' = 3, max_suggestions: 'int' = 3) -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_remediation",
+      "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, detail_level: 'DetailLevel' = 'normal') -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_report_section",
+      "signature": "(self, *, run_id: 'str | None' = None, section: 'ReportSection' = 'all', family: 'MetricsDetailFamily | None' = None, path: 'str | None' = None, offset: 'int' = 0, limit: 'int' = 50) -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_run_summary",
+      "signature": "(self, run_id: 'str | None' = None) -> 'dict[str, object]'"
+    },
+    {
+      "name": "list_findings",
+      "signature": "(self, *, run_id: 'str | None' = None, family: 'FindingFamilyFilter' = 'all', category: 'str | None' = None, severity: 'str | None' = None, source_kind: 'str | None' = None, novelty: 'FindingNoveltyFilter' = 'all', sort_by: 'FindingSort' = 'default', detail_level: 'DetailLevel' = 'summary', changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, exclude_reviewed: 'bool' = False, offset: 'int' = 0, limit: 'int' = 50, max_results: 'int | None' = None) -> 'dict[str, object]'"
+    },
+    {
+      "name": "list_hotspots",
+      "signature": "(self, *, kind: 'HotlistKind', run_id: 'str | None' = None, detail_level: 'DetailLevel' = 'summary', changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, exclude_reviewed: 'bool' = False, limit: 'int' = 10, max_results: 'int | None' = None) -> 'dict[str, object]'"
+    },
+    {
+      "name": "list_reviewed_findings",
+      "signature": "(self, *, run_id: 'str | None' = None) -> 'dict[str, object]'"
+    },
+    {
+      "name": "mark_finding_reviewed",
+      "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, note: 'str | None' = None) -> 'dict[str, object]'"
+    },
+    {
+      "name": "read_resource",
+      "signature": "(self, uri: 'str') -> 'str'"
+    }
+  ]
+}

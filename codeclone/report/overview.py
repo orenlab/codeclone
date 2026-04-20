@@ -11,9 +11,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, cast
 
-from .._coerce import as_int as _as_int
-from .._coerce import as_mapping as _as_mapping
-from .._coerce import as_sequence as _as_sequence
 from ..domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
@@ -44,6 +41,9 @@ from ..report.explain_contract import (
     BLOCK_HINT_ASSERT_ONLY,
     BLOCK_PATTERN_REPEATED_STMT_HASH,
 )
+from ..utils.coerce import as_int as _as_int
+from ..utils.coerce import as_mapping as _as_mapping
+from ..utils.coerce import as_sequence as _as_sequence
 from .derived import (
     classify_source_kind,
     format_spread_location_label,

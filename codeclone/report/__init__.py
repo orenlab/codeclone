@@ -6,8 +6,13 @@
 
 from __future__ import annotations
 
-from ..grouping import build_block_groups, build_groups, build_segment_groups
+from ..findings.clones.grouping import (
+    build_block_groups,
+    build_groups,
+    build_segment_groups,
+)
 from .blocks import prepare_block_report_groups
+from .document import build_report_document
 from .explain import build_block_group_facts
 from .markdown import render_markdown_report_document, to_markdown_report
 from .sarif import render_sarif_report_document, to_sarif_report
@@ -29,6 +34,7 @@ __all__ = [
     "build_block_group_facts",
     "build_block_groups",
     "build_groups",
+    "build_report_document",
     "build_segment_groups",
     "classify_clone_type",
     "generate_suggestions",

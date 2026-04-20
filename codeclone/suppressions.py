@@ -31,7 +31,7 @@ INLINE_CODECLONE_SUPPRESSION_SOURCE: Final[SuppressionSource] = "inline_codeclon
 SuppressionTargetKey = tuple[str, str, int, int, DeclarationKind]
 
 _SUPPRESSION_DIRECTIVE_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^\s*#\s*codeclone\s*:\s*ignore\s*\[(?P<rules>[^\]]+)\]\s*$"
+    r"^\s*#\s*codeclone\s*:\s*ignore\s*\[(?P<rules>[^]]+)]\s*$"
 )
 _RULE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -174,7 +174,7 @@ def _declaration_inline_lines(target: DeclarationTarget) -> tuple[int, ...]:
     end_line = target.declaration_end_line or target.start_line
     if end_line <= 0 or end_line == target.start_line:
         return (target.start_line,)
-    return (target.start_line, end_line)
+    return target.start_line, end_line
 
 
 def _bound_inline_rules(
@@ -250,7 +250,7 @@ def suppression_target_key(
     end_line: int,
     kind: DeclarationKind,
 ) -> SuppressionTargetKey:
-    return (filepath, qualname, start_line, end_line, kind)
+    return filepath, qualname, start_line, end_line, kind
 
 
 def build_suppression_index(

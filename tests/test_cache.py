@@ -17,11 +17,19 @@ import pytest
 import codeclone.cache as cache_mod
 from codeclone.blocks import BlockUnit, SegmentUnit
 from codeclone.cache import Cache, CacheStatus
-from codeclone.cache_io import sign_cache_payload
-from codeclone.cache_paths import runtime_filepath_from_wire, wire_filepath_from_runtime
-from codeclone.errors import CacheError
-from codeclone.extractor import Unit
-from codeclone.models import ApiParamSpec, FileMetrics, ModuleApiSurface, PublicSymbol
+from codeclone.cache.integrity import sign_cache_payload
+from codeclone.cache.projection import (
+    runtime_filepath_from_wire,
+    wire_filepath_from_runtime,
+)
+from codeclone.contracts.errors import CacheError
+from codeclone.models import (
+    ApiParamSpec,
+    FileMetrics,
+    ModuleApiSurface,
+    PublicSymbol,
+    Unit,
+)
 
 
 def _make_unit(filepath: str) -> Unit:

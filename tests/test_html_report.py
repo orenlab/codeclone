@@ -12,7 +12,6 @@ from typing import Any, cast
 
 import pytest
 
-from codeclone._html_badges import _tab_empty_info
 from codeclone.contracts import (
     CACHE_VERSION,
     DOCS_URL,
@@ -20,16 +19,7 @@ from codeclone.contracts import (
     REPORT_SCHEMA_VERSION,
     REPOSITORY_URL,
 )
-from codeclone.errors import FileProcessingError
-from codeclone.html_report import (
-    _FileCache,
-    _pygments_css,
-    _render_code_block,
-    _try_pygments,
-)
-from codeclone.html_report import (
-    build_html_report as _core_build_html_report,
-)
+from codeclone.contracts.errors import FileProcessingError
 from codeclone.models import (
     StructuralFindingGroup,
     StructuralFindingOccurrence,
@@ -37,6 +27,16 @@ from codeclone.models import (
     SuppressedCloneGroup,
 )
 from codeclone.report import build_block_group_facts
+from codeclone.report.html import (
+    _FileCache,
+    _pygments_css,
+    _render_code_block,
+    _try_pygments,
+)
+from codeclone.report.html import (
+    build_html_report as _core_build_html_report,
+)
+from codeclone.report.html.widgets.badges import _tab_empty_info
 from codeclone.report.json_contract import (
     build_report_document,
     clone_group_id,
@@ -1276,7 +1276,7 @@ def test_try_pygments_ok() -> None:
 def test_render_code_block_without_pygments_uses_escaped_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import codeclone._html_snippets as snippets
+    import codeclone.report.html.widgets.snippets as snippets
 
     src = tmp_path / "a.py"
     src.write_text("x = '<tag>'\n", "utf-8")
@@ -1327,7 +1327,7 @@ def test_html_report_with_blocks(tmp_path: Path) -> None:
 
 
 def test_html_report_pygments_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    import codeclone.html_report as hr
+    import codeclone.report.html as hr
 
     def _fake_css(name: str) -> str:
         if name in ("github-dark", "github-light"):
@@ -1460,7 +1460,7 @@ def test_render_code_block_truncates_and_fallback(
     f = tmp_path / "a.py"
     f.write_text("\n".join([f"line{i}" for i in range(1, 30)]), "utf-8")
 
-    import codeclone.html_report as hr
+    import codeclone.report.html as hr
 
     monkeypatch.setattr(hr, "_try_pygments", lambda _text: None)
     cache = _FileCache(maxsize=2)

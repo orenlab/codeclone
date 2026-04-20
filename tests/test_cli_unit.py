@@ -17,24 +17,24 @@ from typing import Any, cast
 
 import pytest
 
-import codeclone._cli_baselines as cli_baselines_mod
-import codeclone._cli_meta as cli_meta_mod
-import codeclone._cli_reports as cli_reports
-import codeclone._cli_summary as cli_summary
 import codeclone.baseline as baseline_mod
-import codeclone.cli as cli
-import codeclone.metrics_baseline as metrics_baseline_mod
-import codeclone.pipeline as pipeline
+import codeclone.baseline.metrics_baseline as metrics_baseline_mod
+import codeclone.core as pipeline
+import codeclone.core.worker as core_worker
+import codeclone.surfaces.cli.baseline_state as cli_baselines_mod
+import codeclone.surfaces.cli.main as cli
+import codeclone.surfaces.cli.report_meta as cli_meta_mod
+import codeclone.surfaces.cli.reports_output as cli_reports
+import codeclone.surfaces.cli.summary as cli_summary
 from codeclone import __version__
 from codeclone import ui_messages as ui
-from codeclone._cli_args import build_parser
-from codeclone._cli_config import ConfigValidationError
+from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.cache import Cache
-from codeclone.cli import process_file
+from codeclone.config import ConfigValidationError, build_parser
 from codeclone.contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
-from codeclone.errors import BaselineValidationError
+from codeclone.contracts.errors import BaselineValidationError
+from codeclone.core.worker import process_file
 from codeclone.models import HealthScore, ProjectMetrics
-from codeclone.normalize import NormalizationConfig
 from tests._assertions import assert_contains_all
 
 
@@ -134,7 +134,7 @@ def test_process_file_unexpected_error(
     def _boom(*_args: object, **_kwargs: object) -> object:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(pipeline, "extract_units_and_stats_from_source", _boom)
+    monkeypatch.setattr(core_worker, "extract_units_and_stats_from_source", _boom)
     result = process_file(str(src), str(tmp_path), NormalizationConfig(), 1, 1)
     assert result.success is False
     assert result.error is not None
@@ -686,15 +686,32 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
 ) -> None:
     cli.console = cli._make_console(no_color=True)
     observed: dict[str, object] = {}
-
-    monkeypatch.setattr(
-        cli,
-        "gate",
-        lambda **_kwargs: pipeline.GatingResult(
-            exit_code=3,
-            reasons=("clone:threshold:8:1",),
-        ),
+    analysis = pipeline.AnalysisResult(
+        func_groups={},
+        block_groups={},
+        block_groups_report={},
+        segment_groups={},
+        suppressed_segment_groups=0,
+        block_group_facts={},
+        func_clones_count=8,
+        block_clones_count=0,
+        segment_clones_count=0,
+        files_analyzed_or_cached=0,
+        project_metrics=None,
+        metrics_payload=None,
+        suggestions=(),
+        segment_groups_raw_digest="",
     )
+
+    def _fake_gate(**kwargs: object) -> pipeline.GatingResult:
+        gate_analysis = cast("pipeline.AnalysisResult", kwargs["analysis"])
+        observed["clone_threshold_total"] = gate_analysis.func_clones_count
+        return pipeline.GatingResult(
+            exit_code=3,
+            reasons=("clone:threshold:2:1",),
+        )
+
+    monkeypatch.setattr(cli, "gate", _fake_gate)
     monkeypatch.setattr(
         cli,
         "_print_gating_failure_block",
@@ -707,7 +724,7 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
         cli._enforce_gating(
             args=Namespace(fail_threshold=1, verbose=False),
             boot=cast("pipeline.BootstrapResult", object()),
-            analysis=cast("pipeline.AnalysisResult", object()),
+            analysis=analysis,
             processing=cast(Any, Namespace(source_read_failures=[])),
             source_read_contract_failure=False,
             baseline_failure_code=None,
@@ -720,6 +737,7 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
         )
 
     assert exc.value.code == 3
+    assert observed["clone_threshold_total"] == 2
     assert observed["code"] == "threshold"
     assert observed["entries"] == (
         ("clone_groups_total", 2),
@@ -732,15 +750,29 @@ def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_l
 ) -> None:
     cli.console = cli._make_console(no_color=True)
     observed: dict[str, object] = {}
-
-    monkeypatch.setattr(
-        cli,
-        "gate",
-        lambda **_kwargs: pipeline.GatingResult(
-            exit_code=3,
-            reasons=("clone:threshold:8:1",),
-        ),
+    analysis = pipeline.AnalysisResult(
+        func_groups={},
+        block_groups={},
+        block_groups_report={},
+        segment_groups={},
+        suppressed_segment_groups=0,
+        block_group_facts={},
+        func_clones_count=8,
+        block_clones_count=0,
+        segment_clones_count=0,
+        files_analyzed_or_cached=0,
+        project_metrics=None,
+        metrics_payload=None,
+        suggestions=(),
+        segment_groups_raw_digest="",
     )
+
+    def _fake_gate(**kwargs: object) -> pipeline.GatingResult:
+        gate_analysis = cast("pipeline.AnalysisResult", kwargs["analysis"])
+        observed["clone_threshold_total"] = gate_analysis.func_clones_count
+        return pipeline.GatingResult(exit_code=0, reasons=())
+
+    monkeypatch.setattr(cli, "gate", _fake_gate)
     monkeypatch.setattr(
         cli,
         "_print_gating_failure_block",
@@ -750,7 +782,7 @@ def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_l
     cli._enforce_gating(
         args=Namespace(fail_threshold=5, verbose=False),
         boot=cast("pipeline.BootstrapResult", object()),
-        analysis=cast("pipeline.AnalysisResult", object()),
+        analysis=analysis,
         processing=cast(Any, Namespace(source_read_failures=[])),
         source_read_contract_failure=False,
         baseline_failure_code=None,
@@ -762,7 +794,7 @@ def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_l
         clone_threshold_total=2,
     )
 
-    assert observed == {}
+    assert observed == {"clone_threshold_total": 2}
 
 
 def test_main_impl_prints_changed_scope_when_changed_projection_is_available(

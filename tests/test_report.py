@@ -16,11 +16,6 @@ import pytest
 import codeclone.report.merge as merge_mod
 import codeclone.report.overview as overview_mod
 import codeclone.report.serialize as serialize_mod
-from codeclone._html_report._sections._structural import (
-    _finding_why_template_html,
-    build_structural_findings_html_panel,
-)
-from codeclone._html_snippets import _FileCache
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.models import (
     StructuralFindingGroup,
@@ -39,6 +34,11 @@ from codeclone.report import (
     to_markdown_report,
     to_sarif_report,
 )
+from codeclone.report.html.sections._structural import (
+    _finding_why_template_html,
+    build_structural_findings_html_panel,
+)
+from codeclone.report.html.widgets.snippets import _FileCache
 from codeclone.report.json_contract import build_report_document
 from codeclone.report.overview import materialize_report_overview
 from codeclone.report.segments import (

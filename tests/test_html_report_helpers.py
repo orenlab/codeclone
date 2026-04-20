@@ -10,33 +10,29 @@ from typing import Any, cast
 
 import pytest
 
-import codeclone._html_report._assemble as assemble_mod
-import codeclone._html_report._sections._suggestions as suggestions_section
-from codeclone._html_badges import _quality_badge_html, _stat_card
-from codeclone._html_report._components import (
-    overview_source_breakdown_html,
-    overview_summary_item_html,
-)
-from codeclone._html_report._icons import section_icon_html
-from codeclone._html_report._sections._clones import (
+import codeclone.report.html.assemble as assemble_mod
+import codeclone.report.html.sections._suggestions as suggestions_section
+from codeclone.contracts import REPORT_SCHEMA_VERSION
+from codeclone.models import MetricsDiff, ReportLocation, Suggestion
+from codeclone.report.html.sections._clones import (
     _derive_group_display_name,
     _render_group_explanation,
 )
-from codeclone._html_report._sections._dead_code import render_dead_code_panel
-from codeclone._html_report._sections._dependencies import (
+from codeclone.report.html.sections._dead_code import render_dead_code_panel
+from codeclone.report.html.sections._dependencies import (
     _hub_threshold,
     _render_dep_nodes_and_labels,
     _select_dep_nodes,
 )
-from codeclone._html_report._sections._meta import _path_basename, render_meta_panel
-from codeclone._html_report._sections._overview import (
+from codeclone.report.html.sections._meta import _path_basename, render_meta_panel
+from codeclone.report.html.sections._overview import (
     _directory_hotspot_bucket_body,
     _directory_kind_meta_parts,
     _health_gauge_html,
     _issue_breakdown_html,
     render_overview_panel,
 )
-from codeclone._html_report._sections._suggestions import (
+from codeclone.report.html.sections._suggestions import (
     _format_source_breakdown,
     _priority_badge_label,
     _render_card,
@@ -44,10 +40,14 @@ from codeclone._html_report._sections._suggestions import (
     _spread_label,
     _suggestion_context_labels,
 )
-from codeclone._html_report._tabs import render_split_tabs
-from codeclone._html_snippets import _FileCache
-from codeclone.contracts import REPORT_SCHEMA_VERSION
-from codeclone.models import MetricsDiff, ReportLocation, Suggestion
+from codeclone.report.html.widgets.badges import _quality_badge_html, _stat_card
+from codeclone.report.html.widgets.components import (
+    overview_source_breakdown_html,
+    overview_summary_item_html,
+)
+from codeclone.report.html.widgets.icons import section_icon_html
+from codeclone.report.html.widgets.snippets import _FileCache
+from codeclone.report.html.widgets.tabs import render_split_tabs
 from tests._assertions import assert_contains_none
 
 

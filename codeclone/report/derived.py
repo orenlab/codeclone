@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections import Counter
 from typing import TYPE_CHECKING, cast
 
-from .._coerce import as_int as _as_int
 from ..domain.source_scope import (
     IMPACT_SCOPE_MIXED,
     IMPACT_SCOPE_NON_RUNTIME,
@@ -31,6 +30,7 @@ from ..paths import (
 from ..paths import (
     relative_repo_path as _relative_repo_path,
 )
+from ..utils.coerce import as_int as _as_int
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence

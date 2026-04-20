@@ -12,6 +12,7 @@ from benchmarks.run_benchmark import (
     BENCHMARK_NEUTRAL_ARGS,
     RunMeasurement,
     Scenario,
+    _timing_regressions,
     _validate_inventory_sample,
 )
 
@@ -31,6 +32,27 @@ def _measurement(
         files_cached=cached,
         files_skipped=skipped,
     )
+
+
+def _benchmark_payload(
+    *,
+    cold_full: float,
+    warm_full: float,
+    warm_clones_only: float,
+) -> dict[str, object]:
+    def _scenario(name: str, median: float) -> dict[str, object]:
+        return {
+            "name": name,
+            "stats_seconds": {"median": median},
+        }
+
+    return {
+        "scenarios": [
+            _scenario("cold_full", cold_full),
+            _scenario("warm_full", warm_full),
+            _scenario("warm_clones_only", warm_clones_only),
+        ]
+    }
 
 
 def test_benchmark_inventory_validation_accepts_valid_cold_and_warm_samples() -> None:
@@ -90,3 +112,53 @@ def test_benchmark_inventory_validation_rejects_invalid_samples(
             scenario=scenario,
             measurement=measurement,
         )
+
+
+def test_benchmark_timing_regressions_accept_within_tolerance() -> None:
+    baseline = _benchmark_payload(
+        cold_full=1.0,
+        warm_full=0.30,
+        warm_clones_only=0.25,
+    )
+    current = _benchmark_payload(
+        cold_full=1.04,
+        warm_full=0.31,
+        warm_clones_only=0.24,
+    )
+
+    assert (
+        _timing_regressions(
+            current_payload=current,
+            baseline_payload=baseline,
+            max_regression_pct=5.0,
+        )
+        == []
+    )
+
+
+def test_benchmark_timing_regressions_report_excess_slowdown() -> None:
+    baseline = _benchmark_payload(
+        cold_full=1.0,
+        warm_full=0.30,
+        warm_clones_only=0.25,
+    )
+    current = _benchmark_payload(
+        cold_full=1.07,
+        warm_full=0.32,
+        warm_clones_only=0.27,
+    )
+
+    regressions = _timing_regressions(
+        current_payload=current,
+        baseline_payload=baseline,
+        max_regression_pct=5.0,
+    )
+
+    assert regressions == [
+        "cold_full: median 1.0700s exceeds baseline 1.0000s by 7.00% (allowed 5.00%)",
+        (
+            "warm_clones_only: median 0.2700s exceeds baseline 0.2500s "
+            "by 8.00% (allowed 5.00%)"
+        ),
+        "warm_full: median 0.3200s exceeds baseline 0.3000s by 6.67% (allowed 5.00%)",
+    ]

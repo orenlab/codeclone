@@ -14,9 +14,11 @@ from typing import cast
 import orjson
 import pytest
 
-import codeclone.cli as cli
-import codeclone.pipeline as pipeline
-from codeclone._cli_gating import policy_context
+import codeclone.core as pipeline
+import codeclone.core.discovery as core_discovery
+import codeclone.core.pipeline as core_pipeline
+import codeclone.surfaces.cli.main as cli
+from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.cache import (
     Cache,
     CacheEntry,
@@ -34,9 +36,17 @@ from codeclone.cache import (
     _is_dead_candidate_dict,
     build_segment_report_projection,
 )
-from codeclone.cache_segments import decode_segment_report_projection
-from codeclone.errors import CacheError
-from codeclone.grouping import build_segment_groups
+from codeclone.cache.projection import decode_segment_report_projection
+from codeclone.contracts.errors import CacheError
+from codeclone.core._types import (
+    _coerce_segment_report_projection,
+    _segment_groups_digest,
+)
+from codeclone.core.discovery_cache import (
+    _cache_entry_source_stats,
+    decode_cached_structural_finding_group,
+)
+from codeclone.findings.clones.grouping import build_segment_groups
 from codeclone.models import (
     BlockUnit,
     ClassMetrics,
@@ -45,7 +55,7 @@ from codeclone.models import (
     ModuleDep,
     SegmentUnit,
 )
-from codeclone.normalize import NormalizationConfig
+from codeclone.report.gates.reasons import policy_context
 from tests._assertions import assert_contains_all
 
 
@@ -484,7 +494,7 @@ def test_pipeline_analyze_uses_cached_segment_projection(
         "size": 6,
     }
     raw_groups = build_segment_groups((seg_item_a, seg_item_b))
-    digest = pipeline._segment_groups_digest(raw_groups)
+    digest = _segment_groups_digest(raw_groups)
     cached_projection = {
         "digest": digest,
         "suppressed": 7,
@@ -522,7 +532,7 @@ def test_pipeline_analyze_uses_cached_segment_projection(
     ) -> tuple[dict[str, list[dict[str, object]]], int]:
         raise AssertionError("prepare_segment_report_groups must not be called")
 
-    monkeypatch.setattr(pipeline, "prepare_segment_report_groups", _must_not_run)
+    monkeypatch.setattr(core_pipeline, "prepare_segment_report_groups", _must_not_run)
 
     boot = pipeline.BootstrapResult(
         root=Path("."),
@@ -582,15 +592,13 @@ def test_pipeline_analyze_uses_cached_segment_projection(
 
 
 def test_pipeline_coerce_segment_projection_invalid_shapes() -> None:
-    assert pipeline._coerce_segment_report_projection("bad") is None
+    assert _coerce_segment_report_projection("bad") is None
     assert (
-        pipeline._coerce_segment_report_projection(
-            {"digest": 1, "suppressed": 0, "groups": {}}
-        )
+        _coerce_segment_report_projection({"digest": 1, "suppressed": 0, "groups": {}})
         is None
     )
     assert (
-        pipeline._coerce_segment_report_projection(
+        _coerce_segment_report_projection(
             {"digest": "d", "suppressed": 0, "groups": {"k": "bad"}}
         )
         is None
@@ -672,7 +680,7 @@ def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
 
 
 def test_pipeline_decode_cached_structural_group() -> None:
-    decoded = pipeline._decode_cached_structural_finding_group(
+    decoded = decode_cached_structural_finding_group(
         {
             "finding_kind": "duplicated_branches",
             "finding_key": "k",
@@ -708,8 +716,8 @@ def _discover_with_single_cached_entry(
         output_paths=pipeline.OutputPaths(),
         cache_path=tmp_path / "cache.json",
     )
-    monkeypatch.setattr(pipeline, "iter_py_files", lambda _root: [filepath])
-    monkeypatch.setattr(pipeline, "file_stat_signature", lambda _path: stat)
+    monkeypatch.setattr(core_discovery, "iter_py_files", lambda _root: [filepath])
+    monkeypatch.setattr(core_discovery, "file_stat_signature", lambda _path: stat)
     return pipeline.discover(boot=boot, cache=cast(Cache, _FakeCache()))
 
 
@@ -830,9 +838,9 @@ def test_pipeline_discover_cache_admission_branches(
 
 
 def test_pipeline_cached_source_stats_helper_invalid_shapes() -> None:
-    assert pipeline._cache_entry_source_stats(cast(CacheEntry, {})) is None
+    assert _cache_entry_source_stats(cast(CacheEntry, {})) is None
     assert (
-        pipeline._cache_entry_source_stats(
+        _cache_entry_source_stats(
             cast(
                 CacheEntry,
                 {

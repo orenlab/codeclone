@@ -14,10 +14,14 @@ from typing import Literal
 
 import pytest
 
-import codeclone.pipeline as pipeline
+import codeclone.core as pipeline
+import codeclone.core.parallelism as core_parallelism
+import codeclone.core.pipeline as core_pipeline
+import codeclone.core.worker as core_worker
+from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.cache import Cache, CacheEntry, SourceStatsDict, file_stat_signature
+from codeclone.core.discovery_cache import usable_cached_source_stats
 from codeclone.models import HealthScore, ProjectMetrics
-from codeclone.normalize import NormalizationConfig
 
 
 class _FailExec:
@@ -217,9 +221,9 @@ def test_process_parallel_fallback_without_callback_uses_sequential(
 ) -> None:
     boot, discovery, cache, filepaths = _build_large_batch_case(tmp_path)
 
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailExec)
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailExec)
     monkeypatch.setattr(
-        pipeline,
+        core_worker,
         "process_file",
         _stub_process_file(
             expected_root=str(tmp_path),
@@ -249,9 +253,9 @@ def test_process_small_batch_skips_parallel_executor(
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
     callbacks: list[str] = []
 
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _UnexpectedExec)
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _UnexpectedExec)
     monkeypatch.setattr(
-        pipeline,
+        core_worker,
         "process_file",
         _stub_process_file(expected_root=str(tmp_path)),
     )
@@ -273,9 +277,9 @@ def test_process_parallel_failure_large_batch_invokes_fallback_callback(
     boot, discovery, cache, filepaths = _build_large_batch_case(tmp_path)
     callbacks: list[str] = []
 
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailExec)
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailExec)
     monkeypatch.setattr(
-        pipeline,
+        core_worker,
         "process_file",
         _stub_process_file(expected_root=str(tmp_path)),
     )
@@ -415,13 +419,13 @@ def test_usable_cached_source_stats_respects_required_sections() -> None:
         "class_names": [],
         "structural_findings": [],
     }
-    assert pipeline._usable_cached_source_stats(
+    assert usable_cached_source_stats(
         complete_entry,
         skip_metrics=False,
         collect_structural_findings=True,
     ) == (5, 2, 1, 1)
     assert (
-        pipeline._usable_cached_source_stats(
+        usable_cached_source_stats(
             base_entry,
             skip_metrics=False,
             collect_structural_findings=False,
@@ -429,7 +433,7 @@ def test_usable_cached_source_stats_respects_required_sections() -> None:
         is None
     )
     assert (
-        pipeline._usable_cached_source_stats(
+        usable_cached_source_stats(
             {
                 **base_entry,
                 "class_metrics": [],
@@ -541,20 +545,20 @@ def test_analyze_skips_suppressed_dead_code_scan_when_dead_code_is_disabled(
     )
 
     monkeypatch.setattr(
-        pipeline,
+        core_pipeline,
         "compute_project_metrics",
         lambda **kwargs: (project_metrics, None, ()),
     )
     monkeypatch.setattr(
-        pipeline,
+        core_pipeline,
         "find_suppressed_unused",
         lambda **kwargs: (_ for _ in ()).throw(
             AssertionError("should not compute suppressed dead-code items")
         ),
     )
-    monkeypatch.setattr(pipeline, "compute_suggestions", lambda **kwargs: ())
+    monkeypatch.setattr(core_pipeline, "compute_suggestions", lambda **kwargs: ())
     monkeypatch.setattr(
-        pipeline,
+        core_pipeline,
         "build_metrics_report_payload",
         lambda **kwargs: {"health": {"score": 100, "grade": "A", "dimensions": {}}},
     )

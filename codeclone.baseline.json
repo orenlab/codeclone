@@ -2,14 +2,14 @@
   "meta": {
     "generator": {
       "name": "codeclone",
-      "version": "2.0.0b5"
+      "version": "2.0.0b6"
     },
     "schema_version": "2.1",
     "fingerprint_version": "1",
     "python_tag": "cp313",
-    "created_at": "2026-04-13T13:10:37Z",
+    "created_at": "2026-04-20T16:54:58Z",
     "payload_sha256": "07a383c1d0974593c83ac30430aec9b99d89fe50f640a9b3b433658e0bd029e8",
-    "metrics_payload_sha256": "122ee5d2d3dc2d4e9553b1d440c0314515dcb60cc79ada264b13c39c6ba18e04"
+    "metrics_payload_sha256": "2b2885a8e2a35a58b25e0136a21d30d57b4a72136a09bf6db3d0ac5b043b2e32"
   },
   "clones": {
     "functions": [],
@@ -23,9 +23,13 @@
     "max_cohesion": 3,
     "low_cohesion_classes": [],
     "dependency_cycles": [],
-    "dependency_max_depth": 11,
+    "dependency_max_depth": 13,
     "dead_code_items": [],
-    "health_score": 89,
-    "health_grade": "B"
+    "health_score": 88,
+    "health_grade": "B",
+    "typing_param_permille": 1000,
+    "typing_return_permille": 999,
+    "docstring_permille": 37,
+    "typing_any_count": 51
   }
 }

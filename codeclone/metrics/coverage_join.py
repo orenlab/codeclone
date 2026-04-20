@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Literal, cast
 from xml.etree import ElementTree
 
-from .._coerce import as_int, as_str
 from ..models import CoverageJoinResult, GroupItemLike, UnitCoverageFact
+from ..utils.coerce import as_int, as_str
 
 __all__ = [
     "CoverageJoinParseError",

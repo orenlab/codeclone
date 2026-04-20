@@ -16,16 +16,22 @@ from pathlib import Path
 
 import pytest
 
-import codeclone.pipeline as pipeline
-from codeclone import cli
+import codeclone.core.parallelism as core_parallelism
+import codeclone.main as cli
+from codeclone.analysis.normalizer import NormalizationConfig
+from codeclone.analysis.units import extract_units_and_stats_from_source
 from codeclone.baseline import current_python_tag
-from codeclone.extractor import extract_units_and_stats_from_source
-from codeclone.grouping import build_block_groups, build_groups, build_segment_groups
+from codeclone.core.pipeline import compute_project_metrics
+from codeclone.findings.clones.grouping import (
+    build_block_groups,
+    build_groups,
+    build_segment_groups,
+)
+from codeclone.findings.structural.detectors import (
+    build_clone_cohort_structural_findings,
+)
 from codeclone.models import ClassMetrics, DeadCandidate, ModuleDep
-from codeclone.normalize import NormalizationConfig
-from codeclone.pipeline import compute_project_metrics
 from codeclone.scanner import iter_py_files, module_name_from_path
-from codeclone.structural_findings import build_clone_cohort_structural_findings
 from tests._assertions import snapshot_python_tag
 
 _GOLDEN_V2_ROOT = Path("tests/fixtures/golden_v2").resolve()
@@ -59,8 +65,12 @@ def _dummy_process_pool_executor(
 
 
 def _patch_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _dummy_process_pool_executor)
-    monkeypatch.setattr(pipeline, "as_completed", lambda futures: futures)
+    monkeypatch.setattr(
+        core_parallelism,
+        "ProcessPoolExecutor",
+        _dummy_process_pool_executor,
+    )
+    monkeypatch.setattr(core_parallelism, "as_completed", lambda futures: futures)
 
 
 def _relative_to_root(path: str, root: Path) -> str:

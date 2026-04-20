@@ -10,7 +10,7 @@ import ast
 
 import pytest
 
-from codeclone.cfg_model import CFG
+from codeclone.analysis.cfg_model import CFG
 from codeclone.metrics import (
     HealthInputs,
     build_dep_graph,

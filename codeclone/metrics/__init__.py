@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from ._base import MetricAggregate, MetricFamily, MetricProjectContext
 from .cohesion import cohesion_risk, compute_lcom4
 from .complexity import cyclomatic_complexity, nesting_depth, risk_level
 from .coupling import compute_cbo, coupling_risk
@@ -20,14 +21,20 @@ from .dependencies import (
 )
 from .health import HealthInputs, compute_health
 from .overloaded_modules import build_overloaded_modules_payload
+from .registry import METRIC_FAMILIES, build_project_metrics, project_metrics_defaults
 
 __all__ = [
+    "METRIC_FAMILIES",
     "CoverageJoinParseError",
     "HealthInputs",
+    "MetricAggregate",
+    "MetricFamily",
+    "MetricProjectContext",
     "build_coverage_join",
     "build_dep_graph",
     "build_import_graph",
     "build_overloaded_modules_payload",
+    "build_project_metrics",
     "cohesion_risk",
     "compute_cbo",
     "compute_health",
@@ -40,5 +47,6 @@ __all__ = [
     "longest_chains",
     "max_depth",
     "nesting_depth",
+    "project_metrics_defaults",
     "risk_level",
 ]

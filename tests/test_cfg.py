@@ -9,12 +9,12 @@ from textwrap import dedent
 
 import pytest
 
-from codeclone.cfg import CFG, CFGBuilder
-from codeclone.cfg_model import CFG as CFGModel
-from codeclone.cfg_model import Block
-from codeclone.extractor import _cfg_fingerprint_and_complexity
+from codeclone.analysis.cfg import CFG, CFGBuilder
+from codeclone.analysis.cfg_model import CFG as CFGModel
+from codeclone.analysis.cfg_model import Block
+from codeclone.analysis.fingerprint import _cfg_fingerprint_and_complexity
+from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.meta_markers import CFG_META_PREFIX
-from codeclone.normalize import NormalizationConfig
 from tests._ast_helpers import fix_missing_single_function
 
 

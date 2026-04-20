@@ -14,7 +14,6 @@ from typing import cast
 import pytest
 
 import codeclone.report.json_contract as json_contract_mod
-from codeclone import _coerce
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import (
     ReportLocation,
@@ -103,6 +102,7 @@ from codeclone.report.serialize import (
     _structural_kind_label,
     render_text_report_document,
 )
+from codeclone.utils import coerce as _coerce
 from tests._assertions import assert_contains_all, assert_mapping_entries
 
 

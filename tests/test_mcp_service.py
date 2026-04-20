@@ -18,13 +18,14 @@ from typing import Any, cast
 
 import pytest
 
-from codeclone import mcp_service as mcp_service_mod
-from codeclone._cli_config import ConfigValidationError
 from codeclone.baseline import Baseline, current_python_tag
 from codeclone.cache import Cache
+from codeclone.config import ConfigValidationError
 from codeclone.contracts import REPORT_SCHEMA_VERSION
-from codeclone.mcp_service import (
-    CodeCloneMCPService,
+from codeclone.models import MetricsDiff
+from codeclone.surfaces.mcp import session as mcp_service_mod
+from codeclone.surfaces.mcp.service import CodeCloneMCPService
+from codeclone.surfaces.mcp.session import (
     DetailLevel,
     MCPAnalysisRequest,
     MCPFindingNotFoundError,
@@ -35,7 +36,6 @@ from codeclone.mcp_service import (
     MCPServiceContractError,
     MCPServiceError,
 )
-from codeclone.models import MetricsDiff
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 
 
@@ -441,10 +441,10 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
     service = CodeCloneMCPService(history_limit=4)
 
     with pytest.raises(MCPServiceContractError, match="Invalid value for topic"):
-        service.get_help(topic="gates")  # type: ignore[arg-type]
+        service.get_help(topic="gates")
 
     with pytest.raises(MCPServiceContractError, match="Invalid value for detail"):
-        service.get_help(topic="baseline", detail="full")  # type: ignore[arg-type]
+        service.get_help(topic="baseline", detail="full")
 
 
 def test_mcp_service_summary_inventory_is_compact_and_report_inventory_stays_canonical(
@@ -1242,7 +1242,7 @@ def test_mcp_service_reports_contract_errors_for_resources_and_findings(
     assert overview["run_id"] == run_id
 
     with pytest.raises(MCPServiceContractError):
-        service.get_report_section(section=cast("object", "unknown"))  # type: ignore[arg-type]
+        service.get_report_section(section=cast("object", "unknown"))
     with pytest.raises(MCPFindingNotFoundError):
         service.get_finding(run_id=run_id, finding_id="missing")
     with pytest.raises(MCPServiceContractError):
@@ -1699,7 +1699,10 @@ def test_mcp_service_short_finding_ids_remain_unique_for_overlapping_clones(
 def test_mcp_service_reports_missing_json_artifact(tmp_path: Path) -> None:
     _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
-    service_module = cast(Any, importlib.import_module("codeclone.mcp_service"))
+    service_module = cast(
+        Any,
+        importlib.import_module("codeclone.surfaces.mcp.session"),
+    )
     original_report = service_module.report
 
     def _fake_report(**kwargs: Any) -> object:
@@ -1713,7 +1716,7 @@ def test_mcp_service_reports_missing_json_artifact(tmp_path: Path) -> None:
         )
 
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr("codeclone.mcp_service.report", _fake_report)
+    monkeypatch.setattr("codeclone.surfaces.mcp.session.report", _fake_report)
     try:
         with pytest.raises(MCPServiceError):
             service.analyze_repository(
@@ -2301,20 +2304,20 @@ def test_mcp_service_additional_projection_and_error_branches(
         )
     ).startswith("design:coupling:")
 
-    original_service_get = service.get_finding
+    original_session_get = service.session.get_finding
     original_runs_get = service._runs.get
     monkeypatch.setattr(
-        service,
+        service.session,
         "get_finding",
         lambda **kwargs: {"id": "no-remediation"},
     )
     monkeypatch.setattr(service._runs, "get", lambda run_id=None: record)
     with pytest.raises(MCPFindingNotFoundError):
         service.get_remediation(finding_id="no-remediation", run_id=run_id)
-    monkeypatch.setattr(service, "get_finding", original_service_get)
+    monkeypatch.setattr(service.session, "get_finding", original_session_get)
     monkeypatch.setattr(service._runs, "get", original_runs_get)
 
-    original_get_finding = service.get_finding
+    original_get_finding = service.session.get_finding
 
     def _patched_get_finding(
         *,
@@ -2330,7 +2333,7 @@ def test_mcp_service_additional_projection_and_error_branches(
             detail_level=detail_level,
         )
 
-    monkeypatch.setattr(service, "get_finding", _patched_get_finding)
+    monkeypatch.setattr(service.session, "get_finding", _patched_get_finding)
     service._review_state[record.run_id] = OrderedDict([("missing", None)])
     reviewed_items = service.list_reviewed_findings(run_id=run_id)
     assert reviewed_items["reviewed_count"] == 0
@@ -2859,7 +2862,11 @@ def test_mcp_service_metrics_diff_warning_and_projection_branches(
         max_size_bytes=1024 * 1024,
     )
     cache_with_warning.load_warning = "cache warning"
-    monkeypatch.setattr(service, "_build_cache", lambda **kwargs: cache_with_warning)
+    monkeypatch.setattr(
+        service.session,
+        "_build_cache",
+        lambda **kwargs: cache_with_warning,
+    )
 
     summary = service.analyze_repository(
         MCPAnalysisRequest(
@@ -3324,17 +3331,17 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
 
     collision_service = CodeCloneMCPService(history_limit=4)
     monkeypatch.setattr(
-        collision_service,
+        collision_service.session,
         "_base_findings",
         lambda _record: [{"id": "clone:block:one"}, {"id": "clone:block:two"}],
     )
     monkeypatch.setattr(
-        collision_service,
+        collision_service.session,
         "_base_short_finding_id",
         lambda _cid: "blk:dup|x1",
     )
     monkeypatch.setattr(
-        collision_service,
+        collision_service.session,
         "_disambiguated_short_finding_ids",
         lambda _ids: {
             "clone:block:one": "blk:resolved1|x1",
@@ -3454,12 +3461,12 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
     missing_record = _dummy_run_record(tmp_path, "missing-finding")
     service._runs.register(missing_record)
     monkeypatch.setattr(
-        service,
+        service.session,
         "_resolve_canonical_finding_id",
         lambda _record, _finding_id: "design:cohesion:pkg.mod:Runner",
     )
     monkeypatch.setattr(
-        service,
+        service.session,
         "_base_findings",
         lambda _record: [{"id": "design:cohesion:pkg.mod:Other"}],
     )
@@ -3469,7 +3476,7 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         )
 
     monkeypatch.setattr(
-        service,
+        service.session,
         "get_finding",
         lambda **_kwargs: {"id": "design:cohesion:pkg.mod:Runner"},
     )
@@ -3576,7 +3583,7 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         metrics_diff=None,
     )
     monkeypatch.setattr(
-        service,
+        service.session,
         "_resolve_canonical_finding_id",
         lambda _record, _finding_id: (_ for _ in ()).throw(
             MCPFindingNotFoundError("missing")
@@ -3644,7 +3651,7 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
 
     record = _dummy_run_record(tmp_path, "summary-helper")
     monkeypatch.setattr(
-        service,
+        service.session,
         "_base_findings",
         lambda _record: [
             {
