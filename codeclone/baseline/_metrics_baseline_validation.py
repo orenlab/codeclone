@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from json import JSONDecodeError
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Literal
 
 from ..cache.projection import runtime_filepath_from_wire
 from ..contracts import BASELINE_SCHEMA_VERSION
@@ -32,6 +32,11 @@ from ._metrics_baseline_contract import (
     MetricsBaselineStatus,
 )
 from ._metrics_baseline_payload import _compose_api_surface_qualname
+
+_HEALTH_GRADES = {"A", "B", "C", "D", "F"}
+_API_PARAM_KINDS = {"pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg"}
+_PUBLIC_SYMBOL_KINDS = {"function", "class", "method", "constant"}
+_EXPORTED_VIA_KINDS = {"all", "name"}
 
 
 def _is_compatible_metrics_schema(
@@ -66,7 +71,7 @@ def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     )
 
 
-def _load_json_object(path: Path) -> dict[str, Any]:
+def _load_json_object(path: Path) -> dict[str, object]:
     try:
         return _read_json_object(path)
     except OSError as e:
@@ -86,7 +91,7 @@ def _load_json_object(path: Path) -> dict[str, Any]:
         ) from None
 
 
-def _validate_top_level_structure(payload: dict[str, Any], *, path: Path) -> None:
+def _validate_top_level_structure(payload: dict[str, object], *, path: Path) -> None:
     validate_top_level_structure(
         payload,
         path=path,
@@ -99,7 +104,7 @@ def _validate_top_level_structure(payload: dict[str, Any], *, path: Path) -> Non
 
 
 def _validate_required_keys(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     required: frozenset[str],
     *,
     path: Path,
@@ -114,7 +119,7 @@ def _validate_required_keys(
 
 
 def _validate_exact_keys(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     required: frozenset[str],
     *,
     path: Path,
@@ -128,7 +133,7 @@ def _validate_exact_keys(
         )
 
 
-def _require_str(payload: dict[str, Any], key: str, *, path: Path) -> str:
+def _require_str(payload: dict[str, object], key: str, *, path: Path) -> str:
     value = payload.get(key)
     if isinstance(value, str):
         return value
@@ -139,7 +144,7 @@ def _require_str(payload: dict[str, Any], key: str, *, path: Path) -> str:
 
 
 def _extract_metrics_payload_sha256(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     path: Path,
 ) -> str:
@@ -150,7 +155,7 @@ def _extract_metrics_payload_sha256(
 
 
 def _extract_optional_payload_sha256(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     key: str,
 ) -> str | None:
@@ -158,7 +163,7 @@ def _extract_optional_payload_sha256(
     return value if isinstance(value, str) else None
 
 
-def _require_int(payload: dict[str, Any], key: str, *, path: Path) -> int:
+def _require_int(payload: dict[str, object], key: str, *, path: Path) -> int:
     value = payload.get(key)
     if isinstance(value, bool):
         raise BaselineValidationError(
@@ -174,7 +179,7 @@ def _require_int(payload: dict[str, Any], key: str, *, path: Path) -> int:
 
 
 def _optional_require_str(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     key: str,
     *,
     path: Path,
@@ -190,7 +195,12 @@ def _optional_require_str(
     )
 
 
-def _require_str_list(payload: dict[str, Any], key: str, *, path: Path) -> list[str]:
+def _require_str_list(
+    payload: dict[str, object],
+    key: str,
+    *,
+    path: Path,
+) -> list[str]:
     value = payload.get(key)
     if not isinstance(value, list):
         raise BaselineValidationError(
@@ -206,7 +216,7 @@ def _require_str_list(payload: dict[str, Any], key: str, *, path: Path) -> list[
 
 
 def _parse_cycles(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     key: str,
     path: Path,
@@ -237,7 +247,7 @@ def _parse_cycles(
 
 
 def _parse_generator(
-    meta: dict[str, Any],
+    meta: dict[str, object],
     *,
     path: Path,
 ) -> tuple[str, str | None]:
@@ -288,10 +298,10 @@ def _parse_generator(
 
 
 def _require_embedded_clone_baseline_payload(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     path: Path,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, object], dict[str, object]]:
     meta_obj = payload.get("meta")
     clones_obj = payload.get("clones")
     if not isinstance(meta_obj, dict):
@@ -326,7 +336,7 @@ def _require_embedded_clone_baseline_payload(
     return meta_obj, clones_obj
 
 
-def _resolve_embedded_schema_version(meta: dict[str, Any], *, path: Path) -> str:
+def _resolve_embedded_schema_version(meta: dict[str, object], *, path: Path) -> str:
     raw_version = _require_str(meta, "schema_version", path=path)
     parts = raw_version.split(".")
     if len(parts) not in {2, 3} or not all(part.isdigit() for part in parts):
@@ -342,7 +352,7 @@ def _resolve_embedded_schema_version(meta: dict[str, Any], *, path: Path) -> str
 
 
 def _parse_snapshot(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     path: Path,
 ) -> MetricsSnapshot:
@@ -373,7 +383,7 @@ def _parse_snapshot(
             sorted(set(_require_str_list(payload, "dead_code_items", path=path)))
         ),
         health_score=_require_int(payload, "health_score", path=path),
-        health_grade=cast("Literal['A', 'B', 'C', 'D', 'F']", grade),
+        health_grade=_require_health_grade(grade, path=path),
         typing_param_permille=_optional_int(
             payload,
             "typing_param_permille",
@@ -389,11 +399,89 @@ def _parse_snapshot(
     )
 
 
-def _optional_int(payload: dict[str, Any], key: str, *, path: Path) -> int:
+def _optional_int(payload: dict[str, object], key: str, *, path: Path) -> int:
     value = payload.get(key)
     if value is None:
         return 0
     return _require_int(payload, key, path=path)
+
+
+def _require_health_grade(
+    value: str,
+    *,
+    path: Path,
+) -> Literal["A", "B", "C", "D", "F"]:
+    if value == "A":
+        return "A"
+    if value == "B":
+        return "B"
+    if value == "C":
+        return "C"
+    if value == "D":
+        return "D"
+    if value == "F":
+        return "F"
+    raise BaselineValidationError(
+        f"Invalid metrics baseline schema at {path}: "
+        "'health_grade' must be one of A/B/C/D/F",
+        status=MetricsBaselineStatus.INVALID_TYPE,
+    )
+
+
+def _require_api_param_kind(
+    value: str,
+    *,
+    path: Path,
+) -> Literal["pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg"]:
+    if value == "pos_only":
+        return "pos_only"
+    if value == "pos_or_kw":
+        return "pos_or_kw"
+    if value == "vararg":
+        return "vararg"
+    if value == "kw_only":
+        return "kw_only"
+    if value == "kwarg":
+        return "kwarg"
+    raise BaselineValidationError(
+        f"Invalid metrics baseline schema at {path}: api param 'kind' is invalid",
+        status=MetricsBaselineStatus.INVALID_TYPE,
+    )
+
+
+def _require_public_symbol_kind(
+    value: str,
+    *,
+    path: Path,
+) -> Literal["function", "class", "method", "constant"]:
+    if value == "function":
+        return "function"
+    if value == "class":
+        return "class"
+    if value == "method":
+        return "method"
+    if value == "constant":
+        return "constant"
+    raise BaselineValidationError(
+        f"Invalid metrics baseline schema at {path}: public symbol 'kind' is invalid",
+        status=MetricsBaselineStatus.INVALID_TYPE,
+    )
+
+
+def _require_exported_via(
+    value: str,
+    *,
+    path: Path,
+) -> Literal["all", "name"]:
+    if value == "all":
+        return "all"
+    if value == "name":
+        return "name"
+    raise BaselineValidationError(
+        f"Invalid metrics baseline schema at {path}: "
+        "public symbol 'exported_via' is invalid",
+        status=MetricsBaselineStatus.INVALID_TYPE,
+    )
 
 
 def _parse_api_surface_snapshot(
@@ -493,13 +581,7 @@ def _parse_api_surface_snapshot(
                 params.append(
                     ApiParamSpec(
                         name=name,
-                        kind=cast(
-                            (
-                                "Literal['pos_only', 'pos_or_kw', "
-                                "'vararg', 'kw_only', 'kwarg']"
-                            ),
-                            param_kind,
-                        ),
+                        kind=_require_api_param_kind(param_kind, path=path),
                         has_default=has_default,
                         annotation_hash=annotation_hash or "",
                     )
@@ -507,10 +589,7 @@ def _parse_api_surface_snapshot(
             symbols.append(
                 PublicSymbol(
                     qualname=qualname or "",
-                    kind=cast(
-                        "Literal['function', 'class', 'method', 'constant']",
-                        kind,
-                    ),
+                    kind=_require_public_symbol_kind(kind, path=path),
                     start_line=_require_int(raw_symbol, "start_line", path=path),
                     end_line=_require_int(raw_symbol, "end_line", path=path),
                     params=tuple(params),
@@ -520,7 +599,7 @@ def _parse_api_surface_snapshot(
                         path=path,
                     )
                     or "",
-                    exported_via=cast("Literal['all', 'name']", exported_via),
+                    exported_via=_require_exported_via(exported_via, path=path),
                 )
             )
         modules.append(
@@ -537,7 +616,7 @@ def _parse_api_surface_snapshot(
 
 
 def _require_str_list_or_none(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     key: str,
     *,
     path: Path,

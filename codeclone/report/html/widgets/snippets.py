@@ -10,7 +10,7 @@ import html
 import importlib
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple
 
 from ....contracts.errors import FileProcessingError
 
@@ -69,7 +69,13 @@ class _FileCache:
         currsize: int
 
     def cache_info(self) -> _CacheInfo:
-        return cast("_FileCache._CacheInfo", self._get_file_lines_impl.cache_info())
+        info = self._get_file_lines_impl.cache_info()
+        return self._CacheInfo(
+            hits=info.hits,
+            misses=info.misses,
+            maxsize=info.maxsize,
+            currsize=info.currsize,
+        )
 
 
 _PYGMENTS_IMPORTER_ID: int | None = None

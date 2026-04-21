@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from .surfaces.cli.main import main
+from .surfaces.cli.workflow import main
 
 __all__ = ["main"]
 

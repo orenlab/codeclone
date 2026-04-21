@@ -13,12 +13,13 @@ from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING
 
 from ... import __version__
 from ... import ui_messages as ui
 from ...report.gates import reasons as gate_reasons
 from . import state as cli_state
+from .types import CLIArgsLike, PrinterLike, StatusConsole, require_status_console
 
 if TYPE_CHECKING:
     from rich.console import Console as RichConsole
@@ -38,10 +39,6 @@ _RICH_THEME_STYLES: dict[str, str] = {
     "dim": "dim",
 }
 _RICH_MARKUP_TAG_RE = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_ .#:-]*]")
-
-
-class _PrinterLike(Protocol):
-    def print(self, *objects: object, **kwargs: object) -> None: ...
 
 
 class PlainConsole:
@@ -112,7 +109,7 @@ def make_plain_console() -> PlainConsole:
 
 def _render_banner(
     *,
-    console: _PrinterLike,
+    console: PrinterLike,
     banner_title: str,
     project_name: str | None = None,
     root_display: str | None = None,
@@ -131,12 +128,19 @@ def _render_banner(
         console.print(f"  [dim]Root:[/dim] [dim]{root_display}[/dim]")
 
 
-def _console() -> _PrinterLike:
-    return cast("_PrinterLike", cli_state.get_console())
+def _console() -> StatusConsole:
+    return require_status_console(cli_state.get_console())
 
 
-def _rich_progress_symbols() -> tuple[type[object], ...]:
-    return cast("tuple[type[object], ...]", rich_progress_symbols())
+def _rich_progress_symbols() -> tuple[
+    type[RichProgress],
+    type[RichSpinnerColumn],
+    type[RichTextColumn],
+    type[RichBarColumn],
+    type[RichTimeElapsedColumn],
+]:
+    progress, spinner, text, bar, elapsed = rich_progress_symbols()
+    return (progress, spinner, text, bar, elapsed)
 
 
 def _make_console(*, no_color: bool) -> object:
@@ -155,18 +159,18 @@ def _print_gating_failure_block(
     *,
     code: str,
     entries: Sequence[tuple[str, object]],
-    args: object,
+    args: CLIArgsLike,
 ) -> None:
     gate_reasons.print_gating_failure_block(
         console=_console(),
         code=code,
         entries=list(entries),
-        args=cast("Any", args),
+        args=args,
     )
 
 
 def _print_verbose_clone_hashes(
-    console: _PrinterLike,
+    console: PrinterLike,
     *,
     label: str,
     clone_hashes: set[str],

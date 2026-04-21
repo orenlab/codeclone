@@ -9,7 +9,7 @@ from __future__ import annotations
 import hmac
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .. import __version__
 from ..contracts import (
@@ -73,7 +73,7 @@ class Baseline:
         self,
         *,
         max_size_bytes: int | None = None,
-        preloaded_payload: dict[str, Any] | None = None,
+        preloaded_payload: dict[str, object] | None = None,
     ) -> None:
         try:
             exists = self.path.exists()
@@ -391,7 +391,7 @@ class Baseline:
         )
 
 
-def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     _write_json_document_atomically(
         path,
         payload,
@@ -400,7 +400,7 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
-def _validate_top_level_structure(payload: dict[str, Any], *, path: Path) -> None:
+def _validate_top_level_structure(payload: dict[str, object], *, path: Path) -> None:
     validate_top_level_structure(
         payload,
         path=path,
@@ -413,7 +413,7 @@ def _validate_top_level_structure(payload: dict[str, Any], *, path: Path) -> Non
 
 
 def _validate_required_keys(
-    obj: dict[str, Any], required: set[str], *, path: Path
+    obj: dict[str, object], required: set[str], *, path: Path
 ) -> None:
     missing = required - set(obj.keys())
     if missing:
@@ -424,7 +424,7 @@ def _validate_required_keys(
         )
 
 
-def _validate_exact_clone_keys(clones: dict[str, Any], *, path: Path) -> None:
+def _validate_exact_clone_keys(clones: dict[str, object], *, path: Path) -> None:
     keys = set(clones.keys())
     extra = keys - _CLONES_REQUIRED_KEYS
     if extra:
@@ -435,13 +435,18 @@ def _validate_exact_clone_keys(clones: dict[str, Any], *, path: Path) -> None:
         )
 
 
-def _is_legacy_baseline_payload(payload: dict[str, Any]) -> bool:
+def _is_legacy_baseline_payload(payload: dict[str, object]) -> bool:
     return "functions" in payload and "blocks" in payload
 
 
 def _preserve_embedded_metrics(
     path: Path,
-) -> tuple[dict[str, Any] | None, str | None, dict[str, Any] | None, str | None]:
+) -> tuple[
+    dict[str, object] | None,
+    str | None,
+    dict[str, object] | None,
+    str | None,
+]:
     try:
         payload = _trust._load_json_object(path)
     except BaselineValidationError:
@@ -486,7 +491,7 @@ def _baseline_payload(
     python_tag: str | None,
     generator_version: str | None,
     created_at: str | None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     resolved_generator = generator or _trust.BASELINE_GENERATOR
     resolved_schema = schema_version or BASELINE_SCHEMA_VERSION
     resolved_fingerprint = fingerprint_version or BASELINE_FINGERPRINT_VERSION

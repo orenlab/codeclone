@@ -10,7 +10,7 @@ import sys
 from dataclasses import dataclass
 from json import JSONDecodeError
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Protocol
 
 import orjson
 
@@ -36,8 +36,10 @@ from ...contracts import (
 )
 from ...contracts.errors import BaselineValidationError
 from . import state as cli_state
+from .types import CLIArgsLike, require_status_console
 
 if TYPE_CHECKING:
+    from ...core._types import AnalysisResult
     from ...models import GroupMapLike, ProjectMetrics
 
 __all__ = [
@@ -478,41 +480,39 @@ def _probe_metrics_baseline_section(path: Path) -> _MetricsBaselineSectionProbe:
 
 def _resolve_clone_baseline_state(
     *,
-    args: object,
+    args: CLIArgsLike,
     baseline_path: Path,
     baseline_exists: bool,
-    analysis: object,
+    analysis: AnalysisResult,
     shared_baseline_payload: dict[str, object] | None = None,
 ) -> _CloneBaselineState:
-    analysis_obj = cast("Any", analysis)
     return resolve_clone_baseline_state(
-        args=cast("Any", args),
+        args=args,
         baseline_path=baseline_path,
         baseline_exists=baseline_exists,
-        func_groups=analysis_obj.func_groups,
-        block_groups=analysis_obj.block_groups,
+        func_groups=analysis.func_groups,
+        block_groups=analysis.block_groups,
         codeclone_version=__version__,
-        console=cast("_PrinterLike", cli_state.get_console()),
+        console=require_status_console(cli_state.get_console()),
         shared_baseline_payload=shared_baseline_payload,
     )
 
 
 def _resolve_metrics_baseline_state(
     *,
-    args: object,
+    args: CLIArgsLike,
     metrics_baseline_path: Path,
     metrics_baseline_exists: bool,
     baseline_updated_path: Path | None,
-    analysis: object,
+    analysis: AnalysisResult,
     shared_baseline_payload: dict[str, object] | None = None,
 ) -> _MetricsBaselineState:
-    analysis_obj = cast("Any", analysis)
     return resolve_metrics_baseline_state(
-        args=cast("Any", args),
+        args=args,
         metrics_baseline_path=metrics_baseline_path,
         metrics_baseline_exists=metrics_baseline_exists,
         baseline_updated_path=baseline_updated_path,
-        project_metrics=analysis_obj.project_metrics,
-        console=cast("_PrinterLike", cli_state.get_console()),
+        project_metrics=analysis.project_metrics,
+        console=require_status_console(cli_state.get_console()),
         shared_baseline_payload=shared_baseline_payload,
     )

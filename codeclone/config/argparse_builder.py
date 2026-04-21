@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Any, NoReturn
+from typing import NoReturn
 
 from .. import ui_messages as ui
 from ..contracts import ExitCode, cli_help_epilog
@@ -37,7 +37,7 @@ def _add_option(
         )
         return
 
-    argument_kwargs: dict[str, Any] = {"help": option.help_text}
+    argument_kwargs: dict[str, object] = {"help": option.help_text}
 
     if option.cli_kind == "value":
         argument_kwargs.update(
@@ -76,7 +76,7 @@ def _add_option(
     else:
         raise RuntimeError(f"Unsupported CLI option kind: {option.cli_kind}")
 
-    group.add_argument(*option.flags, **argument_kwargs)
+    group.add_argument(*option.flags, **argument_kwargs)  # type: ignore[arg-type]
 
 
 def build_parser(version: str) -> _ArgumentParser:

@@ -9,7 +9,6 @@ from __future__ import annotations
 import hmac
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
 
 from .. import __version__
 from ..contracts import BASELINE_SCHEMA_VERSION, METRICS_BASELINE_SCHEMA_VERSION
@@ -54,9 +53,6 @@ from ._metrics_baseline_validation import (
 )
 from .diff import diff_metrics
 from .trust import current_python_tag
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
 
 
 def _now_utc_z() -> str:
@@ -211,19 +207,25 @@ class MetricsBaseline:
             api_surface_snapshot=self.api_surface_snapshot,
             api_surface_root=self.path.parent,
         )
-        payload_meta = cast("Mapping[str, Any]", payload["meta"])
+        payload_meta = payload.get("meta")
+        if not isinstance(payload_meta, dict):
+            raise BaselineValidationError(
+                f"Invalid metrics baseline schema at {self.path}: "
+                "'meta' must be object",
+                status=MetricsBaselineStatus.INVALID_TYPE,
+            )
         payload_metrics_hash = _require_str(
-            cast("dict[str, Any]", payload_meta),
+            payload_meta,
             "payload_sha256",
             path=self.path,
         )
         payload_api_surface_hash = _optional_require_str(
-            cast("dict[str, Any]", payload_meta),
+            payload_meta,
             _API_SURFACE_PAYLOAD_SHA256_KEY,
             path=self.path,
         )
 
-        existing: dict[str, Any] | None = None
+        existing: dict[str, object] | None = None
         try:
             if self.path.exists():
                 loaded = _load_json_object(self.path)
@@ -285,17 +287,17 @@ class MetricsBaseline:
         _atomic_write_json(self.path, payload)
         self.is_embedded_in_clone_baseline = False
         self.schema_version = _require_str(
-            cast("dict[str, Any]", payload_meta),
+            payload_meta,
             "schema_version",
             path=self.path,
         )
         self.python_tag = _require_str(
-            cast("dict[str, Any]", payload_meta),
+            payload_meta,
             "python_tag",
             path=self.path,
         )
         self.created_at = _require_str(
-            cast("dict[str, Any]", payload_meta),
+            payload_meta,
             "created_at",
             path=self.path,
         )

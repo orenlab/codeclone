@@ -11,7 +11,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import cast
 
 import orjson
 
@@ -31,13 +30,14 @@ from ..models import (
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
     ProjectMetrics,
+    SegmentGroupItem,
     SegmentUnit,
     StructuralFindingGroup,
     Suggestion,
     SuppressedCloneGroup,
     Unit,
 )
-from ..utils.coerce import as_int, as_str
+from ..utils.coerce import as_int, as_mapping, as_str
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
 DEFAULT_BATCH_SIZE = 100
@@ -219,23 +219,61 @@ def _segment_groups_digest(segment_groups: Mapping[str, list[GroupItem]]) -> str
 def _coerce_segment_report_projection(
     value: object,
 ) -> SegmentReportProjection | None:
-    if not isinstance(value, dict):
+    row = as_mapping(value)
+    if not row:
         return None
-    digest = value.get("digest")
-    suppressed = value.get("suppressed")
-    groups = value.get("groups")
-    if (
-        not isinstance(digest, str)
-        or not isinstance(suppressed, int)
-        or not isinstance(groups, dict)
-    ):
-        return None
+    match row.get("digest"), row.get("suppressed"), row.get("groups"):
+        case str() as digest, int() as suppressed, dict() as groups:
+            pass
+        case _:
+            return None
     if not all(
         isinstance(group_key, str) and isinstance(items, list)
         for group_key, items in groups.items()
     ):
         return None
-    return cast("SegmentReportProjection", value)
+    normalized_groups: dict[str, list[SegmentGroupItem]] = {}
+    for group_key, items in groups.items():
+        if not isinstance(group_key, str) or not isinstance(items, list):
+            return None
+        normalized_items: list[SegmentGroupItem] = []
+        for item in items:
+            if not isinstance(item, dict):
+                return None
+            segment_hash = item.get("segment_hash")
+            segment_sig = item.get("segment_sig")
+            filepath = item.get("filepath")
+            qualname = item.get("qualname")
+            start_line = item.get("start_line")
+            end_line = item.get("end_line")
+            size = item.get("size")
+            if not (
+                isinstance(segment_hash, str)
+                and isinstance(segment_sig, str)
+                and isinstance(filepath, str)
+                and isinstance(qualname, str)
+                and isinstance(start_line, int)
+                and isinstance(end_line, int)
+                and isinstance(size, int)
+            ):
+                return None
+            normalized_items.append(
+                SegmentGroupItem(
+                    segment_hash=segment_hash,
+                    segment_sig=segment_sig,
+                    filepath=filepath,
+                    qualname=qualname,
+                    start_line=start_line,
+                    end_line=end_line,
+                    size=size,
+                )
+            )
+        normalized_groups[group_key] = normalized_items
+    return {
+        "digest": digest,
+        "suppressed": suppressed,
+        "groups": normalized_groups,
+    }
 
 
 def _module_dep_sort_key(dep: ModuleDep) -> tuple[str, str, str, int]:

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import cast
 
 from ..findings.clones.grouping import (
     build_block_groups,
@@ -60,6 +59,19 @@ from .bootstrap import _resolve_optional_runtime_path
 from .metrics_payload import build_metrics_report_payload
 
 
+def _artifact_dep_graph(value: object, default: DepGraph) -> DepGraph:
+    return value if isinstance(value, DepGraph) else default
+
+
+def _artifact_dead_items(
+    value: object,
+    default: tuple[DeadItem, ...],
+) -> tuple[DeadItem, ...]:
+    if isinstance(value, tuple) and all(isinstance(item, DeadItem) for item in value):
+        return value
+    return default
+
+
 def compute_project_metrics(
     *,
     units: Sequence[GroupItemLike],
@@ -107,10 +119,10 @@ def compute_project_metrics(
     for family in METRIC_FAMILIES.values():
         aggregate = family.aggregate([family.compute(context)])
         project_fields.update(aggregate.project_fields)
-        dep_graph = cast("DepGraph", aggregate.artifacts.get("dep_graph", dep_graph))
-        dead_items = cast(
-            "tuple[DeadItem, ...]",
-            aggregate.artifacts.get("dead_items", dead_items),
+        dep_graph = _artifact_dep_graph(aggregate.artifacts.get("dep_graph"), dep_graph)
+        dead_items = _artifact_dead_items(
+            aggregate.artifacts.get("dead_items"),
+            dead_items,
         )
     return build_project_metrics(project_fields), dep_graph, dead_items
 

@@ -5,17 +5,23 @@
 
 from __future__ import annotations
 
-from typing import cast
+from collections.abc import Mapping
 
-from ..session import MCPGateRequest
+from ..session import MCPGateRequest, MCPServiceContractError
 from ._base import MCPToolSchema, SimpleMCPTool
+
+
+def _gate_request(params: Mapping[str, object]) -> MCPGateRequest:
+    request = params.get("request")
+    if not isinstance(request, MCPGateRequest):
+        raise MCPServiceContractError("Tool requires a valid MCPGateRequest.")
+    return request
+
 
 TOOLS = (
     SimpleMCPTool(
         name="evaluate_gates",
         schema=MCPToolSchema(title="Evaluate Gates"),
-        runner=lambda session, params: session.evaluate_gates(
-            cast("MCPGateRequest", params["request"])
-        ),
+        runner=lambda session, params: session.evaluate_gates(_gate_request(params)),
     ),
 )

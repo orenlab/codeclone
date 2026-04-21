@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from ..session import MCPSession
@@ -40,5 +40,5 @@ class SimpleMCPTool:
         return self.runner(session, params)
 
 
-def run_kw(bound: object, params: Mapping[str, object]) -> object:
-    return cast("Any", bound)(**dict(params))
+def run_kw(bound: Callable[..., object], params: Mapping[str, object]) -> object:
+    return bound(**dict(params))

@@ -5,17 +5,19 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 from ._base import MCPToolSchema, SimpleMCPTool
+
+
+def _run_id(params: dict[str, object]) -> str | None:
+    value = params.get("run_id")
+    return value if isinstance(value, str) else None
+
 
 TOOLS = (
     SimpleMCPTool(
         name="get_run_summary",
         schema=MCPToolSchema(title="Get Run Summary"),
-        runner=lambda session, params: session.get_run_summary(
-            cast("str | None", params.get("run_id"))
-        ),
+        runner=lambda session, params: session.get_run_summary(_run_id(dict(params))),
     ),
     SimpleMCPTool(
         name="clear_session_runs",

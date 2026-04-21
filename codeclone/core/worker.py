@@ -10,7 +10,6 @@ import inspect
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 from ..analysis.normalizer import NormalizationConfig
 from ..analysis.units import extract_units_and_stats_from_source
@@ -155,7 +154,7 @@ def _invoke_process_file(
                 for key, value in optional_kwargs.items()
                 if key in supported_names
             }
-    process_callable = cast("Callable[..., FileProcessResult]", process_file)
+    process_callable: Callable[..., FileProcessResult] = process_file
     return process_callable(
         filepath,
         root,

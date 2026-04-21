@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 from ... import ui_messages as ui
+from ...core._types import AnalysisResult, DiscoveryResult, ProcessingResult
+from ...models import MetricsDiff
 from ...utils import coerce as _coerce
 
 _as_int = _coerce.as_int
@@ -65,8 +67,8 @@ class _Printer(Protocol):
 
 def build_summary_counts(
     *,
-    discovery_result: Any,
-    processing_result: Any,
+    discovery_result: DiscoveryResult,
+    processing_result: ProcessingResult,
 ) -> dict[str, int]:
     return {
         "analyzed_lines": processing_result.analyzed_lines
@@ -82,11 +84,13 @@ def build_summary_counts(
 
 def build_metrics_snapshot(
     *,
-    analysis_result: Any,
-    metrics_diff: Any | None,
+    analysis_result: AnalysisResult,
+    metrics_diff: MetricsDiff | None,
     api_surface_diff_available: bool,
 ) -> MetricsSnapshot:
     project_metrics = analysis_result.project_metrics
+    if project_metrics is None:
+        raise ValueError("Metrics snapshot requires computed project metrics.")
     metrics_payload_map = _as_mapping(analysis_result.metrics_payload)
     overloaded_modules_summary = _as_mapping(
         _as_mapping(metrics_payload_map.get("overloaded_modules")).get("summary")

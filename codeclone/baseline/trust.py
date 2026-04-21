@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from json import JSONDecodeError
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Final
 
 import orjson
 
@@ -84,7 +84,7 @@ def _safe_stat_size(path: Path) -> int:
         ) from e
 
 
-def _load_json_object(path: Path) -> dict[str, Any]:
+def _load_json_object(path: Path) -> dict[str, object]:
     try:
         return _read_json_object(path)
     except OSError as e:
@@ -105,7 +105,7 @@ def _load_json_object(path: Path) -> dict[str, Any]:
 
 
 def _parse_generator_meta(
-    meta_obj: dict[str, Any], *, path: Path
+    meta_obj: dict[str, object], *, path: Path
 ) -> tuple[str, str | None]:
     raw_generator = meta_obj.get("generator")
 
@@ -173,7 +173,7 @@ def _utc_now_z() -> str:
     )
 
 
-def _require_str(obj: dict[str, Any], key: str, *, path: Path) -> str:
+def _require_str(obj: dict[str, object], key: str, *, path: Path) -> str:
     value = obj.get(key)
     if not isinstance(value, str):
         raise BaselineValidationError(
@@ -183,7 +183,7 @@ def _require_str(obj: dict[str, Any], key: str, *, path: Path) -> str:
     return value
 
 
-def _optional_str(obj: dict[str, Any], key: str, *, path: Path) -> str | None:
+def _optional_str(obj: dict[str, object], key: str, *, path: Path) -> str | None:
     value = obj.get(key)
     if value is None:
         return None
@@ -195,7 +195,7 @@ def _optional_str(obj: dict[str, Any], key: str, *, path: Path) -> str | None:
     return value
 
 
-def _require_semver_str(obj: dict[str, Any], key: str, *, path: Path) -> str:
+def _require_semver_str(obj: dict[str, object], key: str, *, path: Path) -> str:
     value = _require_str(obj, key, path=path)
     _parse_semver(value, key=key, path=path)
     return value
@@ -216,7 +216,7 @@ def _parse_semver(value: str, *, key: str, path: Path) -> tuple[int, int, int]:
     return major, minor, patch
 
 
-def _require_python_tag(obj: dict[str, Any], key: str, *, path: Path) -> str:
+def _require_python_tag(obj: dict[str, object], key: str, *, path: Path) -> str:
     value = _require_str(obj, key, path=path)
     if not re.fullmatch(r"[a-z]{2}\d{2,3}", value):
         raise BaselineValidationError(
@@ -226,7 +226,7 @@ def _require_python_tag(obj: dict[str, Any], key: str, *, path: Path) -> str:
     return value
 
 
-def _require_utc_iso8601_z(obj: dict[str, Any], key: str, *, path: Path) -> str:
+def _require_utc_iso8601_z(obj: dict[str, object], key: str, *, path: Path) -> str:
     value = _require_str(obj, key, path=path)
     if not _UTC_ISO8601_Z_RE.fullmatch(value):
         raise BaselineValidationError(
@@ -252,7 +252,7 @@ def _require_utc_iso8601_z(obj: dict[str, Any], key: str, *, path: Path) -> str:
 
 
 def _require_sorted_unique_ids(
-    obj: dict[str, Any], key: str, *, pattern: re.Pattern[str], path: Path
+    obj: dict[str, object], key: str, *, pattern: re.Pattern[str], path: Path
 ) -> list[str]:
     value = obj.get(key)
     if not isinstance(value, list):

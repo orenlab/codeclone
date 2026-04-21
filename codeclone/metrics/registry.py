@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
+from typing import TypeGuard
 
 from ..domain.findings import CATEGORY_COHESION, CATEGORY_COMPLEXITY, CATEGORY_COUPLING
 from ..domain.quality import RISK_HIGH
@@ -70,6 +70,63 @@ def _empty_dep_graph() -> DepGraph:
     )
 
 
+_EMPTY_HEALTH_SCORE = compute_health(
+    HealthInputs(
+        files_found=0,
+        files_analyzed_or_cached=0,
+        function_clone_groups=0,
+        block_clone_groups=0,
+        complexity_avg=0.0,
+        complexity_max=0,
+        high_risk_functions=0,
+        coupling_avg=0.0,
+        coupling_max=0,
+        high_risk_classes=0,
+        cohesion_avg=0.0,
+        low_cohesion_classes=0,
+        dependency_cycles=0,
+        dependency_max_depth=0,
+        dead_code_items=0,
+    )
+)
+
+
+def _is_tuple_of_str(value: object) -> TypeGuard[tuple[str, ...]]:
+    return isinstance(value, tuple) and all(isinstance(item, str) for item in value)
+
+
+def _is_tuple_of_tuple_str(value: object) -> TypeGuard[tuple[tuple[str, ...], ...]]:
+    return isinstance(value, tuple) and all(_is_tuple_of_str(item) for item in value)
+
+
+def _is_tuple_of_dead_items(value: object) -> TypeGuard[tuple[DeadItem, ...]]:
+    return isinstance(value, tuple) and all(
+        isinstance(item, DeadItem) for item in value
+    )
+
+
+def _is_tuple_of_module_deps(value: object) -> TypeGuard[tuple[ModuleDep, ...]]:
+    return isinstance(value, tuple) and all(
+        isinstance(item, ModuleDep) for item in value
+    )
+
+
+def _is_tuple_of_typing_modules(
+    value: object,
+) -> TypeGuard[tuple[ModuleTypingCoverage, ...]]:
+    return isinstance(value, tuple) and all(
+        isinstance(item, ModuleTypingCoverage) for item in value
+    )
+
+
+def _is_tuple_of_docstring_modules(
+    value: object,
+) -> TypeGuard[tuple[ModuleDocstringCoverage, ...]]:
+    return isinstance(value, tuple) and all(
+        isinstance(item, ModuleDocstringCoverage) for item in value
+    )
+
+
 def project_metrics_defaults() -> dict[str, object]:
     return {
         "complexity_avg": 0.0,
@@ -88,25 +145,7 @@ def project_metrics_defaults() -> dict[str, object]:
         "dependency_max_depth": 0,
         "dependency_longest_chains": (),
         "dead_code": (),
-        "health": compute_health(
-            HealthInputs(
-                files_found=0,
-                files_analyzed_or_cached=0,
-                function_clone_groups=0,
-                block_clone_groups=0,
-                complexity_avg=0.0,
-                complexity_max=0,
-                high_risk_functions=0,
-                coupling_avg=0.0,
-                coupling_max=0,
-                high_risk_classes=0,
-                cohesion_avg=0.0,
-                low_cohesion_classes=0,
-                dependency_cycles=0,
-                dependency_max_depth=0,
-                dead_code_items=0,
-            )
-        ),
+        "health": _EMPTY_HEALTH_SCORE,
         "typing_param_total": 0,
         "typing_param_annotated": 0,
         "typing_return_total": 0,
@@ -133,21 +172,21 @@ def build_project_metrics(project_fields: dict[str, object]) -> ProjectMetrics:
         low_cohesion_classes=_result_tuple_str(project_fields, "low_cohesion_classes"),
         dependency_modules=_result_int(project_fields, "dependency_modules"),
         dependency_edges=_result_int(project_fields, "dependency_edges"),
-        dependency_edge_list=cast(
-            "tuple[ModuleDep, ...]",
-            project_fields.get("dependency_edge_list", ()),
+        dependency_edge_list=_result_module_deps(
+            project_fields,
+            "dependency_edge_list",
         ),
-        dependency_cycles=cast(
-            "tuple[tuple[str, ...], ...]",
-            project_fields.get("dependency_cycles", ()),
+        dependency_cycles=_result_nested_tuple_str(
+            project_fields,
+            "dependency_cycles",
         ),
         dependency_max_depth=_result_int(project_fields, "dependency_max_depth"),
-        dependency_longest_chains=cast(
-            "tuple[tuple[str, ...], ...]",
-            project_fields.get("dependency_longest_chains", ()),
+        dependency_longest_chains=_result_nested_tuple_str(
+            project_fields,
+            "dependency_longest_chains",
         ),
-        dead_code=cast("tuple[DeadItem, ...]", project_fields.get("dead_code", ())),
-        health=cast("HealthScore", project_fields["health"]),
+        dead_code=_result_dead_items(project_fields, "dead_code"),
+        health=_result_health(project_fields, "health"),
         typing_param_total=_result_int(project_fields, "typing_param_total"),
         typing_param_annotated=_result_int(project_fields, "typing_param_annotated"),
         typing_return_total=_result_int(project_fields, "typing_return_total"),
@@ -161,18 +200,12 @@ def build_project_metrics(project_fields: dict[str, object]) -> ProjectMetrics:
             project_fields,
             "docstring_public_documented",
         ),
-        typing_modules=cast(
-            "tuple[ModuleTypingCoverage, ...]",
-            project_fields.get("typing_modules", ()),
+        typing_modules=_result_typing_modules(project_fields, "typing_modules"),
+        docstring_modules=_result_docstring_modules(
+            project_fields,
+            "docstring_modules",
         ),
-        docstring_modules=cast(
-            "tuple[ModuleDocstringCoverage, ...]",
-            project_fields.get("docstring_modules", ()),
-        ),
-        api_surface=cast(
-            "ApiSurfaceSnapshot | None",
-            project_fields.get("api_surface"),
-        ),
+        api_surface=_result_api_surface(project_fields, "api_surface"),
     )
 
 
@@ -186,21 +219,61 @@ def _result_int(result: dict[str, object], key: str) -> int:
 
 
 def _result_tuple_str(result: dict[str, object], key: str) -> tuple[str, ...]:
-    return cast("tuple[str, ...]", result.get(key, ()))
+    value = result.get(key, ())
+    return value if _is_tuple_of_str(value) else ()
 
 
 def _result_nested_tuple_str(
     result: dict[str, object],
     key: str,
 ) -> tuple[tuple[str, ...], ...]:
-    return cast("tuple[tuple[str, ...], ...]", result.get(key, ()))
+    value = result.get(key, ())
+    return value if _is_tuple_of_tuple_str(value) else ()
 
 
 def _result_dead_items(
     result: dict[str, object],
     key: str,
 ) -> tuple[DeadItem, ...]:
-    return cast("tuple[DeadItem, ...]", result.get(key, ()))
+    value = result.get(key, ())
+    return value if _is_tuple_of_dead_items(value) else ()
+
+
+def _result_module_deps(
+    result: dict[str, object],
+    key: str,
+) -> tuple[ModuleDep, ...]:
+    value = result.get(key, ())
+    return value if _is_tuple_of_module_deps(value) else ()
+
+
+def _result_health(result: dict[str, object], key: str) -> HealthScore:
+    value = result.get(key)
+    return value if isinstance(value, HealthScore) else _EMPTY_HEALTH_SCORE
+
+
+def _result_typing_modules(
+    result: dict[str, object],
+    key: str,
+) -> tuple[ModuleTypingCoverage, ...]:
+    value = result.get(key, ())
+    return value if _is_tuple_of_typing_modules(value) else ()
+
+
+def _result_docstring_modules(
+    result: dict[str, object],
+    key: str,
+) -> tuple[ModuleDocstringCoverage, ...]:
+    value = result.get(key, ())
+    return value if _is_tuple_of_docstring_modules(value) else ()
+
+
+def _result_api_surface(
+    result: dict[str, object],
+    key: str,
+) -> ApiSurfaceSnapshot | None:
+    value = result.get(key)
+    return value if isinstance(value, ApiSurfaceSnapshot) else None
 
 
 def _memoized_result(
@@ -386,10 +459,7 @@ def _aggregate_dependencies_family(results: list[MetricResult]) -> MetricAggrega
         project_fields={
             "dependency_modules": _result_int(result, "dependency_modules"),
             "dependency_edges": _result_int(result, "dependency_edges"),
-            "dependency_edge_list": cast(
-                "tuple[ModuleDep, ...]",
-                result.get("dependency_edge_list", ()),
-            ),
+            "dependency_edge_list": _result_module_deps(result, "dependency_edge_list"),
             "dependency_cycles": _result_nested_tuple_str(result, "dependency_cycles"),
             "dependency_max_depth": _result_int(result, "dependency_max_depth"),
             "dependency_longest_chains": _result_nested_tuple_str(
@@ -478,9 +548,7 @@ def _compute_health_family(context: MetricProjectContext) -> MetricResult:
 
 def _aggregate_health_family(results: list[MetricResult]) -> MetricAggregate:
     result = _first_result(results)
-    return MetricAggregate(
-        project_fields={"health": cast("HealthScore", result.get("health"))}
-    )
+    return MetricAggregate(project_fields={"health": _result_health(result, "health")})
 
 
 def _build_coverage_adoption_result(context: MetricProjectContext) -> MetricResult:
@@ -532,13 +600,10 @@ def _aggregate_coverage_adoption_family(results: list[MetricResult]) -> MetricAg
                 result,
                 "docstring_public_documented",
             ),
-            "typing_modules": cast(
-                "tuple[ModuleTypingCoverage, ...]",
-                result.get("typing_modules", ()),
-            ),
-            "docstring_modules": cast(
-                "tuple[ModuleDocstringCoverage, ...]",
-                result.get("docstring_modules", ()),
+            "typing_modules": _result_typing_modules(result, "typing_modules"),
+            "docstring_modules": _result_docstring_modules(
+                result,
+                "docstring_modules",
             ),
         }
     )

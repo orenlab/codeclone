@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from json import JSONDecodeError
 from pathlib import Path
 from threading import RLock
-from typing import Any, Final, Literal, cast
+from typing import Final, Literal, TypeVar
 
 import orjson
 
@@ -338,6 +338,7 @@ _METRICS_DETAIL_FAMILY_ALIASES: Final[dict[str, str]] = {
 }
 _SHORT_RUN_ID_LENGTH = 8
 _SHORT_HASH_ID_LENGTH = 6
+ChoiceT = TypeVar("ChoiceT", bound=str)
 
 
 @dataclass(frozen=True)
@@ -1232,18 +1233,15 @@ class MCPSession:
                 analysis_result.project_metrics
             )
 
-        report_artifacts = cast(
-            "Any",
-            report(
-                boot=boot,
-                discovery=discovery_result,
-                processing=processing_result,
-                analysis=analysis_result,
-                report_meta=report_meta,
-                new_func=new_func,
-                new_block=new_block,
-                metrics_diff=metrics_diff,
-            ),
+        report_artifacts = report(
+            boot=boot,
+            discovery=discovery_result,
+            processing=processing_result,
+            analysis=analysis_result,
+            report_meta=report_meta,
+            new_func=new_func,
+            new_block=new_block,
+            metrics_diff=metrics_diff,
         )
         report_json = report_artifacts.json
         if report_json is None:
@@ -1349,9 +1347,10 @@ class MCPSession:
         run_id_after: str | None = None,
         focus: ComparisonFocus = "all",
     ) -> dict[str, object]:
-        validated_focus = cast(
-            "ComparisonFocus",
-            self._validate_choice("focus", focus, _VALID_COMPARISON_FOCUS),
+        validated_focus = self._validate_choice(
+            "focus",
+            focus,
+            _VALID_COMPARISON_FOCUS,
         )
         before = self._runs.get(run_id_before)
         after = self._runs.get(run_id_after)
@@ -1517,9 +1516,10 @@ class MCPSession:
         offset: int = 0,
         limit: int = 50,
     ) -> dict[str, object]:
-        validated_section = cast(
-            "ReportSection",
-            self._validate_choice("section", section, _VALID_REPORT_SECTIONS),
+        validated_section = self._validate_choice(
+            "section",
+            section,
+            _VALID_REPORT_SECTIONS,
         )
         record = self._runs.get(run_id)
         report_document = record.report_document
@@ -1553,7 +1553,7 @@ class MCPSession:
                 if validated_family_input is not None
                 else None
             )
-            validated_family = cast("MetricsDetailFamily | None", normalized_family)
+            validated_family = self._metrics_detail_family(normalized_family)
             return self._metrics_detail_payload(
                 metrics=metrics,
                 family=validated_family,
@@ -1588,21 +1588,25 @@ class MCPSession:
         limit: int = 50,
         max_results: int | None = None,
     ) -> dict[str, object]:
-        validated_family = cast(
-            "FindingFamilyFilter",
-            self._validate_choice("family", family, _VALID_FINDING_FAMILIES),
+        validated_family = self._validate_choice(
+            "family",
+            family,
+            _VALID_FINDING_FAMILIES,
         )
-        validated_novelty = cast(
-            "FindingNoveltyFilter",
-            self._validate_choice("novelty", novelty, _VALID_FINDING_NOVELTY),
+        validated_novelty = self._validate_choice(
+            "novelty",
+            novelty,
+            _VALID_FINDING_NOVELTY,
         )
-        validated_sort = cast(
-            "FindingSort",
-            self._validate_choice("sort_by", sort_by, _VALID_FINDING_SORT),
+        validated_sort = self._validate_choice(
+            "sort_by",
+            sort_by,
+            _VALID_FINDING_SORT,
         )
-        validated_detail = cast(
-            "DetailLevel",
-            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        validated_detail = self._validate_choice(
+            "detail_level",
+            detail_level,
+            _VALID_DETAIL_LEVELS,
         )
         validated_severity = self._validate_optional_choice(
             "severity",
@@ -1658,9 +1662,10 @@ class MCPSession:
         detail_level: DetailLevel = "normal",
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
-        validated_detail = cast(
-            "DetailLevel",
-            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        validated_detail = self._validate_choice(
+            "detail_level",
+            detail_level,
+            _VALID_DETAIL_LEVELS,
         )
         canonical_id = self._resolve_canonical_finding_id(record, finding_id)
         for finding in self._base_findings(record):
@@ -1695,9 +1700,10 @@ class MCPSession:
         run_id: str | None = None,
         detail_level: DetailLevel = "normal",
     ) -> dict[str, object]:
-        validated_detail = cast(
-            "DetailLevel",
-            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        validated_detail = self._validate_choice(
+            "detail_level",
+            detail_level,
+            _VALID_DETAIL_LEVELS,
         )
         record = self._runs.get(run_id)
         canonical_id = self._resolve_canonical_finding_id(record, finding_id)
@@ -1733,13 +1739,11 @@ class MCPSession:
         limit: int = 10,
         max_results: int | None = None,
     ) -> dict[str, object]:
-        validated_kind = cast(
-            "HotlistKind",
-            self._validate_choice("kind", kind, _VALID_HOTLIST_KINDS),
-        )
-        validated_detail = cast(
-            "DetailLevel",
-            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        validated_kind = self._validate_choice("kind", kind, _VALID_HOTLIST_KINDS)
+        validated_detail = self._validate_choice(
+            "detail_level",
+            detail_level,
+            _VALID_DETAIL_LEVELS,
         )
         record = self._runs.get(run_id)
         paths_filter = self._resolve_query_changed_paths(
@@ -1854,13 +1858,11 @@ class MCPSession:
         topic: HelpTopic,
         detail: HelpDetail = "compact",
     ) -> dict[str, object]:
-        validated_topic = cast(
-            "HelpTopic",
-            self._validate_choice("topic", topic, _VALID_HELP_TOPICS),
-        )
-        validated_detail = cast(
-            "HelpDetail",
-            self._validate_choice("detail", detail, _VALID_HELP_DETAILS),
+        validated_topic = self._validate_choice("topic", topic, _VALID_HELP_TOPICS)
+        validated_detail = self._validate_choice(
+            "detail",
+            detail,
+            _VALID_HELP_DETAILS,
         )
         spec = _HELP_TOPIC_SPECS[validated_topic]
         payload: dict[str, object] = {
@@ -1888,9 +1890,10 @@ class MCPSession:
         git_diff_ref: str | None = None,
         format: PRSummaryFormat = "markdown",
     ) -> dict[str, object]:
-        output_format = cast(
-            "PRSummaryFormat",
-            self._validate_choice("format", format, _VALID_PR_SUMMARY_FORMATS),
+        output_format = self._validate_choice(
+            "format",
+            format,
+            _VALID_PR_SUMMARY_FORMATS,
         )
         record = self._runs.get(run_id)
         paths_filter = self._resolve_query_changed_paths(
@@ -1912,7 +1915,7 @@ class MCPSession:
                 run_id_after=record.run_id,
                 focus="all",
             )
-            resolved = cast("list[dict[str, object]]", compare_payload["improvements"])
+            resolved = self._dict_rows(compare_payload.get("improvements"))
         with self._state_lock:
             gate_result = dict(
                 self._last_gate_results.get(
@@ -1937,7 +1940,7 @@ class MCPSession:
             "verdict": verdict,
             "new_findings_in_changed_files": changed_items,
             "resolved": resolved,
-            "blocking_gates": list(cast(Sequence[str], gate_result.get("reasons", []))),
+            "blocking_gates": self._string_rows(gate_result.get("reasons")),
         }
         if output_format == "json":
             return payload
@@ -2042,9 +2045,10 @@ class MCPSession:
         max_results: int = 10,
         detail_level: DetailLevel = "summary",
     ) -> dict[str, object]:
-        validated_detail = cast(
-            "DetailLevel",
-            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        validated_detail = self._validate_choice(
+            "detail_level",
+            detail_level,
+            _VALID_DETAIL_LEVELS,
         )
         record = self._resolve_granular_record(
             run_id=run_id,
@@ -2098,9 +2102,10 @@ class MCPSession:
         max_results: int = 10,
         detail_level: DetailLevel = "summary",
     ) -> dict[str, object]:
-        validated_detail = cast(
-            "DetailLevel",
-            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        validated_detail = self._validate_choice(
+            "detail_level",
+            detail_level,
+            _VALID_DETAIL_LEVELS,
         )
         record = self._resolve_granular_record(
             run_id=run_id,
@@ -2179,9 +2184,10 @@ class MCPSession:
         category: str,
         check: str,
     ) -> dict[str, object]:
-        validated_detail = cast(
-            "DetailLevel",
-            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        validated_detail = self._validate_choice(
+            "detail_level",
+            detail_level,
+            _VALID_DETAIL_LEVELS,
         )
         record = self._resolve_granular_record(
             run_id=run_id,
@@ -2221,9 +2227,10 @@ class MCPSession:
         max_results: int = 10,
         detail_level: DetailLevel = "summary",
     ) -> dict[str, object]:
-        validated_detail = cast(
-            "DetailLevel",
-            self._validate_choice("detail_level", detail_level, _VALID_DETAIL_LEVELS),
+        validated_detail = self._validate_choice(
+            "detail_level",
+            detail_level,
+            _VALID_DETAIL_LEVELS,
         )
         validated_min_severity = self._validate_optional_choice(
             "min_severity",
@@ -3927,9 +3934,9 @@ class MCPSession:
     @staticmethod
     def _validate_choice(
         name: str,
-        value: str,
+        value: ChoiceT,
         allowed: Sequence[str] | frozenset[str],
-    ) -> str:
+    ) -> ChoiceT:
         if value not in allowed:
             allowed_list = ", ".join(sorted(allowed))
             raise MCPServiceContractError(
@@ -3940,12 +3947,56 @@ class MCPSession:
     def _validate_optional_choice(
         self,
         name: str,
-        value: str | None,
+        value: ChoiceT | None,
         allowed: Sequence[str] | frozenset[str],
-    ) -> str | None:
+    ) -> ChoiceT | None:
         if value is None:
             return None
         return self._validate_choice(name, value, allowed)
+
+    @staticmethod
+    def _metrics_detail_family(value: str | None) -> MetricsDetailFamily | None:
+        match value:
+            case "complexity":
+                return "complexity"
+            case "coupling":
+                return "coupling"
+            case "cohesion":
+                return "cohesion"
+            case "coverage_adoption":
+                return "coverage_adoption"
+            case "coverage_join":
+                return "coverage_join"
+            case "dependencies":
+                return "dependencies"
+            case "dead_code":
+                return "dead_code"
+            case "api_surface":
+                return "api_surface"
+            case "god_modules" | "overloaded_modules":
+                return "overloaded_modules"
+            case "health":
+                return "health"
+            case _:
+                return None
+
+    @staticmethod
+    def _dict_rows(value: object) -> list[dict[str, object]]:
+        if not isinstance(value, Sequence) or isinstance(
+            value,
+            (str, bytes, bytearray),
+        ):
+            return []
+        return [dict(item) for item in value if isinstance(item, Mapping)]
+
+    @staticmethod
+    def _string_rows(value: object) -> list[str]:
+        if not isinstance(value, Sequence) or isinstance(
+            value,
+            (str, bytes, bytearray),
+        ):
+            return []
+        return [str(item) for item in value if isinstance(item, str)]
 
     @staticmethod
     def _resolve_root(root: str | None) -> Path:

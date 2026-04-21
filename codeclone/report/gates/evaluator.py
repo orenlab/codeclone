@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from ...contracts import ExitCode
 from ...metrics.registry import METRIC_FAMILIES
@@ -109,28 +109,14 @@ def summarize_metrics_diff(metrics_diff: object | None) -> dict[str, object] | N
         }
 
     new_high_risk_functions = tuple(
-        cast(  # pragma: no branch - tuple normalization is deterministic
-            "tuple[str, ...]",
-            tuple(
-                str(item)
-                for item in _as_sequence(
-                    getattr(metrics_diff, "new_high_risk_functions", ())
-                )
-                if str(item).strip()
-            ),
-        )
+        str(item)
+        for item in _as_sequence(getattr(metrics_diff, "new_high_risk_functions", ()))
+        if str(item).strip()
     )
     new_high_coupling_classes = tuple(
-        cast(
-            "tuple[str, ...]",
-            tuple(
-                str(item)
-                for item in _as_sequence(
-                    getattr(metrics_diff, "new_high_coupling_classes", ())
-                )
-                if str(item).strip()
-            ),
-        )
+        str(item)
+        for item in _as_sequence(getattr(metrics_diff, "new_high_coupling_classes", ()))
+        if str(item).strip()
     )
     new_cycles = tuple(
         tuple(str(part) for part in _as_sequence(item) if str(part).strip())

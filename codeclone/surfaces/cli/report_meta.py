@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from ...baseline.clone_baseline import Baseline
 from ...baseline.trust import current_python_tag
@@ -19,6 +19,7 @@ from ...contracts import (
     DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
 )
 from ...contracts.schemas import ReportMeta
+from .types import CLIArgsLike
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -142,12 +143,11 @@ def build_cli_report_meta(
     metrics_baseline_path: Path,
     metrics_baseline_state: MetricsBaselineState,
     analysis_result: AnalysisResult,
-    args: object,
+    args: CLIArgsLike,
     metrics_computed: tuple[str, ...],
     analysis_started_at_utc: str | None,
     report_generated_at_utc: str,
 ) -> ReportMeta:
-    args_obj = cast("Any", args)
     project_metrics = analysis_result.project_metrics
     return _build_report_meta(
         codeclone_version=codeclone_version,
@@ -167,14 +167,14 @@ def build_cli_report_meta(
         metrics_baseline_status=metrics_baseline_state.status.value,
         health_score=(project_metrics.health.total if project_metrics else None),
         health_grade=(project_metrics.health.grade if project_metrics else None),
-        analysis_mode=("clones_only" if args_obj.skip_metrics else "full"),
+        analysis_mode=("clones_only" if args.skip_metrics else "full"),
         metrics_computed=metrics_computed,
-        min_loc=args_obj.min_loc,
-        min_stmt=args_obj.min_stmt,
-        block_min_loc=args_obj.block_min_loc,
-        block_min_stmt=args_obj.block_min_stmt,
-        segment_min_loc=args_obj.segment_min_loc,
-        segment_min_stmt=args_obj.segment_min_stmt,
+        min_loc=args.min_loc,
+        min_stmt=args.min_stmt,
+        block_min_loc=args.block_min_loc,
+        block_min_stmt=args.block_min_stmt,
+        segment_min_loc=args.segment_min_loc,
+        segment_min_stmt=args.segment_min_stmt,
         analysis_started_at_utc=analysis_started_at_utc,
         report_generated_at_utc=report_generated_at_utc,
     )

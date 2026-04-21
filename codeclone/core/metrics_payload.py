@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import cast
 
 from ..domain.findings import CATEGORY_COHESION, CATEGORY_COMPLEXITY, CATEGORY_COUPLING
 from ..domain.quality import CONFIDENCE_HIGH, RISK_LOW
@@ -22,7 +21,7 @@ from ..models import (
     ProjectMetrics,
 )
 from ..suppressions import DEAD_CODE_RULE_ID, INLINE_CODECLONE_SUPPRESSION_SOURCE
-from ..utils.coerce import as_int, as_str
+from ..utils.coerce import as_int, as_mapping, as_sequence, as_str
 from .api_surface_payload import (
     _api_surface_rows,
     _api_surface_summary,
@@ -47,12 +46,8 @@ def _enrich_metrics_report_payload(
         key: (dict(value) if isinstance(value, Mapping) else value)
         for key, value in metrics_payload.items()
     }
-    coverage_adoption = dict(
-        cast("Mapping[str, object]", enriched.get("coverage_adoption", {}))
-    )
-    coverage_summary = dict(
-        cast("Mapping[str, object]", coverage_adoption.get("summary", {}))
-    )
+    coverage_adoption = dict(as_mapping(enriched.get("coverage_adoption")))
+    coverage_summary = dict(as_mapping(coverage_adoption.get("summary")))
     if coverage_summary:
         coverage_summary["baseline_diff_available"] = coverage_adoption_diff_available
         coverage_summary["param_delta"] = (
@@ -73,9 +68,9 @@ def _enrich_metrics_report_payload(
         coverage_adoption["summary"] = coverage_summary
         enriched["coverage_adoption"] = coverage_adoption
 
-    api_surface = dict(cast("Mapping[str, object]", enriched.get("api_surface", {})))
-    api_summary = dict(cast("Mapping[str, object]", api_surface.get("summary", {})))
-    api_items = list(cast("Sequence[object]", api_surface.get("items", ())))
+    api_surface = dict(as_mapping(enriched.get("api_surface")))
+    api_summary = dict(as_mapping(api_surface.get("summary")))
+    api_items = list(as_sequence(api_surface.get("items")))
     if api_summary:
         api_summary["baseline_diff_available"] = api_surface_diff_available
         api_summary["added"] = (

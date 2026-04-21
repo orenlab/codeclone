@@ -11,7 +11,7 @@ import copy
 import hashlib
 from ast import AST
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from ..meta_markers import CFG_META_PREFIX
 
@@ -92,11 +92,16 @@ class AstNormalizer(ast.NodeTransformer):
             node.value = "_CONST_"
         return node
 
+    def _visit_expr(self, node: ast.expr) -> ast.expr:
+        visited = self.visit(node)
+        assert isinstance(visited, ast.expr)
+        return visited
+
     def visit_Call(self, node: ast.Call) -> ast.Call:
         node.func = self._visit_call_target(node.func)
-        node.args = [cast("ast.expr", self.visit(arg)) for arg in node.args]
+        node.args = [self._visit_expr(arg) for arg in node.args]
         for kw in node.keywords:
-            kw.value = cast("ast.expr", self.visit(kw.value))
+            kw.value = self._visit_expr(kw.value)
         return node
 
     def _visit_call_target(self, node: ast.expr) -> ast.expr:
@@ -108,9 +113,9 @@ class AstNormalizer(ast.NodeTransformer):
             if isinstance(value, (ast.Name, ast.Attribute)):
                 node.value = self._visit_call_target(value)
             else:
-                node.value = cast("ast.expr", self.visit(value))
+                node.value = self._visit_expr(value)
             return node
-        return cast("ast.expr", self.visit(node))
+        return self._visit_expr(node)
 
     def visit_AugAssign(self, node: ast.AugAssign) -> AST:
         # Normalize x += 1 to x = x + 1

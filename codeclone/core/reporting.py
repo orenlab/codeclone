@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping
-from typing import cast
 
 from ..models import MetricsDiff
 from ..report.document.builder import build_report_document
@@ -30,6 +29,10 @@ from .metrics_payload import _enrich_metrics_report_payload
 
 MetricGateConfig = _MetricGateConfig
 GatingResult = GateResult
+
+
+def _coerce_metrics_diff(value: object | None) -> MetricsDiff | None:
+    return value if isinstance(value, MetricsDiff) else None
 
 
 def _load_markdown_report_renderer() -> Callable[..., str]:
@@ -100,10 +103,11 @@ def report(
         )
     )
     if needs_report_document:
+        validated_metrics_diff = _coerce_metrics_diff(metrics_diff)
         metrics_for_report = (
             _enrich_metrics_report_payload(
                 metrics_payload=analysis.metrics_payload,
-                metrics_diff=cast("MetricsDiff | None", metrics_diff),
+                metrics_diff=validated_metrics_diff,
                 coverage_adoption_diff_available=coverage_adoption_diff_available,
                 api_surface_diff_available=api_surface_diff_available,
             )
@@ -127,10 +131,11 @@ def report(
         )
 
     if boot.output_paths.html and html_builder is not None:
+        validated_metrics_diff = _coerce_metrics_diff(metrics_diff)
         metrics_for_html = (
             _enrich_metrics_report_payload(
                 metrics_payload=analysis.metrics_payload,
-                metrics_diff=cast("MetricsDiff | None", metrics_diff),
+                metrics_diff=validated_metrics_diff,
                 coverage_adoption_diff_available=coverage_adoption_diff_available,
                 api_surface_diff_available=api_surface_diff_available,
             )

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import TypeGuard, TypeVar, cast
+from typing import TypeGuard, TypeVar
 
 from ._validators import (
     _is_block_dict,
@@ -44,12 +44,15 @@ from .entries import (
 _ValidatedItemT = TypeVar("_ValidatedItemT")
 
 
+def _is_str_item(value: object) -> TypeGuard[str]:
+    return isinstance(value, str)
+
+
 def _as_file_stat_dict(value: object) -> FileStat | None:
     if not _is_file_stat_dict(value):
         return None
-    obj = cast("Mapping[str, object]", value)
-    mtime_ns = obj.get("mtime_ns")
-    size = obj.get("size")
+    mtime_ns = value.get("mtime_ns")
+    size = value.get("size")
     if not isinstance(mtime_ns, int) or not isinstance(size, int):
         return None
     return FileStat(mtime_ns=mtime_ns, size=size)
@@ -58,33 +61,27 @@ def _as_file_stat_dict(value: object) -> FileStat | None:
 def _as_source_stats_dict(value: object) -> SourceStatsDict | None:
     if not _is_source_stats_dict(value):
         return None
-    obj = cast("Mapping[str, object]", value)
-    lines = obj.get("lines")
-    functions = obj.get("functions")
-    methods = obj.get("methods")
-    classes = obj.get("classes")
-    assert isinstance(lines, int)
-    assert isinstance(functions, int)
-    assert isinstance(methods, int)
-    assert isinstance(classes, int)
     return SourceStatsDict(
-        lines=lines,
-        functions=functions,
-        methods=methods,
-        classes=classes,
+        lines=value["lines"],
+        functions=value["functions"],
+        methods=value["methods"],
+        classes=value["classes"],
     )
 
 
 def _as_typed_list(
     value: object,
     *,
-    predicate: Callable[[object], bool],
+    predicate: Callable[[object], TypeGuard[_ValidatedItemT]],
 ) -> list[_ValidatedItemT] | None:
     if not isinstance(value, list):
         return None
-    if not all(predicate(item) for item in value):
-        return None
-    return cast("list[_ValidatedItemT]", value)
+    items: list[_ValidatedItemT] = []
+    for item in value:
+        if not predicate(item):
+            return None
+        items.append(item)
+    return items
 
 
 def _as_typed_unit_list(value: object) -> list[UnitDict] | None:
@@ -114,7 +111,7 @@ def _as_typed_module_deps_list(value: object) -> list[ModuleDepDict] | None:
 
 
 def _as_typed_string_list(value: object) -> list[str] | None:
-    return _as_typed_list(value, predicate=lambda item: isinstance(item, str))
+    return _as_typed_list(value, predicate=_is_str_item)
 
 
 def _as_module_typing_coverage_dict(
@@ -122,7 +119,7 @@ def _as_module_typing_coverage_dict(
 ) -> ModuleTypingCoverageDict | None:
     if not _is_module_typing_coverage_dict(value):
         return None
-    return cast("ModuleTypingCoverageDict", value)
+    return value
 
 
 def _as_module_docstring_coverage_dict(
@@ -130,13 +127,13 @@ def _as_module_docstring_coverage_dict(
 ) -> ModuleDocstringCoverageDict | None:
     if not _is_module_docstring_coverage_dict(value):
         return None
-    return cast("ModuleDocstringCoverageDict", value)
+    return value
 
 
 def _as_module_api_surface_dict(value: object) -> ModuleApiSurfaceDict | None:
     if not _is_module_api_surface_dict(value):
         return None
-    return cast("ModuleApiSurfaceDict", value)
+    return value
 
 
 def _normalized_optional_string_list(value: object) -> list[str] | None:

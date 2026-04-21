@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, cast
+from typing import Protocol
 
 from .session import (
     DEFAULT_MCP_HISTORY_LIMIT,
@@ -17,107 +17,110 @@ from .session import (
 from .tools._base import run_kw
 
 
-class CodeCloneMCPService(MCPSession):
+class _RunDictService(Protocol):
+    def _run_dict(self, method_name: str, **params: object) -> dict[str, object]: ...
+
+
+class _QueryServiceMixin:
+    def compare_runs(self: _RunDictService, **params: object) -> dict[str, object]:
+        return self._run_dict("compare_runs", **params)
+
+    def get_report_section(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("get_report_section", **params)
+
+    def list_findings(self: _RunDictService, **params: object) -> dict[str, object]:
+        return self._run_dict("list_findings", **params)
+
+    def get_finding(self: _RunDictService, **params: object) -> dict[str, object]:
+        return self._run_dict("get_finding", **params)
+
+    def get_remediation(self: _RunDictService, **params: object) -> dict[str, object]:
+        return self._run_dict("get_remediation", **params)
+
+    def list_hotspots(self: _RunDictService, **params: object) -> dict[str, object]:
+        return self._run_dict("list_hotspots", **params)
+
+    def get_production_triage(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("get_production_triage", **params)
+
+    def get_help(self: _RunDictService, **params: object) -> dict[str, object]:
+        return self._run_dict("get_help", **params)
+
+    def generate_pr_summary(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("generate_pr_summary", **params)
+
+    def mark_finding_reviewed(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("mark_finding_reviewed", **params)
+
+    def list_reviewed_findings(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("list_reviewed_findings", **params)
+
+    def check_complexity(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("check_complexity", **params)
+
+    def check_clones(self: _RunDictService, **params: object) -> dict[str, object]:
+        return self._run_dict("check_clones", **params)
+
+    def check_coupling(self: _RunDictService, **params: object) -> dict[str, object]:
+        return self._run_dict("check_coupling", **params)
+
+    def check_cohesion(self: _RunDictService, **params: object) -> dict[str, object]:
+        return self._run_dict("check_cohesion", **params)
+
+    def check_dead_code(self: _RunDictService, **params: object) -> dict[str, object]:
+        return self._run_dict("check_dead_code", **params)
+
+
+class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
     def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
         super().__init__(history_limit=history_limit)
+        self._session_cls = MCPSession
         # Keep a stable seam for tests and monkeypatch-based callers while the
         # service itself now owns the real MCP session state.
         self.session = self
 
-    def _run_session_method(
-        self,
-        name: str,
-        /,
-        *args: object,
-        **kwargs: object,
-    ) -> object:
-        method = cast("Any", getattr(MCPSession, name))
-        return method(self, *args, **kwargs)
-
-    def _session_bound_method(self, name: str) -> object:
-        return cast("Any", getattr(MCPSession, name)).__get__(self, MCPSession)
-
-    def _run_dict(self, name: str, **params: object) -> dict[str, object]:
-        bound = self._session_bound_method(name)
-        return cast("dict[str, object]", run_kw(bound, params))
+    def _run_dict(self, method_name: str, **params: object) -> dict[str, object]:
+        bound = getattr(self._session_cls, method_name).__get__(self, type(self))
+        result = run_kw(bound, params)
+        if not isinstance(result, dict):
+            raise TypeError(f"MCP session method '{method_name}' must return a dict.")
+        return result
 
     def analyze_repository(self, request: MCPAnalysisRequest) -> dict[str, object]:
-        return cast(
-            "dict[str, object]",
-            self._run_session_method("analyze_repository", request),
-        )
+        return self._session_cls.analyze_repository(self, request)
 
     def analyze_changed_paths(self, request: MCPAnalysisRequest) -> dict[str, object]:
-        return cast(
-            "dict[str, object]",
-            self._run_session_method("analyze_changed_paths", request),
-        )
+        return self._session_cls.analyze_changed_paths(self, request)
 
     def get_run_summary(self, run_id: str | None = None) -> dict[str, object]:
-        return cast(
-            "dict[str, object]",
-            self._run_session_method("get_run_summary", run_id),
-        )
-
-    def compare_runs(self, **params: object) -> dict[str, object]:
-        return self._run_dict("compare_runs", **params)
+        return self._session_cls.get_run_summary(self, run_id)
 
     def evaluate_gates(self, request: MCPGateRequest) -> dict[str, object]:
-        return cast(
-            "dict[str, object]",
-            self._run_session_method("evaluate_gates", request),
-        )
-
-    def get_report_section(self, **params: object) -> dict[str, object]:
-        return self._run_dict("get_report_section", **params)
-
-    def list_findings(self, **params: object) -> dict[str, object]:
-        return self._run_dict("list_findings", **params)
-
-    def get_finding(self, **params: object) -> dict[str, object]:
-        return self._run_dict("get_finding", **params)
-
-    def get_remediation(self, **params: object) -> dict[str, object]:
-        return self._run_dict("get_remediation", **params)
-
-    def list_hotspots(self, **params: object) -> dict[str, object]:
-        return self._run_dict("list_hotspots", **params)
-
-    def get_production_triage(self, **params: object) -> dict[str, object]:
-        return self._run_dict("get_production_triage", **params)
-
-    def get_help(self, **params: object) -> dict[str, object]:
-        return self._run_dict("get_help", **params)
-
-    def generate_pr_summary(self, **params: object) -> dict[str, object]:
-        return self._run_dict("generate_pr_summary", **params)
-
-    def mark_finding_reviewed(self, **params: object) -> dict[str, object]:
-        return self._run_dict("mark_finding_reviewed", **params)
-
-    def list_reviewed_findings(self, **params: object) -> dict[str, object]:
-        return self._run_dict("list_reviewed_findings", **params)
+        return self._session_cls.evaluate_gates(self, request)
 
     def clear_session_runs(self) -> dict[str, object]:
-        return cast("dict[str, object]", self._run_session_method("clear_session_runs"))
-
-    def check_complexity(self, **params: object) -> dict[str, object]:
-        return self._run_dict("check_complexity", **params)
-
-    def check_clones(self, **params: object) -> dict[str, object]:
-        return self._run_dict("check_clones", **params)
-
-    def check_coupling(self, **params: object) -> dict[str, object]:
-        return self._run_dict("check_coupling", **params)
-
-    def check_cohesion(self, **params: object) -> dict[str, object]:
-        return self._run_dict("check_cohesion", **params)
-
-    def check_dead_code(self, **params: object) -> dict[str, object]:
-        return self._run_dict("check_dead_code", **params)
+        return self._session_cls.clear_session_runs(self)
 
     def read_resource(self, uri: str) -> str:
-        return cast("str", self._run_session_method("read_resource", uri))
+        return self._session_cls.read_resource(self, uri)
 
 
 _EMPTY = inspect.Signature.empty

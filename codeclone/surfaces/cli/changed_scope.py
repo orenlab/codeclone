@@ -10,14 +10,14 @@ import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
 
 from ... import ui_messages as ui
 from ...contracts import ExitCode
 from ...utils import coerce as _coerce
 from ...utils.git_diff import validate_git_diff_ref
 from . import state as cli_state
-from .types import ChangedCloneGate
+from .attrs import bool_attr, optional_text_attr, set_bool_attr
+from .types import ChangedCloneGate, require_status_console
 
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
@@ -26,29 +26,30 @@ __all__ = ["ChangedCloneGate"]
 
 
 def _validate_changed_scope_args(*, args: object) -> str | None:
-    args_obj = cast("Any", args)
-    console = cast("Any", cli_state.get_console())
-    if args_obj.diff_against and args_obj.paths_from_git_diff:
+    console = require_status_console(cli_state.get_console())
+    diff_against = optional_text_attr(args, "diff_against")
+    paths_from_git_diff = optional_text_attr(args, "paths_from_git_diff")
+    if diff_against and paths_from_git_diff:
         console.print(
             ui.fmt_contract_error(
                 "Use --diff-against or --paths-from-git-diff, not both."
             )
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
-    if args_obj.paths_from_git_diff:
-        args_obj.changed_only = True
-        return str(args_obj.paths_from_git_diff)
-    if args_obj.diff_against and not args_obj.changed_only:
+    if paths_from_git_diff:
+        set_bool_attr(args, "changed_only", True)
+        return paths_from_git_diff
+    if diff_against and not bool_attr(args, "changed_only"):
         console.print(ui.fmt_contract_error("--diff-against requires --changed-only."))
         sys.exit(ExitCode.CONTRACT_ERROR)
-    if args_obj.changed_only and not args_obj.diff_against:
+    if bool_attr(args, "changed_only") and not diff_against:
         console.print(
             ui.fmt_contract_error(
                 "--changed-only requires --diff-against or --paths-from-git-diff."
             )
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
-    return str(args_obj.diff_against) if args_obj.diff_against else None
+    return diff_against
 
 
 def _normalize_changed_paths(
@@ -56,7 +57,7 @@ def _normalize_changed_paths(
     root_path: Path,
     paths: Sequence[str],
 ) -> tuple[str, ...]:
-    console = cast("Any", cli_state.get_console())
+    console = require_status_console(cli_state.get_console())
     normalized: set[str] = set()
     for raw_path in paths:
         candidate = raw_path.strip()
@@ -92,7 +93,7 @@ def _normalize_changed_paths(
 
 
 def _git_diff_changed_paths(*, root_path: Path, git_diff_ref: str) -> tuple[str, ...]:
-    console = cast("Any", cli_state.get_console())
+    console = require_status_console(cli_state.get_console())
     try:
         validated_ref = validate_git_diff_ref(git_diff_ref)
     except ValueError as exc:

@@ -10,7 +10,7 @@ import argparse
 import ipaddress
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from ... import __version__
 from ...contracts import DOCS_URL
@@ -22,6 +22,7 @@ from .session import (
     CachePolicy,
     MCPAnalysisRequest,
     MCPGateRequest,
+    MCPServiceContractError,
     _validated_history_limit,
 )
 
@@ -66,12 +67,13 @@ def _load_mcp_runtime() -> tuple[
     ToolAnnotations,
 ]:
     try:
-        from mcp.server.fastmcp import FastMCP as runtime_fastmcp
+        from mcp.server.fastmcp import FastMCP as imported_fastmcp
         from mcp.types import ToolAnnotations as runtime_tool_annotations
     except ImportError as exc:
         raise MCPDependencyError(_MCP_INSTALL_HINT) from exc
+    runtime_fastmcp: type[FastMCP] = imported_fastmcp
     return (
-        cast("type[FastMCP]", runtime_fastmcp),
+        runtime_fastmcp,
         runtime_tool_annotations(
             readOnlyHint=True,
             destructiveHint=False,
@@ -93,6 +95,30 @@ def _load_mcp_runtime() -> tuple[
     )
 
 
+def _validated_analysis_mode(value: str) -> AnalysisMode:
+    if value == "full":
+        return "full"
+    if value == "clones_only":
+        return "clones_only"
+    raise MCPServiceContractError(
+        f"Invalid value for analysis_mode: {value!r}. "
+        "Expected one of: clones_only, full."
+    )
+
+
+def _validated_cache_policy(value: str) -> CachePolicy:
+    if value == "reuse":
+        return "reuse"
+    if value == "refresh":
+        return "refresh"
+    if value == "off":
+        return "off"
+    raise MCPServiceContractError(
+        f"Invalid value for cache_policy: {value!r}. "
+        "Expected one of: off, refresh, reuse."
+    )
+
+
 def build_mcp_server(
     *,
     history_limit: int = DEFAULT_MCP_HISTORY_LIMIT,
@@ -103,6 +129,8 @@ def build_mcp_server(
     debug: bool = False,
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO",
 ) -> FastMCP:
+    """Build and register the local read-only CodeClone FastMCP server."""
+
     runtime_fastmcp, read_only_tool, analysis_tool, session_tool = _load_mcp_runtime()
     service = CodeCloneMCPService(history_limit=_validated_history_limit(history_limit))
     mcp = runtime_fastmcp(
@@ -120,20 +148,26 @@ def build_mcp_server(
     # FastMCP otherwise reports the `mcp` package version in initialize/serverInfo.
     mcp._mcp_server.version = __version__
 
-    def tool(*args: Any, **kwargs: Any) -> Callable[[MCPCallable], MCPCallable]:
-        return cast(
-            "Callable[[MCPCallable], MCPCallable]",
-            mcp.tool(*args, **kwargs),
-        )
+    def tool(*args: object, **kwargs: object) -> Callable[[MCPCallable], MCPCallable]:
+        decorator = mcp.tool(*args, **kwargs)  # type: ignore[arg-type]
+
+        def register(func: MCPCallable) -> MCPCallable:
+            decorator(func)
+            return func
+
+        return register
 
     def resource(
-        *args: Any,
-        **kwargs: Any,
+        *args: object,
+        **kwargs: object,
     ) -> Callable[[MCPCallable], MCPCallable]:
-        return cast(
-            "Callable[[MCPCallable], MCPCallable]",
-            mcp.resource(*args, **kwargs),
-        )
+        decorator = mcp.resource(*args, **kwargs)  # type: ignore[arg-type]
+
+        def register(func: MCPCallable) -> MCPCallable:
+            decorator(func)
+            return func
+
+        return register
 
     @tool(
         title="Analyze Repository",
@@ -177,7 +211,7 @@ def build_mcp_server(
         return service.analyze_repository(
             MCPAnalysisRequest(
                 root=root,
-                analysis_mode=cast("AnalysisMode", analysis_mode),
+                analysis_mode=_validated_analysis_mode(analysis_mode),
                 respect_pyproject=respect_pyproject,
                 changed_paths=tuple(changed_paths or ()),
                 git_diff_ref=git_diff_ref,
@@ -197,7 +231,7 @@ def build_mcp_server(
                 baseline_path=baseline_path,
                 metrics_baseline_path=metrics_baseline_path,
                 max_baseline_size_mb=max_baseline_size_mb,
-                cache_policy=cast("CachePolicy", cache_policy),
+                cache_policy=_validated_cache_policy(cache_policy),
                 cache_path=cache_path,
                 max_cache_size_mb=max_cache_size_mb,
             )
@@ -249,7 +283,7 @@ def build_mcp_server(
                 root=root,
                 changed_paths=tuple(changed_paths or ()),
                 git_diff_ref=git_diff_ref,
-                analysis_mode=cast("AnalysisMode", analysis_mode),
+                analysis_mode=_validated_analysis_mode(analysis_mode),
                 respect_pyproject=respect_pyproject,
                 processes=processes,
                 min_loc=min_loc,
@@ -267,7 +301,7 @@ def build_mcp_server(
                 baseline_path=baseline_path,
                 metrics_baseline_path=metrics_baseline_path,
                 max_baseline_size_mb=max_baseline_size_mb,
-                cache_policy=cast("CachePolicy", cache_policy),
+                cache_policy=_validated_cache_policy(cache_policy),
                 cache_path=cache_path,
                 max_cache_size_mb=max_cache_size_mb,
             )

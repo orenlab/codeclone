@@ -10,7 +10,7 @@ import hashlib
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import orjson
 
@@ -194,7 +194,7 @@ def _artifact_catalog(
         }
     )
     artifact_index_map = {path: index for index, path in enumerate(artifact_paths)}
-    artifacts = [
+    artifacts: list[dict[str, object]] = [
         {
             "location": {
                 "uri": path,
@@ -203,7 +203,7 @@ def _artifact_catalog(
         }
         for path in artifact_paths
     ]
-    return cast(list[dict[str, object]], artifacts), artifact_index_map
+    return artifacts, artifact_index_map
 
 
 def _clone_rule_spec(category: str) -> _RuleSpec:
@@ -807,10 +807,10 @@ def _result_entry(
             group=group,
             primary_item=primary_item,
         ),
-        "properties": _result_properties(group),
     }
+    properties = _result_properties(group)
+    result["properties"] = properties
     if primary_item:
-        properties = cast(dict[str, object], result["properties"])
         properties.update(_primary_location_properties(primary_item))
     baseline_state = _baseline_state(group)
     if baseline_state:

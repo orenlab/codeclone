@@ -10,7 +10,6 @@ import os
 import tempfile
 from json import JSONDecodeError
 from pathlib import Path
-from typing import Any
 
 import orjson
 
@@ -40,7 +39,7 @@ def read_json_document(path: Path) -> object:
         return orjson.loads(path.read_bytes())
 
 
-def read_json_object(path: Path) -> dict[str, Any]:
+def read_json_object(path: Path) -> dict[str, object]:
     payload = read_json_document(path)
     if not isinstance(payload, dict):
         raise TypeError("JSON payload must be an object")

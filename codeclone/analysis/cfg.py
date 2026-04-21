@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING
 
 from ..meta_markers import CFG_META_PREFIX
 from .cfg_model import CFG, Block
@@ -19,13 +19,6 @@ if TYPE_CHECKING:
 __all__ = ["CFG", "CFGBuilder"]
 
 TryStar = getattr(ast, "TryStar", ast.Try)
-
-
-class _TryLike(Protocol):
-    body: list[ast.stmt]
-    handlers: list[ast.ExceptHandler]
-    orelse: list[ast.stmt]
-    finalbody: list[ast.stmt]
 
 
 @dataclass(slots=True)
@@ -105,9 +98,19 @@ class CFGBuilder:
                 self._visit_for(stmt)  # Structure is identical to For
 
             case ast.Try():
-                self._visit_try(cast("_TryLike", stmt))
+                self._visit_try(
+                    body=stmt.body,
+                    handlers=stmt.handlers,
+                    orelse=stmt.orelse,
+                    finalbody=stmt.finalbody,
+                )
             case _ if TryStar is not None and isinstance(stmt, TryStar):
-                self._visit_try(cast("_TryLike", cast("object", stmt)))
+                self._visit_try(
+                    body=stmt.body,
+                    handlers=stmt.handlers,
+                    orelse=stmt.orelse,
+                    finalbody=stmt.finalbody,
+                )
 
             case ast.With() | ast.AsyncWith():
                 self._visit_with(stmt)
@@ -261,18 +264,25 @@ class CFGBuilder:
 
         self.current = after_block
 
-    def _visit_try(self, stmt: _TryLike) -> None:
+    def _visit_try(
+        self,
+        *,
+        body: list[ast.stmt],
+        handlers: list[ast.ExceptHandler],
+        orelse: list[ast.stmt],
+        finalbody: list[ast.stmt],
+    ) -> None:
         try_entry = self.cfg.create_block()
         self.current.add_successor(try_entry)
         self.current = try_entry
 
-        handler_test_blocks = [self.cfg.create_block() for _ in stmt.handlers]
-        handler_body_blocks = [self.cfg.create_block() for _ in stmt.handlers]
-        else_block = self.cfg.create_block() if stmt.orelse else None
+        handler_test_blocks = [self.cfg.create_block() for _ in handlers]
+        handler_body_blocks = [self.cfg.create_block() for _ in handlers]
+        else_block = self.cfg.create_block() if orelse else None
         final_block = self.cfg.create_block()
 
         for idx, (handler, test_block, body_block) in enumerate(
-            zip(stmt.handlers, handler_test_blocks, handler_body_blocks, strict=True)
+            zip(handlers, handler_test_blocks, handler_body_blocks, strict=True)
         ):
             test_block.statements.append(_meta_expr(f"TRY_HANDLER_INDEX:{idx}"))
             if handler.type is not None:
@@ -290,7 +300,7 @@ class CFGBuilder:
 
         # Process each statement in try body
         # Link only statements that can raise to exception handlers
-        for stmt_node in stmt.body:
+        for stmt_node in body:
             if self.current.is_terminated:
                 break
 
@@ -307,7 +317,7 @@ class CFGBuilder:
                 self.current.add_successor(final_block)
 
         # Process handlers
-        for handler, body_block in zip(stmt.handlers, handler_body_blocks, strict=True):
+        for handler, body_block in zip(handlers, handler_body_blocks, strict=True):
             self.current = body_block
             self._visit_statements(handler.body)
             if not self.current.is_terminated:
@@ -316,14 +326,14 @@ class CFGBuilder:
         # Process else
         if else_block:
             self.current = else_block
-            self._visit_statements(stmt.orelse)
+            self._visit_statements(orelse)
             if not self.current.is_terminated:
                 self.current.add_successor(final_block)
 
         # Process finally
         self.current = final_block
-        if stmt.finalbody:
-            self._visit_statements(stmt.finalbody)
+        if finalbody:
+            self._visit_statements(finalbody)
 
     def _visit_match(self, stmt: ast.Match) -> None:
         self.current.statements.append(ast.Expr(value=stmt.subject))

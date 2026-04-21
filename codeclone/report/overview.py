@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from ..domain.findings import (
     CATEGORY_COHESION,
@@ -125,6 +126,25 @@ _DIRECTORY_KIND_BREAKDOWN_KEYS: tuple[str, ...] = (
 )
 
 
+@dataclass(slots=True)
+class _DirectoryContribution:
+    affected_items: int = 0
+    files: set[str] = field(default_factory=set)
+    locations: list[dict[str, object]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _DirectoryBucketRow:
+    path: str
+    finding_ids: set[str] = field(default_factory=set)
+    affected_items: int = 0
+    files: set[str] = field(default_factory=set)
+    locations: list[dict[str, object]] = field(default_factory=list)
+    kind_breakdown_ids: dict[str, set[str]] = field(
+        default_factory=lambda: {key: set() for key in _DIRECTORY_KIND_BREAKDOWN_KEYS}
+    )
+
+
 def _directory_bucket_keys(group: Mapping[str, object]) -> tuple[str, ...]:
     family = str(group.get("family", "")).strip()
     category = str(group.get("category", "")).strip()
@@ -221,8 +241,8 @@ def _overview_directory_label(
 
 def _directory_contributions(
     group: Mapping[str, object],
-) -> dict[str, dict[str, object]]:
-    contributions: dict[str, dict[str, object]] = {}
+) -> dict[str, _DirectoryContribution]:
+    contributions: dict[str, _DirectoryContribution] = {}
     for item in map(_as_mapping, _as_sequence(group.get("items"))):
         relative_path = _directory_relative_path(item)
         if relative_path is None:
@@ -231,25 +251,16 @@ def _directory_contributions(
             relative_path
         )
         directory = _overview_directory_label(relative_path, source_kind=source_kind)
-        entry = contributions.setdefault(
-            directory,
-            {
-                "affected_items": 0,
-                "files": set(),
-                "locations": [],
-            },
-        )
-        entry["affected_items"] = _as_int(entry.get("affected_items")) + 1
-        cast(set[str], entry["files"]).add(relative_path)
-        cast(list[dict[str, object]], entry["locations"]).append(
-            {"source_kind": source_kind}
-        )
+        entry = contributions.setdefault(directory, _DirectoryContribution())
+        entry.affected_items += 1
+        entry.files.add(relative_path)
+        entry.locations.append({"source_kind": source_kind})
     return contributions
 
 
 def _directory_group_data(
     group: Mapping[str, object],
-) -> tuple[str, dict[str, dict[str, object]]] | None:
+) -> tuple[str, dict[str, _DirectoryContribution]] | None:
     group_id = str(group.get("id", "")).strip()
     if not group_id:
         return None
@@ -265,7 +276,7 @@ def build_directory_hotspots(
     limit: int = 5,
 ) -> dict[str, object]:
     normalized_limit = max(1, _as_int(limit, 5))
-    bucket_rows: dict[str, dict[str, dict[str, object]]] = {
+    bucket_rows: dict[str, dict[str, _DirectoryBucketRow]] = {
         bucket: {} for bucket in _DIRECTORY_HOTSPOT_BUCKETS
     }
     bucket_totals: Counter[str] = Counter()
@@ -282,41 +293,22 @@ def build_directory_hotspots(
             for directory, contribution in contributions.items():
                 row = rows.setdefault(
                     directory,
-                    {
-                        "path": directory,
-                        "finding_ids": set(),
-                        "affected_items": 0,
-                        "files": set(),
-                        "locations": [],
-                        "kind_breakdown_ids": {
-                            key: set() for key in _DIRECTORY_KIND_BREAKDOWN_KEYS
-                        },
-                    },
+                    _DirectoryBucketRow(path=directory),
                 )
-                cast(set[str], row["finding_ids"]).add(group_id)
-                row["affected_items"] = _as_int(row.get("affected_items")) + _as_int(
-                    contribution.get("affected_items")
-                )
-                cast(set[str], row["files"]).update(
-                    cast(set[str], contribution["files"])
-                )
-                cast(list[dict[str, object]], row["locations"]).extend(
-                    cast(list[dict[str, object]], contribution["locations"])
-                )
+                row.finding_ids.add(group_id)
+                row.affected_items += contribution.affected_items
+                row.files.update(contribution.files)
+                row.locations.extend(contribution.locations)
                 if bucket == "all" and kind_key is not None:
-                    kind_rows = cast(
-                        dict[str, set[str]],
-                        row["kind_breakdown_ids"],
-                    )
-                    kind_rows[kind_key].add(group_id)
-                bucket_totals[bucket] += _as_int(contribution.get("affected_items"))
+                    row.kind_breakdown_ids[kind_key].add(group_id)
+                bucket_totals[bucket] += contribution.affected_items
 
-    def _row_sort_key(row: Mapping[str, object]) -> tuple[int, int, int, str]:
+    def _row_sort_key(row: _DirectoryBucketRow) -> tuple[int, int, int, str]:
         return (
-            -len(cast(set[str], row["finding_ids"])),
-            -_as_int(row.get("affected_items")),
-            -len(cast(set[str], row["files"])),
-            str(row.get("path", "")),
+            -len(row.finding_ids),
+            -row.affected_items,
+            -len(row.files),
+            row.path,
         )
 
     hotspots: dict[str, object] = {}
@@ -326,11 +318,11 @@ def build_directory_hotspots(
         total_affected_items = bucket_totals[bucket]
         items: list[dict[str, object]] = []
         for row in bucket_items[:normalized_limit]:
-            finding_groups = len(cast(set[str], row["finding_ids"]))
-            affected_items = _as_int(row.get("affected_items"))
-            files = len(cast(set[str], row["files"]))
+            finding_groups = len(row.finding_ids)
+            affected_items = row.affected_items
+            files = len(row.files)
             item = {
-                "path": str(row.get("path", ".")),
+                "path": row.path,
                 "finding_groups": finding_groups,
                 "affected_items": affected_items,
                 "files": files,
@@ -340,13 +332,11 @@ def build_directory_hotspots(
                 )
                 if total_affected_items > 0
                 else 0.0,
-                "source_scope": source_scope_from_locations(
-                    cast(list[dict[str, object]], row["locations"])
-                ),
+                "source_scope": source_scope_from_locations(row.locations),
             }
             if bucket == "all":
                 item["kind_breakdown"] = {
-                    key: len(cast(dict[str, set[str]], row["kind_breakdown_ids"])[key])
+                    key: len(row.kind_breakdown_ids[key])
                     for key in _DIRECTORY_KIND_BREAKDOWN_KEYS
                 }
             items.append(item)

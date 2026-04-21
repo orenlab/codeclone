@@ -7,15 +7,32 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import TypeGuard
+
+from .entries import (
+    ApiParamSpecDict,
+    BlockDict,
+    ClassMetricsDict,
+    DeadCandidateDict,
+    FileStat,
+    ModuleApiSurfaceDict,
+    ModuleDepDict,
+    ModuleDocstringCoverageDict,
+    ModuleTypingCoverageDict,
+    PublicSymbolDict,
+    SegmentDict,
+    SourceStatsDict,
+    UnitDict,
+)
 
 
-def _is_file_stat_dict(value: object) -> bool:
+def _is_file_stat_dict(value: object) -> TypeGuard[FileStat]:
     if not isinstance(value, dict):
         return False
     return isinstance(value.get("mtime_ns"), int) and isinstance(value.get("size"), int)
 
 
-def _is_source_stats_dict(value: object) -> bool:
+def _is_source_stats_dict(value: object) -> TypeGuard[SourceStatsDict]:
     if not isinstance(value, dict):
         return False
     lines = value.get("lines")
@@ -34,7 +51,7 @@ def _is_source_stats_dict(value: object) -> bool:
     )
 
 
-def _is_unit_dict(value: object) -> bool:
+def _is_unit_dict(value: object) -> TypeGuard[UnitDict]:
     if not isinstance(value, dict):
         return False
     string_keys = ("qualname", "filepath", "fingerprint", "loc_bucket")
@@ -60,7 +77,7 @@ def _is_unit_dict(value: object) -> bool:
     )
 
 
-def _is_block_dict(value: object) -> bool:
+def _is_block_dict(value: object) -> TypeGuard[BlockDict]:
     if not isinstance(value, dict):
         return False
     string_keys = ("block_hash", "filepath", "qualname")
@@ -68,7 +85,7 @@ def _is_block_dict(value: object) -> bool:
     return _has_typed_fields(value, string_keys=string_keys, int_keys=int_keys)
 
 
-def _is_segment_dict(value: object) -> bool:
+def _is_segment_dict(value: object) -> TypeGuard[SegmentDict]:
     if not isinstance(value, dict):
         return False
     string_keys = ("segment_hash", "segment_sig", "filepath", "qualname")
@@ -76,7 +93,9 @@ def _is_segment_dict(value: object) -> bool:
     return _has_typed_fields(value, string_keys=string_keys, int_keys=int_keys)
 
 
-def _is_module_typing_coverage_dict(value: object) -> bool:
+def _is_module_typing_coverage_dict(
+    value: object,
+) -> TypeGuard[ModuleTypingCoverageDict]:
     if not isinstance(value, dict):
         return False
     string_keys = ("module", "filepath")
@@ -91,7 +110,9 @@ def _is_module_typing_coverage_dict(value: object) -> bool:
     return _has_typed_fields(value, string_keys=string_keys, int_keys=int_keys)
 
 
-def _is_module_docstring_coverage_dict(value: object) -> bool:
+def _is_module_docstring_coverage_dict(
+    value: object,
+) -> TypeGuard[ModuleDocstringCoverageDict]:
     if not isinstance(value, dict):
         return False
     string_keys = ("module", "filepath")
@@ -99,7 +120,7 @@ def _is_module_docstring_coverage_dict(value: object) -> bool:
     return _has_typed_fields(value, string_keys=string_keys, int_keys=int_keys)
 
 
-def _is_api_param_spec_dict(value: object) -> bool:
+def _is_api_param_spec_dict(value: object) -> TypeGuard[ApiParamSpecDict]:
     if not isinstance(value, dict):
         return False
     return (
@@ -110,7 +131,7 @@ def _is_api_param_spec_dict(value: object) -> bool:
     )
 
 
-def _is_public_symbol_dict(value: object) -> bool:
+def _is_public_symbol_dict(value: object) -> TypeGuard[PublicSymbolDict]:
     if not isinstance(value, dict):
         return False
     if not _has_typed_fields(
@@ -127,7 +148,7 @@ def _is_public_symbol_dict(value: object) -> bool:
     )
 
 
-def _is_module_api_surface_dict(value: object) -> bool:
+def _is_module_api_surface_dict(value: object) -> TypeGuard[ModuleApiSurfaceDict]:
     if not isinstance(value, dict):
         return False
     all_declared = value.get("all_declared", [])
@@ -141,7 +162,7 @@ def _is_module_api_surface_dict(value: object) -> bool:
     )
 
 
-def _is_class_metrics_dict(value: object) -> bool:
+def _is_class_metrics_dict(value: object) -> TypeGuard[ClassMetricsDict]:
     if not isinstance(value, dict):
         return False
     if not _has_typed_fields(
@@ -169,7 +190,7 @@ def _is_class_metrics_dict(value: object) -> bool:
     return _is_string_list(coupled_classes)
 
 
-def _is_module_dep_dict(value: object) -> bool:
+def _is_module_dep_dict(value: object) -> TypeGuard[ModuleDepDict]:
     if not isinstance(value, dict):
         return False
     return _has_typed_fields(
@@ -179,7 +200,7 @@ def _is_module_dep_dict(value: object) -> bool:
     )
 
 
-def _is_dead_candidate_dict(value: object) -> bool:
+def _is_dead_candidate_dict(value: object) -> TypeGuard[DeadCandidateDict]:
     if not isinstance(value, dict):
         return False
     if not _has_typed_fields(
@@ -194,7 +215,7 @@ def _is_dead_candidate_dict(value: object) -> bool:
     return _is_string_list(suppressed_rules)
 
 
-def _is_string_list(value: object) -> bool:
+def _is_string_list(value: object) -> TypeGuard[list[str]]:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 

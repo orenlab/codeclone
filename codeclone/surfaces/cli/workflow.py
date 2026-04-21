@@ -9,7 +9,6 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
-from typing import Any, Protocol, cast
 
 from ... import __version__
 from ... import ui_messages as ui
@@ -33,6 +32,7 @@ from ...core.discovery import discover
 from ...core.parallelism import process
 from ...core.pipeline import analyze
 from ...core.reporting import gate, report
+from ...models import MetricsDiff
 from ...report.html import build_html_report
 from . import report_meta as cli_meta_mod
 from . import state as cli_state
@@ -98,6 +98,7 @@ from .summary import (
     build_metrics_snapshot,
     build_summary_counts,
 )
+from .types import CLIArgsLike, StatusConsole, require_status_console
 
 __all__ = [
     "LEGACY_CACHE_PATH",
@@ -137,17 +138,13 @@ __all__ = [
 ]
 
 
-class _PrinterLike(Protocol):
-    def print(self, *objects: object, **kwargs: object) -> None: ...
-
-
 def _set_console(value: object) -> object:
     cli_state.set_console(value)
     return value
 
 
-def _console() -> _PrinterLike:
-    return cast("_PrinterLike", _set_console(console))
+def _console() -> StatusConsole:
+    return require_status_console(_set_console(console))
 
 
 def _make_console(*, no_color: bool) -> object:
@@ -164,21 +161,26 @@ def print_banner(*, root: Path | None = None) -> None:
     _print_banner_impl(root=root)
 
 
-def _configure_runtime_console(args: object) -> None:
+def _configure_runtime_console(args: CLIArgsLike) -> None:
     global console
     console = _configure_runtime_console_impl(
         args=args,
         make_plain_console=_make_plain_console,
         make_console=_make_console,
-        set_console=_set_console,
+        set_console=lambda value: cli_state.set_console(value),
     )
 
 
-def _resolve_cache_path(*, root_path: Path, args: object, from_args: bool) -> Path:
+def _resolve_cache_path(
+    *,
+    root_path: Path,
+    args: CLIArgsLike,
+    from_args: bool,
+) -> Path:
     cli_state.LEGACY_CACHE_PATH = LEGACY_CACHE_PATH
     _set_console(console)
     return _resolve_cache_path_impl(
-        root_path=cast("Any", root_path),
+        root_path=root_path,
         args=args,
         from_args=from_args,
     )
@@ -199,7 +201,7 @@ def _cache_update_segment_projection(cache: Cache, analysis: AnalysisResult) -> 
 
 def _run_analysis_stages(
     *,
-    args: object,
+    args: CLIArgsLike,
     boot: BootstrapResult,
     cache: Cache,
 ) -> tuple[DiscoveryResult, PipelineProcessingResult, AnalysisResult]:
@@ -228,7 +230,7 @@ def _enforce_gating(
     metrics_baseline_failure_code: ExitCode | None,
     new_func: set[str],
     new_block: set[str],
-    metrics_diff: object | None,
+    metrics_diff: MetricsDiff | None,
     html_report_path: str | None,
     clone_threshold_total: int | None = None,
 ) -> None:

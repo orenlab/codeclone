@@ -7,13 +7,17 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NoReturn, cast
+from typing import NoReturn
 
 from ... import ui_messages as ui
 from ...config.pyproject_loader import ConfigValidationError
 from ...contracts import ExitCode
+from .attrs import text_attr
+from .baseline_state import MetricsBaselineSectionProbe
+from .types import CLIArgsLike, ParserWithDefaults, StatusConsole
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +44,7 @@ def resolve_runtime_path_arg(
 def exit_contract_error(
     message: str,
     *,
-    printer: Any,
+    printer: StatusConsole,
     cause: BaseException | None = None,
 ) -> NoReturn:
     printer.print(ui.fmt_contract_error(message))
@@ -49,9 +53,9 @@ def exit_contract_error(
     raise SystemExit(ExitCode.CONTRACT_ERROR) from cause
 
 
-def resolve_existing_root_path(*, args: object, printer: Any) -> Path:
+def resolve_existing_root_path(*, args: object, printer: StatusConsole) -> Path:
     try:
-        root_path = Path(cast("Any", args).root).resolve()
+        root_path = Path(text_attr(args, "root", ".")).resolve()
     except OSError as exc:
         exit_contract_error(
             ui.ERR_INVALID_ROOT_PATH.format(error=exc),
@@ -69,37 +73,33 @@ def resolve_existing_root_path(*, args: object, printer: Any) -> Path:
 def load_pyproject_config_or_exit(
     *,
     root_path: Path,
-    load_pyproject_config_fn: Any,
-    printer: Any,
+    load_pyproject_config_fn: Callable[[Path], dict[str, object]],
+    printer: StatusConsole,
 ) -> dict[str, object]:
     try:
-        return cast("dict[str, object]", load_pyproject_config_fn(root_path))
+        return load_pyproject_config_fn(root_path)
     except ConfigValidationError as exc:
         exit_contract_error(str(exc), printer=printer, cause=exc)
 
 
-def configure_runtime_flags(args: object) -> None:
-    args_obj = cast("Any", args)
-    if args_obj.debug:
+def configure_runtime_flags(args: CLIArgsLike) -> None:
+    if args.debug:
         os.environ["CODECLONE_DEBUG"] = "1"
-    if args_obj.ci:
-        args_obj.fail_on_new = True
-        args_obj.no_color = True
-        args_obj.quiet = True
+    if args.ci:
+        args.fail_on_new = True
+        args.no_color = True
+        args.quiet = True
 
 
 def configure_runtime_console(
     *,
-    args: object,
-    make_plain_console: Any,
-    make_console: Any,
-    set_console: Any,
+    args: CLIArgsLike,
+    make_plain_console: Callable[[], object],
+    make_console: Callable[..., object],
+    set_console: Callable[[object], None],
 ) -> object:
-    args_obj = cast("Any", args)
     console = (
-        make_plain_console()
-        if args_obj.quiet
-        else make_console(no_color=args_obj.no_color)
+        make_plain_console() if args.quiet else make_console(no_color=args.no_color)
     )
     set_console(console)
     return console
@@ -107,9 +107,9 @@ def configure_runtime_console(
 
 def validate_numeric_args_or_exit(
     *,
-    args: object,
-    validate_numeric_args_fn: Any,
-    printer: Any,
+    args: CLIArgsLike,
+    validate_numeric_args_fn: Callable[[CLIArgsLike], bool],
+    printer: StatusConsole,
 ) -> None:
     if validate_numeric_args_fn(args):
         return
@@ -123,22 +123,19 @@ def validate_numeric_args_or_exit(
 
 def resolve_baseline_inputs(
     *,
-    ap: object,
-    args: object,
+    ap: ParserWithDefaults,
+    args: CLIArgsLike,
     root_path: Path,
     baseline_path_from_args: bool,
     metrics_path_from_args: bool,
-    probe_metrics_baseline_section_fn: Any,
-    printer: Any,
+    probe_metrics_baseline_section_fn: Callable[[Path], MetricsBaselineSectionProbe],
+    printer: StatusConsole,
 ) -> ResolvedBaselineInputs:
-    args_obj = cast("Any", args)
-    ap_obj = cast("Any", ap)
-
-    baseline_arg_path = Path(args_obj.baseline).expanduser()
+    baseline_arg_path = Path(text_attr(args, "baseline")).expanduser()
     try:
         baseline_path = resolve_runtime_path_arg(
             root_path=root_path,
-            raw_path=args_obj.baseline,
+            raw_path=text_attr(args, "baseline"),
             from_cli=baseline_path_from_args,
         )
         baseline_exists = baseline_path.exists()
@@ -150,12 +147,15 @@ def resolve_baseline_inputs(
         )
 
     shared_baseline_payload: dict[str, object] | None = None
-    default_metrics_baseline = ap_obj.get_default("metrics_baseline")
+    default_metrics_baseline = ap.get_default("metrics_baseline")
+    metrics_baseline_value = text_attr(args, "metrics_baseline")
     metrics_path_overridden = metrics_path_from_args or (
-        args_obj.metrics_baseline != default_metrics_baseline
+        metrics_baseline_value != str(default_metrics_baseline)
     )
     metrics_baseline_raw_path = (
-        args_obj.metrics_baseline if metrics_path_overridden else args_obj.baseline
+        metrics_baseline_value
+        if metrics_path_overridden
+        else text_attr(args, "baseline")
     )
     metrics_baseline_arg_path = Path(metrics_baseline_raw_path).expanduser()
     try:

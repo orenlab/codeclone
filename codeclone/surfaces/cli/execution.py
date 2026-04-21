@@ -8,9 +8,18 @@ from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Protocol, cast
+
+from rich.console import Console as RichConsole
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
 from ... import ui_messages as ui
 from ...cache.store import Cache
@@ -18,12 +27,12 @@ from ...contracts import ExitCode
 from ...contracts.errors import CacheError
 from ...core._types import AnalysisResult, BootstrapResult, DiscoveryResult
 from ...core._types import ProcessingResult as PipelineProcessingResult
+from ...core.reporting import GatingResult
+from ...models import MetricsDiff
 from . import state as cli_state
+from .attrs import bool_attr
 from .console import PlainConsole
-
-
-class _PrinterLike(Protocol):
-    def print(self, *objects: object, **kwargs: object) -> None: ...
+from .types import require_status_console
 
 
 def run_analysis_stages(
@@ -31,25 +40,35 @@ def run_analysis_stages(
     args: object,
     boot: BootstrapResult,
     cache: Cache,
-    discover_fn: Any,
-    process_fn: Any,
-    analyze_fn: Any,
-    print_failed_files_fn: Any,
-    cache_update_segment_projection_fn: Any,
-    rich_progress_symbols_fn: Any,
+    discover_fn: Callable[..., DiscoveryResult],
+    process_fn: Callable[..., PipelineProcessingResult],
+    analyze_fn: Callable[..., AnalysisResult],
+    print_failed_files_fn: Callable[[tuple[str, ...]], None],
+    cache_update_segment_projection_fn: Callable[[Cache, AnalysisResult], None],
+    rich_progress_symbols_fn: Callable[
+        [],
+        tuple[
+            type[Progress],
+            type[SpinnerColumn],
+            type[TextColumn],
+            type[BarColumn],
+            type[TimeElapsedColumn],
+        ],
+    ],
 ) -> tuple[DiscoveryResult, PipelineProcessingResult, AnalysisResult]:
-    def _require_rich_console(value: object) -> object:
+    def _require_rich_console(value: object) -> RichConsole:
         if isinstance(value, PlainConsole):
+            raise RuntimeError("Rich console is required when progress UI is enabled.")
+        if not isinstance(value, RichConsole):
             raise RuntimeError("Rich console is required when progress UI is enabled.")
         return value
 
-    args_obj = cast("Any", args)
-    printer = cast("_PrinterLike", cli_state.get_console())
-    use_status = not args_obj.quiet and not args_obj.no_progress
+    printer = require_status_console(cli_state.get_console())
+    use_status = not bool_attr(args, "quiet") and not bool_attr(args, "no_progress")
 
     try:
         if use_status:
-            with cast("Any", printer).status(ui.STATUS_DISCOVERING, spinner="dots"):
+            with printer.status(ui.STATUS_DISCOVERING, spinner="dots"):
                 discovery_result = discover_fn(boot=boot, cache=cache)
         else:
             discovery_result = discover_fn(boot=boot, cache=cache)
@@ -61,10 +80,14 @@ def run_analysis_stages(
         printer.print(f"[warning]{warning}[/warning]")
 
     total_files = len(discovery_result.files_to_process)
-    if total_files > 0 and not args_obj.quiet and args_obj.no_progress:
+    if (
+        total_files > 0
+        and not bool_attr(args, "quiet")
+        and bool_attr(args, "no_progress")
+    ):
         printer.print(ui.fmt_processing_changed(total_files))
 
-    if total_files > 0 and not args_obj.no_progress:
+    if total_files > 0 and not bool_attr(args, "no_progress"):
         (
             progress_cls,
             spinner_column_cls,
@@ -73,19 +96,15 @@ def run_analysis_stages(
             time_elapsed_column_cls,
         ) = rich_progress_symbols_fn()
 
-        progress_factory = cast("Any", progress_cls)
-        with progress_factory(
-            cast("Any", spinner_column_cls)(),
-            cast("Any", text_column_cls)("[progress.description]{task.description}"),
-            cast("Any", bar_column_cls)(),
-            cast("Any", text_column_cls)(
-                "[progress.percentage]{task.percentage:>3.0f}%"
-            ),
-            cast("Any", time_elapsed_column_cls)(),
+        with progress_cls(
+            spinner_column_cls(),
+            text_column_cls("[progress.description]{task.description}"),
+            bar_column_cls(),
+            text_column_cls("[progress.percentage]{task.percentage:>3.0f}%"),
+            time_elapsed_column_cls(),
             console=_require_rich_console(cli_state.get_console()),
         ) as progress_ui:
-            progress_ui_any = cast("Any", progress_ui)
-            task_id = progress_ui_any.add_task(
+            task_id = progress_ui.add_task(
                 f"Analyzing {total_files} files...",
                 total=total_files,
             )
@@ -93,7 +112,7 @@ def run_analysis_stages(
                 boot=boot,
                 discovery=discovery_result,
                 cache=cache,
-                on_advance=lambda: progress_ui_any.advance(task_id),
+                on_advance=lambda: progress_ui.advance(task_id),
                 on_worker_error=lambda reason: printer.print(
                     ui.fmt_worker_failed(reason)
                 ),
@@ -108,7 +127,7 @@ def run_analysis_stages(
             cache=cache,
             on_worker_error=(
                 (lambda reason: printer.print(ui.fmt_batch_item_failed(reason)))
-                if args_obj.no_progress
+                if bool_attr(args, "no_progress")
                 else (lambda reason: printer.print(ui.fmt_worker_failed(reason)))
             ),
             on_parallel_fallback=lambda exc: printer.print(
@@ -121,7 +140,7 @@ def run_analysis_stages(
         print_failed_files_fn(tuple(processing_result.source_read_failures))
 
     if use_status:
-        with cast("Any", printer).status(ui.STATUS_GROUPING, spinner="dots"):
+        with printer.status(ui.STATUS_GROUPING, spinner="dots"):
             analysis_result = analyze_fn(
                 boot=boot,
                 discovery=discovery_result,
@@ -166,16 +185,15 @@ def enforce_gating(
     metrics_baseline_failure_code: ExitCode | None,
     new_func: set[str],
     new_block: set[str],
-    metrics_diff: object | None,
+    metrics_diff: MetricsDiff | None,
     html_report_path: str | None,
-    gate_fn: Any,
-    parse_metric_reason_entry_fn: Any,
-    print_gating_failure_block_fn: Any,
-    print_verbose_clone_hashes_fn: Any,
+    gate_fn: Callable[..., GatingResult],
+    parse_metric_reason_entry_fn: Callable[[str], tuple[str, str]],
+    print_gating_failure_block_fn: Callable[..., None],
+    print_verbose_clone_hashes_fn: Callable[..., None],
     clone_threshold_total: int | None = None,
 ) -> None:
-    args_obj = cast("Any", args)
-    printer = cast("_PrinterLike", cli_state.get_console())
+    printer = require_status_console(cli_state.get_console())
 
     if source_read_contract_failure:
         printer.print(
@@ -203,7 +221,7 @@ def enforce_gating(
         )
         sys.exit(metrics_baseline_failure_code)
 
-    if bool(getattr(args_obj, "fail_on_untested_hotspots", False)):
+    if bool_attr(args, "fail_on_untested_hotspots"):
         if analysis.coverage_join is None:
             printer.print(
                 ui.fmt_contract_error(
@@ -238,7 +256,7 @@ def enforce_gating(
         analysis=gating_analysis,
         new_func=new_func,
         new_block=new_block,
-        metrics_diff=cast("Any", metrics_diff),
+        metrics_diff=metrics_diff,
     )
 
     metric_reasons = [
@@ -250,7 +268,7 @@ def enforce_gating(
         print_gating_failure_block_fn(
             code="metrics",
             entries=[parse_metric_reason_entry_fn(reason) for reason in metric_reasons],
-            args=args_obj,
+            args=args,
         )
         sys.exit(ExitCode.GATING_FAILURE)
 
@@ -270,10 +288,10 @@ def enforce_gating(
         print_gating_failure_block_fn(
             code="new-clones",
             entries=clone_entries,
-            args=args_obj,
+            args=args,
         )
 
-        if args_obj.verbose:
+        if bool_attr(args, "verbose"):
             print_verbose_clone_hashes_fn(
                 printer,
                 label="Function clone hashes",
@@ -303,16 +321,15 @@ def enforce_gating(
                 ("clone_groups_total", int(total_raw)),
                 ("clone_groups_limit", int(threshold_raw)),
             ),
-            args=args_obj,
+            args=args,
         )
         sys.exit(ExitCode.GATING_FAILURE)
 
 
 def print_pipeline_done_if_needed(*, args: object, run_started_at: float) -> None:
-    args_obj = cast("Any", args)
-    if args_obj.quiet:
+    if bool_attr(args, "quiet"):
         return
     elapsed = time.monotonic() - run_started_at
-    printer = cast("_PrinterLike", cli_state.get_console())
+    printer = require_status_console(cli_state.get_console())
     printer.print()
     printer.print(ui.fmt_pipeline_done(elapsed))

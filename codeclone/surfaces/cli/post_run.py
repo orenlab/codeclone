@@ -6,17 +6,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
 
 from ... import ui_messages as ui
 from ...baseline import Baseline
 from ...core._types import AnalysisResult
+from ...models import MetricsDiff
 from .baseline_state import CloneBaselineState, MetricsBaselineState
 from .changed_scope import ChangedCloneGate
 from .summary import ChangedScopeSnapshot
+from .types import CLIArgsLike, PrinterLike
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,7 +25,7 @@ class DiffContext:
     new_func: set[str]
     new_block: set[str]
     new_clones_count: int
-    metrics_diff: object | None
+    metrics_diff: MetricsDiff | None
     coverage_adoption_diff_available: bool
     api_surface_diff_available: bool
 
@@ -71,19 +72,19 @@ def build_diff_context(
 
 def print_metrics_if_available(
     *,
-    args: object,
+    args: CLIArgsLike,
     analysis: AnalysisResult,
-    metrics_diff: object | None,
+    metrics_diff: MetricsDiff | None,
     api_surface_diff_available: bool,
-    console: Any,
-    build_metrics_snapshot_fn: Any,
-    print_metrics_fn: Any,
+    console: PrinterLike,
+    build_metrics_snapshot_fn: Callable[..., object],
+    print_metrics_fn: Callable[..., None],
 ) -> None:
     if analysis.project_metrics is None:
         return
     print_metrics_fn(
         console=console,
-        quiet=bool(cast("Any", args).quiet),
+        quiet=args.quiet,
         metrics=build_metrics_snapshot_fn(
             analysis_result=analysis,
             metrics_diff=metrics_diff,
@@ -94,34 +95,31 @@ def print_metrics_if_available(
 
 def resolve_changed_clone_gate(
     *,
-    args: object,
+    args: CLIArgsLike,
     report_document: Mapping[str, object] | None,
     changed_paths: Collection[str],
-    changed_clone_gate_from_report_fn: Any,
+    changed_clone_gate_from_report_fn: Callable[..., ChangedCloneGate],
 ) -> ChangedCloneGate | None:
-    if not cast("Any", args).changed_only or report_document is None:
+    if not args.changed_only or report_document is None:
         return None
-    return cast(
-        "ChangedCloneGate",
-        changed_clone_gate_from_report_fn(
-            report_document,
-            changed_paths=tuple(changed_paths),
-        ),
+    return changed_clone_gate_from_report_fn(
+        report_document,
+        changed_paths=tuple(changed_paths),
     )
 
 
 def maybe_print_changed_scope_snapshot(
     *,
-    args: object,
+    args: CLIArgsLike,
     changed_clone_gate: ChangedCloneGate | None,
-    console: Any,
-    print_changed_scope_fn: Any,
+    console: PrinterLike,
+    print_changed_scope_fn: Callable[..., None],
 ) -> None:
     if changed_clone_gate is None:
         return
     print_changed_scope_fn(
         console=console,
-        quiet=bool(cast("Any", args).quiet),
+        quiet=args.quiet,
         changed_scope=ChangedScopeSnapshot(
             paths_count=len(changed_clone_gate.changed_paths),
             findings_total=changed_clone_gate.findings_total,
@@ -133,11 +131,10 @@ def maybe_print_changed_scope_snapshot(
 
 def warn_new_clones_without_fail(
     *,
-    args: object,
+    args: CLIArgsLike,
     notice_new_clones_count: int,
-    console: Any,
+    console: PrinterLike,
 ) -> None:
-    args_obj = cast("Any", args)
-    if args_obj.update_baseline or args_obj.fail_on_new or notice_new_clones_count <= 0:
+    if args.update_baseline or args.fail_on_new or notice_new_clones_count <= 0:
         return
     console.print(ui.WARN_NEW_CLONES_WITHOUT_FAIL)

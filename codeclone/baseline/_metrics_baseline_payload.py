@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any
 
 import orjson
 
@@ -205,33 +204,32 @@ def _build_payload(
     include_adoption: bool = True,
     api_surface_snapshot: ApiSurfaceSnapshot | None = None,
     api_surface_root: Path | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     payload_sha256 = _compute_payload_sha256(
         snapshot,
         include_adoption=include_adoption,
     )
-    payload: dict[str, Any] = {
-        "meta": {
-            "generator": {
-                "name": generator_name,
-                "version": generator_version,
-            },
-            "schema_version": schema_version,
-            "python_tag": python_tag,
-            "created_at": created_at,
-            "payload_sha256": payload_sha256,
+    meta: dict[str, object] = {
+        "generator": {
+            "name": generator_name,
+            "version": generator_version,
         },
+        "schema_version": schema_version,
+        "python_tag": python_tag,
+        "created_at": created_at,
+        "payload_sha256": payload_sha256,
+    }
+    payload: dict[str, object] = {
+        "meta": meta,
         "metrics": _snapshot_payload(
             snapshot,
             include_adoption=include_adoption,
         ),
     }
     if api_surface_snapshot is not None:
-        payload["meta"][_API_SURFACE_PAYLOAD_SHA256_KEY] = (
-            _compute_api_surface_payload_sha256(
-                api_surface_snapshot,
-                root=api_surface_root,
-            )
+        meta[_API_SURFACE_PAYLOAD_SHA256_KEY] = _compute_api_surface_payload_sha256(
+            api_surface_snapshot,
+            root=api_surface_root,
         )
         payload["api_surface"] = _api_surface_snapshot_payload(
             api_surface_snapshot,

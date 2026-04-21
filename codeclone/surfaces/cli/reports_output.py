@@ -10,16 +10,20 @@ import sys
 import webbrowser
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Protocol
 
 from ... import ui_messages as ui
 from ...contracts import ExitCode
 from . import state as cli_state
-from .types import OutputPaths, ReportPathOrigin
-
-
-class _PrinterLike(Protocol):
-    def print(self, *objects: object, **kwargs: object) -> None: ...
+from .attrs import bool_attr, optional_text_attr
+from .types import (
+    CLIArgsLike,
+    OutputPaths,
+    PrinterLike,
+    ReportArtifacts,
+    ReportPathOrigin,
+    require_status_console,
+)
 
 
 class _QuietArgs(Protocol):
@@ -41,7 +45,7 @@ def _write_report_output(
     out: Path,
     content: str,
     label: str,
-    console: _PrinterLike,
+    console: PrinterLike,
 ) -> None:
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -63,9 +67,9 @@ def _open_html_report_in_browser(*, path: Path) -> None:
 def write_report_outputs(
     *,
     args: _QuietArgs,
-    output_paths: object,
-    report_artifacts: object,
-    console: _PrinterLike,
+    output_paths: OutputPaths,
+    report_artifacts: ReportArtifacts,
+    console: PrinterLike,
     open_html_report: bool = False,
 ) -> str | None:
     html_report_path: str | None = None
@@ -156,7 +160,7 @@ def _validate_output_path(
     *,
     expected_suffix: str,
     label: str,
-    console: _PrinterLike,
+    console: PrinterLike,
     invalid_message: Callable[..., str],
     invalid_path_message: Callable[..., str],
 ) -> Path:
@@ -233,13 +237,12 @@ def _timestamped_report_path(path: Path, *, report_generated_at_utc: str) -> Pat
 
 
 def _resolve_output_paths(
-    args: object,
+    args: CLIArgsLike,
     *,
     report_path_origins: Mapping[str, ReportPathOrigin | None],
     report_generated_at_utc: str,
 ) -> OutputPaths:
-    args_obj = cast("Any", args)
-    printer = cast("_PrinterLike", cli_state.get_console())
+    printer = require_status_console(cli_state.get_console())
     resolved: dict[str, Path | None] = {
         "html": None,
         "json": None,
@@ -256,7 +259,7 @@ def _resolve_output_paths(
     )
 
     for field_name, arg_name, expected_suffix, label in output_specs:
-        raw_value = getattr(args_obj, arg_name, None)
+        raw_value = optional_text_attr(args, arg_name)
         if not raw_value:
             continue
         path = _validate_output_path(
@@ -268,7 +271,7 @@ def _resolve_output_paths(
             invalid_path_message=ui.fmt_invalid_output_path,
         )
         if (
-            args_obj.timestamped_report_paths
+            args.timestamped_report_paths
             and report_path_origins.get(field_name) == "default"
         ):
             path = _timestamped_report_path(
@@ -287,13 +290,12 @@ def _resolve_output_paths(
 
 
 def _validate_report_ui_flags(*, args: object, output_paths: OutputPaths) -> None:
-    args_obj = cast("Any", args)
-    console = cast("_PrinterLike", cli_state.get_console())
-    if args_obj.open_html_report and output_paths.html is None:
+    console = require_status_console(cli_state.get_console())
+    if bool_attr(args, "open_html_report") and output_paths.html is None:
         console.print(ui.fmt_contract_error(ui.ERR_OPEN_HTML_REPORT_REQUIRES_HTML))
         sys.exit(ExitCode.CONTRACT_ERROR)
 
-    if args_obj.timestamped_report_paths and not any(
+    if bool_attr(args, "timestamped_report_paths") and not any(
         (
             output_paths.html,
             output_paths.json,
@@ -310,15 +312,15 @@ def _validate_report_ui_flags(*, args: object, output_paths: OutputPaths) -> Non
 
 def _write_report_outputs(
     *,
-    args: object,
+    args: CLIArgsLike,
     output_paths: OutputPaths,
-    report_artifacts: object,
+    report_artifacts: ReportArtifacts,
     open_html_report: bool = False,
 ) -> str | None:
     return write_report_outputs(
-        args=cast("Any", args),
+        args=args,
         output_paths=output_paths,
         report_artifacts=report_artifacts,
-        console=cast("_PrinterLike", cli_state.get_console()),
+        console=require_status_console(cli_state.get_console()),
         open_html_report=open_html_report,
     )

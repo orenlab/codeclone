@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+from collections.abc import Mapping, Sequence
 
 from ..cache.store import Cache, file_stat_signature
 from ..models import (
@@ -53,6 +53,10 @@ DiscoveryBuffers = tuple[
     list[str],
     list[str],
 ]
+
+
+def _group_items_from_cache(rows: Sequence[Mapping[str, object]]) -> list[GroupItem]:
+    return [dict(row) for row in rows]
 
 
 def _new_discovery_buffers() -> DiscoveryBuffers:
@@ -118,13 +122,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
             cached_source_stats_by_file.append(
                 (filepath, lines, functions, methods, classes)
             )
-            cached_units.extend(cast("list[GroupItem]", cast(object, cached["units"])))
-            cached_blocks.extend(
-                cast("list[GroupItem]", cast(object, cached["blocks"]))
-            )
-            cached_segments.extend(
-                cast("list[GroupItem]", cast(object, cached["segments"]))
-            )
+            cached_units.extend(_group_items_from_cache(cached["units"]))
+            cached_blocks.extend(_group_items_from_cache(cached["blocks"]))
+            cached_segments.extend(_group_items_from_cache(cached["segments"]))
             if not boot.args.skip_metrics:
                 (
                     class_metrics,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final, Literal, cast
+from typing import Final, Literal
 
 from .. import ui_messages as ui
 from ..contracts import (
@@ -104,8 +104,10 @@ def _option(
         resolved_pyproject_key = None
     elif pyproject_key is _INFER_PYPROJECT_KEY:
         resolved_pyproject_key = dest
+    elif pyproject_key is None or isinstance(pyproject_key, str):
+        resolved_pyproject_key = pyproject_key
     else:
-        resolved_pyproject_key = cast("str | None", pyproject_key)
+        raise TypeError("pyproject_key must be str | None when pyproject_type is set")
     return OptionSpec(
         dest=dest,
         group=group,
