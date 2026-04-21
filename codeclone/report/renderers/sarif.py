@@ -52,7 +52,6 @@ from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
-from ..document.builder import build_report_document
 
 if TYPE_CHECKING:
     from ...models import StructuralFindingGroup, Suggestion
@@ -973,20 +972,24 @@ def to_sarif_report(
     suggestions: Collection[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
 ) -> str:
-    payload = report_document or build_report_document(
-        func_groups=func_groups,
-        block_groups=block_groups,
-        segment_groups=segment_groups,
-        meta=meta,
-        inventory=inventory,
-        block_facts=block_facts or {},
-        new_function_group_keys=new_function_group_keys,
-        new_block_group_keys=new_block_group_keys,
-        new_segment_group_keys=new_segment_group_keys,
-        metrics=metrics,
-        suggestions=tuple(suggestions or ()),
-        structural_findings=tuple(structural_findings or ()),
-    )
+    payload = report_document
+    if payload is None:
+        from ..document.builder import build_report_document
+
+        payload = build_report_document(
+            func_groups=func_groups,
+            block_groups=block_groups,
+            segment_groups=segment_groups,
+            meta=meta,
+            inventory=inventory,
+            block_facts=block_facts or {},
+            new_function_group_keys=new_function_group_keys,
+            new_block_group_keys=new_block_group_keys,
+            new_segment_group_keys=new_segment_group_keys,
+            metrics=metrics,
+            suggestions=tuple(suggestions or ()),
+            structural_findings=tuple(structural_findings or ()),
+        )
     return render_sarif_report_document(payload)
 
 

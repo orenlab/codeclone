@@ -8,16 +8,17 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
-
-if TYPE_CHECKING:
-    from ..session import MCPSession
+from typing import Protocol
 
 
 @dataclass(frozen=True, slots=True)
 class MCPToolSchema:
     title: str
     description: str = ""
+
+
+class MCPToolSession(Protocol):
+    def __getattr__(self, name: str) -> Callable[..., object]: ...
 
 
 class MCPTool(Protocol):
@@ -27,16 +28,16 @@ class MCPTool(Protocol):
     @property
     def schema(self) -> MCPToolSchema: ...
 
-    def run(self, session: MCPSession, params: Mapping[str, object]) -> object: ...
+    def run(self, session: MCPToolSession, params: Mapping[str, object]) -> object: ...
 
 
 @dataclass(frozen=True, slots=True)
 class SimpleMCPTool:
     name: str
     schema: MCPToolSchema
-    runner: Callable[[MCPSession, Mapping[str, object]], object]
+    runner: Callable[[MCPToolSession, Mapping[str, object]], object]
 
-    def run(self, session: MCPSession, params: Mapping[str, object]) -> object:
+    def run(self, session: MCPToolSession, params: Mapping[str, object]) -> object:
         return self.runner(session, params)
 
 

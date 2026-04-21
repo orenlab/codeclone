@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 from ...domain.findings import FAMILY_CLONE, FAMILY_DEAD_CODE, FAMILY_STRUCTURAL
 from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
 from .._formatting import format_spread_text
-from ..document.builder import build_report_document
 
 if TYPE_CHECKING:
     from ...models import StructuralFindingGroup, Suggestion, SuppressedCloneGroup
@@ -641,21 +640,25 @@ def to_markdown_report(
     suggestions: Collection[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
 ) -> str:
-    payload = report_document or build_report_document(
-        func_groups=func_groups,
-        block_groups=block_groups,
-        segment_groups=segment_groups,
-        meta=meta,
-        inventory=inventory,
-        block_facts=block_facts or {},
-        new_function_group_keys=new_function_group_keys,
-        new_block_group_keys=new_block_group_keys,
-        new_segment_group_keys=new_segment_group_keys,
-        suppressed_clone_groups=suppressed_clone_groups,
-        metrics=metrics,
-        suggestions=tuple(suggestions or ()),
-        structural_findings=tuple(structural_findings or ()),
-    )
+    payload = report_document
+    if payload is None:
+        from ..document.builder import build_report_document
+
+        payload = build_report_document(
+            func_groups=func_groups,
+            block_groups=block_groups,
+            segment_groups=segment_groups,
+            meta=meta,
+            inventory=inventory,
+            block_facts=block_facts or {},
+            new_function_group_keys=new_function_group_keys,
+            new_block_group_keys=new_block_group_keys,
+            new_segment_group_keys=new_segment_group_keys,
+            suppressed_clone_groups=suppressed_clone_groups,
+            metrics=metrics,
+            suggestions=tuple(suggestions or ()),
+            structural_findings=tuple(structural_findings or ()),
+        )
     return render_markdown_report_document(payload)
 
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Mapping
 
 from ..models import MetricsDiff
-from ..report.document.builder import build_report_document
 from ..report.gates.evaluator import GateResult, GateState
 from ..report.gates.evaluator import MetricGateConfig as _MetricGateConfig
 from ..report.gates.evaluator import evaluate_gate_state as _evaluate_gate_state
@@ -45,6 +44,12 @@ def _load_sarif_report_renderer() -> Callable[..., str]:
     from ..report.renderers.sarif import to_sarif_report
 
     return to_sarif_report
+
+
+def _load_report_document_builder() -> Callable[..., dict[str, object]]:
+    from ..report.document.builder import build_report_document
+
+    return build_report_document
 
 
 def report(
@@ -103,6 +108,7 @@ def report(
         )
     )
     if needs_report_document:
+        build_report_document = _load_report_document_builder()
         validated_metrics_diff = _coerce_metrics_diff(metrics_diff)
         metrics_for_report = (
             _enrich_metrics_report_payload(
