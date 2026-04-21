@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from json import JSONDecodeError
 from pathlib import Path
 
@@ -75,15 +74,6 @@ from .versioning import (
 )
 
 
-def _default_max_cache_size_bytes() -> int:
-    public_module = sys.modules.get("codeclone.cache")
-    if public_module is not None:
-        candidate = getattr(public_module, "MAX_CACHE_SIZE_BYTES", MAX_CACHE_SIZE_BYTES)
-        if isinstance(candidate, int):
-            return candidate
-    return MAX_CACHE_SIZE_BYTES
-
-
 class Cache:
     __slots__ = (
         "_canonical_runtime_paths",
@@ -141,9 +131,7 @@ class Cache:
         self.load_status = CacheStatus.MISSING
         self.load_warning: str | None = self.legacy_secret_warning
         self.max_size_bytes = (
-            _default_max_cache_size_bytes()
-            if max_size_bytes is None
-            else max_size_bytes
+            MAX_CACHE_SIZE_BYTES if max_size_bytes is None else max_size_bytes
         )
         self.segment_report_projection: SegmentReportProjection | None = None
         self._dirty: bool = True

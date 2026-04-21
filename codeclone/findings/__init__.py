@@ -3,19 +3,3 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
-
-from __future__ import annotations
-
-from .ids import (
-    clone_group_id,
-    dead_code_group_id,
-    design_group_id,
-    structural_group_id,
-)
-
-__all__ = [
-    "clone_group_id",
-    "dead_code_group_id",
-    "design_group_id",
-    "structural_group_id",
-]

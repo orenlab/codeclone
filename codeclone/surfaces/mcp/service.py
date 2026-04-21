@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Mapping
 from typing import Any, cast
 
 from .session import (
@@ -15,110 +14,110 @@ from .session import (
     MCPGateRequest,
     MCPSession,
 )
-from .tools import MCP_TOOLS_BY_NAME
-from .tools._base import MCPTool
+from .tools._base import run_kw
 
 
-class CodeCloneMCPService:
+class CodeCloneMCPService(MCPSession):
     def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
-        self.session = MCPSession(history_limit=history_limit)
-        self._tools: Mapping[str, MCPTool] = MCP_TOOLS_BY_NAME
+        super().__init__(history_limit=history_limit)
+        # Keep a stable seam for tests and monkeypatch-based callers while the
+        # service itself now owns the real MCP session state.
+        self.session = self
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.session, name)
+    def _run_session_method(
+        self,
+        name: str,
+        /,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        method = cast("Any", getattr(MCPSession, name))
+        return method(self, *args, **kwargs)
 
-    def _dispatch(self, name: str, **params: object) -> object:
-        return self._tools[name].run(self.session, params)
+    def _session_bound_method(self, name: str) -> object:
+        return cast("Any", getattr(MCPSession, name)).__get__(self, MCPSession)
+
+    def _run_dict(self, name: str, **params: object) -> dict[str, object]:
+        bound = self._session_bound_method(name)
+        return cast("dict[str, object]", run_kw(bound, params))
 
     def analyze_repository(self, request: MCPAnalysisRequest) -> dict[str, object]:
         return cast(
             "dict[str, object]",
-            self._dispatch("analyze_repository", request=request),
+            self._run_session_method("analyze_repository", request),
         )
 
     def analyze_changed_paths(self, request: MCPAnalysisRequest) -> dict[str, object]:
         return cast(
             "dict[str, object]",
-            self._dispatch("analyze_changed_paths", request=request),
+            self._run_session_method("analyze_changed_paths", request),
         )
 
     def get_run_summary(self, run_id: str | None = None) -> dict[str, object]:
         return cast(
             "dict[str, object]",
-            self._dispatch("get_run_summary", run_id=run_id),
+            self._run_session_method("get_run_summary", run_id),
         )
 
     def compare_runs(self, **params: object) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("compare_runs", **params))
+        return self._run_dict("compare_runs", **params)
 
     def evaluate_gates(self, request: MCPGateRequest) -> dict[str, object]:
         return cast(
             "dict[str, object]",
-            self._dispatch("evaluate_gates", request=request),
+            self._run_session_method("evaluate_gates", request),
         )
 
     def get_report_section(self, **params: object) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("get_report_section", **params))
+        return self._run_dict("get_report_section", **params)
 
     def list_findings(self, **params: object) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("list_findings", **params))
+        return self._run_dict("list_findings", **params)
 
     def get_finding(self, **params: object) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("get_finding", **params))
+        return self._run_dict("get_finding", **params)
 
     def get_remediation(self, **params: object) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("get_remediation", **params))
+        return self._run_dict("get_remediation", **params)
 
     def list_hotspots(self, **params: object) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("list_hotspots", **params))
+        return self._run_dict("list_hotspots", **params)
 
     def get_production_triage(self, **params: object) -> dict[str, object]:
-        return cast(
-            "dict[str, object]",
-            self._dispatch("get_production_triage", **params),
-        )
+        return self._run_dict("get_production_triage", **params)
 
     def get_help(self, **params: object) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("help", **params))
+        return self._run_dict("get_help", **params)
 
     def generate_pr_summary(self, **params: object) -> dict[str, object]:
-        return cast(
-            "dict[str, object]",
-            self._dispatch("generate_pr_summary", **params),
-        )
+        return self._run_dict("generate_pr_summary", **params)
 
     def mark_finding_reviewed(self, **params: object) -> dict[str, object]:
-        return cast(
-            "dict[str, object]",
-            self._dispatch("mark_finding_reviewed", **params),
-        )
+        return self._run_dict("mark_finding_reviewed", **params)
 
     def list_reviewed_findings(self, **params: object) -> dict[str, object]:
-        return cast(
-            "dict[str, object]",
-            self._dispatch("list_reviewed_findings", **params),
-        )
+        return self._run_dict("list_reviewed_findings", **params)
 
     def clear_session_runs(self) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("clear_session_runs"))
+        return cast("dict[str, object]", self._run_session_method("clear_session_runs"))
 
     def check_complexity(self, **params: object) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("check_complexity", **params))
+        return self._run_dict("check_complexity", **params)
 
     def check_clones(self, **params: object) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("check_clones", **params))
+        return self._run_dict("check_clones", **params)
 
     def check_coupling(self, **params: object) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("check_coupling", **params))
+        return self._run_dict("check_coupling", **params)
 
     def check_cohesion(self, **params: object) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("check_cohesion", **params))
+        return self._run_dict("check_cohesion", **params)
 
     def check_dead_code(self, **params: object) -> dict[str, object]:
-        return cast("dict[str, object]", self._dispatch("check_dead_code", **params))
+        return self._run_dict("check_dead_code", **params)
 
     def read_resource(self, uri: str) -> str:
-        return self.session.read_resource(uri)
+        return cast("str", self._run_session_method("read_resource", uri))
 
 
 _EMPTY = inspect.Signature.empty

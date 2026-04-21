@@ -23,7 +23,7 @@ from ...domain.quality import (
 from ...domain.source_scope import (
     SOURCE_KIND_OTHER,
 )
-from ...metrics import METRIC_FAMILIES
+from ...metrics.registry import METRIC_FAMILIES
 from ...suppressions import INLINE_CODECLONE_SUPPRESSION_SOURCE
 from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int

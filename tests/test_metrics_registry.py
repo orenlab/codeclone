@@ -6,7 +6,8 @@
 
 from __future__ import annotations
 
-from codeclone.metrics import METRIC_FAMILIES, MetricFamily
+from codeclone.metrics._base import MetricFamily
+from codeclone.metrics.registry import METRIC_FAMILIES
 
 
 def test_registered_metric_families_define_contract_metadata() -> None:

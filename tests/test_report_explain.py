@@ -8,7 +8,7 @@ import ast
 from pathlib import Path
 
 import codeclone.report.explain as explain_mod
-from codeclone.report import build_block_group_facts
+from codeclone.report.explain import build_block_group_facts
 from tests._report_fixtures import (
     repeated_block_group_key,
     write_repeated_assert_source,

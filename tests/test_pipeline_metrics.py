@@ -12,7 +12,7 @@ from typing import cast
 
 import pytest
 
-from codeclone.cache import (
+from codeclone.cache.entries import (
     ApiParamSpecDict,
     CacheEntry,
     ModuleApiSurfaceDict,
@@ -44,7 +44,7 @@ from codeclone.core.metrics_payload import (
 )
 from codeclone.core.parallelism import _should_use_parallel
 from codeclone.core.pipeline import compute_project_metrics
-from codeclone.metrics import build_overloaded_modules_payload
+from codeclone.metrics.overloaded_modules import build_overloaded_modules_payload
 from codeclone.models import (
     ApiBreakingChange,
     ApiParamSpec,
@@ -63,7 +63,7 @@ from codeclone.models import (
     PublicSymbol,
     UnitCoverageFact,
 )
-from codeclone.report.gates import (
+from codeclone.report.gates.evaluator import (
     MetricGateConfig,
     gate_state_from_project_metrics,
     metric_gate_reasons_for_state,

@@ -14,20 +14,65 @@ from typing import Any, cast
 
 import pytest
 
-import codeclone.cache as cache_mod
-from codeclone.blocks import BlockUnit, SegmentUnit
-from codeclone.cache import Cache, CacheStatus
+import codeclone.cache.store as cache_store
+from codeclone.cache._canonicalize import (
+    _as_module_api_surface_dict,
+    _as_module_docstring_coverage_dict,
+    _as_module_typing_coverage_dict,
+    _canonicalize_cache_entry,
+    _has_cache_entry_container_shape,
+)
+from codeclone.cache._validators import (
+    _is_api_param_spec_dict,
+    _is_class_metrics_dict,
+    _is_dead_candidate_dict,
+    _is_module_dep_dict,
+    _is_public_symbol_dict,
+)
+from codeclone.cache._wire_decode import (
+    _decode_optional_wire_api_surface,
+    _decode_optional_wire_module_ints,
+    _decode_optional_wire_source_stats,
+    _decode_wire_api_param_spec,
+    _decode_wire_api_surface_symbol,
+    _decode_wire_block,
+    _decode_wire_class_metric,
+    _decode_wire_dead_candidate,
+    _decode_wire_file_entry,
+    _decode_wire_file_sections,
+    _decode_wire_module_dep,
+    _decode_wire_name_sections,
+    _decode_wire_segment,
+    _decode_wire_unit,
+)
+from codeclone.cache._wire_encode import _encode_wire_file_entry
+from codeclone.cache._wire_helpers import (
+    _decode_optional_wire_coupled_classes,
+    _decode_wire_int_fields,
+    _decode_wire_qualname_span_size,
+)
+from codeclone.cache.entries import (
+    CacheEntry,
+    _block_dict_from_model,
+    _segment_dict_from_model,
+    _unit_dict_from_model,
+)
+from codeclone.cache.integrity import as_str_dict as _as_str_dict
 from codeclone.cache.integrity import sign_cache_payload
 from codeclone.cache.projection import (
     runtime_filepath_from_wire,
     wire_filepath_from_runtime,
 )
+from codeclone.cache.store import Cache, file_stat_signature
+from codeclone.cache.versioning import CacheStatus, _as_analysis_profile, _resolve_root
 from codeclone.contracts.errors import CacheError
 from codeclone.models import (
     ApiParamSpec,
+    BlockUnit,
     FileMetrics,
     ModuleApiSurface,
     PublicSymbol,
+    SegmentUnit,
     Unit,
 )
 
@@ -231,7 +276,7 @@ def test_cache_load_normalizes_stale_structural_findings(tmp_path: Path) -> None
     )
     payload = _analysis_payload(
         cache,
-        files={"x.py": cache_mod._encode_wire_file_entry(entry)},
+        files={"x.py": _encode_wire_file_entry(entry)},
     )
     signature = sign_cache_payload(payload)
     cache_path.write_text(
@@ -292,7 +337,7 @@ def test_store_canonical_file_entry_marks_dirty_only_when_entry_changes(
     cache = Cache(tmp_path / "cache.json")
     canonical_entry = cast(
         Any,
-        cache_mod._canonicalize_cache_entry(
+        _canonicalize_cache_entry(
             {
                 "stat": {"mtime_ns": 1, "size": 1},
                 "units": [],
@@ -327,11 +372,11 @@ def test_store_canonical_file_entry_marks_dirty_only_when_entry_changes(
 
 
 def test_cache_helper_type_guards_and_wire_api_decoders_cover_invalid_inputs() -> None:
-    assert cache_mod._as_module_typing_coverage_dict({"module": "pkg"}) is None
-    assert cache_mod._as_module_docstring_coverage_dict({"module": "pkg"}) is None
-    assert cache_mod._as_module_api_surface_dict({"module": "pkg"}) is None
+    assert _as_module_typing_coverage_dict({"module": "pkg"}) is None
+    assert _as_module_docstring_coverage_dict({"module": "pkg"}) is None
+    assert _as_module_api_surface_dict({"module": "pkg"}) is None
     assert (
-        cache_mod._has_cache_entry_container_shape(
+        _has_cache_entry_container_shape(
             {
                 "stat": {"mtime_ns": 1, "size": 1},
                 "units": [],
@@ -343,7 +388,7 @@ def test_cache_helper_type_guards_and_wire_api_decoders_cover_invalid_inputs() -
         is False
     )
     assert (
-        cache_mod._has_cache_entry_container_shape(
+        _has_cache_entry_container_shape(
             {
                 "stat": {"mtime_ns": 1, "size": 1},
                 "units": [],
@@ -355,7 +400,7 @@ def test_cache_helper_type_guards_and_wire_api_decoders_cover_invalid_inputs() -
         is False
     )
     assert (
-        cache_mod._has_cache_entry_container_shape(
+        _has_cache_entry_container_shape(
             {
                 "stat": {"mtime_ns": 1, "size": 1},
                 "units": [],
@@ -367,14 +412,14 @@ def test_cache_helper_type_guards_and_wire_api_decoders_cover_invalid_inputs() -
         is False
     )
     assert (
-        cache_mod._decode_optional_wire_api_surface(
+        _decode_optional_wire_api_surface(
             obj={"as": ["pkg.mod", ["run"], [None]]},
             filepath="pkg/mod.py",
         )
         is None
     )
     assert (
-        cache_mod._decode_optional_wire_module_ints(
+        _decode_optional_wire_module_ints(
             obj={"tc": ["pkg.mod", "bad"]},
             key="tc",
             expected_len=2,
@@ -382,18 +427,18 @@ def test_cache_helper_type_guards_and_wire_api_decoders_cover_invalid_inputs() -
         )
         is None
     )
-    assert cache_mod._decode_wire_api_surface_symbol(["pkg.mod:run"]) is None
+    assert _decode_wire_api_surface_symbol(["pkg.mod:run"]) is None
     assert (
-        cache_mod._decode_wire_api_surface_symbol(
+        _decode_wire_api_surface_symbol(
             ["pkg.mod:run", "function", 1, 2, "name", "", [None]]
         )
         is None
     )
-    assert cache_mod._decode_wire_api_param_spec(["value"]) is None
-    assert cache_mod._is_api_param_spec_dict([]) is False
-    assert cache_mod._is_public_symbol_dict([]) is False
+    assert _decode_wire_api_param_spec(["value"]) is None
+    assert _is_api_param_spec_dict([]) is False
+    assert _is_public_symbol_dict([]) is False
     assert (
-        cache_mod._is_public_symbol_dict(
+        _is_public_symbol_dict(
             {
                 "qualname": "pkg.mod:run",
                 "kind": "function",
@@ -472,14 +517,12 @@ def test_cache_signature_validation_ignores_json_whitespace(tmp_path: Path) -> N
 
 
 def test_decode_wire_file_and_name_section_helpers_cover_valid_and_invalid() -> None:
-    encoded = cache_mod._encode_wire_file_entry(
+    encoded = _encode_wire_file_entry(
         {
             "stat": {"mtime_ns": 1, "size": 10},
-            "units": [cache_mod._unit_dict_from_model(_make_unit("x.py"), "x.py")],
-            "blocks": [cache_mod._block_dict_from_model(_make_block("x.py"), "x.py")],
-            "segments": [
-                cache_mod._segment_dict_from_model(_make_segment("x.py"), "x.py")
-            ],
+            "units": [_unit_dict_from_model(_make_unit("x.py"), "x.py")],
+            "blocks": [_block_dict_from_model(_make_block("x.py"), "x.py")],
+            "segments": [_segment_dict_from_model(_make_segment("x.py"), "x.py")],
             "class_metrics": [],
             "module_deps": [],
             "dead_candidates": [],
@@ -491,7 +534,7 @@ def test_decode_wire_file_and_name_section_helpers_cover_valid_and_invalid() -> 
     )
     assert isinstance(encoded, dict)
 
-    file_sections = cache_mod._decode_wire_file_sections(obj=encoded, filepath="x.py")
+    file_sections = _decode_wire_file_sections(obj=encoded, filepath="x.py")
     assert file_sections is not None
     units, blocks, segments, class_metrics, module_deps, dead_candidates = file_sections
     assert units[0]["qualname"] == "mod:func"
@@ -501,7 +544,7 @@ def test_decode_wire_file_and_name_section_helpers_cover_valid_and_invalid() -> 
     assert module_deps == []
     assert dead_candidates == []
 
-    name_sections = cache_mod._decode_wire_name_sections(obj=encoded)
+    name_sections = _decode_wire_name_sections(obj=encoded)
     assert name_sections == (
         ["used"],
         ["pkg.mod:used"],
@@ -512,7 +555,7 @@ def test_decode_wire_file_and_name_section_helpers_cover_valid_and_invalid() -> 
     invalid_sections = dict(encoded)
     invalid_sections["u"] = "bad"
     assert (
-        cache_mod._decode_wire_file_sections(
+        _decode_wire_file_sections(
             obj=invalid_sections,
             filepath="x.py",
         )
@@ -521,7 +564,7 @@ def test_decode_wire_file_and_name_section_helpers_cover_valid_and_invalid() -> 
 
     invalid_names = dict(encoded)
     invalid_names["rn"] = 1
-    assert cache_mod._decode_wire_name_sections(obj=invalid_names) is None
+    assert _decode_wire_name_sections(obj=invalid_names) is None
 
 
 def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
@@ -585,7 +628,7 @@ def test_cache_v_field_version_mismatch_warns(tmp_path: Path, version: str) -> N
 def test_cache_too_large_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cache_path = tmp_path / "cache.json"
     cache_path.write_text(json.dumps({"version": Cache._CACHE_VERSION, "files": {}}))
-    monkeypatch.setattr(cache_mod, "MAX_CACHE_SIZE_BYTES", 1)
+    monkeypatch.setattr(cache_store, "MAX_CACHE_SIZE_BYTES", 1)
     cache = Cache(cache_path)
     cache.load()
     assert cache.load_warning is not None
@@ -822,7 +865,7 @@ def test_cache_entry_not_dict(tmp_path: Path) -> None:
 def test_file_stat_signature(tmp_path: Path) -> None:
     file_path = tmp_path / "x.py"
     file_path.write_text("print('x')\n", "utf-8")
-    stat = cache_mod.file_stat_signature(str(file_path))
+    stat = file_stat_signature(str(file_path))
     assert stat["size"] == file_path.stat().st_size
     assert isinstance(stat["mtime_ns"], int)
 
@@ -1266,7 +1309,7 @@ def test_runtime_filepath_from_wire_resolve_oserror(
 
 
 def test_as_str_dict_rejects_non_string_keys() -> None:
-    assert cache_mod._as_str_dict({1: "x"}) is None
+    assert _as_str_dict({1: "x"}) is None
 
 
 @pytest.mark.parametrize(
@@ -1285,31 +1328,29 @@ def test_as_str_dict_rejects_non_string_keys() -> None:
     ],
 )
 def test_decode_wire_file_entry_invalid_variants(entry: object, filepath: str) -> None:
-    assert cache_mod._decode_wire_file_entry(entry, filepath) is None
+    assert _decode_wire_file_entry(entry, filepath) is None
 
 
 def test_decode_wire_item_type_failures() -> None:
-    assert cache_mod._decode_wire_unit(["q", 1, 2, 3, 4, "fp"], "x.py") is None
-    assert cache_mod._decode_wire_unit(["q", 1, 2, 3, 4, "fp", "0-19"], "x.py") is None
-    assert (
-        cache_mod._decode_wire_unit(["q", "1", 2, 3, 4, "fp", "0-19"], "x.py") is None
-    )
-    assert cache_mod._decode_wire_block(["q", 1, 2, 3], "x.py") is None
-    assert cache_mod._decode_wire_block(["q", 1, 2, "4", "hash"], "x.py") is None
-    assert cache_mod._decode_wire_segment(["q", 1, 2, 3, "h"], "x.py") is None
-    assert cache_mod._decode_wire_segment(["q", 1, 2, "3", "h", "sig"], "x.py") is None
+    assert _decode_wire_unit(["q", 1, 2, 3, 4, "fp"], "x.py") is None
+    assert _decode_wire_unit(["q", 1, 2, 3, 4, "fp", "0-19"], "x.py") is None
+    assert _decode_wire_unit(["q", "1", 2, 3, 4, "fp", "0-19"], "x.py") is None
+    assert _decode_wire_block(["q", 1, 2, 3], "x.py") is None
+    assert _decode_wire_block(["q", 1, 2, "4", "hash"], "x.py") is None
+    assert _decode_wire_segment(["q", 1, 2, 3, "h"], "x.py") is None
+    assert _decode_wire_segment(["q", 1, 2, "3", "h", "sig"], "x.py") is None
 
 
 def test_decode_wire_item_rejects_invalid_risk_fields() -> None:
     assert (
-        cache_mod._decode_wire_unit(
+        _decode_wire_unit(
             ["q", 1, 2, 3, 4, "fp", "0-19", 2, 1, "critical", "raw"],
             "x.py",
         )
         is None
     )
     assert (
-        cache_mod._decode_wire_class_metric(
+        _decode_wire_class_metric(
             ["pkg.mod:Service", 1, 10, 3, 2, 4, 1, 7, 8],
             "x.py",
         )
@@ -1328,7 +1369,7 @@ def test_resolve_root_oserror_returns_none(
         return original_resolve(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _resolve_with_error)
-    assert cache_mod._resolve_root(tmp_path) is None
+    assert _resolve_root(tmp_path) is None
 
 
 def test_cache_entry_rejects_invalid_metrics_sections(tmp_path: Path) -> None:
@@ -1352,46 +1393,36 @@ def test_cache_entry_rejects_invalid_metrics_sections(tmp_path: Path) -> None:
 
 
 def test_decode_wire_file_entry_rejects_metrics_related_invalid_sections() -> None:
+    assert _decode_wire_file_entry({"st": [1, 2], "cm": "bad"}, "x.py") is None
     assert (
-        cache_mod._decode_wire_file_entry({"st": [1, 2], "cm": "bad"}, "x.py") is None
-    )
-    assert (
-        cache_mod._decode_wire_file_entry(
+        _decode_wire_file_entry(
             {"st": [1, 2], "cm": [["Q", 1, 2, 3, 4, 5, 6, "low"]]},
             "x.py",
         )
         is None
     )
+    assert _decode_wire_file_entry({"st": [1, 2], "md": "bad"}, "x.py") is None
     assert (
-        cache_mod._decode_wire_file_entry({"st": [1, 2], "md": "bad"}, "x.py") is None
-    )
-    assert (
-        cache_mod._decode_wire_file_entry(
+        _decode_wire_file_entry(
             {"st": [1, 2], "md": [["source", "target", "import"]]},
             "x.py",
         )
         is None
     )
-    assert (
-        cache_mod._decode_wire_file_entry({"st": [1, 2], "dc": "bad"}, "x.py") is None
-    )
-    decoded = cache_mod._decode_wire_file_entry(
+    assert _decode_wire_file_entry({"st": [1, 2], "dc": "bad"}, "x.py") is None
+    decoded = _decode_wire_file_entry(
         {"st": [1, 2], "dc": [["q", "n", 1, 2, "function"]]},
         "x.py",
     )
     assert decoded is not None
     assert decoded["dead_candidates"][0]["filepath"] == "x.py"
-    assert cache_mod._decode_wire_file_entry({"st": [1, 2], "rn": [1]}, "x.py") is None
-    assert cache_mod._decode_wire_file_entry({"st": [1, 2], "in": [1]}, "x.py") is None
-    assert cache_mod._decode_wire_file_entry({"st": [1, 2], "cn": [1]}, "x.py") is None
+    assert _decode_wire_file_entry({"st": [1, 2], "rn": [1]}, "x.py") is None
+    assert _decode_wire_file_entry({"st": [1, 2], "in": [1]}, "x.py") is None
+    assert _decode_wire_file_entry({"st": [1, 2], "cn": [1]}, "x.py") is None
+    assert _decode_wire_file_entry({"st": [1, 2], "cc": "bad"}, "x.py") is None
+    assert _decode_wire_file_entry({"st": [1, 2], "cc": [["Q"]]}, "x.py") is None
     assert (
-        cache_mod._decode_wire_file_entry({"st": [1, 2], "cc": "bad"}, "x.py") is None
-    )
-    assert (
-        cache_mod._decode_wire_file_entry({"st": [1, 2], "cc": [["Q"]]}, "x.py") is None
-    )
-    assert (
-        cache_mod._decode_wire_file_entry(
+        _decode_wire_file_entry(
             {"st": [1, 2], "cc": [["Q", ["A", 1]]]},
             "x.py",
         )
@@ -1400,7 +1431,7 @@ def test_decode_wire_file_entry_rejects_metrics_related_invalid_sections() -> No
 
 
 def test_decode_wire_file_entry_accepts_metrics_sections() -> None:
-    decoded = cache_mod._decode_wire_file_entry(
+    decoded = _decode_wire_file_entry(
         {
             "st": [1, 2],
             "cm": [["pkg.mod:Service", 1, 10, 3, 2, 4, 1, "low", "medium"]],
@@ -1423,7 +1454,7 @@ def test_decode_wire_file_entry_accepts_metrics_sections() -> None:
 
 
 def test_decode_wire_file_entry_optional_source_stats() -> None:
-    decoded = cache_mod._decode_wire_file_entry(
+    decoded = _decode_wire_file_entry(
         {"st": [1, 2], "ss": [10, 3, 1, 1]},
         "x.py",
     )
@@ -1435,20 +1466,16 @@ def test_decode_wire_file_entry_optional_source_stats() -> None:
         "classes": 1,
     }
 
-    assert cache_mod._decode_optional_wire_source_stats(obj={"ss": "bad"}) is None
-    assert cache_mod._decode_optional_wire_source_stats(obj={"ss": [1, 2, 3]}) is None
-    assert (
-        cache_mod._decode_optional_wire_source_stats(obj={"ss": [1, 2, -1, 0]}) is None
-    )
+    assert _decode_optional_wire_source_stats(obj={"ss": "bad"}) is None
+    assert _decode_optional_wire_source_stats(obj={"ss": [1, 2, 3]}) is None
+    assert _decode_optional_wire_source_stats(obj={"ss": [1, 2, -1, 0]}) is None
 
 
 def test_cache_helpers_cover_invalid_analysis_profile_and_source_stats_shapes() -> None:
+    assert _decode_wire_qualname_span_size(["pkg.mod:fn", 1, 2, "bad"]) is None
+    assert _decode_wire_qualname_span_size([None, 1, 2, 4]) is None
     assert (
-        cache_mod._decode_wire_qualname_span_size(["pkg.mod:fn", 1, 2, "bad"]) is None
-    )
-    assert cache_mod._decode_wire_qualname_span_size([None, 1, 2, 4]) is None
-    assert (
-        cache_mod._as_analysis_profile(
+        _as_analysis_profile(
             {
                 "min_loc": 1,
                 "min_stmt": 1,
@@ -1460,16 +1487,13 @@ def test_cache_helpers_cover_invalid_analysis_profile_and_source_stats_shapes() 
         )
         is None
     )
-    assert (
-        cache_mod._decode_optional_wire_source_stats(obj={"ss": [1, 2, "bad", 0]})
-        is None
-    )
+    assert _decode_optional_wire_source_stats(obj={"ss": [1, 2, "bad", 0]}) is None
 
 
 def test_canonicalize_cache_entry_skips_invalid_dead_candidate_suppression_shape() -> (
     None
 ):
-    normalized = cache_mod._canonicalize_cache_entry(
+    normalized = _canonicalize_cache_entry(
         cast(
             Any,
             {
@@ -1511,7 +1535,7 @@ def test_canonicalize_cache_entry_skips_invalid_dead_candidate_suppression_shape
 
 def test_decode_optional_wire_coupled_classes_rejects_non_string_qualname() -> None:
     assert (
-        cache_mod._decode_optional_wire_coupled_classes(
+        _decode_optional_wire_coupled_classes(
             obj={"cc": [[1, ["A"]]]},
             key="cc",
         )
@@ -1520,7 +1544,7 @@ def test_decode_optional_wire_coupled_classes_rejects_non_string_qualname() -> N
 
 
 def test_decode_wire_file_entry_skips_empty_coupled_classes_mapping() -> None:
-    decoded = cache_mod._decode_wire_file_entry(
+    decoded = _decode_wire_file_entry(
         {
             "st": [1, 2],
             "cm": [["pkg.mod:Service", 1, 10, 3, 2, 4, 1, "low", "medium"]],
@@ -1533,46 +1557,46 @@ def test_decode_wire_file_entry_skips_empty_coupled_classes_mapping() -> None:
 
 
 def test_decode_wire_metrics_items_and_deps_roundtrip_shape() -> None:
-    class_metric = cache_mod._decode_wire_class_metric(
+    class_metric = _decode_wire_class_metric(
         ["pkg.mod:Service", 1, 10, 3, 2, 4, 1, "low", "medium"],
         "x.py",
     )
     assert class_metric is not None
     assert class_metric["filepath"] == "x.py"
     assert (
-        cache_mod._decode_wire_class_metric(
+        _decode_wire_class_metric(
             ["pkg.mod:Service", "1", 10, 3, 2, 4, 1, "low", "medium"],
             "x.py",
         )
         is None
     )
 
-    module_dep = cache_mod._decode_wire_module_dep(["a", "b", "import", 1])
+    module_dep = _decode_wire_module_dep(["a", "b", "import", 1])
     assert module_dep is not None
     assert module_dep["source"] == "a"
-    assert cache_mod._decode_wire_module_dep(["a", "b", "import", "1"]) is None
+    assert _decode_wire_module_dep(["a", "b", "import", "1"]) is None
 
-    dead_candidate = cache_mod._decode_wire_dead_candidate(
+    dead_candidate = _decode_wire_dead_candidate(
         ["pkg.mod:unused", "unused", 1, 2, "function"],
         "fallback.py",
     )
     assert dead_candidate is not None
     assert dead_candidate["filepath"] == "fallback.py"
     assert (
-        cache_mod._decode_wire_dead_candidate(
+        _decode_wire_dead_candidate(
             ["pkg.mod:unused", "unused", "1", 2, "function"],
             "fallback.py",
         )
         is None
     )
     assert (
-        cache_mod._decode_wire_dead_candidate(
+        _decode_wire_dead_candidate(
             ["pkg.mod:unused", "unused", 1, 2, "function", "legacy.py"],
             "fallback.py",
         )
         is None
     )
-    dead_candidate_with_suppression = cache_mod._decode_wire_dead_candidate(
+    dead_candidate_with_suppression = _decode_wire_dead_candidate(
         ["pkg.mod:unused", "unused", 1, 2, "function", ["dead-code", "dead-code"]],
         "fallback.py",
     )
@@ -1581,7 +1605,7 @@ def test_decode_wire_metrics_items_and_deps_roundtrip_shape() -> None:
 
 
 def test_encode_wire_file_entry_includes_optional_metrics_sections() -> None:
-    entry: cache_mod.CacheEntry = {
+    entry: CacheEntry = {
         "stat": {"mtime_ns": 1, "size": 2},
         "units": [],
         "blocks": [],
@@ -1609,7 +1633,7 @@ def test_encode_wire_file_entry_includes_optional_metrics_sections() -> None:
         "import_names": ["z", "a"],
         "class_names": ["B", "A"],
     }
-    wire = cache_mod._encode_wire_file_entry(entry)
+    wire = _encode_wire_file_entry(entry)
     assert "cm" in wire
     assert "cc" in wire
     assert "md" in wire
@@ -1619,7 +1643,7 @@ def test_encode_wire_file_entry_includes_optional_metrics_sections() -> None:
 
 
 def test_encode_wire_file_entry_compacts_dead_candidate_filepaths() -> None:
-    entry: cache_mod.CacheEntry = {
+    entry: CacheEntry = {
         "stat": {"mtime_ns": 1, "size": 2},
         "units": [],
         "blocks": [],
@@ -1640,12 +1664,12 @@ def test_encode_wire_file_entry_compacts_dead_candidate_filepaths() -> None:
         "import_names": [],
         "class_names": [],
     }
-    wire = cache_mod._encode_wire_file_entry(entry)
+    wire = _encode_wire_file_entry(entry)
     assert wire["dc"] == [["pkg.mod:unused", "unused", 3, 4, "function"]]
 
 
 def test_encode_wire_file_entry_encodes_dead_candidate_suppressions() -> None:
-    entry: cache_mod.CacheEntry = {
+    entry: CacheEntry = {
         "stat": {"mtime_ns": 1, "size": 2},
         "units": [],
         "blocks": [],
@@ -1667,12 +1691,12 @@ def test_encode_wire_file_entry_encodes_dead_candidate_suppressions() -> None:
         "import_names": [],
         "class_names": [],
     }
-    wire = cache_mod._encode_wire_file_entry(entry)
+    wire = _encode_wire_file_entry(entry)
     assert wire["dc"] == [["pkg.mod:unused", "unused", 3, 4, "function", ["dead-code"]]]
 
 
 def test_encode_wire_file_entry_skips_empty_or_invalid_coupled_classes() -> None:
-    entry: cache_mod.CacheEntry = {
+    entry: CacheEntry = {
         "stat": {"mtime_ns": 1, "size": 2},
         "units": [],
         "blocks": [],
@@ -1711,7 +1735,7 @@ def test_encode_wire_file_entry_skips_empty_or_invalid_coupled_classes() -> None
         "import_names": [],
         "class_names": [],
     }
-    wire = cache_mod._encode_wire_file_entry(entry)
+    wire = _encode_wire_file_entry(entry)
     assert "cc" not in wire
 
 
@@ -1772,7 +1796,7 @@ def test_get_file_entry_sorts_coupled_classes_in_runtime_payload(
 
 def test_cache_entry_container_shape_rejects_invalid_source_stats() -> None:
     assert (
-        cache_mod._has_cache_entry_container_shape(
+        _has_cache_entry_container_shape(
             {
                 "stat": {"mtime_ns": 1, "size": 1},
                 "source_stats": {
@@ -1791,11 +1815,11 @@ def test_cache_entry_container_shape_rejects_invalid_source_stats() -> None:
 
 
 def test_cache_type_predicates_reject_non_dict_variants() -> None:
-    assert cache_mod._is_class_metrics_dict([]) is False
-    assert cache_mod._is_module_dep_dict([]) is False
-    assert cache_mod._is_dead_candidate_dict([]) is False
+    assert _is_class_metrics_dict([]) is False
+    assert _is_module_dep_dict([]) is False
+    assert _is_dead_candidate_dict([]) is False
     assert (
-        cache_mod._is_dead_candidate_dict(
+        _is_dead_candidate_dict(
             {
                 "qualname": "pkg.mod:broken",
                 "local_name": "broken",
@@ -1807,7 +1831,7 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
         is False
     )
     assert (
-        cache_mod._is_dead_candidate_dict(
+        _is_dead_candidate_dict(
             {
                 "qualname": "pkg.mod:unused",
                 "local_name": "unused",
@@ -1821,7 +1845,7 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
         is True
     )
     assert (
-        cache_mod._is_dead_candidate_dict(
+        _is_dead_candidate_dict(
             {
                 "qualname": "pkg.mod:unused",
                 "local_name": "unused",
@@ -1835,7 +1859,7 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
         is False
     )
     assert (
-        cache_mod._is_class_metrics_dict(
+        _is_class_metrics_dict(
             {
                 "qualname": "pkg.mod:Service",
                 "filepath": "x.py",
@@ -1852,7 +1876,7 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
         is True
     )
     assert (
-        cache_mod._is_class_metrics_dict(
+        _is_class_metrics_dict(
             {
                 "qualname": "pkg.mod:Service",
                 "filepath": "x.py",
@@ -1870,7 +1894,7 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
         is True
     )
     assert (
-        cache_mod._is_class_metrics_dict(
+        _is_class_metrics_dict(
             {
                 "qualname": "pkg.mod:Service",
                 "filepath": "x.py",
@@ -1887,9 +1911,9 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
         )
         is False
     )
-    assert cache_mod._is_class_metrics_dict({"qualname": "pkg.mod:Service"}) is False
+    assert _is_class_metrics_dict({"qualname": "pkg.mod:Service"}) is False
     assert (
-        cache_mod._is_module_dep_dict(
+        _is_module_dep_dict(
             {
                 "source": "a",
                 "target": "b",
@@ -1902,12 +1926,12 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
 
 
 def test_decode_wire_int_fields_rejects_non_int_values() -> None:
-    assert cache_mod._decode_wire_int_fields(["x", "nope"], 1) is None
+    assert _decode_wire_int_fields(["x", "nope"], 1) is None
 
 
 def test_decode_wire_block_rejects_missing_block_hash() -> None:
     assert (
-        cache_mod._decode_wire_block(
+        _decode_wire_block(
             ["pkg.mod:func", 10, 12, 4, None],
             "pkg/mod.py",
         )
@@ -1917,7 +1941,7 @@ def test_decode_wire_block_rejects_missing_block_hash() -> None:
 
 def test_decode_wire_segment_rejects_missing_segment_signature() -> None:
     assert (
-        cache_mod._decode_wire_segment(
+        _decode_wire_segment(
             ["pkg.mod:func", 10, 12, 4, "seg-hash", None],
             "pkg/mod.py",
         )
@@ -1926,4 +1950,4 @@ def test_decode_wire_segment_rejects_missing_segment_signature() -> None:
 
 
 def test_decode_wire_dead_candidate_rejects_invalid_rows() -> None:
-    assert cache_mod._decode_wire_dead_candidate(object(), "pkg/mod.py") is None
+    assert _decode_wire_dead_candidate(object(), "pkg/mod.py") is None

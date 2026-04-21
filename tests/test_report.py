@@ -15,32 +15,32 @@ import pytest
 
 import codeclone.report.merge as merge_mod
 import codeclone.report.overview as overview_mod
-import codeclone.report.serialize as serialize_mod
+import codeclone.report.renderers.text as text_renderer_mod
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
+from codeclone.findings.clones.grouping import (
+    build_block_groups,
+    build_groups,
+    build_segment_groups,
+)
 from codeclone.models import (
     StructuralFindingGroup,
     StructuralFindingOccurrence,
     Suggestion,
     SuppressedCloneGroup,
 )
-from codeclone.report import (
-    GroupMap,
-    build_block_group_facts,
-    build_block_groups,
-    build_groups,
-    build_segment_groups,
-    prepare_block_report_groups,
-    prepare_segment_report_groups,
-    to_markdown_report,
-    to_sarif_report,
-)
+from codeclone.report.blocks import prepare_block_report_groups
+from codeclone.report.document.builder import build_report_document
+from codeclone.report.explain import build_block_group_facts
 from codeclone.report.html.sections._structural import (
     _finding_why_template_html,
     build_structural_findings_html_panel,
 )
 from codeclone.report.html.widgets.snippets import _FileCache
-from codeclone.report.json_contract import build_report_document
 from codeclone.report.overview import materialize_report_overview
+from codeclone.report.renderers.json import render_json_report_document
+from codeclone.report.renderers.markdown import to_markdown_report
+from codeclone.report.renderers.sarif import to_sarif_report
+from codeclone.report.renderers.text import render_text_report_document
 from codeclone.report.segments import (
     analyze_segment_statements as _analyze_segment_statements,
 )
@@ -51,13 +51,11 @@ from codeclone.report.segments import (
     collect_file_functions as _collect_file_functions,
 )
 from codeclone.report.segments import merge_segment_items as _merge_segment_items
+from codeclone.report.segments import prepare_segment_report_groups
 from codeclone.report.segments import (
     segment_statements as _segment_statements,
 )
-from codeclone.report.serialize import (
-    render_json_report_document,
-    render_text_report_document,
-)
+from codeclone.report.types import GroupMap
 from tests._assertions import assert_contains_all, assert_mapping_entries
 from tests._report_access import (
     report_clone_groups as _clone_groups,
@@ -2620,10 +2618,10 @@ def test_collect_file_functions_class_and_async(tmp_path: Path) -> None:
 
 def test_report_serialize_helpers_and_text_metrics_section() -> None:
     assert merge_mod.coerce_positive_int(True) == 1
-    assert serialize_mod._as_int(True) == 1
-    assert serialize_mod._as_int("42") == 42
-    assert serialize_mod._as_int("bad") == 0
-    assert serialize_mod._as_int(1.2) == 0
+    assert text_renderer_mod._as_int(True) == 1
+    assert text_renderer_mod._as_int("42") == 42
+    assert text_renderer_mod._as_int("bad") == 0
+    assert text_renderer_mod._as_int(1.2) == 0
 
     text_report = to_text_report(
         meta={},

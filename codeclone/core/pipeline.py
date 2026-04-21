@@ -21,13 +21,12 @@ from ..golden_fixtures import (
     build_suppressed_clone_groups,
     split_clone_groups_for_golden_fixtures,
 )
-from ..metrics import (
+from ..metrics._base import MetricProjectContext
+from ..metrics.coverage_join import CoverageJoinParseError, build_coverage_join
+from ..metrics.dead_code import find_suppressed_unused
+from ..metrics.registry import (
     METRIC_FAMILIES,
-    CoverageJoinParseError,
-    MetricProjectContext,
-    build_coverage_join,
     build_project_metrics,
-    find_suppressed_unused,
     project_metrics_defaults,
 )
 from ..models import (

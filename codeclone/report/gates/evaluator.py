@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from ...contracts import ExitCode
-from ...metrics import METRIC_FAMILIES
+from ...metrics.registry import METRIC_FAMILIES
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence

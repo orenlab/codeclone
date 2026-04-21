@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import ast
 
-from ..metrics import cohesion_risk, compute_cbo, compute_lcom4, coupling_risk
+from ..metrics.cohesion import cohesion_risk, compute_lcom4
+from ..metrics.coupling import compute_cbo, coupling_risk
 from ..models import ClassMetrics
 
 

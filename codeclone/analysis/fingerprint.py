@@ -10,7 +10,7 @@ import hashlib
 from typing import TYPE_CHECKING
 
 from .. import qualnames as _qualnames
-from ..metrics import cyclomatic_complexity
+from ..metrics.complexity import cyclomatic_complexity
 from .cfg import CFGBuilder
 from .normalizer import (
     AstNormalizer,

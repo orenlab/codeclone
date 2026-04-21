@@ -21,8 +21,13 @@ import orjson
 
 from ... import __version__
 from ...baseline import Baseline
-from ...cache import Cache, CacheStatus
-from ...config import (
+from ...cache.store import Cache
+from ...cache.versioning import CacheStatus
+from ...config.pyproject_loader import (
+    ConfigValidationError,
+    load_pyproject_config,
+)
+from ...config.spec import (
     DEFAULT_BASELINE_PATH,
     DEFAULT_BLOCK_MIN_LOC,
     DEFAULT_BLOCK_MIN_STMT,
@@ -32,8 +37,6 @@ from ...config import (
     DEFAULT_MIN_STMT,
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
-    ConfigValidationError,
-    load_pyproject_config,
 )
 from ...contracts import (
     DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
@@ -42,14 +45,12 @@ from ...contracts import (
     DOCS_URL,
     REPORT_SCHEMA_VERSION,
 )
-from ...core import (
-    OutputPaths,
-    analyze,
-    bootstrap,
-    discover,
-    process,
-    report,
-)
+from ...core._types import OutputPaths
+from ...core.bootstrap import bootstrap
+from ...core.discovery import discover
+from ...core.parallelism import process
+from ...core.pipeline import analyze
+from ...core.reporting import report
 from ...domain.findings import (
     CATEGORY_CLONE,
     CATEGORY_COHESION,

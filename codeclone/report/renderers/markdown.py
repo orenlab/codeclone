@@ -6,15 +6,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from ...domain.findings import FAMILY_CLONE, FAMILY_DEAD_CODE, FAMILY_STRUCTURAL
 from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
 from .._formatting import format_spread_text
+from ..document.builder import build_report_document
 
 if TYPE_CHECKING:
-    pass
+    from ...models import StructuralFindingGroup, Suggestion, SuppressedCloneGroup
+    from ..types import GroupMapLike
 
 MARKDOWN_SCHEMA_VERSION = "1.0"
 _MAX_FINDING_LOCATIONS = 5
@@ -622,7 +624,47 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def to_markdown_report(
+    *,
+    report_document: Mapping[str, object] | None = None,
+    meta: Mapping[str, object],
+    inventory: Mapping[str, object] | None = None,
+    func_groups: GroupMapLike,
+    block_groups: GroupMapLike,
+    segment_groups: GroupMapLike,
+    block_facts: Mapping[str, Mapping[str, str]] | None = None,
+    new_function_group_keys: Collection[str] | None = None,
+    new_block_group_keys: Collection[str] | None = None,
+    new_segment_group_keys: Collection[str] | None = None,
+    suppressed_clone_groups: Sequence[SuppressedCloneGroup] | None = None,
+    metrics: Mapping[str, object] | None = None,
+    suggestions: Collection[Suggestion] | None = None,
+    structural_findings: Sequence[StructuralFindingGroup] | None = None,
+) -> str:
+    payload = report_document or build_report_document(
+        func_groups=func_groups,
+        block_groups=block_groups,
+        segment_groups=segment_groups,
+        meta=meta,
+        inventory=inventory,
+        block_facts=block_facts or {},
+        new_function_group_keys=new_function_group_keys,
+        new_block_group_keys=new_block_group_keys,
+        new_segment_group_keys=new_segment_group_keys,
+        suppressed_clone_groups=suppressed_clone_groups,
+        metrics=metrics,
+        suggestions=tuple(suggestions or ()),
+        structural_findings=tuple(structural_findings or ()),
+    )
+    return render_markdown_report_document(payload)
+
+
 __all__ = [
     "MARKDOWN_SCHEMA_VERSION",
+    "_append_findings_section",
+    "_append_metric_items",
+    "_as_float",
+    "_location_text",
     "render_markdown_report_document",
+    "to_markdown_report",
 ]

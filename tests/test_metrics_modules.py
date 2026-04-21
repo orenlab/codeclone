@@ -11,27 +11,25 @@ import ast
 import pytest
 
 from codeclone.analysis.cfg_model import CFG
-from codeclone.metrics import (
-    HealthInputs,
-    build_dep_graph,
-    build_import_graph,
-    cohesion_risk,
-    compute_cbo,
-    compute_health,
-    compute_lcom4,
-    coupling_risk,
-    cyclomatic_complexity,
-    find_cycles,
-    find_suppressed_unused,
-    find_unused,
-    longest_chains,
-    max_depth,
-    nesting_depth,
-    risk_level,
-)
 from codeclone.metrics import complexity as complexity_mod
 from codeclone.metrics import coupling as coupling_mod
 from codeclone.metrics import health as health_mod
+from codeclone.metrics.cohesion import cohesion_risk, compute_lcom4
+from codeclone.metrics.complexity import (
+    cyclomatic_complexity,
+    nesting_depth,
+    risk_level,
+)
+from codeclone.metrics.coupling import compute_cbo, coupling_risk
+from codeclone.metrics.dead_code import find_suppressed_unused, find_unused
+from codeclone.metrics.dependencies import (
+    build_dep_graph,
+    build_import_graph,
+    find_cycles,
+    longest_chains,
+    max_depth,
+)
+from codeclone.metrics.health import HealthInputs, compute_health
 from codeclone.models import DeadCandidate, DeadItem, ModuleDep
 from codeclone.paths import is_test_filepath
 
@@ -626,3 +624,30 @@ def test_health_helpers_and_compute_health_boundaries() -> None:
         "dependencies",
         "coverage",
     }
+
+
+def test_health_dependency_depth_safe_zone_matches_html_threshold() -> None:
+    def _health_inputs(*, dependency_max_depth: int) -> HealthInputs:
+        return HealthInputs(
+            files_found=10,
+            files_analyzed_or_cached=10,
+            function_clone_groups=0,
+            block_clone_groups=0,
+            complexity_avg=0.0,
+            complexity_max=0,
+            high_risk_functions=0,
+            coupling_avg=0.0,
+            coupling_max=0,
+            high_risk_classes=0,
+            cohesion_avg=1.0,
+            low_cohesion_classes=0,
+            dependency_cycles=0,
+            dependency_max_depth=dependency_max_depth,
+            dead_code_items=0,
+        )
+
+    safe = compute_health(_health_inputs(dependency_max_depth=8))
+    warn = compute_health(_health_inputs(dependency_max_depth=9))
+
+    assert safe.dimensions["dependencies"] == 100
+    assert warn.dimensions["dependencies"] == 96

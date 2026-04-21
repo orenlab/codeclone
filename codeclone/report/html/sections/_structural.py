@@ -17,7 +17,7 @@ from codeclone.domain.findings import (
 )
 from codeclone.domain.quality import RISK_HIGH, RISK_LOW
 from codeclone.findings.ids import structural_group_id
-from codeclone.findings.structural import normalize_structural_findings
+from codeclone.findings.structural.detectors import normalize_structural_findings
 
 from ..._source_kinds import SOURCE_KIND_FILTER_VALUES, source_kind_label
 from ...derived import (

@@ -9,7 +9,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from ..cache import Cache, SourceStatsDict
+from ..cache.entries import SourceStatsDict
+from ..cache.store import Cache
 from ..models import (
     ClassMetrics,
     DeadCandidate,

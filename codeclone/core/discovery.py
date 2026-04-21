@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from ..cache import Cache, file_stat_signature
+from ..cache.store import Cache, file_stat_signature
 from ..models import (
     ClassMetrics,
     DeadCandidate,

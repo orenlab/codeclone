@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from ... import __version__
 from ...contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
 from ...domain.quality import CONFIDENCE_HIGH
-from ...findings.structural import normalize_structural_findings
+from ...findings.structural.detectors import normalize_structural_findings
 from ...templates import FONT_CSS_URL, REPORT_TEMPLATE
 from ...utils import coerce as _coerce
 from ._context import _meta_pick, build_context

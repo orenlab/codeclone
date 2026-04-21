@@ -15,7 +15,7 @@ import pytest
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.units import extract_units_and_stats_from_source
 from codeclone.baseline import current_python_tag
-from codeclone.report import build_block_groups, build_groups
+from codeclone.findings.clones.grouping import build_block_groups, build_groups
 from codeclone.scanner import module_name_from_path
 from tests._assertions import snapshot_python_tag
 

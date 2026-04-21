@@ -11,7 +11,7 @@ from typing import cast
 
 from ..domain.findings import CATEGORY_COHESION, CATEGORY_COMPLEXITY, CATEGORY_COUPLING
 from ..domain.quality import CONFIDENCE_HIGH, RISK_LOW
-from ..metrics import build_overloaded_modules_payload
+from ..metrics.overloaded_modules import build_overloaded_modules_payload
 from ..models import (
     ClassMetrics,
     CoverageJoinResult,

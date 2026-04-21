@@ -10,7 +10,7 @@ from collections.abc import Callable, Collection, Mapping
 from typing import cast
 
 from ..models import MetricsDiff
-from ..report.document import build_report_document
+from ..report.document.builder import build_report_document
 from ..report.gates.evaluator import GateResult, GateState
 from ..report.gates.evaluator import MetricGateConfig as _MetricGateConfig
 from ..report.gates.evaluator import evaluate_gate_state as _evaluate_gate_state
@@ -33,13 +33,13 @@ GatingResult = GateResult
 
 
 def _load_markdown_report_renderer() -> Callable[..., str]:
-    from ..report.markdown import to_markdown_report
+    from ..report.renderers.markdown import to_markdown_report
 
     return to_markdown_report
 
 
 def _load_sarif_report_renderer() -> Callable[..., str]:
-    from ..report.sarif import to_sarif_report
+    from ..report.renderers.sarif import to_sarif_report
 
     return to_sarif_report
 

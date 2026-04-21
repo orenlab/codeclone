@@ -14,7 +14,7 @@ from typing import cast
 
 from ..analysis.normalizer import NormalizationConfig
 from ..analysis.units import extract_units_and_stats_from_source
-from ..cache import FileStat
+from ..cache.entries import FileStat
 from ..scanner import module_name_from_path
 from ._types import MAX_FILE_SIZE, FileProcessResult
 

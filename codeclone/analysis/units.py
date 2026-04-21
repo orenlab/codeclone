@@ -13,9 +13,9 @@ from .. import qualnames as _qualnames
 from ..blocks import extract_blocks, extract_segments
 from ..contracts.errors import ParseError
 from ..findings.structural.detectors import scan_function_structure
-from ..metrics import risk_level
 from ..metrics.adoption import collect_module_adoption
 from ..metrics.api_surface import collect_module_api_surface
+from ..metrics.complexity import risk_level
 from ..models import (
     BlockUnit,
     ClassMetrics,

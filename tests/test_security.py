@@ -15,7 +15,7 @@ from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.contracts.errors import ValidationError
 from codeclone.core._types import MAX_FILE_SIZE
 from codeclone.core.worker import process_file
-from codeclone.report import build_block_group_facts
+from codeclone.report.explain import build_block_group_facts
 from codeclone.report.html import build_html_report
 from codeclone.scanner import iter_py_files
 

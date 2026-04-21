@@ -19,20 +19,30 @@ import pytest
 
 import codeclone.baseline as baseline_mod
 import codeclone.baseline.metrics_baseline as metrics_baseline_mod
-import codeclone.core as pipeline
 import codeclone.core.worker as core_worker
 import codeclone.surfaces.cli.baseline_state as cli_baselines_mod
-import codeclone.surfaces.cli.main as cli
+import codeclone.surfaces.cli.changed_scope as cli_changed_scope
+import codeclone.surfaces.cli.console as cli_console
 import codeclone.surfaces.cli.report_meta as cli_meta_mod
 import codeclone.surfaces.cli.reports_output as cli_reports
+import codeclone.surfaces.cli.runtime as cli_runtime
 import codeclone.surfaces.cli.summary as cli_summary
+import codeclone.surfaces.cli.workflow as cli
 from codeclone import __version__
 from codeclone import ui_messages as ui
 from codeclone.analysis.normalizer import NormalizationConfig
-from codeclone.cache import Cache
-from codeclone.config import ConfigValidationError, build_parser
+from codeclone.cache.store import Cache
+from codeclone.config.argparse_builder import build_parser
+from codeclone.config.pyproject_loader import ConfigValidationError
 from codeclone.contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
 from codeclone.contracts.errors import BaselineValidationError
+from codeclone.core._types import (
+    AnalysisResult,
+    BootstrapResult,
+    DiscoveryResult,
+    ProcessingResult,
+)
+from codeclone.core.reporting import GatingResult
 from codeclone.core.worker import process_file
 from codeclone.models import HealthScore, ProjectMetrics
 from tests._assertions import assert_contains_all
@@ -230,7 +240,7 @@ def test_cli_help_text_consistency(
 
 
 def test_report_path_origins_distinguish_bare_and_explicit_flags() -> None:
-    assert cli._report_path_origins(
+    assert cli_reports._report_path_origins(
         (
             "--html",
             "--json",
@@ -249,7 +259,7 @@ def test_report_path_origins_distinguish_bare_and_explicit_flags() -> None:
 
 
 def test_report_path_origins_stops_at_double_dash() -> None:
-    assert cli._report_path_origins(("--json=out.json", "--", "--html")) == {
+    assert cli_reports._report_path_origins(("--json=out.json", "--", "--html")) == {
         "html": None,
         "json": "explicit",
         "md": None,
@@ -260,7 +270,7 @@ def test_report_path_origins_stops_at_double_dash() -> None:
 
 def test_timestamped_report_path_appends_utc_slug() -> None:
     path = Path("/tmp/report.html")
-    assert cli._timestamped_report_path(
+    assert cli_reports._timestamped_report_path(
         path,
         report_generated_at_utc="2026-03-22T21:30:45Z",
     ) == Path("/tmp/report-20260322T213045Z.html")
@@ -400,7 +410,7 @@ def test_validate_changed_scope_args_rejects_invalid_combinations(
 ) -> None:
     cli.console = cli._make_console(no_color=True)
     with pytest.raises(SystemExit) as exc:
-        cli._validate_changed_scope_args(args=args)
+        cli_changed_scope._validate_changed_scope_args(args=args)
     assert exc.value.code == 2
 
 
@@ -410,7 +420,7 @@ def test_validate_changed_scope_args_promotes_paths_from_git_diff() -> None:
         diff_against=None,
         paths_from_git_diff="HEAD~1",
     )
-    assert cli._validate_changed_scope_args(args=args) == "HEAD~1"
+    assert cli_changed_scope._validate_changed_scope_args(args=args) == "HEAD~1"
     assert args.changed_only is True
 
 
@@ -423,7 +433,7 @@ def test_normalize_changed_paths_relativizes_dedupes_and_sorts(tmp_path: Path) -
     first.write_text("pass\n", "utf-8")
     second.write_text("pass\n", "utf-8")
 
-    assert cli._normalize_changed_paths(
+    assert cli_changed_scope._normalize_changed_paths(
         root_path=root_path,
         paths=("pkg/b.py", str(second), " pkg/b.py ", ""),
     ) == ("pkg/a.py", "pkg/b.py")
@@ -445,7 +455,11 @@ def test_normalize_changed_paths_skips_empty_relative_results(
 
     monkeypatch.setattr(Path, "relative_to", _fake_relative_to)
     assert (
-        cli._normalize_changed_paths(root_path=root_path, paths=(str(candidate),)) == ()
+        cli_changed_scope._normalize_changed_paths(
+            root_path=root_path,
+            paths=(str(candidate),),
+        )
+        == ()
     )
 
 
@@ -463,7 +477,10 @@ def test_normalize_changed_paths_reports_unresolvable_path(
 
     monkeypatch.setattr(Path, "resolve", _broken_resolve)
     with pytest.raises(SystemExit) as exc:
-        cli._normalize_changed_paths(root_path=root_path, paths=("broken.py",))
+        cli_changed_scope._normalize_changed_paths(
+            root_path=root_path,
+            paths=("broken.py",),
+        )
     assert exc.value.code == 2
 
 
@@ -476,7 +493,10 @@ def test_normalize_changed_paths_rejects_outside_root(tmp_path: Path) -> None:
     outside_path.write_text("pass\n", "utf-8")
 
     with pytest.raises(SystemExit) as exc:
-        cli._normalize_changed_paths(root_path=root_path, paths=(str(outside_path),))
+        cli_changed_scope._normalize_changed_paths(
+            root_path=root_path,
+            paths=(str(outside_path),),
+        )
     assert exc.value.code == 2
 
 
@@ -498,7 +518,10 @@ def test_git_diff_changed_paths_normalizes_subprocess_output(
         )
 
     monkeypatch.setattr(subprocess, "run", _run)
-    assert cli._git_diff_changed_paths(root_path=root_path, git_diff_ref="HEAD~1") == (
+    assert cli_changed_scope._git_diff_changed_paths(
+        root_path=root_path,
+        git_diff_ref="HEAD~1",
+    ) == (
         "pkg/a.py",
         "pkg/b.py",
     )
@@ -514,14 +537,17 @@ def test_git_diff_changed_paths_reports_subprocess_errors(
 
     monkeypatch.setattr(subprocess, "run", _run)
     with pytest.raises(SystemExit) as exc:
-        cli._git_diff_changed_paths(root_path=tmp_path.resolve(), git_diff_ref="HEAD~1")
+        cli_changed_scope._git_diff_changed_paths(
+            root_path=tmp_path.resolve(),
+            git_diff_ref="HEAD~1",
+        )
     assert exc.value.code == 2
 
 
 def test_git_diff_changed_paths_rejects_option_like_ref(tmp_path: Path) -> None:
     cli.console = cli._make_console(no_color=True)
     with pytest.raises(SystemExit) as exc:
-        cli._git_diff_changed_paths(
+        cli_changed_scope._git_diff_changed_paths(
             root_path=tmp_path.resolve(), git_diff_ref="--cached"
         )
     assert exc.value.code == 2
@@ -543,7 +569,7 @@ def test_git_diff_changed_paths_rejects_unsafe_ref_syntax(
 ) -> None:
     cli.console = cli._make_console(no_color=True)
     with pytest.raises(SystemExit) as exc:
-        cli._git_diff_changed_paths(
+        cli_changed_scope._git_diff_changed_paths(
             root_path=tmp_path.resolve(),
             git_diff_ref=git_diff_ref,
         )
@@ -551,7 +577,7 @@ def test_git_diff_changed_paths_rejects_unsafe_ref_syntax(
 
 
 def test_report_path_origins_ignores_unrelated_equals_tokens() -> None:
-    assert cli._report_path_origins(("--unknown=value", "--json=out.json")) == {
+    assert cli_reports._report_path_origins(("--unknown=value", "--json=out.json")) == {
         "html": None,
         "json": "explicit",
         "md": None,
@@ -561,7 +587,7 @@ def test_report_path_origins_ignores_unrelated_equals_tokens() -> None:
 
 
 def test_changed_clone_gate_from_report_filters_changed_scope() -> None:
-    gate = cli._changed_clone_gate_from_report(
+    gate = cli_changed_scope._changed_clone_gate_from_report(
         {
             "findings": {
                 "groups": {
@@ -686,7 +712,7 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
 ) -> None:
     cli.console = cli._make_console(no_color=True)
     observed: dict[str, object] = {}
-    analysis = pipeline.AnalysisResult(
+    analysis = AnalysisResult(
         func_groups={},
         block_groups={},
         block_groups_report={},
@@ -703,10 +729,10 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
         segment_groups_raw_digest="",
     )
 
-    def _fake_gate(**kwargs: object) -> pipeline.GatingResult:
-        gate_analysis = cast("pipeline.AnalysisResult", kwargs["analysis"])
+    def _fake_gate(**kwargs: object) -> GatingResult:
+        gate_analysis = cast("AnalysisResult", kwargs["analysis"])
         observed["clone_threshold_total"] = gate_analysis.func_clones_count
-        return pipeline.GatingResult(
+        return GatingResult(
             exit_code=3,
             reasons=("clone:threshold:2:1",),
         )
@@ -723,7 +749,7 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
     with pytest.raises(SystemExit) as exc:
         cli._enforce_gating(
             args=Namespace(fail_threshold=1, verbose=False),
-            boot=cast("pipeline.BootstrapResult", object()),
+            boot=cast("BootstrapResult", object()),
             analysis=analysis,
             processing=cast(Any, Namespace(source_read_failures=[])),
             source_read_contract_failure=False,
@@ -750,7 +776,7 @@ def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_l
 ) -> None:
     cli.console = cli._make_console(no_color=True)
     observed: dict[str, object] = {}
-    analysis = pipeline.AnalysisResult(
+    analysis = AnalysisResult(
         func_groups={},
         block_groups={},
         block_groups_report={},
@@ -767,10 +793,10 @@ def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_l
         segment_groups_raw_digest="",
     )
 
-    def _fake_gate(**kwargs: object) -> pipeline.GatingResult:
-        gate_analysis = cast("pipeline.AnalysisResult", kwargs["analysis"])
+    def _fake_gate(**kwargs: object) -> GatingResult:
+        gate_analysis = cast("AnalysisResult", kwargs["analysis"])
         observed["clone_threshold_total"] = gate_analysis.func_clones_count
-        return pipeline.GatingResult(exit_code=0, reasons=())
+        return GatingResult(exit_code=0, reasons=())
 
     monkeypatch.setattr(cli, "gate", _fake_gate)
     monkeypatch.setattr(
@@ -781,7 +807,7 @@ def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_l
 
     cli._enforce_gating(
         args=Namespace(fail_threshold=5, verbose=False),
-        boot=cast("pipeline.BootstrapResult", object()),
+        boot=cast("BootstrapResult", object()),
         analysis=analysis,
         processing=cast(Any, Namespace(source_read_failures=[])),
         source_read_contract_failure=False,
@@ -893,7 +919,7 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
     monkeypatch.setattr(
         cli,
         "_changed_clone_gate_from_report",
-        lambda _report, changed_paths: cli.ChangedCloneGate(
+        lambda _report, changed_paths: cli_changed_scope.ChangedCloneGate(
             changed_paths=tuple(changed_paths),
             new_func=frozenset(),
             new_block=frozenset(),
@@ -1358,7 +1384,7 @@ def test_configure_metrics_mode_rejects_skip_metrics_with_metrics_flags(
         skip_dependencies=False,
     )
     with pytest.raises(SystemExit) as exc:
-        cli._configure_metrics_mode(args=args, metrics_baseline_exists=False)
+        cli_runtime._configure_metrics_mode(args=args, metrics_baseline_exists=False)
     assert exc.value.code == 2
 
 
@@ -1376,7 +1402,7 @@ def test_configure_metrics_mode_forces_dependency_and_dead_code_when_gated() -> 
         skip_dead_code=True,
         skip_dependencies=True,
     )
-    cli._configure_metrics_mode(args=args, metrics_baseline_exists=True)
+    cli_runtime._configure_metrics_mode(args=args, metrics_baseline_exists=True)
     assert args.skip_dead_code is False
     assert args.skip_dependencies is False
 
@@ -1406,7 +1432,7 @@ def test_configure_metrics_mode_does_not_force_api_surface_for_baseline_update()
         coverage_xml=None,
     )
 
-    cli._configure_metrics_mode(args=args, metrics_baseline_exists=True)
+    cli_runtime._configure_metrics_mode(args=args, metrics_baseline_exists=True)
 
     assert args.api_surface is False
 
@@ -1434,7 +1460,7 @@ def test_configure_metrics_mode_forces_api_surface_for_api_break_gate() -> None:
         coverage_xml=None,
     )
 
-    cli._configure_metrics_mode(args=args, metrics_baseline_exists=True)
+    cli_runtime._configure_metrics_mode(args=args, metrics_baseline_exists=True)
 
     assert args.api_surface is True
 
@@ -1442,20 +1468,20 @@ def test_configure_metrics_mode_forces_api_surface_for_api_break_gate() -> None:
 def test_probe_metrics_baseline_section_for_non_object_payload(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
     path.write_text("[]", "utf-8")
-    probe = cli._probe_metrics_baseline_section(path)
+    probe = cli_baselines_mod._probe_metrics_baseline_section(path)
     assert probe.has_metrics_section is True
     assert probe.payload is None
 
 
 def test_metrics_computed_respects_skip_switches() -> None:
-    assert cli._metrics_computed(
+    assert cli_runtime._metrics_computed(
         Namespace(
             skip_metrics=False,
             skip_dependencies=True,
             skip_dead_code=True,
         )
     ) == ("complexity", "coupling", "cohesion", "health", "coverage_adoption")
-    assert cli._metrics_computed(
+    assert cli_runtime._metrics_computed(
         Namespace(
             skip_metrics=False,
             skip_dependencies=False,
@@ -1473,7 +1499,7 @@ def test_metrics_computed_respects_skip_switches() -> None:
 
 
 def test_metrics_computed_includes_api_surface_only_when_enabled() -> None:
-    assert cli._metrics_computed(
+    assert cli_runtime._metrics_computed(
         Namespace(
             skip_metrics=False,
             skip_dependencies=True,
@@ -1481,7 +1507,7 @@ def test_metrics_computed_includes_api_surface_only_when_enabled() -> None:
             api_surface=False,
         )
     ) == ("complexity", "coupling", "cohesion", "health", "coverage_adoption")
-    assert cli._metrics_computed(
+    assert cli_runtime._metrics_computed(
         Namespace(
             skip_metrics=False,
             skip_dependencies=True,
@@ -1499,7 +1525,7 @@ def test_metrics_computed_includes_api_surface_only_when_enabled() -> None:
 
 
 def test_metrics_computed_includes_coverage_join_only_with_xml() -> None:
-    assert cli._metrics_computed(
+    assert cli_runtime._metrics_computed(
         Namespace(
             skip_metrics=False,
             skip_dependencies=True,
@@ -1508,7 +1534,7 @@ def test_metrics_computed_includes_coverage_join_only_with_xml() -> None:
             coverage_xml=None,
         )
     ) == ("complexity", "coupling", "cohesion", "health", "coverage_adoption")
-    assert cli._metrics_computed(
+    assert cli_runtime._metrics_computed(
         Namespace(
             skip_metrics=False,
             skip_dependencies=True,
@@ -1530,7 +1556,7 @@ def test_enforce_gating_requires_coverage_input_for_hotspot_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cli.console = cli._make_console(no_color=True)
-    monkeypatch.setattr(cli, "gate", lambda **_kwargs: pipeline.GatingResult(0, ()))
+    monkeypatch.setattr(cli, "gate", lambda **_kwargs: GatingResult(0, ()))
     with pytest.raises(SystemExit) as exc:
         cli._enforce_gating(
             args=Namespace(
@@ -1538,7 +1564,7 @@ def test_enforce_gating_requires_coverage_input_for_hotspot_gate(
                 fail_threshold=-1,
                 verbose=False,
             ),
-            boot=cast("pipeline.BootstrapResult", object()),
+            boot=cast("BootstrapResult", object()),
             analysis=cast(Any, SimpleNamespace(coverage_join=None)),
             processing=cast(Any, Namespace(source_read_failures=[])),
             source_read_contract_failure=False,
@@ -1556,7 +1582,7 @@ def test_enforce_gating_requires_valid_coverage_input_for_hotspot_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cli.console = cli._make_console(no_color=True)
-    monkeypatch.setattr(cli, "gate", lambda **_kwargs: pipeline.GatingResult(0, ()))
+    monkeypatch.setattr(cli, "gate", lambda **_kwargs: GatingResult(0, ()))
     with pytest.raises(SystemExit) as exc:
         cli._enforce_gating(
             args=Namespace(
@@ -1564,7 +1590,7 @@ def test_enforce_gating_requires_valid_coverage_input_for_hotspot_gate(
                 fail_threshold=-1,
                 verbose=False,
             ),
-            boot=cast("pipeline.BootstrapResult", object()),
+            boot=cast("BootstrapResult", object()),
             analysis=cast(
                 Any,
                 SimpleNamespace(
@@ -1633,8 +1659,8 @@ def test_main_impl_debug_sets_env_and_handles_metrics_baseline_resolve_error(
     assert os.environ.get("CODECLONE_DEBUG") == "1"
 
 
-def _stub_discovery_result() -> pipeline.DiscoveryResult:
-    return pipeline.DiscoveryResult(
+def _stub_discovery_result() -> DiscoveryResult:
+    return DiscoveryResult(
         files_found=0,
         cache_hits=0,
         files_skipped=0,
@@ -1651,8 +1677,8 @@ def _stub_discovery_result() -> pipeline.DiscoveryResult:
     )
 
 
-def _stub_processing_result() -> pipeline.ProcessingResult:
-    return pipeline.ProcessingResult(
+def _stub_processing_result() -> ProcessingResult:
+    return ProcessingResult(
         units=(),
         blocks=(),
         segments=(),
@@ -1674,8 +1700,8 @@ def _stub_processing_result() -> pipeline.ProcessingResult:
 def _stub_analysis_result(
     *,
     project_metrics: ProjectMetrics | None = None,
-) -> pipeline.AnalysisResult:
-    return pipeline.AnalysisResult(
+) -> AnalysisResult:
+    return AnalysisResult(
         func_groups={},
         block_groups={},
         block_groups_report={},
@@ -1840,7 +1866,7 @@ def test_main_impl_prints_metric_gate_reasons_and_exits_gating_failure(
     monkeypatch.setattr(
         cli,
         "gate",
-        lambda **_kwargs: pipeline.GatingResult(
+        lambda **_kwargs: GatingResult(
             exit_code=3,
             reasons=(
                 "metric:Health score regressed vs metrics baseline: delta=-1.",
@@ -2123,11 +2149,11 @@ def test_main_impl_ci_enables_fail_on_new_metrics_when_metrics_baseline_loaded(
 
     observed: dict[str, bool] = {}
 
-    def _capture_gate(**kwargs: object) -> pipeline.GatingResult:
+    def _capture_gate(**kwargs: object) -> GatingResult:
         boot = kwargs["boot"]
-        assert isinstance(boot, pipeline.BootstrapResult)
+        assert isinstance(boot, BootstrapResult)
         observed["fail_on_new_metrics"] = bool(boot.args.fail_on_new_metrics)
-        return pipeline.GatingResult(exit_code=0, reasons=())
+        return GatingResult(exit_code=0, reasons=())
 
     monkeypatch.setattr(cli, "gate", _capture_gate)
     monkeypatch.setattr(
@@ -2151,7 +2177,7 @@ def test_main_impl_ci_enables_fail_on_new_metrics_when_metrics_baseline_loaded(
 
 def test_print_verbose_clone_hashes_noop_on_empty() -> None:
     printer = _RecordingPrinter()
-    cli._print_verbose_clone_hashes(
+    cli_console._print_verbose_clone_hashes(
         printer,
         label="Function clone hashes",
         clone_hashes=set(),
@@ -2161,7 +2187,7 @@ def test_print_verbose_clone_hashes_noop_on_empty() -> None:
 
 def test_print_verbose_clone_hashes_prints_sorted_values() -> None:
     printer = _RecordingPrinter()
-    cli._print_verbose_clone_hashes(
+    cli_console._print_verbose_clone_hashes(
         printer,
         label="Block clone hashes",
         clone_hashes={"b-hash", "a-hash"},

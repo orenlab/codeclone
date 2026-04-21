@@ -16,7 +16,8 @@ from typing import cast
 import orjson
 
 from ..analysis.normalizer import NormalizationConfig
-from ..cache import FileStat, SegmentReportProjection
+from ..cache.entries import FileStat
+from ..cache.projection import SegmentReportProjection
 from ..models import (
     BlockUnit,
     ClassMetrics,

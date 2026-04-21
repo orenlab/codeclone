@@ -18,16 +18,15 @@ import pytest
 
 import codeclone.baseline as baseline
 import codeclone.baseline.trust as baseline_trust
-import codeclone.core as pipeline
 import codeclone.core.discovery as core_discovery
 import codeclone.core.parallelism as core_parallelism
 import codeclone.core.pipeline as core_pipeline
 import codeclone.core.worker as core_worker
-import codeclone.surfaces.cli.main as cli
 import codeclone.surfaces.cli.report_meta as cli_meta
 import codeclone.surfaces.cli.reports_output as cli_reports
+import codeclone.surfaces.cli.workflow as cli
 from codeclone import __version__
-from codeclone.cache import Cache, file_stat_signature
+from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.contracts import (
     BASELINE_FINGERPRINT_VERSION,
     BASELINE_SCHEMA_VERSION,
@@ -35,6 +34,8 @@ from codeclone.contracts import (
     REPORT_SCHEMA_VERSION,
 )
 from codeclone.contracts.errors import CacheError
+from codeclone.core._types import FileProcessResult as CliFileProcessResult
+from codeclone.core.parallelism import _parallel_min_files
 from codeclone.models import Unit
 from codeclone.report.gates.reasons import parse_metric_reason_entry
 from tests._assertions import (
@@ -540,7 +541,7 @@ def _assert_worker_failure_internal_error(
 ) -> None:
     _write_default_source(tmp_path)
 
-    def _boom(*_args: object, **_kwargs: object) -> cli.ProcessingResult:
+    def _boom(*_args: object, **_kwargs: object) -> CliFileProcessResult:
         raise RuntimeError("boom")
 
     class _FailExec:
@@ -692,8 +693,8 @@ def _prepare_single_source_cache(tmp_path: Path) -> tuple[Path, Path, Cache]:
     return src, cache_path, Cache(cache_path)
 
 
-def _source_read_error_result(filepath: str) -> cli.ProcessingResult:
-    return cli.ProcessingResult(
+def _source_read_error_result(filepath: str) -> CliFileProcessResult:
+    return CliFileProcessResult(
         filepath=filepath,
         success=False,
         error="Cannot read file: [Errno 13] Permission denied",
@@ -1043,7 +1044,7 @@ def test_cli_main_progress_fallback(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailingExecutor)
@@ -1057,7 +1058,7 @@ def test_cli_main_no_progress_fallback(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailingExecutor)
@@ -3109,7 +3110,7 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
-    ) -> cli.ProcessingResult:
+    ) -> CliFileProcessResult:
         return _source_read_error_result(fp)
 
     monkeypatch.setattr(core_worker, "process_file", _source_read_error)
@@ -3143,7 +3144,7 @@ def test_cli_unreadable_source_fails_in_ci_with_contract_error(
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
-    ) -> cli.ProcessingResult:
+    ) -> CliFileProcessResult:
         return _source_read_error_result(fp)
 
     monkeypatch.setattr(core_worker, "process_file", _source_read_error)
@@ -3202,7 +3203,7 @@ def test_cli_contract_error_priority_over_gating_failure_for_unreadable_source(
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
-    ) -> cli.ProcessingResult:
+    ) -> CliFileProcessResult:
         return _source_read_error_result(fp)
 
     def _diff(
@@ -3247,7 +3248,7 @@ def test_cli_unreadable_source_ci_shows_overflow_summary(
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
-    ) -> cli.ProcessingResult:
+    ) -> CliFileProcessResult:
         return _source_read_error_result(fp)
 
     monkeypatch.setattr(core_worker, "process_file", _source_read_error)
@@ -3705,8 +3706,8 @@ def test_cli_failed_files_report(
 
     def _bad_process(
         _fp: str, *_args: object, **_kwargs: object
-    ) -> cli.ProcessingResult:
-        return cli.ProcessingResult(filepath=_fp, success=False, error="bad")
+    ) -> CliFileProcessResult:
+        return CliFileProcessResult(filepath=_fp, success=False, error="bad")
 
     monkeypatch.setattr(core_worker, "process_file", _bad_process)
     _patch_parallel(monkeypatch)
@@ -3726,8 +3727,8 @@ def test_cli_failed_files_report_single(
 
     def _bad_process(
         _fp: str, *_args: object, **_kwargs: object
-    ) -> cli.ProcessingResult:
-        return cli.ProcessingResult(filepath=_fp, success=False, error="bad")
+    ) -> CliFileProcessResult:
+        return CliFileProcessResult(filepath=_fp, success=False, error="bad")
 
     monkeypatch.setattr(core_worker, "process_file", _bad_process)
     _patch_parallel(monkeypatch)
@@ -3745,7 +3746,7 @@ def test_cli_worker_failed(
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
 
-    def _boom(*_args: object, **_kwargs: object) -> cli.ProcessingResult:
+    def _boom(*_args: object, **_kwargs: object) -> CliFileProcessResult:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(core_worker, "process_file", _boom)
@@ -3977,7 +3978,7 @@ def test_cli_batch_result_none_no_progress(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     _patch_fixed_executor(monkeypatch, _FixedFuture(value=None))
@@ -3991,7 +3992,7 @@ def test_cli_batch_result_none_progress(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     _patch_dummy_progress(monkeypatch)
@@ -4006,7 +4007,7 @@ def test_cli_failed_batch_item_no_progress(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     _patch_fixed_executor(monkeypatch, _FixedFuture(error=RuntimeError("boom")))
@@ -4020,7 +4021,7 @@ def test_cli_failed_batch_item_progress(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     _patch_dummy_progress(monkeypatch)

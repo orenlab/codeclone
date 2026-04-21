@@ -17,9 +17,9 @@ from typing import cast
 
 import pytest
 
+import codeclone.surfaces.mcp.server as mcp_server
 from codeclone import __version__ as CODECLONE_VERSION
 from codeclone.contracts import REPORT_SCHEMA_VERSION
-from codeclone.surfaces.mcp import server as mcp_server
 from codeclone.surfaces.mcp.server import MCPDependencyError, build_mcp_server
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 

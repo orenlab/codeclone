@@ -105,7 +105,7 @@ def compute_health(inputs: HealthInputs) -> HealthScore:
     dependency_score = _clamp_score(
         100
         - inputs.dependency_cycles * 25
-        - max(0, inputs.dependency_max_depth - 6) * 4
+        - max(0, inputs.dependency_max_depth - 8) * 4
     )
     coverage_score = _clamp_score(
         _safe_div(inputs.files_analyzed_or_cached * 100.0, max(1, inputs.files_found))

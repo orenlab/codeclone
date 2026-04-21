@@ -4,12 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from codeclone.config import (
-    build_parser,
-    collect_explicit_cli_dests,
-    load_pyproject_config,
-    resolve_config,
-)
+from codeclone.config.argparse_builder import build_parser
+from codeclone.config.pyproject_loader import load_pyproject_config
+from codeclone.config.resolver import collect_explicit_cli_dests, resolve_config
 from codeclone.config.spec import PYPROJECT_OPTIONS, TESTABLE_CLI_OPTIONS, OptionSpec
 
 

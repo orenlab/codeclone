@@ -13,7 +13,7 @@ from typing import cast
 
 import pytest
 
-import codeclone.report.json_contract as json_contract_mod
+import codeclone.report.document._common as document_common_mod
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import (
     ReportLocation,
@@ -23,77 +23,81 @@ from codeclone.models import (
 )
 from codeclone.report import derived as derived_mod
 from codeclone.report import overview as overview_mod
-from codeclone.report.json_contract import (
-    _build_design_groups,
-    _clone_group_assessment,
+from codeclone.report.document._common import (
     _collect_paths_from_metrics,
     _collect_report_file_list,
-    _combined_impact_scope,
     _contract_path,
     _count_file_lines,
     _count_file_lines_for_path,
-    _csv_values,
-    _derive_inventory_code_counts,
-    _findings_summary,
     _is_absolute_path,
     _normalize_block_machine_facts,
     _normalize_nested_string_rows,
     _parse_ratio_percent,
     _source_scope_from_filepaths,
     _source_scope_from_locations,
-    _structural_group_assessment,
-    _suggestion_finding_id,
-    build_report_document,
 )
-from codeclone.report.markdown import (
+from codeclone.report.document._design_groups import _build_design_groups
+from codeclone.report.document._findings_groups import (
+    _clone_group_assessment,
+    _csv_values,
+    _structural_group_assessment,
+)
+from codeclone.report.document.builder import build_report_document
+from codeclone.report.document.derived import (
+    _combined_impact_scope,
+    _suggestion_finding_id,
+)
+from codeclone.report.document.findings import _findings_summary
+from codeclone.report.document.inventory import _derive_inventory_code_counts
+from codeclone.report.renderers.markdown import (
     render_markdown_report_document,
     to_markdown_report,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _baseline_state as _sarif_baseline_state,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _location_entry as _sarif_location_entry,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _location_message as _sarif_location_message,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _logical_locations as _sarif_logical_locations,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _partial_fingerprints as _sarif_partial_fingerprints,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _primary_location_properties as _sarif_primary_location_properties,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _result_entry as _sarif_result_entry,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _result_message as _sarif_result_message,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _result_properties as _sarif_result_properties,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _rule_name as _sarif_rule_name,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _rule_spec as _sarif_rule_spec,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _scan_root_uri as _sarif_scan_root_uri,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _severity_to_level,
     render_sarif_report_document,
     to_sarif_report,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _text as _sarif_text,
 )
-from codeclone.report.serialize import (
+from codeclone.report.renderers.text import (
     _append_clone_section,
     _append_single_item_findings,
     _append_structural_findings,
@@ -2354,7 +2358,7 @@ def test_collect_report_file_list_deterministically_merges_all_sources(
             self.items = tuple(_Occurrence(path) for path in paths)
 
     monkeypatch.setattr(
-        json_contract_mod,
+        document_common_mod,
         "normalize_structural_findings",
         lambda _findings: [_Group("/repo/struct.py", "")],
     )

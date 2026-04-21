@@ -18,12 +18,12 @@ from typing import Any, cast
 
 import pytest
 
+import codeclone.surfaces.mcp.session as mcp_service_mod
 from codeclone.baseline import Baseline, current_python_tag
-from codeclone.cache import Cache
-from codeclone.config import ConfigValidationError
+from codeclone.cache.store import Cache
+from codeclone.config.pyproject_loader import ConfigValidationError
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import MetricsDiff
-from codeclone.surfaces.mcp import session as mcp_service_mod
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     DetailLevel,
@@ -1716,7 +1716,7 @@ def test_mcp_service_reports_missing_json_artifact(tmp_path: Path) -> None:
         )
 
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr("codeclone.surfaces.mcp.session.report", _fake_report)
+    monkeypatch.setattr(mcp_service_mod, "report", _fake_report)
     try:
         with pytest.raises(MCPServiceError):
             service.analyze_repository(

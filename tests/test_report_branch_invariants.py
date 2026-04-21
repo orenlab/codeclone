@@ -21,16 +21,16 @@ from codeclone.report.html.sections._structural import (
     _occurrences_table_html,
 )
 from codeclone.report.html.widgets.snippets import _FileCache
-from codeclone.report.markdown import (
+from codeclone.report.overview import _health_snapshot
+from codeclone.report.renderers.markdown import (
     _append_findings_section,
     _append_metric_items,
     _location_text,
 )
-from codeclone.report.markdown import (
+from codeclone.report.renderers.markdown import (
     _as_float as _markdown_as_float,
 )
-from codeclone.report.overview import _health_snapshot
-from codeclone.report.sarif import _result_properties
+from codeclone.report.renderers.sarif import _result_properties
 from codeclone.report.suggestions import (
     _clone_steps,
     _clone_summary,

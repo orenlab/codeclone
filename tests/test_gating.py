@@ -13,7 +13,7 @@ from codeclone.models import (
     ModuleDep,
     ProjectMetrics,
 )
-from codeclone.report.gates import MetricGateConfig, evaluate_gates
+from codeclone.report.gates.evaluator import MetricGateConfig, evaluate_gates
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     MCPAnalysisRequest,

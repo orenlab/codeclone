@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import re
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from functools import lru_cache
 from pathlib import Path
@@ -163,13 +163,6 @@ def _print_gating_failure_block(
         entries=list(entries),
         args=cast("Any", args),
     )
-
-
-def build_html_report(*args: object, **kwargs: object) -> str:
-    from ...report.html import build_html_report as _build_html_report
-
-    html_builder: Callable[..., str] = _build_html_report
-    return html_builder(*args, **kwargs)
 
 
 def _print_verbose_clone_hashes(

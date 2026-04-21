@@ -8,15 +8,7 @@ from __future__ import annotations
 from .cfg import CFG, CFGBuilder
 from .fingerprint import bucket_loc, sha1
 from .normalizer import AstNormalizer, NormalizationConfig, stmt_hashes
-
-
-def __getattr__(name: str) -> object:
-    if name == "extract_units_and_stats_from_source":
-        from .units import extract_units_and_stats_from_source
-
-        return extract_units_and_stats_from_source
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
+from .units import extract_units_and_stats_from_source
 
 __all__ = [
     "CFG",

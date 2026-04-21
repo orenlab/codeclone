@@ -21,7 +21,7 @@ import codeclone.analysis.units as units_mod
 from codeclone import qualnames
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.contracts.errors import ParseError
-from codeclone.metrics import find_unused
+from codeclone.metrics.dead_code import find_unused
 from codeclone.models import BlockUnit, ClassMetrics, ModuleDep, SegmentUnit, Unit
 from codeclone.qualnames import FunctionNode, QualnameCollector
 

@@ -20,13 +20,15 @@ from codeclone.contracts import (
     REPOSITORY_URL,
 )
 from codeclone.contracts.errors import FileProcessingError
+from codeclone.findings.ids import clone_group_id, structural_group_id
 from codeclone.models import (
     StructuralFindingGroup,
     StructuralFindingOccurrence,
     Suggestion,
     SuppressedCloneGroup,
 )
-from codeclone.report import build_block_group_facts
+from codeclone.report.document.builder import build_report_document
+from codeclone.report.explain import build_block_group_facts
 from codeclone.report.html import (
     _FileCache,
     _pygments_css,
@@ -37,12 +39,7 @@ from codeclone.report.html import (
     build_html_report as _core_build_html_report,
 )
 from codeclone.report.html.widgets.badges import _tab_empty_info
-from codeclone.report.json_contract import (
-    build_report_document,
-    clone_group_id,
-    structural_group_id,
-)
-from codeclone.report.serialize import render_json_report_document
+from codeclone.report.renderers.json import render_json_report_document
 from tests._assertions import assert_contains_all
 from tests._report_fixtures import (
     REPEATED_ASSERT_SOURCE,

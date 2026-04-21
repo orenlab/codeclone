@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal, cast
 
-from ..cache import (
+from ..cache.entries import (
     ApiParamSpecDict,
     CacheEntry,
     ClassMetricsDict,

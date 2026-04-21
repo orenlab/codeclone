@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from ... import ui_messages as ui
-from ...cache import Cache, CacheStatus
+from ...cache.store import Cache
+from ...cache.versioning import CacheStatus
 from ...contracts import ExitCode
 from . import state as cli_state
 
@@ -202,6 +203,68 @@ def resolve_cache_status(cache: _CacheLike) -> tuple[CacheStatus, str | None]:
         raw_cache_schema_version if isinstance(raw_cache_schema_version, str) else None
     )
     return cache_status, cache_schema_version
+
+
+def resolve_report_cache_path(cache_path: Path) -> Path:
+    try:
+        return cache_path.resolve()
+    except OSError:
+        return cache_path
+
+
+def prepare_metrics_mode_and_ui(
+    *,
+    args: object,
+    root_path: Path,
+    baseline_path: Path,
+    baseline_exists: bool,
+    metrics_baseline_path: Path,
+    metrics_baseline_exists: bool,
+    configure_metrics_mode: Any,
+    print_banner: Any,
+) -> None:
+    args_obj = cast("Any", args)
+    if (
+        args_obj.update_baseline
+        and not args_obj.skip_metrics
+        and not args_obj.update_metrics_baseline
+    ):
+        args_obj.update_metrics_baseline = True
+    configure_metrics_mode(
+        args=args_obj,
+        metrics_baseline_exists=metrics_baseline_exists,
+    )
+    if (
+        args_obj.update_metrics_baseline
+        and metrics_baseline_path == baseline_path
+        and not baseline_exists
+        and not args_obj.update_baseline
+    ):
+        args_obj.update_baseline = True
+    if args_obj.quiet:
+        args_obj.no_progress = True
+        return
+    print_banner(root=root_path)
+
+
+def gating_mode_enabled(args: object) -> bool:
+    args_obj = cast("Any", args)
+    return bool(
+        args_obj.fail_on_new
+        or args_obj.fail_threshold >= 0
+        or args_obj.fail_complexity >= 0
+        or args_obj.fail_coupling >= 0
+        or args_obj.fail_cohesion >= 0
+        or args_obj.fail_cycles
+        or args_obj.fail_dead_code
+        or args_obj.fail_health >= 0
+        or args_obj.fail_on_new_metrics
+        or args_obj.fail_on_typing_regression
+        or args_obj.fail_on_docstring_regression
+        or args_obj.fail_on_api_break
+        or args_obj.min_typing_coverage >= 0
+        or args_obj.min_docstring_coverage >= 0
+    )
 
 
 def print_failed_files(*, failed_files: tuple[str, ...], console: _PrinterLike) -> None:
