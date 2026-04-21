@@ -143,6 +143,47 @@ def test_cache_roundtrip(tmp_path: Path) -> None:
     assert loaded.cache_schema_version == Cache._CACHE_VERSION
 
 
+def test_cache_prune_file_entries_removes_stale_paths(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    cache_path = root / "cache.json"
+    live = root / "live.py"
+    stale = root / "stale.py"
+    live.write_text("def live():\n    return 1\n", "utf-8")
+
+    cache = Cache(cache_path, root=root)
+    cache.put_file_entry(
+        str(live),
+        file_stat_signature(str(live)),
+        [],
+        [],
+        [],
+    )
+    cache.put_file_entry(
+        str(stale),
+        {"mtime_ns": 1, "size": 1},
+        [],
+        [],
+        [],
+    )
+    cache.save()
+
+    loaded = Cache(cache_path, root=root)
+    loaded.load()
+
+    removed = loaded.prune_file_entries((str(live),))
+
+    assert removed == 1
+    assert str(live) in loaded.data["files"]
+    assert str(stale) not in loaded.data["files"]
+
+    loaded.save()
+
+    reloaded = Cache(cache_path, root=root)
+    reloaded.load()
+    assert reloaded.get_file_entry(str(live)) is not None
+    assert reloaded.get_file_entry(str(stale)) is None
+
+
 def test_cache_roundtrip_preserves_empty_structural_findings(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)

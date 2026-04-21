@@ -33,13 +33,13 @@ from codeclone.cache._wire_decode import (
     _decode_wire_unit,
 )
 from codeclone.cache._wire_encode import _encode_wire_file_entry
-from codeclone.cache.entries import CacheEntry, _as_risk_literal
+from codeclone.cache.entries import CacheEntry, SourceStatsDict, _as_risk_literal
 from codeclone.cache.projection import (
     SegmentReportProjection,
     build_segment_report_projection,
     decode_segment_report_projection,
 )
-from codeclone.cache.store import Cache
+from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.contracts.errors import CacheError
 from codeclone.core._types import (
     AnalysisResult,
@@ -719,6 +719,9 @@ def _discover_with_single_cached_entry(
         def get_file_entry(self, _path: str) -> dict[str, object]:
             return cache_entry
 
+        def prune_file_entries(self, existing_filepaths: object) -> int:
+            return 0
+
     boot = BootstrapResult(
         root=tmp_path,
         config=NormalizationConfig(),
@@ -729,6 +732,55 @@ def _discover_with_single_cached_entry(
     monkeypatch.setattr(core_discovery, "iter_py_files", lambda _root: [filepath])
     monkeypatch.setattr(core_discovery, "file_stat_signature", lambda _path: stat)
     return discover(boot=boot, cache=cast(Cache, _FakeCache()))
+
+
+def test_discover_prunes_deleted_cache_entries(tmp_path: Path) -> None:
+    live = tmp_path / "a.py"
+    stale = tmp_path / "stale.py"
+    live.write_text("def f():\n    return 1\n", "utf-8")
+
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path, root=tmp_path)
+    cache.put_file_entry(
+        str(live),
+        file_stat_signature(str(live)),
+        [],
+        [],
+        [],
+        source_stats=SourceStatsDict(lines=2, functions=1, methods=0, classes=0),
+    )
+    cache.put_file_entry(
+        str(stale),
+        {"mtime_ns": 1, "size": 1},
+        [],
+        [],
+        [],
+        source_stats=SourceStatsDict(lines=0, functions=0, methods=0, classes=0),
+    )
+    cache.save()
+
+    loaded = Cache(cache_path, root=tmp_path)
+    loaded.load()
+    boot = BootstrapResult(
+        root=tmp_path,
+        config=NormalizationConfig(),
+        args=Namespace(skip_metrics=False, min_loc=1, min_stmt=1, processes=1),
+        output_paths=OutputPaths(),
+        cache_path=cache_path,
+    )
+
+    result = discover(boot=boot, cache=loaded)
+
+    assert result.files_found == 1
+    assert result.cache_hits == 1
+    assert result.files_to_process == ()
+    assert str(stale) not in loaded.data["files"]
+
+    loaded.save()
+
+    reloaded = Cache(cache_path, root=tmp_path)
+    reloaded.load()
+    assert str(stale) not in reloaded.data["files"]
 
 
 @pytest.mark.parametrize(

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Collection
 from json import JSONDecodeError
 from pathlib import Path
 
@@ -591,6 +592,27 @@ class Cache:
             runtime_path=runtime_path,
             canonical_entry=canonical_entry,
         )
+
+    def prune_file_entries(self, existing_filepaths: Collection[str]) -> int:
+        keep_runtime_paths = {
+            runtime_filepath_from_wire(
+                wire_filepath_from_runtime(filepath, root=self.root),
+                root=self.root,
+            )
+            for filepath in existing_filepaths
+        }
+        stale_runtime_paths = sorted(
+            runtime_path
+            for runtime_path in self.data["files"]
+            if runtime_path not in keep_runtime_paths
+        )
+        if not stale_runtime_paths:
+            return 0
+        for runtime_path in stale_runtime_paths:
+            self.data["files"].pop(runtime_path, None)
+            self._canonical_runtime_paths.discard(runtime_path)
+        self._dirty = True
+        return len(stale_runtime_paths)
 
 
 def file_stat_signature(path: str) -> FileStat:

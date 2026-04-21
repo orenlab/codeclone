@@ -155,6 +155,8 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
             continue
         files_to_process.append(filepath)
 
+    cache.prune_file_entries(all_file_paths)
+
     return DiscoveryResult(
         files_found=files_found,
         cache_hits=cache_hits,
