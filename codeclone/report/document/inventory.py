@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
 
 from ...domain.findings import (
     CATEGORY_COHESION,
@@ -16,10 +15,6 @@ from ...domain.findings import (
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
-
-if TYPE_CHECKING:
-    pass
-
 from ._common import (
     _analysis_profile_payload,
     _contract_path,

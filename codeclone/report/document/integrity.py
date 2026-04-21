@@ -8,12 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from hashlib import sha256
-from typing import TYPE_CHECKING
 
 import orjson
-
-if TYPE_CHECKING:
-    pass
 
 
 def _canonical_integrity_payload(

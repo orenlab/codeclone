@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
 
 from ...contracts import (
     DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
@@ -32,6 +31,7 @@ from ...domain.quality import (
     SEVERITY_CRITICAL,
     SEVERITY_WARNING,
 )
+from ...findings.ids import design_group_id
 from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
@@ -39,11 +39,6 @@ from ...utils.coerce import as_sequence as _as_sequence
 from ..derived import (
     report_location_from_group_item,
 )
-
-if TYPE_CHECKING:
-    pass
-
-from ...findings.ids import design_group_id
 from ._common import (
     _COVERAGE_JOIN_FAMILY,
     _coerced_nonnegative_threshold,

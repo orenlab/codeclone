@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
 
 from ...domain.findings import (
     CATEGORY_COHESION,
@@ -29,10 +28,6 @@ from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
-
-if TYPE_CHECKING:
-    pass
-
 from ._common import (
     _contract_path,
     _normalize_nested_string_rows,

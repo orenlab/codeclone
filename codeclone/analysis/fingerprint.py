@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import hashlib
-from typing import TYPE_CHECKING
 
 from .. import qualnames as _qualnames
 from ..metrics.complexity import cyclomatic_complexity
@@ -17,9 +16,6 @@ from .normalizer import (
     NormalizationConfig,
     normalized_ast_dump_from_list,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 def sha1(s: str) -> str:
