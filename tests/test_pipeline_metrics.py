@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -27,12 +28,21 @@ from codeclone.core._types import (
 from codeclone.core.bootstrap import _resolve_optional_runtime_path
 from codeclone.core.coverage_payload import _coverage_join_rows, _coverage_join_summary
 from codeclone.core.discovery_cache import (
+    _api_param_kind,
     _api_param_spec_from_cache_dict,
     _api_surface_from_cache_dict,
     _cache_dict_int_fields,
     _cache_dict_module_fields,
+    _class_metric_from_cache_row,
+    _dead_candidate_from_cache_row,
+    _dead_candidate_kind,
     _docstring_coverage_from_cache_dict,
+    _exported_via_kind,
+    _import_type,
+    _module_dep_from_cache_row,
     _public_symbol_from_cache_dict,
+    _public_symbol_kind,
+    _risk_level,
     _typing_coverage_from_cache_dict,
 )
 from codeclone.core.discovery_cache import (
@@ -742,6 +752,180 @@ def test_load_cached_metrics_extended_decodes_adoption_and_api_surface() -> None
     assert typing_coverage.any_annotation_count == 1
     assert docstring_coverage.public_symbol_documented == 2
     assert api_surface.symbols[0].qualname == "pkg.mod:run"
+
+
+@pytest.mark.parametrize(
+    ("helper", "accepted"),
+    (
+        (_api_param_kind, ("pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg")),
+        (_public_symbol_kind, ("function", "class", "method", "constant")),
+        (_exported_via_kind, ("all", "name")),
+        (_risk_level, ("low", "medium", "high")),
+        (_import_type, ("import", "from_import")),
+        (_dead_candidate_kind, ("function", "class", "method", "import")),
+    ),
+)
+def test_discovery_cache_literal_helpers_accept_known_values_and_reject_unknowns(
+    helper: Callable[[object], object | None],
+    accepted: tuple[str, ...],
+) -> None:
+    for value in accepted:
+        assert helper(value) == value
+    assert helper("broken") is None
+
+
+def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() -> None:
+    assert _api_param_spec_from_cache_dict([]) is None
+    assert (
+        _public_symbol_from_cache_dict(
+            {
+                "qualname": "pkg.mod:run",
+                "kind": "broken",
+                "start_line": 1,
+                "end_line": 2,
+                "exported_via": "name",
+                "returns_hash": "",
+                "params": [],
+            }
+        )
+        is None
+    )
+    assert (
+        _api_surface_from_cache_dict(
+            {
+                "module": "pkg.mod",
+                "filepath": "pkg/mod.py",
+                "all_declared": [1],
+                "symbols": [],
+            }
+        )
+        is None
+    )
+    assert (
+        _class_metric_from_cache_row(
+            {
+                "qualname": "pkg.mod:Service",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 10,
+                "cbo": 3,
+                "lcom4": 2,
+                "method_count": 2,
+                "instance_var_count": 1,
+                "risk_coupling": "broken",
+                "risk_cohesion": "high",
+            }
+        )
+        is None
+    )
+    assert (
+        _module_dep_from_cache_row(
+            {
+                "source": "pkg.mod",
+                "target": "pkg.dep",
+                "import_type": "broken",
+                "line": 3,
+            }
+        )
+        is None
+    )
+    assert (
+        _dead_candidate_from_cache_row(
+            {
+                "qualname": "pkg.mod:unused",
+                "local_name": "unused",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 2,
+                "kind": "broken",
+            }
+        )
+        is None
+    )
+
+    entry: CacheEntry = {
+        "stat": {"mtime_ns": 1, "size": 1},
+        "units": [],
+        "blocks": [],
+        "segments": [],
+        "class_metrics": [
+            {
+                "qualname": "pkg.mod:Service",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 10,
+                "cbo": 3,
+                "lcom4": 2,
+                "method_count": 2,
+                "instance_var_count": 1,
+                "risk_coupling": "high",
+                "risk_cohesion": "medium",
+                "coupled_classes": ["pkg.dep"],
+            },
+            {
+                "qualname": "pkg.mod:Broken",
+                "filepath": "pkg/mod.py",
+                "start_line": 11,
+                "end_line": 20,
+                "cbo": 1,
+                "lcom4": 1,
+                "method_count": 1,
+                "instance_var_count": 0,
+                "risk_coupling": "broken",
+                "risk_cohesion": "low",
+            },
+        ],
+        "module_deps": [
+            {
+                "source": "pkg.mod",
+                "target": "pkg.dep",
+                "import_type": "import",
+                "line": 3,
+            },
+            {
+                "source": "pkg.mod",
+                "target": "pkg.bad",
+                "import_type": "broken",
+                "line": 4,
+            },
+        ],
+        "dead_candidates": [
+            {
+                "qualname": "pkg.mod:unused",
+                "local_name": "unused",
+                "filepath": "pkg/mod.py",
+                "start_line": 30,
+                "end_line": 32,
+                "kind": "function",
+                "suppressed_rules": ["dead-code"],
+            },
+            {
+                "qualname": "pkg.mod:broken",
+                "local_name": "broken",
+                "filepath": "pkg/mod.py",
+                "start_line": 40,
+                "end_line": 42,
+                "kind": "broken",
+            },
+        ],
+        "referenced_names": ["run"],
+        "referenced_qualnames": ["pkg.mod:run"],
+    }
+
+    (
+        class_metrics,
+        module_deps,
+        dead_candidates,
+        referenced_names,
+        referenced_qualnames,
+        *_rest,
+    ) = _load_cached_metrics_extended(entry, filepath="tests/test_mod.py")
+
+    assert len(class_metrics) == 1
+    assert len(module_deps) == 1
+    assert len(dead_candidates) == 1
+    assert referenced_names == frozenset()
+    assert referenced_qualnames == frozenset()
 
 
 def test_metric_gate_reasons_collects_all_enabled_reasons() -> None:

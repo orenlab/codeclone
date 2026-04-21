@@ -1345,6 +1345,72 @@ def test_report_contract_renderers_include_coverage_join_section_when_present() 
     )
 
 
+def test_report_contract_markdown_renders_empty_suppressed_clone_section() -> None:
+    payload = _rich_report_document()
+    findings = cast(dict[str, object], payload["findings"])
+    groups = cast(dict[str, object], findings["groups"])
+    clone_groups = cast(dict[str, object], groups["clones"])
+    clone_groups["suppressed"] = {"functions": [], "blocks": [], "segments": []}
+
+    markdown = render_markdown_report_document(payload)
+
+    assert "Suppressed Golden Fixture Clone Groups" in markdown
+    assert "_None._" in markdown
+
+
+def test_report_contract_markdown_truncates_suppressed_clone_locations() -> None:
+    payload = _rich_report_document()
+    findings = cast(dict[str, object], payload["findings"])
+    groups = cast(dict[str, object], findings["groups"])
+    clone_groups = cast(dict[str, object], groups["clones"])
+    clone_groups["suppressed"] = {
+        "functions": [
+            {
+                "id": "clone:function:golden",
+                "category": "function",
+                "clone_type": "Type-2",
+                "severity": "warning",
+                "source_scope": {
+                    "impact_scope": "runtime",
+                    "dominant_kind": "production",
+                },
+                "spread": {"files": 7, "functions": 7},
+                "count": 7,
+                "suppression_rule": "golden_fixture",
+                "suppression_source": "project_config",
+                "matched_patterns": ["tests/fixtures/golden_*"],
+                "items": [
+                    {
+                        "relative_path": f"tests/golden_{idx}.py",
+                        "qualname": f"tests.golden_{idx}:run",
+                        "start_line": 10 + idx,
+                        "end_line": 11 + idx,
+                    }
+                    for idx in range(7)
+                ],
+            }
+        ],
+        "blocks": [],
+        "segments": [],
+    }
+
+    markdown = render_markdown_report_document(payload)
+
+    assert "... and 2 more occurrence(s)" in markdown
+
+
+def test_report_contract_markdown_supports_legacy_god_modules_metrics_key() -> None:
+    payload = _rich_report_document()
+    metrics = cast(dict[str, object], payload["metrics"])
+    families = cast(dict[str, object], metrics["families"])
+    families["god_modules"] = families.pop("overloaded_modules")
+
+    markdown = render_markdown_report_document(payload)
+
+    assert "### Overloaded Modules" in markdown
+    assert "candidate_status=candidate" in markdown
+
+
 def test_report_contract_includes_canonical_overloaded_modules_family() -> None:
     payload = _rich_report_document()
 
@@ -2272,6 +2338,15 @@ def test_render_sarif_report_document_without_srcroot_keeps_relative_payload() -
     location_map = cast(dict[str, object], primary_location)
     assert cast(dict[str, object], location_map["message"])["text"] == "Cycle member"
     assert cast(str, cast(dict[str, object], result["message"])["text"]).endswith(".")
+
+
+def test_sarif_rule_spec_covers_coverage_scope_gap_design_findings() -> None:
+    spec = _sarif_rule_spec(
+        {"family": "design", "category": "coverage", "kind": "coverage_scope_gap"}
+    )
+
+    assert spec.rule_id == "CDESIGN006"
+    assert spec.short_description == "Coverage scope gap"
 
 
 def test_collect_paths_from_metrics_covers_all_metric_families_and_skips_missing() -> (

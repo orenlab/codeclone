@@ -573,8 +573,7 @@ def test_pipeline_analyze_uses_cached_segment_projection(
         files_to_process=(),
         skipped_warnings=(),
         cached_segment_report_projection=cast(
-            "SegmentReportProjection",
-            cached_projection,
+            SegmentReportProjection, cached_projection
         ),
     )
     processing = ProcessingResult(
@@ -613,6 +612,68 @@ def test_pipeline_coerce_segment_projection_invalid_shapes() -> None:
         )
         is None
     )
+
+    assert (
+        _coerce_segment_report_projection(
+            {
+                "digest": "d",
+                "suppressed": 0,
+                "groups": {"k": [{"segment_hash": "h", "segment_sig": "s"}]},
+            }
+        )
+        is None
+    )
+
+    assert (
+        _coerce_segment_report_projection(
+            {
+                "digest": "d",
+                "suppressed": 0,
+                "groups": {"k": ["bad-item"]},
+            }
+        )
+        is None
+    )
+
+
+def test_pipeline_coerce_segment_projection_valid_group_items() -> None:
+    projection = _coerce_segment_report_projection(
+        {
+            "digest": "digest",
+            "suppressed": 2,
+            "groups": {
+                "sig-1": [
+                    {
+                        "segment_hash": "hash-1",
+                        "segment_sig": "sig-1",
+                        "filepath": "pkg/mod.py",
+                        "qualname": "pkg.mod:run",
+                        "start_line": 10,
+                        "end_line": 16,
+                        "size": 6,
+                    }
+                ]
+            },
+        }
+    )
+
+    assert projection == {
+        "digest": "digest",
+        "suppressed": 2,
+        "groups": {
+            "sig-1": [
+                {
+                    "segment_hash": "hash-1",
+                    "segment_sig": "sig-1",
+                    "filepath": "pkg/mod.py",
+                    "qualname": "pkg.mod:run",
+                    "start_line": 10,
+                    "end_line": 16,
+                    "size": 6,
+                }
+            ]
+        },
+    }
 
 
 def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:

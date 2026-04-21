@@ -20,6 +20,7 @@ import pytest
 import codeclone.baseline as baseline_mod
 import codeclone.baseline.metrics_baseline as metrics_baseline_mod
 import codeclone.core.worker as core_worker
+import codeclone.surfaces.cli.attrs as cli_attrs
 import codeclone.surfaces.cli.baseline_state as cli_baselines_mod
 import codeclone.surfaces.cli.changed_scope as cli_changed_scope
 import codeclone.surfaces.cli.console as cli_console
@@ -157,6 +158,24 @@ def test_process_file_success(tmp_path: Path) -> None:
     result = process_file(str(src), str(tmp_path), NormalizationConfig(), 1, 1)
     assert result.success is True
     assert result.stat is not None
+
+
+def test_cli_attr_helpers_handle_bool_int_and_path_edges(tmp_path: Path) -> None:
+    args = SimpleNamespace(
+        flag="yes",
+        numeric=True,
+        broken=3.14,
+        path_value=tmp_path / "report.json",
+        invalid_text=123,
+    )
+
+    assert cli_attrs.bool_attr(args, "flag") is True
+    assert cli_attrs.int_attr(args, "numeric", default=7) == 7
+    assert cli_attrs.int_attr(args, "broken", default=9) == 9
+    assert cli_attrs.optional_text_attr(args, "path_value") == str(
+        tmp_path / "report.json"
+    )
+    assert cli_attrs.optional_text_attr(args, "invalid_text") is None
 
 
 def test_cli_module_main_guard(monkeypatch: pytest.MonkeyPatch) -> None:

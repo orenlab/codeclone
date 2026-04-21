@@ -105,6 +105,11 @@ def test_validate_git_diff_ref_rejects_control_whitespace_characters() -> None:
         validate_git_diff_ref("main\tHEAD")
 
 
+def test_validate_git_diff_ref_rejects_empty_value() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        validate_git_diff_ref("")
+
+
 def test_add_option_rejects_unsupported_cli_kind() -> None:
     parser = argparse.ArgumentParser()
     group = parser.add_argument_group("Example")

@@ -1043,6 +1043,212 @@ def test_metrics_baseline_parse_snapshot_grade_validation(tmp_path: Path) -> Non
         mb_validate._parse_snapshot(payload, path=path)
 
 
+def test_metrics_baseline_version_and_optional_string_helpers(tmp_path: Path) -> None:
+    path = tmp_path / "metrics-baseline.json"
+
+    assert (
+        mb_validate._is_compatible_metrics_schema(
+            baseline_version="1.1",
+            expected_version="1.2",
+        )
+        is True
+    )
+    assert (
+        mb_validate._is_compatible_metrics_schema(
+            baseline_version=None,
+            expected_version="1.2",
+        )
+        is False
+    )
+    assert (
+        mb_validate._is_compatible_metrics_schema(
+            baseline_version="broken",
+            expected_version="1.2",
+        )
+        is False
+    )
+    assert mb_validate._parse_major_minor("1") is None
+    assert mb_validate._parse_major_minor("1.x") is None
+    assert mb_validate._require_str_list_or_none({}, "missing", path=path) is None
+
+    with pytest.raises(BaselineValidationError, match="'qualname' must be str"):
+        mb_validate._optional_require_str({"qualname": 1}, "qualname", path=path)
+
+
+def test_metrics_baseline_enum_validation_helpers_cover_all_supported_values(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "metrics-baseline.json"
+
+    for grade in ("A", "B", "C", "D", "F"):
+        assert mb_validate._require_health_grade(grade, path=path) == grade
+    with pytest.raises(BaselineValidationError, match="must be one of A/B/C/D/F"):
+        mb_validate._require_health_grade("Z", path=path)
+
+    for kind in ("pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg"):
+        assert mb_validate._require_api_param_kind(kind, path=path) == kind
+    with pytest.raises(BaselineValidationError, match="api param 'kind' is invalid"):
+        mb_validate._require_api_param_kind("bad", path=path)
+
+    for kind in ("function", "class", "method", "constant"):
+        assert mb_validate._require_public_symbol_kind(kind, path=path) == kind
+    with pytest.raises(
+        BaselineValidationError,
+        match="public symbol 'kind' is invalid",
+    ):
+        mb_validate._require_public_symbol_kind("bad", path=path)
+
+    assert mb_validate._require_exported_via("all", path=path) == "all"
+    assert mb_validate._require_exported_via("name", path=path) == "name"
+    with pytest.raises(
+        BaselineValidationError,
+        match="public symbol 'exported_via' is invalid",
+    ):
+        mb_validate._require_exported_via("bad", path=path)
+
+
+def test_metrics_baseline_parse_api_surface_snapshot_validation_edges(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "metrics-baseline.json"
+
+    with pytest.raises(BaselineValidationError, match="'api_surface' must be object"):
+        mb_validate._parse_api_surface_snapshot([], path=path)
+
+    with pytest.raises(
+        BaselineValidationError,
+        match=r"'api_surface\.modules' must be list",
+    ):
+        mb_validate._parse_api_surface_snapshot({"modules": "bad"}, path=path)
+
+    with pytest.raises(
+        BaselineValidationError, match="api surface module must be object"
+    ):
+        mb_validate._parse_api_surface_snapshot({"modules": ["bad"]}, path=path)
+
+    with pytest.raises(
+        BaselineValidationError, match="api surface symbols must be list"
+    ):
+        mb_validate._parse_api_surface_snapshot(
+            {
+                "modules": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "pkg/mod.py",
+                        "symbols": "bad",
+                    }
+                ]
+            },
+            path=path,
+        )
+
+    with pytest.raises(
+        BaselineValidationError, match="api surface symbol must be object"
+    ):
+        mb_validate._parse_api_surface_snapshot(
+            {
+                "modules": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "pkg/mod.py",
+                        "symbols": ["bad"],
+                    }
+                ]
+            },
+            path=path,
+        )
+
+    with pytest.raises(
+        BaselineValidationError,
+        match="api surface symbol requires 'local_name' or 'qualname'",
+    ):
+        mb_validate._parse_api_surface_snapshot(
+            {
+                "modules": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "pkg/mod.py",
+                        "symbols": [{"kind": "function", "exported_via": "name"}],
+                    }
+                ]
+            },
+            path=path,
+        )
+
+    with pytest.raises(
+        BaselineValidationError, match="api surface params must be list"
+    ):
+        mb_validate._parse_api_surface_snapshot(
+            {
+                "modules": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "pkg/mod.py",
+                        "symbols": [
+                            {
+                                "local_name": "run",
+                                "kind": "function",
+                                "exported_via": "name",
+                                "params": "bad",
+                            }
+                        ],
+                    }
+                ]
+            },
+            path=path,
+        )
+
+    with pytest.raises(BaselineValidationError, match="api param must be object"):
+        mb_validate._parse_api_surface_snapshot(
+            {
+                "modules": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "pkg/mod.py",
+                        "symbols": [
+                            {
+                                "local_name": "run",
+                                "kind": "function",
+                                "exported_via": "name",
+                                "params": ["bad"],
+                            }
+                        ],
+                    }
+                ]
+            },
+            path=path,
+        )
+
+    with pytest.raises(
+        BaselineValidationError, match="api param 'has_default' must be bool"
+    ):
+        mb_validate._parse_api_surface_snapshot(
+            {
+                "modules": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "pkg/mod.py",
+                        "symbols": [
+                            {
+                                "local_name": "run",
+                                "kind": "function",
+                                "exported_via": "name",
+                                "params": [
+                                    {
+                                        "name": "value",
+                                        "kind": "pos_or_kw",
+                                        "has_default": "bad",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+            path=path,
+        )
+
+
 def test_metrics_baseline_load_json_read_oserror_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
