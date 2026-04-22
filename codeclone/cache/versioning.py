@@ -10,12 +10,12 @@ from enum import Enum
 from pathlib import Path
 from typing import TypedDict
 
-from ..contracts import CACHE_VERSION
+from ..contracts import CACHE_VERSION, DEFAULT_MAX_CACHE_SIZE_MB
 from ..contracts.schemas import AnalysisProfile
 from .entries import CacheEntry
 from .integrity import as_int_or_none, as_str_dict
 
-MAX_CACHE_SIZE_BYTES = 50 * 1024 * 1024
+MAX_CACHE_SIZE_BYTES = DEFAULT_MAX_CACHE_SIZE_MB * 1024 * 1024
 LEGACY_CACHE_SECRET_FILENAME = ".cache_secret"
 _DEFAULT_WIRE_UNIT_FLOW_PROFILES = (
     0,

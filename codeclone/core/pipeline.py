@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from ..contracts import DEFAULT_COVERAGE_MIN
 from ..findings.clones.grouping import (
     build_block_groups,
     build_groups,
@@ -309,7 +310,7 @@ def analyze(
                     root_path=boot.root,
                     units=processing.units,
                     hotspot_threshold_percent=int(
-                        getattr(boot.args, "coverage_min", 50)
+                        getattr(boot.args, "coverage_min", DEFAULT_COVERAGE_MIN)
                     ),
                 )
             except CoverageJoinParseError as exc:
@@ -317,7 +318,7 @@ def analyze(
                     coverage_xml=str(coverage_xml_path),
                     status="invalid",
                     hotspot_threshold_percent=int(
-                        getattr(boot.args, "coverage_min", 50)
+                        getattr(boot.args, "coverage_min", DEFAULT_COVERAGE_MIN)
                     ),
                     invalid_reason=str(exc),
                 )

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Final
 
 import orjson
 
+from ..contracts import DEFAULT_MAX_BASELINE_SIZE_MB
 from ..contracts.errors import BaselineValidationError
 from ..utils.json_io import read_json_object as _read_json_object
 
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 
 BASELINE_GENERATOR = "codeclone"
 _BASELINE_SCHEMA_MAX_MINOR_BY_MAJOR = {1: 0, 2: 1}
-MAX_BASELINE_SIZE_BYTES = 5 * 1024 * 1024
+MAX_BASELINE_SIZE_BYTES = DEFAULT_MAX_BASELINE_SIZE_MB * 1024 * 1024
 _UTC_ISO8601_Z_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 

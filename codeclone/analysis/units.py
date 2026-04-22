@@ -11,6 +11,12 @@ from hashlib import sha1 as _sha1
 
 from .. import qualnames as _qualnames
 from ..blocks import extract_blocks, extract_segments
+from ..contracts import (
+    DEFAULT_BLOCK_MIN_LOC,
+    DEFAULT_BLOCK_MIN_STMT,
+    DEFAULT_SEGMENT_MIN_LOC,
+    DEFAULT_SEGMENT_MIN_STMT,
+)
 from ..contracts.errors import ParseError
 from ..findings.structural.detectors import scan_function_structure
 from ..metrics.adoption import collect_module_adoption
@@ -84,10 +90,10 @@ def extract_units_and_stats_from_source(
     min_loc: int,
     min_stmt: int,
     *,
-    block_min_loc: int = 20,
-    block_min_stmt: int = 8,
-    segment_min_loc: int = 20,
-    segment_min_stmt: int = 10,
+    block_min_loc: int = DEFAULT_BLOCK_MIN_LOC,
+    block_min_stmt: int = DEFAULT_BLOCK_MIN_STMT,
+    segment_min_loc: int = DEFAULT_SEGMENT_MIN_LOC,
+    segment_min_stmt: int = DEFAULT_SEGMENT_MIN_STMT,
     collect_structural_findings: bool = True,
     collect_api_surface: bool = False,
     api_include_private_modules: bool = False,

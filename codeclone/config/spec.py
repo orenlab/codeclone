@@ -5,10 +5,27 @@ from typing import Final, Literal
 
 from .. import ui_messages as ui
 from ..contracts import (
+    DEFAULT_BASELINE_PATH,
+    DEFAULT_BLOCK_MIN_LOC,
+    DEFAULT_BLOCK_MIN_STMT,
     DEFAULT_COHESION_THRESHOLD,
     DEFAULT_COMPLEXITY_THRESHOLD,
     DEFAULT_COUPLING_THRESHOLD,
+    DEFAULT_COVERAGE_MIN,
     DEFAULT_HEALTH_THRESHOLD,
+    DEFAULT_HTML_REPORT_PATH,
+    DEFAULT_JSON_REPORT_PATH,
+    DEFAULT_MARKDOWN_REPORT_PATH,
+    DEFAULT_MAX_BASELINE_SIZE_MB,
+    DEFAULT_MAX_CACHE_SIZE_MB,
+    DEFAULT_MIN_LOC,
+    DEFAULT_MIN_STMT,
+    DEFAULT_PROCESSES,
+    DEFAULT_ROOT,
+    DEFAULT_SARIF_REPORT_PATH,
+    DEFAULT_SEGMENT_MIN_LOC,
+    DEFAULT_SEGMENT_MIN_STMT,
+    DEFAULT_TEXT_REPORT_PATH,
 )
 
 CliKind = Literal[
@@ -21,24 +38,6 @@ CliKind = Literal[
     "help",
     "version",
 ]
-
-DEFAULT_ROOT = "."
-DEFAULT_MIN_LOC = 10
-DEFAULT_MIN_STMT = 6
-DEFAULT_BLOCK_MIN_LOC = 20
-DEFAULT_BLOCK_MIN_STMT = 8
-DEFAULT_SEGMENT_MIN_LOC = 20
-DEFAULT_SEGMENT_MIN_STMT = 10
-DEFAULT_PROCESSES = 4
-DEFAULT_MAX_CACHE_SIZE_MB = 50
-DEFAULT_MAX_BASELINE_SIZE_MB = 5
-
-DEFAULT_BASELINE_PATH = "codeclone.baseline.json"
-DEFAULT_HTML_REPORT_PATH = ".cache/codeclone/report.html"
-DEFAULT_JSON_REPORT_PATH = ".cache/codeclone/report.json"
-DEFAULT_MARKDOWN_REPORT_PATH = ".cache/codeclone/report.md"
-DEFAULT_SARIF_REPORT_PATH = ".cache/codeclone/report.sarif"
-DEFAULT_TEXT_REPORT_PATH = ".cache/codeclone/report.txt"
 
 _UNSET: Final[object] = object()
 _INFER_PYPROJECT_KEY: Final[object] = object()
@@ -509,7 +508,7 @@ OPTIONS: Final[tuple[OptionSpec, ...]] = (
         group="Quality gates",
         cli_kind="value",
         flags=("--coverage-min",),
-        default=50,
+        default=DEFAULT_COVERAGE_MIN,
         value_type=int,
         metavar="PERCENT",
         help_text=ui.HELP_COVERAGE_MIN,

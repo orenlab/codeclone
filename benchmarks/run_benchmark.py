@@ -26,6 +26,7 @@ from codeclone import __version__ as codeclone_version
 from codeclone.baseline import current_python_tag
 
 BENCHMARK_SCHEMA_VERSION = "1.0"
+BENCHMARK_CLI_MODULE = "codeclone.main"
 BENCHMARK_NEUTRAL_ARGS: tuple[str, ...] = (
     "--no-fail-on-new",
     "--no-fail-on-new-metrics",
@@ -162,7 +163,7 @@ def _run_cli_once(
     cmd = [
         python_executable,
         "-m",
-        "codeclone.cli",
+        BENCHMARK_CLI_MODULE,
         str(target),
         *BENCHMARK_NEUTRAL_ARGS,
         "--json",

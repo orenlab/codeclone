@@ -12,7 +12,16 @@ from json import JSONDecodeError
 from pathlib import Path
 
 from ..baseline.trust import current_python_tag
-from ..contracts import BASELINE_FINGERPRINT_VERSION, CACHE_VERSION
+from ..contracts import (
+    BASELINE_FINGERPRINT_VERSION,
+    CACHE_VERSION,
+    DEFAULT_BLOCK_MIN_LOC,
+    DEFAULT_BLOCK_MIN_STMT,
+    DEFAULT_MIN_LOC,
+    DEFAULT_MIN_STMT,
+    DEFAULT_SEGMENT_MIN_LOC,
+    DEFAULT_SEGMENT_MIN_STMT,
+)
 from ..contracts.errors import CacheError
 from ..models import BlockUnit, FileMetrics, SegmentUnit, StructuralFindingGroup, Unit
 from ._canonicalize import (
@@ -100,12 +109,12 @@ class Cache:
         *,
         root: str | Path | None = None,
         max_size_bytes: int | None = None,
-        min_loc: int = 10,
-        min_stmt: int = 6,
-        block_min_loc: int = 20,
-        block_min_stmt: int = 8,
-        segment_min_loc: int = 20,
-        segment_min_stmt: int = 10,
+        min_loc: int = DEFAULT_MIN_LOC,
+        min_stmt: int = DEFAULT_MIN_STMT,
+        block_min_loc: int = DEFAULT_BLOCK_MIN_LOC,
+        block_min_stmt: int = DEFAULT_BLOCK_MIN_STMT,
+        segment_min_loc: int = DEFAULT_SEGMENT_MIN_LOC,
+        segment_min_stmt: int = DEFAULT_SEGMENT_MIN_STMT,
         collect_api_surface: bool = False,
     ):
         self.path = Path(path)

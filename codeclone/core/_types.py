@@ -17,6 +17,7 @@ import orjson
 from ..analysis.normalizer import NormalizationConfig
 from ..cache.entries import FileStat
 from ..cache.projection import SegmentReportProjection
+from ..contracts import DEFAULT_PROCESSES
 from ..models import (
     BlockUnit,
     ClassMetrics,
@@ -43,7 +44,7 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 DEFAULT_BATCH_SIZE = 100
 PARALLEL_MIN_FILES_PER_WORKER = 8
 PARALLEL_MIN_FILES_FLOOR = 16
-DEFAULT_RUNTIME_PROCESSES = 4
+DEFAULT_RUNTIME_PROCESSES = DEFAULT_PROCESSES
 
 
 @dataclass(frozen=True, slots=True)

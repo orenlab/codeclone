@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping
 
+from ..contracts import DEFAULT_COVERAGE_MIN
 from ..models import MetricsDiff
 from ..report.gates.evaluator import GateResult, GateState
 from ..report.gates.evaluator import MetricGateConfig as _MetricGateConfig
@@ -246,7 +247,7 @@ def gate(
         ),
         min_typing_coverage=int(getattr(boot.args, "min_typing_coverage", -1)),
         min_docstring_coverage=int(getattr(boot.args, "min_docstring_coverage", -1)),
-        coverage_min=int(getattr(boot.args, "coverage_min", 50)),
+        coverage_min=int(getattr(boot.args, "coverage_min", DEFAULT_COVERAGE_MIN)),
         fail_on_new=bool(getattr(boot.args, "fail_on_new", False)),
         fail_threshold=int(getattr(boot.args, "fail_threshold", -1)),
     )

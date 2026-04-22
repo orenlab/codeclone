@@ -14,6 +14,12 @@ from pathlib import Path
 from ..analysis.normalizer import NormalizationConfig
 from ..analysis.units import extract_units_and_stats_from_source
 from ..cache.entries import FileStat
+from ..contracts import (
+    DEFAULT_BLOCK_MIN_LOC,
+    DEFAULT_BLOCK_MIN_STMT,
+    DEFAULT_SEGMENT_MIN_LOC,
+    DEFAULT_SEGMENT_MIN_STMT,
+)
 from ..scanner import module_name_from_path
 from ._types import MAX_FILE_SIZE, FileProcessResult
 
@@ -27,10 +33,10 @@ def process_file(
     collect_structural_findings: bool = True,
     collect_api_surface: bool = False,
     api_include_private_modules: bool = False,
-    block_min_loc: int = 20,
-    block_min_stmt: int = 8,
-    segment_min_loc: int = 20,
-    segment_min_stmt: int = 10,
+    block_min_loc: int = DEFAULT_BLOCK_MIN_LOC,
+    block_min_stmt: int = DEFAULT_BLOCK_MIN_STMT,
+    segment_min_loc: int = DEFAULT_SEGMENT_MIN_LOC,
+    segment_min_stmt: int = DEFAULT_SEGMENT_MIN_STMT,
 ) -> FileProcessResult:
     try:
         try:

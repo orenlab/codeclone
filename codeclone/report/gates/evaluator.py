@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ...contracts import ExitCode
+from ...contracts import DEFAULT_COVERAGE_MIN, ExitCode
 from ...metrics.registry import METRIC_FAMILIES
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
@@ -35,7 +35,7 @@ class MetricGateConfig:
     fail_on_untested_hotspots: bool = False
     min_typing_coverage: int = -1
     min_docstring_coverage: int = -1
-    coverage_min: int = 50
+    coverage_min: int = DEFAULT_COVERAGE_MIN
     fail_on_new: bool = False
     fail_threshold: int = -1
 

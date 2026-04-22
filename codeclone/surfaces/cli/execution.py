@@ -23,7 +23,7 @@ from rich.progress import (
 
 from ... import ui_messages as ui
 from ...cache.store import Cache
-from ...contracts import ExitCode
+from ...contracts import DEFAULT_HTML_REPORT_PATH, ExitCode
 from ...contracts.errors import CacheError
 from ...core._types import AnalysisResult, BootstrapResult, DiscoveryResult
 from ...core._types import ProcessingResult as PipelineProcessingResult
@@ -273,7 +273,7 @@ def enforce_gating(
         sys.exit(ExitCode.GATING_FAILURE)
 
     if "clone:new" in gate_result.reasons:
-        default_report = Path(".cache/codeclone/report.html")
+        default_report = Path(DEFAULT_HTML_REPORT_PATH)
         resolved_html_report_path = html_report_path
         if resolved_html_report_path is None and default_report.exists():
             resolved_html_report_path = str(default_report)

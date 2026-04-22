@@ -13,7 +13,21 @@ import traceback
 from pathlib import Path
 
 from .. import __version__
-from ..contracts import ISSUES_URL
+from ..contracts import (
+    DEFAULT_BASELINE_PATH,
+    DEFAULT_COVERAGE_MIN,
+    DEFAULT_HTML_REPORT_PATH,
+    DEFAULT_JSON_REPORT_PATH,
+    DEFAULT_MARKDOWN_REPORT_PATH,
+    DEFAULT_MAX_BASELINE_SIZE_MB,
+    DEFAULT_MAX_CACHE_SIZE_MB,
+    DEFAULT_MIN_LOC,
+    DEFAULT_MIN_STMT,
+    DEFAULT_PROCESSES,
+    DEFAULT_SARIF_REPORT_PATH,
+    DEFAULT_TEXT_REPORT_PATH,
+    ISSUES_URL,
+)
 from ..domain.quality import (
     HEALTH_GRADE_A,
     HEALTH_GRADE_B,
@@ -31,9 +45,15 @@ REPORT_BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN = "Assert pattern block"
 
 HELP_VERSION = "Print the CodeClone version and exit."
 HELP_ROOT = "Project root directory to scan.\nDefaults to the current directory."
-HELP_MIN_LOC = "Minimum Lines of Code (LOC) required for clone analysis.\nDefault: 10."
-HELP_MIN_STMT = "Minimum AST statement count required for clone analysis.\nDefault: 6."
-HELP_PROCESSES = "Number of parallel worker processes.\nDefault: 4."
+HELP_MIN_LOC = (
+    "Minimum Lines of Code (LOC) required for clone analysis.\n"
+    f"Default: {DEFAULT_MIN_LOC}."
+)
+HELP_MIN_STMT = (
+    "Minimum AST statement count required for clone analysis.\n"
+    f"Default: {DEFAULT_MIN_STMT}."
+)
+HELP_PROCESSES = f"Number of parallel worker processes.\nDefault: {DEFAULT_PROCESSES}."
 HELP_CHANGED_ONLY = (
     "Limit clone gating and changed-scope summaries to findings that touch\n"
     "files from a git diff selection."
@@ -53,11 +73,15 @@ HELP_CACHE_PATH = (
 HELP_CACHE_DIR_LEGACY = (
     "Legacy alias for --cache-path.\nPrefer --cache-path in new configurations."
 )
-HELP_MAX_BASELINE_SIZE_MB = "Maximum allowed baseline size in MB.\nDefault: 5."
-HELP_MAX_CACHE_SIZE_MB = "Maximum cache file size in MB.\nDefault: 50."
+HELP_MAX_BASELINE_SIZE_MB = (
+    f"Maximum allowed baseline size in MB.\nDefault: {DEFAULT_MAX_BASELINE_SIZE_MB}."
+)
+HELP_MAX_CACHE_SIZE_MB = (
+    f"Maximum cache file size in MB.\nDefault: {DEFAULT_MAX_CACHE_SIZE_MB}."
+)
 HELP_BASELINE = (
     "Path to the clone baseline.\n"
-    f"If FILE is omitted, uses {Path('codeclone.baseline.json')}."
+    f"If FILE is omitted, uses {Path(DEFAULT_BASELINE_PATH)}."
 )
 HELP_UPDATE_BASELINE = (
     "Overwrite the clone baseline with current results.\nDisabled by default."
@@ -127,7 +151,8 @@ HELP_MIN_DOCSTRING_COVERAGE = (
 )
 HELP_COVERAGE_MIN = (
     "Coverage threshold for untested hotspot detection.\n"
-    "Threshold is a whole percent from 0 to 100.\nDefault: 50."
+    "Threshold is a whole percent from 0 to 100.\n"
+    f"Default: {DEFAULT_COVERAGE_MIN}."
 )
 HELP_CI = (
     "Enable CI preset.\n"
@@ -140,30 +165,30 @@ HELP_UPDATE_METRICS_BASELINE = (
 )
 HELP_METRICS_BASELINE = (
     "Path to the metrics baseline.\n"
-    f"If FILE is omitted, uses {Path('codeclone.baseline.json')}."
+    f"If FILE is omitted, uses {Path(DEFAULT_BASELINE_PATH)}."
 )
 HELP_SKIP_METRICS = "Skip full metrics analysis and run in clone-only mode."
 HELP_SKIP_DEAD_CODE = "Skip dead code detection."
 HELP_SKIP_DEPENDENCIES = "Skip dependency graph analysis."
 HELP_HTML = (
     "Generate an HTML report.\n"
-    "If FILE is omitted, writes to .cache/codeclone/report.html."
+    f"If FILE is omitted, writes to {DEFAULT_HTML_REPORT_PATH}."
 )
 HELP_JSON = (
     "Generate the canonical JSON report.\n"
-    "If FILE is omitted, writes to .cache/codeclone/report.json."
+    f"If FILE is omitted, writes to {DEFAULT_JSON_REPORT_PATH}."
 )
 HELP_MD = (
     "Generate a Markdown report.\n"
-    "If FILE is omitted, writes to .cache/codeclone/report.md."
+    f"If FILE is omitted, writes to {DEFAULT_MARKDOWN_REPORT_PATH}."
 )
 HELP_SARIF = (
     "Generate a SARIF 2.1.0 report.\n"
-    "If FILE is omitted, writes to .cache/codeclone/report.sarif."
+    f"If FILE is omitted, writes to {DEFAULT_SARIF_REPORT_PATH}."
 )
 HELP_TEXT = (
     "Generate a plain-text report.\n"
-    "If FILE is omitted, writes to .cache/codeclone/report.txt."
+    f"If FILE is omitted, writes to {DEFAULT_TEXT_REPORT_PATH}."
 )
 HELP_OPEN_HTML_REPORT = (
     "Open the generated HTML report in the default browser.\nRequires --html."

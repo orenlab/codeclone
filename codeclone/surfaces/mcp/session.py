@@ -39,6 +39,8 @@ from ...config.spec import (
     DEFAULT_SEGMENT_MIN_STMT,
 )
 from ...contracts import (
+    DEFAULT_COVERAGE_MIN,
+    DEFAULT_JSON_REPORT_PATH,
     DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
@@ -169,7 +171,7 @@ HealthScope = Literal["repository"]
 SummaryFocus = Literal["repository", "production", "changed_paths"]
 
 _LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
-_REPORT_DUMMY_PATH = Path(".cache/codeclone/report.json")
+_REPORT_DUMMY_PATH = Path(DEFAULT_JSON_REPORT_PATH)
 _HEALTH_SCOPE_REPOSITORY: Final[HealthScope] = "repository"
 _FOCUS_REPOSITORY: Final[SummaryFocus] = "repository"
 _FOCUS_PRODUCTION: Final[SummaryFocus] = "production"
@@ -999,7 +1001,7 @@ class MCPGateRequest:
     fail_on_untested_hotspots: bool = False
     min_typing_coverage: int = -1
     min_docstring_coverage: int = -1
-    coverage_min: int = 50
+    coverage_min: int = DEFAULT_COVERAGE_MIN
 
 
 @dataclass(frozen=True, slots=True)
@@ -4066,7 +4068,7 @@ class MCPSession:
             api_surface=False,
             coverage_xml=None,
             fail_on_untested_hotspots=False,
-            coverage_min=50,
+            coverage_min=DEFAULT_COVERAGE_MIN,
             design_complexity_threshold=DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
             design_coupling_threshold=DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
             design_cohesion_threshold=DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,

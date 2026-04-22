@@ -6,12 +6,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from subprocess import CompletedProcess
+
 import pytest
 
 from benchmarks.run_benchmark import (
+    BENCHMARK_CLI_MODULE,
     BENCHMARK_NEUTRAL_ARGS,
     RunMeasurement,
     Scenario,
+    _run_cli_once,
     _timing_regressions,
     _validate_inventory_sample,
 )
@@ -75,6 +80,60 @@ def test_benchmark_neutral_args_disable_repo_quality_gates() -> None:
     assert "--min-typing-coverage" in BENCHMARK_NEUTRAL_ARGS
     assert "--min-docstring-coverage" in BENCHMARK_NEUTRAL_ARGS
     assert "--skip-metrics" not in BENCHMARK_NEUTRAL_ARGS
+
+
+def test_benchmark_runner_invokes_canonical_main_entrypoint(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(
+        cmd: list[str],
+        *,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+        env: dict[str, str],
+    ) -> CompletedProcess[str]:
+        captured["cmd"] = cmd
+        captured["check"] = check
+        captured["capture_output"] = capture_output
+        captured["text"] = text
+        captured["env"] = env
+        return CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("benchmarks.run_benchmark.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "benchmarks.run_benchmark._read_report",
+        lambda _report_path: (
+            "digest",
+            {"found": 10, "analyzed": 10, "cached": 0, "skipped": 0},
+        ),
+    )
+
+    _run_cli_once(
+        target=tmp_path,
+        python_executable="python3",
+        cache_path=tmp_path / "cache.json",
+        report_path=tmp_path / "report.json",
+        extra_args=("--skip-metrics",),
+    )
+
+    assert captured["cmd"] == [
+        "python3",
+        "-m",
+        BENCHMARK_CLI_MODULE,
+        str(tmp_path),
+        *BENCHMARK_NEUTRAL_ARGS,
+        "--json",
+        str(tmp_path / "report.json"),
+        "--cache-path",
+        str(tmp_path / "cache.json"),
+        "--no-progress",
+        "--quiet",
+        "--skip-metrics",
+    ]
 
 
 @pytest.mark.parametrize(

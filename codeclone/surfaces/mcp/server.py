@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal, TypeVar
 
 from ... import __version__
-from ...contracts import DOCS_URL
+from ...contracts import DEFAULT_COVERAGE_MIN, DOCS_URL
 from .service import CodeCloneMCPService
 from .session import (
     DEFAULT_MCP_HISTORY_LIMIT,
@@ -51,6 +51,12 @@ _MCP_INSTALL_HINT = (
     "CodeClone MCP support requires the optional 'mcp' extra. "
     "Install it with: pip install 'codeclone[mcp]'"
 )
+DEFAULT_MCP_HOST = "127.0.0.1"
+DEFAULT_MCP_PORT = 8000
+DEFAULT_MCP_JSON_RESPONSE = True
+DEFAULT_MCP_STATELESS_HTTP = True
+DEFAULT_MCP_DEBUG = False
+DEFAULT_MCP_LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
 
 class MCPDependencyError(RuntimeError):
@@ -122,12 +128,14 @@ def _validated_cache_policy(value: str) -> CachePolicy:
 def build_mcp_server(
     *,
     history_limit: int = DEFAULT_MCP_HISTORY_LIMIT,
-    host: str = "127.0.0.1",
-    port: int = 8000,
-    json_response: bool = False,
-    stateless_http: bool = False,
-    debug: bool = False,
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO",
+    host: str = DEFAULT_MCP_HOST,
+    port: int = DEFAULT_MCP_PORT,
+    json_response: bool = DEFAULT_MCP_JSON_RESPONSE,
+    stateless_http: bool = DEFAULT_MCP_STATELESS_HTTP,
+    debug: bool = DEFAULT_MCP_DEBUG,
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = (
+        DEFAULT_MCP_LOG_LEVEL
+    ),
 ) -> FastMCP:
     """Build and register the local read-only CodeClone FastMCP server."""
 
@@ -389,7 +397,7 @@ def build_mcp_server(
         fail_on_untested_hotspots: bool = False,
         min_typing_coverage: int = -1,
         min_docstring_coverage: int = -1,
-        coverage_min: int = 50,
+        coverage_min: int = DEFAULT_COVERAGE_MIN,
     ) -> dict[str, object]:
         return service.evaluate_gates(
             MCPGateRequest(
@@ -911,7 +919,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--host",
-        default="127.0.0.1",
+        default=DEFAULT_MCP_HOST,
         help="Host to bind when using streamable-http.",
     )
     parser.add_argument(
@@ -926,7 +934,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--port",
         type=int,
-        default=8000,
+        default=DEFAULT_MCP_PORT,
         help="Port to bind when using streamable-http.",
     )
     parser.add_argument(
@@ -941,25 +949,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--json-response",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=DEFAULT_MCP_JSON_RESPONSE,
         help="Use JSON responses for streamable-http transport.",
     )
     parser.add_argument(
         "--stateless-http",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=DEFAULT_MCP_STATELESS_HTTP,
         help="Use stateless Streamable HTTP mode when transport is streamable-http.",
     )
     parser.add_argument(
         "--debug",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=DEFAULT_MCP_DEBUG,
         help="Enable FastMCP debug mode.",
     )
     parser.add_argument(
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
-        default="INFO",
+        default=DEFAULT_MCP_LOG_LEVEL,
         help="FastMCP server log level.",
     )
     return parser

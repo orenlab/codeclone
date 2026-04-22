@@ -14,7 +14,7 @@ from typing import NoReturn
 
 from ... import ui_messages as ui
 from ...config.pyproject_loader import ConfigValidationError
-from ...contracts import ExitCode
+from ...contracts import DEFAULT_ROOT, ExitCode
 from .attrs import text_attr
 from .baseline_state import MetricsBaselineSectionProbe
 from .types import CLIArgsLike, ParserWithDefaults, StatusConsole
@@ -55,7 +55,7 @@ def exit_contract_error(
 
 def resolve_existing_root_path(*, args: object, printer: StatusConsole) -> Path:
     try:
-        root_path = Path(text_attr(args, "root", ".")).resolve()
+        root_path = Path(text_attr(args, "root", DEFAULT_ROOT)).resolve()
     except OSError as exc:
         exit_contract_error(
             ui.ERR_INVALID_ROOT_PATH.format(error=exc),
