@@ -1,8 +1,18 @@
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/codeclone-wordmark-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/codeclone-wordmark.svg">
-    <img alt="CodeClone" src="docs/assets/codeclone-wordmark.svg" width="320">
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="https://raw.githubusercontent.com/orenlab/codeclone/main/docs/assets/codeclone-wordmark-dark.svg"
+    >
+    <source
+      media="(prefers-color-scheme: light)"
+      srcset="https://raw.githubusercontent.com/orenlab/codeclone/main/docs/assets/codeclone-wordmark.svg"
+    >
+    <img
+      alt="CodeClone"
+      src="https://raw.githubusercontent.com/orenlab/codeclone/main/docs/assets/codeclone-wordmark.svg"
+      width="320"
+    >
   </picture>
 </div>
 
