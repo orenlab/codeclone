@@ -11,7 +11,7 @@ source comments, without introducing broad/project-wide ignores.
 - Dead-code final filter: `codeclone/metrics/dead_code.py:find_unused`
 - Suppressed dead-code projection helper:
   `codeclone/metrics/dead_code.py:find_suppressed_unused`
-- Dead-code candidate extraction: `codeclone/extractor.py:_collect_dead_candidates`
+- Dead-code candidate extraction: `codeclone/analysis/_module_walk.py:_collect_dead_candidates`
 
 ## Data model
 
@@ -78,18 +78,18 @@ Refs:
 
 - `codeclone/suppressions.py:extract_suppression_directives`
 - `codeclone/suppressions.py:bind_suppressions_to_declarations`
-- `codeclone/cache.py:_canonicalize_cache_entry`
+- `codeclone/cache/_canonicalize.py:_canonicalize_cache_entry`
 
 ## Locked by tests
 
 - `tests/test_suppressions.py::test_extract_suppression_directives_supports_inline_and_leading_forms`
-- `tests/test_suppressions.py::test_extract_suppression_directives_ignores_unknown_and_malformed_safely`
-- `tests/test_suppressions.py::test_bind_suppressions_applies_only_to_adjacent_declaration_line`
-- `tests/test_suppressions.py::test_bind_suppressions_does_not_propagate_class_inline_to_method`
-- `tests/test_suppressions.py::test_bind_suppressions_applies_to_method_target`
+- `tests/test_suppressions.py::test_extract_suppression_directives_ignores_invalid_forms[unknown_and_malformed]`
+- `tests/test_suppressions.py::test_bind_suppressions_targets_expected_declaration_scope[adjacent_leading_only]`
+- `tests/test_suppressions.py::test_bind_suppressions_targets_expected_declaration_scope[class_inline_does_not_propagate]`
+- `tests/test_suppressions.py::test_bind_suppressions_targets_expected_declaration_scope[method_target]`
 - `tests/test_suppressions.py::test_build_suppression_index_deduplicates_rules_stably`
-- `tests/test_extractor.py::test_dead_code_applies_inline_suppression_per_declaration`
-- `tests/test_extractor.py::test_dead_code_suppression_binding_is_scoped_to_target_symbol`
+- `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[inline_suppression_per_declaration]`
+- `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[suppression_binding_scoped_to_target]`
 - `tests/test_metrics_modules.py::test_find_unused_applies_inline_dead_code_suppression`
 - `tests/test_metrics_modules.py::test_find_suppressed_unused_returns_actionable_suppressed_candidates`
 - `tests/test_report.py::test_report_json_dead_code_suppressed_items_are_reported_separately`

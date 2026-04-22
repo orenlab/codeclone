@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.0b6] - 2026-04-22
+
+Stabilizes the post-refactor architecture: canonical package layout, thinner
+entrypoints, cleaner dependency boundaries, refreshed tests, and aligned docs.
+
+### Architecture and contracts
+
+- Move the runtime onto the new package layout: `main` + `surfaces/cli`,
+  `surfaces/mcp`, `core`, `analysis`, `baseline`, `cache`, `contracts`,
+  `report/document`, `report/renderers`, and `report/html`.
+- Remove legacy root shims and stale compatibility modules in favor of direct
+  canonical imports.
+- Keep clone baseline schema `2.1`, cache schema `2.5`, report schema `2.8`,
+  and metrics-baseline schema `1.2` unchanged while preserving determinism and
+  read-only MCP semantics.
+- Prune stale deleted-file cache entries and tighten dependency chains that were
+  inflating post-refactor architectural depth.
+
 ## [2.0.0b5] - 2026-04-16
 
 Expands the canonical contract with adoption, API-surface, and coverage-join layers; clarifies run interpretation

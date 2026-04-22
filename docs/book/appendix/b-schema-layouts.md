@@ -109,7 +109,7 @@ Notes:
       "collect_api_surface": false
     },
     "files": {
-      "codeclone/cache.py": {
+      "codeclone/cache/store.py": {
         "st": [1730000000000000000, 2048],
         "ss": [450, 12, 3, 1],
         "u": [[
@@ -509,7 +509,7 @@ Notes:
       "artifacts": [
         {
           "location": {
-            "uri": "codeclone/report/sarif.py",
+            "uri": "codeclone/report/renderers/sarif.py",
             "uriBaseId": "%SRCROOT%"
           }
         }
@@ -540,7 +540,7 @@ Notes:
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "codeclone/report/sarif.py",
+                  "uri": "codeclone/report/renderers/sarif.py",
                   "uriBaseId": "%SRCROOT%",
                   "index": 0
                 },
@@ -560,7 +560,7 @@ Notes:
             }
           ],
           "properties": {
-            "primaryPath": "codeclone/report/sarif.py",
+            "primaryPath": "codeclone/report/renderers/sarif.py",
             "primaryQualname": "codeclone.report.sarif:render_sarif_report_document",
             "primaryRegion": "1:10"
           },
@@ -598,9 +598,9 @@ INTEGRITY
 
 ## Refs
 
-- `codeclone/baseline.py`
-- `codeclone/cache.py`
-- `codeclone/report/json_contract.py`
-- `codeclone/report/serialize.py`
-- `codeclone/report/markdown.py`
-- `codeclone/report/sarif.py`
+- `codeclone/baseline/clone_baseline.py`
+- `codeclone/cache/store.py`
+- `codeclone/report/document/builder.py`
+- `codeclone/report/renderers/text.py`
+- `codeclone/report/renderers/markdown.py`
+- `codeclone/report/renderers/sarif.py`

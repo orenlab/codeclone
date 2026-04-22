@@ -6,11 +6,13 @@ Describe effective runtime configuration and defaults that affect behavior.
 
 ## Public surface
 
-- CLI parser and defaults: `codeclone/_cli_args.py:build_parser`
-- Pyproject config loader: `codeclone/_cli_config.py`
-- Effective cache default path logic: `codeclone/cli.py:_resolve_cache_path`
-- Metrics-mode selection logic: `codeclone/cli.py:_configure_metrics_mode`
-- Debug mode sources: `codeclone/cli.py:_is_debug_enabled`
+- Option specs/defaults: `codeclone/config/spec.py`
+- CLI parser and defaults: `codeclone/config/argparse_builder.py:build_parser`
+- Pyproject config loader: `codeclone/config/pyproject_loader.py:load_pyproject_config`
+- Config resolver: `codeclone/config/resolver.py:resolve_config`
+- Effective cache default path logic: `codeclone/surfaces/cli/runtime.py:_resolve_cache_path`
+- Metrics-mode selection logic: `codeclone/surfaces/cli/runtime.py:_configure_metrics_mode`
+- Debug mode sources: `codeclone/surfaces/cli/console.py:_is_debug_enabled`
 
 ## Data model
 
@@ -132,8 +134,8 @@ Report outputs and local UX:
 | `verbose`     | `bool`        | `false` | Enable more verbose CLI output | `-`                                    |
 | `debug`       | `bool`        | `false` | Enable debug diagnostics       | Also enabled by `CODECLONE_DEBUG=1`    |
 
-This is the exact accepted key set from `codeclone/_cli_config.py`; unknown
-keys are contract errors.
+This is the exact accepted key set from `codeclone/config/spec.py` and
+`codeclone/config/pyproject_loader.py`; unknown keys are contract errors.
 
 Notes:
 
@@ -178,9 +180,12 @@ Metrics baseline path selection contract:
 
 Refs:
 
-- `codeclone/_cli_args.py:build_parser`
-- `codeclone/cli.py:_main_impl`
-- `codeclone/cli.py:_configure_metrics_mode`
+- `codeclone/config/spec.py`
+- `codeclone/config/argparse_builder.py:build_parser`
+- `codeclone/config/pyproject_loader.py:load_pyproject_config`
+- `codeclone/config/resolver.py:resolve_config`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
+- `codeclone/surfaces/cli/runtime.py:_configure_metrics_mode`
 
 ## Contracts
 
@@ -192,7 +197,7 @@ Refs:
 
 Refs:
 
-- `codeclone/cli.py:_main_impl`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
 
 ## Invariants (MUST)
 
@@ -209,9 +214,10 @@ Refs:
 
 Refs:
 
-- `codeclone/extractor.py:extract_units_and_stats_from_source`
-- `codeclone/_cli_args.py:build_parser`
-- `codeclone/cli.py:_configure_metrics_mode`
+- `codeclone/analysis/units.py:extract_units_and_stats_from_source`
+- `codeclone/config/spec.py`
+- `codeclone/config/argparse_builder.py:build_parser`
+- `codeclone/surfaces/cli/runtime.py:_configure_metrics_mode`
 
 ## Failure modes
 
@@ -223,8 +229,9 @@ Refs:
 
 Refs:
 
-- `codeclone/_cli_paths.py:_validate_output_path`
-- `codeclone/cli.py:_main_impl`
+- `codeclone/surfaces/cli/reports_output.py:_validate_output_path`
+- `codeclone/surfaces/cli/startup.py:resolve_existing_root_path`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
 
 ## Determinism / canonicalization
 
@@ -233,8 +240,8 @@ Refs:
 
 Refs:
 
-- `codeclone/contracts.py:cli_help_epilog`
-- `codeclone/ui_messages.py:SUMMARY_LABEL_FILES_FOUND`
+- `codeclone/contracts/__init__.py:cli_help_epilog`
+- `codeclone/ui_messages/__init__.py:SUMMARY_LABEL_FILES_FOUND`
 
 ## Locked by tests
 

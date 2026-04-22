@@ -2,90 +2,73 @@
 
 ## Purpose
 
-Define cache schema v2.5, integrity verification, and fail-open behavior.
+Define cache schema `2.5`, integrity verification, stale-entry pruning, and
+fail-open behavior.
 
 ## Public surface
 
-- Cache object lifecycle: `codeclone/cache.py:Cache`
-- Cache statuses: `codeclone/cache.py:CacheStatus`
-- Stat signature source: `codeclone/cache.py:file_stat_signature`
-- CLI cache integration: `codeclone/cli.py:_main_impl`
+- Cache object lifecycle: `codeclone/cache/store.py:Cache`
+- Cache statuses: `codeclone/cache/versioning.py:CacheStatus`
+- Stat signature source: `codeclone/cache/store.py:file_stat_signature`
+- Wire encode/decode: `codeclone/cache/_wire_encode.py`,
+  `codeclone/cache/_wire_decode.py`
+- CLI/runtime integration: `codeclone/surfaces/cli/runtime.py`,
+  `codeclone/core/discovery.py`
 
 ## Data model
 
 On-disk schema (`v == "2.5"`):
 
-- Top-level: `v`, `payload`, `sig`
+- top-level: `v`, `payload`, `sig`
 - `payload` keys: `py`, `fp`, `ap`, `files`, optional `sr`
 - `ap` (`analysis_profile`) keys:
-    - `min_loc`, `min_stmt`
-    - `block_min_loc`, `block_min_stmt`
-    - `segment_min_loc`, `segment_min_stmt`
-    - `collect_api_surface`
-- `files` map stores compact per-file entries:
-    - `st`: `[mtime_ns, size]`
-    - `ss`: `[lines, functions, methods, classes]` (source stats snapshot)
-    - `u` (function units): compact row layout with structural facts:
-      `[qualname,start,end,loc,stmt_count,fingerprint,loc_bucket,cc,nesting,risk,raw_hash,entry_guard_count,entry_guard_terminal_profile,entry_guard_has_side_effect_before,terminal_kind,try_finally_profile,side_effect_order_profile]`
-    - optional analysis sections (`b`/`s` and metrics-related sections)
-    - `rn`: referenced local names (non-test files only)
-    - `rq`: referenced canonical qualnames (non-test files only)
-- file keys are wire relpaths when `root` is configured
-- optional `sr` (`segment report projection`) stores precomputed segment-report
-  merge/suppression output:
-    - `d`: digest of raw segment groups
-    - `s`: suppressed segment groups count
-    - `g`: grouped merged segment items (wire rows)
-- per-file `dc` (`dead_candidates`) rows do not repeat filepath; path is implied by
-  the containing file entry
+  `min_loc`, `min_stmt`, `block_min_loc`, `block_min_stmt`,
+  `segment_min_loc`, `segment_min_stmt`, `collect_api_surface`
+- `files` stores compact per-file entries with stat signature, extracted units,
+  optional metrics sections, referenced names/qualnames, and cached source stats
+- `sr` stores optional segment-report projection payload
 
 Refs:
 
-- `codeclone/cache.py:Cache.load`
-- `codeclone/cache.py:_encode_wire_file_entry`
-- `codeclone/cache.py:_decode_wire_file_entry`
+- `codeclone/cache/store.py:Cache.load`
+- `codeclone/cache/_wire_encode.py:_encode_wire_file_entry`
+- `codeclone/cache/_wire_decode.py:_decode_wire_file_entry`
 
 ## Contracts
 
 - Cache is optimization-only; invalid cache never blocks analysis.
-- Any cache trust failure triggers warning + empty cache fallback.
-- Cached file entry without valid `ss` (`source_stats`) is treated as cache-miss for
-  processing counters and reprocessed.
-- Cache compatibility gates:
-    - version `v == CACHE_VERSION`
+- Any cache trust failure triggers warning + empty-cache fallback.
+- Compatibility gates:
+    - `v == CACHE_VERSION`
     - `payload.py == current_python_tag()`
     - `payload.fp == BASELINE_FINGERPRINT_VERSION`
     - `payload.ap` matches the current analysis profile
-      (`min_loc`, `min_stmt`, `block_min_loc`, `block_min_stmt`,
-      `segment_min_loc`, `segment_min_stmt`, `collect_api_surface`)
-    - `sig` equals deterministic hash of canonical payload
-- Cache schema must also be bumped when cached analysis semantics change in a
-  way that could leave syntactically valid but semantically stale per-file
-  entries accepted by runtime compatibility checks.
+    - `sig` matches deterministic hash of canonical payload
+- Stale deleted-file entries are pruned on save/update; cache must reflect the
+  current worktree, not historical deleted modules.
+- Cached entries without valid source stats are treated as cache-miss for
+  processing counters and reprocessed.
 
 Refs:
 
-- `codeclone/cache.py:Cache.load`
-- `codeclone/cache.py:Cache._ignore_cache`
-- `codeclone/cache.py:Cache._sign_data`
+- `codeclone/cache/store.py:Cache.load`
+- `codeclone/cache/store.py:Cache._ignore_cache`
+- `codeclone/cache/integrity.py:sign_cache_payload`
+- `codeclone/core/discovery.py:discover`
 
 ## Invariants (MUST)
 
-- Cache save writes canonical JSON and atomically replaces target file.
-- Empty sections (`u`, `b`, `s`) are omitted from written wire entries.
-- `rn`/`rq` are serialized as sorted unique arrays and omitted when empty.
-- Cached public-API symbol payloads preserve declared parameter order; cache
-  canonicalization must not reorder callable signatures.
-- `ss` is written when source stats are available and is required for full cache-hit
-  accounting in discovery stage.
-- Legacy secret file `.cache_secret` is never used for trust; warning only.
+- Cache save writes canonical JSON and atomically replaces the target file.
+- Empty sections are omitted from wire entries.
+- Referenced names/qualnames are serialized as sorted unique arrays and omitted when empty.
+- Cached public-API symbol payloads preserve declared parameter order.
+- Legacy `.cache_secret` is warning-only and never used for trust.
 
 Refs:
 
-- `codeclone/cache.py:Cache.save`
-- `codeclone/cache.py:_encode_wire_file_entry`
-- `codeclone/pipeline.py:discover`
-- `codeclone/cache.py:LEGACY_CACHE_SECRET_FILENAME`
+- `codeclone/cache/store.py:Cache.save`
+- `codeclone/cache/_wire_encode.py:_encode_wire_file_entry`
+- `codeclone/cache/versioning.py:LEGACY_CACHE_SECRET_FILENAME`
 
 ## Failure modes
 
@@ -106,25 +89,21 @@ CLI behavior: cache failures do not change exit code; analysis continues without
 
 Refs:
 
-- `codeclone/cache.py:CacheStatus`
-- `codeclone/cli.py:_main_impl`
+- `codeclone/cache/versioning.py:CacheStatus`
+- `codeclone/surfaces/cli/runtime.py:resolve_cache_status`
 
 ## Determinism / canonicalization
 
 - Cache signatures are computed over canonical JSON payload.
-- Wire file paths and row arrays are sorted before write.
-- `rn`/`rq` are deterministically normalized to sorted unique arrays.
-- Current schema decodes only the canonical row shapes that current runtime writes;
-  for `u` rows, decoder accepts legacy 11-column layout and canonical 17-column
-  layout (missing structural columns default to neutral values).
-- `sr` is additive and optional; invalid/missing projection never invalidates the
-  cache and simply falls back to runtime recomputation.
+- Wire file paths and compact row arrays are sorted before write.
+- Optional segment-report projection is additive; invalid/missing projection
+  falls back to runtime recomputation.
 
 Refs:
 
-- `codeclone/cache.py:_canonical_json`
-- `codeclone/cache.py:_wire_filepath_from_runtime`
-- `codeclone/cache.py:_encode_wire_file_entry`
+- `codeclone/cache/integrity.py:canonical_json`
+- `codeclone/cache/projection.py:wire_filepath_from_runtime`
+- `codeclone/cache/_wire_encode.py:_encode_wire_file_entry`
 
 ## Locked by tests
 
@@ -135,9 +114,9 @@ Refs:
 - `tests/test_cache.py::test_cache_too_large_warns`
 - `tests/test_cli_inprocess.py::test_cli_reports_cache_too_large_respects_max_size_flag`
 - `tests/test_cli_inprocess.py::test_cli_cache_analysis_profile_compatibility`
-- `tests/test_pipeline_metrics.py::test_load_cached_metrics_ignores_referenced_names_from_test_files`
+- `tests/test_core_branch_coverage.py::test_discover_prunes_deleted_cache_entries`
 
 ## Non-guarantees
 
 - Cache file content stability across schema bumps is not guaranteed.
-- Cache payload is tamper-evident only; it is not secret-authenticated.
+- Cache is tamper-evident only; it is not an authenticated secret store.

@@ -2,135 +2,125 @@
 
 ## Purpose
 
-Document current module boundaries and ownership in CodeClone v2.x.
+Document the current module boundaries and ownership in CodeClone `2.0.x`.
 
 ## Public surface
 
 Main ownership layers:
 
-- Core detection pipeline: `scanner` -> `extractor` -> `cfg/normalize/blocks` -> `grouping`.
-- Quality metrics pipeline: complexity/coupling/cohesion/dependencies/dead-code/health.
-- Contracts and persistence: baseline, metrics baseline, cache, exit semantics.
-- Report model and projections: canonical JSON + deterministic TXT/Markdown/SARIF + explainability facts.
-- MCP agent surface: read-only server layer over the same pipeline/report contracts.
-- VS Code extension surface: native IDE client over the MCP layer and the same canonical report semantics, with
-  limited Restricted Mode, source-first review flow, and factual overview surfaces such as `Coverage Join` when MCP
-  exposes them.
-- Claude Desktop bundle surface: installable local `.mcpb` wrapper that launches the same `codeclone-mcp` server for
-  Claude Desktop without introducing a second MCP or analysis layer.
-- Codex plugin surface: repo-local Codex plugin under `plugins/` and `.agents/plugins/marketplace.json` that adds
-  native plugin discovery, a local MCP definition, and a CodeClone review skill over the same server.
-- Render layer: HTML rendering and template assets.
+- CLI entry and UX orchestration
+- Config parsing and pyproject resolution
+- Core runtime pipeline
+- Analysis and clone grouping
+- Metrics and findings
+- Baseline/cache persistence contracts
+- Canonical report document and deterministic projections
+- HTML render-only surface
+- Read-only MCP surface
+- IDE/client surfaces over MCP
 
 ## Data model
 
-| Layer                 | Modules                                                                                                                                                                                            | Responsibility                                                                                                          |
-|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
-| Contracts             | `codeclone/contracts.py`, `codeclone/errors.py`                                                                                                                                                    | Shared schema versions, URLs, exit-code enum, typed exceptions                                                          |
-| Domain models         | `codeclone/models.py`, `codeclone/domain/*.py`                                                                                                                                                     | Typed dataclasses/enums plus centralized finding/scope/severity taxonomies                                              |
-| Discovery + parsing   | `codeclone/scanner.py`, `codeclone/extractor.py`                                                                                                                                                   | Enumerate files, parse AST, extract function/block/segment units                                                        |
-| Structural analysis   | `codeclone/cfg.py`, `codeclone/normalize.py`, `codeclone/fingerprint.py`, `codeclone/blocks.py`                                                                                                    | CFG, normalization, statement hashes, block/segment windows                                                             |
-| Grouping              | `codeclone/grouping.py`                                                                                                                                                                            | Build function/block/segment groups                                                                                     |
-| Metrics               | `codeclone/metrics/*`                                                                                                                                                                              | Compute complexity/coupling/cohesion/dependency/dead-code/health signals                                                |
-| Report core           | `codeclone/report/*`, `codeclone/_cli_meta.py`                                                                                                                                                     | Canonical report building, deterministic projections, explainability facts, and shared metadata                         |
-| Persistence           | `codeclone/baseline.py`, `codeclone/metrics_baseline.py`, `codeclone/cache.py`                                                                                                                     | Baseline/cache trust/compat/integrity and atomic persistence                                                            |
-| Runtime orchestration | `codeclone/pipeline.py`, `codeclone/cli.py`, `codeclone/_cli_args.py`, `codeclone/_cli_paths.py`, `codeclone/_cli_summary.py`, `codeclone/_cli_config.py`, `codeclone/ui_messages.py`              | CLI UX, stage orchestration, status handling, outputs, error markers                                                    |
-| MCP agent interface   | `codeclone/mcp_service.py`, `codeclone/mcp_server.py`                                                                                                                                              | Read-only MCP tools/resources over canonical analysis and report layers                                                 |
-| VS Code extension     | `extensions/vscode-codeclone/*`                                                                                                                                                                    | Native VS Code control surface over MCP, with limited Restricted Mode, triage-first review, and source-first drill-down |
-| Claude Desktop bundle | `extensions/claude-desktop-codeclone/*`                                                                                                                                                            | Installable local MCPB wrapper over `codeclone-mcp`, keeping Claude Desktop on the canonical read-only MCP surface      |
-| Codex plugin          | `plugins/codeclone/*`, `.agents/plugins/marketplace.json`                                                                                                                                          | Native Codex plugin surface over `codeclone-mcp`, with repo-local discovery metadata and CodeClone skill guidance       |
-| Rendering             | `codeclone/html_report.py`, `codeclone/_html_report/*`, `codeclone/_html_badges.py`, `codeclone/_html_js.py`, `codeclone/_html_escape.py`, `codeclone/_html_snippets.py`, `codeclone/templates.py` | HTML-only view layer over report data                                                                                   |
+| Layer                   | Modules                                                                                         | Responsibility                                                                                        |
+|-------------------------|-------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Entry                   | `codeclone/main.py`                                                                             | Public CLI entrypoint only                                                                            |
+| CLI surface             | `codeclone/surfaces/cli/*`, `codeclone/ui_messages/*`                                           | Parse args, resolve runtime mode, print summaries, write outputs, route exits                         |
+| Config                  | `codeclone/config/*`                                                                            | Option specs, parser construction, pyproject loading, CLI > pyproject > defaults merge                |
+| Core runtime            | `codeclone/core/*`                                                                              | Bootstrap, discovery, worker processing, project metrics, report/gate integration                     |
+| Analysis                | `codeclone/analysis/*`, `codeclone/blocks/*`, `codeclone/paths/*`, `codeclone/qualnames/*`      | Parse source, normalize AST/CFG facts, extract units, prepare deterministic analysis inputs           |
+| Findings                | `codeclone/findings/clones/*`, `codeclone/findings/structural/*`                                | Clone grouping and structural finding derivation                                                      |
+| Metrics                 | `codeclone/metrics/*`                                                                           | Complexity, coupling, cohesion, dependencies, dead code, health, adoption, coverage join, API surface |
+| Contracts/domain        | `codeclone/contracts/*`, `codeclone/models.py`, `codeclone/domain/*`                            | Version constants, enums, typed exceptions, shared models, domain taxonomies                          |
+| Persistence             | `codeclone/baseline/*`, `codeclone/cache/*`                                                     | Trusted comparison state and optimization-only cache contracts                                        |
+| Canonical report        | `codeclone/report/document/*`, `codeclone/report/gates/*`, `codeclone/report/*.py`              | Canonical report payload, derived projections, explainability, suggestions, gate reasons              |
+| Deterministic renderers | `codeclone/report/renderers/*`                                                                  | Text/Markdown/SARIF/JSON projections over the canonical report                                        |
+| HTML render layer       | `codeclone/report/html/*`, `codeclone/templates.py`                                             | Render-only HTML view over canonical report/meta facts                                                |
+| MCP surface             | `codeclone/surfaces/mcp/*`                                                                      | Read-only MCP tools/resources over the same pipeline/report contracts                                 |
+| Client surfaces         | `extensions/vscode-codeclone/*`, `extensions/claude-desktop-codeclone/*`, `plugins/codeclone/*` | Native clients/install surfaces over `codeclone-mcp`                                                  |
 
 Refs:
 
-- `codeclone/pipeline.py`
-- `codeclone/cli.py:_main_impl`
+- `codeclone/main.py:main`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
+- `codeclone/core/pipeline.py:analyze`
+- `codeclone/report/document/builder.py:build_report_document`
+- `codeclone/report/html/assemble.py:build_html_report`
+- `codeclone/surfaces/mcp/server.py:build_mcp_server`
 
 ## Contracts
 
-- Core analysis modules do not depend on render/UI modules.
-- HTML renderer receives already-computed report data/facts and does not
-  recompute detection semantics.
-- MCP layer reuses current pipeline/report semantics and must not introduce a
-  separate analysis truth path.
-- The VS Code extension follows the same rule through MCP: it is a client
-  integration surface over canonical report semantics, not a separate analyzer.
-- The Claude Desktop bundle follows the same rule: it is a local installation
-  and launcher surface over `codeclone-mcp`, not a second server.
-- The Codex plugin follows the same rule: it is a local discovery and skills
-  surface over `codeclone-mcp`, not a second analyzer or report model.
-- MCP may ship task-specific slim projections (for example, summary-only metrics
-  or inventory counts) as long as canonical report data remains the source of
-  truth and richer detail stays reachable through dedicated tools/sections.
-- The same rule applies to bounded semantic routing tools such as
-  `help(topic=...)`: they explain contract meaning and route agents to the
-  safest next step, but they do not introduce a second documentation or truth
-  model.
-- The same rule applies to summary cache convenience fields such as
-  `freshness` and to production-first triage projections built from
-  canonical hotlists/suggestions.
-- The same rule also applies to compact interpretation hints such as
-  `health_scope`, `focus`, and `new_by_source_kind`: they clarify projection
-  meaning without introducing a second report truth.
-- MCP finding lists may also expose short run/finding ids and slimmer relative
-  location projections, while keeping `get_finding(detail_level="full")` as the
-  richer per-finding inspection path.
-- Baseline, metrics baseline, and cache are validated before being trusted.
+- Core produces facts; renderers present facts.
+- `codeclone/report/document/*` is the canonical report source of truth.
+- HTML, Markdown, SARIF, text, and MCP are projections over the same canonical report semantics.
+- Baseline and cache are persistence contracts, not analysis truth.
+- Cache is optimization-only and fail-open.
+- MCP is read-only and must not create a second analysis truth path.
+- VS Code, Claude Desktop, and Codex plugin surfaces are clients over MCP, not second analyzers.
 
 Refs:
 
-- `codeclone/report/json_contract.py:build_report_document`
-- `codeclone/html_report.py:build_html_report`
-- `codeclone/baseline.py:Baseline.load`
-- `codeclone/metrics_baseline.py:MetricsBaseline.load`
-- `codeclone/cache.py:Cache.load`
+- `codeclone/report/document/builder.py:build_report_document`
+- `codeclone/report/renderers/text.py:render_text_report_document`
+- `codeclone/report/renderers/markdown.py:render_markdown_report_document`
+- `codeclone/report/renderers/sarif.py:render_sarif_report_document`
+- `codeclone/report/html/assemble.py:build_html_report`
+- `codeclone/baseline/clone_baseline.py:Baseline.load`
+- `codeclone/baseline/metrics_baseline.py:MetricsBaseline.load`
+- `codeclone/cache/store.py:Cache.load`
 
 ## Invariants (MUST)
 
 - Report serialization is deterministic and schema-versioned.
-- UI is render-only and must not change gating semantics.
-- Status enums remain domain-owned in baseline/metrics-baseline/cache modules.
+- UI is render-only and must not invent gating semantics.
+- Status enums remain domain-owned in baseline/metrics-baseline/cache/contracts modules.
+- `codeclone/main.py` stays thin; orchestration lives in `codeclone/surfaces/cli/*`.
 
 Refs:
 
-- `codeclone/report/json_contract.py:build_report_document`
-- `codeclone/report/explain.py:build_block_group_facts`
-- `codeclone/baseline.py:BaselineStatus`
-- `codeclone/metrics_baseline.py:MetricsBaselineStatus`
-- `codeclone/cache.py:CacheStatus`
+- `codeclone/report/document/integrity.py:_build_integrity_payload`
+- `codeclone/report/document/inventory.py:_build_inventory_payload`
+- `codeclone/baseline/trust.py:BaselineStatus`
+- `codeclone/baseline/_metrics_baseline_contract.py:MetricsBaselineStatus`
+- `codeclone/cache/versioning.py:CacheStatus`
+- `codeclone/contracts/__init__.py:ExitCode`
 
 ## Failure modes
 
-| Condition                                  | Layer                                             |
-|--------------------------------------------|---------------------------------------------------|
-| Invalid CLI args / invalid output path     | Runtime orchestration (`_cli_args`, `_cli_paths`) |
-| Baseline schema/integrity mismatch         | Baseline contract layer                           |
-| Metrics baseline schema/integrity mismatch | Metrics baseline contract layer                   |
-| Cache corruption/version mismatch          | Cache contract layer (fail-open)                  |
-| HTML snippet read failure                  | Render layer fallback snippet                     |
+| Condition                                        | Layer                                                          |
+|--------------------------------------------------|----------------------------------------------------------------|
+| Invalid CLI args / invalid output path           | CLI surface (`codeclone/config/*`, `codeclone/surfaces/cli/*`) |
+| Baseline schema/integrity mismatch               | Baseline contract layer                                        |
+| Metrics baseline schema/integrity mismatch       | Metrics-baseline contract layer                                |
+| Cache corruption/version mismatch                | Cache contract layer (fail-open)                               |
+| HTML snippet read failure                        | HTML render layer fallback snippet                             |
+| MCP invalid request / invalid root / unknown run | MCP surface                                                    |
 
 ## Determinism / canonicalization
 
-- File iteration and group key ordering are explicit sorts.
-- Report serializer uses fixed record layouts and sorted keys.
+- File iteration and grouping order are explicit sorts.
+- Canonical report integrity excludes non-canonical `derived` payload.
+- Baseline and cache hashes/signatures use canonical JSON.
 
 Refs:
 
 - `codeclone/scanner.py:iter_py_files`
-- `codeclone/report/json_contract.py:build_report_document`
+- `codeclone/report/document/integrity.py:_build_integrity_payload`
+- `codeclone/baseline/trust.py:_compute_payload_sha256`
+- `codeclone/cache/integrity.py:canonical_json`
 
 ## Locked by tests
 
+- `tests/test_architecture.py::test_architecture_layer_violations`
 - `tests/test_report.py::test_report_json_compact_v21_contract`
+- `tests/test_report_contract_coverage.py::test_report_document_rich_invariants_and_renderers`
 - `tests/test_html_report.py::test_html_report_uses_core_block_group_facts`
 - `tests/test_cache.py::test_cache_v13_uses_relpaths_when_root_set`
-- `tests/test_cli_unit.py::test_argument_parser_contract_error_marker_for_invalid_args`
-- `tests/test_architecture.py::test_architecture_layer_violations`
+- `tests/test_mcp_service.py::test_mcp_service_analyze_repository_registers_latest_run`
 
 ## Non-guarantees
 
-- Internal module split may evolve in v2.x if public contracts are preserved.
-- Import tree acyclicity is policy and test-enforced where explicitly asserted.
+- Internal file splits may evolve in `2.0.x` if public contracts are preserved.
+- Package markers and internal helper placement are not contract by themselves.
 
 ## Chapter map
 
@@ -143,11 +133,7 @@ Refs:
 | Cache trust and fail-open behavior    | [07-cache.md](07-cache.md)                                                                                       |
 | Report schema and provenance          | [08-report.md](08-report.md), [10-html-render.md](10-html-render.md)                                             |
 | MCP agent surface                     | [20-mcp-interface.md](20-mcp-interface.md)                                                                       |
-| VS Code IDE surface                   | [21-vscode-extension.md](21-vscode-extension.md)                                                                 |
-| Claude Desktop install surface        | [22-claude-desktop-bundle.md](22-claude-desktop-bundle.md)                                                       |
-| Codex plugin surface                  | [23-codex-plugin.md](23-codex-plugin.md)                                                                         |
 | Health score model                    | [15-health-score.md](15-health-score.md)                                                                         |
 | Metrics gates and metrics baseline    | [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)                                               |
 | Dead-code liveness policy             | [16-dead-code-contract.md](16-dead-code-contract.md)                                                             |
-| Suggestions and clone typing          | [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)                                         |
 | Determinism and versioning policy     | [12-determinism.md](12-determinism.md), [14-compatibility-and-versioning.md](14-compatibility-and-versioning.md) |

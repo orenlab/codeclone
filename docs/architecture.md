@@ -193,10 +193,10 @@ Current shape:
 
 Operational note:
 
-- `codeclone/mcp_server.py` is only a thin launcher/registration layer.
+- `codeclone/surfaces/mcp/server.py` is only a thin launcher/registration layer.
 - The optional MCP runtime is imported lazily so the base `codeclone` install
   and normal CI paths do not require MCP packages.
-- `codeclone/mcp_service.py` is the in-process adapter over the existing
+- `codeclone/surfaces/mcp/service.py` is the in-process adapter over the existing
   pipeline/report contracts.
 
 The MCP layer is intentionally thin. It does not add a separate analysis engine;

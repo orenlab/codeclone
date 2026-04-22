@@ -7,12 +7,16 @@ compatibility is enforced.
 
 ## Public surface
 
-- Version constants: `codeclone/contracts.py`
-- Baseline compatibility checks: `codeclone/baseline.py:Baseline.verify_compatibility`
-- Metrics baseline compatibility checks: `codeclone/metrics_baseline.py:MetricsBaseline.verify_compatibility`
-- Cache compatibility checks: `codeclone/cache.py:Cache.load`
-- Report schema assignment: `codeclone/report/json_contract.py:build_report_document`
-- MCP public surface: `codeclone/mcp_server.py`, `codeclone/mcp_service.py`
+- Version constants: `codeclone/contracts/__init__.py`
+- Clone baseline compatibility:
+  `codeclone/baseline/clone_baseline.py:Baseline.verify_compatibility`
+- Metrics baseline compatibility:
+  `codeclone/baseline/metrics_baseline.py:MetricsBaseline.verify_compatibility`
+- Cache compatibility: `codeclone/cache/store.py:Cache.load`
+- Report schema assignment:
+  `codeclone/report/document/builder.py:build_report_document`
+- MCP public surface: `codeclone/surfaces/mcp/server.py`,
+  `codeclone/surfaces/mcp/service.py`
 
 ## Data model
 
@@ -22,142 +26,69 @@ Current contract versions:
 - `BASELINE_FINGERPRINT_VERSION = "1"`
 - `CACHE_VERSION = "2.5"`
 - `REPORT_SCHEMA_VERSION = "2.8"`
-- `METRICS_BASELINE_SCHEMA_VERSION = "1.2"` (used only when metrics are stored
-  in a dedicated metrics-baseline file instead of the default unified baseline)
+- `METRICS_BASELINE_SCHEMA_VERSION = "1.2"`
 
 Refs:
 
-- `codeclone/contracts.py`
+- `codeclone/contracts/__init__.py`
 
 ## Contracts
 
 Version bump rules:
 
-- Bump **baseline schema** only for baseline JSON layout/type changes.
-- Bump **fingerprint version** when clone key semantics change.
-- Bump **cache schema** for cache wire-format/validation changes and for
-  cached-analysis semantic changes that would otherwise leave stale cache
-  entries looking compatible to runtime validation.
-- Bump **report schema** for canonical report document contract changes
-  (`report_schema_version`, consumed by JSON/TXT/Markdown/SARIF and HTML provenance/view).
-- Bump **metrics-baseline schema** only for dedicated metrics-baseline payload
-  changes.
-- This schema does **not** imply that metrics normally live in a separate file:
-  the default runtime path is still the unified baseline file, and the
-  standalone metrics-baseline schema applies only when users opt into a
-  different metrics-baseline path.
-- MCP does not currently define a separate schema/version constant; tool names,
-  resource shapes, and documented request/response semantics are therefore
-  package-versioned public surface and must be documented/tested when changed.
-- Slimming or splitting MCP-only projections (for example, summary payloads or
-  `metrics` vs `metrics_detail`) does not change `report_schema_version` as long
-  as the canonical report document and finding identities remain unchanged.
-- The same rule applies to finding-level MCP projection changes such as
-  short MCP ids, slim summary locations, or omitting `priority_factors`
-  outside `detail_level="full"`.
-- Additive MCP-only convenience fields/projections such as
-  `cache.freshness`, production-first triage, `health_scope`, `focus`, or
-  `new_by_source_kind` also do not change
-  `report_schema_version` when they are derived from unchanged canonical report
-  and summary data.
-- The same rule applies to bounded MCP semantic guidance such as
-  `help(topic=...)`: package-versioned wording and routing may evolve, but they
-  do not change `report_schema_version` as long as canonical report semantics
-  and finding identities remain unchanged.
-- Canonical report changes such as `meta.analysis_thresholds.design_findings`
-  or threshold-aware design finding materialization do change
-  `report_schema_version` because they alter canonical report semantics and
-  integrity payload.
-- The same is true for additive canonical metrics families such as
-  `metrics.families.overloaded_modules`, `coverage_adoption`, `api_surface`,
-  or `coverage_join`: even when the layer is report-only or current-run only,
-  it still changes canonical report schema and integrity payload, so it
-  requires a report-schema bump.
-- The same rule applies to new canonical suppressed-finding buckets such as
-  `findings.groups.clones.suppressed.*`: even though they are non-active
-  review facts, they still change canonical report shape and integrity payload.
-- CodeClone does not currently define a separate health-model version constant.
-  Health-score semantics are package-versioned and must be documented in the
-  Health Score chapter and release notes when they change.
+- bump **baseline schema** only for clone-baseline JSON layout/type changes
+- bump **fingerprint version** when clone identity semantics change
+- bump **cache schema** for cache wire-format or compatibility-semantics changes
+- bump **report schema** for canonical report document shape/meaning changes
+- bump **metrics-baseline schema** only for standalone metrics-baseline payload changes
 
-Baseline compatibility rules:
+Operational compatibility rules:
 
-- Runtime accepts baseline schema majors `1` and `2` with supported minors.
-- Runtime writes current schema (`2.1`) on new/updated baseline saves.
-- Embedded top-level `metrics` is valid only for baseline schema `>= 2.0`.
-- Unified clone baselines may also embed top-level `api_surface` when metrics
-  baseline data is stored in the same file.
-- Embedded and standalone `api_surface` snapshots now use compact symbol wire
-  layout (`local_name` relative to `module`, `filepath` relative to the
-  baseline directory when possible) while runtime reconstructs full canonical
-  qualnames and runtime filepaths before comparison. This is a schema change
-  for baseline `2.1` / metrics-baseline `1.2`, not a silent serialization
-  detail.
-- Capability-sensitive metrics gates (for example adoption regression or API
-  break gating) must check for the required embedded data, not only the clone
-  baseline schema version.
+- runtime writes baseline schema `2.1`
+- runtime accepts clone baseline `1.0`, `2.0`, and `2.1`
+- runtime writes standalone metrics-baseline schema `1.2`
+- runtime accepts standalone metrics-baseline `1.1` and `1.2`
+- runtime writes cache schema `2.5`
+- MCP does not define a separate schema constant; tool/resource semantics are package-versioned public surface
 
-Metrics-baseline compatibility rules:
+Baseline regeneration is required when:
 
-- Runtime writes standalone metrics-baseline schema `1.2`.
-- Runtime accepts standalone metrics-baseline `1.1` and `1.2`.
-- When metrics are embedded into the unified clone baseline, the embedded
-  metrics section follows the clone baseline schema compatibility window
-  instead (`2.0` and `2.1` in the current runtime).
+- `fingerprint_version` changes
+- `python_tag` changes
 
-Baseline regeneration rules:
-
-- Required when `fingerprint_version` changes.
-- Required when `python_tag` changes.
-- Not required for package patch/minor updates if compatibility gates still pass.
+It is not required for package patch/minor updates when compatibility gates still pass.
 
 ## Health model evolution
 
-Health Score is stable within a given scoring model, but the scoring model may
-evolve across releases.
+CodeClone does not currently define a separate health-model version constant.
+Health semantics are package-versioned behavior and must be documented in:
 
-New signal families may first appear as report-only or experimental layers.
-After validation and contract hardening, selected layers may later be promoted
-into scoring.
+- this chapter
+- [15-health-score.md](15-health-score.md)
+- release notes
 
-Future CodeClone releases may expand the Health Score formula with additional
-validated signal families. As a result, a repository's score may decrease after
-upgrade even if the code itself did not become worse. In such cases, the change
-reflects an evolved scoring model rather than a retroactive decline in code
-quality.
-
-Short operational reminder:
-
-> A lower score after upgrade may reflect a broader health model, not only
-> worse code.
-
-Contract consequence:
-
-- health-model expansion does not necessarily require a baseline/cache/report
-  schema bump;
-- but it **does** require explicit documentation and release-note coverage,
-  because it changes user-visible scoring semantics.
+A lower score after upgrade may reflect a broader scoring model, not only worse code.
 
 ## Invariants (MUST)
 
-- Contract changes must include code updates and changelog/docs updates.
-- Schema mismatches must map to explicit statuses.
-- Legacy baseline payloads (<=1.3 layout) remain untrusted and require regeneration.
+- Contract changes require code + tests + changelog/docs updates.
+- Schema mismatches map to explicit statuses.
+- Legacy baselines stay untrusted and require regeneration.
 
 Refs:
 
-- `codeclone/baseline.py:BaselineStatus`
-- `codeclone/baseline.py:_is_legacy_baseline_payload`
+- `codeclone/baseline/trust.py:BaselineStatus`
+- `codeclone/baseline/clone_baseline.py:_is_legacy_baseline_payload`
 
 ## Failure modes
 
-| Change type                  | User impact                                                           |
-|------------------------------|-----------------------------------------------------------------------|
-| Baseline schema bump         | older unsupported baseline schemas become untrusted until regenerated |
-| Fingerprint bump             | clone IDs change; baseline regeneration required                      |
-| Cache schema bump            | old caches are ignored and rebuilt automatically                      |
-| Report schema bump           | downstream report consumers must update                               |
-| Metrics-baseline schema bump | dedicated metrics-baseline files must be regenerated                  |
+| Change type                  | User impact                                                    |
+|------------------------------|----------------------------------------------------------------|
+| Baseline schema bump         | Older unsupported baselines become untrusted until regenerated |
+| Fingerprint bump             | Clone IDs change; baseline regeneration required               |
+| Cache schema bump            | Old caches are ignored and rebuilt automatically               |
+| Report schema bump           | Downstream report consumers must update                        |
+| Metrics-baseline schema bump | Dedicated metrics-baseline files must be regenerated           |
 
 ## Determinism / canonicalization
 
@@ -166,9 +97,9 @@ Refs:
 
 Refs:
 
-- `codeclone/contracts.py`
-- `codeclone/baseline.py:Baseline.verify_compatibility`
-- `codeclone/metrics_baseline.py:MetricsBaseline.verify_compatibility`
+- `codeclone/contracts/__init__.py`
+- `codeclone/baseline/clone_baseline.py:Baseline.verify_compatibility`
+- `codeclone/baseline/metrics_baseline.py:MetricsBaseline.verify_compatibility`
 
 ## Locked by tests
 
@@ -180,7 +111,5 @@ Refs:
 
 ## Non-guarantees
 
-- Backward compatibility is not guaranteed across incompatible schema/fingerprint
-  bumps.
-- Health Score is not frozen forever as a mathematical formula; what is frozen
-  is the obligation to document scoring-model changes and present them honestly.
+- Backward compatibility is not guaranteed across incompatible schema/fingerprint bumps.
+- Health Score is not mathematically frozen forever; the obligation to document scoring-model changes is.

@@ -6,59 +6,61 @@ Define stable process exit semantics and category boundaries.
 
 ## Public surface
 
-- Exit enum: `codeclone/contracts.py:ExitCode`
-- CLI categorization and exits: `codeclone/cli.py:_main_impl`, `codeclone/cli.py:main`
-- Error markers: `codeclone/ui_messages.py`
+- Exit enum: `codeclone/contracts/__init__.py:ExitCode`
+- CLI entry: `codeclone/main.py:main`
+- CLI orchestration: `codeclone/surfaces/cli/workflow.py:_main_impl`
+- Error markers/formatters: `codeclone/ui_messages/__init__.py`
 
 ## Data model
 
-| Exit code | Category       | Meaning                                                                                                                |
-|-----------|----------------|------------------------------------------------------------------------------------------------------------------------|
-| 0         | success        | Run completed without gating failures                                                                                  |
-| 2         | contract error | Input/contract violation (baseline trust, output path/ext, invalid CLI flag combinations, unreadable source in gating) |
-| 3         | gating failure | Analysis succeeded but policy failed (`--fail-on-new`, `--fail-threshold`, metrics gates)                              |
-| 5         | internal error | Unexpected exception escaped `_main_impl`                                                                              |
+| Exit code | Category       | Meaning                                             |
+|-----------|----------------|-----------------------------------------------------|
+| `0`       | success        | Run completed without gating failures               |
+| `2`       | contract error | Input or contract violation                         |
+| `3`       | gating failure | Analysis succeeded but policy failed                |
+| `5`       | internal error | Unexpected exception escaped top-level CLI handling |
 
 Refs:
 
-- `codeclone/contracts.py:ExitCode`
-- `codeclone/_cli_args.py:_ArgumentParser.error`
+- `codeclone/contracts/__init__.py:ExitCode`
+- `codeclone/config/argparse_builder.py:_ArgumentParser.error`
 
 ## Contracts
 
-- Contract errors must use `CONTRACT ERROR:` marker.
-- Gating failures must use `GATING FAILURE:` marker.
-- Internal errors are formatted by `fmt_internal_error`; traceback hidden unless debug enabled.
+- Contract errors use the `CONTRACT ERROR:` marker.
+- Gating failures use the `GATING FAILURE:` marker.
+- Internal errors use `INTERNAL ERROR:` and hide traceback unless debug is enabled.
+- `main()` lets `SystemExit` from contract/gating paths pass through unchanged.
 
 Refs:
 
-- `codeclone/ui_messages.py:fmt_contract_error`
-- `codeclone/ui_messages.py:fmt_gating_failure`
-- `codeclone/ui_messages.py:fmt_internal_error`
+- `codeclone/ui_messages/__init__.py:MARKER_CONTRACT_ERROR`
+- `codeclone/ui_messages/__init__.py:MARKER_INTERNAL_ERROR`
+- `codeclone/ui_messages/__init__.py:fmt_contract_error`
+- `codeclone/ui_messages/__init__.py:fmt_gating_failure`
+- `codeclone/ui_messages/__init__.py:fmt_internal_error`
 
 ## Invariants (MUST)
 
-- `SystemExit` from contract/gating paths must pass through `main()` unchanged.
-- Only non-`SystemExit` exceptions in `main()` become exit 5.
-- In gating mode, unreadable source files force exit 2 even if clone gating would also fail.
+- Only non-`SystemExit` exceptions in `main()` become exit `5`.
+- In gating mode, unreadable source files win over clone/metric gate failure and force exit `2`.
 
 Refs:
 
-- `codeclone/cli.py:main`
-- `codeclone/cli.py:_main_impl`
+- `codeclone/main.py:main`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
 
 ## Failure modes
 
-| Condition                                    | Marker         | Exit |
-|----------------------------------------------|----------------|------|
-| Invalid output extension                     | CONTRACT ERROR | 2    |
-| `--open-html-report` without `--html`        | CONTRACT ERROR | 2    |
-| `--timestamped-report-paths` without reports | CONTRACT ERROR | 2    |
-| Untrusted baseline in CI/gating              | CONTRACT ERROR | 2    |
-| Unreadable source in CI/gating               | CONTRACT ERROR | 2    |
-| New clones with `--fail-on-new`              | GATING FAILURE | 3    |
-| Threshold exceeded                           | GATING FAILURE | 3    |
-| Unexpected exception in main pipeline        | INTERNAL ERROR | 5    |
+| Condition                                  | Marker           | Exit |
+|--------------------------------------------|------------------|------|
+| Invalid output extension/path              | `CONTRACT ERROR` | `2`  |
+| Invalid CLI flag combination               | `CONTRACT ERROR` | `2`  |
+| Untrusted baseline in CI/gating            | `CONTRACT ERROR` | `2`  |
+| Unreadable source in CI/gating             | `CONTRACT ERROR` | `2`  |
+| New clones with `--fail-on-new`            | `GATING FAILURE` | `3`  |
+| Threshold or metrics gate breach           | `GATING FAILURE` | `3`  |
+| Unexpected exception in top-level CLI path | `INTERNAL ERROR` | `5`  |
 
 ## Determinism / canonicalization
 
@@ -67,8 +69,8 @@ Refs:
 
 Refs:
 
-- `codeclone/contracts.py:cli_help_epilog`
-- `codeclone/ui_messages.py:MARKER_CONTRACT_ERROR`
+- `codeclone/contracts/__init__.py:cli_help_epilog`
+- `codeclone/ui_messages/__init__.py:MARKER_CONTRACT_ERROR`
 
 ## Locked by tests
 
@@ -80,9 +82,4 @@ Refs:
 
 ## Non-guarantees
 
-- Exact message body text may evolve; category marker and exit code are contract.
-
-## See also
-
-- [09-cli.md](09-cli.md)
-- [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
+- Exact message body wording may evolve; marker category and exit code are contract.
