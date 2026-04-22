@@ -185,10 +185,15 @@ Optional read-only MCP server for AI agents and IDE clients.
 Never mutates source, baselines, or repo state.
 
 ```bash
-uv tool install --pre "codeclone[mcp]"       # or: uv pip install --pre "codeclone[mcp]"
+uv tool install --pre "codeclone[mcp]"
+# or
+uv pip install --pre "codeclone[mcp]"
 
-codeclone-mcp --transport stdio            # local (Claude Code, Codex, Copilot, Gemini CLI)
-codeclone-mcp --transport streamable-http  # remote / HTTP-only clients
+# local stdio clients
+codeclone-mcp --transport stdio
+
+# remote / HTTP-only clients
+codeclone-mcp --transport streamable-http
 ```
 
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/) ·
@@ -284,7 +289,7 @@ Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-r
 {
   "report_schema_version": "2.8",
   "meta": {
-    "codeclone_version": "2.0.0b5",
+    "codeclone_version": "2.0.0b6",
     "project_name": "...",
     "scan_root": ".",
     "report_mode": "full",

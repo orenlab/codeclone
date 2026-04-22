@@ -15,7 +15,7 @@ def test_codex_plugin_manifest_is_consistent() -> None:
 
     assert isinstance(manifest, dict)
     assert manifest["name"] == "codeclone"
-    assert manifest["version"] == "2.0.0-b5.0"
+    assert manifest["version"] == "2.0.0-b6.0"
     assert manifest["skills"] == "./skills/"
     assert manifest["mcpServers"] == "./.mcp.json"
     assert manifest["license"] == "MPL-2.0"
@@ -126,7 +126,7 @@ def test_codex_plugin_readme_and_docs_exist() -> None:
     assert "does not rewrite `~/.codex/config.toml`" in readme_text
     assert "The plugin prefers a workspace launcher first" in readme_text
     assert "the current Poetry environment launcher" in readme_text
-    assert 'uv tool install "codeclone[mcp]>=2.0.0b4"' in readme_text
+    assert 'uv tool install --pre "codeclone[mcp]"' in readme_text
 
     assert (root / "docs" / "codex-plugin.md").is_file()
     assert (root / "docs" / "terms-of-use.md").is_file()

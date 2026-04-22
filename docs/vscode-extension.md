@@ -36,13 +36,13 @@ to `PATH`. Runtime and version-mismatch messages identify that resolved launcher
 Recommended install for the preview extension:
 
 ```bash
-uv tool install "codeclone[mcp]>=2.0.0b4"
+uv tool install --pre "codeclone[mcp]"
 ```
 
 If you want the launcher inside the current environment instead:
 
 ```bash
-uv pip install "codeclone[mcp]>=2.0.0b4"
+uv pip install --pre "codeclone[mcp]"
 ```
 
 Verify the launcher:

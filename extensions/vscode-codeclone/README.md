@@ -9,8 +9,7 @@ creating a second truth model. The extension stays read-only with respect to
 repository state and uses the same canonical report semantics as the CLI, HTML
 report, and MCP server.
 
-This extension is published as a preview while the `2.0.0b5` line is still in
-beta.
+This extension is published as a preview for the current `2.0.x` beta line.
 
 ## What it is for
 
@@ -50,13 +49,13 @@ falling back to `PATH`. Runtime and version-mismatch messages identify that reso
 Recommended install for the preview extension:
 
 ```bash
-uv tool install "codeclone[mcp]>=2.0.0b4"
+uv tool install --pre "codeclone[mcp]"
 ```
 
 If you want the launcher inside the current environment instead:
 
 ```bash
-uv pip install "codeclone[mcp]>=2.0.0b4"
+uv pip install --pre "codeclone[mcp]"
 ```
 
 Verify the launcher:
