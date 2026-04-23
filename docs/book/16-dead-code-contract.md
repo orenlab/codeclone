@@ -8,7 +8,7 @@ Define dead-code liveness rules, canonical symbol-usage boundaries, and gating s
 
 - Dead-code detection core: `codeclone/metrics/dead_code.py:find_unused`
 - Test-path classifier: `codeclone/paths.py:is_test_filepath`
-- Inline suppression parser/binder: `codeclone/suppressions.py`
+- Inline suppression parser/binder: `codeclone/analysis/suppressions.py`
 - Extraction of referenced names/candidates:
   `codeclone/analysis/units.py:extract_units_and_stats_from_source`
 - Cache load boundary for referenced names:

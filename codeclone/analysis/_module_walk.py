@@ -13,13 +13,6 @@ from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from .. import qualnames as _qualnames
 from ..models import DeadCandidate, ModuleDep
-from ..suppressions import (
-    DeclarationTarget,
-    bind_suppressions_to_declarations,
-    build_suppression_index,
-    extract_suppression_directives,
-    suppression_target_key,
-)
 from .class_metrics import _node_line_span
 from .parser import (
     _build_declaration_token_index,
@@ -27,11 +20,18 @@ from .parser import (
     _DeclarationTokenIndexKey,
     _source_tokens,
 )
+from .suppressions import (
+    DeclarationTarget,
+    bind_suppressions_to_declarations,
+    build_suppression_index,
+    extract_suppression_directives,
+    suppression_target_key,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from ..suppressions import SuppressionTargetKey
+    from .suppressions import SuppressionTargetKey
 
 
 _NamedDeclarationNode = _qualnames.FunctionNode | ast.ClassDef

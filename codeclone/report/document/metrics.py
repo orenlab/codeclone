@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from ...analysis.suppressions import INLINE_CODECLONE_SUPPRESSION_SOURCE
 from ...domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
@@ -23,7 +24,6 @@ from ...domain.source_scope import (
     SOURCE_KIND_OTHER,
 )
 from ...metrics.registry import METRIC_FAMILIES
-from ...suppressions import INLINE_CODECLONE_SUPPRESSION_SOURCE
 from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping

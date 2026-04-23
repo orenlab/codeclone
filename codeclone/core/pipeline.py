@@ -9,6 +9,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from ..contracts import DEFAULT_COVERAGE_MIN
+from ..findings.clones.golden_fixtures import (
+    build_suppressed_clone_groups,
+    split_clone_groups_for_golden_fixtures,
+)
 from ..findings.clones.grouping import (
     build_block_groups,
     build_groups,
@@ -16,10 +20,6 @@ from ..findings.clones.grouping import (
 )
 from ..findings.structural.detectors import (
     build_clone_cohort_structural_findings,
-)
-from ..golden_fixtures import (
-    build_suppressed_clone_groups,
-    split_clone_groups_for_golden_fixtures,
 )
 from ..metrics._base import MetricProjectContext
 from ..metrics.coverage_join import CoverageJoinParseError, build_coverage_join

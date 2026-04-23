@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from ..analysis.suppressions import (
+    DEAD_CODE_RULE_ID,
+    INLINE_CODECLONE_SUPPRESSION_SOURCE,
+)
 from ..domain.findings import CATEGORY_COHESION, CATEGORY_COMPLEXITY, CATEGORY_COUPLING
 from ..domain.quality import CONFIDENCE_HIGH, RISK_LOW
 from ..metrics.overloaded_modules import build_overloaded_modules_payload
@@ -20,7 +24,6 @@ from ..models import (
     ModuleDep,
     ProjectMetrics,
 )
-from ..suppressions import DEAD_CODE_RULE_ID, INLINE_CODECLONE_SUPPRESSION_SOURCE
 from ..utils.coerce import as_int, as_mapping, as_sequence, as_str
 from .api_surface_payload import (
     _api_surface_rows,

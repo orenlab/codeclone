@@ -11,15 +11,15 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Literal
 
-from .domain.source_scope import SOURCE_KIND_FIXTURES, SOURCE_KIND_TESTS
-from .models import (
+from ...domain.source_scope import SOURCE_KIND_FIXTURES, SOURCE_KIND_TESTS
+from ...models import (
     GroupItem,
     GroupItemLike,
     GroupMap,
     GroupMapLike,
     SuppressedCloneGroup,
 )
-from .paths import classify_source_kind, normalize_repo_path, relative_repo_path
+from ...paths import classify_source_kind, normalize_repo_path, relative_repo_path
 
 CloneGroupKind = Literal["function", "block", "segment"]
 

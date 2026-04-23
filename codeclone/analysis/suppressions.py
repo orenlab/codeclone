@@ -265,6 +265,5 @@ def build_suppression_index(
             end_line=binding.end_line,
             kind=binding.kind,
         )
-        existing = index.get(key, ())
-        index[key] = _merge_rules(existing, binding.rules)
+        index[key] = _merge_rules(index.get(key, ()), binding.rules)
     return index

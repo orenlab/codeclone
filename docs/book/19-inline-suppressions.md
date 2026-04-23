@@ -7,7 +7,7 @@ source comments, without introducing broad/project-wide ignores.
 
 ## Public surface
 
-- Suppression directive parser and binder: `codeclone/suppressions.py`
+- Suppression directive parser and binder: `codeclone/analysis/suppressions.py`
 - Dead-code final filter: `codeclone/metrics/dead_code.py:find_unused`
 - Suppressed dead-code projection helper:
   `codeclone/metrics/dead_code.py:find_suppressed_unused`
@@ -22,9 +22,9 @@ source comments, without introducing broad/project-wide ignores.
 
 Refs:
 
-- `codeclone/suppressions.py:SuppressionDirective`
-- `codeclone/suppressions.py:DeclarationTarget`
-- `codeclone/suppressions.py:SuppressionBinding`
+- `codeclone/analysis/suppressions.py:SuppressionDirective`
+- `codeclone/analysis/suppressions.py:DeclarationTarget`
+- `codeclone/analysis/suppressions.py:SuppressionBinding`
 - `codeclone/models.py:DeadCandidate`
 
 ## Contracts
@@ -76,8 +76,8 @@ Refs:
 
 Refs:
 
-- `codeclone/suppressions.py:extract_suppression_directives`
-- `codeclone/suppressions.py:bind_suppressions_to_declarations`
+- `codeclone/analysis/suppressions.py:extract_suppression_directives`
+- `codeclone/analysis/suppressions.py:bind_suppressions_to_declarations`
 - `codeclone/cache/_canonicalize.py:_canonicalize_cache_entry`
 
 ## Locked by tests

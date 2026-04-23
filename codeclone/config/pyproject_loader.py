@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..golden_fixtures import (
+from ..findings.clones.golden_fixtures import (
     GoldenFixturePatternError,
     normalize_golden_fixture_patterns,
 )
