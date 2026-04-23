@@ -61,6 +61,7 @@ def test_old_analysis_and_findings_paths_are_gone() -> None:
     assert importlib.util.find_spec("codeclone.grouping") is None
     assert importlib.util.find_spec("codeclone.pipeline") is None
     assert importlib.util.find_spec("codeclone.structural_findings") is None
+    assert importlib.util.find_spec("codeclone.templates") is None
     assert callable(canonical_build_groups)
     assert callable(canonical_scan_function_structure)
 

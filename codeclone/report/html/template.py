@@ -45,3 +45,8 @@ ${body}
 </body>
 </html>"""
 )
+
+__all__ = [
+    "FONT_CSS_URL",
+    "REPORT_TEMPLATE",
+]

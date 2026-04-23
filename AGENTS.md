@@ -384,7 +384,7 @@ Architecture is layered, but grounded in current code (not aspirational diagrams
 - **Canonical report + projections** (`codeclone/report/document/*`, `codeclone/report/gates/*`,
   `codeclone/report/renderers/*`, `codeclone/report/*.py`) converts analysis facts into deterministic report payloads
   and deterministic projections.
-- **HTML/UI rendering** (`codeclone/report/html/*`, `codeclone/templates.py`) renders views from canonical report/meta
+- **HTML/UI rendering** (`codeclone/report/html/*`) renders views from canonical report/meta
   facts. HTML is render-only.
 - **MCP agent interface** (`codeclone/surfaces/mcp/*`) exposes the same pipeline/report contracts as a deterministic,
   read-only MCP surface for AI agents and MCP-capable clients.

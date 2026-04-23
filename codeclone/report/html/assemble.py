@@ -15,7 +15,6 @@ from ... import __version__
 from ...contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
 from ...domain.quality import CONFIDENCE_HIGH
 from ...findings.structural.detectors import normalize_structural_findings
-from ...templates import FONT_CSS_URL, REPORT_TEMPLATE
 from ...utils import coerce as _coerce
 from ._context import _meta_pick, build_context
 from .assets.css import build_css
@@ -29,6 +28,7 @@ from .sections._meta import build_topbar_provenance_summary, render_meta_panel
 from .sections._overview import render_overview_panel
 from .sections._structural import render_structural_panel
 from .sections._suggestions import render_suggestions_panel
+from .template import FONT_CSS_URL, REPORT_TEMPLATE
 from .widgets.icons import BRAND_LOGO, ICONS, section_icon_html
 from .widgets.snippets import _FileCache, _pygments_css
 
