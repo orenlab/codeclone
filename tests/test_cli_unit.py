@@ -14,7 +14,7 @@ from collections.abc import Callable
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, TextIO, cast
 
 import pytest
 
@@ -195,6 +195,37 @@ def test_cli_tips_detect_vscode_environment_signals() -> None:
     assert cli_tips._is_vscode_environment({"TERM_PROGRAM": "xterm-256color"}) is False
 
 
+def test_cli_stream_is_tty_handles_oserror() -> None:
+    class _BrokenTTY:
+        def isatty(self) -> bool:
+            raise OSError("tty unavailable")
+
+    assert cli_tips._stream_is_tty(cast("TextIO", _BrokenTTY())) is False
+
+
+def test_cli_load_tips_state_rejects_invalid_tip_shapes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(cli_tips, "read_json_object", lambda _path: {"tips": []})
+    assert cli_tips._load_tips_state(tmp_path / "tips.json") == {
+        "schema_version": 1,
+        "tips": {},
+    }
+
+
+def test_cli_tip_last_shown_version_rejects_invalid_shapes() -> None:
+    assert (
+        cli_tips._tip_last_shown_version({"tips": []}, tip_key="vscode_extension") == ""
+    )
+    assert (
+        cli_tips._tip_last_shown_version(
+            {"tips": {"vscode_extension": {"last_shown_version": 7}}},
+            tip_key="vscode_extension",
+        )
+        == ""
+    )
+
+
 def test_cli_vscode_extension_tip_uses_versioned_cache(
     tmp_path: Path,
 ) -> None:
@@ -241,6 +272,31 @@ def test_cli_vscode_extension_tip_uses_versioned_cache(
     )
     assert shown_for_new_version is True
     assert len(printer.lines) == 2
+
+
+def test_cli_vscode_extension_tip_tolerates_state_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    printer = _RecordingPrinter()
+    args = SimpleNamespace(quiet=False, ci=False)
+
+    def _fail_remember(**_kwargs: object) -> None:
+        raise OSError("read-only cache")
+
+    monkeypatch.setattr(cli_tips, "_remember_tip_version", _fail_remember)
+
+    shown = cli_tips.maybe_print_vscode_extension_tip(
+        args=args,
+        console=printer,
+        codeclone_version=__version__,
+        cache_path=tmp_path / ".cache" / "codeclone" / "cache.json",
+        environ={"TERM_PROGRAM": "vscode"},
+        stream=_TTYStream(is_tty=True),
+    )
+
+    assert shown is True
+    assert len(printer.lines) == 1
 
 
 @pytest.mark.parametrize(
@@ -1153,6 +1209,14 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
         "  cycles=0  dead_code=1  health=85(B)  overloaded_modules=3"
     )
     assert (
+        ui.fmt_summary_compact_dependencies(
+            avg_depth=4.0,
+            p95_depth=13,
+            max_depth=16,
+        )
+        == "Dependencies  avg=4.0  p95=13  max=16"
+    )
+    assert (
         ui.fmt_summary_compact_adoption(
             param_permille=750,
             return_permille=500,
@@ -1221,6 +1285,12 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
     assert "[yellow]2[/yellow] fixtures" in clones
 
     assert "5 detected" in ui.fmt_metrics_cycles(5)
+    dependencies = ui.fmt_metrics_dependencies(
+        avg_depth=4.0,
+        p95_depth=13,
+        max_depth=16,
+    )
+    assert_contains_all(dependencies, "avg 4.0", "p95 13", "max 16")
     dead_with_suppressed = ui.fmt_metrics_dead_code(447, suppressed=9)
     assert "447 found" in dead_with_suppressed
     assert "(9 suppressed)" in dead_with_suppressed

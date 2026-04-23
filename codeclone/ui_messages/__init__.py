@@ -241,6 +241,9 @@ SUMMARY_COMPACT_METRICS = (
     "  lcom4={lcom_avg}/{lcom_max}  cycles={cycles}  dead_code={dead}"
     "  health={health}({grade})  overloaded_modules={overloaded_modules}"
 )
+SUMMARY_COMPACT_DEPENDENCIES = (
+    "Dependencies  avg={avg_depth}  p95={p95_depth}  max={max_depth}"
+)
 SUMMARY_COMPACT_CHANGED_SCOPE = (
     "Changed  paths={paths}  findings={findings}  new={new}  known={known}"
 )
@@ -494,6 +497,19 @@ def fmt_summary_compact_metrics(
     )
 
 
+def fmt_summary_compact_dependencies(
+    *,
+    avg_depth: float,
+    p95_depth: int,
+    max_depth: int,
+) -> str:
+    return SUMMARY_COMPACT_DEPENDENCIES.format(
+        avg_depth=f"{avg_depth:.1f}",
+        p95_depth=p95_depth,
+        max_depth=max_depth,
+    )
+
+
 def fmt_summary_compact_adoption(
     *,
     param_permille: int,
@@ -559,7 +575,7 @@ _HEALTH_GRADE_STYLE: dict[str, str] = {
     HEALTH_GRADE_F: "bold red",
 }
 
-_L = 12  # label column width (after 2-space indent)
+_L = 13  # label column width (after 2-space indent)
 
 
 def _v(n: int, style: str = "") -> str:
@@ -663,6 +679,15 @@ def fmt_metrics_cycles(count: int) -> str:
             return f"  {'Cycles':<{_L}}[green]\u2714 clean[/green]"
         case _:
             return f"  {'Cycles':<{_L}}[bold red]{count} detected[/bold red]"
+
+
+def fmt_metrics_dependencies(
+    *, avg_depth: float, p95_depth: int, max_depth: int
+) -> str:
+    return (
+        f"  {'Dependencies':<{_L}}"
+        f"avg {avg_depth:.1f} · p95 {p95_depth} · max {max_depth}"
+    )
 
 
 def fmt_metrics_dead_code(count: int, *, suppressed: int = 0) -> str:

@@ -31,6 +31,9 @@ class MetricsSnapshot:
     dead_code_count: int
     health_total: int
     health_grade: str
+    dependency_avg_depth: float = 0.0
+    dependency_p95_depth: int = 0
+    dependency_max_depth: int = 0
     suppressed_dead_code_count: int = 0
     overloaded_modules_candidates: int = 0
     overloaded_modules_total: int = 0
@@ -114,6 +117,13 @@ def build_metrics_snapshot(
         cohesion_avg=project_metrics.cohesion_avg,
         cohesion_max=project_metrics.cohesion_max,
         cycles_count=len(project_metrics.dependency_cycles),
+        dependency_avg_depth=_coerce.as_float(
+            _as_mapping(metrics_payload_map.get("dependencies")).get("avg_depth")
+        ),
+        dependency_p95_depth=_as_int(
+            _as_mapping(metrics_payload_map.get("dependencies")).get("p95_depth")
+        ),
+        dependency_max_depth=project_metrics.dependency_max_depth,
         dead_code_count=len(project_metrics.dead_code),
         health_total=project_metrics.health.total,
         health_grade=project_metrics.health.grade,
@@ -276,6 +286,13 @@ def _print_metrics(
                 overloaded_modules=metrics.overloaded_modules_candidates,
             )
         )
+        console.print(
+            ui.fmt_summary_compact_dependencies(
+                avg_depth=metrics.dependency_avg_depth,
+                p95_depth=metrics.dependency_p95_depth,
+                max_depth=metrics.dependency_max_depth,
+            )
+        )
         if (
             metrics.adoption_param_permille is not None
             and metrics.adoption_return_permille is not None
@@ -329,6 +346,13 @@ def _print_metrics(
             ui.fmt_metrics_cohesion(metrics.cohesion_avg, metrics.cohesion_max)
         )
         console.print(ui.fmt_metrics_cycles(metrics.cycles_count))
+        console.print(
+            ui.fmt_metrics_dependencies(
+                avg_depth=metrics.dependency_avg_depth,
+                p95_depth=metrics.dependency_p95_depth,
+                max_depth=metrics.dependency_max_depth,
+            )
+        )
         console.print(
             ui.fmt_metrics_dead_code(
                 metrics.dead_code_count,

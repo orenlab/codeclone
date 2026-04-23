@@ -93,6 +93,8 @@ class DepGraph:
     edges: tuple[ModuleDep, ...]
     cycles: tuple[tuple[str, ...], ...]
     max_depth: int
+    avg_depth: float
+    p95_depth: int
     longest_chains: tuple[tuple[str, ...], ...]
 
 

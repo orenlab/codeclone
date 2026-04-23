@@ -30,6 +30,7 @@ Summary metrics include:
 - function/block/segment clone groups
 - suppressed clone groups from `golden_fixture_paths`
 - dead-code active/suppressed status
+- dependency depth profile (`avg_depth`, `p95_depth`, `max_depth`) when metrics are computed
 - adoption/API/coverage-join facts when computed
 - new vs baseline
 

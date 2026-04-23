@@ -47,7 +47,7 @@ GLOSSARY: dict[str, str] = {
     "modules": "Total number of Python modules analyzed",
     "edges": "Total number of import relationships between modules",
     "max depth": (
-        "Longest chain of transitive imports; health stays in the safe zone at <= 8"
+        "Longest internal transitive import chain; compare with avg and p95 depth"
     ),
     "cycles": "Number of circular import dependencies detected",
     # Complexity stat cards

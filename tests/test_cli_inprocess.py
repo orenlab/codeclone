@@ -3474,7 +3474,16 @@ def test_cli_summary_with_metrics_baseline_shows_metrics_section(
         ],
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "Metrics", "Adoption", "Overloaded")
+    assert_contains_all(
+        out,
+        "Metrics",
+        "Dependencies",
+        "avg",
+        "p95",
+        "max",
+        "Adoption",
+        "Overloaded",
+    )
 
 
 def test_cli_summary_with_api_surface_shows_public_api_line(
@@ -3530,7 +3539,17 @@ def test_cli_ci_summary_includes_adoption_and_public_api_lines(
         ],
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "Adoption", "Public API", "symbols=", "docstrings=")
+    assert_contains_all(
+        out,
+        "Dependencies",
+        "avg=",
+        "p95=",
+        "max=",
+        "Adoption",
+        "Public API",
+        "symbols=",
+        "docstrings=",
+    )
 
 
 def test_cli_pyproject_golden_fixture_paths_exclude_fixture_clone_groups(

@@ -114,6 +114,8 @@ def compute_project_metrics(
         edges=(),
         cycles=(),
         max_depth=0,
+        avg_depth=0.0,
+        p95_depth=0,
         longest_chains=(),
     )
     dead_items: tuple[DeadItem, ...] = ()
@@ -265,7 +267,7 @@ def analyze(
         *cohort_structural_findings,
     )
     if not boot.args.skip_metrics:
-        project_metrics, _, _ = compute_project_metrics(
+        project_metrics, dep_graph, _ = compute_project_metrics(
             units=processing.units,
             class_metrics=processing.class_metrics,
             module_deps=processing.module_deps,
@@ -325,6 +327,7 @@ def analyze(
         metrics_payload = build_metrics_report_payload(
             scan_root=str(boot.root),
             project_metrics=project_metrics,
+            dep_graph=dep_graph,
             coverage_join=coverage_join,
             units=processing.units,
             class_metrics=processing.class_metrics,

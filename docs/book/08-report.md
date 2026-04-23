@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the canonical report contract in `2.0.0b6`: report schema `2.8` plus
+Define the canonical report contract in `2.0.0b6`: report schema `2.9` plus
 deterministic text/Markdown/SARIF/HTML projections.
 
 ## Public surface
@@ -47,6 +47,15 @@ Current canonical report-only metric families include:
 - `api_surface`
 - `coverage_join`
 - `overloaded_modules`
+
+Dependency depth facts in the canonical report now include:
+
+- `avg_depth`
+- `p95_depth`
+- `max_depth`
+
+These describe the internal module dependency graph. They are report facts, not
+user-facing config knobs.
 
 Current finding families include:
 

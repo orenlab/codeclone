@@ -12,7 +12,6 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from codeclone.contracts import HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE
 from codeclone.utils import coerce as _coerce
 
 from ..primitives.escape import _escape_html
@@ -31,6 +30,7 @@ if TYPE_CHECKING:
     from .._context import ReportContext
 
 _as_int = _coerce.as_int
+_as_float = _coerce.as_float
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
 
@@ -344,11 +344,25 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
     dep_module_count = _as_int(ctx.dependencies_map.get("modules"))
     dep_edge_count = _as_int(ctx.dependencies_map.get("edges"))
     dep_max_depth = _as_int(ctx.dependencies_map.get("max_depth"))
+    dep_avg_depth = _as_float(ctx.dependencies_map.get("avg_depth"))
+    dep_p95_depth = _as_int(ctx.dependencies_map.get("p95_depth"))
     cycle_count = len(dep_cycles)
+    dependency_health = _as_int(
+        _as_mapping(ctx.health_map.get("dimensions")).get("dependencies"),
+    )
 
     dep_avg = (
         f"{dep_edge_count / dep_module_count:.1f}" if dep_module_count > 0 else "n/a"
     )
+    dep_avg_depth_label = f"{dep_avg_depth:.1f}" if dep_module_count > 0 else "n/a"
+
+    dependency_tone: Tone
+    if cycle_count > 0:
+        dependency_tone = "risk"
+    elif dependency_health < 100:
+        dependency_tone = "warn"
+    else:
+        dependency_tone = "ok"
 
     cards = [
         _stat_card(
@@ -369,13 +383,12 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
             "Max depth",
             dep_max_depth,
             detail=_micro_badges(
-                ("target", f"<= {HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE}")
+                ("avg", dep_avg_depth_label),
+                ("p95", dep_p95_depth),
             ),
-            value_tone=(
-                "warn"
-                if dep_max_depth > HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE
-                else "good"
-            ),
+            value_tone="bad"
+            if cycle_count > 0
+            else ("warn" if dependency_health < 100 else "good"),
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
         ),
@@ -446,13 +459,11 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
     if not ctx.metrics_available:
         answer, tone = "Metrics are skipped for this run.", "info"
     else:
-        answer = f"Cycles: {cycle_count}; max dependency depth: {dep_max_depth}."
-        if cycle_count > 0:
-            tone = "risk"
-        elif dep_max_depth > HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE:
-            tone = "warn"
-        else:
-            tone = "ok"
+        answer = (
+            f"Cycles: {cycle_count}; avg depth: {dep_avg_depth_label}; "
+            f"p95 depth: {dep_p95_depth}; max dependency depth: {dep_max_depth}."
+        )
+        tone = dependency_tone
 
     return (
         insight_block(

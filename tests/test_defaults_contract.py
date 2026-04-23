@@ -26,9 +26,11 @@ from codeclone.contracts import (
     DEFAULT_ROOT,
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
-    HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE,
+    HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER,
+    HEALTH_DEPENDENCY_DEPTH_P95_MARGIN,
 )
 from codeclone.core._types import DEFAULT_RUNTIME_PROCESSES
+from codeclone.metrics import health as health_mod
 from codeclone.report.gates.evaluator import MetricGateConfig
 from codeclone.report.html.sections import _dependencies as html_dependencies_mod
 from codeclone.surfaces.mcp import server as mcp_server
@@ -121,7 +123,16 @@ def test_mcp_parser_and_builder_defaults_stay_in_sync() -> None:
     assert signature.parameters["log_level"].default == args.log_level
 
 
-def test_dependency_depth_safe_zone_stays_shared_between_contract_and_html() -> None:
-    source = inspect.getsource(html_dependencies_mod.render_dependencies_panel)
-    assert "HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE" in source
-    assert HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE == 8
+def test_dependency_depth_profile_contract_stays_shared_between_health_and_html() -> (
+    None
+):
+    health_source = inspect.getsource(health_mod._dependency_expected_tail)
+    html_source = inspect.getsource(html_dependencies_mod.render_dependencies_panel)
+
+    assert "HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER" in health_source
+    assert "HEALTH_DEPENDENCY_DEPTH_P95_MARGIN" in health_source
+    assert HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER == 2.0
+    assert HEALTH_DEPENDENCY_DEPTH_P95_MARGIN == 1
+    assert "avg depth" in html_source
+    assert "p95 depth" in html_source
+    assert "HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE" not in html_source

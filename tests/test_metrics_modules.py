@@ -7,11 +7,15 @@
 from __future__ import annotations
 
 import ast
+from math import ceil
 
 import pytest
 
 from codeclone.analysis.cfg_model import CFG
-from codeclone.contracts import HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE
+from codeclone.contracts import (
+    HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER,
+    HEALTH_DEPENDENCY_DEPTH_P95_MARGIN,
+)
 from codeclone.metrics import complexity as complexity_mod
 from codeclone.metrics import coupling as coupling_mod
 from codeclone.metrics import health as health_mod
@@ -26,6 +30,7 @@ from codeclone.metrics.dead_code import find_suppressed_unused, find_unused
 from codeclone.metrics.dependencies import (
     build_dep_graph,
     build_import_graph,
+    depth_profile,
     find_cycles,
     longest_chains,
     max_depth,
@@ -565,9 +570,12 @@ def test_build_import_graph_cycle_depth_and_chain_helpers() -> None:
 
 def test_build_dep_graph_deduplicates_edges() -> None:
     repeated = ModuleDep(source="pkg.a", target="pkg.b", import_type="import", line=1)
-    dep_graph = build_dep_graph(modules={"pkg.a"}, deps=(repeated, repeated))
+    external = ModuleDep(source="pkg.a", target="typing", import_type="import", line=2)
+    dep_graph = build_dep_graph(modules={"pkg.a"}, deps=(repeated, repeated, external))
     assert dep_graph.modules == frozenset({"pkg.a", "pkg.b"})
     assert dep_graph.edges == (repeated,)
+    assert dep_graph.avg_depth == 1.5
+    assert dep_graph.p95_depth == 2
 
 
 def test_clone_piecewise_score_breakpoints() -> None:
@@ -611,6 +619,8 @@ def test_health_helpers_and_compute_health_boundaries() -> None:
             low_cohesion_classes=10,
             dependency_cycles=10,
             dependency_max_depth=20,
+            dependency_avg_depth=6.0,
+            dependency_p95_depth=12,
             dead_code_items=30,
         )
     )
@@ -627,8 +637,27 @@ def test_health_helpers_and_compute_health_boundaries() -> None:
     }
 
 
-def test_health_dependency_depth_safe_zone_matches_html_threshold() -> None:
-    def _health_inputs(*, dependency_max_depth: int) -> HealthInputs:
+def test_depth_profile_uses_nearest_rank_p95() -> None:
+    graph = {
+        "a": {"b"},
+        "b": {"c"},
+        "c": set(),
+        "d": {"e"},
+        "e": set(),
+        "f": set(),
+    }
+    avg_depth, p95_depth = depth_profile(graph)
+    assert avg_depth == pytest.approx((3 + 2 + 1 + 2 + 1 + 1) / 6)
+    assert p95_depth == 3
+
+
+def test_health_dependency_tail_pressure_is_adaptive() -> None:
+    def _health_inputs(
+        *,
+        dependency_max_depth: int,
+        dependency_avg_depth: float,
+        dependency_p95_depth: int,
+    ) -> HealthInputs:
         return HealthInputs(
             files_found=10,
             files_analyzed_or_cached=10,
@@ -644,17 +673,27 @@ def test_health_dependency_depth_safe_zone_matches_html_threshold() -> None:
             low_cohesion_classes=0,
             dependency_cycles=0,
             dependency_max_depth=dependency_max_depth,
+            dependency_avg_depth=dependency_avg_depth,
+            dependency_p95_depth=dependency_p95_depth,
             dead_code_items=0,
         )
 
+    expected_tail = max(
+        ceil(3.0 * HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER),
+        5 + HEALTH_DEPENDENCY_DEPTH_P95_MARGIN,
+    )
     safe = compute_health(
         _health_inputs(
-            dependency_max_depth=HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE,
+            dependency_max_depth=expected_tail,
+            dependency_avg_depth=3.0,
+            dependency_p95_depth=5,
         )
     )
     warn = compute_health(
         _health_inputs(
-            dependency_max_depth=HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE + 1,
+            dependency_max_depth=expected_tail + 1,
+            dependency_avg_depth=3.0,
+            dependency_p95_depth=5,
         )
     )
 

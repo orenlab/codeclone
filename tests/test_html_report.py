@@ -1508,6 +1508,8 @@ def _metrics_payload(
     dep_max_depth: object,
     dead_total: object,
     dead_critical: object,
+    dep_avg_depth: object = 2.5,
+    dep_p95_depth: object = 3,
     dead_suppressed: object = 0,
 ) -> dict[str, object]:
     suppressed_items: list[dict[str, object]] = []
@@ -1594,6 +1596,8 @@ def _metrics_payload(
             "modules": 4,
             "edges": 4,
             "max_depth": dep_max_depth,
+            "avg_depth": dep_avg_depth,
+            "p95_depth": dep_p95_depth,
             "cycles": dep_cycles,
             "longest_chains": [["pkg.a", "pkg.b", "pkg.c"]],
             "edge_list": [
@@ -1690,7 +1694,7 @@ def test_html_report_metrics_warn_branches_and_dependency_svg() -> None:
     assert "insight-warn" in html
     assert "dep-graph-svg" in html
     assert "Grade B" in html
-    assert "&lt;= 8" in html
+    assert "Cycles: 0; avg depth: 2.5; p95 depth: 3; max dependency depth: 9." in html
     assert "pkg.mod.func" in html
     assert "outside/project/pkg/mod.py" in html
 
@@ -1718,7 +1722,7 @@ def test_html_report_metrics_risk_branches() -> None:
         html,
         "insight-risk",
         'stroke="var(--error)"',
-        "Cycles: 1; max dependency depth: 4.",
+        "Cycles: 1; avg depth: 2.5; p95 depth: 3; max dependency depth: 4.",
         "5 candidates total; 2 high-confidence items; 0 suppressed.",
         '<button class="main-tab" role="tab" data-tab="dead-code"',
         '<svg class="main-tab-icon"',

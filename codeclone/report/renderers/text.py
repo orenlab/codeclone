@@ -672,7 +672,14 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
                     "hotspot_threshold_percent",
                 )
             case "dependencies":
-                keys = ("modules", "edges", "cycles", "max_depth")
+                keys = (
+                    "modules",
+                    "edges",
+                    "cycles",
+                    "avg_depth",
+                    "p95_depth",
+                    "max_depth",
+                )
             case "overloaded_modules":
                 keys = (
                     "total",

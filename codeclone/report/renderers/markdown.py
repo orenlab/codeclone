@@ -546,7 +546,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         (
             "dependencies",
             "Dependencies",
-            ("modules", "edges", "cycles", "max_depth"),
+            ("modules", "edges", "cycles", "avg_depth", "p95_depth", "max_depth"),
             ("source", "target", "import_type", "line"),
         ),
         (

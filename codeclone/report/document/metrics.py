@@ -487,6 +487,8 @@ def _normalize_metrics_families(
                 "edges": _as_int(dependencies.get("edges")),
                 "cycles": len(dependency_cycles),
                 "max_depth": _as_int(dependencies.get("max_depth")),
+                "avg_depth": round(_as_float(dependencies.get("avg_depth")), 2),
+                "p95_depth": _as_int(dependencies.get("p95_depth")),
             },
             "items": dependency_edges,
             "cycles": dependency_cycles,

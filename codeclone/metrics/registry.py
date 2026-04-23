@@ -66,6 +66,8 @@ def _empty_dep_graph() -> DepGraph:
         edges=(),
         cycles=(),
         max_depth=0,
+        avg_depth=0.0,
+        p95_depth=0,
         longest_chains=(),
     )
 
@@ -86,6 +88,8 @@ _EMPTY_HEALTH_SCORE = compute_health(
         low_cohesion_classes=0,
         dependency_cycles=0,
         dependency_max_depth=0,
+        dependency_avg_depth=0.0,
+        dependency_p95_depth=0,
         dead_code_items=0,
     )
 )
@@ -439,6 +443,8 @@ def _build_dependencies_result(context: MetricProjectContext) -> MetricResult:
         "dependency_edge_list": dep_graph.edges,
         "dependency_cycles": dep_graph.cycles,
         "dependency_max_depth": dep_graph.max_depth,
+        "dependency_avg_depth": dep_graph.avg_depth,
+        "dependency_p95_depth": dep_graph.p95_depth,
         "dependency_longest_chains": dep_graph.longest_chains,
         "dep_graph": dep_graph,
     }
@@ -532,6 +538,8 @@ def _build_health_result(context: MetricProjectContext) -> MetricResult:
                 _result_nested_tuple_str(dependencies, "dependency_cycles")
             ),
             dependency_max_depth=_result_int(dependencies, "dependency_max_depth"),
+            dependency_avg_depth=_result_float(dependencies, "dependency_avg_depth"),
+            dependency_p95_depth=_result_int(dependencies, "dependency_p95_depth"),
             dead_code_items=len(_result_dead_items(dead_code, "dead_code")),
         )
     )

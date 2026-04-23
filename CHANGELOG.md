@@ -1,22 +1,45 @@
 # Changelog
 
-## [2.0.0b6] - 2026-04-22
+## [2.0.0b6]
 
-Stabilizes the post-refactor architecture: canonical package layout, thinner
-entrypoints, cleaner dependency boundaries, refreshed tests, and aligned docs.
+Stabilizes the post-refactor architecture, removes the remaining legacy shim
+tails, and replaces the old fixed dependency-depth penalty with an adaptive
+project-relative model.
 
 ### Architecture and contracts
 
-- Move the runtime onto the new package layout: `main` + `surfaces/cli`,
-  `surfaces/mcp`, `core`, `analysis`, `baseline`, `cache`, `contracts`,
-  `report/document`, `report/renderers`, and `report/html`.
-- Remove legacy root shims and stale compatibility modules in favor of direct
-  canonical imports.
-- Keep clone baseline schema `2.1`, cache schema `2.5`, report schema `2.8`,
-  and metrics-baseline schema `1.2` unchanged while preserving determinism and
-  read-only MCP semantics.
-- Prune stale deleted-file cache entries and tighten dependency chains that were
-  inflating post-refactor architectural depth.
+- Move the runtime fully onto the canonical package layout:
+  `main` + `surfaces/cli`, `surfaces/mcp`, `core`, `analysis`, `baseline`,
+  `cache`, `contracts`, `report/document`, `report/renderers`, and
+  `report/html`.
+- Remove remaining legacy root shims and stale compatibility modules in favor
+  of direct canonical imports.
+- Keep clone baseline schema `2.1`, cache schema `2.5`, and metrics-baseline
+  schema `1.2` unchanged; bump report schema to `2.9` for additive dependency
+  depth profile fields.
+- Preserve deterministic contracts and read-only MCP semantics across the new
+  layout.
+
+### Dependencies and health scoring
+
+- Replace the old fixed dependency-depth penalty (`max_depth > 8`) with an
+  adaptive internal-graph profile based on `avg_depth`, `p95_depth`, and
+  `max_depth`.
+- Keep dependency cycles as the hard signal; treat acyclic depth as adaptive
+  pressure relative to the project’s own dependency profile.
+- Limit dependency-depth scoring to the internal module graph instead of
+  external imports such as `typing` or `argparse`.
+- Surface the dependency depth profile in the canonical report, HTML
+  Dependencies tab, and CLI/CI summaries.
+- Remove stale deleted-file cache entries and trim post-refactor import tails
+  that were inflating dependency depth and clone pressure.
+
+### Tooling, docs, and UX
+
+- Refresh AGENTS, docs/book, and changelog content for the b6 package layout
+  and report schema `2.9`.
+- Tighten preview client metadata and install guidance for VS Code, Claude
+  Desktop, and Codex.
 - Add a quiet one-time VS Code extension hint in interactive VS Code terminals,
   tracked per CodeClone version next to the resolved project cache path.
 

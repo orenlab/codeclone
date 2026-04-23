@@ -565,7 +565,7 @@ def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
                 metrics_baseline_meta={},
                 runtime_meta={},
                 integrity_map={},
-                report_schema_version="2.8",
+                report_schema_version="2.9",
                 report_generated_at="2026-04-15T12:00:00Z",
             ),
         )

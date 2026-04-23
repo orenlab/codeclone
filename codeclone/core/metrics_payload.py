@@ -19,6 +19,7 @@ from ..models import (
     ClassMetrics,
     CoverageJoinResult,
     DeadItem,
+    DepGraph,
     GroupItemLike,
     MetricsDiff,
     ModuleDep,
@@ -105,6 +106,7 @@ def build_metrics_report_payload(
     *,
     scan_root: str = "",
     project_metrics: ProjectMetrics,
+    dep_graph: DepGraph | None = None,
     coverage_join: CoverageJoinResult | None = None,
     units: Sequence[GroupItemLike],
     class_metrics: Sequence[ClassMetrics],
@@ -225,6 +227,10 @@ def build_metrics_report_payload(
             "modules": project_metrics.dependency_modules,
             "edges": project_metrics.dependency_edges,
             "max_depth": project_metrics.dependency_max_depth,
+            "avg_depth": (
+                round(dep_graph.avg_depth, 2) if dep_graph is not None else 0.0
+            ),
+            "p95_depth": dep_graph.p95_depth if dep_graph is not None else 0,
             "cycles": [list(cycle) for cycle in project_metrics.dependency_cycles],
             "longest_chains": [
                 list(chain) for chain in project_metrics.dependency_longest_chains
