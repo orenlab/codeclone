@@ -12,6 +12,7 @@ import pytest
 
 import codeclone.report.html.assemble as assemble_mod
 import codeclone.report.html.sections._suggestions as suggestions_section
+import codeclone.ui_messages as ui
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import MetricsDiff, ReportLocation, Suggestion
 from codeclone.report.html.sections._clones import (
@@ -21,6 +22,7 @@ from codeclone.report.html.sections._clones import (
 from codeclone.report.html.sections._dead_code import render_dead_code_panel
 from codeclone.report.html.sections._dependencies import (
     _hub_threshold,
+    _layout_dep_graph,
     _render_dep_nodes_and_labels,
     _select_dep_nodes,
 )
@@ -138,7 +140,11 @@ def test_clone_display_name_falls_back_to_short_key_when_items_have_no_labels() 
 
 def test_dependency_helpers_cover_dense_and_empty_branches() -> None:
     edges = [(f"n{i}", f"n{i + 1}") for i in range(21)]
-    nodes, filtered = _select_dep_nodes(edges)
+    nodes, filtered = _select_dep_nodes(
+        edges,
+        dep_cycles=(),
+        longest_chains=(),
+    )
     assert len(nodes) == 20
     assert len(filtered) <= 100
     assert _hub_threshold([], {}, {}) == 99
@@ -152,10 +158,84 @@ def test_dependency_helpers_cover_dense_and_empty_branches() -> None:
         cycle_node_set={"n0"},
         hub_threshold=1,
         max_per_layer=9,
+        prefer_horizontal=True,
     )
     assert len(node_svg) == 9
     assert len(label_svg) == 9
     assert "rotate(-45)" in label_svg[0]
+
+
+def test_dependency_layout_covers_horizontal_and_non_rotated_label_paths() -> None:
+    layer_groups = {
+        0: ["alpha", "beta", "gamma"],
+        1: ["delta", "epsilon", "zeta"],
+        2: ["eta"],
+        3: ["theta"],
+        4: ["iota"],
+        5: ["kappa"],
+    }
+    in_degree = {
+        "alpha": 0,
+        "beta": 1,
+        "gamma": 3,
+        "delta": 2,
+        "epsilon": 1,
+        "zeta": 1,
+        "eta": 2,
+        "theta": 1,
+        "iota": 1,
+        "kappa": 1,
+    }
+    out_degree = {
+        "alpha": 1,
+        "beta": 2,
+        "gamma": 4,
+        "delta": 2,
+        "epsilon": 1,
+        "zeta": 1,
+        "eta": 2,
+        "theta": 1,
+        "iota": 1,
+        "kappa": 0,
+    }
+    width, height, max_per_layer, positions = _layout_dep_graph(
+        layer_groups,
+        in_degree=in_degree,
+        out_degree=out_degree,
+    )
+    assert width > height
+    assert max_per_layer == 3
+    assert positions["beta"][1] != positions["gamma"][1]
+    assert positions["delta"][0] > positions["alpha"][0]
+
+    node_svg, label_svg = _render_dep_nodes_and_labels(
+        ["leaf", "hub"],
+        positions={"leaf": (10.0, 20.0), "hub": (40.0, 20.0)},
+        node_radii={"leaf": 3.0, "hub": 6.0},
+        in_degree={"leaf": 0, "hub": 2},
+        out_degree={"leaf": 1, "hub": 2},
+        cycle_node_set=set(),
+        hub_threshold=3,
+        max_per_layer=2,
+        prefer_horizontal=False,
+    )
+    assert len(node_svg) == 2
+    assert len(label_svg) == 2
+    assert 'text-anchor="middle"' in label_svg[0]
+    assert 'font-size="8"' in label_svg[0]
+    assert 'font-size="10"' in label_svg[1]
+    assert "rotate(-45)" not in label_svg[0]
+
+
+def test_cli_runtime_warning_formatter_covers_baseline_and_legacy_cache_paths() -> None:
+    rendered = ui.fmt_cli_runtime_warning(
+        "Baseline trust mismatch: python_tag=cp313\n\nLegacy cache format ignored"
+    )
+    assert (
+        rendered == "  [warning]Baseline[/warning] trust mismatch\n"
+        "    [dim]python_tag=cp313[/dim]\n\n"
+        "  [warning]Cache[/warning] Legacy cache format ignored"
+    )
 
 
 def test_render_split_tabs_returns_empty_for_no_tabs() -> None:

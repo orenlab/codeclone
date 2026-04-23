@@ -6,7 +6,9 @@
 
 import importlib
 import json
+import re
 from collections.abc import Callable
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, cast
 
@@ -2690,6 +2692,109 @@ def test_html_report_dependency_graph_rootless_fallback_seed() -> None:
         )
     )
     _assert_html_contains(html, 'data-node="pkg.c"', 'data-node="pkg.d"')
+
+
+def test_html_report_dependency_graph_keeps_chain_and_cycle_nodes_when_truncated() -> (
+    None
+):
+    edge_list: list[dict[str, object]] = []
+    line = 1
+    for index in range(18):
+        edge_list.append(
+            {
+                "source": "hub.alpha",
+                "target": f"a.leaf{index:02d}",
+                "import_type": "import",
+                "line": line,
+            }
+        )
+        line += 1
+    for index in range(18):
+        edge_list.append(
+            {
+                "source": "hub.beta",
+                "target": f"b.leaf{index:02d}",
+                "import_type": "import",
+                "line": line,
+            }
+        )
+        line += 1
+
+    chain_nodes = [
+        "z.chain.start",
+        "z.chain.one",
+        "z.chain.two",
+        "z.chain.three",
+        "z.chain.four",
+        "z.chain.end",
+    ]
+    for source, target in pairwise(chain_nodes):
+        edge_list.append(
+            {
+                "source": source,
+                "target": target,
+                "import_type": "import",
+                "line": line,
+            }
+        )
+        line += 1
+
+    cycle_nodes = ["z.cycle.left", "z.cycle.right"]
+    edge_list.extend(
+        [
+            {
+                "source": cycle_nodes[0],
+                "target": cycle_nodes[1],
+                "import_type": "import",
+                "line": line,
+            },
+            {
+                "source": cycle_nodes[1],
+                "target": cycle_nodes[0],
+                "import_type": "import",
+                "line": line + 1,
+            },
+        ]
+    )
+    payload = _dependency_metrics_payload(
+        edge_list=edge_list,
+        longest_chains=[chain_nodes],
+        dep_cycles=[cycle_nodes],
+        dep_max_depth=len(chain_nodes),
+    )
+    deps = payload["dependencies"]
+    assert isinstance(deps, dict)
+    deps["modules"] = len(
+        {part for edge in edge_list for part in (edge["source"], edge["target"])}
+    )
+    deps["edges"] = len(edge_list)
+
+    html = _render_metrics_html(payload)
+
+    _assert_html_contains(
+        html,
+        'data-node="z.chain.start"',
+        'data-node="z.chain.three"',
+        'data-node="z.chain.end"',
+        'data-node="z.cycle.left"',
+        'data-node="z.cycle.right"',
+    )
+    view_box = re.search(
+        r'<svg viewBox="(-?\d+) (-?\d+) (\d+) (\d+)" class="dep-graph-svg"',
+        html,
+    )
+    assert view_box is not None
+    assert int(view_box.group(1)) < 0
+    assert int(view_box.group(3)) > int(view_box.group(4))
+    assert re.search(
+        r'<text class="dep-label" data-node="z\.chain\.three".*?rotate\(-45\)">',
+        html,
+    )
+    assert re.search(
+        r'<text class="dep-label" data-node="z\.chain\.three".*?font-size="8"'
+        r'.*?rotate\(-45\)">',
+        html,
+    )
 
 
 def test_html_report_provenance_badges_cover_mismatch_and_untrusted_metrics() -> None:

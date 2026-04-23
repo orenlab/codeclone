@@ -1261,6 +1261,16 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
         ui.fmt_coverage_join_ignored("bad xml")
         == "[warning]Coverage join ignored: bad xml[/warning]"
     )
+    assert ui.fmt_cli_runtime_warning(
+        "Cache analysis profile mismatch (found min_loc=6, min_stmt=4, "
+        "collect_api_surface=false; expected min_loc=6, min_stmt=4, "
+        "collect_api_surface=true); ignoring cache."
+    ) == (
+        "  [warning]Cache[/warning] analysis profile mismatch\n"
+        "    [dim]found min_loc=6, min_stmt=4, collect_api_surface=false[/dim]\n"
+        "    [dim]expected min_loc=6, min_stmt=4, collect_api_surface=true[/dim]\n"
+        "    [dim]ignoring cache[/dim]"
+    )
 
 
 def test_ui_summary_formatters_cover_optional_branches() -> None:

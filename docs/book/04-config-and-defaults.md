@@ -134,8 +134,18 @@ Report outputs and local UX:
 | `verbose`     | `bool`        | `false` | Enable more verbose CLI output | `-`                                    |
 | `debug`       | `bool`        | `false` | Enable debug diagnostics       | Also enabled by `CODECLONE_DEBUG=1`    |
 
-This is the exact accepted key set from `codeclone/config/spec.py` and
-`codeclone/config/pyproject_loader.py`; unknown keys are contract errors.
+This is the exact accepted `[tool.codeclone]` key set from
+`codeclone/config/spec.py` and `codeclone/config/pyproject_loader.py`; unknown
+keys are contract errors.
+
+Important:
+
+- The tables above list `pyproject.toml` keys, not CLI flag spellings.
+- CLI flags may map to the same internal destination under a different name.
+  Example: `coverage_xml` in `pyproject.toml` corresponds to CLI
+  `--coverage FILE`.
+- The same pattern applies to report outputs such as `html_out` ↔ `--html` and
+  `json_out` ↔ `--json`.
 
 Notes:
 
@@ -160,6 +170,8 @@ scan root when provided as relative paths.
 
 Current-run coverage join config:
 
+- `coverage_xml` is the `[tool.codeclone]` key; the equivalent CLI flag is
+  `--coverage FILE`.
 - `coverage_xml` may be set in `pyproject.toml`; relative paths resolve from
   the scan root like other configured paths.
 - `coverage_min` and `fail_on_untested_hotspots` follow the same precedence

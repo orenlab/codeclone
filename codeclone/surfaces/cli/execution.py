@@ -77,7 +77,7 @@ def run_analysis_stages(
         sys.exit(ExitCode.CONTRACT_ERROR)
 
     for warning in discovery_result.skipped_warnings:
-        printer.print(f"[warning]{warning}[/warning]")
+        printer.print(ui.fmt_cli_runtime_warning(warning))
 
     total_files = len(discovery_result.files_to_process)
     if (
@@ -114,10 +114,10 @@ def run_analysis_stages(
                 cache=cache,
                 on_advance=lambda: progress_ui.advance(task_id),
                 on_worker_error=lambda reason: printer.print(
-                    ui.fmt_worker_failed(reason)
+                    ui.fmt_cli_runtime_warning(ui.fmt_worker_failed(reason))
                 ),
                 on_parallel_fallback=lambda exc: printer.print(
-                    ui.fmt_parallel_fallback(exc)
+                    ui.fmt_cli_runtime_warning(ui.fmt_parallel_fallback(exc))
                 ),
             )
     else:
@@ -126,12 +126,20 @@ def run_analysis_stages(
             discovery=discovery_result,
             cache=cache,
             on_worker_error=(
-                (lambda reason: printer.print(ui.fmt_batch_item_failed(reason)))
+                (
+                    lambda reason: printer.print(
+                        ui.fmt_cli_runtime_warning(ui.fmt_batch_item_failed(reason))
+                    )
+                )
                 if bool_attr(args, "no_progress")
-                else (lambda reason: printer.print(ui.fmt_worker_failed(reason)))
+                else (
+                    lambda reason: printer.print(
+                        ui.fmt_cli_runtime_warning(ui.fmt_worker_failed(reason))
+                    )
+                )
             ),
             on_parallel_fallback=lambda exc: printer.print(
-                ui.fmt_parallel_fallback(exc)
+                ui.fmt_cli_runtime_warning(ui.fmt_parallel_fallback(exc))
             ),
         )
 
@@ -150,7 +158,7 @@ def run_analysis_stages(
             try:
                 cache.save()
             except CacheError as exc:
-                printer.print(ui.fmt_cache_save_failed(exc))
+                printer.print(ui.fmt_cli_runtime_warning(ui.fmt_cache_save_failed(exc)))
     else:
         analysis_result = analyze_fn(
             boot=boot,
@@ -161,7 +169,7 @@ def run_analysis_stages(
         try:
             cache.save()
         except CacheError as exc:
-            printer.print(ui.fmt_cache_save_failed(exc))
+            printer.print(ui.fmt_cli_runtime_warning(ui.fmt_cache_save_failed(exc)))
 
     coverage_join = getattr(analysis_result, "coverage_join", None)
     if (
@@ -169,7 +177,11 @@ def run_analysis_stages(
         and coverage_join.status != "ok"
         and coverage_join.invalid_reason
     ):
-        printer.print(ui.fmt_coverage_join_ignored(coverage_join.invalid_reason))
+        printer.print(
+            ui.fmt_cli_runtime_warning(
+                ui.fmt_coverage_join_ignored(coverage_join.invalid_reason)
+            )
+        )
 
     return discovery_result, processing_result, analysis_result
 

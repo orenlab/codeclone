@@ -121,3 +121,9 @@ def test_config_defaults_doc_covers_exact_pyproject_key_set() -> None:
     }
 
     assert documented == declared
+
+
+def test_config_defaults_doc_explains_coverage_pyproject_to_cli_mapping() -> None:
+    text = Path("docs/book/04-config-and-defaults.md").read_text(encoding="utf-8")
+    assert "`coverage_xml` is the `[tool.codeclone]` key" in text
+    assert "`--coverage FILE`" in text

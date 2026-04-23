@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import platform
+import re
 import shlex
 import sys
+import textwrap
 import traceback
 from pathlib import Path
 
@@ -351,6 +353,8 @@ TIP_VSCODE_EXTENSION = (
     "[dim]{url}[/dim]"
 )
 
+_RICH_MARKUP_TAG_RE = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_ .#:-]*]")
+
 
 def version_output(version: str) -> str:
     return f"CodeClone {version}"
@@ -433,6 +437,54 @@ def fmt_legacy_cache_warning(*, legacy_path: Path, new_path: Path) -> str:
 
 def fmt_invalid_baseline(error: object) -> str:
     return ERR_INVALID_BASELINE.format(error=error)
+
+
+def fmt_cli_runtime_warning(message: object) -> str:
+    source = _RICH_MARKUP_TAG_RE.sub("", str(message)).strip()
+    paragraphs = [
+        line.strip() for raw_line in source.splitlines() if (line := raw_line.strip())
+    ]
+    rendered: list[str] = []
+    for index, paragraph in enumerate(paragraphs):
+        label = "Warning"
+        body = paragraph.rstrip()
+        lowered = body.lower()
+        if lowered.startswith("cache "):
+            label = "Cache"
+            body = body[6:]
+        elif lowered.startswith("baseline "):
+            label = "Baseline"
+            body = body[9:]
+        elif lowered.startswith("legacy cache "):
+            label = "Cache"
+
+        segments = [segment.strip() for segment in body.split("; ") if segment.strip()]
+        head = segments[0].rstrip(".)") if segments else body.rstrip(".)")
+        details: list[str] = []
+        if " (" in head:
+            head, extra = head.split(" (", 1)
+            details.append(extra.rstrip(".)"))
+        if not details and ": " in head:
+            head, extra = head.split(": ", 1)
+            details.append(extra.rstrip(".)"))
+        details.extend(segment.rstrip(".)") for segment in segments[1:])
+
+        rendered.append(f"  [warning]{label}[/warning] {head}")
+        for detail in details:
+            rendered.extend(
+                [
+                    f"    [dim]{wrapped}[/dim]"
+                    for wrapped in textwrap.wrap(
+                        detail,
+                        width=max(40, CLI_LAYOUT_MAX_WIDTH - 8),
+                        break_long_words=False,
+                        break_on_hyphens=False,
+                    )
+                ]
+            )
+        if index != len(paragraphs) - 1:
+            rendered.append("")
+    return "\n".join(rendered)
 
 
 def fmt_path(template: str, path: Path) -> str:

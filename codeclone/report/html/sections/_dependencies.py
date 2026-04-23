@@ -37,6 +37,9 @@ _as_sequence = _coerce.as_sequence
 
 def _select_dep_nodes(
     edges: Sequence[tuple[str, str]],
+    *,
+    dep_cycles: Sequence[object],
+    longest_chains: Sequence[object],
 ) -> tuple[list[str], list[tuple[str, str]]]:
     all_nodes = sorted({part for edge in edges for part in edge})
     if len(all_nodes) > 20:
@@ -44,7 +47,38 @@ def _select_dep_nodes(
         for source, target in edges:
             degree_count[source] = degree_count.get(source, 0) + 1
             degree_count[target] = degree_count.get(target, 0) + 1
-        nodes = sorted(all_nodes, key=lambda node: -degree_count.get(node, 0))[:20]
+        all_node_set = set(all_nodes)
+        nodes: list[str] = []
+        node_set: set[str] = set()
+
+        def _seed_node(node: object) -> None:
+            node_name = str(node).strip()
+            if (
+                not node_name
+                or node_name not in all_node_set
+                or node_name in node_set
+                or len(nodes) >= 20
+            ):
+                return
+            nodes.append(node_name)
+            node_set.add(node_name)
+
+        # Keep the visual graph aligned with the dependency tables. When we
+        # downsample a large graph, cycle members and longest-chain nodes must
+        # remain visible instead of being dropped behind high-degree hubs.
+        for cycle in dep_cycles:
+            for node in _as_sequence(cycle):
+                _seed_node(node)
+        for chain in longest_chains:
+            for node in _as_sequence(chain):
+                _seed_node(node)
+
+        for node in sorted(
+            all_nodes, key=lambda item: (-degree_count.get(item, 0), item)
+        ):
+            _seed_node(node)
+            if len(nodes) >= 20:
+                break
         nodes.sort()
     else:
         nodes = all_nodes
@@ -109,17 +143,58 @@ def _build_layer_groups(
 
 def _layout_dep_graph(
     layer_groups: Mapping[int, Sequence[str]],
+    *,
+    in_degree: Mapping[str, int],
+    out_degree: Mapping[str, int],
 ) -> tuple[int, int, int, dict[str, tuple[float, float]]]:
     num_layers = max(layer_groups.keys(), default=0) + 1
     max_per_layer = max((len(members) for members in layer_groups.values()), default=1)
-    width = max(600, min(1200, max_per_layer * 70 + 140))
-    height = max(260, num_layers * 80 + 80)
-    pad_x, pad_y = 60.0, 40.0
+    pad_x, pad_y = 56.0, 36.0
+    prefer_horizontal = num_layers >= 6 and num_layers > max_per_layer + 2
+
+    def _ordered_members(members: Sequence[str]) -> list[str]:
+        if not prefer_horizontal or len(members) < 3:
+            return list(members)
+        ranked = sorted(
+            members,
+            key=lambda node: (
+                -(in_degree.get(node, 0) + out_degree.get(node, 0)),
+                node,
+            ),
+        )
+        center = (len(ranked) - 1) / 2
+        slot_order = sorted(
+            range(len(ranked)),
+            key=lambda index: (abs(index - center), index),
+        )
+        ordered = [""] * len(ranked)
+        for node, slot in zip(ranked, slot_order, strict=False):
+            ordered[slot] = node
+        return ordered
+
+    if prefer_horizontal:
+        width = max(920, min(1600, num_layers * 118 + max_per_layer * 28 + 180))
+        height = max(300, max_per_layer * 84 + 104)
+    else:
+        width = max(600, min(1200, max_per_layer * 70 + 140))
+        height = max(260, num_layers * 80 + 80)
 
     positions: dict[str, tuple[float, float]] = {}
     for layer_index in range(num_layers):
         members = layer_groups.get(layer_index, [])
         count = len(members)
+        if prefer_horizontal:
+            members = _ordered_members(members)
+            layer_step = (width - 2 * pad_x) / max(1, num_layers - 1)
+            x = pad_x + layer_index * layer_step
+            fan = min(14.0, layer_step * 0.12)
+            offset_unit = fan / max(1, count - 1)
+            center = (count - 1) / 2
+            for index, node in enumerate(members):
+                y = pad_y + (index + 0.5) * ((height - 2 * pad_y) / max(1, count))
+                positions[node] = (x + (index - center) * offset_unit, y)
+            continue
+
         y = pad_y + layer_index * ((height - 2 * pad_y) / max(1, num_layers - 1))
         for index, node in enumerate(members):
             x = pad_x + (index + 0.5) * ((width - 2 * pad_x) / max(1, count))
@@ -224,10 +299,11 @@ def _render_dep_nodes_and_labels(
     cycle_node_set: set[str],
     hub_threshold: int,
     max_per_layer: int,
+    prefer_horizontal: bool,
 ) -> tuple[list[str], list[str]]:
     nodes_svg: list[str] = []
     labels_svg: list[str] = []
-    rotate_labels = max_per_layer > 6
+    rotate_labels = prefer_horizontal or max_per_layer > 6
 
     for node in nodes:
         x, y = positions[node]
@@ -236,6 +312,7 @@ def _render_dep_nodes_and_labels(
         label = _short_label(node)
         is_cycle = node in cycle_node_set
         is_hub = degree >= hub_threshold and degree > 2
+        is_secondary = not is_hub and not is_cycle
 
         if is_cycle:
             fill, fill_opacity, extra = (
@@ -260,19 +337,25 @@ def _render_dep_nodes_and_labels(
             f'fill="{fill}" fill-opacity="{fill_opacity}" {extra}/>'
         )
 
-        font_size = "10" if is_hub else "9"
+        font_size = "10" if is_hub else ("8" if is_secondary else "9")
         if rotate_labels:
+            label_x = (
+                x + radius + (4 if is_secondary else 6 if prefer_horizontal else 0)
+            )
+            label_y = (
+                y - radius - (1 if is_secondary else 2 if prefer_horizontal else 6)
+            )
             labels_svg.append(
                 f'<text class="dep-label" data-node="{_escape_html(node)}" '
                 f'x="0" y="0" font-size="{font_size}" text-anchor="start" '
-                f'transform="translate({x:.1f},{y - radius - 6:.1f}) rotate(-45)">'
+                f'transform="translate({label_x:.1f},{label_y:.1f}) rotate(-45)">'
                 f"<title>{_escape_html(node)}</title>{_escape_html(label)}</text>"
             )
             continue
 
         labels_svg.append(
             f'<text class="dep-label" data-node="{_escape_html(node)}" '
-            f'x="{x:.1f}" y="{y - radius - 5:.1f}" font-size="{font_size}" text-anchor="middle">'
+            f'x="{x:.1f}" y="{y - radius - (4 if is_secondary else 5):.1f}" font-size="{font_size}" text-anchor="middle">'
             f"<title>{_escape_html(node)}</title>{_escape_html(label)}</text>"
         )
 
@@ -283,14 +366,24 @@ def _render_dep_svg(
     edges: Sequence[tuple[str, str]],
     cycle_node_set: set[str],
     dep_cycles: Sequence[object],
+    longest_chains: Sequence[object],
 ) -> str:
     if not edges:
         return _tab_empty("Dependency graph is not available.")
 
-    nodes, filtered_edges = _select_dep_nodes(edges)
+    nodes, filtered_edges = _select_dep_nodes(
+        edges,
+        dep_cycles=dep_cycles,
+        longest_chains=longest_chains,
+    )
     in_degree, out_degree = _build_degree_maps(nodes, filtered_edges)
     layer_groups = _build_layer_groups(nodes, filtered_edges, in_degree, out_degree)
-    width, height, max_per_layer, positions = _layout_dep_graph(layer_groups)
+    width, height, max_per_layer, positions = _layout_dep_graph(
+        layer_groups,
+        in_degree=in_degree,
+        out_degree=out_degree,
+    )
+    prefer_horizontal = width > height
     hub_threshold = _hub_threshold(nodes, in_degree, out_degree)
     node_radii = _build_node_radii(
         nodes,
@@ -311,15 +404,19 @@ def _render_dep_svg(
         cycle_node_set=cycle_node_set,
         hub_threshold=hub_threshold,
         max_per_layer=max_per_layer,
+        prefer_horizontal=prefer_horizontal,
     )
 
-    label_pad = 50 if max_per_layer > 6 else 0
+    label_pad = 44 if prefer_horizontal else (50 if max_per_layer > 6 else 0)
+    label_pad_x = 52 if prefer_horizontal else (28 if max_per_layer > 6 else 0)
+    vb_x = -label_pad_x
     vb_y = -label_pad
+    vb_w = width + label_pad_x * 2
     vb_h = height + label_pad
 
     return (
         '<div class="dep-graph-wrap">'
-        f'<svg viewBox="0 {vb_y} {width} {vb_h}" class="dep-graph-svg" role="img" '
+        f'<svg viewBox="{vb_x} {vb_y} {vb_w} {vb_h}" class="dep-graph-svg" role="img" '
         'preserveAspectRatio="xMidYMid meet" '
         'aria-label="Module dependency graph">'
         f"{defs}{''.join(edge_svg)}{''.join(node_svg)}{''.join(label_svg)}"
@@ -329,6 +426,7 @@ def _render_dep_svg(
 
 def render_dependencies_panel(ctx: ReportContext) -> str:
     dep_cycles = _as_sequence(ctx.dependencies_map.get("cycles"))
+    dep_longest = _as_sequence(ctx.dependencies_map.get("longest_chains"))
     dep_edge_data = _as_sequence(ctx.dependencies_map.get("edge_list"))
     dep_edges = [
         (str(_as_mapping(r).get("source", "")), str(_as_mapping(r).get("target", "")))
@@ -407,7 +505,12 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
     ]
 
     # SVG graph
-    graph_svg = _render_dep_svg(dep_edges, cycle_node_set, dep_cycles)
+    graph_svg = _render_dep_svg(
+        dep_edges,
+        cycle_node_set,
+        dep_cycles,
+        dep_longest,
+    )
 
     # Hub bar
     deg_map = dict.fromkeys(sorted({p for e in dep_edges for p in e}), 0)
@@ -444,7 +547,6 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
         (_render_chain_flow([str(p) for p in _as_sequence(c)], arrows=True),)
         for c in dep_cycles
     ]
-    dep_longest = _as_sequence(ctx.dependencies_map.get("longest_chains"))
     dep_chain_rows = [
         (
             _render_chain_flow([str(p) for p in _as_sequence(ch)], arrows=True),

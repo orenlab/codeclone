@@ -844,7 +844,7 @@ _DEPENDENCIES = """\
 .stat-cards .kpi-detail,.dep-stats .kpi-detail{margin-top:0;align-self:end}
 .dep-graph-wrap{overflow:hidden;margin-bottom:var(--sp-4);border:1px solid var(--border);
   border-radius:var(--radius-lg);background:var(--bg-surface);padding:var(--sp-4)}
-.dep-graph-svg{width:100%;height:auto;max-height:520px}
+.dep-graph-svg{display:block;width:100%;height:auto;max-height:680px;margin:0 auto}
 .dep-graph-svg text{fill:var(--text-secondary);font-family:var(--font-mono)}
 .dep-node{transition:fill-opacity var(--dur-fast) var(--ease)}
 .dep-edge{transition:stroke-opacity var(--dur-fast) var(--ease)}

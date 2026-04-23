@@ -136,7 +136,7 @@ fail_cycles = true
 fail_dead_code = true
 fail_health = 80
 fail_on_new_metrics = true
-api_surface = false
+api_surface = true
 golden_fixture_paths = ["tests/fixtures/golden_*"]
 min_typing_coverage = 99
 

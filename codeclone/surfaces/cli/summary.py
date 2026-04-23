@@ -261,7 +261,7 @@ def _print_summary(
         )
 
     if not invariant_ok:
-        console.print(f"[warning]{ui.WARN_SUMMARY_ACCOUNTING_MISMATCH}[/warning]")
+        console.print(ui.fmt_cli_runtime_warning(ui.WARN_SUMMARY_ACCOUNTING_MISMATCH))
 
 
 def _print_metrics(

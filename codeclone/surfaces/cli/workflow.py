@@ -354,7 +354,7 @@ def _main_impl() -> None:
     )
     cache.load()
     if cache.load_warning:
-        _console().print(f"[warning]{cache.load_warning}[/warning]")
+        _console().print(ui.fmt_cli_runtime_warning(cache.load_warning))
 
     boot = bootstrap(
         args=args,
