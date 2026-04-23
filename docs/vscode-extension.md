@@ -51,6 +51,11 @@ Verify the launcher:
 codeclone-mcp --help
 ```
 
+When you run the CLI inside an interactive VS Code terminal, CodeClone may also
+show a one-time extension hint after the summary. It is suppressed in quiet,
+CI, and non-interactive runs, and is remembered per CodeClone version next to
+the resolved project cache path.
+
 ## Main views
 
 ### Overview

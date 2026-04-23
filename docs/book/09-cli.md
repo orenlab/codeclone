@@ -46,6 +46,10 @@ Refs:
 - Bare report flags write to deterministic default paths under `.cache/codeclone/`.
 - `--open-html-report` is layered on top of `--html`; it does not imply HTML output.
 - `--timestamped-report-paths` rewrites only default report paths requested via bare flags.
+- In interactive VS Code terminals, the CLI may print a one-time extension hint
+  after summary output. The hint is suppressed in `--quiet`, CI, and non-TTY
+  contexts, and is tracked per CodeClone version next to the resolved project
+  cache path.
 - Changed-scope review uses:
     - `--changed-only`
     - `--diff-against`

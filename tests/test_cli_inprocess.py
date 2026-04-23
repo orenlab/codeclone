@@ -24,6 +24,7 @@ import codeclone.core.pipeline as core_pipeline
 import codeclone.core.worker as core_worker
 import codeclone.surfaces.cli.report_meta as cli_meta
 import codeclone.surfaces.cli.reports_output as cli_reports
+import codeclone.surfaces.cli.tips as cli_tips
 import codeclone.surfaces.cli.workflow as cli
 from codeclone import __version__
 from codeclone.cache.store import Cache, file_stat_signature
@@ -2259,6 +2260,35 @@ def test_cli_outputs_quiet_no_print(
     assert text_out.exists()
     out = capsys.readouterr().out
     assert "report saved" not in out
+
+
+def test_cli_shows_vscode_extension_tip_once_per_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_default_source(tmp_path)
+    tips_path = tmp_path / ".cache" / "codeclone" / "tips.json"
+
+    monkeypatch.setenv("TERM_PROGRAM", "vscode")
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(cli_tips, "_stream_is_tty", lambda _stream: True)
+
+    _run_parallel_main(monkeypatch, [str(tmp_path), "--no-progress", "--no-color"])
+    first_out = capsys.readouterr().out
+
+    assert "VS Code detected" in first_out
+    assert "marketplace.visualstudio.com" in first_out
+    assert first_out.index("Summary") < first_out.index("Tip:")
+
+    state = json.loads(tips_path.read_text("utf-8"))
+    assert state["tips"]["vscode_extension"]["last_shown_version"] == __version__
+
+    _run_parallel_main(monkeypatch, [str(tmp_path), "--no-progress", "--no-color"])
+    second_out = capsys.readouterr().out
+
+    assert "VS Code detected" not in second_out
 
 
 def test_cli_update_baseline_skips_version_check(

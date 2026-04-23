@@ -42,6 +42,7 @@ from . import runtime as cli_runtime
 from . import startup as cli_startup
 from . import state as cli_state
 from . import summary as cli_summary
+from . import tips as cli_tips
 from .types import CLIArgsLike, StatusConsole, require_status_console
 
 __all__ = [
@@ -78,6 +79,7 @@ __all__ = [
     "discover",
     "gate",
     "main",
+    "maybe_print_vscode_extension_tip",
     "print_banner",
     "process",
     "report",
@@ -111,6 +113,7 @@ maybe_print_changed_scope_snapshot = cli_post_run.maybe_print_changed_scope_snap
 print_metrics_if_available = cli_post_run.print_metrics_if_available
 resolve_changed_clone_gate = cli_post_run.resolve_changed_clone_gate
 warn_new_clones_without_fail = cli_post_run.warn_new_clones_without_fail
+maybe_print_vscode_extension_tip = cli_tips.maybe_print_vscode_extension_tip
 
 _report_path_origins = cli_reports_output._report_path_origins
 _resolve_output_paths = cli_reports_output._resolve_output_paths
@@ -517,6 +520,12 @@ def _main_impl() -> None:
         args=args,
         notice_new_clones_count=notice_new_clones_count,
         console=_console(),
+    )
+    maybe_print_vscode_extension_tip(
+        args=args,
+        console=_console(),
+        codeclone_version=__version__,
+        cache_path=cache_path,
     )
     print_pipeline_done_if_needed(args=args, run_started_at=run_started_at)
 

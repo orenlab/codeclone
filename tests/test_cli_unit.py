@@ -11,6 +11,7 @@ import sys
 import webbrowser
 from argparse import Namespace
 from collections.abc import Callable
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -28,6 +29,7 @@ import codeclone.surfaces.cli.report_meta as cli_meta_mod
 import codeclone.surfaces.cli.reports_output as cli_reports
 import codeclone.surfaces.cli.runtime as cli_runtime
 import codeclone.surfaces.cli.summary as cli_summary
+import codeclone.surfaces.cli.tips as cli_tips
 import codeclone.surfaces.cli.workflow as cli
 from codeclone import __version__
 from codeclone import ui_messages as ui
@@ -55,6 +57,15 @@ class _RecordingPrinter:
 
     def print(self, *objects: object, **kwargs: object) -> None:
         self.lines.append(" ".join(str(obj) for obj in objects))
+
+
+class _TTYStream(StringIO):
+    def __init__(self, *, is_tty: bool) -> None:
+        super().__init__()
+        self._is_tty = is_tty
+
+    def isatty(self) -> bool:
+        return self._is_tty
 
 
 def _metrics_baseline_runtime_for_gate_checks() -> (
@@ -176,6 +187,100 @@ def test_cli_attr_helpers_handle_bool_int_and_path_edges(tmp_path: Path) -> None
         tmp_path / "report.json"
     )
     assert cli_attrs.optional_text_attr(args, "invalid_text") is None
+
+
+def test_cli_tips_detect_vscode_environment_signals() -> None:
+    assert cli_tips._is_vscode_environment({"TERM_PROGRAM": "vscode"}) is True
+    assert cli_tips._is_vscode_environment({"VSCODE_PID": "123"}) is True
+    assert cli_tips._is_vscode_environment({"TERM_PROGRAM": "xterm-256color"}) is False
+
+
+def test_cli_vscode_extension_tip_uses_versioned_cache(
+    tmp_path: Path,
+) -> None:
+    printer = _RecordingPrinter()
+    args = SimpleNamespace(quiet=False, ci=False)
+    env = {"TERM_PROGRAM": "vscode"}
+    cache_path = tmp_path / ".cache" / "codeclone" / "cache.json"
+
+    cli_tips.maybe_print_vscode_extension_tip(
+        args=args,
+        console=printer,
+        codeclone_version=__version__,
+        cache_path=cache_path,
+        environ=env,
+        stream=_TTYStream(is_tty=True),
+    )
+
+    assert len(printer.lines) == 1
+    assert "VS Code detected" in printer.lines[0]
+    assert "marketplace.visualstudio.com" in printer.lines[0]
+
+    tips_path = cache_path.parent / "tips.json"
+    state = json.loads(tips_path.read_text("utf-8"))
+    assert state["tips"]["vscode_extension"]["last_shown_version"] == __version__
+
+    shown_again = cli_tips.maybe_print_vscode_extension_tip(
+        args=args,
+        console=printer,
+        codeclone_version=__version__,
+        cache_path=cache_path,
+        environ=env,
+        stream=_TTYStream(is_tty=True),
+    )
+    assert shown_again is False
+    assert len(printer.lines) == 1
+
+    shown_for_new_version = cli_tips.maybe_print_vscode_extension_tip(
+        args=args,
+        console=printer,
+        codeclone_version=f"{__version__}.post1",
+        cache_path=cache_path,
+        environ=env,
+        stream=_TTYStream(is_tty=True),
+    )
+    assert shown_for_new_version is True
+    assert len(printer.lines) == 2
+
+
+@pytest.mark.parametrize(
+    ("args", "env", "isatty"),
+    [
+        (SimpleNamespace(quiet=True, ci=False), {"TERM_PROGRAM": "vscode"}, True),
+        (SimpleNamespace(quiet=False, ci=True), {"TERM_PROGRAM": "vscode"}, True),
+        (
+            SimpleNamespace(quiet=False, ci=False),
+            {"TERM_PROGRAM": "vscode", "CI": "1"},
+            True,
+        ),
+        (SimpleNamespace(quiet=False, ci=False), {"TERM_PROGRAM": "vscode"}, False),
+        (
+            SimpleNamespace(quiet=False, ci=False),
+            {"TERM_PROGRAM": "xterm-256color"},
+            True,
+        ),
+    ],
+)
+def test_cli_vscode_extension_tip_respects_context_gates(
+    tmp_path: Path,
+    args: SimpleNamespace,
+    env: dict[str, str],
+    isatty: bool,
+) -> None:
+    printer = _RecordingPrinter()
+    effective_env = dict(env)
+
+    shown = cli_tips.maybe_print_vscode_extension_tip(
+        args=args,
+        console=printer,
+        codeclone_version=__version__,
+        cache_path=tmp_path / ".cache" / "codeclone" / "cache.json",
+        environ=effective_env,
+        stream=_TTYStream(is_tty=isatty),
+    )
+
+    assert shown is False
+    assert printer.lines == []
 
 
 def test_cli_module_main_guard(monkeypatch: pytest.MonkeyPatch) -> None:

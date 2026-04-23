@@ -17,6 +17,8 @@ entrypoints, cleaner dependency boundaries, refreshed tests, and aligned docs.
   read-only MCP semantics.
 - Prune stale deleted-file cache entries and tighten dependency chains that were
   inflating post-refactor architectural depth.
+- Add a quiet one-time VS Code extension hint in interactive VS Code terminals,
+  tracked per CodeClone version next to the resolved project cache path.
 
 ## [2.0.0b5] - 2026-04-16
 

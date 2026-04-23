@@ -341,6 +341,12 @@ WARN_NEW_CLONES_WITHOUT_FAIL = (
     "\n[warning]New clones detected but --fail-on-new not set.[/warning]\n"
     "Run with --update-baseline to accept them as technical debt."
 )
+TIP_VSCODE_EXTENSION = (
+    "\n[dim]Tip:[/dim] VS Code detected. "
+    "CodeClone has a native extension for triage-first review and hotspot "
+    "navigation.\n"
+    "[dim]{url}[/dim]"
+)
 
 
 def version_output(version: str) -> str:
@@ -412,6 +418,10 @@ def fmt_failed_files_header(count: int) -> str:
 
 def fmt_cache_save_failed(error: object) -> str:
     return WARN_CACHE_SAVE_FAILED.format(error=error)
+
+
+def fmt_vscode_extension_tip(*, url: str) -> str:
+    return TIP_VSCODE_EXTENSION.format(url=url)
 
 
 def fmt_legacy_cache_warning(*, legacy_path: Path, new_path: Path) -> str:
