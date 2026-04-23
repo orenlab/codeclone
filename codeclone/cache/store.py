@@ -10,6 +10,7 @@ import os
 from collections.abc import Collection
 from json import JSONDecodeError
 from pathlib import Path
+from typing import Protocol
 
 from ..baseline.trust import current_python_tag
 from ..contracts import (
@@ -82,6 +83,41 @@ from .versioning import (
     _empty_cache_data,
     _resolve_root,
 )
+
+
+class _CacheStatusLike(Protocol):
+    @property
+    def load_status(self) -> CacheStatus | str | None: ...
+
+    @property
+    def load_warning(self) -> str | None: ...
+
+    @property
+    def cache_schema_version(self) -> str | None: ...
+
+
+def resolve_cache_status(cache: _CacheStatusLike) -> tuple[CacheStatus, str | None]:
+    raw_cache_status = getattr(cache, "load_status", None)
+    load_warning = getattr(cache, "load_warning", None)
+    if isinstance(raw_cache_status, CacheStatus):
+        cache_status = raw_cache_status
+    elif isinstance(raw_cache_status, str):
+        try:
+            cache_status = CacheStatus(raw_cache_status)
+        except ValueError:
+            cache_status = (
+                CacheStatus.OK if load_warning is None else CacheStatus.INVALID_TYPE
+            )
+    else:
+        cache_status = (
+            CacheStatus.OK if load_warning is None else CacheStatus.INVALID_TYPE
+        )
+
+    raw_cache_schema_version = getattr(cache, "cache_schema_version", None)
+    cache_schema_version = (
+        raw_cache_schema_version if isinstance(raw_cache_schema_version, str) else None
+    )
+    return cache_status, cache_schema_version
 
 
 class Cache:

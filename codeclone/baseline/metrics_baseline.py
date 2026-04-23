@@ -7,8 +7,12 @@
 from __future__ import annotations
 
 import hmac
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from json import JSONDecodeError
 from pathlib import Path
+
+import orjson
 
 from .. import __version__
 from ..contracts import BASELINE_SCHEMA_VERSION, METRICS_BASELINE_SCHEMA_VERSION
@@ -55,12 +59,43 @@ from .diff import diff_metrics
 from .trust import current_python_tag
 
 
+@dataclass(frozen=True, slots=True)
+class MetricsBaselineSectionProbe:
+    has_metrics_section: bool
+    payload: dict[str, object] | None
+
+
 def _now_utc_z() -> str:
     return (
         datetime.now(timezone.utc)
         .replace(microsecond=0)
         .isoformat()
         .replace("+00:00", "Z")
+    )
+
+
+def probe_metrics_baseline_section(path: Path) -> MetricsBaselineSectionProbe:
+    if not path.exists():
+        return MetricsBaselineSectionProbe(
+            has_metrics_section=False,
+            payload=None,
+        )
+    try:
+        raw_payload = orjson.loads(path.read_text("utf-8"))
+    except (OSError, JSONDecodeError):
+        return MetricsBaselineSectionProbe(
+            has_metrics_section=True,
+            payload=None,
+        )
+    if not isinstance(raw_payload, dict):
+        return MetricsBaselineSectionProbe(
+            has_metrics_section=True,
+            payload=None,
+        )
+    payload = dict(raw_payload)
+    return MetricsBaselineSectionProbe(
+        has_metrics_section=("metrics" in payload),
+        payload=payload,
     )
 
 
@@ -453,8 +488,10 @@ __all__ = [
     "METRICS_BASELINE_SCHEMA_VERSION",
     "METRICS_BASELINE_UNTRUSTED_STATUSES",
     "MetricsBaseline",
+    "MetricsBaselineSectionProbe",
     "MetricsBaselineStatus",
     "coerce_metrics_baseline_status",
     "current_python_tag",
+    "probe_metrics_baseline_section",
     "snapshot_from_project_metrics",
 ]

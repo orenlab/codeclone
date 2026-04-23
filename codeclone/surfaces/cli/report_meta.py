@@ -6,128 +6,23 @@
 
 from __future__ import annotations
 
-import sys
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from ...baseline.clone_baseline import Baseline
-from ...baseline.trust import current_python_tag
 from ...cache.versioning import CacheStatus
-from ...contracts import (
-    DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
-    DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
-    DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
-)
 from ...contracts.schemas import ReportMeta
+from ...report import meta as _report_meta
+from ...report.meta import build_report_meta as _build_report_meta
 from .types import CLIArgsLike
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from ...baseline.metrics_baseline import MetricsBaseline
-    from ...cache.versioning import CacheStatus
     from ...core._types import AnalysisResult
     from ...core._types import ProcessingResult as PipelineProcessingResult
     from .baseline_state import CloneBaselineState, MetricsBaselineState
 
 
-def _current_python_version() -> str:
-    return f"{sys.version_info.major}.{sys.version_info.minor}"
-
-
-def _current_report_timestamp_utc() -> str:
-    return (
-        datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
-    )
-
-
-def _build_report_meta(
-    *,
-    codeclone_version: str,
-    scan_root: Path,
-    baseline_path: Path,
-    baseline: Baseline,
-    baseline_loaded: bool,
-    baseline_status: str,
-    cache_path: Path,
-    cache_used: bool,
-    cache_status: str,
-    cache_schema_version: str | None,
-    files_skipped_source_io: int,
-    metrics_baseline_path: Path,
-    metrics_baseline: MetricsBaseline,
-    metrics_baseline_loaded: bool,
-    metrics_baseline_status: str,
-    health_score: int | None,
-    health_grade: str | None,
-    analysis_mode: str,
-    metrics_computed: tuple[str, ...],
-    min_loc: int,
-    min_stmt: int,
-    block_min_loc: int,
-    block_min_stmt: int,
-    segment_min_loc: int,
-    segment_min_stmt: int,
-    design_complexity_threshold: int = DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
-    design_coupling_threshold: int = DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
-    design_cohesion_threshold: int = DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
-    analysis_started_at_utc: str | None,
-    report_generated_at_utc: str,
-) -> ReportMeta:
-    project_name = scan_root.name or str(scan_root)
-    return {
-        "codeclone_version": codeclone_version,
-        "project_name": project_name,
-        "scan_root": str(scan_root),
-        "python_version": _current_python_version(),
-        "python_tag": current_python_tag(),
-        "baseline_path": str(baseline_path),
-        "baseline_fingerprint_version": baseline.fingerprint_version,
-        "baseline_schema_version": baseline.schema_version,
-        "baseline_python_tag": baseline.python_tag,
-        "baseline_generator_name": baseline.generator,
-        "baseline_generator_version": baseline.generator_version,
-        "baseline_payload_sha256": baseline.payload_sha256,
-        "baseline_payload_sha256_verified": (
-            baseline_loaded
-            and baseline_status == "ok"
-            and isinstance(baseline.payload_sha256, str)
-        ),
-        "baseline_loaded": baseline_loaded,
-        "baseline_status": baseline_status,
-        "cache_path": str(cache_path),
-        "cache_used": cache_used,
-        "cache_status": cache_status,
-        "cache_schema_version": cache_schema_version,
-        "files_skipped_source_io": files_skipped_source_io,
-        "metrics_baseline_path": str(metrics_baseline_path),
-        "metrics_baseline_loaded": metrics_baseline_loaded,
-        "metrics_baseline_status": metrics_baseline_status,
-        "metrics_baseline_schema_version": metrics_baseline.schema_version,
-        "metrics_baseline_payload_sha256": metrics_baseline.payload_sha256,
-        "metrics_baseline_payload_sha256_verified": (
-            metrics_baseline_loaded
-            and metrics_baseline_status == "ok"
-            and isinstance(metrics_baseline.payload_sha256, str)
-        ),
-        "health_score": health_score,
-        "health_grade": health_grade,
-        "analysis_mode": analysis_mode,
-        "metrics_computed": list(metrics_computed),
-        "analysis_profile": {
-            "min_loc": min_loc,
-            "min_stmt": min_stmt,
-            "block_min_loc": block_min_loc,
-            "block_min_stmt": block_min_stmt,
-            "segment_min_loc": segment_min_loc,
-            "segment_min_stmt": segment_min_stmt,
-        },
-        "design_complexity_threshold": design_complexity_threshold,
-        "design_coupling_threshold": design_coupling_threshold,
-        "design_cohesion_threshold": design_cohesion_threshold,
-        "analysis_started_at_utc": analysis_started_at_utc,
-        "report_generated_at_utc": report_generated_at_utc,
-    }
+_current_report_timestamp_utc = _report_meta.current_report_timestamp_utc
 
 
 def build_cli_report_meta(

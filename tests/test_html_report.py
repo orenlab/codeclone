@@ -30,15 +30,15 @@ from codeclone.models import (
 from codeclone.report.document.builder import build_report_document
 from codeclone.report.explain import build_block_group_facts
 from codeclone.report.html import (
+    build_html_report as _core_build_html_report,
+)
+from codeclone.report.html.widgets.badges import _tab_empty_info
+from codeclone.report.html.widgets.snippets import (
     _FileCache,
     _pygments_css,
     _render_code_block,
     _try_pygments,
 )
-from codeclone.report.html import (
-    build_html_report as _core_build_html_report,
-)
-from codeclone.report.html.widgets.badges import _tab_empty_info
 from codeclone.report.renderers.json import render_json_report_document
 from tests._assertions import assert_contains_all
 from tests._report_fixtures import (
@@ -1324,14 +1324,14 @@ def test_html_report_with_blocks(tmp_path: Path) -> None:
 
 
 def test_html_report_pygments_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    import codeclone.report.html as hr
+    import codeclone.report.html.widgets.snippets as snippets
 
     def _fake_css(name: str) -> str:
         if name in ("github-dark", "github-light"):
             return ""
         return "x"
 
-    monkeypatch.setattr(hr, "_pygments_css", _fake_css)
+    monkeypatch.setattr(snippets, "_pygments_css", _fake_css)
     html = build_html_report(
         func_groups={}, block_groups={}, segment_groups={}, title="Pygments"
     )
@@ -1457,11 +1457,11 @@ def test_render_code_block_truncates_and_fallback(
     f = tmp_path / "a.py"
     f.write_text("\n".join([f"line{i}" for i in range(1, 30)]), "utf-8")
 
-    import codeclone.report.html as hr
+    import codeclone.report.html.widgets.snippets as snippets
 
-    monkeypatch.setattr(hr, "_try_pygments", lambda _text: None)
+    monkeypatch.setattr(snippets, "_try_pygments", lambda _text: None)
     cache = _FileCache(maxsize=2)
-    snippet = hr._render_code_block(
+    snippet = snippets._render_code_block(
         filepath=str(f),
         start_line=1,
         end_line=20,

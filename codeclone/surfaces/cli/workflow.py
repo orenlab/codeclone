@@ -15,12 +15,9 @@ from ... import ui_messages as ui
 from ...baseline import Baseline
 from ...cache.projection import build_segment_report_projection
 from ...cache.store import Cache
+from ...config import resolver as config_resolver
 from ...config.argparse_builder import build_parser
 from ...config.pyproject_loader import load_pyproject_config
-from ...config.resolver import (
-    apply_pyproject_config_overrides,
-    collect_explicit_cli_dests,
-)
 from ...contracts import (
     ISSUES_URL,
     ExitCode,
@@ -34,70 +31,17 @@ from ...core.pipeline import analyze
 from ...core.reporting import gate, report
 from ...models import MetricsDiff
 from ...report.html import build_html_report
+from . import baseline_state as cli_baseline_state
+from . import changed_scope as cli_changed_scope
+from . import console as cli_console
+from . import execution as cli_execution
+from . import post_run as cli_post_run
 from . import report_meta as cli_meta_mod
+from . import reports_output as cli_reports_output
+from . import runtime as cli_runtime
+from . import startup as cli_startup
 from . import state as cli_state
-from .baseline_state import (
-    _probe_metrics_baseline_section,
-    _resolve_clone_baseline_state,
-    _resolve_metrics_baseline_state,
-)
-from .changed_scope import (
-    _changed_clone_gate_from_report,
-    _git_diff_changed_paths,
-    _validate_changed_scope_args,
-)
-from .console import (
-    _is_debug_enabled,
-    _make_plain_console,
-    _parse_metric_reason_entry,
-    _print_gating_failure_block,
-    _print_verbose_clone_hashes,
-    _rich_progress_symbols,
-)
-from .console import make_console as _make_rich_console
-from .console import print_banner as _print_banner_impl
-from .execution import (
-    enforce_gating,
-    print_pipeline_done_if_needed,
-    run_analysis_stages,
-)
-from .post_run import build_diff_context as _build_diff_context
-from .post_run import (
-    maybe_print_changed_scope_snapshot,
-    print_metrics_if_available,
-    resolve_changed_clone_gate,
-    warn_new_clones_without_fail,
-)
-from .reports_output import (
-    _report_path_origins,
-    _resolve_output_paths,
-    _validate_report_ui_flags,
-    _write_report_outputs,
-)
-from .runtime import (
-    _configure_metrics_mode,
-    _metrics_computed,
-    _print_failed_files,
-    _resolve_cache_status,
-    _validate_numeric_args,
-    gating_mode_enabled,
-    prepare_metrics_mode_and_ui,
-    resolve_report_cache_path,
-)
-from .runtime import _resolve_cache_path as _resolve_cache_path_impl
-from .startup import configure_runtime_console as _configure_runtime_console_impl
-from .startup import configure_runtime_flags as _configure_runtime_flags
-from .startup import load_pyproject_config_or_exit as _load_pyproject_config_or_exit
-from .startup import resolve_baseline_inputs as _resolve_baseline_inputs
-from .startup import resolve_existing_root_path as _resolve_existing_root_path
-from .startup import validate_numeric_args_or_exit as _validate_numeric_args_or_exit
-from .summary import (
-    _print_changed_scope,
-    _print_metrics,
-    _print_summary,
-    build_metrics_snapshot,
-    build_summary_counts,
-)
+from . import summary as cli_summary
 from .types import CLIArgsLike, StatusConsole, require_status_console
 
 __all__ = [
@@ -126,8 +70,10 @@ __all__ = [
     "_validate_report_ui_flags",
     "_write_report_outputs",
     "analyze",
+    "apply_pyproject_config_overrides",
     "bootstrap",
     "build_html_report",
+    "collect_explicit_cli_dests",
     "console",
     "discover",
     "gate",
@@ -136,6 +82,63 @@ __all__ = [
     "process",
     "report",
 ]
+
+apply_pyproject_config_overrides = config_resolver.apply_pyproject_config_overrides
+collect_explicit_cli_dests = config_resolver.collect_explicit_cli_dests
+
+_probe_metrics_baseline_section = cli_baseline_state._probe_metrics_baseline_section
+_resolve_clone_baseline_state = cli_baseline_state._resolve_clone_baseline_state
+_resolve_metrics_baseline_state = cli_baseline_state._resolve_metrics_baseline_state
+
+_changed_clone_gate_from_report = cli_changed_scope._changed_clone_gate_from_report
+_git_diff_changed_paths = cli_changed_scope._git_diff_changed_paths
+_validate_changed_scope_args = cli_changed_scope._validate_changed_scope_args
+
+_is_debug_enabled = cli_console._is_debug_enabled
+_make_plain_console = cli_console._make_plain_console
+_make_rich_console = cli_console.make_console
+_parse_metric_reason_entry = cli_console._parse_metric_reason_entry
+_print_banner_impl = cli_console.print_banner
+_print_gating_failure_block = cli_console._print_gating_failure_block
+_print_verbose_clone_hashes = cli_console._print_verbose_clone_hashes
+_rich_progress_symbols = cli_console._rich_progress_symbols
+
+print_pipeline_done_if_needed = cli_execution.print_pipeline_done_if_needed
+run_analysis_stages = cli_execution.run_analysis_stages
+
+_build_diff_context = cli_post_run.build_diff_context
+maybe_print_changed_scope_snapshot = cli_post_run.maybe_print_changed_scope_snapshot
+print_metrics_if_available = cli_post_run.print_metrics_if_available
+resolve_changed_clone_gate = cli_post_run.resolve_changed_clone_gate
+warn_new_clones_without_fail = cli_post_run.warn_new_clones_without_fail
+
+_report_path_origins = cli_reports_output._report_path_origins
+_resolve_output_paths = cli_reports_output._resolve_output_paths
+_validate_report_ui_flags = cli_reports_output._validate_report_ui_flags
+_write_report_outputs = cli_reports_output._write_report_outputs
+
+_configure_metrics_mode = cli_runtime._configure_metrics_mode
+_metrics_computed = cli_runtime._metrics_computed
+_print_failed_files = cli_runtime._print_failed_files
+_resolve_cache_path_impl = cli_runtime._resolve_cache_path
+_resolve_cache_status = cli_runtime._resolve_cache_status
+_validate_numeric_args = cli_runtime._validate_numeric_args
+gating_mode_enabled = cli_runtime.gating_mode_enabled
+prepare_metrics_mode_and_ui = cli_runtime.prepare_metrics_mode_and_ui
+resolve_report_cache_path = cli_runtime.resolve_report_cache_path
+
+_configure_runtime_console_impl = cli_startup.configure_runtime_console
+_configure_runtime_flags = cli_startup.configure_runtime_flags
+_load_pyproject_config_or_exit = cli_startup.load_pyproject_config_or_exit
+_resolve_baseline_inputs = cli_startup.resolve_baseline_inputs
+_resolve_existing_root_path = cli_startup.resolve_existing_root_path
+_validate_numeric_args_or_exit = cli_startup.validate_numeric_args_or_exit
+
+_print_changed_scope = cli_summary._print_changed_scope
+_print_metrics = cli_summary._print_metrics
+_print_summary = cli_summary._print_summary
+build_metrics_snapshot = cli_summary.build_metrics_snapshot
+build_summary_counts = cli_summary.build_summary_counts
 
 
 def _set_console(value: object) -> object:
@@ -235,7 +238,7 @@ def _enforce_gating(
     clone_threshold_total: int | None = None,
 ) -> None:
     _set_console(console)
-    enforce_gating(
+    cli_execution.enforce_gating(
         args=args,
         boot=boot,
         analysis=analysis,

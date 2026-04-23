@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Unit tests for codeclone.structural_findings (Phase 1: duplicated_branches)."""
+"""Unit tests for codeclone.findings.structural.detectors."""
 
 from __future__ import annotations
 

@@ -8,11 +8,8 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
-
-import orjson
 
 from ... import __version__
 from ... import ui_messages as ui
@@ -26,8 +23,10 @@ from ...baseline import (
 from ...baseline.metrics_baseline import (
     METRICS_BASELINE_UNTRUSTED_STATUSES,
     MetricsBaseline,
+    MetricsBaselineSectionProbe,
     MetricsBaselineStatus,
     coerce_metrics_baseline_status,
+    probe_metrics_baseline_section,
 )
 from ...contracts import (
     BASELINE_FINGERPRINT_VERSION,
@@ -104,40 +103,9 @@ class _MetricsBaselineRuntime:
     trusted_for_diff: bool = False
 
 
-@dataclass(frozen=True, slots=True)
-class MetricsBaselineSectionProbe:
-    has_metrics_section: bool
-    payload: dict[str, object] | None
-
-
 _CloneBaselineState = CloneBaselineState
 _MetricsBaselineSectionProbe = MetricsBaselineSectionProbe
 _MetricsBaselineState = MetricsBaselineState
-
-
-def probe_metrics_baseline_section(path: Path) -> MetricsBaselineSectionProbe:
-    if not path.exists():
-        return MetricsBaselineSectionProbe(
-            has_metrics_section=False,
-            payload=None,
-        )
-    try:
-        raw_payload = orjson.loads(path.read_text("utf-8"))
-    except (OSError, JSONDecodeError):
-        return MetricsBaselineSectionProbe(
-            has_metrics_section=True,
-            payload=None,
-        )
-    if not isinstance(raw_payload, dict):
-        return MetricsBaselineSectionProbe(
-            has_metrics_section=True,
-            payload=None,
-        )
-    payload = dict(raw_payload)
-    return MetricsBaselineSectionProbe(
-        has_metrics_section=("metrics" in payload),
-        payload=payload,
-    )
 
 
 def resolve_clone_baseline_state(

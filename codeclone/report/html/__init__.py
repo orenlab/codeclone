@@ -9,17 +9,5 @@
 from __future__ import annotations
 
 from .assemble import build_html_report
-from .widgets.snippets import (
-    _FileCache,
-    _pygments_css,
-    _render_code_block,
-    _try_pygments,
-)
 
-__all__ = [
-    "_FileCache",
-    "_pygments_css",
-    "_render_code_block",
-    "_try_pygments",
-    "build_html_report",
-]
+__all__ = ["build_html_report"]
