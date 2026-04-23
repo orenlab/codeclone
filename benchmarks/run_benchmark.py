@@ -50,6 +50,8 @@ BENCHMARK_NEUTRAL_ARGS: tuple[str, ...] = (
     "-1",
     "--min-docstring-coverage",
     "-1",
+    "--no-api-surface",
+    "--no-update-metrics-baseline",
 )
 
 

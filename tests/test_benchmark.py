@@ -76,6 +76,8 @@ def test_benchmark_neutral_args_disable_repo_quality_gates() -> None:
     assert "--no-fail-on-new-metrics" in BENCHMARK_NEUTRAL_ARGS
     assert "--no-fail-cycles" in BENCHMARK_NEUTRAL_ARGS
     assert "--no-fail-dead-code" in BENCHMARK_NEUTRAL_ARGS
+    assert "--no-api-surface" in BENCHMARK_NEUTRAL_ARGS
+    assert "--no-update-metrics-baseline" in BENCHMARK_NEUTRAL_ARGS
     assert "--fail-health" in BENCHMARK_NEUTRAL_ARGS
     assert "--min-typing-coverage" in BENCHMARK_NEUTRAL_ARGS
     assert "--min-docstring-coverage" in BENCHMARK_NEUTRAL_ARGS

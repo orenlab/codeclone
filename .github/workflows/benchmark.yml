@@ -98,7 +98,7 @@ jobs:
 
       - name: Install dependencies (macOS local benchmark)
         if: env.BENCH_ENABLED == '1' && runner.os == 'macOS'
-        run: uv sync --all-extras --dev
+        run: uv sync --extra dev
 
       - name: Set benchmark output path
         if: env.BENCH_ENABLED == '1'

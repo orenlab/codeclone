@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE_TAG="${IMAGE_TAG:-codeclone-benchmark:2.0.0b5}"
+IMAGE_TAG="${IMAGE_TAG:-codeclone-benchmark:local}"
 OUT_DIR="${OUT_DIR:-$ROOT_DIR/.cache/benchmarks}"
 OUTPUT_BASENAME="${OUTPUT_BASENAME:-codeclone-benchmark.json}"
 CPUSET="${CPUSET:-0}"
