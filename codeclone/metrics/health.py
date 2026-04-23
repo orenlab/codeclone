@@ -9,7 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from ..contracts import HEALTH_WEIGHTS
+from ..contracts import (
+    HEALTH_DEPENDENCY_CYCLE_PENALTY,
+    HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY,
+    HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE,
+    HEALTH_WEIGHTS,
+)
 from ..models import HealthScore
 
 
@@ -104,8 +109,12 @@ def compute_health(inputs: HealthInputs) -> HealthScore:
     dead_code_score = _clamp_score(100 - inputs.dead_code_items * 8)
     dependency_score = _clamp_score(
         100
-        - inputs.dependency_cycles * 25
-        - max(0, inputs.dependency_max_depth - 8) * 4
+        - inputs.dependency_cycles * HEALTH_DEPENDENCY_CYCLE_PENALTY
+        - max(
+            0,
+            inputs.dependency_max_depth - HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE,
+        )
+        * HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY
     )
     coverage_score = _clamp_score(
         _safe_div(inputs.files_analyzed_or_cached * 100.0, max(1, inputs.files_found))

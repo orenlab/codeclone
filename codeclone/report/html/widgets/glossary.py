@@ -46,7 +46,9 @@ GLOSSARY: dict[str, str] = {
     # Dependency stat cards
     "modules": "Total number of Python modules analyzed",
     "edges": "Total number of import relationships between modules",
-    "max depth": "Longest chain of transitive imports",
+    "max depth": (
+        "Longest chain of transitive imports; health stays in the safe zone at <= 8"
+    ),
     "cycles": "Number of circular import dependencies detected",
     # Complexity stat cards
     "high-risk functions": (

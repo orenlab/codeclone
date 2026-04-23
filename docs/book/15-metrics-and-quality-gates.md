@@ -53,6 +53,9 @@ Refs:
 - `--skip-metrics` is incompatible with metrics gating/update flags.
 - If metrics are not explicitly requested and no metrics baseline exists, runtime may auto-enable clone-only mode.
 - In clone-only mode, dead-code and dependency analysis are skipped unless explicitly forced by gates.
+- There is currently no user-facing gate or config knob for `dependency_max_depth`;
+  the metric is observed and contributes to Health Score through the internal
+  health model only.
 - `--coverage` is a current-run signal only; it does not update baseline state.
 - Invalid Cobertura XML becomes `coverage_join.status="invalid"` in normal runs and becomes a contract error only when
   hotspot gating requires a valid join.

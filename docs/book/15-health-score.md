@@ -48,6 +48,11 @@ Important clarifications:
 - `coverage` here means analysis completeness, not test coverage.
 - Segment clones are visible in reports but do not currently affect Health Score.
 - Suppressed or non-actionable dead-code items do not penalize the score.
+- Dependencies score currently uses:
+  `100 - cycles * 25 - max(0, max_depth - 8) * 4`.
+- The dependency-depth safe zone is `<= 8`.
+- That dependency-depth threshold is currently internal and not configurable
+  through CLI or `pyproject.toml`.
 
 ## Current non-scoring layers
 

@@ -166,6 +166,13 @@ Current-run coverage join config:
   rules as CLI flags.
 - Coverage join remains current-run only and does not persist to baseline.
 
+Dependency depth config note:
+
+- `dependency_max_depth` is an observed metric in reports/baselines, not a
+  CLI or `pyproject.toml` option.
+- The current health safe zone for dependency depth is internal and fixed at
+  `<= 8`; there is no user-facing knob to tune it in `2.0.0b6`.
+
 Metrics baseline path selection contract:
 
 - Relative `baseline` / `metrics_baseline` paths coming from defaults or

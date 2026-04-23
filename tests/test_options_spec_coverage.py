@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -108,3 +109,15 @@ def test_option_specs_have_pyproject_loading_coverage(
 
     loaded = load_pyproject_config(tmp_path)
     assert loaded[pyproject_key] == expected
+
+
+def test_config_defaults_doc_covers_exact_pyproject_key_set() -> None:
+    text = Path("docs/book/04-config-and-defaults.md").read_text(encoding="utf-8")
+    documented = set(re.findall(r"^\| `([a-z0-9_]+)`\s+\|", text, re.MULTILINE))
+    declared = {
+        option.pyproject_key
+        for option in PYPROJECT_OPTIONS
+        if option.pyproject_key is not None
+    }
+
+    assert documented == declared

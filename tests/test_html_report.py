@@ -1690,6 +1690,7 @@ def test_html_report_metrics_warn_branches_and_dependency_svg() -> None:
     assert "insight-warn" in html
     assert "dep-graph-svg" in html
     assert "Grade B" in html
+    assert "&lt;= 8" in html
     assert "pkg.mod.func" in html
     assert "outside/project/pkg/mod.py" in html
 

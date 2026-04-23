@@ -12,6 +12,7 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
+from codeclone.contracts import HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE
 from codeclone.utils import coerce as _coerce
 
 from ..primitives.escape import _escape_html
@@ -367,8 +368,14 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
         _stat_card(
             "Max depth",
             dep_max_depth,
-            detail=_micro_badges(("target", "< 8")),
-            value_tone="warn" if dep_max_depth > 8 else "good",
+            detail=_micro_badges(
+                ("target", f"<= {HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE}")
+            ),
+            value_tone=(
+                "warn"
+                if dep_max_depth > HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE
+                else "good"
+            ),
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
         ),
@@ -442,7 +449,7 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
         answer = f"Cycles: {cycle_count}; max dependency depth: {dep_max_depth}."
         if cycle_count > 0:
             tone = "risk"
-        elif dep_max_depth > 8:
+        elif dep_max_depth > HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE:
             tone = "warn"
         else:
             tone = "ok"

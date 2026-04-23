@@ -26,9 +26,11 @@ from codeclone.contracts import (
     DEFAULT_ROOT,
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
+    HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE,
 )
 from codeclone.core._types import DEFAULT_RUNTIME_PROCESSES
 from codeclone.report.gates.evaluator import MetricGateConfig
+from codeclone.report.html.sections import _dependencies as html_dependencies_mod
 from codeclone.surfaces.mcp import server as mcp_server
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import MCPAnalysisRequest, MCPGateRequest
@@ -117,3 +119,9 @@ def test_mcp_parser_and_builder_defaults_stay_in_sync() -> None:
     assert signature.parameters["stateless_http"].default == args.stateless_http
     assert signature.parameters["debug"].default == args.debug
     assert signature.parameters["log_level"].default == args.log_level
+
+
+def test_dependency_depth_safe_zone_stays_shared_between_contract_and_html() -> None:
+    source = inspect.getsource(html_dependencies_mod.render_dependencies_panel)
+    assert "HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE" in source
+    assert HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE == 8

@@ -11,6 +11,7 @@ import ast
 import pytest
 
 from codeclone.analysis.cfg_model import CFG
+from codeclone.contracts import HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE
 from codeclone.metrics import complexity as complexity_mod
 from codeclone.metrics import coupling as coupling_mod
 from codeclone.metrics import health as health_mod
@@ -646,8 +647,16 @@ def test_health_dependency_depth_safe_zone_matches_html_threshold() -> None:
             dead_code_items=0,
         )
 
-    safe = compute_health(_health_inputs(dependency_max_depth=8))
-    warn = compute_health(_health_inputs(dependency_max_depth=9))
+    safe = compute_health(
+        _health_inputs(
+            dependency_max_depth=HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE,
+        )
+    )
+    warn = compute_health(
+        _health_inputs(
+            dependency_max_depth=HEALTH_DEPENDENCY_MAX_DEPTH_SAFE_ZONE + 1,
+        )
+    )
 
     assert safe.dimensions["dependencies"] == 100
     assert warn.dimensions["dependencies"] == 96
