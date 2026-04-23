@@ -4,11 +4,15 @@ This site is built with MkDocs and published to
 [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/).
 
 !!! note "Version Notice"
-This site currently documents the in-development `v2.0.x` line from `main`.
-For the latest stable CodeClone documentation (`v1.4.4`), see the
-[`v1.4.4` README](https://github.com/orenlab/codeclone/blob/v1.4.4/README.md)
-and the
-[`v1.4.4` docs tree](https://github.com/orenlab/codeclone/tree/v1.4.4/docs).
+    This site currently documents the in-development `v2.0.x` line from `main`.
+    For the latest stable CodeClone documentation (`v1.4.4`), see the
+    [`v1.4.4` README](https://github.com/orenlab/codeclone/blob/v1.4.4/README.md)
+    and the
+    [`v1.4.4` docs tree](https://github.com/orenlab/codeclone/tree/v1.4.4/docs).
+
+!!! note "Repository licensing"
+    CodeClone source code is licensed under MPL-2.0. Documentation content
+    under `docs/` and the published docs site is licensed under MIT.
 
 It has two documentation layers:
 
@@ -91,13 +95,22 @@ help topics when the connected server exposes them.
 
 ## Local Preview
 
-Build the docs site with MkDocs, then generate the sample report into the built
-site:
+=== "Build the site"
 
-```bash
-uv run --with mkdocs --with mkdocs-material mkdocs build --strict
-uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
-```
+    ```bash title="Validate the docs site"
+    uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+    ```
+
+=== "Build the site and sample report"
+
+    ```bash title="Generate the live sample report into the built site"
+    uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+    uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
+    ```
+
+!!! note "Generated output"
+    `site/` is generated output. It is used for local preview and GitHub Pages
+    publishing, but it is not committed to git.
 
 GitHub Pages publishing is handled by
 [`docs.yml`](https://github.com/orenlab/codeclone/blob/main/.github/workflows/docs.yml)

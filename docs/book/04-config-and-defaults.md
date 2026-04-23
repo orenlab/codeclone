@@ -53,7 +53,7 @@ Fragment-level admission thresholds (pyproject.toml only, advanced tuning):
 
 Example project-level config:
 
-```toml
+```toml title="Minimal [tool.codeclone] configuration"
 [tool.codeclone]
 min_loc = 10
 min_stmt = 6
@@ -138,14 +138,17 @@ This is the exact accepted `[tool.codeclone]` key set from
 `codeclone/config/spec.py` and `codeclone/config/pyproject_loader.py`; unknown
 keys are contract errors.
 
-Important:
+!!! note "Pyproject keys vs CLI flags"
+    The tables above list `[tool.codeclone]` keys, not CLI flag spellings.
+    CLI flags may map to the same internal destination under a different name.
+    Example: `coverage_xml` in `pyproject.toml` corresponds to CLI
+    `--coverage FILE`. The same pattern applies to report outputs such as
+    `html_out` ↔ `--html` and `json_out` ↔ `--json`.
 
-- The tables above list `pyproject.toml` keys, not CLI flag spellings.
-- CLI flags may map to the same internal destination under a different name.
-  Example: `coverage_xml` in `pyproject.toml` corresponds to CLI
-  `--coverage FILE`.
-- The same pattern applies to report outputs such as `html_out` ↔ `--html` and
-  `json_out` ↔ `--json`.
+!!! warning "Metrics-mode conflicts are enforced"
+    Metrics update/gating flags are runtime contracts, not hints. Combinations
+    such as `skip_metrics=true` together with metrics gating or metrics
+    baseline update flags are contract errors.
 
 Notes:
 

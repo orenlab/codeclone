@@ -5,6 +5,11 @@
 Define observable CLI behavior: argument handling, summaries, output writing,
 and exit routing.
 
+!!! note "Observable surface only"
+    This chapter covers scripting-visible behavior and user-facing CLI output
+    categories. Rich styling details may evolve as long as markers, exit
+    semantics, and deterministic output contracts stay stable.
+
 ## Public surface
 
 - Public entrypoint: `codeclone/main.py:main`
@@ -82,6 +87,11 @@ Refs:
 - `codeclone/surfaces/cli/workflow.py:_main_impl`
 
 ## Failure modes
+
+!!! warning "Failure precedence"
+    Contract failures take precedence over gating failures. In CI and scripted
+    flows, invalid config or unreadable sources must surface as exit `2` before
+    any clone or metrics gate can fail with exit `3`.
 
 | Condition                                                         | User-facing category | Exit |
 |-------------------------------------------------------------------|----------------------|------|

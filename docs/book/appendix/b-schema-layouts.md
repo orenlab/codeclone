@@ -2,14 +2,14 @@
 
 ## Purpose
 
-Compact structural layouts for baseline/cache/report contracts in `2.0.0b5`.
+Compact structural layouts for baseline/cache/report contracts in `2.0.0b6`.
 
 ## Baseline schema (`2.1`)
 
 ```json
 {
   "meta": {
-    "generator": { "name": "codeclone", "version": "2.0.0b5" },
+    "generator": { "name": "codeclone", "version": "2.0.0b6" },
     "schema_version": "2.1",
     "fingerprint_version": "1",
     "python_tag": "cp313",
@@ -60,7 +60,7 @@ Notes:
 ```json
 {
   "meta": {
-    "generator": { "name": "codeclone", "version": "2.0.0b5" },
+    "generator": { "name": "codeclone", "version": "2.0.0b6" },
     "schema_version": "1.2",
     "python_tag": "cp313",
     "created_at": "2026-03-11T00:00:00Z",
@@ -152,7 +152,7 @@ Notes:
 {
   "report_schema_version": "2.9",
   "meta": {
-    "codeclone_version": "2.0.0b5",
+    "codeclone_version": "2.0.0b6",
     "project_name": "codeclone",
     "scan_root": ".",
     "analysis_mode": "full",
@@ -470,7 +470,7 @@ Notes:
       "tool": {
         "driver": {
           "name": "codeclone",
-          "version": "2.0.0b5",
+          "version": "2.0.0b6",
           "rules": [
             {
               "id": "CCLONE001",

@@ -283,11 +283,11 @@ Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-r
 [HTML render](https://orenlab.github.io/codeclone/book/10-html-render/)
 
 <details>
-<summary>Canonical JSON report shape (v2.8)</summary>
+<summary>Canonical JSON report shape (v2.9)</summary>
 
 ```json
 {
-  "report_schema_version": "2.8",
+  "report_schema_version": "2.9",
   "meta": {
     "codeclone_version": "2.0.0b6",
     "project_name": "...",
@@ -356,15 +356,27 @@ Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-r
   "metrics": {
     "summary": {
       "...": "...",
-      "coverage_adoption": { "...": "..." },
-      "coverage_join": { "...": "..." },
-      "api_surface": { "...": "..." }
+      "coverage_adoption": {
+        "...": "..."
+      },
+      "coverage_join": {
+        "...": "..."
+      },
+      "api_surface": {
+        "...": "..."
+      }
     },
     "families": {
       "...": "...",
-      "coverage_adoption": { "...": "..." },
-      "coverage_join": { "...": "..." },
-      "api_surface": { "...": "..." }
+      "coverage_adoption": {
+        "...": "..."
+      },
+      "coverage_join": {
+        "...": "..."
+      },
+      "api_surface": {
+        "...": "..."
+      }
     }
   },
   "derived": {
@@ -470,8 +482,8 @@ in [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmark
 
 ## License
 
-- **Code:** MPL-2.0
-- **Documentation:** MIT
+- **Code:** MPL-2.0 (`LICENSE`)
+- **Documentation and docs-site content:** MIT (`LICENSE-MIT`)
 
 Versions released before this change remain under their original license terms.
 
@@ -480,4 +492,4 @@ Versions released before this change remain under their original license terms.
 - **Docs:** <https://orenlab.github.io/codeclone/>
 - **Issues:** <https://github.com/orenlab/codeclone/issues>
 - **PyPI:** <https://pypi.org/project/codeclone/>
-- **Licenses:** [MPL-2.0](LICENSE) · [MIT docs](LICENSE-docs)
+- **Licenses:** [MPL-2.0](LICENSE) · [MIT docs](LICENSE-MIT) · [Scope map](LICENSES.md)

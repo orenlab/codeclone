@@ -9,7 +9,8 @@ CodeClone is distributed as a local analysis tool and local integration layer.
 
 That means:
 
-- CodeClone is provided as-is under the repository license terms
+- CodeClone source code is provided as-is under MPL-2.0, and repository
+  documentation is provided as-is under MIT
 - local integrations are wrappers over local CodeClone execution, not hosted
   managed services
 - users are responsible for reviewing the commands, configuration, and

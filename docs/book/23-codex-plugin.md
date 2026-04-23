@@ -8,6 +8,11 @@ Document the current contract and behavior of the Codex plugin shipped in
 This chapter describes the plugin as a local Codex discovery and guidance layer
 over existing CodeClone MCP contracts.
 
+!!! note "Guidance layer only"
+    The plugin contributes discovery metadata, a local MCP definition, and
+    review skills. It does not add a second analyzer or Codex-only finding
+    semantics.
+
 ## Position in the platform
 
 The Codex plugin is:

@@ -8,6 +8,10 @@ The MCP layer is optional, read-only, and built on the same canonical
 pipeline/report contracts as the CLI. It does not create a second analysis
 engine or a second persistence model.
 
+!!! note "Read-only integration contract"
+MCP surfaces the same canonical report and run state as the CLI and HTML
+report. It must not mutate source, baseline, cache, or report artifacts.
+
 ## Public surface
 
 - package extra: `codeclone[mcp]`
@@ -22,23 +26,28 @@ Current server characteristics:
 
 - optional dependency; base `codeclone` install does not require MCP runtime
 - transports:
-  - `stdio`
-  - `streamable-http`
+    - `stdio`
+    - `streamable-http`
 - run storage:
-  - in-memory only
-  - bounded by `--history-limit`
-  - latest-run pointer is process-local
+    - in-memory only
+    - bounded by `--history-limit`
+    - latest-run pointer is process-local
 - roots:
-  - analysis tools require an absolute repository root
-  - relative roots such as `.` are rejected
+    - analysis tools require an absolute repository root
+    - relative roots such as `.` are rejected
 - analysis modes:
-  - `full`
-  - `clones_only`
+    - `full`
+    - `clones_only`
 - cache policies:
-  - `reuse`
-  - `off`
-  - `refresh` is accepted by the current MCP contract and routed through the
-    same runtime path as the CLI
+    - `reuse`
+    - `off`
+    - `refresh` is accepted by the current MCP contract and routed through the
+      same runtime path as the CLI
+
+!!! warning "Absolute roots and remote exposure"
+Analysis tools require an absolute repository root, and HTTP exposure
+beyond loopback is intentionally explicit. Keep `stdio` as the default for
+local IDE and agent clients.
 
 ## Tools
 
@@ -49,60 +58,60 @@ second, then drill into one finding or one hotspot family.
 
 ### Analysis and run-level tools
 
-| Tool | Key parameters | Purpose |
-|---|---|---|
-| `analyze_repository` | `root`, `analysis_mode`, thresholds, `api_surface`, `coverage_xml`, `baseline_path`, `metrics_baseline_path`, `cache_policy` | Full deterministic analysis of one repo root; registers the latest in-memory run. |
-| `analyze_changed_paths` | `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, thresholds, `api_surface`, `coverage_xml`, `cache_policy` | Diff-aware analysis with changed-files projection over the same canonical run/report contract. |
-| `get_run_summary` | `run_id` | Cheapest run-level snapshot. Start here after analysis when you need health, findings, baseline/cache status, and inventory in compact form. |
-| `get_production_triage` | `run_id`, `max_hotspots`, `max_suggestions` | Production-first first-pass view over one stored run. |
-| `help` | `topic`, `detail` | Bounded workflow/contract guidance for supported MCP topics. |
-| `compare_runs` | `run_id_before`, `run_id_after`, `focus` | Run-to-run delta view over findings and health; returns `incomparable` when roots/settings differ. |
-| `evaluate_gates` | `run_id`, gate flags, threshold overrides, `coverage_min` | Preview CI/gating decisions against a stored run without mutating process or repo state. |
+| Tool                    | Key parameters                                                                                                               | Purpose                                                                                                                                      |
+|-------------------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| `analyze_repository`    | `root`, `analysis_mode`, thresholds, `api_surface`, `coverage_xml`, `baseline_path`, `metrics_baseline_path`, `cache_policy` | Full deterministic analysis of one repo root; registers the latest in-memory run.                                                            |
+| `analyze_changed_paths` | `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, thresholds, `api_surface`, `coverage_xml`, `cache_policy`        | Diff-aware analysis with changed-files projection over the same canonical run/report contract.                                               |
+| `get_run_summary`       | `run_id`                                                                                                                     | Cheapest run-level snapshot. Start here after analysis when you need health, findings, baseline/cache status, and inventory in compact form. |
+| `get_production_triage` | `run_id`, `max_hotspots`, `max_suggestions`                                                                                  | Production-first first-pass view over one stored run.                                                                                        |
+| `help`                  | `topic`, `detail`                                                                                                            | Bounded workflow/contract guidance for supported MCP topics.                                                                                 |
+| `compare_runs`          | `run_id_before`, `run_id_after`, `focus`                                                                                     | Run-to-run delta view over findings and health; returns `incomparable` when roots/settings differ.                                           |
+| `evaluate_gates`        | `run_id`, gate flags, threshold overrides, `coverage_min`                                                                    | Preview CI/gating decisions against a stored run without mutating process or repo state.                                                     |
 
 ### Report and finding projection tools
 
-| Tool | Key parameters | Purpose |
-|---|---|---|
-| `get_report_section` | `run_id`, `section`, `family`, `path`, `offset`, `limit` | Read canonical report sections; `metrics_detail` is the bounded/paginated drill-down path. |
-| `list_findings` | `run_id`, `family`, `category`, `severity`, `source_kind`, `novelty`, `sort_by`, `detail_level`, changed-scope filters, pagination | Deterministic filtered finding list over canonical stored findings. |
-| `get_finding` | `finding_id`, `run_id`, `detail_level` | Return one canonical finding group by short or full id. |
-| `get_remediation` | `finding_id`, `run_id`, `detail_level` | Return the remediation/explainability packet for one finding. |
-| `list_hotspots` | `kind`, `run_id`, `detail_level`, changed-scope filters, pagination | Return one derived hotspot list such as `most_actionable` or `production_hotspots`. |
-| `generate_pr_summary` | `run_id`, `changed_paths`, `git_diff_ref`, `format` | PR-oriented summary for changed scope; `markdown` is the default human/LLM-facing format. |
+| Tool                  | Key parameters                                                                                                                     | Purpose                                                                                    |
+|-----------------------|------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|
+| `get_report_section`  | `run_id`, `section`, `family`, `path`, `offset`, `limit`                                                                           | Read canonical report sections; `metrics_detail` is the bounded/paginated drill-down path. |
+| `list_findings`       | `run_id`, `family`, `category`, `severity`, `source_kind`, `novelty`, `sort_by`, `detail_level`, changed-scope filters, pagination | Deterministic filtered finding list over canonical stored findings.                        |
+| `get_finding`         | `finding_id`, `run_id`, `detail_level`                                                                                             | Return one canonical finding group by short or full id.                                    |
+| `get_remediation`     | `finding_id`, `run_id`, `detail_level`                                                                                             | Return the remediation/explainability packet for one finding.                              |
+| `list_hotspots`       | `kind`, `run_id`, `detail_level`, changed-scope filters, pagination                                                                | Return one derived hotspot list such as `most_actionable` or `production_hotspots`.        |
+| `generate_pr_summary` | `run_id`, `changed_paths`, `git_diff_ref`, `format`                                                                                | PR-oriented summary for changed scope; `markdown` is the default human/LLM-facing format.  |
 
 ### Focused check tools
 
-| Tool | Key parameters | Purpose |
-|---|---|---|
-| `check_clones` | `run_id` or absolute `root`, `path`, `clone_type`, `source_kind`, `max_results`, `detail_level` | Narrow clone-only query over a compatible stored run. |
-| `check_complexity` | `run_id` or absolute `root`, `path`, `min_complexity`, `max_results`, `detail_level` | Narrow complexity-hotspot query. |
-| `check_coupling` | `run_id` or absolute `root`, `path`, `max_results`, `detail_level` | Narrow coupling-hotspot query. |
-| `check_cohesion` | `run_id` or absolute `root`, `path`, `max_results`, `detail_level` | Narrow cohesion-hotspot query. |
-| `check_dead_code` | `run_id` or absolute `root`, `path`, `min_severity`, `max_results`, `detail_level` | Narrow dead-code query. |
+| Tool               | Key parameters                                                                                  | Purpose                                               |
+|--------------------|-------------------------------------------------------------------------------------------------|-------------------------------------------------------|
+| `check_clones`     | `run_id` or absolute `root`, `path`, `clone_type`, `source_kind`, `max_results`, `detail_level` | Narrow clone-only query over a compatible stored run. |
+| `check_complexity` | `run_id` or absolute `root`, `path`, `min_complexity`, `max_results`, `detail_level`            | Narrow complexity-hotspot query.                      |
+| `check_coupling`   | `run_id` or absolute `root`, `path`, `max_results`, `detail_level`                              | Narrow coupling-hotspot query.                        |
+| `check_cohesion`   | `run_id` or absolute `root`, `path`, `max_results`, `detail_level`                              | Narrow cohesion-hotspot query.                        |
+| `check_dead_code`  | `run_id` or absolute `root`, `path`, `min_severity`, `max_results`, `detail_level`              | Narrow dead-code query.                               |
 
 ### Session-local tools
 
-| Tool | Key parameters | Purpose |
-|---|---|---|
-| `mark_finding_reviewed` | `finding_id`, `run_id`, `note` | Mark a finding as reviewed in the current in-memory MCP session. |
-| `list_reviewed_findings` | `run_id` | Return reviewed markers currently held in process memory. |
-| `clear_session_runs` | none | Clear in-memory run history and session-local review state for this server process. |
+| Tool                     | Key parameters                 | Purpose                                                                             |
+|--------------------------|--------------------------------|-------------------------------------------------------------------------------------|
+| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note` | Mark a finding as reviewed in the current in-memory MCP session.                    |
+| `list_reviewed_findings` | `run_id`                       | Return reviewed markers currently held in process memory.                           |
+| `clear_session_runs`     | none                           | Clear in-memory run history and session-local review state for this server process. |
 
 ## Resources
 
 Resources are deterministic read-only projections over stored runs.
 
-| URI | Purpose |
-|---|---|
-| `codeclone://latest/summary` | Compact summary for the latest stored run. |
-| `codeclone://latest/report.json` | Canonical JSON report for the latest stored run. |
-| `codeclone://latest/health` | Health/metrics snapshot for the latest stored run. |
-| `codeclone://latest/gates` | Last gate-evaluation result produced in this MCP session. |
-| `codeclone://latest/changed` | Changed-files projection for the latest diff-aware run. |
-| `codeclone://latest/triage` | Production-first triage payload for the latest stored run. |
-| `codeclone://schema` | Canonical report schema-style descriptor. |
-| `codeclone://runs/{run_id}/summary` | Compact summary for one specific stored run. |
-| `codeclone://runs/{run_id}/report.json` | Canonical JSON report for one specific stored run. |
+| URI                                               | Purpose                                                     |
+|---------------------------------------------------|-------------------------------------------------------------|
+| `codeclone://latest/summary`                      | Compact summary for the latest stored run.                  |
+| `codeclone://latest/report.json`                  | Canonical JSON report for the latest stored run.            |
+| `codeclone://latest/health`                       | Health/metrics snapshot for the latest stored run.          |
+| `codeclone://latest/gates`                        | Last gate-evaluation result produced in this MCP session.   |
+| `codeclone://latest/changed`                      | Changed-files projection for the latest diff-aware run.     |
+| `codeclone://latest/triage`                       | Production-first triage payload for the latest stored run.  |
+| `codeclone://schema`                              | Canonical report schema-style descriptor.                   |
+| `codeclone://runs/{run_id}/summary`               | Compact summary for one specific stored run.                |
+| `codeclone://runs/{run_id}/report.json`           | Canonical JSON report for one specific stored run.          |
 | `codeclone://runs/{run_id}/findings/{finding_id}` | Canonical JSON finding payload for one specific stored run. |
 
 ## Contract rules

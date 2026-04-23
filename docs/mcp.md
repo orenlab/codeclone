@@ -7,13 +7,24 @@ state is mutable in memory only.
 
 Works with any MCP-capable client regardless of backend model.
 
+!!! note "Read-only by contract"
+    MCP is an integration surface over the same canonical pipeline and report
+    contracts as the CLI. It does not create a second analysis engine or write
+    back to repository state.
+
 ## Install
 
-```bash
-uv tool install --pre "codeclone[mcp]"    # install as a standalone tool
-# or, inside an existing environment
-uv pip install --pre "codeclone[mcp]"     # add the MCP extra to that environment
-```
+=== "Standalone tool"
+
+    ```bash title="Install the MCP launcher as a standalone tool"
+    uv tool install --pre "codeclone[mcp]"
+    ```
+
+=== "Existing environment"
+
+    ```bash title="Install the MCP extra into the current environment"
+    uv pip install --pre "codeclone[mcp]"
+    ```
 
 ## Quick client setup
 
@@ -56,7 +67,7 @@ See [Claude Desktop bundle guide](claude-desktop-bundle.md).
 
 **Local agents** (Claude Code, Codex, Copilot Chat, Gemini CLI):
 
-```bash
+```bash title="Start a local stdio MCP server"
 codeclone-mcp --transport stdio
 ```
 
@@ -65,11 +76,21 @@ MCP analysis tools require an absolute repository root. Relative roots such as
 the client workspace. The same absolute-path rule applies to `check_*` tools
 when a `root` filter is provided.
 
+!!! note "Absolute roots are required"
+    MCP tool requests must pass an absolute repository root. This keeps runs
+    deterministic across clients whose working directories may differ from the
+    visible workspace path.
+
 **Remote / HTTP-only clients:**
 
-```bash
+```bash title="Start the optional HTTP transport locally"
 codeclone-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 ```
+
+!!! warning "Remote exposure is opt-in"
+    Non-loopback hosts require `--allow-remote`, and the built-in HTTP server
+    does not provide authentication. Use it only on trusted networks or behind
+    your own authenticated reverse proxy.
 
 Non-loopback hosts require `--allow-remote` (no built-in auth).
 When `--allow-remote` is enabled, any reachable network client can trigger
@@ -77,11 +98,12 @@ CPU-intensive analysis, read results, and probe repository-relative paths
 through MCP request parameters. Use it only on trusted networks. For anything
 production-adjacent, put the server behind a firewall or a reverse proxy with
 authentication.
+
 Run retention is bounded: default `4`, max `10` (`--history-limit`).
 If a tool request omits `processes`, MCP defers process-count policy to the
 core CodeClone runtime.
 
-Current `b5` MCP surface: `21` tools, `7` fixed resources, and `3`
+Current `b6` MCP surface: `21` tools, `7` fixed resources, and `3`
 run-scoped URI templates.
 
 ## Tool surface

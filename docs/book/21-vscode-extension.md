@@ -10,6 +10,11 @@ CodeClone contracts. It does not define a second analysis truth model.
 
 Marketplace: [orenlab.codeclone](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)
 
+!!! note "No second truth path"
+    The extension is a guided IDE client over `codeclone-mcp`. It may reshape
+    review UX, but it must not recompute findings, health, or report truth
+    independently from MCP and canonical report semantics.
+
 ## Position in the platform
 
 The VS Code extension is:
@@ -116,6 +121,11 @@ Reviewed markers:
 - do not change canonical report truth
 
 ## Trust and runtime model
+
+!!! warning "Workspace trust still matters"
+    The extension is intentionally limited in Restricted Mode. Local analysis,
+    local git access, and local MCP startup remain disabled until the workspace
+    is trusted.
 
 The extension runs as a workspace extension and requires:
 
