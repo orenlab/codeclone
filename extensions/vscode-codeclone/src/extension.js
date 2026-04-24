@@ -61,6 +61,7 @@ const {
     renderSetupMarkdown,
     renderTriageMarkdown,
 } = require("./renderers");
+const {loadRunArtifacts} = require("./runArtifacts");
 const {
     HotspotsTreeProvider,
     OverviewTreeProvider,
@@ -1059,32 +1060,21 @@ class CodeCloneController {
                             ...analysisSettings.overrides,
                         });
                     const runId = String(analysisPayload.run_id);
-                    const summary = await this.client.callTool("get_run_summary", {
-                        run_id: runId,
-                    });
-                    const triage = await this.client.callTool("get_production_triage", {
-                        run_id: runId,
-                        max_hotspots: 5,
-                        max_suggestions: 5,
-                    });
-                    const metrics = await this.client.callTool("get_report_section", {
-                        run_id: runId,
-                        section: "metrics",
-                    });
-                    const reviewed = await this.client.callTool("list_reviewed_findings", {
-                        run_id: runId,
-                    });
-                    const gitSnapshot = await captureWorkspaceGitSnapshot(folder);
+                    const artifacts = await loadRunArtifacts(
+                        this.client,
+                        folder,
+                        runId
+                    );
                     state.currentRunId = runId;
-                    state.latestSummary = summary;
-                    state.latestTriage = triage;
-                    state.metricsSummary = metrics.summary || metrics;
+                    state.latestSummary = artifacts.summary;
+                    state.latestTriage = artifacts.triage;
+                    state.metricsSummary = artifacts.metricsSummary;
                     state.changedSummary = changedMode ? analysisPayload : null;
                     state.analysisSettings = analysisSettings;
-                    state.reviewed = safeArray(reviewed.items);
+                    state.reviewed = artifacts.reviewedItems;
                     state.lastScope = changedMode ? "changed" : "workspace";
                     state.lastUpdatedAt = new Date();
-                    state.gitSnapshot = gitSnapshot;
+                    state.gitSnapshot = artifacts.gitSnapshot;
                     state.stale = false;
                     state.staleReason = null;
                     state.lastStaleCheckAt = Date.now();

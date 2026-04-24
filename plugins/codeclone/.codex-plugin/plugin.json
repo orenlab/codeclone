@@ -1,5 +1,5 @@
 {
-  "name": "CodeClone",
+  "name": "codeclone",
   "version": "2.0.0-b6.0",
   "description": "Baseline-aware structural code quality analysis for Codex through the local CodeClone MCP server.",
   "author": {

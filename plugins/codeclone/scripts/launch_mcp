@@ -1,0 +1,9 @@
+from __future__ import annotations
+
+import runpy
+from pathlib import Path
+
+PLUGIN_LAUNCHER = Path(__file__).with_name("launch_mcp.py")
+
+if __name__ == "__main__":
+    runpy.run_path(str(PLUGIN_LAUNCHER), run_name="__main__")

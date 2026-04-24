@@ -9,6 +9,7 @@ Repo-local discovery via `.agents/plugins/marketplace.json`.
 |------------------------------|----------------------------------------------------|
 | `.codex-plugin/plugin.json`  | Plugin metadata, prompts, instructions             |
 | `.mcp.json`                  | Workspace-first MCP launcher definition            |
+| `scripts/launch_mcp`         | Shell-free launcher wrapper for Codex              |
 | `skills/codeclone-review/`   | Conservative-first full review skill               |
 | `skills/codeclone-hotspots/` | Quick hotspot discovery skill                      |
 | `assets/`                    | Plugin branding                                    |
@@ -47,6 +48,7 @@ not mutate `~/.codex/config.toml` or install a second server binary.
 - if you already registered `codeclone-mcp` manually, keep only one setup path
   to avoid duplicate MCP surfaces
 - the bundled `.mcp.json` prefers `.venv`, then a Poetry env, then `PATH`
+- the bundled launcher stays shell-free and local-stdio-only
 
 For the underlying interface contract, see:
 

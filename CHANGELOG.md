@@ -31,6 +31,8 @@ report schema advances to `2.9` to surface the new depth profile.
 
 - Refresh AGENTS, docs/book, and changelog content for the b6 package layout and report schema `2.9`.
 - Tighten preview client metadata and install guidance for VS Code, Claude Desktop, and Codex.
+- Replace the Codex plugin shell snippet with a repo-local shell-free launcher, and parallelize VS Code post-run MCP
+  artifact hydration.
 - Add a quiet one-time VS Code extension hint in interactive VS Code terminals, tracked per CodeClone version next to
   the resolved project cache path.
 

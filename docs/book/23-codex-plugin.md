@@ -45,6 +45,7 @@ The plugin currently provides:
 
 - `.codex-plugin/plugin.json`
 - `.mcp.json`
+- `scripts/launch_mcp`
 - `README.md`
 - two bundled skills:
     - `codeclone-review`
@@ -56,6 +57,7 @@ The plugin currently provides:
 The plugin surface is additive:
 
 - `.mcp.json` contributes a local stdio MCP server definition
+- `scripts/launch_mcp.py` resolves the local launcher without shell wrapping
 - that launcher prefers a workspace `.venv`, then a Poetry env, then `PATH`
 - the skills contribute workflow guidance and starter prompts
 - `README.md` documents local usage and boundaries inside the repository tree
@@ -78,6 +80,8 @@ The plugin does not rewrite user config or install CodeClone automatically.
 - **Launcher honesty**: the plugin assumes `codeclone-mcp` is already
   installable in the current workspace or reachable on `PATH`, and prefers the
   workspace environment when one is present.
+- **Shell-free launch**: the bundled launcher must stay argv-based and
+  local-stdio-only.
 
 ## Relationship to other interfaces
 

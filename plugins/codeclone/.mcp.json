@@ -1,10 +1,9 @@
 {
   "mcpServers": {
     "codeclone": {
-      "command": "sh",
+      "command": "python3",
       "args": [
-        "-lc",
-        "if [ -x \"$PWD/.venv/bin/codeclone-mcp\" ]; then exec \"$PWD/.venv/bin/codeclone-mcp\" --transport stdio; fi; if command -v poetry >/dev/null 2>&1; then poetry_env=\"$(poetry env info -p 2>/dev/null || true)\"; if [ -n \"$poetry_env\" ] && [ -x \"$poetry_env/bin/codeclone-mcp\" ]; then exec \"$poetry_env/bin/codeclone-mcp\" --transport stdio; fi; fi; if command -v codeclone-mcp >/dev/null 2>&1; then exec codeclone-mcp --transport stdio; fi; echo 'codeclone-mcp not found: expected .venv/bin/codeclone-mcp, a Poetry env launcher, or a PATH entry' >&2; exit 1"
+        "./scripts/launch_mcp"
       ]
     }
   }

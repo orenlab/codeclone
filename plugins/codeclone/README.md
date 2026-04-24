@@ -12,10 +12,14 @@ directly, including `Coverage Join` facts and the optional `coverage` help topic
 | File                         | Purpose                                            |
 |------------------------------|----------------------------------------------------|
 | `.codex-plugin/plugin.json`  | Plugin metadata and prompts                        |
-| `.mcp.json`                  | Local `codeclone-mcp --transport stdio` definition |
+| `.mcp.json`                  | Local stdio MCP definition                         |
+| `scripts/launch_mcp`         | Shell-free workspace-first launcher bootstrap      |
 | `skills/codeclone-review/`   | Conservative-first full review skill               |
 | `skills/codeclone-hotspots/` | Quick hotspot discovery skill                      |
 | `assets/`                    | Plugin branding                                    |
+
+`plugin.json` keeps the machine identifier as lowercase `codeclone`; the
+user-facing label stays in `interface.displayName` as `CodeClone`.
 
 ## Install
 
@@ -24,6 +28,9 @@ The plugin prefers a workspace launcher first:
 1. `./.venv/bin/codeclone-mcp`
 2. the current Poetry environment launcher
 3. `codeclone-mcp` from `PATH`
+
+The bundled Codex launcher is a small repo-local Python wrapper, not a shell
+snippet. It keeps the same workspace-first order without relying on `sh -lc`.
 
 Recommended workspace-local setup:
 
