@@ -2830,13 +2830,14 @@ def test_html_report_provenance_badges_cover_mismatch_and_untrusted_metrics() ->
 
 def test_html_report_provenance_table_values_use_unified_badges() -> None:
     runtime_tag = current_python_tag()
+    baseline_tag = "cp313" if runtime_tag != "cp313" else "cp314"
     html = build_html_report(
         func_groups={},
         block_groups={},
         segment_groups={},
         report_meta={
             "python_tag": runtime_tag,
-            "baseline_python_tag": "cp312",
+            "baseline_python_tag": baseline_tag,
             "baseline_loaded": False,
             "baseline_status": "missing",
             "baseline_payload_sha256_verified": False,

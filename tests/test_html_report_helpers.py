@@ -631,13 +631,14 @@ def test_meta_snippet_and_assembly_helpers_cover_empty_optional_paths(
 
 def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
     runtime_tag = current_python_tag()
+    baseline_tag = "cp313" if runtime_tag != "cp313" else "cp314"
     meta_html = render_meta_panel(
         cast(
             Any,
             SimpleNamespace(
                 meta={
                     "python_tag": runtime_tag,
-                    "baseline_python_tag": "cp312",
+                    "baseline_python_tag": baseline_tag,
                     "cache_status": "stale",
                     "metrics_baseline_loaded": True,
                     "metrics_baseline_payload_sha256_verified": True,
