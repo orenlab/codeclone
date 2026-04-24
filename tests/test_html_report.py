@@ -14,6 +14,7 @@ from typing import Any, cast
 
 import pytest
 
+from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import (
     CACHE_VERSION,
     DOCS_URL,
@@ -2828,12 +2829,13 @@ def test_html_report_provenance_badges_cover_mismatch_and_untrusted_metrics() ->
 
 
 def test_html_report_provenance_table_values_use_unified_badges() -> None:
+    runtime_tag = current_python_tag()
     html = build_html_report(
         func_groups={},
         block_groups={},
         segment_groups={},
         report_meta={
-            "python_tag": "cp313",
+            "python_tag": runtime_tag,
             "baseline_python_tag": "cp312",
             "baseline_loaded": False,
             "baseline_status": "missing",
@@ -2855,7 +2857,7 @@ def test_html_report_provenance_table_values_use_unified_badges() -> None:
         '<span class="prov-badge-val">unverified</span>',
         '<span class="prov-badge-val">ok</span>',
         '<span class="prov-badge-val">hit</span>',
-        '<span class="prov-badge-val">runtime cp313</span>',
+        f'<span class="prov-badge-val">runtime {runtime_tag}</span>',
     )
     assert 'class="meta-status' not in html
     assert 'class="meta-bool' not in html

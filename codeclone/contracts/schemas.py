@@ -33,9 +33,9 @@ class ReportMeta(TypedDict):
     Canonical report metadata contract shared by HTML, JSON, and TXT reports.
 
     Key semantics:
-    - python_version: runtime major.minor string for human readability (e.g. "3.13")
+    - python_version: runtime major.minor string for human readability (e.g. "3.14")
     - python_tag: runtime compatibility tag used by baseline/cache contracts
-      (e.g. "cp313")
+      (e.g. "cp314")
     - baseline_*: values loaded from baseline metadata for audit/provenance
     - cache_*: cache status/provenance for run transparency
     """

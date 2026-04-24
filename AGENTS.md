@@ -162,7 +162,7 @@ versions from another document.
     },
     "schema_version": "2.1",
     "fingerprint_version": "1",
-    "python_tag": "cp313",
+    "python_tag": "cp314",
     "created_at": "2026-02-08T14:20:15Z",
     "payload_sha256": "…"
   },

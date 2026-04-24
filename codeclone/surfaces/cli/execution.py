@@ -222,7 +222,11 @@ def enforce_gating(
         sys.exit(ExitCode.CONTRACT_ERROR)
 
     if baseline_failure_code is not None:
-        printer.print(ui.fmt_contract_error(ui.ERR_BASELINE_GATING_REQUIRES_TRUSTED))
+        printer.print(
+            ui.fmt_contract_error(
+                ui.fmt_baseline_gating_requires_trusted(ci=bool_attr(args, "ci"))
+            )
+        )
         sys.exit(baseline_failure_code)
 
     if metrics_baseline_failure_code is not None:

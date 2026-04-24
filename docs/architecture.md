@@ -274,7 +274,7 @@ baseline/options contract violations.
 ## Python Tag Consistency for Baseline Checks
 
 Due to inherent AST differences across interpreter builds, baseline compatibility
-is pinned to `python_tag` (for example `cp313`).
+is pinned to `python_tag` (for example `cp314`).
 
 This preserves deterministic and reproducible clone detection results while allowing
 patch updates within the same interpreter tag.

@@ -16,7 +16,7 @@ Define terms exactly as used by code and tests.
 - **block_hash**: ordered sequence of normalized statement hashes in a fixed window
 - **segment_hash**: hash of an ordered segment window
 - **segment_sig**: hash of a sorted segment window used for candidate grouping
-- **python_tag**: runtime compatibility tag like `cp313`
+- **python_tag**: runtime compatibility tag like `cp314`
 - **schema_version**:
     - baseline schema in `meta.schema_version`
     - cache schema in top-level `v`

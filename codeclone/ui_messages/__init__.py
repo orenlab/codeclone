@@ -326,8 +326,12 @@ WARN_BASELINE_IGNORED = (
     "[dim]Comparison will proceed against an empty baseline.[/dim]\n"
     f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
 )
-ERR_BASELINE_GATING_REQUIRES_TRUSTED = (
+ERR_BASELINE_CI_REQUIRES_TRUSTED = (
     f"[error]CI requires a trusted baseline.[/error]\n{ACTION_UPDATE_BASELINE}"
+)
+ERR_BASELINE_GATING_REQUIRES_TRUSTED = (
+    "[error]Baseline-aware gates require a trusted baseline.[/error]\n"
+    f"{ACTION_UPDATE_BASELINE}"
 )
 SUCCESS_BASELINE_UPDATED = "✔ Baseline updated: {path}"
 
@@ -437,6 +441,12 @@ def fmt_legacy_cache_warning(*, legacy_path: Path, new_path: Path) -> str:
 
 def fmt_invalid_baseline(error: object) -> str:
     return ERR_INVALID_BASELINE.format(error=error)
+
+
+def fmt_baseline_gating_requires_trusted(*, ci: bool) -> str:
+    return (
+        ERR_BASELINE_CI_REQUIRES_TRUSTED if ci else ERR_BASELINE_GATING_REQUIRES_TRUSTED
+    )
 
 
 def fmt_cli_runtime_warning(message: object) -> str:

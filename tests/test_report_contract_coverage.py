@@ -14,6 +14,7 @@ from typing import cast
 import pytest
 
 import codeclone.report.document._common as document_common_mod
+from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import (
     ReportLocation,
@@ -526,12 +527,13 @@ def _rich_report_document() -> dict[str, object]:
             source_breakdown=(("production", 2),),
         ),
     )
+    runtime_tag = current_python_tag()
     meta = {
         "codeclone_version": "2.0.0b2",
         "project_name": "codeclone",
         "scan_root": "/repo/codeclone",
-        "python_version": "3.13.11",
-        "python_tag": "cp313",
+        "python_version": f"{runtime_tag[2]}.{runtime_tag[3:]}",
+        "python_tag": runtime_tag,
         "analysis_mode": "full",
         "report_mode": "full",
         "min_loc": 10,

@@ -13,6 +13,7 @@ import pytest
 import codeclone.report.html.assemble as assemble_mod
 import codeclone.report.html.sections._suggestions as suggestions_section
 import codeclone.ui_messages as ui
+from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import MetricsDiff, ReportLocation, Suggestion
 from codeclone.report.html.sections._clones import (
@@ -629,12 +630,13 @@ def test_meta_snippet_and_assembly_helpers_cover_empty_optional_paths(
 
 
 def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
+    runtime_tag = current_python_tag()
     meta_html = render_meta_panel(
         cast(
             Any,
             SimpleNamespace(
                 meta={
-                    "python_tag": "cp313",
+                    "python_tag": runtime_tag,
                     "baseline_python_tag": "cp312",
                     "cache_status": "stale",
                     "metrics_baseline_loaded": True,
@@ -655,6 +657,6 @@ def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
     assert 'class="prov-badge prov-badge--amber prov-badge--inline"' in meta_html
     assert '<span class="prov-badge-val">FAILED</span>' in meta_html
     assert '<span class="prov-badge-val">stale</span>' in meta_html
-    assert '<span class="prov-badge-val">runtime cp313</span>' in meta_html
+    assert f'<span class="prov-badge-val">runtime {runtime_tag}</span>' in meta_html
     assert '<span class="prov-badge-val">verified</span>' in meta_html
     assert '<span class="prov-badge-lbl">Metrics baseline</span>' in meta_html

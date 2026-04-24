@@ -16,6 +16,7 @@ import pytest
 import codeclone.report.merge as merge_mod
 import codeclone.report.overview as overview_mod
 import codeclone.report.renderers.text as text_renderer_mod
+from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.findings.clones.grouping import (
     build_block_groups,
@@ -421,7 +422,7 @@ def test_report_output_formats(
     expected_text = [
         "REPORT METADATA",
         f"Report schema version: {REPORT_SCHEMA_VERSION}",
-        "Python tag: cp313",
+        f"Python tag: {current_python_tag()}",
         "Report generated (UTC): 2026-03-10T12:00:00Z",
         "Baseline path: codeclone.baseline.json",
         "Baseline schema version: 1",

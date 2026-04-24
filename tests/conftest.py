@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 
 import pytest
 
+from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 
 ReportMetaFactory = Callable[..., dict[str, object]]
@@ -18,15 +20,17 @@ ReportMetaFactory = Callable[..., dict[str, object]]
 @pytest.fixture
 def report_meta_factory() -> ReportMetaFactory:
     def _make(**overrides: object) -> dict[str, object]:
+        runtime_tag = current_python_tag()
+        runtime_version = f"{sys.version_info.major}.{sys.version_info.minor}"
         meta: dict[str, object] = {
             "report_schema_version": REPORT_SCHEMA_VERSION,
             "codeclone_version": "1.4.0",
-            "python_version": "3.13",
-            "python_tag": "cp313",
+            "python_version": runtime_version,
+            "python_tag": runtime_tag,
             "baseline_path": "/repo/codeclone.baseline.json",
             "baseline_fingerprint_version": "1",
             "baseline_schema_version": "1.0",
-            "baseline_python_tag": "cp313",
+            "baseline_python_tag": runtime_tag,
             "baseline_generator_name": "codeclone",
             "baseline_generator_version": "1.4.0",
             "baseline_payload_sha256": "a" * 64,

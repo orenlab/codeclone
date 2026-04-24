@@ -210,6 +210,7 @@ def resolve_metrics_baseline_state(
     args: _BaselineArgs,
     metrics_baseline_path: Path,
     metrics_baseline_exists: bool,
+    clone_baseline_state: CloneBaselineState,
     baseline_updated_path: Path | None,
     project_metrics: ProjectMetrics | None,
     console: _PrinterLike,
@@ -229,6 +230,7 @@ def resolve_metrics_baseline_state(
     _load_metrics_baseline_for_diff(
         args=args,
         metrics_baseline_exists=metrics_baseline_exists,
+        clone_baseline_state=clone_baseline_state,
         state=state,
         console=console,
         shared_baseline_payload=shared_baseline_payload,
@@ -282,10 +284,17 @@ def _load_metrics_baseline_for_diff(
     *,
     args: _BaselineArgs,
     metrics_baseline_exists: bool,
+    clone_baseline_state: CloneBaselineState,
     state: _MetricsBaselineRuntime,
     console: _PrinterLike,
     shared_baseline_payload: dict[str, object] | None = None,
 ) -> None:
+    suppress_invalid_message = bool(
+        shared_baseline_payload is not None
+        and not clone_baseline_state.loaded
+        and clone_baseline_state.status in BASELINE_UNTRUSTED_STATUSES
+    )
+
     if not metrics_baseline_exists:
         if _metrics_baseline_gate_requested(args) and not args.update_metrics_baseline:
             state.failure_code = ExitCode.CONTRACT_ERROR
@@ -308,7 +317,8 @@ def _load_metrics_baseline_for_diff(
     except BaselineValidationError as exc:
         state.status = coerce_metrics_baseline_status(exc.status)
         if not args.update_metrics_baseline:
-            console.print(ui.fmt_invalid_baseline(exc))
+            if not suppress_invalid_message:
+                console.print(ui.fmt_invalid_baseline(exc))
             if args.fail_on_new_metrics:
                 state.failure_code = ExitCode.CONTRACT_ERROR
         return
@@ -320,7 +330,8 @@ def _load_metrics_baseline_for_diff(
         state.baseline.verify_compatibility(runtime_python_tag=current_python_tag())
     except BaselineValidationError as exc:
         state.status = coerce_metrics_baseline_status(exc.status)
-        console.print(ui.fmt_invalid_baseline(exc))
+        if not suppress_invalid_message:
+            console.print(ui.fmt_invalid_baseline(exc))
         if args.fail_on_new_metrics:
             state.failure_code = ExitCode.CONTRACT_ERROR
     else:
@@ -471,6 +482,7 @@ def _resolve_metrics_baseline_state(
     args: CLIArgsLike,
     metrics_baseline_path: Path,
     metrics_baseline_exists: bool,
+    clone_baseline_state: CloneBaselineState,
     baseline_updated_path: Path | None,
     analysis: AnalysisResult,
     shared_baseline_payload: dict[str, object] | None = None,
@@ -479,6 +491,7 @@ def _resolve_metrics_baseline_state(
         args=args,
         metrics_baseline_path=metrics_baseline_path,
         metrics_baseline_exists=metrics_baseline_exists,
+        clone_baseline_state=clone_baseline_state,
         baseline_updated_path=baseline_updated_path,
         project_metrics=analysis.project_metrics,
         console=require_status_console(cli_state.get_console()),

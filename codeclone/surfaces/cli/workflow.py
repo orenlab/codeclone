@@ -389,6 +389,7 @@ def _main_impl() -> None:
         args=args,
         metrics_baseline_path=baseline_inputs.metrics_baseline_path,
         metrics_baseline_exists=baseline_inputs.metrics_baseline_exists,
+        clone_baseline_state=baseline_state,
         baseline_updated_path=baseline_state.updated_path,
         analysis=analysis_result,
         shared_baseline_payload=shared_baseline_payload,

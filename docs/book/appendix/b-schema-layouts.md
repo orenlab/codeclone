@@ -12,7 +12,7 @@ Compact structural layouts for baseline/cache/report contracts in `2.0.0b6`.
     "generator": { "name": "codeclone", "version": "2.0.0b6" },
     "schema_version": "2.1",
     "fingerprint_version": "1",
-    "python_tag": "cp313",
+    "python_tag": "cp314",
     "created_at": "2026-03-11T00:00:00Z",
     "payload_sha256": "...",
     "metrics_payload_sha256": "...",
@@ -62,7 +62,7 @@ Notes:
   "meta": {
     "generator": { "name": "codeclone", "version": "2.0.0b6" },
     "schema_version": "1.2",
-    "python_tag": "cp313",
+    "python_tag": "cp314",
     "created_at": "2026-03-11T00:00:00Z",
     "payload_sha256": "...",
     "api_surface_payload_sha256": "..."
@@ -97,7 +97,7 @@ Notes:
 {
   "v": "2.5",
   "payload": {
-    "py": "cp313",
+    "py": "cp314",
     "fp": "1",
     "ap": {
       "min_loc": 10,

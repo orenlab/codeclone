@@ -1618,9 +1618,47 @@ def test_cli_legacy_baseline_fail_on_new_fails_fast_exit_2(
         out,
         "legacy (<=1.3.x)",
         "Invalid baseline file",
-        "CI requires a trusted baseline",
+        "Baseline-aware gates require a trusted baseline",
         "Run: codeclone . --update-baseline",
     )
+
+
+def test_cli_shared_baseline_mismatch_is_reported_once_without_ci_label(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_default_source(tmp_path)
+    mismatch_tag = "cp313" if baseline.current_python_tag() != "cp313" else "cp314"
+    _write_baseline(
+        tmp_path / "codeclone.baseline.json",
+        python_version="3.13" if mismatch_tag == "cp313" else "3.14",
+        python_tag=mismatch_tag,
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[tool.codeclone]
+fail_on_new = true
+fail_on_new_metrics = true
+""".strip()
+        + "\n",
+        "utf-8",
+    )
+
+    _assert_parallel_cli_exit(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--html",
+            "--no-progress",
+        ],
+        expected_code=2,
+    )
+
+    out = capsys.readouterr().out
+    assert out.count("Invalid baseline file") == 1
+    assert "CI requires a trusted baseline" not in out
+    assert "Baseline-aware gates require a trusted baseline" in out
 
 
 def test_cli_reports_include_audit_metadata_integrity_failed(
