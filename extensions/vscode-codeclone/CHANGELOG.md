@@ -1,5 +1,10 @@
 # Change Log
 
+## 0.2.4
+
+- restore repo-local `uv run codeclone-mcp` fallback for the refactored MCP server layout
+- cover both legacy and current CodeClone repo markers in extension runtime tests
+
 ## 0.2.3
 
 - explain baseline mismatch runs more clearly with compact baseline/runtime tag context

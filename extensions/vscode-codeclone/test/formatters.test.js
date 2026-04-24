@@ -4,8 +4,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Module = require("node:module");
 
-const originalLoad = Module._load;
-Module._load = function patchedLoad(request, parent, isMain) {
+const moduleInternals = /** @type {{_load: Function}} */ (
+    /** @type {unknown} */ (Module)
+);
+const originalLoad = moduleInternals._load;
+moduleInternals._load = function patchedLoad(request, parent, isMain) {
     if (request === "vscode") {
         return {
             ThemeIcon: class ThemeIcon {},
@@ -23,7 +26,7 @@ const {
     formatCoverageJoinSummary,
 } = require("../src/formatters");
 
-Module._load = originalLoad;
+moduleInternals._load = originalLoad;
 
 test("coverage join formatters render joined summary from canonical metrics facts", () => {
     const payload = {

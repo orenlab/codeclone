@@ -14,7 +14,7 @@ def test_codex_plugin_manifest_is_consistent() -> None:
     manifest = _load_json(plugin_root / ".codex-plugin" / "plugin.json")
 
     assert isinstance(manifest, dict)
-    assert manifest["name"] == "codeclone"
+    assert manifest["name"] == "CodeClone"
     assert manifest["version"] == "2.0.0-b6.0"
     assert manifest["skills"] == "./skills/"
     assert manifest["mcpServers"] == "./.mcp.json"

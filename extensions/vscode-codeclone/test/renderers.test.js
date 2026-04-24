@@ -4,8 +4,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Module = require("node:module");
 
-const originalLoad = Module._load;
-Module._load = function patchedLoad(request, parent, isMain) {
+const moduleInternals = /** @type {{_load: Function}} */ (
+    /** @type {unknown} */ (Module)
+);
+const originalLoad = moduleInternals._load;
+moduleInternals._load = function patchedLoad(request, parent, isMain) {
     if (request === "vscode") {
         return {
             ThemeIcon: class ThemeIcon {},
@@ -21,7 +24,7 @@ const {
 } = require("../src/formatters");
 const {renderTriageMarkdown} = require("../src/renderers");
 
-Module._load = originalLoad;
+moduleInternals._load = originalLoad;
 
 test("formatBaselineState explains comparison without a valid baseline", () => {
     assert.equal(

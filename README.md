@@ -35,7 +35,7 @@
 CodeClone provides deterministic structural code quality analysis for Python.
 It detects architectural duplication, computes quality metrics, and enforces CI gates — all with **baseline-aware
 governance** that separates **known** technical debt from **new** regressions.
-An optional MCP interface exposes the same canonical analysis pipeline to AI agents and IDEs.
+A triage-first MCP control surface exposes the same canonical pipeline to AI agents and IDEs.
 
 Docs: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/) ·
 Live sample report:
@@ -58,7 +58,7 @@ Live sample report:
 - **Coverage Join** — fuse external Cobertura XML into the current run to surface coverage hotspots and scope gaps
 - **Baseline governance** — separates accepted **legacy** debt from **new regressions**; CI fails only on what changed
 - **Reports** — interactive HTML, JSON, Markdown, SARIF, and text from one canonical report
-- **MCP server** — optional read-only surface for AI agents and IDEs
+- **MCP control surface** — triage-first agent and IDE interface over the same canonical pipeline; read-only by contract
 - **IDE & agent clients** — VS Code extension, Claude Desktop bundle, and Codex plugin over the same MCP contract
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Fast** — incremental caching, parallel processing, warm-run optimization
@@ -179,10 +179,10 @@ repos:
         types: [ python ]
 ```
 
-## MCP Server
+## MCP Control Surface
 
-Optional read-only MCP server for AI agents and IDE clients.
-Never mutates source, baselines, or repo state.
+Triage-first MCP server for AI agents and IDE clients, built on the same canonical pipeline as the CLI. Read-only by
+contract: never mutates source, baselines, or repo state.
 
 ```bash
 uv tool install --pre "codeclone[mcp]"
@@ -207,7 +207,7 @@ codeclone-mcp --transport streamable-http
 | **Claude Desktop bundle** | [`extensions/claude-desktop-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone) | Local `.mcpb` install with pre-loaded instructions |
 | **Codex plugin**          | [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone)                                     | Native discovery, two skills, and MCP definition   |
 
-All three are thin wrappers over the same `codeclone-mcp` contract — no second analysis engine.
+All three are native clients over the same `codeclone-mcp` contract — no second analysis engine.
 
 [VS Code extension docs](https://orenlab.github.io/codeclone/book/21-vscode-extension/) ·
 [Claude Desktop docs](https://orenlab.github.io/codeclone/book/22-claude-desktop-bundle/) ·
