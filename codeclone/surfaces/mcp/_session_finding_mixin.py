@@ -1305,6 +1305,7 @@ class _MCPSessionFindingMixin:
                 finding = self._service_get_finding(
                     finding_id=finding_id,
                     run_id=record.run_id,
+                    detail_level="full",
                 )
             except MCPFindingNotFoundError:
                 continue

@@ -825,6 +825,12 @@ def test_mcp_service_changed_runs_remediation_and_review_flow(tmp_path: Path) ->
 
     reviewed_items = service.list_reviewed_findings(run_id=str(after["run_id"]))
     assert reviewed_items["reviewed_count"] == 1
+    reviewed_entries = cast("list[dict[str, object]]", reviewed_items["items"])
+    reviewed_finding = cast("dict[str, object]", reviewed_entries[0]["finding"])
+    assert reviewed_finding["id"] == first_id
+    assert reviewed_finding["scope"] == clone_items[0]["scope"]
+    assert reviewed_finding["priority"] == clone_items[0]["priority"]
+    assert reviewed_finding["locations"] == clone_items[0]["locations"]
 
     unreviewed = service.list_findings(
         run_id=str(after["run_id"]),

@@ -523,6 +523,12 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert dead_code["check"] == "dead_code"
     assert reviewed["reviewed"] is True
     assert reviewed_items["reviewed_count"] == 1
+    reviewed_entries = cast("list[dict[str, object]]", reviewed_items["items"])
+    reviewed_finding = cast("dict[str, object]", reviewed_entries[0]["finding"])
+    assert reviewed_finding["id"] == first_finding_id
+    assert reviewed_finding["scope"] == summary_finding["scope"]
+    assert reviewed_finding["priority"] == summary_finding["priority"]
+    assert reviewed_finding["locations"] == summary_finding["locations"]
     assert "## CodeClone Summary" in str(pr_summary["content"])
 
     run_summary_resource = list(
