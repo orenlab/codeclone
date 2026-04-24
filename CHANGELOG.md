@@ -2,46 +2,37 @@
 
 ## [2.0.0b6]
 
-Stabilizes the post-refactor architecture, removes the remaining legacy shim
-tails, and replaces the old fixed dependency-depth penalty with an adaptive
-project-relative model.
+The global package refactor lands here: the entire runtime moves onto the canonical module layout and legacy shims are
+removed for good. On top of that, dependency-depth scoring is replaced with an adaptive project-relative model, and
+report schema advances to `2.9` to surface the new depth profile.
 
-### Architecture and contracts
+### Package layout and contracts
 
-- Move the runtime fully onto the canonical package layout:
-  `main` + `surfaces/cli`, `surfaces/mcp`, `core`, `analysis`, `baseline`,
-  `cache`, `contracts`, `report/document`, `report/renderers`, and
-  `report/html`.
-- Remove remaining legacy root shims and stale compatibility modules in favor
-  of direct canonical imports.
-- Keep clone baseline schema `2.1`, cache schema `2.5`, and metrics-baseline
-  schema `1.2` unchanged; bump report schema to `2.9` for additive dependency
-  depth profile fields.
-- Preserve deterministic contracts and read-only MCP semantics across the new
-  layout.
+- Move the runtime fully onto the canonical package layout: `main` + `surfaces/cli`, `surfaces/mcp`, `core`, `analysis`,
+  `baseline`, `cache`, `contracts`, `report/document`, `report/renderers`, and `report/html`.
+- Remove remaining legacy root shims and stale compatibility modules in favor of direct canonical imports.
+- Bump report schema to `2.9` for additive dependency depth profile fields; keep clone baseline schema `2.1`, cache
+  schema `2.5`, and metrics-baseline schema `1.2` unchanged.
+- Preserve deterministic contracts and read-only MCP semantics across the new layout.
 
-### Dependencies and health scoring
+### Dependency depth scoring
 
-- Replace the old fixed dependency-depth penalty (`max_depth > 8`) with an
-  adaptive internal-graph profile based on `avg_depth`, `p95_depth`, and
-  `max_depth`.
-- Keep dependency cycles as the hard signal; treat acyclic depth as adaptive
-  pressure relative to the project’s own dependency profile.
-- Limit dependency-depth scoring to the internal module graph instead of
-  external imports such as `typing` or `argparse`.
-- Surface the dependency depth profile in the canonical report, HTML
-  Dependencies tab, and CLI/CI summaries.
-- Remove stale deleted-file cache entries and trim post-refactor import tails
-  that were inflating dependency depth and clone pressure.
+- Replace the old fixed dependency-depth penalty (`max_depth > 8`) with an adaptive internal-graph profile based on
+  `avg_depth`, `p95_depth`, and `max_depth`.
+- Keep dependency cycles as the hard signal; treat acyclic depth as adaptive pressure relative to the project's own
+  dependency profile.
+- Limit dependency-depth scoring to the internal module graph instead of external imports such as `typing` or
+  `argparse`.
+- Surface the dependency depth profile in the canonical report, HTML Dependencies tab, and CLI/CI summaries.
+- Remove stale deleted-file cache entries and trim post-refactor import tails that were inflating dependency depth and
+  clone pressure.
 
 ### Tooling, docs, and UX
 
-- Refresh AGENTS, docs/book, and changelog content for the b6 package layout
-  and report schema `2.9`.
-- Tighten preview client metadata and install guidance for VS Code, Claude
-  Desktop, and Codex.
-- Add a quiet one-time VS Code extension hint in interactive VS Code terminals,
-  tracked per CodeClone version next to the resolved project cache path.
+- Refresh AGENTS, docs/book, and changelog content for the b6 package layout and report schema `2.9`.
+- Tighten preview client metadata and install guidance for VS Code, Claude Desktop, and Codex.
+- Add a quiet one-time VS Code extension hint in interactive VS Code terminals, tracked per CodeClone version next to
+  the resolved project cache path.
 
 ## [2.0.0b5] - 2026-04-16
 
@@ -64,7 +55,8 @@ across MCP/HTML/clients; tightens MCP launcher/runtime behavior.
   `--fail-on-docstring-regression`, `--fail-on-api-break`, `--fail-on-untested-hotspots`, `--coverage-min`.
 - Surface adoption/API/coverage-join in MCP, CLI Metrics, report payloads, and HTML (Overview + Quality subtab).
 - Preserve embedded metrics and optional `api_surface` in unified baselines.
-- Cache `2.5`: make analysis-profile compatibility API-surface-aware; invalidate stale non-API warm caches; preserve parameter order; align warm/cold API diffs.
+- Cache `2.5`: make analysis-profile compatibility API-surface-aware; invalidate stale non-API warm caches; preserve
+  parameter order; align warm/cold API diffs.
 
 ### MCP, HTML, and client interpretation
 

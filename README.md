@@ -52,8 +52,8 @@ Live sample report:
 
 - **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
 - **Structural findings** — duplicated branch families, clone guard/exit divergence, and clone-cohort drift
-- **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, dead code,
-  health score, and overloaded-module profiling
+- **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, adaptive depth
+  profile, dead code, health score, and overloaded-module profiling
 - **Adoption & API** — type/docstring annotation coverage, public API surface inventory and baseline diff
 - **Coverage Join** — fuse external Cobertura XML into the current run to surface coverage hotspots and scope gaps
 - **Baseline governance** — separates accepted **legacy** debt from **new regressions**; CI fails only on what changed
@@ -492,4 +492,4 @@ Versions released before this change remain under their original license terms.
 - **Docs:** <https://orenlab.github.io/codeclone/>
 - **Issues:** <https://github.com/orenlab/codeclone/issues>
 - **PyPI:** <https://pypi.org/project/codeclone/>
-- **Licenses:** [MPL-2.0](LICENSE) · [MIT docs](LICENSE-MIT) · [Scope map](LICENSES.md)
+- **Licenses:** [MPL-2.0](https://github.com/orenlab/codeclone/blob/main/LICENSE) · [MIT docs](https://github.com/orenlab/codeclone/blob/main/LICENSE-MIT) · [Scope map](https://github.com/orenlab/codeclone/blob/main/LICENSES.md)

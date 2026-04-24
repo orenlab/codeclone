@@ -27,9 +27,10 @@ policy for future scoring-model expansion.
 - The current scoring model includes exactly seven dimensions:
   `clones`, `complexity`, `coupling`, `cohesion`, `dead_code`,
   `dependencies`, `coverage`.
-- Report-only or advisory layers must not affect the score until they are explicitly promoted and documented.
+- Report-only or advisory layers must not affect the score until they are
+  explicitly promoted and documented.
 
-## What currently affects Health Score
+## Scoring model
 
 Current weights from `codeclone/contracts/__init__.py:HEALTH_WEIGHTS`:
 
@@ -51,15 +52,19 @@ Important clarifications:
 - Dependencies score uses the internal module dependency graph only.
 - Cycles still penalize the dependencies dimension directly.
 - Acyclic depth pressure is adaptive:
-  `expected_tail = max(ceil(avg_depth * 2.0), p95_depth + 1)`, then
-  `tail_pressure = max(0, max_depth - expected_tail)`.
-- The dependencies dimension score is:
-  `100 - cycles * 25 - tail_pressure * 4`.
+
+```
+  expected_tail = max(ceil(avg_depth * 2.0), p95_depth + 1)
+  tail_pressure = max(0, max_depth - expected_tail)
+  score         = 100 - cycles * 25 - tail_pressure * 4
+```
+
 - This model is internal and not configurable through CLI or `pyproject.toml`.
 
 ## Current non-scoring layers
 
-Visible but non-scoring:
+These layers are report-only: they provide signal but are not yet validated
+for scoring-model inclusion.
 
 - `metrics.families.overloaded_modules`
 - `findings.groups.clones.segments`
