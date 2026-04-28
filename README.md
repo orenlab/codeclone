@@ -283,11 +283,11 @@ Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-r
 [HTML render](https://orenlab.github.io/codeclone/book/10-html-render/)
 
 <details>
-<summary>Canonical JSON report shape (v2.9)</summary>
+<summary>Canonical JSON report shape (v2.10)</summary>
 
 ```json
 {
-  "report_schema_version": "2.9",
+  "report_schema_version": "2.10",
   "meta": {
     "codeclone_version": "2.0.0b6",
     "project_name": "...",

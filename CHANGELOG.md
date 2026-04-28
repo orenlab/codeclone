@@ -1,10 +1,11 @@
 # Changelog
 
-## [2.0.0b6]
+## [2.0.0b6] - 2026-04-28
 
-The global package refactor lands here: the entire runtime moves onto the canonical module layout and legacy shims are
-removed for good. On top of that, dependency-depth scoring is replaced with an adaptive project-relative model, and
-the report/cache contracts advance to surface the new depth profile and the
+The global package refactor lands here: the entire runtime moves onto the
+canonical module layout and legacy shims are removed for good. On top of that,
+dependency-depth scoring is replaced with an adaptive project-relative model,
+and the report/cache contracts advance to surface the new depth profile and the
 report-only `security_surfaces` layer.
 
 ### Package layout and contracts
@@ -12,9 +13,10 @@ report-only `security_surfaces` layer.
 - Move the runtime fully onto the canonical package layout: `main` + `surfaces/cli`, `surfaces/mcp`, `core`, `analysis`,
   `baseline`, `cache`, `contracts`, `report/document`, `report/renderers`, and `report/html`.
 - Remove remaining legacy root shims and stale compatibility modules in favor of direct canonical imports.
-- Bump report schema to `2.10` and cache schema to `2.6` for additive
-  `security_surfaces` and cache-persisted security-surface facts; keep clone
-  baseline schema `2.1` and metrics-baseline schema `1.2` unchanged.
+- Remove stale deleted-file cache entries and trim post-refactor import tails that were inflating dependency depth and
+  clone pressure.
+- Bump report schema to `2.10` and cache schema to `2.6` for additive dependency depth profile fields and
+  `security_surfaces` facts; keep clone baseline schema `2.1` and metrics-baseline schema `1.2` unchanged.
 - Preserve deterministic contracts and read-only MCP semantics across the new layout.
 
 ### Dependency depth scoring
@@ -26,18 +28,15 @@ report-only `security_surfaces` layer.
 - Limit dependency-depth scoring to the internal module graph instead of external imports such as `typing` or
   `argparse`.
 - Surface the dependency depth profile in the canonical report, HTML Dependencies tab, and CLI/CI summaries.
-- Remove stale deleted-file cache entries and trim post-refactor import tails that were inflating dependency depth and
-  clone pressure.
 
 ### Security surfaces
 
-- Add `metrics.families.security_surfaces`: a report-only exact inventory of
-  security-relevant capability surfaces and trust-boundary code.
-- Surface compact `security_surfaces` facts in canonical report JSON,
-  CLI Metrics, HTML Quality, text/markdown projections, and MCP summaries /
-  `metrics_detail`.
-- Keep the layer honest: no vulnerability claims, no score impact, no gates,
-  no SARIF security findings, and no baseline truth.
+- Add `metrics.families.security_surfaces`: a report-only exact inventory of security-relevant capability surfaces and
+  trust-boundary code.
+- Surface compact `security_surfaces` facts in canonical report JSON, CLI Metrics, HTML Quality, text/markdown
+  projections, and MCP summaries / `metrics_detail`.
+- Keep the layer honest: no vulnerability claims, no score impact, no gates, no SARIF security findings, and no baseline
+  truth.
 
 ### Tooling, docs, and UX
 

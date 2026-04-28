@@ -41,8 +41,8 @@ Current server characteristics:
 - cache policies:
     - `reuse`
     - `off`
-    - `refresh` is accepted by the current MCP contract and routed through the
-      same runtime path as the CLI
+    - `refresh` is rejected by the read-only MCP service contract; use `reuse`
+      or `off`
 
 !!! warning "Absolute roots and remote exposure"
 Analysis tools require an absolute repository root, and HTTP exposure
