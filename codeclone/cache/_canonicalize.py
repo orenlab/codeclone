@@ -18,6 +18,7 @@ from ._validators import (
     _is_module_dep_dict,
     _is_module_docstring_coverage_dict,
     _is_module_typing_coverage_dict,
+    _is_security_surface_dict,
     _is_segment_dict,
     _is_source_stats_dict,
     _is_string_list,
@@ -35,6 +36,7 @@ from .entries import (
     ModuleDocstringCoverageDict,
     ModuleTypingCoverageDict,
     PublicSymbolDict,
+    SecuritySurfaceDict,
     SegmentDict,
     SourceStatsDict,
     StructuralFindingGroupDict,
@@ -110,6 +112,10 @@ def _as_typed_module_deps_list(value: object) -> list[ModuleDepDict] | None:
     return _as_typed_list(value, predicate=_is_module_dep_dict)
 
 
+def _as_typed_security_surfaces_list(value: object) -> list[SecuritySurfaceDict] | None:
+    return _as_typed_list(value, predicate=_is_security_surface_dict)
+
+
 def _as_typed_string_list(value: object) -> list[str] | None:
     return _as_typed_list(value, predicate=_is_str_item)
 
@@ -170,6 +176,7 @@ def _has_cache_entry_container_shape(entry: Mapping[str, object]) -> bool:
         "referenced_qualnames",
         "import_names",
         "class_names",
+        "security_surfaces",
         "structural_findings",
     )
     if not all(isinstance(entry.get(key, []), list) for key in optional_list_keys):
@@ -199,6 +206,7 @@ def _decode_optional_cache_sections(
         list[str],
         list[str],
         list[str],
+        list[SecuritySurfaceDict],
         ModuleTypingCoverageDict | None,
         ModuleDocstringCoverageDict | None,
         ModuleApiSurfaceDict | None,
@@ -218,6 +226,9 @@ def _decode_optional_cache_sections(
     )
     import_names_raw = _as_typed_string_list(entry.get("import_names", []))
     class_names_raw = _as_typed_string_list(entry.get("class_names", []))
+    security_surfaces_raw = _as_typed_security_surfaces_list(
+        entry.get("security_surfaces", [])
+    )
     if (
         class_metrics_raw is None
         or module_deps_raw is None
@@ -226,6 +237,7 @@ def _decode_optional_cache_sections(
         or referenced_qualnames_raw is None
         or import_names_raw is None
         or class_names_raw is None
+        or security_surfaces_raw is None
     ):
         return None
     typing_coverage_raw = _as_module_typing_coverage_dict(entry.get("typing_coverage"))
@@ -246,6 +258,7 @@ def _decode_optional_cache_sections(
         referenced_qualnames_raw,
         import_names_raw,
         class_names_raw,
+        security_surfaces_raw,
         typing_coverage_raw,
         docstring_coverage_raw,
         api_surface_raw,
@@ -260,6 +273,7 @@ def _attach_optional_cache_sections(
     typing_coverage: ModuleTypingCoverageDict | None = None,
     docstring_coverage: ModuleDocstringCoverageDict | None = None,
     api_surface: ModuleApiSurfaceDict | None = None,
+    security_surfaces: list[SecuritySurfaceDict] | None = None,
     source_stats: SourceStatsDict | None = None,
     structural_findings: list[StructuralFindingGroupDict] | None = None,
 ) -> CacheEntry:
@@ -269,6 +283,8 @@ def _attach_optional_cache_sections(
         entry["docstring_coverage"] = docstring_coverage
     if api_surface is not None:
         entry["api_surface"] = api_surface
+    if security_surfaces is not None:
+        entry["security_surfaces"] = security_surfaces
     if source_stats is not None:
         entry["source_stats"] = source_stats
     if structural_findings is not None:
@@ -340,6 +356,17 @@ def _canonicalize_cache_entry(entry: CacheEntry) -> CacheEntry:
         "referenced_qualnames": sorted(set(entry.get("referenced_qualnames", []))),
         "import_names": sorted(set(entry["import_names"])),
         "class_names": sorted(set(entry["class_names"])),
+        "security_surfaces": sorted(
+            entry.get("security_surfaces", []),
+            key=lambda item: (
+                item["start_line"],
+                item["end_line"],
+                item["qualname"],
+                item["category"],
+                item["capability"],
+                item["evidence_symbol"],
+            ),
+        ),
     }
     typing_coverage = entry.get("typing_coverage")
     if typing_coverage is not None:
@@ -417,6 +444,7 @@ __all__ = [
     "_as_typed_class_metrics_list",
     "_as_typed_dead_candidates_list",
     "_as_typed_module_deps_list",
+    "_as_typed_security_surfaces_list",
     "_as_typed_segment_list",
     "_as_typed_string_list",
     "_as_typed_unit_list",

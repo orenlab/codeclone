@@ -24,8 +24,8 @@ Current contract versions:
 
 - `BASELINE_SCHEMA_VERSION = "2.1"`
 - `BASELINE_FINGERPRINT_VERSION = "1"`
-- `CACHE_VERSION = "2.5"`
-- `REPORT_SCHEMA_VERSION = "2.9"`
+- `CACHE_VERSION = "2.6"`
+- `REPORT_SCHEMA_VERSION = "2.10"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.2"`
 
 Refs:
@@ -48,7 +48,7 @@ Operational compatibility rules:
 - runtime accepts clone baseline `1.0`, `2.0`, and `2.1`
 - runtime writes standalone metrics-baseline schema `1.2`
 - runtime accepts standalone metrics-baseline `1.1` and `1.2`
-- runtime writes cache schema `2.5`
+- runtime writes cache schema `2.6`
 - MCP does not define a separate schema constant; tool/resource semantics are package-versioned public surface
 
 Baseline regeneration is required when:

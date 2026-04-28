@@ -146,6 +146,8 @@ def _metrics_detail_family(value: str | None) -> MetricsDetailFamily | None:
             return "dead_code"
         case "api_surface":
             return "api_surface"
+        case "security_surfaces":
+            return "security_surfaces"
         case "god_modules" | "overloaded_modules":
             return "overloaded_modules"
         case "health":
@@ -769,6 +771,22 @@ def _summary_coverage_join_payload(record: MCPRunRecord) -> dict[str, object]:
     if invalid_reason:
         payload["invalid_reason"] = invalid_reason
     return payload
+
+
+def _summary_security_surfaces_payload(record: MCPRunRecord) -> dict[str, object]:
+    metrics = _as_mapping(record.report_document.get("metrics"))
+    families = _as_mapping(metrics.get("families"))
+    security_surfaces = _as_mapping(families.get("security_surfaces"))
+    summary = _as_mapping(security_surfaces.get("summary"))
+    if not summary:
+        return {}
+    return {
+        "items": _as_int(summary.get("items", 0), 0),
+        "categories": _as_int(summary.get("category_count", 0), 0),
+        "production": _as_int(summary.get("production", 0), 0),
+        "tests": _as_int(summary.get("tests", 0), 0),
+        "report_only": bool(summary.get("report_only", True)),
+    }
 
 
 def _compact_metrics_item(item: Mapping[str, object]) -> dict[str, object]:

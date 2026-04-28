@@ -530,6 +530,9 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
             coverage_join = _helpers._summary_coverage_join_payload(record)
             if coverage_join:
                 payload["coverage_join"] = coverage_join
+            security_surfaces = _helpers._summary_security_surfaces_payload(record)
+            if security_surfaces:
+                payload["security_surfaces"] = security_surfaces
         return payload
 
     def _summary_baseline_payload(
@@ -1002,6 +1005,9 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         coverage_join = _helpers._summary_coverage_join_payload(record)
         if coverage_join:
             payload["coverage_join"] = coverage_join
+        security_surfaces = _helpers._summary_security_surfaces_payload(record)
+        if security_surfaces:
+            payload["security_surfaces"] = security_surfaces
         return payload
 
     def get_help(

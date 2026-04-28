@@ -10,10 +10,7 @@ from ._canonicalize import _normalized_optional_string_list
 from .entries import CacheEntry, ClassMetricsDict
 
 
-def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
-    wire: dict[str, object] = {
-        "st": [entry["stat"]["mtime_ns"], entry["stat"]["size"]],
-    }
+def _encode_source_stats(entry: CacheEntry, wire: dict[str, object]) -> None:
     source_stats = entry.get("source_stats")
     if source_stats is not None:
         wire["ss"] = [
@@ -23,6 +20,8 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
             source_stats["classes"],
         ]
 
+
+def _encode_units(entry: CacheEntry, wire: dict[str, object]) -> None:
     units = sorted(
         entry["units"],
         key=lambda unit: (
@@ -56,6 +55,8 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
             for unit in units
         ]
 
+
+def _encode_blocks(entry: CacheEntry, wire: dict[str, object]) -> None:
     blocks = sorted(
         entry["blocks"],
         key=lambda block: (
@@ -77,6 +78,8 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
             for block in blocks
         ]
 
+
+def _encode_segments(entry: CacheEntry, wire: dict[str, object]) -> None:
     segments = sorted(
         entry["segments"],
         key=lambda segment: (
@@ -99,6 +102,20 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
             for segment in segments
         ]
 
+
+def _append_coupled_classes_row(
+    metric: ClassMetricsDict,
+    *,
+    rows: list[list[object]],
+) -> None:
+    coupled_classes = _normalized_optional_string_list(
+        metric.get("coupled_classes", [])
+    )
+    if coupled_classes:
+        rows.append([metric["qualname"], coupled_classes])
+
+
+def _encode_class_metrics(entry: CacheEntry, wire: dict[str, object]) -> None:
     class_metrics = sorted(
         entry["class_metrics"],
         key=lambda metric: (
@@ -109,14 +126,6 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
     )
     if class_metrics:
         coupled_classes_rows: list[list[object]] = []
-
-        def _append_coupled_classes_row(metric: ClassMetricsDict) -> None:
-            coupled_classes = _normalized_optional_string_list(
-                metric.get("coupled_classes", [])
-            )
-            if coupled_classes:
-                coupled_classes_rows.append([metric["qualname"], coupled_classes])
-
         wire["cm"] = [
             [
                 metric["qualname"],
@@ -132,10 +141,12 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
             for metric in class_metrics
         ]
         for metric in class_metrics:
-            _append_coupled_classes_row(metric)
+            _append_coupled_classes_row(metric, rows=coupled_classes_rows)
         if coupled_classes_rows:
             wire["cc"] = coupled_classes_rows
 
+
+def _encode_module_deps(entry: CacheEntry, wire: dict[str, object]) -> None:
     module_deps = sorted(
         entry["module_deps"],
         key=lambda dep: (dep["source"], dep["target"], dep["import_type"], dep["line"]),
@@ -151,6 +162,8 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
             for dep in module_deps
         ]
 
+
+def _encode_dead_candidates(entry: CacheEntry, wire: dict[str, object]) -> None:
     dead_candidates = sorted(
         entry["dead_candidates"],
         key=lambda candidate: (
@@ -178,6 +191,8 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
             encoded_dead_candidates.append(encoded)
         wire["dc"] = encoded_dead_candidates
 
+
+def _encode_name_lists(entry: CacheEntry, wire: dict[str, object]) -> None:
     if entry["referenced_names"]:
         wire["rn"] = sorted(set(entry["referenced_names"]))
     if entry.get("referenced_qualnames"):
@@ -186,6 +201,41 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
         wire["in"] = sorted(set(entry["import_names"]))
     if entry["class_names"]:
         wire["cn"] = sorted(set(entry["class_names"]))
+
+
+def _encode_security_surfaces(entry: CacheEntry, wire: dict[str, object]) -> None:
+    security_surfaces = sorted(
+        entry.get("security_surfaces", []),
+        key=lambda item: (
+            item["start_line"],
+            item["end_line"],
+            item["qualname"],
+            item["category"],
+            item["capability"],
+            item["evidence_symbol"],
+        ),
+    )
+    if security_surfaces:
+        wire["sc"] = [
+            [
+                item["category"],
+                item["capability"],
+                item["module"],
+                item["qualname"],
+                item["start_line"],
+                item["end_line"],
+                item["location_scope"],
+                item["classification_mode"],
+                item["evidence_kind"],
+                item["evidence_symbol"],
+            ]
+            for item in security_surfaces
+        ]
+
+
+def _encode_optional_metrics_sections(
+    entry: CacheEntry, wire: dict[str, object]
+) -> None:
     typing_coverage = entry.get("typing_coverage")
     if typing_coverage is not None:
         wire["tc"] = [
@@ -231,6 +281,8 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
             ],
         ]
 
+
+def _encode_structural_findings(entry: CacheEntry, wire: dict[str, object]) -> None:
     if "structural_findings" in entry:
         structural_findings = entry.get("structural_findings", [])
         wire["sf"] = [
@@ -246,6 +298,22 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
             for group in structural_findings
         ]
 
+
+def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
+    wire: dict[str, object] = {
+        "st": [entry["stat"]["mtime_ns"], entry["stat"]["size"]],
+    }
+    _encode_source_stats(entry, wire)
+    _encode_units(entry, wire)
+    _encode_blocks(entry, wire)
+    _encode_segments(entry, wire)
+    _encode_class_metrics(entry, wire)
+    _encode_module_deps(entry, wire)
+    _encode_dead_candidates(entry, wire)
+    _encode_name_lists(entry, wire)
+    _encode_security_surfaces(entry, wire)
+    _encode_optional_metrics_sections(entry, wire)
+    _encode_structural_findings(entry, wire)
     return wire
 
 

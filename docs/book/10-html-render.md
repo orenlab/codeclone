@@ -31,6 +31,9 @@ Output:
 - HTML must not recompute detection semantics; it renders facts from report/core layers.
 - Provenance panels mirror canonical report/meta facts.
 - Overview, Quality, Suggestions, Dead Code, and Clones tabs are projections over canonical report sections.
+- Quality may include report-only subtabs such as `Coverage Join` and
+  `Security Surfaces`; these remain factual projections over canonical metrics
+  families rather than HTML-only analysis.
 - IDE deep links are HTML-only UX over canonical path/line facts.
 - Missing snippets or optional meta fields render safe factual fallbacks rather than invented data.
 
@@ -86,6 +89,7 @@ Refs:
 - `tests/test_html_report.py::test_html_report_escapes_script_breakout_payload`
 - `tests/test_html_report.py::test_html_report_missing_source_snippet_fallback`
 - `tests/test_html_report.py::test_html_and_json_group_order_consistent`
+- `tests/test_html_report.py::test_html_report_quality_includes_security_surfaces_subtab`
 
 ## Non-guarantees
 

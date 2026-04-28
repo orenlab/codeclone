@@ -24,6 +24,7 @@ from ..models import (
     MetricsDiff,
     ModuleDep,
     ProjectMetrics,
+    SecuritySurface,
 )
 from ..utils.coerce import as_int, as_mapping, as_sequence, as_str
 from .api_surface_payload import (
@@ -37,6 +38,7 @@ from .coverage_payload import (
     _coverage_join_summary,
     _permille,
 )
+from .security_surfaces_payload import build_security_surfaces_payload
 
 
 def _enrich_metrics_report_payload(
@@ -111,6 +113,7 @@ def build_metrics_report_payload(
     units: Sequence[GroupItemLike],
     class_metrics: Sequence[ClassMetrics],
     module_deps: Sequence[ModuleDep] = (),
+    security_surfaces: Sequence[SecuritySurface] = (),
     source_stats_by_file: Sequence[tuple[str, int, int, int, int]] = (),
     suppressed_dead_code: Sequence[DeadItem] = (),
 ) -> dict[str, object]:
@@ -306,6 +309,10 @@ def build_metrics_report_payload(
             units=units,
             class_metrics=class_metrics,
             module_deps=module_deps,
+        ),
+        "security_surfaces": build_security_surfaces_payload(
+            scan_root=scan_root,
+            surfaces=security_surfaces,
         ),
     }
     if coverage_join is not None:

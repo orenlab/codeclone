@@ -997,6 +997,19 @@ def test_cli_metric_reason_parser_and_policy_context() -> None:
         "Health score regressed vs metrics baseline: delta=-7."
     ) == ("health_delta", "-7")
     assert cli_console._parse_metric_reason_entry(
+        "Typing coverage regressed vs metrics baseline: "
+        "params_delta=-2, returns_delta=-1."
+    ) == ("typing_coverage_delta", "-2 (returns_delta=-1)")
+    assert cli_console._parse_metric_reason_entry(
+        "Docstring coverage regressed vs metrics baseline: delta=-3."
+    ) == ("docstring_coverage_delta", "-3")
+    assert cli_console._parse_metric_reason_entry(
+        "Public API breaking changes vs metrics baseline: 5."
+    ) == ("api_breaking_changes", "5")
+    assert cli_console._parse_metric_reason_entry(
+        "Coverage hotspots detected: hotspots=2, threshold=50."
+    ) == ("coverage_hotspots", "2 (threshold=50)")
+    assert cli_console._parse_metric_reason_entry(
         "Dependency cycles detected: 3 cycle(s)."
     ) == ("dependency_cycles", "3")
     assert cli_console._parse_metric_reason_entry(

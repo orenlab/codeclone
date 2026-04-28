@@ -34,6 +34,10 @@ class MetricsSnapshot:
     dependency_avg_depth: float = 0.0
     dependency_p95_depth: int = 0
     dependency_max_depth: int = 0
+    security_surfaces_items: int = 0
+    security_surfaces_category_count: int = 0
+    security_surfaces_production: int = 0
+    security_surfaces_tests: int = 0
     suppressed_dead_code_count: int = 0
     overloaded_modules_candidates: int = 0
     overloaded_modules_total: int = 0
@@ -107,6 +111,9 @@ def build_metrics_snapshot(
     coverage_join_summary = _as_mapping(
         _as_mapping(metrics_payload_map.get("coverage_join")).get("summary")
     )
+    security_surfaces_summary = _as_mapping(
+        _as_mapping(metrics_payload_map.get("security_surfaces")).get("summary")
+    )
     coverage_join_source = str(coverage_join_summary.get("source", "")).strip()
     return MetricsSnapshot(
         complexity_avg=project_metrics.complexity_avg,
@@ -124,6 +131,14 @@ def build_metrics_snapshot(
             _as_mapping(metrics_payload_map.get("dependencies")).get("p95_depth")
         ),
         dependency_max_depth=project_metrics.dependency_max_depth,
+        security_surfaces_items=_as_int(security_surfaces_summary.get("items")),
+        security_surfaces_category_count=_as_int(
+            security_surfaces_summary.get("category_count")
+        ),
+        security_surfaces_production=_as_int(
+            security_surfaces_summary.get("production")
+        ),
+        security_surfaces_tests=_as_int(security_surfaces_summary.get("tests")),
         dead_code_count=len(project_metrics.dead_code),
         health_total=project_metrics.health.total,
         health_grade=project_metrics.health.grade,
@@ -293,6 +308,14 @@ def _print_metrics(
                 max_depth=metrics.dependency_max_depth,
             )
         )
+        console.print(
+            ui.fmt_summary_compact_security_surfaces(
+                items=metrics.security_surfaces_items,
+                categories=metrics.security_surfaces_category_count,
+                production=metrics.security_surfaces_production,
+                tests=metrics.security_surfaces_tests,
+            )
+        )
         if (
             metrics.adoption_param_permille is not None
             and metrics.adoption_return_permille is not None
@@ -351,6 +374,14 @@ def _print_metrics(
                 avg_depth=metrics.dependency_avg_depth,
                 p95_depth=metrics.dependency_p95_depth,
                 max_depth=metrics.dependency_max_depth,
+            )
+        )
+        console.print(
+            ui.fmt_metrics_security_surfaces(
+                items=metrics.security_surfaces_items,
+                categories=metrics.security_surfaces_category_count,
+                production=metrics.security_surfaces_production,
+                tests=metrics.security_surfaces_tests,
             )
         )
         console.print(

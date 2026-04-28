@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         ModuleDep,
         ModuleDocstringCoverage,
         ModuleTypingCoverage,
+        SecuritySurface,
     )
 
 MetricResult = dict[str, object]
@@ -39,6 +40,7 @@ class MetricProjectContext:
     dead_candidates: tuple[DeadCandidate, ...]
     referenced_names: frozenset[str]
     referenced_qualnames: frozenset[str]
+    security_surfaces: tuple[SecuritySurface, ...] = ()
     typing_modules: tuple[ModuleTypingCoverage, ...] = ()
     docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
     api_modules: tuple[ModuleApiSurface, ...] = ()

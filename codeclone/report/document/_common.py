@@ -57,6 +57,7 @@ _OVERLOADED_MODULES_FAMILY = "overloaded_modules"
 _COVERAGE_ADOPTION_FAMILY = "coverage_adoption"
 _API_SURFACE_FAMILY = "api_surface"
 _COVERAGE_JOIN_FAMILY = "coverage_join"
+_SECURITY_SURFACES_FAMILY = "security_surfaces"
 
 
 def _optional_str(value: object) -> str | None:
@@ -329,6 +330,12 @@ def _collect_paths_from_metrics(metrics: Mapping[str, object]) -> set[str]:
             paths.add(filepath)
     coverage_join = _as_mapping(metrics.get(_COVERAGE_JOIN_FAMILY))
     for item in _as_sequence(coverage_join.get("items")):
+        item_map = _as_mapping(item)
+        filepath = _optional_str(item_map.get("filepath"))
+        if filepath is not None:
+            paths.add(filepath)
+    security_surfaces = _as_mapping(metrics.get(_SECURITY_SURFACES_FAMILY))
+    for item in _as_sequence(security_surfaces.get("items")):
         item_map = _as_mapping(item)
         filepath = _optional_str(item_map.get("filepath"))
         if filepath is not None:

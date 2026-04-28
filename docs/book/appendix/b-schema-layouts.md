@@ -91,11 +91,11 @@ Notes:
 }
 ```
 
-## Cache schema (`2.5`)
+## Cache schema (`2.6`)
 
 ```json
 {
-  "v": "2.5",
+  "v": "2.6",
   "payload": {
     "py": "cp314",
     "fp": "1",
@@ -126,6 +126,7 @@ Notes:
         "rq": ["pkg.dep:used_name"],
         "in": ["pkg.dep"],
         "cn": ["ClassName"],
+        "sc": [["process_boundary", "subprocess_run", "pkg.runner", "pkg.runner:run", 10, 10, "callable", "exact_call", "call", "subprocess.run"]],
         "sf": [["duplicated_branches", "key", [["stmt_seq", "Expr,Return"]], [["pkg.a:f", 10, 12]]]]
       }
     }
@@ -146,11 +147,11 @@ Notes:
 - `u` row decoder accepts both legacy 11-column rows and canonical 17-column rows
   (legacy rows map new structural fields to neutral defaults).
 
-## Report schema (`2.9`)
+## Report schema (`2.10`)
 
 ```json
 {
-  "report_schema_version": "2.9",
+  "report_schema_version": "2.10",
   "meta": {
     "codeclone_version": "2.0.0b6",
     "project_name": "codeclone",
@@ -295,6 +296,17 @@ Notes:
         "added": 0,
         "breaking": 0,
         "strict_types": false
+      },
+      "security_surfaces": {
+        "items": 0,
+        "modules": 0,
+        "exact_items": 0,
+        "category_count": 0,
+        "production": 0,
+        "tests": 0,
+        "fixtures": 0,
+        "other": 0,
+        "report_only": true
       }
     },
     "families": {
@@ -380,6 +392,27 @@ Notes:
         },
         "items": []
       },
+      "security_surfaces": {
+        "summary": {
+          "items": 0,
+          "modules": 0,
+          "exact_items": 0,
+          "category_count": 0,
+          "categories": {},
+          "by_source_kind": {
+            "production": 0,
+            "tests": 0,
+            "fixtures": 0,
+            "other": 0
+          },
+          "production": 0,
+          "tests": 0,
+          "fixtures": 0,
+          "other": 0,
+          "report_only": true
+        },
+        "items": []
+      },
       "health": {}
     }
   },
@@ -439,7 +472,7 @@ Notes:
 ```text
 # CodeClone Report
 - Markdown schema: 1.0
-- Source report schema: 2.9
+- Source report schema: 2.10
 ...
 ## Overview
 ## Inventory
@@ -525,7 +558,7 @@ Notes:
       ],
       "properties": {
         "profileVersion": "1.0",
-        "reportSchemaVersion": "2.9"
+        "reportSchemaVersion": "2.10"
       },
       "results": [
         {

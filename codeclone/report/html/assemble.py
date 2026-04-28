@@ -125,6 +125,7 @@ def build_html_report(
             _as_mapping(ctx.overloaded_modules_map.get("summary")).get("candidates")
         )
         + coverage_review_items
+        + _as_int(_as_mapping(ctx.security_surfaces_map.get("summary")).get("items"))
     )
 
     def _tab_badge(count: int) -> str:

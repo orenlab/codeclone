@@ -4,15 +4,17 @@
 
 The global package refactor lands here: the entire runtime moves onto the canonical module layout and legacy shims are
 removed for good. On top of that, dependency-depth scoring is replaced with an adaptive project-relative model, and
-report schema advances to `2.9` to surface the new depth profile.
+the report/cache contracts advance to surface the new depth profile and the
+report-only `security_surfaces` layer.
 
 ### Package layout and contracts
 
 - Move the runtime fully onto the canonical package layout: `main` + `surfaces/cli`, `surfaces/mcp`, `core`, `analysis`,
   `baseline`, `cache`, `contracts`, `report/document`, `report/renderers`, and `report/html`.
 - Remove remaining legacy root shims and stale compatibility modules in favor of direct canonical imports.
-- Bump report schema to `2.9` for additive dependency depth profile fields; keep clone baseline schema `2.1`, cache
-  schema `2.5`, and metrics-baseline schema `1.2` unchanged.
+- Bump report schema to `2.10` and cache schema to `2.6` for additive
+  `security_surfaces` and cache-persisted security-surface facts; keep clone
+  baseline schema `2.1` and metrics-baseline schema `1.2` unchanged.
 - Preserve deterministic contracts and read-only MCP semantics across the new layout.
 
 ### Dependency depth scoring
@@ -27,9 +29,19 @@ report schema advances to `2.9` to surface the new depth profile.
 - Remove stale deleted-file cache entries and trim post-refactor import tails that were inflating dependency depth and
   clone pressure.
 
+### Security surfaces
+
+- Add `metrics.families.security_surfaces`: a report-only exact inventory of
+  security-relevant capability surfaces and trust-boundary code.
+- Surface compact `security_surfaces` facts in canonical report JSON,
+  CLI Metrics, HTML Quality, text/markdown projections, and MCP summaries /
+  `metrics_detail`.
+- Keep the layer honest: no vulnerability claims, no score impact, no gates,
+  no SARIF security findings, and no baseline truth.
+
 ### Tooling, docs, and UX
 
-- Refresh AGENTS, docs/book, and changelog content for the b6 package layout and report schema `2.9`.
+- Refresh AGENTS, docs/book, and changelog content for the b6 package layout and report schema `2.10`.
 - Tighten preview client metadata and install guidance for VS Code, Claude Desktop, and Codex.
 - Replace the Codex plugin shell snippet with a repo-local shell-free launcher, and parallelize VS Code post-run MCP
   artifact hydration.

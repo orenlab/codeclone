@@ -21,13 +21,17 @@ from ...domain.quality import (
     RISK_LOW,
 )
 from ...domain.source_scope import (
+    SOURCE_KIND_FIXTURES,
     SOURCE_KIND_OTHER,
+    SOURCE_KIND_PRODUCTION,
+    SOURCE_KIND_TESTS,
 )
 from ...metrics.registry import METRIC_FAMILIES
 from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
+from ..derived import normalized_source_kind as _normalized_source_kind
 from ._common import (
     _contract_path,
     _normalize_nested_string_rows,
@@ -41,6 +45,8 @@ _COVERAGE_ADOPTION_FAMILY = "coverage_adoption"
 _API_SURFACE_FAMILY = "api_surface"
 
 _COVERAGE_JOIN_FAMILY = "coverage_join"
+
+_SECURITY_SURFACES_FAMILY = "security_surfaces"
 
 
 def _normalize_metrics_families(
@@ -272,7 +278,7 @@ def _normalize_metrics_families(
                     scan_root=scan_root,
                 )[0]
                 or "",
-                "source_kind": str(item_map.get("source_kind", SOURCE_KIND_OTHER)),
+                "source_kind": _normalized_source_kind(item_map.get("source_kind")),
                 "loc": _as_int(item_map.get("loc")),
                 "functions": _as_int(item_map.get("functions")),
                 "methods": _as_int(item_map.get("methods")),
@@ -441,6 +447,47 @@ def _normalize_metrics_families(
             item["relative_path"],
             _as_int(item["start_line"]),
             item["qualname"],
+        ),
+    )
+    security_surfaces = _as_mapping(metrics_map.get(_SECURITY_SURFACES_FAMILY))
+    security_surfaces_summary = _as_mapping(security_surfaces.get("summary"))
+    raw_category_counts = _as_mapping(security_surfaces_summary.get("categories"))
+    raw_source_kind_counts = _as_mapping(
+        security_surfaces_summary.get("by_source_kind")
+    )
+    security_surface_items = sorted(
+        (
+            {
+                "category": str(item_map.get("category", "")).strip(),
+                "capability": str(item_map.get("capability", "")).strip(),
+                "module": str(item_map.get("module", "")).strip(),
+                "qualname": str(item_map.get("qualname", "")).strip(),
+                "relative_path": _contract_path(
+                    item_map.get("filepath", ""),
+                    scan_root=scan_root,
+                )[0]
+                or "",
+                "source_kind": str(item_map.get("source_kind", SOURCE_KIND_OTHER)),
+                "start_line": _as_int(item_map.get("start_line")),
+                "end_line": _as_int(item_map.get("end_line")),
+                "location_scope": str(item_map.get("location_scope", "")).strip(),
+                "classification_mode": str(
+                    item_map.get("classification_mode", "")
+                ).strip(),
+                "evidence_kind": str(item_map.get("evidence_kind", "")).strip(),
+                "evidence_symbol": str(item_map.get("evidence_symbol", "")).strip(),
+            }
+            for item in _as_sequence(security_surfaces.get("items"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: (
+            item["relative_path"],
+            item["start_line"],
+            item["end_line"],
+            item["qualname"],
+            item["category"],
+            item["capability"],
+            item["evidence_symbol"],
         ),
     )
     dead_high_confidence = sum(
@@ -633,6 +680,42 @@ def _normalize_metrics_families(
                 ],
             },
             "items": overloaded_module_items,
+            "items_truncated": False,
+        },
+        _SECURITY_SURFACES_FAMILY: {
+            "summary": {
+                "items": _as_int(security_surfaces_summary.get("items")),
+                "modules": _as_int(security_surfaces_summary.get("modules")),
+                "exact_items": _as_int(security_surfaces_summary.get("exact_items")),
+                "category_count": _as_int(
+                    security_surfaces_summary.get("category_count")
+                ),
+                "categories": {
+                    str(key): _as_int(value)
+                    for key, value in sorted(raw_category_counts.items())
+                    if str(key).strip()
+                },
+                "by_source_kind": {
+                    SOURCE_KIND_PRODUCTION: _as_int(
+                        raw_source_kind_counts.get(SOURCE_KIND_PRODUCTION)
+                    ),
+                    SOURCE_KIND_TESTS: _as_int(
+                        raw_source_kind_counts.get(SOURCE_KIND_TESTS)
+                    ),
+                    SOURCE_KIND_FIXTURES: _as_int(
+                        raw_source_kind_counts.get(SOURCE_KIND_FIXTURES)
+                    ),
+                    SOURCE_KIND_OTHER: _as_int(
+                        raw_source_kind_counts.get(SOURCE_KIND_OTHER)
+                    ),
+                },
+                "production": _as_int(security_surfaces_summary.get("production")),
+                "tests": _as_int(security_surfaces_summary.get("tests")),
+                "fixtures": _as_int(security_surfaces_summary.get("fixtures")),
+                "other": _as_int(security_surfaces_summary.get("other")),
+                "report_only": bool(security_surfaces_summary.get("report_only")),
+            },
+            "items": security_surface_items,
             "items_truncated": False,
         },
     }

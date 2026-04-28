@@ -37,11 +37,16 @@ from .entries import (
     ModuleDocstringCoverageDict,
     ModuleTypingCoverageDict,
     PublicSymbolDict,
+    SecuritySurfaceDict,
     SegmentDict,
     SourceStatsDict,
     StructuralFindingGroupDict,
     StructuralFindingOccurrenceDict,
     UnitDict,
+    _as_security_surface_category,
+    _as_security_surface_classification_mode,
+    _as_security_surface_evidence_kind,
+    _as_security_surface_location_scope,
     _normalize_cached_structural_groups,
 )
 from .integrity import (
@@ -125,8 +130,14 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
         filepath=filepath,
     )
     api_surface = _decode_optional_wire_api_surface(obj=obj, filepath=filepath)
+    security_surfaces = _decode_optional_wire_security_surfaces(
+        obj=obj,
+        filepath=filepath,
+    )
     coupled_classes_map = _decode_optional_wire_coupled_classes(obj=obj, key="cc")
     if coupled_classes_map is None:
+        return None
+    if security_surfaces is None:
         return None
 
     for metric in class_metrics:
@@ -156,6 +167,7 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
         typing_coverage=typing_coverage,
         docstring_coverage=docstring_coverage,
         api_surface=api_surface,
+        security_surfaces=security_surfaces,
         source_stats=source_stats,
         structural_findings=(
             _normalize_cached_structural_groups(structural_findings, filepath=filepath)
@@ -338,6 +350,64 @@ def _decode_optional_wire_api_surface(
         filepath=filepath,
         all_declared=sorted(set(all_declared)),
         symbols=symbols,
+    )
+
+
+def _decode_optional_wire_security_surfaces(
+    *,
+    obj: dict[str, object],
+    filepath: str,
+) -> list[SecuritySurfaceDict] | None:
+    rows = _decode_optional_wire_items_for_filepath(
+        obj=obj,
+        key="sc",
+        filepath=filepath,
+        decode_item=_decode_wire_security_surface,
+    )
+    return rows
+
+
+def _decode_wire_security_surface(
+    row_raw: object,
+    filepath: str,
+) -> SecuritySurfaceDict | None:
+    row = _decode_wire_row(row_raw, valid_lengths={10})
+    if row is None:
+        return None
+    category = _as_security_surface_category(_as_str(row[0]))
+    capability = _as_str(row[1])
+    module = _as_str(row[2])
+    qualname = _as_str(row[3])
+    lines = _decode_wire_int_fields(row, 4, 5)
+    location_scope = _as_security_surface_location_scope(_as_str(row[6]))
+    classification_mode = _as_security_surface_classification_mode(_as_str(row[7]))
+    evidence_kind = _as_security_surface_evidence_kind(_as_str(row[8]))
+    evidence_symbol = _as_str(row[9])
+    if (
+        category is None
+        or capability is None
+        or module is None
+        or qualname is None
+        or lines is None
+        or location_scope is None
+        or classification_mode is None
+        or evidence_kind is None
+        or evidence_symbol is None
+    ):
+        return None
+    start_line, end_line = lines
+    return SecuritySurfaceDict(
+        category=category,
+        capability=capability,
+        module=module,
+        filepath=filepath,
+        qualname=qualname,
+        start_line=start_line,
+        end_line=end_line,
+        location_scope=location_scope,
+        classification_mode=classification_mode,
+        evidence_kind=evidence_kind,
+        evidence_symbol=evidence_symbol,
     )
 
 

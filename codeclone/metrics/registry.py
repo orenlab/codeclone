@@ -734,6 +734,15 @@ METRIC_FAMILIES: dict[str, MetricFamily] = {
         gate_keys=(),
         skippable_flag="skip_metrics",
     ),
+    "security_surfaces": MetricFamily(
+        name="security_surfaces",
+        compute=_compute_report_only_family,
+        aggregate=_aggregate_empty_family,
+        report_section="security_surfaces",
+        baseline_key=None,
+        gate_keys=(),
+        skippable_flag="skip_metrics",
+    ),
     "coverage_join": MetricFamily(
         name="coverage_join",
         compute=_compute_report_only_family,

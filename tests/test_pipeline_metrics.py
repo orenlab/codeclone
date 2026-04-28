@@ -18,6 +18,7 @@ from codeclone.cache.entries import (
     CacheEntry,
     ModuleApiSurfaceDict,
     PublicSymbolDict,
+    SecuritySurfaceDict,
 )
 from codeclone.core._types import (
     _as_sorted_str_tuple,
@@ -43,6 +44,11 @@ from codeclone.core.discovery_cache import (
     _public_symbol_from_cache_dict,
     _public_symbol_kind,
     _risk_level,
+    _security_surface_category,
+    _security_surface_classification_mode,
+    _security_surface_evidence_kind,
+    _security_surface_from_cache_row,
+    _security_surface_location_scope,
     _typing_coverage_from_cache_dict,
 )
 from codeclone.core.discovery_cache import (
@@ -71,6 +77,7 @@ from codeclone.models import (
     ModuleTypingCoverage,
     ProjectMetrics,
     PublicSymbol,
+    SecuritySurface,
     UnitCoverageFact,
 )
 from codeclone.report.gates.evaluator import (
@@ -401,6 +408,97 @@ def test_build_metrics_report_payload_includes_adoption_and_api_surface_families
     ]
 
 
+def test_build_metrics_report_payload_includes_security_surfaces_family() -> None:
+    payload = build_metrics_report_payload(
+        scan_root="/repo",
+        project_metrics=_project_metrics(dead_confidence="high"),
+        units=(),
+        class_metrics=(),
+        security_surfaces=(
+            SecuritySurface(
+                category="network_boundary",
+                capability="requests_import",
+                module="pkg.client",
+                filepath="/repo/pkg/client.py",
+                qualname="pkg.client",
+                start_line=1,
+                end_line=1,
+                location_scope="module",
+                classification_mode="exact_import",
+                evidence_kind="import",
+                evidence_symbol="requests",
+            ),
+            SecuritySurface(
+                category="process_boundary",
+                capability="subprocess_run",
+                module="tests.test_cli",
+                filepath="/repo/tests/test_cli.py",
+                qualname="tests.test_cli:run_case",
+                start_line=10,
+                end_line=10,
+                location_scope="callable",
+                classification_mode="exact_call",
+                evidence_kind="call",
+                evidence_symbol="subprocess.run",
+            ),
+        ),
+        suppressed_dead_code=(),
+    )
+
+    security_surfaces = cast(dict[str, object], payload["security_surfaces"])
+    assert security_surfaces["summary"] == {
+        "items": 2,
+        "modules": 2,
+        "exact_items": 2,
+        "category_count": 2,
+        "categories": {
+            "network_boundary": 1,
+            "process_boundary": 1,
+        },
+        "by_source_kind": {
+            "production": 1,
+            "tests": 1,
+            "fixtures": 0,
+            "other": 0,
+        },
+        "production": 1,
+        "tests": 1,
+        "fixtures": 0,
+        "other": 0,
+        "report_only": True,
+    }
+    assert security_surfaces["items"] == [
+        {
+            "category": "network_boundary",
+            "capability": "requests_import",
+            "module": "pkg.client",
+            "filepath": "/repo/pkg/client.py",
+            "qualname": "pkg.client",
+            "start_line": 1,
+            "end_line": 1,
+            "source_kind": "production",
+            "location_scope": "module",
+            "classification_mode": "exact_import",
+            "evidence_kind": "import",
+            "evidence_symbol": "requests",
+        },
+        {
+            "category": "process_boundary",
+            "capability": "subprocess_run",
+            "module": "tests.test_cli",
+            "filepath": "/repo/tests/test_cli.py",
+            "qualname": "tests.test_cli:run_case",
+            "start_line": 10,
+            "end_line": 10,
+            "source_kind": "tests",
+            "location_scope": "callable",
+            "classification_mode": "exact_call",
+            "evidence_kind": "call",
+            "evidence_symbol": "subprocess.run",
+        },
+    ]
+
+
 def test_metrics_payload_includes_overloaded_modules_for_small_population() -> None:
     payload = build_metrics_report_payload(
         scan_root="/repo",
@@ -701,7 +799,9 @@ def test_pipeline_cache_decode_helpers_cover_invalid_and_valid_payloads() -> Non
     assert valid_surface.symbols[0].params[0].annotation_hash == "int"
 
 
-def test_load_cached_metrics_extended_decodes_adoption_and_api_surface() -> None:
+def test_load_cached_metrics_extended_decodes_adoption_api_and_security_surfaces() -> (
+    None
+):
     entry: CacheEntry = {
         "stat": {"mtime_ns": 1, "size": 1},
         "units": [],
@@ -739,8 +839,23 @@ def test_load_cached_metrics_extended_decodes_adoption_and_api_surface() -> None
                 }
             ],
         },
+        "security_surfaces": [
+            {
+                "category": "network_boundary",
+                "capability": "requests_import",
+                "module": "pkg.mod",
+                "filepath": "pkg/mod.py",
+                "qualname": "pkg.mod",
+                "start_line": 1,
+                "end_line": 1,
+                "location_scope": "module",
+                "classification_mode": "exact_import",
+                "evidence_kind": "import",
+                "evidence_symbol": "requests",
+            }
+        ],
     }
-    *_, typing_coverage, docstring_coverage, api_surface = (
+    *_, typing_coverage, docstring_coverage, api_surface, security_surfaces = (
         _load_cached_metrics_extended(
             entry,
             filepath="pkg/mod.py",
@@ -752,6 +867,77 @@ def test_load_cached_metrics_extended_decodes_adoption_and_api_surface() -> None
     assert typing_coverage.any_annotation_count == 1
     assert docstring_coverage.public_symbol_documented == 2
     assert api_surface.symbols[0].qualname == "pkg.mod:run"
+    assert security_surfaces == (
+        SecuritySurface(
+            category="network_boundary",
+            capability="requests_import",
+            module="pkg.mod",
+            filepath="pkg/mod.py",
+            qualname="pkg.mod",
+            start_line=1,
+            end_line=1,
+            location_scope="module",
+            classification_mode="exact_import",
+            evidence_kind="import",
+            evidence_symbol="requests",
+        ),
+    )
+
+
+def test_public_symbol_from_cache_dict_rejects_invalid_param_payload() -> None:
+    assert (
+        _public_symbol_from_cache_dict(
+            {
+                "qualname": "pkg.mod:run",
+                "kind": "function",
+                "start_line": 10,
+                "end_line": 12,
+                "exported_via": "name",
+                "returns_hash": "int",
+                "params": [
+                    {
+                        "name": "value",
+                        "kind": "broken",
+                        "has_default": False,
+                        "annotation_hash": "int",
+                    }
+                ],
+            }
+        )
+        is None
+    )
+
+
+def test_security_surface_from_cache_row_rejects_invalid_literals_and_is_filtered() -> (
+    None
+):
+    invalid_row: SecuritySurfaceDict = {
+        "category": "process_boundary",
+        "capability": "subprocess_run",
+        "module": "pkg.mod",
+        "filepath": "pkg/mod.py",
+        "qualname": "pkg.mod:run",
+        "start_line": 10,
+        "end_line": 12,
+        "location_scope": "callable",
+        "classification_mode": "broken",
+        "evidence_kind": "call",
+        "evidence_symbol": "subprocess.run",
+    }
+
+    assert _security_surface_from_cache_row(invalid_row) is None
+
+    entry: CacheEntry = {
+        "stat": {"mtime_ns": 1, "size": 1},
+        "units": [],
+        "blocks": [],
+        "segments": [],
+        "security_surfaces": [invalid_row],
+    }
+
+    *_, security_surfaces = _load_cached_metrics_extended(entry, filepath="pkg/mod.py")
+
+    assert security_surfaces == ()
 
 
 @pytest.mark.parametrize(
@@ -766,6 +952,41 @@ def test_load_cached_metrics_extended_decodes_adoption_and_api_surface() -> None
     ),
 )
 def test_discovery_cache_literal_helpers_accept_known_values_and_reject_unknowns(
+    helper: Callable[[object], object | None],
+    accepted: tuple[str, ...],
+) -> None:
+    for value in accepted:
+        assert helper(value) == value
+    assert helper("broken") is None
+
+
+@pytest.mark.parametrize(
+    ("helper", "accepted"),
+    (
+        (
+            _security_surface_category,
+            (
+                "archive_extraction",
+                "crypto_transport",
+                "database_boundary",
+                "deserialization",
+                "dynamic_execution",
+                "dynamic_loading",
+                "filesystem_mutation",
+                "identity_token",
+                "network_boundary",
+                "process_boundary",
+            ),
+        ),
+        (_security_surface_location_scope, ("module", "class", "callable")),
+        (
+            _security_surface_classification_mode,
+            ("exact_builtin", "exact_call", "exact_import"),
+        ),
+        (_security_surface_evidence_kind, ("builtin", "call", "import")),
+    ),
+)
+def test_discovery_cache_security_surface_helpers_accept_and_reject(
     helper: Callable[[object], object | None],
     accepted: tuple[str, ...],
 ) -> None:

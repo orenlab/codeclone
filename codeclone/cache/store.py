@@ -49,6 +49,7 @@ from .entries import (
     _module_dep_dict_from_model,
     _new_optional_metrics_payload,
     _normalize_cached_structural_groups,
+    _security_surface_dict_from_model,
     _segment_dict_from_model,
     _structural_group_dict_from_model,
     _typing_coverage_dict_from_model,
@@ -501,6 +502,7 @@ class Cache:
             referenced_qualnames_raw,
             import_names_raw,
             class_names_raw,
+            security_surfaces_raw,
             typing_coverage_raw,
             docstring_coverage_raw,
             api_surface_raw,
@@ -521,10 +523,12 @@ class Cache:
                 referenced_qualnames=referenced_qualnames_raw,
                 import_names=import_names_raw,
                 class_names=class_names_raw,
+                security_surfaces=security_surfaces_raw,
             ),
             typing_coverage=typing_coverage_raw,
             docstring_coverage=docstring_coverage_raw,
             api_surface=api_surface_raw,
+            security_surfaces=security_surfaces_raw,
             source_stats=source_stats,
             structural_findings=structural_findings,
         )
@@ -565,6 +569,7 @@ class Cache:
             referenced_qualnames,
             import_names,
             class_names,
+            security_surfaces,
             typing_coverage,
             docstring_coverage,
             api_surface,
@@ -585,6 +590,10 @@ class Cache:
             referenced_qualnames = sorted(set(file_metrics.referenced_qualnames))
             import_names = sorted(set(file_metrics.import_names))
             class_names = sorted(set(file_metrics.class_names))
+            security_surfaces = [
+                _security_surface_dict_from_model(surface, runtime_path)
+                for surface in file_metrics.security_surfaces
+            ]
             typing_coverage = _typing_coverage_dict_from_model(
                 file_metrics.typing_coverage,
                 filepath=runtime_path,
@@ -617,6 +626,7 @@ class Cache:
             referenced_qualnames=referenced_qualnames,
             import_names=import_names,
             class_names=class_names,
+            security_surfaces=security_surfaces,
         )
         if typing_coverage is not None:
             entry_dict["typing_coverage"] = typing_coverage

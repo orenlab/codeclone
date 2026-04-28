@@ -130,6 +130,9 @@ Resources are deterministic read-only projections over stored runs.
 - Review markers are session-local in-memory state only.
 - Run history is process-local and does not survive restart.
 - Missing optional MCP dependency is surfaced explicitly by the launcher.
+- `metrics_detail(family="security_surfaces")` exposes a compact, report-only
+  inventory of exact security-relevant capability surfaces. It does not claim
+  vulnerabilities or exploitability.
 
 ## Security model
 

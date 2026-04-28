@@ -493,6 +493,224 @@ def _append_overview(
     )
 
 
+def _append_metrics_summary_lines(
+    lines: list[str],
+    *,
+    metrics_summary: Mapping[str, object],
+) -> None:
+    for family_name in (
+        "complexity",
+        "coupling",
+        "cohesion",
+        "coverage_join",
+        "overloaded_modules",
+        "security_surfaces",
+        "dependencies",
+        "dead_code",
+        "health",
+    ):
+        family_summary = _as_mapping(metrics_summary.get(family_name))
+        if family_name == "coverage_join" and not family_summary:
+            continue
+        keys: Sequence[str]
+        match family_name:
+            case "complexity" | "coupling":
+                keys = ("total", "average", "max", "high_risk")
+            case "cohesion":
+                keys = ("total", "average", "max", "low_cohesion")
+            case "coverage_join":
+                keys = (
+                    "status",
+                    "source",
+                    "units",
+                    "measured_units",
+                    "overall_permille",
+                    "coverage_hotspots",
+                    "scope_gap_hotspots",
+                    "hotspot_threshold_percent",
+                )
+            case "dependencies":
+                keys = (
+                    "modules",
+                    "edges",
+                    "cycles",
+                    "avg_depth",
+                    "p95_depth",
+                    "max_depth",
+                )
+            case "overloaded_modules":
+                keys = (
+                    "total",
+                    "candidates",
+                    "population_status",
+                    "top_score",
+                    "average_score",
+                )
+            case "security_surfaces":
+                keys = (
+                    "items",
+                    "modules",
+                    "exact_items",
+                    "category_count",
+                    "production",
+                    "tests",
+                )
+            case "dead_code":
+                keys = ("total", "high_confidence", "suppressed")
+            case _:
+                keys = ("score", "grade")
+        lines.append(f"{family_name}: {_format_key_values(family_summary, keys)}")
+
+
+def _append_top_metric_family(
+    lines: list[str],
+    *,
+    title: str,
+    items: Sequence[object],
+    key_order: Sequence[str],
+) -> None:
+    lines.extend(["", title])
+    rows = list(map(_as_mapping, items[:10]))
+    if not rows:
+        lines.append("(none)")
+        return
+    lines.extend("- " + _format_key_values(item, key_order) for item in rows)
+
+
+def _append_metric_family_sections(
+    lines: list[str],
+    *,
+    metrics_families: Mapping[str, object],
+) -> None:
+    coverage_join_family = _as_mapping(metrics_families.get("coverage_join"))
+    if coverage_join_family:
+        _append_top_metric_family(
+            lines,
+            title="COVERAGE JOIN (top 10)",
+            items=_as_sequence(coverage_join_family.get("items")),
+            key_order=(
+                "relative_path",
+                "qualname",
+                "coverage_status",
+                "risk",
+                "coverage_permille",
+                "cyclomatic_complexity",
+                "coverage_hotspot",
+                "scope_gap_hotspot",
+            ),
+        )
+
+    overloaded_modules_family = _as_mapping(metrics_families.get("overloaded_modules"))
+    if not overloaded_modules_family:
+        overloaded_modules_family = _as_mapping(metrics_families.get("god_modules"))
+    _append_top_metric_family(
+        lines,
+        title="OVERLOADED MODULES (top 10)",
+        items=_as_sequence(overloaded_modules_family.get("items")),
+        key_order=(
+            "module",
+            "relative_path",
+            "source_kind",
+            "score",
+            "candidate_status",
+            "loc",
+            "fan_in",
+            "fan_out",
+            "complexity_total",
+        ),
+    )
+
+    security_surfaces_family = _as_mapping(metrics_families.get("security_surfaces"))
+    _append_top_metric_family(
+        lines,
+        title="SECURITY SURFACES (top 10)",
+        items=_as_sequence(security_surfaces_family.get("items")),
+        key_order=(
+            "category",
+            "capability",
+            "source_kind",
+            "evidence_symbol",
+            "relative_path",
+            "qualname",
+            "location_scope",
+        ),
+    )
+
+
+def _append_findings_sections(
+    lines: list[str],
+    *,
+    findings_groups: Mapping[str, object],
+    clone_groups: Mapping[str, object],
+    suppressed_clone_groups: Mapping[str, object],
+    metrics_families: Mapping[str, object],
+) -> None:
+    for title, group_key, metric_name in (
+        ("FUNCTION CLONES", "functions", "loc"),
+        ("BLOCK CLONES", "blocks", "size"),
+        ("SEGMENT CLONES", "segments", "size"),
+    ):
+        groups = _as_sequence(clone_groups.get(group_key))
+        lines.append("")
+        _append_clone_section(
+            lines,
+            title=title,
+            groups=groups,
+            novelty="new",
+            metric_name=metric_name,
+        )
+        lines.append("")
+        _append_clone_section(
+            lines,
+            title=title,
+            groups=groups,
+            novelty="known",
+            metric_name=metric_name,
+        )
+
+    if suppressed_clone_groups:
+        for title, group_key, metric_name in (
+            ("SUPPRESSED FUNCTION CLONES", "functions", "loc"),
+            ("SUPPRESSED BLOCK CLONES", "blocks", "size"),
+            ("SUPPRESSED SEGMENT CLONES", "segments", "size"),
+        ):
+            lines.append("")
+            _append_suppressed_clone_section(
+                lines,
+                title=title,
+                groups=_as_sequence(suppressed_clone_groups.get(group_key)),
+                metric_name=metric_name,
+            )
+
+    lines.append("")
+    _append_structural_findings(
+        lines,
+        _as_sequence(_as_mapping(findings_groups.get("structural")).get("groups")),
+    )
+    lines.append("")
+    _append_single_item_findings(
+        lines,
+        title="DEAD CODE FINDINGS",
+        groups=_as_sequence(
+            _as_mapping(findings_groups.get("dead_code")).get("groups")
+        ),
+        fact_keys=("kind", "confidence"),
+    )
+    lines.append("")
+    dead_code_family = _as_mapping(metrics_families.get("dead_code"))
+    _append_suppressed_dead_code_items(
+        lines,
+        items=_as_sequence(dead_code_family.get("suppressed_items")),
+    )
+    lines.append("")
+    _append_single_item_findings(
+        lines,
+        title="DESIGN FINDINGS",
+        groups=_as_sequence(_as_mapping(findings_groups.get("design")).get("groups")),
+        fact_keys=("lcom4", "method_count", "instance_var_count", "fan_out", "risk"),
+    )
+
+
 def render_text_report_document(payload: Mapping[str, object]) -> str:
     meta_payload = _as_mapping(payload.get("meta"))
     baseline = _as_mapping(meta_payload.get("baseline"))
@@ -641,223 +859,20 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
             "METRICS SUMMARY",
         ]
     )
-    for family_name in (
-        "complexity",
-        "coupling",
-        "cohesion",
-        "coverage_join",
-        "overloaded_modules",
-        "dependencies",
-        "dead_code",
-        "health",
-    ):
-        family_summary = _as_mapping(metrics_summary.get(family_name))
-        if family_name == "coverage_join" and not family_summary:
-            continue
-        keys: Sequence[str]
-        match family_name:
-            case "complexity" | "coupling":
-                keys = ("total", "average", "max", "high_risk")
-            case "cohesion":
-                keys = ("total", "average", "max", "low_cohesion")
-            case "coverage_join":
-                keys = (
-                    "status",
-                    "source",
-                    "units",
-                    "measured_units",
-                    "overall_permille",
-                    "coverage_hotspots",
-                    "scope_gap_hotspots",
-                    "hotspot_threshold_percent",
-                )
-            case "dependencies":
-                keys = (
-                    "modules",
-                    "edges",
-                    "cycles",
-                    "avg_depth",
-                    "p95_depth",
-                    "max_depth",
-                )
-            case "overloaded_modules":
-                keys = (
-                    "total",
-                    "candidates",
-                    "population_status",
-                    "top_score",
-                    "average_score",
-                )
-            case "dead_code":
-                keys = ("total", "high_confidence", "suppressed")
-            case _:
-                keys = ("score", "grade")
-        lines.append(f"{family_name}: {_format_key_values(family_summary, keys)}")
-
-    coverage_join_family = _as_mapping(metrics_families.get("coverage_join"))
-    coverage_join_items = _as_sequence(coverage_join_family.get("items"))
-    if coverage_join_family:
-        lines.extend(
-            [
-                "",
-                "COVERAGE JOIN (top 10)",
-            ]
-        )
-        if not coverage_join_items:
-            lines.append("(none)")
-        else:
-            lines.extend(
-                "- "
-                + _format_key_values(
-                    item,
-                    (
-                        "relative_path",
-                        "qualname",
-                        "coverage_status",
-                        "risk",
-                        "coverage_permille",
-                        "cyclomatic_complexity",
-                        "coverage_hotspot",
-                        "scope_gap_hotspot",
-                    ),
-                )
-                for item in map(_as_mapping, coverage_join_items[:10])
-            )
-
-    overloaded_modules_family = _as_mapping(metrics_families.get("overloaded_modules"))
-    if not overloaded_modules_family:
-        overloaded_modules_family = _as_mapping(metrics_families.get("god_modules"))
-    overloaded_module_items = _as_sequence(overloaded_modules_family.get("items"))
-    lines.extend(
-        [
-            "",
-            "OVERLOADED MODULES (top 10)",
-        ]
-    )
-    if not overloaded_module_items:
-        lines.append("(none)")
-    else:
-        lines.extend(
-            "- "
-            + _format_key_values(
-                item,
-                (
-                    "module",
-                    "relative_path",
-                    "source_kind",
-                    "score",
-                    "candidate_status",
-                    "loc",
-                    "fan_in",
-                    "fan_out",
-                    "complexity_total",
-                ),
-            )
-            for item in map(_as_mapping, overloaded_module_items[:10])
-        )
+    _append_metrics_summary_lines(lines, metrics_summary=metrics_summary)
+    _append_metric_family_sections(lines, metrics_families=metrics_families)
 
     lines.append("")
     _append_overview(lines, overview, hotlists)
 
     lines.append("")
     _append_suggestions(lines, suggestions=suggestions_payload, findings=findings)
-
-    lines.append("")
-    _append_clone_section(
+    _append_findings_sections(
         lines,
-        title="FUNCTION CLONES",
-        groups=_as_sequence(clone_groups.get("functions")),
-        novelty="new",
-        metric_name="loc",
-    )
-    lines.append("")
-    _append_clone_section(
-        lines,
-        title="FUNCTION CLONES",
-        groups=_as_sequence(clone_groups.get("functions")),
-        novelty="known",
-        metric_name="loc",
-    )
-    lines.append("")
-    _append_clone_section(
-        lines,
-        title="BLOCK CLONES",
-        groups=_as_sequence(clone_groups.get("blocks")),
-        novelty="new",
-        metric_name="size",
-    )
-    lines.append("")
-    _append_clone_section(
-        lines,
-        title="BLOCK CLONES",
-        groups=_as_sequence(clone_groups.get("blocks")),
-        novelty="known",
-        metric_name="size",
-    )
-    lines.append("")
-    _append_clone_section(
-        lines,
-        title="SEGMENT CLONES",
-        groups=_as_sequence(clone_groups.get("segments")),
-        novelty="new",
-        metric_name="size",
-    )
-    lines.append("")
-    _append_clone_section(
-        lines,
-        title="SEGMENT CLONES",
-        groups=_as_sequence(clone_groups.get("segments")),
-        novelty="known",
-        metric_name="size",
-    )
-    if suppressed_clone_groups:
-        lines.append("")
-        _append_suppressed_clone_section(
-            lines,
-            title="SUPPRESSED FUNCTION CLONES",
-            groups=_as_sequence(suppressed_clone_groups.get("functions")),
-            metric_name="loc",
-        )
-        lines.append("")
-        _append_suppressed_clone_section(
-            lines,
-            title="SUPPRESSED BLOCK CLONES",
-            groups=_as_sequence(suppressed_clone_groups.get("blocks")),
-            metric_name="size",
-        )
-        lines.append("")
-        _append_suppressed_clone_section(
-            lines,
-            title="SUPPRESSED SEGMENT CLONES",
-            groups=_as_sequence(suppressed_clone_groups.get("segments")),
-            metric_name="size",
-        )
-    lines.append("")
-    _append_structural_findings(
-        lines,
-        _as_sequence(_as_mapping(findings_groups.get("structural")).get("groups")),
-    )
-    lines.append("")
-    _append_single_item_findings(
-        lines,
-        title="DEAD CODE FINDINGS",
-        groups=_as_sequence(
-            _as_mapping(findings_groups.get("dead_code")).get("groups")
-        ),
-        fact_keys=("kind", "confidence"),
-    )
-    lines.append("")
-    dead_code_family = _as_mapping(metrics_families.get("dead_code"))
-    _append_suppressed_dead_code_items(
-        lines,
-        items=_as_sequence(dead_code_family.get("suppressed_items")),
-    )
-    lines.append("")
-    _append_single_item_findings(
-        lines,
-        title="DESIGN FINDINGS",
-        groups=_as_sequence(_as_mapping(findings_groups.get("design")).get("groups")),
-        fact_keys=("lcom4", "method_count", "instance_var_count", "fan_out", "risk"),
+        findings_groups=findings_groups,
+        clone_groups=clone_groups,
+        suppressed_clone_groups=suppressed_clone_groups,
+        metrics_families=metrics_families,
     )
     lines.extend(
         [

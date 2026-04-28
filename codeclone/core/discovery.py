@@ -17,6 +17,7 @@ from ..models import (
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
+    SecuritySurface,
     StructuralFindingGroup,
 )
 from ..scanner import iter_py_files
@@ -50,6 +51,7 @@ DiscoveryBuffers = tuple[
     list[ModuleTypingCoverage],
     list[ModuleDocstringCoverage],
     list[ModuleApiSurface],
+    list[SecuritySurface],
     list[str],
     list[str],
 ]
@@ -60,7 +62,8 @@ def _group_items_from_cache(rows: Sequence[Mapping[str, object]]) -> list[GroupI
 
 
 def _new_discovery_buffers() -> DiscoveryBuffers:
-    return [], [], [], [], [], [], set(), set(), [], [], [], [], []
+    # Keep buffer order aligned with DiscoveryBuffers above.
+    return [], [], [], [], [], [], set(), set(), [], [], [], [], [], []
 
 
 def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
@@ -83,6 +86,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         cached_typing_modules,
         cached_docstring_modules,
         cached_api_modules,
+        cached_security_surfaces,
         files_to_process,
         skipped_warnings,
     ) = _new_discovery_buffers()
@@ -135,6 +139,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                     typing_coverage,
                     docstring_coverage,
                     api_surface,
+                    security_surfaces,
                 ) = _load_cached_metrics_extended(cached, filepath=filepath)
                 cached_class_metrics.extend(class_metrics)
                 cached_module_deps.extend(module_deps)
@@ -147,6 +152,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                     cached_docstring_modules.append(docstring_coverage)
                 if api_surface is not None:
                     cached_api_modules.append(api_surface)
+                cached_security_surfaces.extend(security_surfaces)
             if collect_structural_findings:
                 cached_sf.extend(
                     _decode_cached_structural_finding_group(group_dict, filepath)
@@ -173,6 +179,20 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
             sorted(cached_dead_candidates, key=_dead_candidate_sort_key)
         ),
         cached_referenced_names=frozenset(cached_referenced_names),
+        cached_security_surfaces=tuple(
+            sorted(
+                cached_security_surfaces,
+                key=lambda item: (
+                    item.filepath,
+                    item.start_line,
+                    item.end_line,
+                    item.qualname,
+                    item.category,
+                    item.capability,
+                    item.evidence_symbol,
+                ),
+            )
+        ),
         cached_referenced_qualnames=frozenset(cached_referenced_qualnames),
         cached_typing_modules=tuple(
             sorted(cached_typing_modules, key=lambda item: (item.filepath, item.module))

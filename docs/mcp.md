@@ -156,6 +156,10 @@ run-scoped URI templates.
   `coverage_xml`, summaries include compact `coverage_join` facts. The XML path
   may be absolute or relative to the analysis root, and the join remains a
   current-run signal rather than baseline truth.
+- Run summaries may also include compact `security_surfaces` facts:
+  item count, category count, production/test split, and `report_only=true`.
+  This layer inventories exact security-relevant capability surfaces and trust
+  boundaries; it does not claim vulnerabilities or exploitability.
 - When `respect_pyproject=true`, MCP also applies `golden_fixture_paths`.
   Fully matching golden-fixture clone groups are excluded from active clone and
   gate projections but remain visible in the canonical report under the
@@ -167,7 +171,8 @@ run-scoped URI templates.
   Both accept the full canonical form as input.
 - `metrics_detail(family="overloaded_modules")` exposes the report-only
   module-hotspot layer without turning it into findings or gate data.
-- `metrics_detail` also accepts `coverage_adoption`, `coverage_join`, and
+- `metrics_detail` also accepts `coverage_adoption`, `coverage_join`,
+  `security_surfaces`, and
   `api_surface`.
 - `help(topic=...)` is static: meaning, anti-patterns, next step, doc links.
 - Start with repo defaults or `pyproject`-resolved thresholds, then lower them

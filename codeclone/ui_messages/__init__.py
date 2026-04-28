@@ -246,6 +246,10 @@ SUMMARY_COMPACT_METRICS = (
 SUMMARY_COMPACT_DEPENDENCIES = (
     "Dependencies  avg={avg_depth}  p95={p95_depth}  max={max_depth}"
 )
+SUMMARY_COMPACT_SECURITY_SURFACES = (
+    "Security  items={items}  categories={categories}"
+    "  production={production}  tests={tests}"
+)
 SUMMARY_COMPACT_CHANGED_SCOPE = (
     "Changed  paths={paths}  findings={findings}  new={new}  known={known}"
 )
@@ -572,6 +576,21 @@ def fmt_summary_compact_dependencies(
     )
 
 
+def fmt_summary_compact_security_surfaces(
+    *,
+    items: int,
+    categories: int,
+    production: int,
+    tests: int,
+) -> str:
+    return SUMMARY_COMPACT_SECURITY_SURFACES.format(
+        items=items,
+        categories=categories,
+        production=production,
+        tests=tests,
+    )
+
+
 def fmt_summary_compact_adoption(
     *,
     param_permille: int,
@@ -749,6 +768,22 @@ def fmt_metrics_dependencies(
     return (
         f"  {'Dependencies':<{_L}}"
         f"avg {avg_depth:.1f} · p95 {p95_depth} · max {max_depth}"
+    )
+
+
+def fmt_metrics_security_surfaces(
+    *,
+    items: int,
+    categories: int,
+    production: int,
+    tests: int,
+) -> str:
+    return (
+        f"  {'Security':<{_L}}"
+        f"{_v(items, 'bold cyan')} surfaces"
+        f" · {_v(categories, 'bold cyan')} categories"
+        f" · production {_v(production)}"
+        f" · tests {_v(tests)}"
     )
 
 

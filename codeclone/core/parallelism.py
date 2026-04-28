@@ -19,6 +19,7 @@ from ..models import (
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
+    SecuritySurface,
     StructuralFindingGroup,
 )
 from ._types import (
@@ -78,6 +79,7 @@ def process(
             module_deps=discovery.cached_module_deps,
             dead_candidates=discovery.cached_dead_candidates,
             referenced_names=discovery.cached_referenced_names,
+            security_surfaces=discovery.cached_security_surfaces,
             referenced_qualnames=discovery.cached_referenced_qualnames,
             typing_modules=discovery.cached_typing_modules,
             docstring_modules=discovery.cached_docstring_modules,
@@ -102,6 +104,9 @@ def process(
     all_dead_candidates: list[DeadCandidate] = list(discovery.cached_dead_candidates)
     all_referenced_names: set[str] = set(discovery.cached_referenced_names)
     all_referenced_qualnames: set[str] = set(discovery.cached_referenced_qualnames)
+    all_security_surfaces: list[SecuritySurface] = list(
+        discovery.cached_security_surfaces
+    )
     all_typing_modules: list[ModuleTypingCoverage] = list(
         discovery.cached_typing_modules
     )
@@ -219,6 +224,7 @@ def process(
                 all_referenced_qualnames.update(
                     result.file_metrics.referenced_qualnames
                 )
+                all_security_surfaces.extend(result.file_metrics.security_surfaces)
                 if result.file_metrics.typing_coverage is not None:
                     all_typing_modules.append(result.file_metrics.typing_coverage)
                 if result.file_metrics.docstring_coverage is not None:
@@ -309,6 +315,20 @@ def process(
             sorted(all_dead_candidates, key=_dead_candidate_sort_key)
         ),
         referenced_names=frozenset(all_referenced_names),
+        security_surfaces=tuple(
+            sorted(
+                all_security_surfaces,
+                key=lambda item: (
+                    item.filepath,
+                    item.start_line,
+                    item.end_line,
+                    item.qualname,
+                    item.category,
+                    item.capability,
+                    item.evidence_symbol,
+                ),
+            )
+        ),
         referenced_qualnames=frozenset(all_referenced_qualnames),
         typing_modules=tuple(
             sorted(all_typing_modules, key=lambda item: (item.filepath, item.module))

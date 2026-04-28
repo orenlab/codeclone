@@ -20,6 +20,7 @@ from .entries import (
     ModuleDocstringCoverageDict,
     ModuleTypingCoverageDict,
     PublicSymbolDict,
+    SecuritySurfaceDict,
     SegmentDict,
     SourceStatsDict,
     UnitDict,
@@ -215,6 +216,26 @@ def _is_dead_candidate_dict(value: object) -> TypeGuard[DeadCandidateDict]:
     return _is_string_list(suppressed_rules)
 
 
+def _is_security_surface_dict(value: object) -> TypeGuard[SecuritySurfaceDict]:
+    if not isinstance(value, dict):
+        return False
+    return _has_typed_fields(
+        value,
+        string_keys=(
+            "category",
+            "capability",
+            "module",
+            "filepath",
+            "qualname",
+            "location_scope",
+            "classification_mode",
+            "evidence_kind",
+            "evidence_symbol",
+        ),
+        int_keys=("start_line", "end_line"),
+    )
+
+
 def _is_string_list(value: object) -> TypeGuard[list[str]]:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
@@ -242,6 +263,7 @@ __all__ = [
     "_is_module_docstring_coverage_dict",
     "_is_module_typing_coverage_dict",
     "_is_public_symbol_dict",
+    "_is_security_surface_dict",
     "_is_segment_dict",
     "_is_source_stats_dict",
     "_is_string_list",

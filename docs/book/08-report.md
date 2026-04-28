@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the canonical report contract in `2.0.0b6`: report schema `2.9` plus
+Define the canonical report contract in `2.0.0b6`: report schema `2.10` plus
 deterministic text/Markdown/SARIF/HTML projections.
 
 ## Public surface
@@ -47,6 +47,7 @@ Current canonical report-only metric families include:
 - `api_surface`
 - `coverage_join`
 - `overloaded_modules`
+- `security_surfaces`
 
 Dependency depth facts in the canonical report now include:
 
@@ -80,6 +81,9 @@ Refs:
 - Design findings are built once in the canonical report using
   `meta.analysis_thresholds.design_findings`; consumers must not synthesize them post-hoc.
 - Coverage Join is canonical current-run truth for that run, but not baseline truth.
+- `security_surfaces` is a report-only exact inventory of security-relevant
+  capabilities and trust-boundary code. It does not claim vulnerabilities or
+  exploitability.
 - Clone groups excluded by project policy are carried only under suppressed clone buckets and do not affect active
   findings, health, clone gating, or suggestions.
 

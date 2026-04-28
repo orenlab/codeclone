@@ -14,6 +14,7 @@ from ..cache.entries import (
     ClassMetricsDict,
     DeadCandidateDict,
     ModuleDepDict,
+    SecuritySurfaceDict,
     StructuralFindingGroupDict,
 )
 from ..models import (
@@ -25,6 +26,11 @@ from ..models import (
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
     PublicSymbol,
+    SecuritySurface,
+    SecuritySurfaceCategory,
+    SecuritySurfaceClassificationMode,
+    SecuritySurfaceEvidenceKind,
+    SecuritySurfaceLocationScope,
     StructuralFindingGroup,
     StructuralFindingOccurrence,
 )
@@ -112,6 +118,55 @@ def _dead_candidate_kind(value: object) -> _DeadCandidateKind | None:
             return "method"
         case "import":
             return "import"
+        case _:
+            return None
+
+
+def _security_surface_category(value: object) -> SecuritySurfaceCategory | None:
+    match value:
+        case (
+            "archive_extraction"
+            | "crypto_transport"
+            | "database_boundary"
+            | "deserialization"
+            | "dynamic_execution"
+            | "dynamic_loading"
+            | "filesystem_mutation"
+            | "identity_token"
+            | "network_boundary"
+            | "process_boundary"
+        ):
+            return value
+        case _:
+            return None
+
+
+def _security_surface_location_scope(
+    value: object,
+) -> SecuritySurfaceLocationScope | None:
+    match value:
+        case "module" | "class" | "callable":
+            return value
+        case _:
+            return None
+
+
+def _security_surface_classification_mode(
+    value: object,
+) -> SecuritySurfaceClassificationMode | None:
+    match value:
+        case "exact_builtin" | "exact_call" | "exact_import":
+            return value
+        case _:
+            return None
+
+
+def _security_surface_evidence_kind(
+    value: object,
+) -> SecuritySurfaceEvidenceKind | None:
+    match value:
+        case "builtin" | "call" | "import":
+            return value
         case _:
             return None
 
@@ -428,6 +483,37 @@ def _dead_candidate_from_cache_row(dead_row: DeadCandidateDict) -> DeadCandidate
     )
 
 
+def _security_surface_from_cache_row(
+    surface_row: SecuritySurfaceDict,
+) -> SecuritySurface | None:
+    category = _security_surface_category(surface_row.get("category"))
+    location_scope = _security_surface_location_scope(surface_row.get("location_scope"))
+    classification_mode = _security_surface_classification_mode(
+        surface_row.get("classification_mode")
+    )
+    evidence_kind = _security_surface_evidence_kind(surface_row.get("evidence_kind"))
+    if (
+        category is None
+        or location_scope is None
+        or classification_mode is None
+        or evidence_kind is None
+    ):
+        return None
+    return SecuritySurface(
+        category=category,
+        capability=surface_row["capability"],
+        module=surface_row["module"],
+        filepath=surface_row["filepath"],
+        qualname=surface_row["qualname"],
+        start_line=surface_row["start_line"],
+        end_line=surface_row["end_line"],
+        location_scope=location_scope,
+        classification_mode=classification_mode,
+        evidence_kind=evidence_kind,
+        evidence_symbol=surface_row["evidence_symbol"],
+    )
+
+
 def load_cached_metrics_extended(
     entry: CacheEntry,
     *,
@@ -441,6 +527,7 @@ def load_cached_metrics_extended(
     ModuleTypingCoverage | None,
     ModuleDocstringCoverage | None,
     ModuleApiSurface | None,
+    tuple[SecuritySurface, ...],
 ]:
     class_metrics_rows: list[ClassMetricsDict] = entry.get("class_metrics", [])
     class_metrics_items: list[ClassMetrics] = []
@@ -473,6 +560,14 @@ def load_cached_metrics_extended(
         if is_test_filepath(filepath)
         else frozenset(entry.get("referenced_qualnames", []))
     )
+    security_surface_rows: list[SecuritySurfaceDict] = entry.get(
+        "security_surfaces", []
+    )
+    security_surface_items: list[SecuritySurface] = []
+    for surface_row in security_surface_rows:
+        parsed_surface = _security_surface_from_cache_row(surface_row)
+        if parsed_surface is not None:
+            security_surface_items.append(parsed_surface)
     return (
         class_metrics,
         module_deps,
@@ -482,4 +577,5 @@ def load_cached_metrics_extended(
         _typing_coverage_from_cache_dict(entry.get("typing_coverage")),
         _docstring_coverage_from_cache_dict(entry.get("docstring_coverage")),
         _api_surface_from_cache_dict(entry.get("api_surface")),
+        tuple(security_surface_items),
     )

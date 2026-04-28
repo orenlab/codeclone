@@ -21,6 +21,7 @@ import codeclone.surfaces.mcp.server as mcp_server
 from codeclone import __version__ as CODECLONE_VERSION
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.surfaces.mcp.server import MCPDependencyError, build_mcp_server
+from codeclone.surfaces.mcp.session import MCPServiceContractError
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 
 
@@ -92,6 +93,14 @@ def _write_quality_fixture(root: Path) -> None:
             "    return 42\n"
         ),
     )
+
+
+def test_mcp_server_validated_cache_policy_accepts_known_values() -> None:
+    assert mcp_server._validated_cache_policy("reuse") == "reuse"
+    assert mcp_server._validated_cache_policy("refresh") == "refresh"
+    assert mcp_server._validated_cache_policy("off") == "off"
+    with pytest.raises(MCPServiceContractError, match="cache_policy"):
+        mcp_server._validated_cache_policy("broken")
 
 
 def test_mcp_server_exposes_expected_read_only_tools() -> None:
@@ -404,10 +413,23 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             )
         )
     )
+    security_surfaces_page = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_report_section",
+                {
+                    "section": "metrics_detail",
+                    "family": "security_surfaces",
+                    "limit": 5,
+                },
+            )
+        )
+    )
     assert cast("list[dict[str, object]]", metrics_detail_page["items"])
     assert overloaded_modules_page["family"] == "overloaded_modules"
     assert overloaded_modules_alias_page["family"] == "overloaded_modules"
     assert overloaded_modules_alias_page["items"] == overloaded_modules_page["items"]
+    assert security_surfaces_page["family"] == "security_surfaces"
     report_metrics = cast("dict[str, object]", report_payload["metrics"])
     report_families = cast("dict[str, object]", report_metrics["families"])
     report_overloaded_modules = cast(

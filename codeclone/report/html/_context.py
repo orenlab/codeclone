@@ -63,6 +63,7 @@ class ReportContext:
     dependencies_map: Mapping[str, object]
     dead_code_map: Mapping[str, object]
     overloaded_modules_map: Mapping[str, object]
+    security_surfaces_map: Mapping[str, object]
     health_map: Mapping[str, object]
 
     # -- suggestions + structural --
@@ -177,6 +178,8 @@ def build_context(
     inventory_map = _as_mapping(report_document_map.get("inventory"))
     derived_map = _as_mapping(report_document_map.get("derived"))
     integrity_map = _as_mapping(report_document_map.get("integrity"))
+    report_metrics_map = _as_mapping(report_document_map.get("metrics"))
+    report_metric_families = _as_mapping(report_metrics_map.get("families"))
 
     report_schema_version = str(
         meta.get("report_schema_version") or REPORT_SCHEMA_VERSION
@@ -237,6 +240,9 @@ def build_context(
     overloaded_modules_map = _as_mapping(metrics_map.get("overloaded_modules"))
     if not overloaded_modules_map:
         overloaded_modules_map = _as_mapping(metrics_map.get("god_modules"))
+    security_surfaces_map = _as_mapping(report_metric_families.get("security_surfaces"))
+    if not security_surfaces_map:
+        security_surfaces_map = _as_mapping(metrics_map.get("security_surfaces"))
     health_map = _as_mapping(metrics_map.get("health"))
 
     suggestions_tuple = tuple(suggestions or ())
@@ -282,6 +288,7 @@ def build_context(
         dependencies_map=dependencies_map,
         dead_code_map=dead_code_map,
         overloaded_modules_map=overloaded_modules_map,
+        security_surfaces_map=security_surfaces_map,
         health_map=health_map,
         suggestions=suggestions_tuple,
         structural_findings=tuple(structural_findings or ()),

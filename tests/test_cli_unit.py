@@ -1217,6 +1217,15 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
         == "Dependencies  avg=4.0  p95=13  max=16"
     )
     assert (
+        ui.fmt_summary_compact_security_surfaces(
+            items=5,
+            categories=3,
+            production=4,
+            tests=1,
+        )
+        == "Security  items=5  categories=3  production=4  tests=1"
+    )
+    assert (
         ui.fmt_summary_compact_adoption(
             param_permille=750,
             return_permille=500,
@@ -1301,6 +1310,21 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
         max_depth=16,
     )
     assert_contains_all(dependencies, "avg 4.0", "p95 13", "max 16")
+    security_surfaces = ui.fmt_metrics_security_surfaces(
+        items=5,
+        categories=3,
+        production=4,
+        tests=1,
+    )
+    assert_contains_all(
+        security_surfaces,
+        "5",
+        "surfaces",
+        "3",
+        "categories",
+        "production 4",
+        "tests 1",
+    )
     dead_with_suppressed = ui.fmt_metrics_dead_code(447, suppressed=9)
     assert "447 found" in dead_with_suppressed
     assert "(9 suppressed)" in dead_with_suppressed
@@ -1462,6 +1486,42 @@ def test_print_metrics_in_quiet_mode_includes_overloaded_modules(
     assert "Public API" not in out
 
 
+def test_print_metrics_in_quiet_mode_includes_security_surfaces(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    cli_summary._print_metrics(
+        console=cast("cli_summary._Printer", cli.console),
+        quiet=True,
+        metrics=cli_summary.MetricsSnapshot(
+            complexity_avg=2.8,
+            complexity_max=20,
+            high_risk_count=0,
+            coupling_avg=0.5,
+            coupling_max=9,
+            cohesion_avg=1.2,
+            cohesion_max=4,
+            cycles_count=0,
+            dead_code_count=0,
+            health_total=85,
+            health_grade="B",
+            security_surfaces_items=5,
+            security_surfaces_category_count=3,
+            security_surfaces_production=4,
+            security_surfaces_tests=1,
+        ),
+    )
+    out = capsys.readouterr().out
+    assert_contains_all(
+        out,
+        "Security",
+        "items=5",
+        "categories=3",
+        "production=4",
+        "tests=1",
+    )
+
+
 def test_print_metrics_in_quiet_mode_includes_adoption_public_api_and_coverage(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1481,6 +1541,10 @@ def test_print_metrics_in_quiet_mode_includes_adoption_public_api_and_coverage(
             dead_code_count=0,
             health_total=85,
             health_grade="B",
+            security_surfaces_items=5,
+            security_surfaces_category_count=3,
+            security_surfaces_production=4,
+            security_surfaces_tests=1,
             adoption_param_permille=750,
             adoption_return_permille=500,
             adoption_docstring_permille=667,
@@ -1505,6 +1569,9 @@ def test_print_metrics_in_quiet_mode_includes_adoption_public_api_and_coverage(
     out = capsys.readouterr().out
     assert_contains_all(
         out,
+        "Security",
+        "items=5",
+        "production=4",
         "Adoption",
         "params=75.0%",
         "Public API",
@@ -1534,6 +1601,10 @@ def test_print_metrics_in_normal_mode_includes_adoption_public_api_and_coverage(
             dead_code_count=0,
             health_total=85,
             health_grade="B",
+            security_surfaces_items=5,
+            security_surfaces_category_count=3,
+            security_surfaces_production=4,
+            security_surfaces_tests=1,
             adoption_param_permille=750,
             adoption_return_permille=500,
             adoption_docstring_permille=667,
@@ -1558,6 +1629,8 @@ def test_print_metrics_in_normal_mode_includes_adoption_public_api_and_coverage(
     out = capsys.readouterr().out
     assert_contains_all(
         out,
+        "Security",
+        "5 surfaces",
         "Adoption",
         "params 75.0%",
         "docstrings 66.7%",

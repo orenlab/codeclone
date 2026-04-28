@@ -360,6 +360,11 @@ _INSIGHT = """\
 .insight-warn{border-left-color:var(--warning);background:var(--warning-muted)}
 .insight-risk{border-left-color:var(--error);background:var(--error-muted)}
 .insight-info{border-left-color:var(--info);background:var(--info-muted)}
+.insight-banner .overview-summary-grid{margin:0}
+.insight-banner .overview-summary-item{background:none;border:none;border-radius:0;padding:0}
+.insight-banner .overview-summary-label{font-size:.76rem;margin-bottom:var(--sp-2);
+  padding-bottom:var(--sp-1);border-bottom:1px solid color-mix(in srgb,var(--border) 55%,transparent)}
+.insight-banner .overview-fact-row{font-size:.78rem}
 """
 
 # ---------------------------------------------------------------------------

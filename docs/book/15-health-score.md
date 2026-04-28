@@ -67,6 +67,7 @@ These layers are report-only: they provide signal but are not yet validated
 for scoring-model inclusion.
 
 - `metrics.families.overloaded_modules`
+- `metrics.families.security_surfaces`
 - `findings.groups.clones.segments`
 - `findings.groups.structural.groups`
 - `derived.suggestions`

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from codeclone.utils import coerce as _coerce
 
 from ..primitives.escape import _escape_html
+from ..primitives.location import location_file_target, relative_location_path
 from ..widgets.badges import _micro_badges, _stat_card, _tab_empty_info
 from ..widgets.glossary import glossary_tip
 from ..widgets.tables import render_rows_table
@@ -200,7 +201,7 @@ def _coverage_join_empty_description() -> str:
 
 
 def _location_cell_html(ctx: ReportContext, item: Mapping[str, object]) -> str:
-    relative_path = str(item.get("relative_path", "")).strip()
+    relative_path = relative_location_path(ctx, item)
     start_line = _as_int(item.get("start_line"))
     end_line = _as_int(item.get("end_line"))
     line_label = (
@@ -210,11 +211,7 @@ def _location_cell_html(ctx: ReportContext, item: Mapping[str, object]) -> str:
     )
     if end_line > start_line > 0:
         line_label = f"{relative_path}:{start_line}-{end_line}"
-    file_target = (
-        f"{ctx.scan_root.rstrip('/')}/{relative_path}"
-        if ctx.scan_root and relative_path
-        else relative_path
-    )
+    file_target = location_file_target(ctx, item, relative_path=relative_path)
     return (
         f'<a class="ide-link" data-file="{_escape_html(file_target)}" '
         f'data-line="{start_line if start_line > 0 else 1}">'

@@ -544,6 +544,26 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             ),
         ),
         (
+            "security-surfaces",
+            "Security Surfaces",
+            (
+                "items",
+                "modules",
+                "exact_items",
+                "category_count",
+                "production",
+                "tests",
+            ),
+            (
+                "category",
+                "capability",
+                "source_kind",
+                "evidence_symbol",
+                "qualname",
+                "location_scope",
+            ),
+        ),
+        (
             "dependencies",
             "Dependencies",
             ("modules", "edges", "cycles", "avg_depth", "p95_depth", "max_depth"),
@@ -565,6 +585,8 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         )
         if family_key == "coverage-join":
             family_key = "coverage_join"
+        if family_key == "security-surfaces":
+            family_key = "security_surfaces"
         family_payload = _as_mapping(metrics_families.get(family_key))
         if not family_payload and family_key == "overloaded_modules":
             family_payload = _as_mapping(metrics_families.get("god_modules"))

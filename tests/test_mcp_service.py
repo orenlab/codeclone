@@ -1160,6 +1160,7 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
         "dependencies",
         "dead_code",
         "overloaded_modules",
+        "security_surfaces",
         "health",
     }
     assert "families" not in metrics_summary
@@ -1189,6 +1190,13 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
         cast("list[dict[str, object]]", overloaded_modules_alias_page["items"])
         == overloaded_modules_items
     )
+    security_surfaces_page = service.get_report_section(
+        run_id=run_id,
+        section="metrics_detail",
+        family="security_surfaces",
+        limit=5,
+    )
+    assert security_surfaces_page["family"] == "security_surfaces"
     report_record = service._runs.get(run_id)
     assert report_record is not None
     report_document = report_record.report_document
@@ -3322,6 +3330,76 @@ def test_mcp_service_summary_and_gate_contract_for_coverage_join(
         )
 
 
+def test_mcp_service_summary_payload_includes_security_surfaces(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    request = MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False)
+    record = MCPRunRecord(
+        run_id="security",
+        root=tmp_path,
+        request=request,
+        comparison_settings=(),
+        report_document={
+            "metrics": {
+                "families": {
+                    "security_surfaces": {
+                        "summary": {
+                            "items": 5,
+                            "category_count": 3,
+                            "production": 4,
+                            "tests": 1,
+                            "report_only": True,
+                        },
+                        "items": [],
+                    }
+                }
+            }
+        },
+        summary={
+            "run_id": "security",
+            "health": {"score": 80, "grade": "B"},
+            "inventory": {},
+            "baseline": {},
+            "metrics_baseline": {},
+            "cache": {},
+            "findings_summary": {},
+            "baseline_diff": {},
+            "metrics_diff": {},
+            "warnings": [],
+            "failures": [],
+        },
+        changed_paths=(),
+        changed_projection=None,
+        warnings=(),
+        failures=(),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        coverage_join=None,
+        suggestions=(),
+        new_func=frozenset(),
+        new_block=frozenset(),
+        metrics_diff=None,
+    )
+    payload = service._summary_payload(record.summary, record=record)
+    assert cast(dict[str, object], payload["security_surfaces"]) == {
+        "items": 5,
+        "categories": 3,
+        "production": 4,
+        "tests": 1,
+        "report_only": True,
+    }
+    empty_report_record = replace(
+        record,
+        report_document={"metrics": {"families": {}}},
+    )
+    assert "security_surfaces" not in service._summary_payload(
+        empty_report_record.summary,
+        record=empty_report_record,
+    )
+
+
 def test_mcp_service_short_id_and_comparison_helper_branches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3979,6 +4057,50 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
                 "coverage_permille": 250,
                 "coverage_hotspot": True,
                 "scope_gap_hotspot": False,
+            }
+        ],
+    }
+    security_surfaces_payload = service._metrics_detail_payload(
+        metrics={
+            "summary": {},
+            "families": {
+                "security_surfaces": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/client.py",
+                            "module": "pkg.client",
+                            "qualname": "pkg.client",
+                            "category": "network_boundary",
+                            "capability": "requests_import",
+                            "classification_mode": "exact_import",
+                            "evidence_symbol": "requests",
+                        }
+                    ]
+                }
+            },
+        },
+        family="security_surfaces",
+        path=None,
+        offset=0,
+        limit=5,
+    )
+    assert security_surfaces_payload == {
+        "family": "security_surfaces",
+        "path": None,
+        "offset": 0,
+        "limit": 5,
+        "returned": 1,
+        "total": 1,
+        "has_more": False,
+        "items": [
+            {
+                "path": "pkg/client.py",
+                "module": "pkg.client",
+                "qualname": "pkg.client",
+                "category": "network_boundary",
+                "capability": "requests_import",
+                "classification_mode": "exact_import",
+                "evidence_symbol": "requests",
             }
         ],
     }

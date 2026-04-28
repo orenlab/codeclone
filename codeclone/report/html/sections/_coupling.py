@@ -22,6 +22,10 @@ from ._coverage_join import (
     coverage_join_quality_summary,
     render_coverage_join_panel,
 )
+from ._security_surfaces import (
+    render_security_surfaces_panel,
+    security_surfaces_quality_count,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -270,12 +274,12 @@ def render_quality_panel(ctx: ReportContext) -> str:
     complexity_summary = _as_mapping(ctx.complexity_map.get("summary"))
     overloaded_modules_summary = _as_mapping(ctx.overloaded_modules_map.get("summary"))
     coverage_join_summary = coverage_join_quality_summary(ctx)
-
     coupling_high_risk = _as_int(coupling_summary.get("high_risk"))
     cohesion_low = _as_int(cohesion_summary.get("low_cohesion"))
     complexity_high_risk = _as_int(complexity_summary.get("high_risk"))
     overloaded_module_candidates = _as_int(overloaded_modules_summary.get("candidates"))
     coverage_review_items = coverage_join_quality_count(ctx)
+    security_surface_items = security_surfaces_quality_count(ctx)
     coverage_hotspots = _as_int(coverage_join_summary.get("coverage_hotspots"))
     coverage_scope_gaps = _as_int(coverage_join_summary.get("scope_gap_hotspots"))
     coverage_join_status = str(coverage_join_summary.get("status", "")).strip()
@@ -293,6 +297,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
             f"high-coupling: {coupling_high_risk}; "
             f"low-cohesion: {cohesion_low}; "
             f"overloaded modules: {overloaded_module_candidates}; "
+            f"security surfaces: {security_surface_items}; "
             f"max CC {cc_max}; "
             f"max CBO {coupling_summary.get('max', 'n/a')}; "
             f"max LCOM4 {cohesion_summary.get('max', 'n/a')}."
@@ -440,6 +445,16 @@ def render_quality_panel(ctx: ReportContext) -> str:
                 "Coverage Join",
                 coverage_review_items,
                 coverage_join_panel,
+            )
+        )
+    security_surfaces_panel = render_security_surfaces_panel(ctx)
+    if security_surfaces_panel:
+        sub_tabs.append(
+            (
+                "security-surfaces",
+                "Security Surfaces",
+                security_surface_items,
+                security_surfaces_panel,
             )
         )
 

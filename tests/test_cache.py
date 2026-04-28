@@ -26,8 +26,10 @@ from codeclone.cache._validators import (
     _is_api_param_spec_dict,
     _is_class_metrics_dict,
     _is_dead_candidate_dict,
+    _is_module_api_surface_dict,
     _is_module_dep_dict,
     _is_public_symbol_dict,
+    _is_security_surface_dict,
 )
 from codeclone.cache._wire_decode import (
     _decode_optional_wire_api_surface,
@@ -42,6 +44,7 @@ from codeclone.cache._wire_decode import (
     _decode_wire_file_sections,
     _decode_wire_module_dep,
     _decode_wire_name_sections,
+    _decode_wire_security_surface,
     _decode_wire_segment,
     _decode_wire_unit,
 )
@@ -53,6 +56,10 @@ from codeclone.cache._wire_helpers import (
 )
 from codeclone.cache.entries import (
     CacheEntry,
+    _as_security_surface_category,
+    _as_security_surface_classification_mode,
+    _as_security_surface_evidence_kind,
+    _as_security_surface_location_scope,
     _block_dict_from_model,
     _segment_dict_from_model,
     _unit_dict_from_model,
@@ -72,6 +79,7 @@ from codeclone.models import (
     FileMetrics,
     ModuleApiSurface,
     PublicSymbol,
+    SecuritySurface,
     SegmentUnit,
     Unit,
 )
@@ -120,6 +128,30 @@ def _analysis_payload(cache: Cache, *, files: object) -> dict[str, object]:
         "ap": cache.data["analysis_profile"],
         "files": files,
     }
+
+
+def _roundtrip_cache_entry_with_metrics(
+    tmp_path: Path,
+    *,
+    file_metrics: FileMetrics,
+) -> CacheEntry:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    cache.put_file_entry(
+        "x.py",
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        file_metrics=file_metrics,
+    )
+    cache.save()
+
+    loaded = Cache(cache_path)
+    loaded.load()
+    entry = loaded.get_file_entry("x.py")
+    assert entry is not None
+    return entry
 
 
 def test_cache_roundtrip(tmp_path: Path) -> None:
@@ -208,14 +240,8 @@ def test_cache_roundtrip_preserves_empty_structural_findings(tmp_path: Path) -> 
 def test_cache_roundtrip_preserves_api_surface_parameter_order(
     tmp_path: Path,
 ) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    cache.put_file_entry(
-        "x.py",
-        {"mtime_ns": 1, "size": 10},
-        [],
-        [],
-        [],
+    entry = _roundtrip_cache_entry_with_metrics(
+        tmp_path,
         file_metrics=FileMetrics(
             class_metrics=(),
             module_deps=(),
@@ -250,14 +276,161 @@ def test_cache_roundtrip_preserves_api_surface_parameter_order(
             ),
         ),
     )
-    cache.save()
-
-    loaded = Cache(cache_path)
-    loaded.load()
-    entry = loaded.get_file_entry("x.py")
-    assert entry is not None
     params = entry["api_surface"]["symbols"][0]["params"]
     assert [param["name"] for param in params] == ["beta", "alpha"]
+
+
+def test_cache_roundtrip_preserves_security_surfaces(tmp_path: Path) -> None:
+    entry = _roundtrip_cache_entry_with_metrics(
+        tmp_path,
+        file_metrics=FileMetrics(
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=frozenset(),
+            import_names=frozenset(),
+            class_names=frozenset(),
+            security_surfaces=(
+                SecuritySurface(
+                    category="process_boundary",
+                    capability="subprocess_run",
+                    module="pkg.runner",
+                    filepath="x.py",
+                    qualname="pkg.runner:run_command",
+                    start_line=10,
+                    end_line=10,
+                    location_scope="callable",
+                    classification_mode="exact_call",
+                    evidence_kind="call",
+                    evidence_symbol="subprocess.run",
+                ),
+            ),
+        ),
+    )
+    assert entry["security_surfaces"] == [
+        {
+            "category": "process_boundary",
+            "capability": "subprocess_run",
+            "module": "pkg.runner",
+            "filepath": "x.py",
+            "qualname": "pkg.runner:run_command",
+            "start_line": 10,
+            "end_line": 10,
+            "location_scope": "callable",
+            "classification_mode": "exact_call",
+            "evidence_kind": "call",
+            "evidence_symbol": "subprocess.run",
+        }
+    ]
+
+
+def test_security_surface_cache_helpers_reject_invalid_values() -> None:
+    assert _as_security_surface_category("process_boundary") == "process_boundary"
+    assert _as_security_surface_category("broken") is None
+    assert _as_security_surface_location_scope("callable") == "callable"
+    assert _as_security_surface_location_scope("broken") is None
+    assert _as_security_surface_classification_mode("exact_call") == "exact_call"
+    assert _as_security_surface_classification_mode("broken") is None
+    assert _as_security_surface_evidence_kind("call") == "call"
+    assert _as_security_surface_evidence_kind("broken") is None
+    assert (
+        _is_module_api_surface_dict(
+            {
+                "module": "pkg.mod",
+                "filepath": "pkg/mod.py",
+                "all_declared": ["run"],
+                "symbols": "bad",
+            }
+        )
+        is False
+    )
+    assert _is_security_surface_dict(object()) is False
+
+
+def test_decode_wire_security_surface_covers_valid_and_invalid_rows() -> None:
+    assert _decode_wire_security_surface(object(), "pkg/mod.py") is None
+    assert (
+        _decode_wire_security_surface(
+            [
+                "broken",
+                "subprocess_run",
+                "pkg.mod",
+                "pkg.mod:run",
+                10,
+                12,
+                "callable",
+                "exact_call",
+                "call",
+                "subprocess.run",
+            ],
+            "pkg/mod.py",
+        )
+        is None
+    )
+    assert (
+        _decode_wire_security_surface(
+            [
+                "process_boundary",
+                "subprocess_run",
+                "pkg.mod",
+                "pkg.mod:run",
+                "10",
+                12,
+                "callable",
+                "exact_call",
+                "call",
+                "subprocess.run",
+            ],
+            "pkg/mod.py",
+        )
+        is None
+    )
+    assert (
+        _decode_wire_security_surface(
+            [
+                "process_boundary",
+                "subprocess_run",
+                "pkg.mod",
+                "pkg.mod:run",
+                10,
+                12,
+                "broken",
+                "exact_call",
+                "call",
+                "subprocess.run",
+            ],
+            "pkg/mod.py",
+        )
+        is None
+    )
+    decoded = _decode_wire_security_surface(
+        [
+            "process_boundary",
+            "subprocess_run",
+            "pkg.mod",
+            "pkg.mod:run",
+            10,
+            12,
+            "callable",
+            "exact_call",
+            "call",
+            "subprocess.run",
+        ],
+        "pkg/mod.py",
+    )
+    assert decoded == {
+        "category": "process_boundary",
+        "capability": "subprocess_run",
+        "module": "pkg.mod",
+        "filepath": "pkg/mod.py",
+        "qualname": "pkg.mod:run",
+        "start_line": 10,
+        "end_line": 12,
+        "location_scope": "callable",
+        "classification_mode": "exact_call",
+        "evidence_kind": "call",
+        "evidence_symbol": "subprocess.run",
+    }
 
 
 def test_cache_load_normalizes_stale_structural_findings(tmp_path: Path) -> None:

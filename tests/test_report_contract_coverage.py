@@ -1347,6 +1347,86 @@ def test_report_contract_renderers_include_coverage_join_section_when_present() 
     )
 
 
+def test_report_contract_renderers_include_security_surfaces_section() -> None:
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics={
+            "security_surfaces": {
+                "summary": {
+                    "items": 2,
+                    "modules": 2,
+                    "exact_items": 2,
+                    "category_count": 2,
+                    "categories": {
+                        "network_boundary": 1,
+                        "process_boundary": 1,
+                    },
+                    "by_source_kind": {
+                        "production": 1,
+                        "tests": 1,
+                        "fixtures": 0,
+                        "other": 0,
+                    },
+                    "production": 1,
+                    "tests": 1,
+                    "fixtures": 0,
+                    "other": 0,
+                    "report_only": True,
+                },
+                "items": [
+                    {
+                        "category": "network_boundary",
+                        "capability": "requests_import",
+                        "module": "pkg.client",
+                        "filepath": "/repo/pkg/client.py",
+                        "qualname": "pkg.client",
+                        "start_line": 1,
+                        "end_line": 1,
+                        "source_kind": "production",
+                        "location_scope": "module",
+                        "classification_mode": "exact_import",
+                        "evidence_kind": "import",
+                        "evidence_symbol": "requests",
+                    },
+                    {
+                        "category": "process_boundary",
+                        "capability": "subprocess_run",
+                        "module": "tests.test_cli",
+                        "filepath": "/repo/tests/test_cli.py",
+                        "qualname": "tests.test_cli:run_case",
+                        "start_line": 10,
+                        "end_line": 10,
+                        "source_kind": "tests",
+                        "location_scope": "callable",
+                        "classification_mode": "exact_call",
+                        "evidence_kind": "call",
+                        "evidence_symbol": "subprocess.run",
+                    },
+                ],
+            }
+        },
+    )
+
+    text = render_text_report_document(payload)
+    markdown = render_markdown_report_document(payload)
+
+    assert_contains_all(
+        text,
+        "SECURITY SURFACES (top 10)",
+        "category=network_boundary",
+        "capability=requests_import",
+    )
+    assert_contains_all(
+        markdown,
+        '<a id="security-surfaces"></a>',
+        "### Security Surfaces",
+        "capability=requests_import",
+    )
+
+
 def test_report_contract_markdown_renders_empty_suppressed_clone_section() -> None:
     payload = _rich_report_document()
     findings = cast(dict[str, object], payload["findings"])
@@ -1680,6 +1760,115 @@ def test_report_contract_includes_canonical_coverage_join_family() -> None:
     )
     assert coverage_group["kind"] == "coverage_hotspot"
     assert cast(dict[str, object], coverage_group["facts"])["coverage_permille"] == 250
+
+
+def test_report_contract_includes_canonical_security_surfaces_family() -> None:
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics={
+            "security_surfaces": {
+                "summary": {
+                    "items": 2,
+                    "modules": 2,
+                    "exact_items": 2,
+                    "category_count": 2,
+                    "categories": {
+                        "network_boundary": 1,
+                        "process_boundary": 1,
+                    },
+                    "by_source_kind": {
+                        "production": 1,
+                        "tests": 1,
+                        "fixtures": 0,
+                        "other": 0,
+                    },
+                    "production": 1,
+                    "tests": 1,
+                    "fixtures": 0,
+                    "other": 0,
+                    "report_only": True,
+                },
+                "items": [
+                    {
+                        "category": "network_boundary",
+                        "capability": "requests_import",
+                        "module": "pkg.client",
+                        "filepath": "/repo/pkg/client.py",
+                        "qualname": "pkg.client",
+                        "start_line": 1,
+                        "end_line": 1,
+                        "source_kind": "production",
+                        "location_scope": "module",
+                        "classification_mode": "exact_import",
+                        "evidence_kind": "import",
+                        "evidence_symbol": "requests",
+                    },
+                    {
+                        "category": "process_boundary",
+                        "capability": "subprocess_run",
+                        "module": "tests.test_cli",
+                        "filepath": "/repo/tests/test_cli.py",
+                        "qualname": "tests.test_cli:run_case",
+                        "start_line": 10,
+                        "end_line": 10,
+                        "source_kind": "tests",
+                        "location_scope": "callable",
+                        "classification_mode": "exact_call",
+                        "evidence_kind": "call",
+                        "evidence_symbol": "subprocess.run",
+                    },
+                ],
+            }
+        },
+    )
+
+    summary, security_surfaces, items = _metric_family_payload(
+        payload,
+        "security_surfaces",
+    )
+    security_summary = cast(dict[str, object], security_surfaces["summary"])
+    assert summary["security_surfaces"] == security_summary
+    assert security_summary == {
+        "items": 2,
+        "modules": 2,
+        "exact_items": 2,
+        "category_count": 2,
+        "categories": {
+            "network_boundary": 1,
+            "process_boundary": 1,
+        },
+        "by_source_kind": {
+            "production": 1,
+            "tests": 1,
+            "fixtures": 0,
+            "other": 0,
+        },
+        "production": 1,
+        "tests": 1,
+        "fixtures": 0,
+        "other": 0,
+        "report_only": True,
+    }
+    assert (
+        items[0]["relative_path"],
+        items[0]["module"],
+        items[0]["classification_mode"],
+        items[0]["evidence_symbol"],
+    ) == ("pkg/client.py", "pkg.client", "exact_import", "requests")
+    assert (
+        items[1]["relative_path"],
+        items[1]["qualname"],
+        items[1]["location_scope"],
+        items[1]["source_kind"],
+    ) == (
+        "tests/test_cli.py",
+        "tests.test_cli:run_case",
+        "callable",
+        "tests",
+    )
 
 
 def test_sarif_helper_level_mapping() -> None:

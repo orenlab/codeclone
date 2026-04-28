@@ -20,6 +20,7 @@ from ..models import (
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
+    SecuritySurface,
     SegmentGroupItem,
     SegmentUnit,
     StructuralFindingGroup,
@@ -80,6 +81,24 @@ class DeadCandidateDictBase(TypedDict):
 
 class DeadCandidateDict(DeadCandidateDictBase, total=False):
     suppressed_rules: list[str]
+
+
+class SecuritySurfaceDictBase(TypedDict):
+    category: str
+    capability: str
+    module: str
+    filepath: str
+    qualname: str
+    start_line: int
+    end_line: int
+    location_scope: str
+    classification_mode: str
+    evidence_kind: str
+    evidence_symbol: str
+
+
+class SecuritySurfaceDict(SecuritySurfaceDictBase):
+    pass
 
 
 class ModuleTypingCoverageDict(TypedDict):
@@ -144,7 +163,7 @@ class _FileEntryBase(TypedDict):
     segments: list[SegmentDict]
 
 
-class _FileEntryV25(_FileEntryBase, total=False):
+class _FileEntryV26(_FileEntryBase, total=False):
     source_stats: SourceStatsDict
     class_metrics: list[ClassMetricsDict]
     module_deps: list[ModuleDepDict]
@@ -153,6 +172,7 @@ class _FileEntryV25(_FileEntryBase, total=False):
     referenced_qualnames: list[str]
     import_names: list[str]
     class_names: list[str]
+    security_surfaces: list[SecuritySurfaceDict]
     typing_coverage: ModuleTypingCoverageDict
     docstring_coverage: ModuleDocstringCoverageDict
     api_surface: ModuleApiSurfaceDict
@@ -160,7 +180,7 @@ class _FileEntryV25(_FileEntryBase, total=False):
 
 
 CacheEntryBase = _FileEntryBase
-CacheEntry = _FileEntryV25
+CacheEntry = _FileEntryV26
 
 
 def _normalize_cached_structural_group(
@@ -236,6 +256,49 @@ def _as_risk_literal(value: object) -> Literal["low", "medium", "high"] | None:
             return None
 
 
+def _as_security_surface_category(value: object) -> str | None:
+    match value:
+        case (
+            "archive_extraction"
+            | "crypto_transport"
+            | "database_boundary"
+            | "deserialization"
+            | "dynamic_execution"
+            | "dynamic_loading"
+            | "filesystem_mutation"
+            | "identity_token"
+            | "network_boundary"
+            | "process_boundary"
+        ):
+            return value
+        case _:
+            return None
+
+
+def _as_security_surface_location_scope(value: object) -> str | None:
+    match value:
+        case "module" | "class" | "callable":
+            return value
+        case _:
+            return None
+
+
+def _as_security_surface_classification_mode(value: object) -> str | None:
+    match value:
+        case "exact_builtin" | "exact_call" | "exact_import":
+            return value
+        case _:
+            return None
+
+
+def _as_security_surface_evidence_kind(value: object) -> str | None:
+    match value:
+        case "builtin" | "call" | "import":
+            return value
+        case _:
+            return None
+
+
 def _new_optional_metrics_payload() -> tuple[
     list[ClassMetricsDict],
     list[ModuleDepDict],
@@ -244,11 +307,12 @@ def _new_optional_metrics_payload() -> tuple[
     list[str],
     list[str],
     list[str],
+    list[SecuritySurfaceDict],
     ModuleTypingCoverageDict | None,
     ModuleDocstringCoverageDict | None,
     ModuleApiSurfaceDict | None,
 ]:
-    return [], [], [], [], [], [], [], None, None, None
+    return [], [], [], [], [], [], [], [], None, None, None
 
 
 def _unit_dict_from_model(unit: Unit, filepath: str) -> UnitDict:
@@ -410,6 +474,25 @@ def _dead_candidate_dict_from_model(
     return result
 
 
+def _security_surface_dict_from_model(
+    surface: SecuritySurface,
+    filepath: str,
+) -> SecuritySurfaceDict:
+    return SecuritySurfaceDict(
+        category=surface.category,
+        capability=surface.capability,
+        module=surface.module,
+        filepath=filepath,
+        qualname=surface.qualname,
+        start_line=surface.start_line,
+        end_line=surface.end_line,
+        location_scope=surface.location_scope,
+        classification_mode=surface.classification_mode,
+        evidence_kind=surface.evidence_kind,
+        evidence_symbol=surface.evidence_symbol,
+    )
+
+
 def _structural_occurrence_dict_from_model(
     occurrence: StructuralFindingOccurrence,
 ) -> StructuralFindingOccurrenceDict:
@@ -447,6 +530,7 @@ __all__ = [
     "ModuleDocstringCoverageDict",
     "ModuleTypingCoverageDict",
     "PublicSymbolDict",
+    "SecuritySurfaceDict",
     "SegmentDict",
     "SourceStatsDict",
     "StructuralFindingGroupDict",
@@ -454,6 +538,10 @@ __all__ = [
     "UnitDict",
     "_api_surface_dict_from_model",
     "_as_risk_literal",
+    "_as_security_surface_category",
+    "_as_security_surface_classification_mode",
+    "_as_security_surface_evidence_kind",
+    "_as_security_surface_location_scope",
     "_block_dict_from_model",
     "_class_metrics_dict_from_model",
     "_dead_candidate_dict_from_model",
@@ -462,6 +550,7 @@ __all__ = [
     "_new_optional_metrics_payload",
     "_normalize_cached_structural_group",
     "_normalize_cached_structural_groups",
+    "_security_surface_dict_from_model",
     "_segment_dict_from_model",
     "_structural_group_dict_from_model",
     "_structural_occurrence_dict_from_model",
