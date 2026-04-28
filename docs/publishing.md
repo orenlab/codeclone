@@ -7,6 +7,10 @@ Document how the documentation site is built, validated, and published.
 This page is operational, not contractual. The source of truth for behavior
 remains the current repository code and CI workflow.
 
+!!! note "Scope"
+    This page covers docs-site build and publishing mechanics. Public behavior
+    contracts still live in the book chapters and in the repository code.
+
 ## Current stack
 
 - Site generator: `MkDocs`
@@ -41,6 +45,10 @@ Relevant files:
 - `.github/workflows/docs.yml`
 - `scripts/build_docs_example_report.py`
 
+!!! warning "Generated output only"
+    `site/` is a generated artifact. It is used for local preview and GitHub
+    Pages deployment, but it should not be committed.
+
 ## Sample report generation
 
 The sample report is generated from the current `codeclone` repository tree.
@@ -57,17 +65,18 @@ git. `site/` remains ignored.
 
 ## Local preview
 
-Build the site:
+=== "Build the site"
 
-```bash
-uv run --with mkdocs --with mkdocs-material mkdocs build --strict
-```
+    ```bash title="Validate the MkDocs site"
+    uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+    ```
 
-Generate the sample report into the built site:
+=== "Build the site and sample report"
 
-```bash
-uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
-```
+    ```bash title="Generate the live sample report into site/"
+    uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+    uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
+    ```
 
 Then open:
 

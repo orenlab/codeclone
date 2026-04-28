@@ -2,37 +2,38 @@
 
 ## Purpose
 
-Define deterministic clone-type classification and suggestion generation
-contracts used by canonical report projections (`JSON` / `TXT` / `Markdown` /
-`HTML`).
+Define deterministic clone-type classification and suggestion generation used by
+canonical report projections.
 
 ## Public surface
 
 - Clone-type classifier: `codeclone/report/suggestions.py:classify_clone_type`
 - Suggestion engine: `codeclone/report/suggestions.py:generate_suggestions`
-- Pipeline integration: `codeclone/pipeline.py:compute_suggestions`
-- Report serialization: `codeclone/report/json_contract.py:build_report_document`
-- HTML render integration: `codeclone/html_report.py:build_html_report`
+- Pipeline integration: `codeclone/core/pipeline.py:compute_suggestions`
+- Report serialization: `codeclone/report/document/builder.py:build_report_document`
+- HTML render integration: `codeclone/report/html/assemble.py:build_html_report`
 
 ## Data model
 
 Suggestion shape:
 
-- `severity`: `critical|warning|info`
-- `category`:
-  `clone|structural|complexity|coupling|cohesion|dead_code|dependency`
-- `source_kind`: source classification of the primary location
-  (`production` / `tests` / `fixtures` / `other`)
-- `title`, `location`, `steps`, `effort`, `priority`
+- `severity`
+- `category`
+- `source_kind`
+- `title`
+- `location`
+- `steps`
+- `effort`
+- `priority`
 
 Clone typing:
 
 - function groups:
     - Type-1: identical `raw_hash`
     - Type-2: identical normalized `fingerprint`
-    - Type-3: mixed fingerprints (same group semantics)
+    - Type-3: mixed fingerprints inside same group semantics
     - Type-4: fallback
-- block/segment groups: Type-4
+- block and segment groups: Type-4
 
 Refs:
 
@@ -41,36 +42,26 @@ Refs:
 
 ## Contracts
 
-- Suggestions are generated only in full metrics mode
-  (`skip_metrics=false`).
+- Suggestions are generated only in full metrics mode.
 - Suggestions are advisory only and never directly control exit code.
-- Suggestions are not a one-to-one mirror of findings. They should exist only
-  when they add action structure beyond the canonical finding itself.
-- Low-signal local structural `info` hints stay in `findings` and do not emit a
-  separate suggestion card.
-- SARIF projection is finding-driven and does not consume suggestion cards.
-- JSON report stores clone typing at group level:
-    - `findings.groups.clones.<kind>[*].clone_type`
-- Suggestion location is deterministic: first item by stable path/line sort.
+- Suggestions are not a one-to-one mirror of findings; they exist only when they add action structure.
+- Low-signal local structural info hints stay in findings and do not emit separate suggestion cards.
+- SARIF remains finding-driven and does not consume suggestion cards.
+- JSON report stores clone typing at group level under clone groups.
 
 Refs:
 
-- `codeclone/pipeline.py:analyze`
-- `codeclone/pipeline.py:gate`
-- `codeclone/report/json_contract.py:build_report_document`
+- `codeclone/core/pipeline.py:analyze`
+- `codeclone/core/pipeline.py:compute_suggestions`
+- `codeclone/report/document/builder.py:build_report_document`
 - `codeclone/report/suggestions.py:generate_suggestions`
 
 ## Invariants (MUST)
 
-- Suggestion priority formula is stable:
-  `severity_weight / effort_weight`.
-- For structural findings, separate suggestion cards are emitted only for the
-  actionable subset; low-signal local `info` hints remain finding-only.
-- Suggestion output is sorted by:
-  `(-priority, severity, category, source_kind, location, title, subject_key)`.
-- Derived suggestion serialization in report JSON applies deterministic ordering by
-  `(-priority, severity_rank, title, finding_id)`.
-- Clone type output for a given group is deterministic for identical inputs.
+- Suggestion priority formula is stable.
+- Structural suggestion cards are emitted only for the actionable subset.
+- Suggestion output is deterministically sorted.
+- Clone type output for identical inputs is deterministic.
 
 Refs:
 
@@ -87,14 +78,13 @@ Refs:
 
 ## Determinism / canonicalization
 
-- Classifier uses deterministic set normalization + sorted collections.
-- Serializer emits suggestions in generator-provided deterministic order.
+- Classifier uses deterministic set normalization and sorted collections.
+- Serializer emits suggestions in deterministic order.
 
 Refs:
 
 - `codeclone/report/suggestions.py:classify_clone_type`
-- `codeclone/report/suggestions.py:generate_suggestions`
-- `codeclone/report/json_contract.py:build_report_document`
+- `codeclone/report/document/builder.py:build_report_document`
 
 ## Locked by tests
 
@@ -105,13 +95,5 @@ Refs:
 
 ## Non-guarantees
 
-- Suggestion wording can evolve without schema bump.
-- Suggestion heuristics may be refined if deterministic ordering and
-  non-gating behavior remain unchanged.
-
-## See also
-
-- [05-core-pipeline.md](05-core-pipeline.md)
-- [08-report.md](08-report.md)
-- [10-html-render.md](10-html-render.md)
-- [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
+- Suggestion wording can evolve without a schema bump.
+- Suggestion heuristics may be refined if deterministic ordering and non-gating behavior remain unchanged.

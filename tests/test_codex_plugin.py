@@ -12,20 +12,30 @@ def test_codex_plugin_manifest_is_consistent() -> None:
     root = Path(__file__).resolve().parents[1]
     plugin_root = root / "plugins" / "codeclone"
     manifest = _load_json(plugin_root / ".codex-plugin" / "plugin.json")
+    marketplace = _load_json(root / ".agents" / "plugins" / "marketplace.json")
 
     assert isinstance(manifest, dict)
+    assert manifest["name"] == plugin_root.name
     assert manifest["name"] == "codeclone"
-    assert manifest["version"] == "2.0.0-b5.0"
+    assert manifest["version"] == "2.0.0-b6.0"
     assert manifest["skills"] == "./skills/"
     assert manifest["mcpServers"] == "./.mcp.json"
     assert manifest["license"] == "MPL-2.0"
     assert manifest["homepage"] == "https://orenlab.github.io/codeclone/codex-plugin/"
+    assert isinstance(marketplace, dict)
+    assert marketplace["plugins"][0]["name"] == manifest["name"]
 
     interface = manifest["interface"]
     assert isinstance(interface, dict)
-    assert interface["displayName"] == "CodeClone"
-    assert interface["category"] == "Developer Tools"
-    assert interface["websiteURL"] == manifest["homepage"]
+    assert {
+        "displayName": interface["displayName"],
+        "category": interface["category"],
+        "websiteURL": interface["websiteURL"],
+    } == {
+        "displayName": "CodeClone",
+        "category": "Developer Tools",
+        "websiteURL": manifest["homepage"],
+    }
     assert (
         interface["privacyPolicyURL"]
         == "https://orenlab.github.io/codeclone/privacy-policy/"
@@ -71,13 +81,11 @@ def test_codex_plugin_marketplace_and_mcp_config_are_aligned() -> None:
 
     assert isinstance(mcp_config, dict)
     server = mcp_config["mcpServers"]["codeclone"]
-    assert server["command"] == "sh"
-    assert server["args"][0] == "-lc"
-    launcher = server["args"][1]
-    assert "$PWD/.venv/bin/codeclone-mcp" in launcher
-    assert "poetry env info -p" in launcher
-    assert "exec codeclone-mcp --transport stdio" in launcher
-    assert "PATH entry" in launcher
+    assert server["command"] == "python3"
+    assert server["args"] == ["./scripts/launch_mcp"]
+    assert (plugin_root / "scripts" / "launch_mcp").is_file()
+    assert (plugin_root / "scripts" / "launch_mcp.py").is_file()
+    assert (root / "scripts" / "launch_mcp").is_file()
 
 
 def test_codex_plugin_skill_exists() -> None:
@@ -126,7 +134,8 @@ def test_codex_plugin_readme_and_docs_exist() -> None:
     assert "does not rewrite `~/.codex/config.toml`" in readme_text
     assert "The plugin prefers a workspace launcher first" in readme_text
     assert "the current Poetry environment launcher" in readme_text
-    assert 'uv tool install "codeclone[mcp]>=2.0.0b4"' in readme_text
+    assert "without relying on `sh -lc`" in readme_text
+    assert 'uv tool install --pre "codeclone[mcp]"' in readme_text
 
     assert (root / "docs" / "codex-plugin.md").is_file()
     assert (root / "docs" / "terms-of-use.md").is_file()

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from codeclone.golden_fixtures import (
+from codeclone.findings.clones.golden_fixtures import (
     GoldenFixturePatternError,
     build_suppressed_clone_groups,
     normalize_golden_fixture_patterns,

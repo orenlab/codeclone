@@ -9,6 +9,7 @@ Repo-local discovery via `.agents/plugins/marketplace.json`.
 |------------------------------|----------------------------------------------------|
 | `.codex-plugin/plugin.json`  | Plugin metadata, prompts, instructions             |
 | `.mcp.json`                  | Workspace-first MCP launcher definition            |
+| `scripts/launch_mcp`         | Shell-free launcher wrapper for Codex              |
 | `skills/codeclone-review/`   | Conservative-first full review skill               |
 | `skills/codeclone-hotspots/` | Quick hotspot discovery skill                      |
 | `assets/`                    | Plugin branding                                    |
@@ -17,14 +18,14 @@ Repo-local discovery via `.agents/plugins/marketplace.json`.
 
 ```bash
 uv venv
-uv pip install --python .venv/bin/python "codeclone[mcp]>=2.0.0b5"
+uv pip install --python .venv/bin/python --pre "codeclone[mcp]"
 .venv/bin/codeclone-mcp --help
 ```
 
 Global fallback:
 
 ```bash
-uv tool install "codeclone[mcp]>=2.0.0b5"
+uv tool install --pre "codeclone[mcp]"
 codeclone-mcp --help
 ```
 
@@ -47,6 +48,7 @@ not mutate `~/.codex/config.toml` or install a second server binary.
 - if you already registered `codeclone-mcp` manually, keep only one setup path
   to avoid duplicate MCP surfaces
 - the bundled `.mcp.json` prefers `.venv`, then a Poetry env, then `PATH`
+- the bundled launcher stays shell-free and local-stdio-only
 
 For the underlying interface contract, see:
 

@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Centralize machine-readable status value sets used across baseline/cache/report contracts.
+Centralize machine-readable status sets used across baseline/cache/report/CLI contracts.
 
 ## Public surface
 
-- Baseline statuses: `codeclone/baseline.py:BaselineStatus`
-- Cache statuses: `codeclone/cache.py:CacheStatus`
-- Exit categories: `codeclone/contracts.py:ExitCode`
+- Baseline statuses: `codeclone/baseline/trust.py:BaselineStatus`
+- Cache statuses: `codeclone/cache/versioning.py:CacheStatus`
+- Exit categories: `codeclone/contracts/__init__.py:ExitCode`
 
 ## Data model
 
@@ -54,13 +54,13 @@ Defined by `BASELINE_UNTRUSTED_STATUSES`.
 
 ## Contracts
 
-- Status values are serialized into report metadata (`baseline_status`, `cache_status`).
-- CLI branches by enum values, not UI text.
+- Status values are serialized into report metadata.
+- CLI branches by enum/status values, not by human-facing message text.
 
 Refs:
 
-- `codeclone/_cli_meta.py:ReportMeta`
-- `codeclone/cli.py:_main_impl`
+- `codeclone/surfaces/cli/report_meta.py:_build_report_meta`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
 
 ## Locked by tests
 

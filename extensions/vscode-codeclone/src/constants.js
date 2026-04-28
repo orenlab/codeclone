@@ -23,6 +23,7 @@ const HOTSPOT_GROUPS = [
     {id: "newRegressions", label: "New Regressions", icon: "diff-added"},
     {id: "productionHotspots", label: "Production Hotspots", icon: "target"},
     {id: "changedFiles", label: "Changed Files", icon: "git-commit"},
+    {id: "securitySurfaces", label: "Security Surfaces", icon: "shield"},
     {id: "overloadedModules", label: "Overloaded Modules", icon: "symbol-module"},
 ];
 
@@ -50,7 +51,7 @@ const HOTSPOT_FOCUS_MODES = [
     {
         id: "reportOnly",
         label: "Report-only",
-        description: "Focus only on report-only Overloaded Module candidates.",
+        description: "Focus only on report-only Security Surfaces and Overloaded Modules.",
     },
     {
         id: "all",
@@ -64,7 +65,7 @@ const HOTSPOT_GROUPS_BY_MODE = {
     new: ["newRegressions"],
     production: ["productionHotspots"],
     changed: ["changedFiles"],
-    reportOnly: ["overloadedModules"],
+    reportOnly: ["securitySurfaces", "overloadedModules"],
     all: HOTSPOT_GROUPS.map((group) => group.id),
 };
 

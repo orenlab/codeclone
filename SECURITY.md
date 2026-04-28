@@ -10,7 +10,7 @@ The following versions currently receive security updates:
 | Version | Supported |
 |---------|-----------|
 | 2.0.x   | Yes       |
-| 1.4.x   | Yes       |
+| 1.4.x   | No        |
 | 1.3.x   | No        |
 | 1.2.x   | No        |
 | 1.1.x   | No        |

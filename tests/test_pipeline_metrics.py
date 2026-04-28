@@ -6,19 +6,61 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 import pytest
 
-from codeclone.cache import (
+from codeclone.cache.entries import (
     ApiParamSpecDict,
     CacheEntry,
     ModuleApiSurfaceDict,
     PublicSymbolDict,
+    SecuritySurfaceDict,
 )
-from codeclone.metrics import build_overloaded_modules_payload
+from codeclone.core._types import (
+    _as_sorted_str_tuple,
+    _class_metric_sort_key,
+    _module_dep_sort_key,
+    _module_names_from_units,
+)
+from codeclone.core.bootstrap import _resolve_optional_runtime_path
+from codeclone.core.coverage_payload import _coverage_join_rows, _coverage_join_summary
+from codeclone.core.discovery_cache import (
+    _api_param_kind,
+    _api_param_spec_from_cache_dict,
+    _api_surface_from_cache_dict,
+    _cache_dict_int_fields,
+    _cache_dict_module_fields,
+    _class_metric_from_cache_row,
+    _dead_candidate_from_cache_row,
+    _dead_candidate_kind,
+    _docstring_coverage_from_cache_dict,
+    _exported_via_kind,
+    _import_type,
+    _module_dep_from_cache_row,
+    _public_symbol_from_cache_dict,
+    _public_symbol_kind,
+    _risk_level,
+    _security_surface_category,
+    _security_surface_classification_mode,
+    _security_surface_evidence_kind,
+    _security_surface_from_cache_row,
+    _security_surface_location_scope,
+    _typing_coverage_from_cache_dict,
+)
+from codeclone.core.discovery_cache import (
+    load_cached_metrics_extended as _load_cached_metrics_extended,
+)
+from codeclone.core.metrics_payload import (
+    _enrich_metrics_report_payload,
+    build_metrics_report_payload,
+)
+from codeclone.core.parallelism import _should_use_parallel
+from codeclone.core.pipeline import compute_project_metrics
+from codeclone.metrics.overloaded_modules import build_overloaded_modules_payload
 from codeclone.models import (
     ApiBreakingChange,
     ApiParamSpec,
@@ -35,33 +77,16 @@ from codeclone.models import (
     ModuleTypingCoverage,
     ProjectMetrics,
     PublicSymbol,
+    SecuritySurface,
     UnitCoverageFact,
 )
-from codeclone.pipeline import (
+from codeclone.report.gates.evaluator import (
     MetricGateConfig,
-    _api_param_spec_from_cache_dict,
-    _api_surface_from_cache_dict,
-    _as_int,
-    _as_sorted_str_tuple,
-    _as_str,
-    _cache_dict_int_fields,
-    _cache_dict_module_fields,
-    _class_metric_sort_key,
-    _coverage_join_rows,
-    _coverage_join_summary,
-    _docstring_coverage_from_cache_dict,
-    _enrich_metrics_report_payload,
-    _load_cached_metrics_extended,
-    _module_dep_sort_key,
-    _module_names_from_units,
-    _public_symbol_from_cache_dict,
-    _resolve_optional_runtime_path,
-    _should_use_parallel,
-    _typing_coverage_from_cache_dict,
-    build_metrics_report_payload,
-    compute_project_metrics,
-    metric_gate_reasons,
+    gate_state_from_project_metrics,
+    metric_gate_reasons_for_state,
 )
+from codeclone.utils.coerce import as_int as _as_int
+from codeclone.utils.coerce import as_str as _as_str
 
 
 def _project_metrics(*, dead_confidence: str = "high") -> ProjectMetrics:
@@ -153,6 +178,21 @@ def _project_metrics_with_adoption_and_api() -> ProjectMetrics:
             )
         ),
     )
+
+
+def _metric_gate_reasons_from_metrics(
+    *,
+    project_metrics: ProjectMetrics,
+    coverage_join: CoverageJoinResult | None,
+    metrics_diff: MetricsDiff | None,
+    config: MetricGateConfig,
+) -> tuple[str, ...]:
+    state = gate_state_from_project_metrics(
+        project_metrics=project_metrics,
+        coverage_join=coverage_join,
+        metrics_diff=metrics_diff,
+    )
+    return metric_gate_reasons_for_state(state=state, config=config)
 
 
 def test_pipeline_basic_helpers_and_sort_keys() -> None:
@@ -365,6 +405,97 @@ def test_build_metrics_report_payload_includes_adoption_and_api_surface_families
             ],
             "returns_annotated": True,
         }
+    ]
+
+
+def test_build_metrics_report_payload_includes_security_surfaces_family() -> None:
+    payload = build_metrics_report_payload(
+        scan_root="/repo",
+        project_metrics=_project_metrics(dead_confidence="high"),
+        units=(),
+        class_metrics=(),
+        security_surfaces=(
+            SecuritySurface(
+                category="network_boundary",
+                capability="requests_import",
+                module="pkg.client",
+                filepath="/repo/pkg/client.py",
+                qualname="pkg.client",
+                start_line=1,
+                end_line=1,
+                location_scope="module",
+                classification_mode="exact_import",
+                evidence_kind="import",
+                evidence_symbol="requests",
+            ),
+            SecuritySurface(
+                category="process_boundary",
+                capability="subprocess_run",
+                module="tests.test_cli",
+                filepath="/repo/tests/test_cli.py",
+                qualname="tests.test_cli:run_case",
+                start_line=10,
+                end_line=10,
+                location_scope="callable",
+                classification_mode="exact_call",
+                evidence_kind="call",
+                evidence_symbol="subprocess.run",
+            ),
+        ),
+        suppressed_dead_code=(),
+    )
+
+    security_surfaces = cast(dict[str, object], payload["security_surfaces"])
+    assert security_surfaces["summary"] == {
+        "items": 2,
+        "modules": 2,
+        "exact_items": 2,
+        "category_count": 2,
+        "categories": {
+            "network_boundary": 1,
+            "process_boundary": 1,
+        },
+        "by_source_kind": {
+            "production": 1,
+            "tests": 1,
+            "fixtures": 0,
+            "other": 0,
+        },
+        "production": 1,
+        "tests": 1,
+        "fixtures": 0,
+        "other": 0,
+        "report_only": True,
+    }
+    assert security_surfaces["items"] == [
+        {
+            "category": "network_boundary",
+            "capability": "requests_import",
+            "module": "pkg.client",
+            "filepath": "/repo/pkg/client.py",
+            "qualname": "pkg.client",
+            "start_line": 1,
+            "end_line": 1,
+            "source_kind": "production",
+            "location_scope": "module",
+            "classification_mode": "exact_import",
+            "evidence_kind": "import",
+            "evidence_symbol": "requests",
+        },
+        {
+            "category": "process_boundary",
+            "capability": "subprocess_run",
+            "module": "tests.test_cli",
+            "filepath": "/repo/tests/test_cli.py",
+            "qualname": "tests.test_cli:run_case",
+            "start_line": 10,
+            "end_line": 10,
+            "source_kind": "tests",
+            "location_scope": "callable",
+            "classification_mode": "exact_call",
+            "evidence_kind": "call",
+            "evidence_symbol": "subprocess.run",
+        },
     ]
 
 
@@ -668,7 +799,9 @@ def test_pipeline_cache_decode_helpers_cover_invalid_and_valid_payloads() -> Non
     assert valid_surface.symbols[0].params[0].annotation_hash == "int"
 
 
-def test_load_cached_metrics_extended_decodes_adoption_and_api_surface() -> None:
+def test_load_cached_metrics_extended_decodes_adoption_api_and_security_surfaces() -> (
+    None
+):
     entry: CacheEntry = {
         "stat": {"mtime_ns": 1, "size": 1},
         "units": [],
@@ -706,8 +839,23 @@ def test_load_cached_metrics_extended_decodes_adoption_and_api_surface() -> None
                 }
             ],
         },
+        "security_surfaces": [
+            {
+                "category": "network_boundary",
+                "capability": "requests_import",
+                "module": "pkg.mod",
+                "filepath": "pkg/mod.py",
+                "qualname": "pkg.mod",
+                "start_line": 1,
+                "end_line": 1,
+                "location_scope": "module",
+                "classification_mode": "exact_import",
+                "evidence_kind": "import",
+                "evidence_symbol": "requests",
+            }
+        ],
     }
-    *_, typing_coverage, docstring_coverage, api_surface = (
+    *_, typing_coverage, docstring_coverage, api_surface, security_surfaces = (
         _load_cached_metrics_extended(
             entry,
             filepath="pkg/mod.py",
@@ -719,10 +867,290 @@ def test_load_cached_metrics_extended_decodes_adoption_and_api_surface() -> None
     assert typing_coverage.any_annotation_count == 1
     assert docstring_coverage.public_symbol_documented == 2
     assert api_surface.symbols[0].qualname == "pkg.mod:run"
+    assert security_surfaces == (
+        SecuritySurface(
+            category="network_boundary",
+            capability="requests_import",
+            module="pkg.mod",
+            filepath="pkg/mod.py",
+            qualname="pkg.mod",
+            start_line=1,
+            end_line=1,
+            location_scope="module",
+            classification_mode="exact_import",
+            evidence_kind="import",
+            evidence_symbol="requests",
+        ),
+    )
+
+
+def test_public_symbol_from_cache_dict_rejects_invalid_param_payload() -> None:
+    assert (
+        _public_symbol_from_cache_dict(
+            {
+                "qualname": "pkg.mod:run",
+                "kind": "function",
+                "start_line": 10,
+                "end_line": 12,
+                "exported_via": "name",
+                "returns_hash": "int",
+                "params": [
+                    {
+                        "name": "value",
+                        "kind": "broken",
+                        "has_default": False,
+                        "annotation_hash": "int",
+                    }
+                ],
+            }
+        )
+        is None
+    )
+
+
+def test_security_surface_from_cache_row_rejects_invalid_literals_and_is_filtered() -> (
+    None
+):
+    invalid_row: SecuritySurfaceDict = {
+        "category": "process_boundary",
+        "capability": "subprocess_run",
+        "module": "pkg.mod",
+        "filepath": "pkg/mod.py",
+        "qualname": "pkg.mod:run",
+        "start_line": 10,
+        "end_line": 12,
+        "location_scope": "callable",
+        "classification_mode": "broken",
+        "evidence_kind": "call",
+        "evidence_symbol": "subprocess.run",
+    }
+
+    assert _security_surface_from_cache_row(invalid_row) is None
+
+    entry: CacheEntry = {
+        "stat": {"mtime_ns": 1, "size": 1},
+        "units": [],
+        "blocks": [],
+        "segments": [],
+        "security_surfaces": [invalid_row],
+    }
+
+    *_, security_surfaces = _load_cached_metrics_extended(entry, filepath="pkg/mod.py")
+
+    assert security_surfaces == ()
+
+
+@pytest.mark.parametrize(
+    ("helper", "accepted"),
+    (
+        (_api_param_kind, ("pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg")),
+        (_public_symbol_kind, ("function", "class", "method", "constant")),
+        (_exported_via_kind, ("all", "name")),
+        (_risk_level, ("low", "medium", "high")),
+        (_import_type, ("import", "from_import")),
+        (_dead_candidate_kind, ("function", "class", "method", "import")),
+    ),
+)
+def test_discovery_cache_literal_helpers_accept_known_values_and_reject_unknowns(
+    helper: Callable[[object], object | None],
+    accepted: tuple[str, ...],
+) -> None:
+    for value in accepted:
+        assert helper(value) == value
+    assert helper("broken") is None
+
+
+@pytest.mark.parametrize(
+    ("helper", "accepted"),
+    (
+        (
+            _security_surface_category,
+            (
+                "archive_extraction",
+                "crypto_transport",
+                "database_boundary",
+                "deserialization",
+                "dynamic_execution",
+                "dynamic_loading",
+                "filesystem_mutation",
+                "identity_token",
+                "network_boundary",
+                "process_boundary",
+            ),
+        ),
+        (_security_surface_location_scope, ("module", "class", "callable")),
+        (
+            _security_surface_classification_mode,
+            ("exact_builtin", "exact_call", "exact_import"),
+        ),
+        (_security_surface_evidence_kind, ("builtin", "call", "import")),
+    ),
+)
+def test_discovery_cache_security_surface_helpers_accept_and_reject(
+    helper: Callable[[object], object | None],
+    accepted: tuple[str, ...],
+) -> None:
+    for value in accepted:
+        assert helper(value) == value
+    assert helper("broken") is None
+
+
+def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() -> None:
+    assert _api_param_spec_from_cache_dict([]) is None
+    assert (
+        _public_symbol_from_cache_dict(
+            {
+                "qualname": "pkg.mod:run",
+                "kind": "broken",
+                "start_line": 1,
+                "end_line": 2,
+                "exported_via": "name",
+                "returns_hash": "",
+                "params": [],
+            }
+        )
+        is None
+    )
+    assert (
+        _api_surface_from_cache_dict(
+            {
+                "module": "pkg.mod",
+                "filepath": "pkg/mod.py",
+                "all_declared": [1],
+                "symbols": [],
+            }
+        )
+        is None
+    )
+    assert (
+        _class_metric_from_cache_row(
+            {
+                "qualname": "pkg.mod:Service",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 10,
+                "cbo": 3,
+                "lcom4": 2,
+                "method_count": 2,
+                "instance_var_count": 1,
+                "risk_coupling": "broken",
+                "risk_cohesion": "high",
+            }
+        )
+        is None
+    )
+    assert (
+        _module_dep_from_cache_row(
+            {
+                "source": "pkg.mod",
+                "target": "pkg.dep",
+                "import_type": "broken",
+                "line": 3,
+            }
+        )
+        is None
+    )
+    assert (
+        _dead_candidate_from_cache_row(
+            {
+                "qualname": "pkg.mod:unused",
+                "local_name": "unused",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 2,
+                "kind": "broken",
+            }
+        )
+        is None
+    )
+
+    entry: CacheEntry = {
+        "stat": {"mtime_ns": 1, "size": 1},
+        "units": [],
+        "blocks": [],
+        "segments": [],
+        "class_metrics": [
+            {
+                "qualname": "pkg.mod:Service",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 10,
+                "cbo": 3,
+                "lcom4": 2,
+                "method_count": 2,
+                "instance_var_count": 1,
+                "risk_coupling": "high",
+                "risk_cohesion": "medium",
+                "coupled_classes": ["pkg.dep"],
+            },
+            {
+                "qualname": "pkg.mod:Broken",
+                "filepath": "pkg/mod.py",
+                "start_line": 11,
+                "end_line": 20,
+                "cbo": 1,
+                "lcom4": 1,
+                "method_count": 1,
+                "instance_var_count": 0,
+                "risk_coupling": "broken",
+                "risk_cohesion": "low",
+            },
+        ],
+        "module_deps": [
+            {
+                "source": "pkg.mod",
+                "target": "pkg.dep",
+                "import_type": "import",
+                "line": 3,
+            },
+            {
+                "source": "pkg.mod",
+                "target": "pkg.bad",
+                "import_type": "broken",
+                "line": 4,
+            },
+        ],
+        "dead_candidates": [
+            {
+                "qualname": "pkg.mod:unused",
+                "local_name": "unused",
+                "filepath": "pkg/mod.py",
+                "start_line": 30,
+                "end_line": 32,
+                "kind": "function",
+                "suppressed_rules": ["dead-code"],
+            },
+            {
+                "qualname": "pkg.mod:broken",
+                "local_name": "broken",
+                "filepath": "pkg/mod.py",
+                "start_line": 40,
+                "end_line": 42,
+                "kind": "broken",
+            },
+        ],
+        "referenced_names": ["run"],
+        "referenced_qualnames": ["pkg.mod:run"],
+    }
+
+    (
+        class_metrics,
+        module_deps,
+        dead_candidates,
+        referenced_names,
+        referenced_qualnames,
+        *_rest,
+    ) = _load_cached_metrics_extended(entry, filepath="tests/test_mod.py")
+
+    assert len(class_metrics) == 1
+    assert len(module_deps) == 1
+    assert len(dead_candidates) == 1
+    assert referenced_names == frozenset()
+    assert referenced_qualnames == frozenset()
 
 
 def test_metric_gate_reasons_collects_all_enabled_reasons() -> None:
-    reasons = metric_gate_reasons(
+    reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="high"),
         coverage_join=None,
         metrics_diff=MetricsDiff(
@@ -865,7 +1293,7 @@ def test_enrich_metrics_report_payload_hides_api_diff_without_api_baseline() -> 
 
 
 def test_metric_gate_reasons_skip_disabled_and_non_critical_paths() -> None:
-    reasons = metric_gate_reasons(
+    reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="medium"),
         coverage_join=None,
         metrics_diff=None,
@@ -883,7 +1311,7 @@ def test_metric_gate_reasons_skip_disabled_and_non_critical_paths() -> None:
 
 
 def test_metric_gate_reasons_partial_new_metrics_paths() -> None:
-    reasons = metric_gate_reasons(
+    reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="medium"),
         coverage_join=None,
         metrics_diff=MetricsDiff(
@@ -910,7 +1338,7 @@ def test_metric_gate_reasons_partial_new_metrics_paths() -> None:
 
 
 def test_metric_gate_reasons_new_metrics_optional_buckets_empty() -> None:
-    reasons = metric_gate_reasons(
+    reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="medium"),
         coverage_join=None,
         metrics_diff=MetricsDiff(
@@ -937,7 +1365,7 @@ def test_metric_gate_reasons_new_metrics_optional_buckets_empty() -> None:
 
 
 def test_metric_gate_reasons_include_adoption_and_api_surface_contracts() -> None:
-    reasons = metric_gate_reasons(
+    reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="medium"),
         coverage_join=None,
         metrics_diff=MetricsDiff(
@@ -1066,7 +1494,7 @@ def test_coverage_join_summary_rows_and_gate_reasons() -> None:
         == []
     )
 
-    reasons = metric_gate_reasons(
+    reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="medium"),
         coverage_join=coverage_join,
         metrics_diff=None,
@@ -1084,7 +1512,7 @@ def test_coverage_join_summary_rows_and_gate_reasons() -> None:
     )
     assert reasons == ("Coverage hotspots detected: hotspots=1, threshold=50%.",)
 
-    invalid_reasons = metric_gate_reasons(
+    invalid_reasons = _metric_gate_reasons_from_metrics(
         project_metrics=_project_metrics(dead_confidence="medium"),
         coverage_join=CoverageJoinResult(
             coverage_xml="/repo/broken.xml",

@@ -9,11 +9,11 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Literal
 
+from ..analysis.suppressions import DEAD_CODE_RULE_ID
 from ..domain.findings import SYMBOL_KIND_FUNCTION, SYMBOL_KIND_METHOD
 from ..domain.quality import CONFIDENCE_HIGH, CONFIDENCE_MEDIUM
 from ..models import DeadCandidate, DeadItem
 from ..paths import is_test_filepath
-from ..suppressions import DEAD_CODE_RULE_ID
 
 _TEST_NAME_PREFIXES = ("test_", "pytest_")
 _DYNAMIC_METHOD_PREFIXES = ("visit_",)

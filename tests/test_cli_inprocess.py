@@ -16,21 +16,29 @@ from typing import Literal, cast
 
 import pytest
 
-import codeclone._cli_meta as cli_meta
-import codeclone._cli_reports as cli_reports
 import codeclone.baseline as baseline
-import codeclone.pipeline as pipeline
-from codeclone import __version__, cli
-from codeclone._cli_gating import parse_metric_reason_entry
-from codeclone.cache import Cache, file_stat_signature
+import codeclone.baseline.trust as baseline_trust
+import codeclone.core.discovery as core_discovery
+import codeclone.core.parallelism as core_parallelism
+import codeclone.core.pipeline as core_pipeline
+import codeclone.core.worker as core_worker
+import codeclone.surfaces.cli.report_meta as cli_meta
+import codeclone.surfaces.cli.reports_output as cli_reports
+import codeclone.surfaces.cli.tips as cli_tips
+import codeclone.surfaces.cli.workflow as cli
+from codeclone import __version__
+from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.contracts import (
     BASELINE_FINGERPRINT_VERSION,
     BASELINE_SCHEMA_VERSION,
     CACHE_VERSION,
     REPORT_SCHEMA_VERSION,
 )
-from codeclone.errors import CacheError
+from codeclone.contracts.errors import CacheError
+from codeclone.core._types import FileProcessResult as CliFileProcessResult
+from codeclone.core.parallelism import _parallel_min_files
 from codeclone.models import Unit
+from codeclone.report.gates.reasons import parse_metric_reason_entry
 from tests._assertions import (
     assert_contains_all,
     assert_mapping_entries,
@@ -167,8 +175,8 @@ def _patch_dummy_progress(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _patch_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _DummyExecutor)
-    monkeypatch.setattr(pipeline, "as_completed", lambda futures: futures)
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _DummyExecutor)
+    monkeypatch.setattr(core_parallelism, "as_completed", lambda futures: futures)
 
 
 def _run_main(monkeypatch: pytest.MonkeyPatch, args: Iterable[str]) -> None:
@@ -261,11 +269,11 @@ def _patch_fixed_executor(
     monkeypatch: pytest.MonkeyPatch, future: _FixedFuture
 ) -> None:
     monkeypatch.setattr(
-        pipeline,
+        core_parallelism,
         "ProcessPoolExecutor",
         lambda *args, **kwargs: _FixedExecutor(future),
     )
-    monkeypatch.setattr(pipeline, "as_completed", lambda futures: futures)
+    monkeypatch.setattr(core_parallelism, "as_completed", lambda futures: futures)
 
 
 def _baseline_payload(
@@ -309,7 +317,7 @@ def _baseline_payload(
             and isinstance(meta_python_tag, str)
             and payload_sha256 is None
         ):
-            hash_value = baseline._compute_payload_sha256(
+            hash_value = baseline_trust._compute_payload_sha256(
                 functions=set(function_list),
                 blocks=set(block_list),
                 fingerprint_version=meta_fingerprint,
@@ -519,6 +527,9 @@ def _capture_cache_path_for_args(
         def save(self) -> None:
             return None
 
+        def prune_file_entries(self, existing_filepaths: object) -> int:
+            return 0
+
     monkeypatch.setattr(cli, "Cache", _CacheStub)
     _write_default_source(tmp_path)
     _run_parallel_main(monkeypatch, [str(tmp_path), *extra_args, "--no-progress"])
@@ -534,7 +545,7 @@ def _assert_worker_failure_internal_error(
 ) -> None:
     _write_default_source(tmp_path)
 
-    def _boom(*_args: object, **_kwargs: object) -> cli.ProcessingResult:
+    def _boom(*_args: object, **_kwargs: object) -> CliFileProcessResult:
         raise RuntimeError("boom")
 
     class _FailExec:
@@ -554,8 +565,8 @@ def _assert_worker_failure_internal_error(
 
     if not no_progress:
         _patch_dummy_progress(monkeypatch)
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailExec)
-    monkeypatch.setattr(pipeline, "process_file", _boom)
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailExec)
+    monkeypatch.setattr(core_worker, "process_file", _boom)
     args = [str(tmp_path)]
     if no_progress:
         args.append("--no-progress")
@@ -686,8 +697,8 @@ def _prepare_single_source_cache(tmp_path: Path) -> tuple[Path, Path, Cache]:
     return src, cache_path, Cache(cache_path)
 
 
-def _source_read_error_result(filepath: str) -> cli.ProcessingResult:
-    return cli.ProcessingResult(
+def _source_read_error_result(filepath: str) -> CliFileProcessResult:
+    return CliFileProcessResult(
         filepath=filepath,
         success=False,
         error="Cannot read file: [Errno 13] Permission denied",
@@ -801,6 +812,9 @@ def test_cli_default_cache_dir_per_root(
         def save(self) -> None:
             return None
 
+        def prune_file_entries(self, existing_filepaths: object) -> int:
+            return 0
+
     monkeypatch.setattr(cli, "Cache", _CacheStub)
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(root1), "--no-progress"])
@@ -821,7 +835,7 @@ def test_cli_cache_not_shared_between_projects(
     legacy_cache.parent.mkdir(parents=True, exist_ok=True)
     legacy_cache.write_text("{}", "utf-8")
 
-    monkeypatch.setattr(pipeline, "iter_py_files", lambda _root: [])
+    monkeypatch.setattr(core_discovery, "iter_py_files", lambda _root: [])
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(root2), "--no-progress"])
     out = capsys.readouterr().out
@@ -966,6 +980,9 @@ def test_cli_no_legacy_warning_when_paths_match(
         def save(self) -> None:
             return None
 
+        def prune_file_entries(self, existing_filepaths: object) -> int:
+            return 0
+
     monkeypatch.setattr(cli, "LEGACY_CACHE_PATH", _LegacyPathSame(cache_path))
     monkeypatch.setattr(cli, "Cache", _CacheStub)
     _patch_parallel(monkeypatch)
@@ -1015,6 +1032,9 @@ def test_cli_cache_status_string_fallback(
         def save(self) -> None:
             return None
 
+        def prune_file_entries(self, existing_filepaths: object) -> int:
+            return 0
+
     monkeypatch.setattr(cli, "Cache", _CacheStub)
     _patch_parallel(monkeypatch)
     _run_main(
@@ -1037,10 +1057,10 @@ def test_cli_main_progress_fallback(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailingExecutor)
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailingExecutor)
     _run_main(monkeypatch, [str(tmp_path), "--processes", "2"])
     out = capsys.readouterr().out
     assert "falling back to sequential" in out
@@ -1051,10 +1071,10 @@ def test_cli_main_no_progress_fallback(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailingExecutor)
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailingExecutor)
     _run_main(monkeypatch, [str(tmp_path), "--processes", "2", "--no-progress"])
     out = capsys.readouterr().out
     assert "falling back to sequential" in out
@@ -1071,7 +1091,7 @@ def test_cli_main_no_progress_fallback_quiet(
         tmp_path / "baseline.json",
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
     )
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailingExecutor)
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailingExecutor)
     _run_main(
         monkeypatch,
         [
@@ -1129,7 +1149,7 @@ def test_cli_unexpected_grouping_failure_is_internal(
         raise RuntimeError("boom")
 
     _patch_parallel(monkeypatch)
-    monkeypatch.setattr(pipeline, "build_groups", _boom)
+    monkeypatch.setattr(core_pipeline, "build_groups", _boom)
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     assert exc.value.code == 5
@@ -1598,9 +1618,47 @@ def test_cli_legacy_baseline_fail_on_new_fails_fast_exit_2(
         out,
         "legacy (<=1.3.x)",
         "Invalid baseline file",
-        "CI requires a trusted baseline",
+        "Baseline-aware gates require a trusted baseline",
         "Run: codeclone . --update-baseline",
     )
+
+
+def test_cli_shared_baseline_mismatch_is_reported_once_without_ci_label(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_default_source(tmp_path)
+    mismatch_tag = "cp313" if baseline.current_python_tag() != "cp313" else "cp314"
+    _write_baseline(
+        tmp_path / "codeclone.baseline.json",
+        python_version="3.13" if mismatch_tag == "cp313" else "3.14",
+        python_tag=mismatch_tag,
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[tool.codeclone]
+fail_on_new = true
+fail_on_new_metrics = true
+""".strip()
+        + "\n",
+        "utf-8",
+    )
+
+    _assert_parallel_cli_exit(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--html",
+            "--no-progress",
+        ],
+        expected_code=2,
+    )
+
+    out = capsys.readouterr().out
+    assert out.count("Invalid baseline file") == 1
+    assert "CI requires a trusted baseline" not in out
+    assert "Baseline-aware gates require a trusted baseline" in out
 
 
 def test_cli_reports_include_audit_metadata_integrity_failed(
@@ -2240,6 +2298,35 @@ def test_cli_outputs_quiet_no_print(
     assert text_out.exists()
     out = capsys.readouterr().out
     assert "report saved" not in out
+
+
+def test_cli_shows_vscode_extension_tip_once_per_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_default_source(tmp_path)
+    tips_path = tmp_path / ".cache" / "codeclone" / "tips.json"
+
+    monkeypatch.setenv("TERM_PROGRAM", "vscode")
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(cli_tips, "_stream_is_tty", lambda _stream: True)
+
+    _run_parallel_main(monkeypatch, [str(tmp_path), "--no-progress", "--no-color"])
+    first_out = capsys.readouterr().out
+
+    assert "VS Code detected" in first_out
+    assert "marketplace.visualstudio.com" in first_out
+    assert first_out.index("Summary") < first_out.index("Tip:")
+
+    state = json.loads(tips_path.read_text("utf-8"))
+    assert state["tips"]["vscode_extension"]["last_shown_version"] == __version__
+
+    _run_parallel_main(monkeypatch, [str(tmp_path), "--no-progress", "--no-color"])
+    second_out = capsys.readouterr().out
+
+    assert "VS Code detected" not in second_out
 
 
 def test_cli_update_baseline_skips_version_check(
@@ -3067,7 +3154,7 @@ def test_cli_discovery_skip_oserror(
     def _bad_stat(_path: str) -> dict[str, int]:
         raise OSError("nope")
 
-    monkeypatch.setattr(pipeline, "file_stat_signature", _bad_stat)
+    monkeypatch.setattr(core_discovery, "file_stat_signature", _bad_stat)
     _patch_parallel(monkeypatch)
     args = [str(tmp_path), *extra_args]
     if "--ci" in extra_args:
@@ -3103,10 +3190,10 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
-    ) -> cli.ProcessingResult:
+    ) -> CliFileProcessResult:
         return _source_read_error_result(fp)
 
-    monkeypatch.setattr(pipeline, "process_file", _source_read_error)
+    monkeypatch.setattr(core_worker, "process_file", _source_read_error)
     _run_parallel_main(
         monkeypatch,
         [
@@ -3137,10 +3224,10 @@ def test_cli_unreadable_source_fails_in_ci_with_contract_error(
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
-    ) -> cli.ProcessingResult:
+    ) -> CliFileProcessResult:
         return _source_read_error_result(fp)
 
-    monkeypatch.setattr(pipeline, "process_file", _source_read_error)
+    monkeypatch.setattr(core_worker, "process_file", _source_read_error)
     _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(
@@ -3196,7 +3283,7 @@ def test_cli_contract_error_priority_over_gating_failure_for_unreadable_source(
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
-    ) -> cli.ProcessingResult:
+    ) -> CliFileProcessResult:
         return _source_read_error_result(fp)
 
     def _diff(
@@ -3204,7 +3291,7 @@ def test_cli_contract_error_priority_over_gating_failure_for_unreadable_source(
     ) -> tuple[set[str], set[str]]:
         return {"f1"}, set()
 
-    monkeypatch.setattr(pipeline, "process_file", _source_read_error)
+    monkeypatch.setattr(core_worker, "process_file", _source_read_error)
     monkeypatch.setattr(baseline.Baseline, "diff", _diff)
     _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
@@ -3241,10 +3328,10 @@ def test_cli_unreadable_source_ci_shows_overflow_summary(
 
     def _source_read_error(
         fp: str, *_args: object, **_kwargs: object
-    ) -> cli.ProcessingResult:
+    ) -> CliFileProcessResult:
         return _source_read_error_result(fp)
 
-    monkeypatch.setattr(pipeline, "process_file", _source_read_error)
+    monkeypatch.setattr(core_worker, "process_file", _source_read_error)
     _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(
@@ -3425,7 +3512,16 @@ def test_cli_summary_with_metrics_baseline_shows_metrics_section(
         ],
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "Metrics", "Adoption", "Overloaded")
+    assert_contains_all(
+        out,
+        "Metrics",
+        "Dependencies",
+        "avg",
+        "p95",
+        "max",
+        "Adoption",
+        "Overloaded",
+    )
 
 
 def test_cli_summary_with_api_surface_shows_public_api_line(
@@ -3481,7 +3577,17 @@ def test_cli_ci_summary_includes_adoption_and_public_api_lines(
         ],
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "Adoption", "Public API", "symbols=", "docstrings=")
+    assert_contains_all(
+        out,
+        "Dependencies",
+        "avg=",
+        "p95=",
+        "max=",
+        "Adoption",
+        "Public API",
+        "symbols=",
+        "docstrings=",
+    )
 
 
 def test_cli_pyproject_golden_fixture_paths_exclude_fixture_clone_groups(
@@ -3664,7 +3770,7 @@ def test_cli_scan_failed_is_internal_error(
     def _boom(_root: str) -> Iterable[str]:
         raise RuntimeError("scan failed")
 
-    monkeypatch.setattr(pipeline, "iter_py_files", _boom)
+    monkeypatch.setattr(core_discovery, "iter_py_files", _boom)
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, [str(tmp_path)])
     assert exc.value.code == 5
@@ -3680,7 +3786,7 @@ def test_cli_scan_oserror_is_contract_error(
     def _boom(_root: str) -> Iterable[str]:
         raise OSError("scan denied")
 
-    monkeypatch.setattr(pipeline, "iter_py_files", _boom)
+    monkeypatch.setattr(core_discovery, "iter_py_files", _boom)
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, [str(tmp_path)])
     assert exc.value.code == 2
@@ -3699,10 +3805,10 @@ def test_cli_failed_files_report(
 
     def _bad_process(
         _fp: str, *_args: object, **_kwargs: object
-    ) -> cli.ProcessingResult:
-        return cli.ProcessingResult(filepath=_fp, success=False, error="bad")
+    ) -> CliFileProcessResult:
+        return CliFileProcessResult(filepath=_fp, success=False, error="bad")
 
-    monkeypatch.setattr(pipeline, "process_file", _bad_process)
+    monkeypatch.setattr(core_worker, "process_file", _bad_process)
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     out = capsys.readouterr().out
@@ -3720,10 +3826,10 @@ def test_cli_failed_files_report_single(
 
     def _bad_process(
         _fp: str, *_args: object, **_kwargs: object
-    ) -> cli.ProcessingResult:
-        return cli.ProcessingResult(filepath=_fp, success=False, error="bad")
+    ) -> CliFileProcessResult:
+        return CliFileProcessResult(filepath=_fp, success=False, error="bad")
 
-    monkeypatch.setattr(pipeline, "process_file", _bad_process)
+    monkeypatch.setattr(core_worker, "process_file", _bad_process)
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     out = capsys.readouterr().out
@@ -3739,10 +3845,10 @@ def test_cli_worker_failed(
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
 
-    def _boom(*_args: object, **_kwargs: object) -> cli.ProcessingResult:
+    def _boom(*_args: object, **_kwargs: object) -> CliFileProcessResult:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(pipeline, "process_file", _boom)
+    monkeypatch.setattr(core_worker, "process_file", _boom)
     _patch_parallel(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
@@ -3971,7 +4077,7 @@ def test_cli_batch_result_none_no_progress(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     _patch_fixed_executor(monkeypatch, _FixedFuture(value=None))
@@ -3985,7 +4091,7 @@ def test_cli_batch_result_none_progress(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     _patch_dummy_progress(monkeypatch)
@@ -4000,7 +4106,7 @@ def test_cli_failed_batch_item_no_progress(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     _patch_fixed_executor(monkeypatch, _FixedFuture(error=RuntimeError("boom")))
@@ -4014,7 +4120,7 @@ def test_cli_failed_batch_item_progress(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     _patch_dummy_progress(monkeypatch)

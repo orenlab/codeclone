@@ -6,13 +6,16 @@
 
 import importlib
 import json
+import re
 from collections.abc import Callable
+from itertools import pairwise
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
-from codeclone._html_badges import _tab_empty_info
+from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import (
     CACHE_VERSION,
     DOCS_URL,
@@ -20,29 +23,40 @@ from codeclone.contracts import (
     REPORT_SCHEMA_VERSION,
     REPOSITORY_URL,
 )
-from codeclone.errors import FileProcessingError
-from codeclone.html_report import (
-    _FileCache,
-    _pygments_css,
-    _render_code_block,
-    _try_pygments,
-)
-from codeclone.html_report import (
-    build_html_report as _core_build_html_report,
-)
+from codeclone.contracts.errors import FileProcessingError
+from codeclone.findings.ids import clone_group_id, structural_group_id
 from codeclone.models import (
     StructuralFindingGroup,
     StructuralFindingOccurrence,
     Suggestion,
     SuppressedCloneGroup,
 )
-from codeclone.report import build_block_group_facts
-from codeclone.report.json_contract import (
-    build_report_document,
-    clone_group_id,
-    structural_group_id,
+from codeclone.report.document.builder import build_report_document
+from codeclone.report.explain import build_block_group_facts
+from codeclone.report.html import (
+    build_html_report as _core_build_html_report,
 )
-from codeclone.report.serialize import render_json_report_document
+from codeclone.report.html.primitives.location import (
+    location_file_target,
+    relative_location_path,
+)
+from codeclone.report.html.sections._security_surfaces import (
+    _coverage_join_review_text,
+    _coverage_review_cues,
+    _coverage_review_index,
+    _coverage_review_item_key,
+    _coverage_review_key,
+    _pluralize,
+    _review_cell_text,
+)
+from codeclone.report.html.widgets.badges import _tab_empty_info
+from codeclone.report.html.widgets.snippets import (
+    _FileCache,
+    _pygments_css,
+    _render_code_block,
+    _try_pygments,
+)
+from codeclone.report.renderers.json import render_json_report_document
 from tests._assertions import assert_contains_all
 from tests._report_fixtures import (
     REPEATED_ASSERT_SOURCE,
@@ -1276,7 +1290,7 @@ def test_try_pygments_ok() -> None:
 def test_render_code_block_without_pygments_uses_escaped_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import codeclone._html_snippets as snippets
+    import codeclone.report.html.widgets.snippets as snippets
 
     src = tmp_path / "a.py"
     src.write_text("x = '<tag>'\n", "utf-8")
@@ -1327,14 +1341,14 @@ def test_html_report_with_blocks(tmp_path: Path) -> None:
 
 
 def test_html_report_pygments_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    import codeclone.html_report as hr
+    import codeclone.report.html.widgets.snippets as snippets
 
     def _fake_css(name: str) -> str:
         if name in ("github-dark", "github-light"):
             return ""
         return "x"
 
-    monkeypatch.setattr(hr, "_pygments_css", _fake_css)
+    monkeypatch.setattr(snippets, "_pygments_css", _fake_css)
     html = build_html_report(
         func_groups={}, block_groups={}, segment_groups={}, title="Pygments"
     )
@@ -1460,11 +1474,11 @@ def test_render_code_block_truncates_and_fallback(
     f = tmp_path / "a.py"
     f.write_text("\n".join([f"line{i}" for i in range(1, 30)]), "utf-8")
 
-    import codeclone.html_report as hr
+    import codeclone.report.html.widgets.snippets as snippets
 
-    monkeypatch.setattr(hr, "_try_pygments", lambda _text: None)
+    monkeypatch.setattr(snippets, "_try_pygments", lambda _text: None)
     cache = _FileCache(maxsize=2)
-    snippet = hr._render_code_block(
+    snippet = snippets._render_code_block(
         filepath=str(f),
         start_line=1,
         end_line=20,
@@ -1511,6 +1525,8 @@ def _metrics_payload(
     dep_max_depth: object,
     dead_total: object,
     dead_critical: object,
+    dep_avg_depth: object = 2.5,
+    dep_p95_depth: object = 3,
     dead_suppressed: object = 0,
 ) -> dict[str, object]:
     suppressed_items: list[dict[str, object]] = []
@@ -1597,6 +1613,8 @@ def _metrics_payload(
             "modules": 4,
             "edges": 4,
             "max_depth": dep_max_depth,
+            "avg_depth": dep_avg_depth,
+            "p95_depth": dep_p95_depth,
             "cycles": dep_cycles,
             "longest_chains": [["pkg.a", "pkg.b", "pkg.c"]],
             "edge_list": [
@@ -1693,6 +1711,7 @@ def test_html_report_metrics_warn_branches_and_dependency_svg() -> None:
     assert "insight-warn" in html
     assert "dep-graph-svg" in html
     assert "Grade B" in html
+    assert "Cycles: 0; avg depth: 2.5; p95 depth: 3; max dependency depth: 9." in html
     assert "pkg.mod.func" in html
     assert "outside/project/pkg/mod.py" in html
 
@@ -1720,7 +1739,7 @@ def test_html_report_metrics_risk_branches() -> None:
         html,
         "insight-risk",
         'stroke="var(--error)"',
-        "Cycles: 1; max dependency depth: 4.",
+        "Cycles: 1; avg depth: 2.5; p95 depth: 3; max dependency depth: 4.",
         "5 candidates total; 2 high-confidence items; 0 suppressed.",
         '<button class="main-tab" role="tab" data-tab="dead-code"',
         '<svg class="main-tab-icon"',
@@ -2107,6 +2126,464 @@ def test_html_report_quality_includes_coverage_join_subtab() -> None:
     )
 
 
+def test_html_report_quality_includes_security_surfaces_subtab() -> None:
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["security_surfaces"] = {
+        "summary": {
+            "items": 2,
+            "modules": 2,
+            "exact_items": 2,
+            "category_count": 2,
+            "categories": {
+                "network_boundary": 1,
+                "process_boundary": 1,
+            },
+            "by_source_kind": {
+                "production": 1,
+                "tests": 1,
+                "fixtures": 0,
+                "other": 0,
+            },
+            "production": 1,
+            "tests": 1,
+            "fixtures": 0,
+            "other": 0,
+            "report_only": True,
+        },
+        "items": [
+            {
+                "category": "network_boundary",
+                "capability": "requests_import",
+                "module": "pkg.client",
+                "filepath": "pkg/client.py",
+                "qualname": "pkg.client",
+                "start_line": 1,
+                "end_line": 1,
+                "source_kind": "production",
+                "location_scope": "module",
+                "classification_mode": "exact_import",
+                "evidence_kind": "import",
+                "evidence_symbol": "requests",
+            },
+            {
+                "category": "process_boundary",
+                "capability": "subprocess_run",
+                "module": "tests.test_cli",
+                "filepath": "tests/test_cli.py",
+                "qualname": "tests.test_cli:run_case",
+                "start_line": 10,
+                "end_line": 10,
+                "source_kind": "tests",
+                "location_scope": "callable",
+                "classification_mode": "exact_call",
+                "evidence_kind": "call",
+                "evidence_symbol": "subprocess.run",
+            },
+        ],
+    }
+
+    html = _render_metrics_html(metrics)
+
+    _assert_html_contains(
+        html,
+        'data-subtab-group="quality"',
+        'data-clone-tab="security-surfaces"',
+        '<span class="main-tab-label">Quality</span><span class="tab-count">2</span>',
+        "Security Surfaces",
+        "How to read",
+        "Review order",
+        "Security-relevant capability inventory",
+        "Surfaces",
+        "Categories",
+        "Production",
+        "Exact items",
+        "Network boundary",
+        "Process boundary",
+        "requests",
+        "subprocess.run",
+        "pkg/client.py:1",
+        "tests/test_cli.py:10",
+        "report-only",
+        'data-file="/outside/project/pkg/client.py"',
+        'data-file="/outside/project/tests/test_cli.py"',
+    )
+
+
+def test_html_report_security_surfaces_add_review_context_and_coverage_overlap() -> (
+    None
+):
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["security_surfaces"] = {
+        "summary": {
+            "items": 3,
+            "modules": 2,
+            "exact_items": 3,
+            "category_count": 2,
+            "categories": {
+                "network_boundary": 1,
+                "process_boundary": 2,
+            },
+            "by_source_kind": {
+                "production": 2,
+                "tests": 1,
+                "fixtures": 0,
+                "other": 0,
+            },
+            "production": 2,
+            "tests": 1,
+            "fixtures": 0,
+            "other": 0,
+            "report_only": True,
+        },
+        "items": [
+            {
+                "category": "process_boundary",
+                "capability": "subprocess_import",
+                "module": "pkg.client",
+                "filepath": "pkg/client.py",
+                "qualname": "pkg.client",
+                "start_line": 1,
+                "end_line": 1,
+                "source_kind": "production",
+                "location_scope": "module",
+                "classification_mode": "exact_import",
+                "evidence_kind": "import",
+                "evidence_symbol": "subprocess",
+            },
+            {
+                "category": "process_boundary",
+                "capability": "subprocess_run",
+                "module": "pkg.client",
+                "filepath": "pkg/client.py",
+                "qualname": "pkg.client:run_case",
+                "start_line": 40,
+                "end_line": 44,
+                "source_kind": "production",
+                "location_scope": "callable",
+                "classification_mode": "exact_call",
+                "evidence_kind": "call",
+                "evidence_symbol": "subprocess.run",
+            },
+            {
+                "category": "network_boundary",
+                "capability": "requests_import",
+                "module": "tests.test_client",
+                "filepath": "tests/test_client.py",
+                "qualname": "tests.test_client:exercise_case",
+                "start_line": 8,
+                "end_line": 12,
+                "source_kind": "tests",
+                "location_scope": "callable",
+                "classification_mode": "exact_import",
+                "evidence_kind": "import",
+                "evidence_symbol": "requests",
+            },
+        ],
+    }
+    metrics["coverage_join"] = {
+        "summary": {
+            "status": "ok",
+            "source": "/outside/project/coverage.xml",
+            "files": 1,
+            "units": 1,
+            "measured_units": 1,
+            "overall_executable_lines": 10,
+            "overall_covered_lines": 6,
+            "overall_permille": 600,
+            "missing_from_report_units": 0,
+            "coverage_hotspots": 1,
+            "scope_gap_hotspots": 0,
+            "hotspot_threshold_percent": 50,
+        },
+        "items": [
+            {
+                "relative_path": "pkg/client.py",
+                "qualname": "pkg.client:run_case",
+                "start_line": 40,
+                "end_line": 44,
+                "cyclomatic_complexity": 18,
+                "risk": "high",
+                "executable_lines": 4,
+                "covered_lines": 1,
+                "coverage_permille": 250,
+                "coverage_status": "measured",
+                "coverage_hotspot": True,
+                "scope_gap_hotspot": False,
+            }
+        ],
+    }
+
+    html = _render_metrics_html(metrics)
+
+    _assert_html_contains(
+        html,
+        "How should I review this inventory?",
+        "How to read",
+        "boundary inventory",
+        "exact imports/calls/builtins",
+        "inventory, not vulnerability proof",
+        "Review order",
+        "1 production callable",
+        "1 overlap",
+        "1 low-coverage overlap",
+        "1 module/class inventory row",
+        "Review",
+        "Module · capability present",
+        "Callable · low coverage",
+        "Callable · exact evidence",
+    )
+
+
+def test_html_report_security_surfaces_prefers_report_document_family_paths() -> None:
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["security_surfaces"] = {
+        "summary": {
+            "items": 1,
+            "modules": 1,
+            "exact_items": 1,
+            "category_count": 1,
+            "categories": {"dynamic_loading": 1},
+            "by_source_kind": {
+                "production": 1,
+                "tests": 0,
+                "fixtures": 0,
+                "other": 0,
+            },
+            "production": 1,
+            "tests": 0,
+            "fixtures": 0,
+            "other": 0,
+            "report_only": True,
+        },
+        "items": [
+            {
+                "category": "dynamic_loading",
+                "capability": "importlib_import",
+                "module": "pkg.client",
+                "qualname": "pkg.client",
+                "start_line": 3,
+                "end_line": 3,
+                "source_kind": "production",
+                "location_scope": "module",
+                "classification_mode": "exact_import",
+                "evidence_kind": "import",
+                "evidence_symbol": "importlib",
+            },
+        ],
+    }
+    report_document = {
+        "metrics": {
+            "families": {
+                "security_surfaces": {
+                    "summary": {
+                        "items": 1,
+                        "modules": 1,
+                        "exact_items": 1,
+                        "category_count": 1,
+                        "categories": {"dynamic_loading": 1},
+                        "by_source_kind": {
+                            "production": 1,
+                            "tests": 0,
+                            "fixtures": 0,
+                            "other": 0,
+                        },
+                        "production": 1,
+                        "tests": 0,
+                        "fixtures": 0,
+                        "other": 0,
+                        "report_only": True,
+                    },
+                    "items": [
+                        {
+                            "category": "dynamic_loading",
+                            "capability": "importlib_import",
+                            "module": "pkg.client",
+                            "qualname": "pkg.client",
+                            "relative_path": "pkg/client.py",
+                            "source_kind": "production",
+                            "start_line": 3,
+                            "end_line": 3,
+                            "location_scope": "module",
+                            "classification_mode": "exact_import",
+                            "evidence_kind": "import",
+                            "evidence_symbol": "importlib",
+                        }
+                    ],
+                }
+            }
+        }
+    }
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=metrics,
+        report_document=report_document,
+    )
+
+    _assert_html_contains(
+        html,
+        "pkg/client.py:3",
+        'data-file="/outside/project/pkg/client.py"',
+    )
+
+
+def test_html_security_surface_helper_context_and_location_fallbacks() -> None:
+    ctx = cast(
+        Any,
+        SimpleNamespace(
+            scan_root="",
+            metrics_map={
+                "coverage_join": {
+                    "summary": {"status": "ok"},
+                    "items": [
+                        {
+                            "relative_path": "pkg/client.py",
+                            "qualname": "pkg.client:run_case",
+                            "coverage_hotspot": False,
+                            "scope_gap_hotspot": True,
+                        },
+                        {
+                            "relative_path": "pkg/ignored.py",
+                            "qualname": "pkg.ignored:run_case",
+                            "coverage_hotspot": False,
+                            "scope_gap_hotspot": False,
+                        },
+                    ],
+                }
+            },
+            relative_path=lambda filepath: filepath.replace("/outside/project/", ""),
+        ),
+    )
+
+    assert relative_location_path(ctx, {"filepath": ""}) == ""
+    assert (
+        location_file_target(
+            ctx,
+            {"filepath": "pkg/client.py"},
+            relative_path="pkg/client.py",
+        )
+        == "pkg/client.py"
+    )
+    assert (
+        location_file_target(
+            ctx,
+            {},
+            relative_path="pkg/client.py",
+        )
+        == "pkg/client.py"
+    )
+    assert (
+        _coverage_join_review_text(
+            ctx,
+            overlap_total=0,
+            scope_gaps=0,
+            hotspots=0,
+        )
+        == "no overlap in current review set"
+    )
+    assert (
+        _coverage_join_review_text(
+            cast(
+                Any,
+                SimpleNamespace(
+                    metrics_map={"coverage_join": {"summary": {"status": "missing"}}}
+                ),
+            ),
+            overlap_total=1,
+            scope_gaps=1,
+            hotspots=0,
+        )
+        == "unavailable for this run"
+    )
+    coverage_index = _coverage_review_index(ctx)
+    assert (
+        _coverage_review_key(ctx, {"relative_path": "", "qualname": "pkg.client"})
+        is None
+    )
+    assert (
+        _coverage_review_item_key(
+            ctx,
+            {
+                "relative_path": "pkg/ignored.py",
+                "qualname": "pkg.ignored:run_case",
+                "coverage_hotspot": False,
+                "scope_gap_hotspot": False,
+            },
+        )
+        is None
+    )
+    assert _coverage_review_cues(
+        ctx,
+        {"relative_path": "", "qualname": ""},
+        coverage_index=coverage_index,
+    ) == {
+        "overlap": False,
+        "coverage_hotspot": False,
+        "scope_gap_hotspot": False,
+    }
+    assert (
+        _review_cell_text(
+            ctx,
+            {
+                "relative_path": "pkg/client.py",
+                "qualname": "pkg.client",
+                "location_scope": "module",
+            },
+            coverage_index=coverage_index,
+        )
+        == "Module · capability present"
+    )
+    assert (
+        _review_cell_text(
+            ctx,
+            {
+                "relative_path": "pkg/client.py",
+                "qualname": "pkg.client:run_case",
+                "location_scope": "callable",
+            },
+            coverage_index=coverage_index,
+        )
+        == "Callable · scope gap"
+    )
+    assert _pluralize(2, "row") == "rows"
+
+
 def test_html_report_quality_coverage_join_empty_and_invalid_states() -> None:
     metrics = _metrics_payload(
         health_score=82,
@@ -2252,6 +2729,62 @@ def test_html_report_quality_coverage_join_edge_states() -> None:
         ">high</span>",
     )
     assert "pkg/mod.py:10-10" not in missing_html
+
+
+def test_html_report_coverage_join_location_falls_back_to_filepath() -> None:
+    metrics = _metrics_payload(
+        health_score=82,
+        health_grade="B",
+        complexity_max=12,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    metrics["coverage_join"] = {
+        "summary": {
+            "status": "ok",
+            "source": "/outside/project/coverage.xml",
+            "files": 1,
+            "units": 1,
+            "measured_units": 0,
+            "overall_executable_lines": 0,
+            "overall_covered_lines": 0,
+            "overall_permille": 0,
+            "missing_from_report_units": 1,
+            "coverage_hotspots": 0,
+            "scope_gap_hotspots": 1,
+            "hotspot_threshold_percent": 50,
+        },
+        "items": [
+            {
+                "filepath": "/outside/project/pkg/mod.py",
+                "qualname": "pkg.mod:run",
+                "start_line": 10,
+                "end_line": 12,
+                "cyclomatic_complexity": 12,
+                "risk": "high",
+                "executable_lines": 0,
+                "covered_lines": 0,
+                "coverage_permille": 0,
+                "coverage_status": "missing_from_report",
+                "coverage_hotspot": False,
+                "scope_gap_hotspot": True,
+            }
+        ],
+    }
+
+    html = _render_metrics_html(metrics)
+
+    _assert_html_contains(
+        html,
+        "pkg/mod.py:10-12",
+        'data-file="/outside/project/pkg/mod.py"',
+    )
+    assert ">:10-12<" not in html
 
 
 def test_tab_empty_info_description_and_empty_variants() -> None:
@@ -2690,6 +3223,109 @@ def test_html_report_dependency_graph_rootless_fallback_seed() -> None:
     _assert_html_contains(html, 'data-node="pkg.c"', 'data-node="pkg.d"')
 
 
+def test_html_report_dependency_graph_keeps_chain_and_cycle_nodes_when_truncated() -> (
+    None
+):
+    edge_list: list[dict[str, object]] = []
+    line = 1
+    for index in range(18):
+        edge_list.append(
+            {
+                "source": "hub.alpha",
+                "target": f"a.leaf{index:02d}",
+                "import_type": "import",
+                "line": line,
+            }
+        )
+        line += 1
+    for index in range(18):
+        edge_list.append(
+            {
+                "source": "hub.beta",
+                "target": f"b.leaf{index:02d}",
+                "import_type": "import",
+                "line": line,
+            }
+        )
+        line += 1
+
+    chain_nodes = [
+        "z.chain.start",
+        "z.chain.one",
+        "z.chain.two",
+        "z.chain.three",
+        "z.chain.four",
+        "z.chain.end",
+    ]
+    for source, target in pairwise(chain_nodes):
+        edge_list.append(
+            {
+                "source": source,
+                "target": target,
+                "import_type": "import",
+                "line": line,
+            }
+        )
+        line += 1
+
+    cycle_nodes = ["z.cycle.left", "z.cycle.right"]
+    edge_list.extend(
+        [
+            {
+                "source": cycle_nodes[0],
+                "target": cycle_nodes[1],
+                "import_type": "import",
+                "line": line,
+            },
+            {
+                "source": cycle_nodes[1],
+                "target": cycle_nodes[0],
+                "import_type": "import",
+                "line": line + 1,
+            },
+        ]
+    )
+    payload = _dependency_metrics_payload(
+        edge_list=edge_list,
+        longest_chains=[chain_nodes],
+        dep_cycles=[cycle_nodes],
+        dep_max_depth=len(chain_nodes),
+    )
+    deps = payload["dependencies"]
+    assert isinstance(deps, dict)
+    deps["modules"] = len(
+        {part for edge in edge_list for part in (edge["source"], edge["target"])}
+    )
+    deps["edges"] = len(edge_list)
+
+    html = _render_metrics_html(payload)
+
+    _assert_html_contains(
+        html,
+        'data-node="z.chain.start"',
+        'data-node="z.chain.three"',
+        'data-node="z.chain.end"',
+        'data-node="z.cycle.left"',
+        'data-node="z.cycle.right"',
+    )
+    view_box = re.search(
+        r'<svg viewBox="(-?\d+) (-?\d+) (\d+) (\d+)" class="dep-graph-svg"',
+        html,
+    )
+    assert view_box is not None
+    assert int(view_box.group(1)) < 0
+    assert int(view_box.group(3)) > int(view_box.group(4))
+    assert re.search(
+        r'<text class="dep-label" data-node="z\.chain\.three".*?rotate\(-45\)">',
+        html,
+    )
+    assert re.search(
+        r'<text class="dep-label" data-node="z\.chain\.three".*?font-size="8"'
+        r'.*?rotate\(-45\)">',
+        html,
+    )
+
+
 def test_html_report_provenance_badges_cover_mismatch_and_untrusted_metrics() -> None:
     html = build_html_report(
         func_groups={},
@@ -2721,13 +3357,15 @@ def test_html_report_provenance_badges_cover_mismatch_and_untrusted_metrics() ->
 
 
 def test_html_report_provenance_table_values_use_unified_badges() -> None:
+    runtime_tag = current_python_tag()
+    baseline_tag = "cp313" if runtime_tag != "cp313" else "cp314"
     html = build_html_report(
         func_groups={},
         block_groups={},
         segment_groups={},
         report_meta={
-            "python_tag": "cp313",
-            "baseline_python_tag": "cp312",
+            "python_tag": runtime_tag,
+            "baseline_python_tag": baseline_tag,
             "baseline_loaded": False,
             "baseline_status": "missing",
             "baseline_payload_sha256_verified": False,
@@ -2748,7 +3386,7 @@ def test_html_report_provenance_table_values_use_unified_badges() -> None:
         '<span class="prov-badge-val">unverified</span>',
         '<span class="prov-badge-val">ok</span>',
         '<span class="prov-badge-val">hit</span>',
-        '<span class="prov-badge-val">runtime cp313</span>',
+        f'<span class="prov-badge-val">runtime {runtime_tag}</span>',
     )
     assert 'class="meta-status' not in html
     assert 'class="meta-bool' not in html

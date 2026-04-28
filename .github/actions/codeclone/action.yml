@@ -13,7 +13,7 @@ inputs:
   python-version:
     description: "Python version"
     required: false
-    default: "3.13"
+    default: "3.14"
 
   package-version:
     description: "CodeClone version from PyPI for remote installs (ignored when the action runs from the checked-out CodeClone repo)"

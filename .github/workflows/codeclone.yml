@@ -26,7 +26,7 @@ jobs:
       - name: Run CodeClone
         uses: ./.github/actions/codeclone
         with:
-          python-version: "3.13"
+          python-version: "3.14"
           fail-on-new: "true"
           fail-health: "60"
           sarif: "true"

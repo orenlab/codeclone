@@ -49,7 +49,7 @@ When reporting issues related to clone detection, include:
 
 - minimal reproducible code snippets (preferred over screenshots);
 - the CodeClone version;
-- the Python version (`python_tag`, e.g. `cp313`);
+- the Python version (`python_tag`, e.g. `cp314`);
 - whether the issue is primarily:
     - AST-related,
     - CFG-related,

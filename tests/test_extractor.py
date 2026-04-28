@@ -15,11 +15,14 @@ from typing import cast
 
 import pytest
 
-from codeclone import extractor, qualnames
-from codeclone.errors import ParseError
-from codeclone.metrics import find_unused
-from codeclone.models import BlockUnit, ClassMetrics, ModuleDep, SegmentUnit
-from codeclone.normalize import NormalizationConfig
+import codeclone.analysis._module_walk as module_walk_mod
+import codeclone.analysis.parser as parser_mod
+import codeclone.analysis.units as units_mod
+from codeclone import qualnames
+from codeclone.analysis.normalizer import NormalizationConfig
+from codeclone.contracts.errors import ParseError
+from codeclone.metrics.dead_code import find_unused
+from codeclone.models import BlockUnit, ClassMetrics, ModuleDep, SegmentUnit, Unit
 from codeclone.qualnames import FunctionNode, QualnameCollector
 
 
@@ -36,12 +39,12 @@ def extract_units_from_source(
     segment_min_loc: int = 20,
     segment_min_stmt: int = 10,
 ) -> tuple[
-    list[extractor.Unit],
+    list[Unit],
     list[BlockUnit],
     list[SegmentUnit],
 ]:
     units, blocks, segments, _source_stats, _file_metrics, _sf = (
-        extractor.extract_units_and_stats_from_source(
+        units_mod.extract_units_and_stats_from_source(
             source=source,
             filepath=filepath,
             module_name=module_name,
@@ -71,9 +74,9 @@ def _collect_module_walk(
     *,
     module_name: str = "pkg.mod",
     collect_referenced_names: bool = True,
-) -> tuple[ast.Module, QualnameCollector, extractor._ModuleWalkResult]:
+) -> tuple[ast.Module, QualnameCollector, module_walk_mod._ModuleWalkResult]:
     tree, collector = _parse_tree_and_collector(source)
-    walk = extractor._collect_module_walk_data(
+    walk = module_walk_mod._collect_module_walk_data(
         tree=tree,
         module_name=module_name,
         collector=collector,
@@ -88,7 +91,7 @@ def _dead_qualnames_from_source(
     filepath: str = "pkg/mod.py",
     module_name: str = "pkg.mod",
 ) -> tuple[str, ...]:
-    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
         source=source,
         filepath=filepath,
         module_name=module_name,
@@ -131,13 +134,13 @@ def foo():
 
 
 def test_source_tokens_returns_empty_on_tokenize_error() -> None:
-    assert extractor._source_tokens('"""') == ()
+    assert parser_mod._source_tokens('"""') == ()
 
 
 def test_declaration_token_index_returns_none_when_start_token_is_missing() -> None:
-    tokens = extractor._source_tokens("value = 1\n")
+    tokens = parser_mod._source_tokens("value = 1\n")
     assert (
-        extractor._declaration_token_index(
+        parser_mod._declaration_token_index(
             source_tokens=tokens,
             start_line=1,
             start_col=0,
@@ -148,11 +151,11 @@ def test_declaration_token_index_returns_none_when_start_token_is_missing() -> N
 
 
 def test_declaration_token_index_uses_prebuilt_index() -> None:
-    tokens = extractor._source_tokens("async def demo():\n    return 1\n")
-    token_index = extractor._build_declaration_token_index(tokens)
+    tokens = parser_mod._source_tokens("async def demo():\n    return 1\n")
+    token_index = parser_mod._build_declaration_token_index(tokens)
 
     assert (
-        extractor._declaration_token_index(
+        parser_mod._declaration_token_index(
             source_tokens=tokens,
             start_line=1,
             start_col=0,
@@ -171,11 +174,11 @@ async def demo():
 """
     ).body[0]
     assert isinstance(async_node, ast.AsyncFunctionDef)
-    assert extractor._declaration_token_name(async_node) == "async"
+    assert parser_mod._declaration_token_name(async_node) == "async"
 
-    tokens = extractor._source_tokens("def demo():\n    return 1\n")
+    tokens = parser_mod._source_tokens("def demo():\n    return 1\n")
     assert (
-        extractor._declaration_token_index(
+        parser_mod._declaration_token_index(
             source_tokens=tokens,
             start_line=1,
             start_col=0,
@@ -184,22 +187,22 @@ async def demo():
         == 0
     )
 
-    nested_tokens = extractor._source_tokens(
+    nested_tokens = parser_mod._source_tokens(
         "def demo(arg: tuple[int, int]) -> tuple[int, int]:\n    return arg\n"
     )
     assert (
-        extractor._scan_declaration_colon_line(
+        parser_mod._scan_declaration_colon_line(
             source_tokens=nested_tokens,
             start_index=0,
         )
         == 1
     )
 
-    default_tokens = extractor._source_tokens(
+    default_tokens = parser_mod._source_tokens(
         "def demo(arg=(1, [2])):\n    return arg\n"
     )
     assert (
-        extractor._scan_declaration_colon_line(
+        parser_mod._scan_declaration_colon_line(
             source_tokens=default_tokens,
             start_index=0,
         )
@@ -212,7 +215,7 @@ async def demo():
         tokenize.TokenInfo(tokenize.OP, "(", (1, 8), (1, 9), "def demo("),
     )
     assert (
-        extractor._scan_declaration_colon_line(
+        parser_mod._scan_declaration_colon_line(
             source_tokens=eof_tokens,
             start_index=0,
         )
@@ -224,7 +227,7 @@ async def demo():
         tokenize.TokenInfo(tokenize.OP, ")", (1, 8), (1, 9), "def demo)"),
     )
     assert (
-        extractor._scan_declaration_colon_line(
+        parser_mod._scan_declaration_colon_line(
             source_tokens=unmatched_close_tokens,
             start_index=0,
         )
@@ -233,9 +236,9 @@ async def demo():
 
 
 def test_scan_declaration_colon_line_returns_none_when_header_is_incomplete() -> None:
-    tokens = extractor._source_tokens("def broken\n")
+    tokens = parser_mod._source_tokens("def broken\n")
     assert (
-        extractor._scan_declaration_colon_line(
+        parser_mod._scan_declaration_colon_line(
             source_tokens=tokens,
             start_index=0,
         )
@@ -251,7 +254,7 @@ class Demo:
 """
     ).body[0]
     assert isinstance(node, ast.ClassDef)
-    assert extractor._declaration_end_line(node, source_tokens=()) == 2
+    assert parser_mod._declaration_end_line(node, source_tokens=()) == 2
 
 
 def test_declaration_end_line_returns_zero_for_invalid_start_line() -> None:
@@ -263,7 +266,7 @@ def broken():
     ).body[0]
     assert isinstance(node, ast.FunctionDef)
     node.lineno = 0
-    assert extractor._declaration_end_line(node, source_tokens=()) == 0
+    assert parser_mod._declaration_end_line(node, source_tokens=()) == 0
 
 
 def test_declaration_fallback_helpers_cover_empty_and_same_line_bodies() -> None:
@@ -275,7 +278,7 @@ def demo():
     ).body[0]
     assert isinstance(empty_body_node, ast.FunctionDef)
     empty_body_node.body = []
-    assert extractor._fallback_declaration_end_line(empty_body_node, start_line=2) == 2
+    assert parser_mod._fallback_declaration_end_line(empty_body_node, start_line=2) == 2
 
     inline_body_node = ast.parse(
         """
@@ -285,14 +288,16 @@ def demo():
     ).body[0]
     assert isinstance(inline_body_node, ast.FunctionDef)
     inline_body_node.body[0].lineno = 2
-    assert extractor._fallback_declaration_end_line(inline_body_node, start_line=2) == 2
+    assert (
+        parser_mod._fallback_declaration_end_line(inline_body_node, start_line=2) == 2
+    )
 
     no_colon_tokens = (
         tokenize.TokenInfo(tokenize.NAME, "def", (2, 0), (2, 3), "def demo"),
         tokenize.TokenInfo(tokenize.NAME, "demo", (2, 4), (2, 8), "def demo"),
     )
     assert (
-        extractor._declaration_end_line(
+        parser_mod._declaration_end_line(
             inline_body_node,
             source_tokens=no_colon_tokens,
         )
@@ -351,7 +356,7 @@ def test_extract_units_skips_suppression_tokenization_without_inline_directives(
     source: str,
 ) -> None:
     monkeypatch.setattr(
-        extractor,
+        module_walk_mod,
         "_source_tokens",
         lambda _source: (_ for _ in ()).throw(
             AssertionError("_source_tokens should not be called")
@@ -376,14 +381,17 @@ def test_extract_units_tokenizes_when_inline_suppressions_exist(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = 0
-    original_source_tokens = extractor._source_tokens
+    original_source_tokens = cast(
+        "Callable[[str], tuple[tokenize.TokenInfo, ...]]",
+        module_walk_mod.__dict__["_source_tokens"],
+    )
 
     def _record_tokens(source: str) -> tuple[tokenize.TokenInfo, ...]:
         nonlocal calls
         calls += 1
         return original_source_tokens(source)
 
-    monkeypatch.setattr(extractor, "_source_tokens", _record_tokens)
+    monkeypatch.setattr(module_walk_mod, "_source_tokens", _record_tokens)
 
     units, blocks, segments = extract_units_from_source(
         source="""
@@ -424,7 +432,7 @@ def foo(x):
     return a + b + c + d + e
 """
     _units, _blocks, _segments, _source_stats, _file_metrics, sf = (
-        extractor.extract_units_and_stats_from_source(
+        units_mod.extract_units_and_stats_from_source(
             source=src,
             filepath="x.py",
             module_name="mod",
@@ -440,19 +448,19 @@ def foo(x):
 def test_parse_timeout_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     @contextmanager
     def _boom(_timeout_s: int) -> Iterator[None]:
-        raise extractor._ParseTimeoutError("AST parsing timeout")
+        raise parser_mod._ParseTimeoutError("AST parsing timeout")
         if False:
             yield
 
-    monkeypatch.setattr(extractor, "_parse_limits", _boom)
+    monkeypatch.setattr(parser_mod, "_parse_limits", _boom)
 
     with pytest.raises(ParseError, match="AST parsing timeout"):
-        extractor._parse_with_limits("x = 1", 1)
+        parser_mod._parse_with_limits("x = 1", 1)
 
 
 def test_parse_limits_no_timeout() -> None:
-    with extractor._parse_limits(0):
-        tree = extractor._parse_with_limits("x = 1", 0)
+    with parser_mod._parse_limits(0):
+        tree = parser_mod._parse_with_limits("x = 1", 0)
     assert tree is not None
 
 
@@ -481,8 +489,8 @@ def test_parse_limits_resource_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
     _patch_posix_parse_limits(monkeypatch, _DummyResource)
 
-    with extractor._parse_limits(1):
-        tree = extractor._parse_with_limits("x = 1", 1)
+    with parser_mod._parse_limits(1):
+        tree = parser_mod._parse_with_limits("x = 1", 1)
     assert tree is not None
 
 
@@ -505,7 +513,7 @@ def test_parse_limits_never_lowers_hard_limit(monkeypatch: pytest.MonkeyPatch) -
 
     _patch_posix_parse_limits(monkeypatch, _DummyResource)
 
-    with extractor._parse_limits(5):
+    with parser_mod._parse_limits(5):
         pass
 
     assert calls
@@ -546,7 +554,7 @@ def test_parse_limits_accounts_for_consumed_cpu(
 
     _patch_posix_parse_limits(monkeypatch, _DummyResource)
 
-    with extractor._parse_limits(5):
+    with parser_mod._parse_limits(5):
         pass
 
     assert calls
@@ -586,7 +594,7 @@ def test_parse_limits_raises_too_low_soft_limit_for_consumed_cpu(
 
     _patch_posix_parse_limits(monkeypatch, _DummyResource)
 
-    with extractor._parse_limits(5):
+    with parser_mod._parse_limits(5):
         pass
 
     # Raised from 2 to ceil(10)+5 to avoid immediate SIGXCPU.
@@ -613,7 +621,7 @@ def test_parse_limits_uses_finite_soft_limit_branch(
 
     _patch_posix_parse_limits(monkeypatch, _DummyResource)
 
-    with extractor._parse_limits(5):
+    with parser_mod._parse_limits(5):
         pass
 
     # Finite soft limits are never lowered.
@@ -646,22 +654,26 @@ def test_parse_limits_restore_failure_is_ignored(
     monkeypatch.setitem(sys.modules, "resource", _DummyResource)
 
     # Should not raise even if restoring old limits fails.
-    with extractor._parse_limits(5):
+    with parser_mod._parse_limits(5):
         pass
 
 
 def test_resolve_import_target_absolute_and_relative() -> None:
     absolute = ast.ImportFrom(module="pkg.util", names=[], level=0)
-    assert extractor._resolve_import_target("root.mod.sub", absolute) == "pkg.util"
+    assert (
+        module_walk_mod._resolve_import_target("root.mod.sub", absolute) == "pkg.util"
+    )
 
     relative = ast.ImportFrom(module="helpers", names=[], level=1)
     assert (
-        extractor._resolve_import_target("root.mod.sub", relative) == "root.mod.helpers"
+        module_walk_mod._resolve_import_target("root.mod.sub", relative)
+        == "root.mod.helpers"
     )
 
     relative_no_module = ast.ImportFrom(module=None, names=[], level=2)
     assert (
-        extractor._resolve_import_target("root.mod.sub", relative_no_module) == "root"
+        module_walk_mod._resolve_import_target("root.mod.sub", relative_no_module)
+        == "root"
     )
 
 
@@ -680,7 +692,7 @@ obj.method()
     )
     collector = QualnameCollector()
     collector.visit(tree)
-    walk = extractor._collect_module_walk_data(
+    walk = module_walk_mod._collect_module_walk_data(
         tree=tree,
         module_name="root.mod.sub",
         collector=collector,
@@ -720,7 +732,7 @@ def test_collect_module_walk_data_edge_branches() -> None:
     tree = ast.parse("from .... import parent")
     collector = QualnameCollector()
     collector.visit(tree)
-    walk = extractor._collect_module_walk_data(
+    walk = module_walk_mod._collect_module_walk_data(
         tree=tree,
         module_name="pkg.mod",
         collector=collector,
@@ -733,7 +745,7 @@ def test_collect_module_walk_data_edge_branches() -> None:
     lambda_call_tree = ast.parse("(lambda x: x)(1)")
     lambda_collector = QualnameCollector()
     lambda_collector.visit(lambda_call_tree)
-    lambda_walk = extractor._collect_module_walk_data(
+    lambda_walk = module_walk_mod._collect_module_walk_data(
         tree=lambda_call_tree,
         module_name="pkg.mod",
         collector=lambda_collector,
@@ -752,7 +764,7 @@ from .... import parent
     )
     collector = QualnameCollector()
     collector.visit(tree)
-    walk = extractor._collect_module_walk_data(
+    walk = module_walk_mod._collect_module_walk_data(
         tree=tree,
         module_name="root.mod.sub",
         collector=collector,
@@ -777,12 +789,12 @@ from .... import parent
 
 
 def test_module_walk_helpers_cover_import_and_reference_branches() -> None:
-    state = extractor._ModuleWalkState()
+    state = module_walk_mod._ModuleWalkState()
     import_node = cast(
         ast.Import,
         ast.parse("import typing_extensions as te").body[0],
     )
-    extractor._collect_import_node(
+    module_walk_mod._collect_import_node(
         node=import_node,
         module_name="pkg.mod",
         state=state,
@@ -796,7 +808,7 @@ def test_module_walk_helpers_cover_import_and_reference_branches() -> None:
         ast.ImportFrom,
         ast.parse("from typing import Protocol as Proto, Thing as Alias").body[0],
     )
-    extractor._collect_import_from_node(
+    module_walk_mod._collect_import_from_node(
         node=import_from_node,
         module_name="pkg.mod",
         state=state,
@@ -810,7 +822,7 @@ def test_module_walk_helpers_cover_import_and_reference_branches() -> None:
         names=[ast.alias(name="parent", asname=None)],
         level=4,
     )
-    extractor._collect_import_from_node(
+    module_walk_mod._collect_import_from_node(
         node=unresolved_import,
         module_name="pkg.mod",
         state=state,
@@ -820,9 +832,9 @@ def test_module_walk_helpers_cover_import_and_reference_branches() -> None:
 
     name_node = cast(ast.Name, ast.parse("value", mode="eval").body)
     attr_node = cast(ast.Attribute, ast.parse("obj.attr", mode="eval").body)
-    extractor._collect_load_reference_node(node=name_node, state=state)
-    extractor._collect_load_reference_node(node=attr_node, state=state)
-    extractor._collect_load_reference_node(
+    module_walk_mod._collect_load_reference_node(node=name_node, state=state)
+    module_walk_mod._collect_load_reference_node(node=attr_node, state=state)
+    module_walk_mod._collect_load_reference_node(
         node=cast(ast.Constant, ast.parse("1", mode="eval").body),
         state=state,
     )
@@ -832,8 +844,11 @@ def test_module_walk_helpers_cover_import_and_reference_branches() -> None:
 
 def test_dotted_expr_protocol_detection_and_runtime_candidate_edges() -> None:
     dotted_expr = ast.parse("pkg.helpers.decorate", mode="eval").body
-    assert extractor._dotted_expr_name(dotted_expr) == "pkg.helpers.decorate"
-    assert extractor._dotted_expr_name(ast.parse("custom()", mode="eval").body) is None
+    assert module_walk_mod._dotted_expr_name(dotted_expr) == "pkg.helpers.decorate"
+    assert (
+        module_walk_mod._dotted_expr_name(ast.parse("custom()", mode="eval").body)
+        is None
+    )
 
     tree = ast.parse(
         """
@@ -848,7 +863,7 @@ class B(te.Protocol[int]):
     )
     collector = QualnameCollector()
     collector.visit(tree)
-    walk = extractor._collect_module_walk_data(
+    walk = module_walk_mod._collect_module_walk_data(
         tree=tree,
         module_name="pkg.mod",
         collector=collector,
@@ -859,12 +874,12 @@ class B(te.Protocol[int]):
     assert "te" in protocol_module_aliases
     classes = [node for node in tree.body if isinstance(node, ast.ClassDef)]
     class_a, class_b = classes
-    assert extractor._is_protocol_class(
+    assert module_walk_mod._is_protocol_class(
         class_a,
         protocol_symbol_aliases=protocol_symbol_aliases,
         protocol_module_aliases=protocol_module_aliases,
     )
-    assert not extractor._is_protocol_class(
+    assert not module_walk_mod._is_protocol_class(
         class_b,
         protocol_symbol_aliases=protocol_symbol_aliases,
         protocol_module_aliases=protocol_module_aliases,
@@ -880,7 +895,7 @@ def f(x):
 """.strip()
     ).body[0]
     assert isinstance(runtime_candidate, ast.FunctionDef)
-    assert extractor._is_non_runtime_candidate(runtime_candidate)
+    assert module_walk_mod._is_non_runtime_candidate(runtime_candidate)
 
 
 def test_resolve_referenced_qualnames_covers_module_class_and_attr_branches() -> None:
@@ -899,26 +914,26 @@ unknown = Missing.hook
 dynamic = factory().attr
 """
     tree, collector = _parse_tree_and_collector(src)
-    state = extractor._ModuleWalkState()
+    state = module_walk_mod._ModuleWalkState()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            extractor._collect_import_node(
+            module_walk_mod._collect_import_node(
                 node=node,
                 module_name="pkg.mod",
                 state=state,
                 collect_referenced_names=True,
             )
         elif isinstance(node, ast.ImportFrom):
-            extractor._collect_import_from_node(
+            module_walk_mod._collect_import_from_node(
                 node=node,
                 module_name="pkg.mod",
                 state=state,
                 collect_referenced_names=True,
             )
         else:
-            extractor._collect_load_reference_node(node=node, state=state)
+            module_walk_mod._collect_load_reference_node(node=node, state=state)
 
-    resolved = extractor._resolve_referenced_qualnames(
+    resolved = module_walk_mod._resolve_referenced_qualnames(
         module_name="pkg.mod",
         collector=collector,
         state=state,
@@ -961,7 +976,7 @@ def test_extractor_private_helper_branches_cover_invalid_protocol_and_declaratio
         attr="method",
         ctx=ast.Load(),
     )
-    assert extractor._dotted_expr_name(expr) is None
+    assert module_walk_mod._dotted_expr_name(expr) is None
 
     protocol_class = ast.parse(
         """
@@ -971,7 +986,7 @@ class Demo(Unknown, alias.Protocol):
     ).body[0]
     assert isinstance(protocol_class, ast.ClassDef)
     assert (
-        extractor._is_protocol_class(
+        module_walk_mod._is_protocol_class(
             protocol_class,
             protocol_symbol_aliases=frozenset({"Protocol"}),
             protocol_module_aliases=frozenset({"typing"}),
@@ -988,7 +1003,7 @@ def demo():
     assert isinstance(bad_span_node, ast.FunctionDef)
     bad_span_node.lineno = 3
     bad_span_node.end_lineno = 2
-    assert extractor._eligible_unit_shape(bad_span_node, min_loc=1, min_stmt=1) is None
+    assert units_mod._eligible_unit_shape(bad_span_node, min_loc=1, min_stmt=1) is None
 
     _, missing_method_collector, missing_method_walk = _collect_module_walk(
         """
@@ -1012,7 +1027,7 @@ class Demo:
     declaration_collector.units[0][1].end_lineno = 0
     declaration_collector.class_nodes[0][1].end_lineno = 0
     assert (
-        extractor._collect_declaration_targets(
+        module_walk_mod._collect_declaration_targets(
             filepath="pkg/mod.py",
             module_name="pkg.mod",
             collector=declaration_collector,
@@ -1025,8 +1040,8 @@ def demo():  # codeclone: ignore[dead-code]
     return 1
 """
     _, suppression_collector = _parse_tree_and_collector(suppression_source)
-    monkeypatch.setattr(extractor, "_source_tokens", lambda _source: ())
-    suppression_index = extractor._build_suppression_index_for_source(
+    monkeypatch.setattr(module_walk_mod, "_source_tokens", lambda _source: ())
+    suppression_index = module_walk_mod._build_suppression_index_for_source(
         source=suppression_source,
         filepath="pkg/mod.py",
         module_name="pkg.mod",
@@ -1041,7 +1056,7 @@ from pkg.mod import live
 
 live()
 """
-    _, _, _, _, test_metrics, _ = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, test_metrics, _ = units_mod.extract_units_and_stats_from_source(
         source=src,
         filepath="pkg/tests/test_usage.py",
         module_name="pkg.tests.test_usage",
@@ -1049,7 +1064,7 @@ live()
         min_loc=1,
         min_stmt=1,
     )
-    _, _, _, _, regular_metrics, _ = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, regular_metrics, _ = units_mod.extract_units_and_stats_from_source(
         source=src,
         filepath="pkg/usage.py",
         module_name="pkg.usage",
@@ -1086,7 +1101,7 @@ class Service:
     def make():
         return Service()
 """
-    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
         source=src,
         filepath="pkg/service.py",
         module_name="pkg.service",
@@ -1123,7 +1138,7 @@ def test_orphan_usage():
     assert orphan() == 1
 """
 
-    _, _, _, _, prod_metrics, _ = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, prod_metrics, _ = units_mod.extract_units_and_stats_from_source(
         source=src_prod,
         filepath="pkg/mod.py",
         module_name="pkg.mod",
@@ -1131,7 +1146,7 @@ def test_orphan_usage():
         min_loc=1,
         min_stmt=1,
     )
-    _, _, _, _, test_metrics, _ = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, test_metrics, _ = units_mod.extract_units_and_stats_from_source(
         source=src_test,
         filepath="pkg/tests/test_mod.py",
         module_name="pkg.tests.test_mod",
@@ -1264,7 +1279,7 @@ def used():
     broken_class.lineno = 0
     broken_class.end_lineno = 0
     collector.class_nodes.append(("Broken", broken_class))
-    dead = extractor._collect_dead_candidates(
+    dead = module_walk_mod._collect_dead_candidates(
         filepath="pkg/mod.py",
         module_name="pkg.mod",
         collector=collector,
@@ -1283,7 +1298,7 @@ def used():
             return None
 
     monkeypatch.setattr(qualnames, "QualnameCollector", _CollectorNoClassMetrics)
-    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
         source="class Broken:\n    pass\n",
         filepath="pkg/mod.py",
         module_name="pkg.mod",
@@ -1303,7 +1318,7 @@ def wrapper():
     value = _run_impl()
     return helpers.decorate(value)
 """
-    _, _, _, _, file_metrics, _ = extractor.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
         source=src,
         filepath="pkg/cli.py",
         module_name="pkg.cli",
@@ -1335,7 +1350,7 @@ def parse_value(value: object) -> str:
     return str(value)
     """
     _tree, collector, walk = _collect_module_walk(src)
-    dead = extractor._collect_dead_candidates(
+    dead = module_walk_mod._collect_dead_candidates(
         filepath="pkg/mod.py",
         module_name="pkg.mod",
         collector=collector,
@@ -1515,7 +1530,7 @@ class TestAdmissionThresholdBoundaries:
         stmt_count: int,
         lines_per_stmt: int,
         **thresholds: int,
-    ) -> tuple[list[extractor.Unit], list[BlockUnit], list[SegmentUnit]]:
+    ) -> tuple[list[Unit], list[BlockUnit], list[SegmentUnit]]:
         return extract_units_from_source(
             source=self._make_func(
                 stmt_count=stmt_count,
@@ -1691,10 +1706,10 @@ def test_extract_handles_non_list_function_body_for_hash_reuse(
         captured_hashes["value"] = precomputed_hashes
         return []
 
-    monkeypatch.setattr(extractor, "_parse_with_limits", _fake_parse)
-    monkeypatch.setattr(extractor, "_stmt_count", lambda _node: 12)
-    monkeypatch.setattr(extractor, "_cfg_fingerprint_and_complexity", _fake_fingerprint)
-    monkeypatch.setattr(extractor, "extract_segments", _fake_extract_segments)
+    monkeypatch.setattr(units_mod, "_parse_with_limits", _fake_parse)
+    monkeypatch.setattr(units_mod, "_stmt_count", lambda _node: 12)
+    monkeypatch.setattr(units_mod, "_cfg_fingerprint_and_complexity", _fake_fingerprint)
+    monkeypatch.setattr(units_mod, "extract_segments", _fake_extract_segments)
 
     units, blocks, segments = extract_units_from_source(
         source="def f():\n    pass\n",
@@ -1725,7 +1740,7 @@ def f():
     def _fake_parse(_source: str, _timeout_s: int) -> ast.AST:
         return tree
 
-    monkeypatch.setattr(extractor, "_parse_with_limits", _fake_parse)
+    monkeypatch.setattr(units_mod, "_parse_with_limits", _fake_parse)
     units, blocks, segments = extract_units_from_source(
         source="def f():\n    return 1\n",
         filepath="x.py",
@@ -1771,4 +1786,4 @@ def test_parse_limits_triggers_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(signal, "setitimer", lambda *_args, **_kwargs: None)
 
     with pytest.raises(ParseError, match="AST parsing timeout"):
-        extractor._parse_with_limits("x = 1", 1)
+        parser_mod._parse_with_limits("x = 1", 1)

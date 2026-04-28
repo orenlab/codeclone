@@ -21,6 +21,7 @@ from tempfile import TemporaryDirectory
 from codeclone import __version__
 
 DEFAULT_OUTPUT_DIR = Path("site/examples/report/live")
+CODECLONE_CLI_MODULE = "codeclone.main"
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,7 @@ def _run_codeclone(scan_root: Path, artifacts: ReportArtifacts) -> None:
     cmd = [
         sys.executable,
         "-m",
-        "codeclone.cli",
+        CODECLONE_CLI_MODULE,
         str(scan_root),
         "--html",
         str(artifacts.html),

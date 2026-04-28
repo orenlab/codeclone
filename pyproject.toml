@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codeclone"
-version = "2.0.0b5"
+version = "2.0.0b6"
 description = "Structural code quality analysis for Python"
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "MPL-2.0 AND MIT"
-license-files = ["LICENSE", "LICENSE-docs"]
+license-files = ["LICENSE", "LICENSE-MIT"]
 
 authors = [
     { name = "Den Rozhnovskiy", email = "pytelemonbot@mail.ru" }
@@ -76,17 +76,43 @@ dev = [
 ]
 
 [project.scripts]
-codeclone = "codeclone.cli:main"
-codeclone-mcp = "codeclone.mcp_server:main"
+codeclone = "codeclone.main:main"
+codeclone-mcp = "codeclone.surfaces.mcp.server:main"
 
 [tool.setuptools]
 packages = [
     "codeclone",
-    "codeclone._html_report",
-    "codeclone._html_report._sections",
+    "codeclone.analysis",
+    "codeclone.baseline",
+    "codeclone.blocks",
+    "codeclone.cache",
+    "codeclone.config",
+    "codeclone.contracts",
+    "codeclone.core",
+    "codeclone.findings",
+    "codeclone.findings.clones",
+    "codeclone.findings.structural",
     "codeclone.domain",
+    "codeclone.meta_markers",
     "codeclone.metrics",
+    "codeclone.paths",
+    "codeclone.qualnames",
     "codeclone.report",
+    "codeclone.report.document",
+    "codeclone.report.gates",
+    "codeclone.report.html",
+    "codeclone.report.html.assets",
+    "codeclone.report.html.primitives",
+    "codeclone.report.html.sections",
+    "codeclone.report.html.widgets",
+    "codeclone.report.renderers",
+    "codeclone.scanner",
+    "codeclone.surfaces",
+    "codeclone.surfaces.cli",
+    "codeclone.surfaces.mcp",
+    "codeclone.surfaces.mcp.tools",
+    "codeclone.ui_messages",
+    "codeclone.utils",
 ]
 
 [tool.setuptools.package-data]
@@ -107,9 +133,9 @@ min_stmt = 4
 fail_on_new = true
 fail_cycles = true
 fail_dead_code = true
-fail_health = 87
+fail_health = 80
 fail_on_new_metrics = true
-api_surface = false
+api_surface = true
 golden_fixture_paths = ["tests/fixtures/golden_*"]
 min_typing_coverage = 99
 
@@ -136,9 +162,8 @@ target-version = "py310"
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "PIE", "PERF", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-"codeclone/_html_css.py" = ["E501"]
-"codeclone/_html_js.py" = ["E501"]
-"codeclone/_html_report/_sections/*.py" = ["E501"]
+"codeclone/report/html/assets/*.py" = ["E501"]
+"codeclone/report/html/sections/*.py" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"

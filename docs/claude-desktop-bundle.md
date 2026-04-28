@@ -23,14 +23,14 @@ The bundle prefers the current workspace launcher first:
 
 ```bash
 uv venv
-uv pip install --python .venv/bin/python "codeclone[mcp]>=2.0.0b5"
+uv pip install --python .venv/bin/python --pre "codeclone[mcp]"
 .venv/bin/codeclone-mcp --help
 ```
 
 Global fallback:
 
 ```bash
-uv tool install "codeclone[mcp]>=2.0.0b5"
+uv tool install --pre "codeclone[mcp]"
 codeclone-mcp --help
 ```
 

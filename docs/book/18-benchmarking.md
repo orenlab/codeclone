@@ -62,7 +62,7 @@ Benchmark output (`benchmark_schema_version=1.0`) contains:
 
 Refs:
 
-- `codeclone/report/json_contract.py:_build_integrity_payload`
+- `codeclone/report/document/integrity.py:_build_integrity_payload`
 - `benchmarks/run_benchmark.py`
 
 ## Recommended run profile

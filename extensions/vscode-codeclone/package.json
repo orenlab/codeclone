@@ -2,7 +2,7 @@
   "name": "codeclone",
   "displayName": "CodeClone",
   "description": "Baseline-aware, triage-first structural review for Python, powered by CodeClone MCP.",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "preview": true,
   "publisher": "orenlab",
   "license": "MPL-2.0",
@@ -49,7 +49,7 @@
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
     "typecheck": "tsc -p jsconfig.json --noEmit",
-    "check": "npm run build && npm run typecheck && node --check src/constants.js && node --check src/formatters.js && node --check src/runtime.js && node --check src/renderers.js && node --check src/providers.js && node --check src/support.js && node --check src/mcpClient.js && node --check src/extension.js",
+    "check": "npm run build && npm run typecheck && node --check src/constants.js && node --check src/formatters.js && node --check src/runtime.js && node --check src/renderers.js && node --check src/providers.js && node --check src/support.js && node --check src/runArtifacts.js && node --check src/mcpClient.js && node --check src/extension.js",
     "test": "node --test test/*.test.js",
     "test:host": "npm run build && node test/runExtensionHost.js",
     "vscode:prepublish": "npm run build"
@@ -79,6 +79,8 @@
     "onCommand:codeclone.openSetupHelp",
     "onCommand:codeclone.openOverloadedModule",
     "onCommand:codeclone.copyOverloadedModuleBrief",
+    "onCommand:codeclone.openSecuritySurface",
+    "onCommand:codeclone.copySecuritySurfaceBrief",
     "onCommand:codeclone.manageWorkspaceTrust"
   ],
   "main": "./dist/extension.js",
@@ -317,6 +319,23 @@
         "icon": "$(copy)"
       },
       {
+        "command": "codeclone.openSecuritySurface",
+        "title": "Open Security Surface Detail",
+        "category": "CodeClone",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "codeclone.reviewSecuritySurface",
+        "title": "Review Security Surface",
+        "category": "CodeClone"
+      },
+      {
+        "command": "codeclone.copySecuritySurfaceBrief",
+        "title": "Copy Security Review Brief",
+        "category": "CodeClone",
+        "icon": "$(copy)"
+      },
+      {
         "command": "codeclone.openOverview",
         "title": "Open Overview",
         "category": "CodeClone"
@@ -384,6 +403,18 @@
         },
         {
           "command": "codeclone.reviewOverloadedModule",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.openSecuritySurface",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.copySecuritySurfaceBrief",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.reviewSecuritySurface",
           "when": "false"
         }
       ],
@@ -554,6 +585,16 @@
           "command": "codeclone.copyOverloadedModuleBrief",
           "when": "viewItem == codeclone.overloadedModule",
           "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.openSecuritySurface",
+          "when": "viewItem == codeclone.securitySurface",
+          "group": "inline@1"
+        },
+        {
+          "command": "codeclone.copySecuritySurfaceBrief",
+          "when": "viewItem == codeclone.securitySurface",
+          "group": "navigation@1"
         }
       ],
       "editor/title": [
@@ -590,6 +631,11 @@
         {
           "command": "codeclone.copyOverloadedModuleBrief",
           "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsOverloadedModule",
+          "group": "secondary@4"
+        },
+        {
+          "command": "codeclone.copySecuritySurfaceBrief",
+          "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsSecuritySurface",
           "group": "secondary@4"
         }
       ]

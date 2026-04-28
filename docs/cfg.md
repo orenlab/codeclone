@@ -186,7 +186,7 @@ This is critical for CI usage and baseline comparison.
 ## Python Tag Consistency for Baseline Checks
 
 Due to AST differences between interpreter versions, baseline compatibility is pinned to
-the same `python_tag` (for example `cp313`), not full patch version equality.
+the same `python_tag` (for example `cp314`), not full patch version equality.
 
 This keeps clone detection deterministic while allowing patch updates within the same tag.
 

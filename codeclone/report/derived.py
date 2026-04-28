@@ -7,9 +7,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-from .._coerce import as_int as _as_int
 from ..domain.source_scope import (
     IMPACT_SCOPE_MIXED,
     IMPACT_SCOPE_NON_RUNTIME,
@@ -31,6 +30,7 @@ from ..paths import (
 from ..paths import (
     relative_repo_path as _relative_repo_path,
 )
+from ..utils.coerce import as_int as _as_int
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -125,7 +125,7 @@ def normalized_source_kind(value: object) -> SourceKind:
 def source_scope_from_counts(
     counts: Mapping[SourceKind, int] | Mapping[str, int],
 ) -> dict[str, object]:
-    normalized_counts = cast("Mapping[str, int]", counts)
+    normalized_counts = {str(key): int(value) for key, value in counts.items()}
 
     def _count(kind: str) -> int:
         value = normalized_counts.get(kind, 0)

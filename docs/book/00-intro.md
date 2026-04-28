@@ -7,9 +7,9 @@ describes only behavior that is present in code and/or locked by tests.
 
 ## Public surface
 
-- CLI entrypoint: `codeclone/cli.py:main`
+- CLI entrypoint: `codeclone/main.py:main`
 - Package version: `codeclone/__init__.py:__version__`
-- Global contract constants: `codeclone/contracts.py`
+- Global contract constants: `codeclone/contracts/__init__.py`
 
 ## Contracts
 
@@ -22,10 +22,10 @@ version, same baseline/cache/report schemas):
 
 Refs:
 
-- `codeclone/report/json_contract.py:build_report_document`
-- `codeclone/baseline.py:Baseline.verify_compatibility`
-- `codeclone/cache.py:Cache.load`
-- `codeclone/contracts.py:ExitCode`
+- `codeclone/report/document/builder.py:build_report_document`
+- `codeclone/baseline/clone_baseline.py:Baseline.verify_compatibility`
+- `codeclone/cache/store.py:Cache.load`
+- `codeclone/contracts/__init__.py:ExitCode`
 
 ## Invariants (MUST)
 
@@ -35,9 +35,9 @@ Refs:
 
 Refs:
 
-- `codeclone/cli.py:_main_impl`
-- `codeclone/baseline.py:BASELINE_UNTRUSTED_STATUSES`
-- `codeclone/cache.py:Cache._ignore_cache`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
+- `codeclone/baseline/trust.py:BASELINE_UNTRUSTED_STATUSES`
+- `codeclone/cache/store.py:Cache._ignore_cache`
 
 ## Failure modes
 
@@ -50,8 +50,8 @@ Refs:
 
 Refs:
 
-- `codeclone/cli.py:_main_impl`
-- `codeclone/cli.py:main`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
+- `codeclone/main.py:main`
 
 ## Determinism / canonicalization
 
@@ -62,9 +62,9 @@ Refs:
 Refs:
 
 - `codeclone/scanner.py:iter_py_files`
-- `codeclone/report/json_contract.py:build_report_document`
-- `codeclone/baseline.py:_compute_payload_sha256`
-- `codeclone/cache.py:_canonical_json`
+- `codeclone/report/document/builder.py:build_report_document`
+- `codeclone/baseline/trust.py:_compute_payload_sha256`
+- `codeclone/cache/integrity.py:canonical_json`
 
 ## Locked by tests
 

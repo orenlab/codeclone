@@ -5,6 +5,10 @@ This book is the contract-level documentation for CodeClone v2.x.
 All guarantees here are derived from code and locked tests.
 If a statement is not enforced by code/tests, it is explicitly marked as non-contractual.
 
+!!! note "Contract rule"
+    If this book and the current repository code diverge, code and locked tests
+    win. Update the book after correcting the implementation or contract test.
+
 ## How to read
 
 - Start with **Intro → Architecture map → Terminology**.

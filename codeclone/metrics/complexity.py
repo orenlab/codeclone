@@ -15,7 +15,7 @@ from ._risk import RiskLevel, threshold_risk
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from ..cfg_model import CFG
+    from ..analysis.cfg_model import CFG
 
 ControlNode = (
     ast.If

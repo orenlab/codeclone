@@ -18,13 +18,21 @@ from typing import Any, cast
 
 import pytest
 
-from codeclone import mcp_service as mcp_service_mod
-from codeclone._cli_config import ConfigValidationError
+import codeclone.surfaces.mcp._session_baseline as mcp_baseline_mod
+import codeclone.surfaces.mcp._session_finding_mixin as mcp_finding_mod
+import codeclone.surfaces.mcp._session_helpers as mcp_helpers_mod
+import codeclone.surfaces.mcp._session_runtime as mcp_runtime_mod
+import codeclone.surfaces.mcp._session_shared as mcp_shared_mod
+import codeclone.surfaces.mcp._session_state_mixin as mcp_state_mod
+import codeclone.surfaces.mcp.session as mcp_session_mod
 from codeclone.baseline import Baseline, current_python_tag
-from codeclone.cache import Cache
+from codeclone.baseline.metrics_baseline import MetricsBaseline
+from codeclone.cache.store import Cache
+from codeclone.config.pyproject_loader import ConfigValidationError
 from codeclone.contracts import REPORT_SCHEMA_VERSION
-from codeclone.mcp_service import (
-    CodeCloneMCPService,
+from codeclone.models import MetricsDiff
+from codeclone.surfaces.mcp.service import CodeCloneMCPService
+from codeclone.surfaces.mcp.session import (
     DetailLevel,
     MCPAnalysisRequest,
     MCPFindingNotFoundError,
@@ -35,7 +43,6 @@ from codeclone.mcp_service import (
     MCPServiceContractError,
     MCPServiceError,
 )
-from codeclone.models import MetricsDiff
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 
 
@@ -212,6 +219,141 @@ def _build_quality_service(root: Path) -> CodeCloneMCPService:
         )
     )
     return service
+
+
+def _assert_loaded_mcp_baseline_state(
+    *,
+    calls: dict[str, object],
+    expected_size_mb: int,
+    expected_payload: dict[str, object] | None,
+    state: mcp_baseline_mod.CloneBaselineState | mcp_baseline_mod.MetricsBaselineState,
+) -> None:
+    assert calls == {
+        "max_size_bytes": expected_size_mb * 1024 * 1024,
+        "preloaded_payload": expected_payload,
+        "python_tag": current_python_tag(),
+    }
+    assert state.loaded is True
+    assert state.trusted_for_diff is True
+    assert state.status.value == "ok"
+    assert state.warning_message is None
+
+
+def test_mcp_runtime_resolve_cache_path_prefers_explicit_path(tmp_path: Path) -> None:
+    args = SimpleNamespace(cache_path="~/codeclone-explicit-cache.json")
+
+    resolved = mcp_runtime_mod.resolve_cache_path(root_path=tmp_path, args=args)
+
+    assert resolved == Path("~/codeclone-explicit-cache.json").expanduser()
+
+
+def test_mcp_clone_baseline_state_loads_existing_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, object] = {}
+
+    def fake_load(
+        self: Baseline,
+        *,
+        max_size_bytes: int,
+        preloaded_payload: dict[str, object] | None = None,
+    ) -> None:
+        calls["max_size_bytes"] = max_size_bytes
+        calls["preloaded_payload"] = preloaded_payload
+
+    def fake_verify(self: Baseline, *, current_python_tag: str) -> None:
+        calls["python_tag"] = current_python_tag
+
+    monkeypatch.setattr(Baseline, "load", fake_load)
+    monkeypatch.setattr(Baseline, "verify_compatibility", fake_verify)
+
+    state = mcp_baseline_mod.resolve_clone_baseline_state(
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_exists=True,
+        max_baseline_size_mb=2,
+    )
+
+    _assert_loaded_mcp_baseline_state(
+        calls=calls,
+        expected_size_mb=2,
+        expected_payload=None,
+        state=state,
+    )
+
+
+def test_mcp_metrics_baseline_state_loads_existing_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, object] = {}
+
+    def fake_load(
+        self: MetricsBaseline,
+        *,
+        max_size_bytes: int,
+        preloaded_payload: dict[str, object] | None = None,
+    ) -> None:
+        calls["max_size_bytes"] = max_size_bytes
+        calls["preloaded_payload"] = preloaded_payload
+
+    def fake_verify(self: MetricsBaseline, *, runtime_python_tag: str) -> None:
+        calls["python_tag"] = runtime_python_tag
+
+    monkeypatch.setattr(MetricsBaseline, "load", fake_load)
+    monkeypatch.setattr(MetricsBaseline, "verify_compatibility", fake_verify)
+
+    state = mcp_baseline_mod.resolve_metrics_baseline_state(
+        metrics_baseline_path=tmp_path / "metrics-baseline.json",
+        metrics_baseline_exists=True,
+        max_baseline_size_mb=3,
+        skip_metrics=False,
+    )
+
+    _assert_loaded_mcp_baseline_state(
+        calls=calls,
+        expected_size_mb=3,
+        expected_payload=None,
+        state=state,
+    )
+
+
+def test_mcp_metrics_baseline_state_uses_shared_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, object] = {}
+    payload: dict[str, object] = {"metrics": {"summary": {"health": {"score": 100}}}}
+
+    def fake_load(
+        self: MetricsBaseline,
+        *,
+        max_size_bytes: int,
+        preloaded_payload: dict[str, object] | None = None,
+    ) -> None:
+        calls["max_size_bytes"] = max_size_bytes
+        calls["preloaded_payload"] = preloaded_payload
+
+    def fake_verify(self: MetricsBaseline, *, runtime_python_tag: str) -> None:
+        calls["python_tag"] = runtime_python_tag
+
+    monkeypatch.setattr(MetricsBaseline, "load", fake_load)
+    monkeypatch.setattr(MetricsBaseline, "verify_compatibility", fake_verify)
+
+    state = mcp_baseline_mod.resolve_metrics_baseline_state(
+        metrics_baseline_path=tmp_path / "metrics-baseline.json",
+        metrics_baseline_exists=True,
+        max_baseline_size_mb=1,
+        skip_metrics=False,
+        shared_baseline_payload=payload,
+    )
+
+    _assert_loaded_mcp_baseline_state(
+        calls=calls,
+        expected_size_mb=1,
+        expected_payload=payload,
+        state=state,
+    )
 
 
 def _analyze_quality_repository(
@@ -441,10 +583,10 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
     service = CodeCloneMCPService(history_limit=4)
 
     with pytest.raises(MCPServiceContractError, match="Invalid value for topic"):
-        service.get_help(topic="gates")  # type: ignore[arg-type]
+        service.get_help(topic="gates")
 
     with pytest.raises(MCPServiceContractError, match="Invalid value for detail"):
-        service.get_help(topic="baseline", detail="full")  # type: ignore[arg-type]
+        service.get_help(topic="baseline", detail="full")
 
 
 def test_mcp_service_summary_inventory_is_compact_and_report_inventory_stays_canonical(
@@ -683,6 +825,12 @@ def test_mcp_service_changed_runs_remediation_and_review_flow(tmp_path: Path) ->
 
     reviewed_items = service.list_reviewed_findings(run_id=str(after["run_id"]))
     assert reviewed_items["reviewed_count"] == 1
+    reviewed_entries = cast("list[dict[str, object]]", reviewed_items["items"])
+    reviewed_finding = cast("dict[str, object]", reviewed_entries[0]["finding"])
+    assert reviewed_finding["id"] == first_id
+    assert reviewed_finding["scope"] == clone_items[0]["scope"]
+    assert reviewed_finding["priority"] == clone_items[0]["priority"]
+    assert reviewed_finding["locations"] == clone_items[0]["locations"]
 
     unreviewed = service.list_findings(
         run_id=str(after["run_id"]),
@@ -958,10 +1106,8 @@ def test_mcp_service_summary_reuses_canonical_meta_for_cache_and_health(
 
 
 def test_mcp_service_effective_freshness_classifies_summary_cache_usage() -> None:
-    service = CodeCloneMCPService(history_limit=4)
-
     assert (
-        service._effective_freshness(
+        mcp_helpers_mod._effective_freshness(
             {
                 "cache": {"used": False},
                 "inventory": {"files": {"analyzed": 2, "cached": 0}},
@@ -970,7 +1116,7 @@ def test_mcp_service_effective_freshness_classifies_summary_cache_usage() -> Non
         == "fresh"
     )
     assert (
-        service._effective_freshness(
+        mcp_helpers_mod._effective_freshness(
             {
                 "cache": {"used": True},
                 "inventory": {"files": {"analyzed": 0, "cached": 2}},
@@ -979,7 +1125,7 @@ def test_mcp_service_effective_freshness_classifies_summary_cache_usage() -> Non
         == "reused"
     )
     assert (
-        service._effective_freshness(
+        mcp_helpers_mod._effective_freshness(
             {
                 "cache": {"used": True},
                 "inventory": {"files": {"analyzed": 1, "cached": 2}},
@@ -1014,6 +1160,7 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
         "dependencies",
         "dead_code",
         "overloaded_modules",
+        "security_surfaces",
         "health",
     }
     assert "families" not in metrics_summary
@@ -1043,6 +1190,13 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
         cast("list[dict[str, object]]", overloaded_modules_alias_page["items"])
         == overloaded_modules_items
     )
+    security_surfaces_page = service.get_report_section(
+        run_id=run_id,
+        section="metrics_detail",
+        family="security_surfaces",
+        limit=5,
+    )
+    assert security_surfaces_page["family"] == "security_surfaces"
     report_record = service._runs.get(run_id)
     assert report_record is not None
     report_document = report_record.report_document
@@ -1242,7 +1396,7 @@ def test_mcp_service_reports_contract_errors_for_resources_and_findings(
     assert overview["run_id"] == run_id
 
     with pytest.raises(MCPServiceContractError):
-        service.get_report_section(section=cast("object", "unknown"))  # type: ignore[arg-type]
+        service.get_report_section(section=cast("object", "unknown"))
     with pytest.raises(MCPFindingNotFoundError):
         service.get_finding(run_id=run_id, finding_id="missing")
     with pytest.raises(MCPServiceContractError):
@@ -1260,7 +1414,7 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
     service = CodeCloneMCPService(history_limit=4)
 
     monkeypatch.setattr(
-        mcp_service_mod,
+        mcp_state_mod,
         "load_pyproject_config",
         lambda _root: {
             "min_loc": 12,
@@ -1286,7 +1440,7 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
     assert str(args.metrics_baseline).endswith("metrics.json")
 
     monkeypatch.setattr(
-        mcp_service_mod,
+        mcp_state_mod,
         "load_pyproject_config",
         lambda _root: (_ for _ in ()).throw(ConfigValidationError("bad config")),
     )
@@ -1345,17 +1499,17 @@ def test_mcp_service_root_and_helper_contract_errors(
         )
 
     with pytest.raises(MCPServiceError):
-        service._load_report_document("{")
+        mcp_helpers_mod._load_report_document("{")
     with pytest.raises(MCPServiceError):
-        service._load_report_document("[]")
+        mcp_helpers_mod._load_report_document("[]")
     with pytest.raises(MCPServiceError):
-        service._report_digest({})
+        mcp_helpers_mod._report_digest({})
 
 
 def test_mcp_service_helper_filters_and_metrics_payload() -> None:
     service = CodeCloneMCPService(history_limit=4)
 
-    payload = service._metrics_diff_payload(
+    payload = mcp_helpers_mod._metrics_diff_payload(
         MetricsDiff(
             new_high_risk_functions=("pkg.a:f",),
             new_high_coupling_classes=("pkg.a:C",),
@@ -1376,7 +1530,7 @@ def test_mcp_service_helper_filters_and_metrics_payload() -> None:
         "new_api_symbols": 0,
         "api_breaking_changes": 0,
     }
-    assert service._metrics_diff_payload(None) is None
+    assert mcp_helpers_mod._metrics_diff_payload(None) is None
 
     finding = {
         "family": "clone",
@@ -1414,7 +1568,7 @@ def test_mcp_service_helper_filters_and_metrics_payload() -> None:
         )
         is False
     )
-    assert service._as_sequence("not-a-sequence") == ()
+    assert mcp_helpers_mod._as_sequence("not-a-sequence") == ()
 
 
 def test_mcp_service_git_diff_and_helper_branch_edges(
@@ -1423,22 +1577,22 @@ def test_mcp_service_git_diff_and_helper_branch_edges(
     service = CodeCloneMCPService(history_limit=4)
 
     with pytest.raises(MCPGitDiffError, match="Invalid git diff ref"):
-        mcp_service_mod._git_diff_lines_payload(
+        mcp_shared_mod._git_diff_lines_payload(
             root_path=tmp_path,
             git_diff_ref="--cached",
         )
 
     with pytest.raises(MCPGitDiffError, match="safe revision expression"):
-        mcp_service_mod._git_diff_lines_payload(
+        mcp_shared_mod._git_diff_lines_payload(
             root_path=tmp_path,
             git_diff_ref="HEAD:path",
         )
 
-    assert service._normalize_relative_path("./.github/workflows/docs.yml") == (
+    assert mcp_helpers_mod._normalize_relative_path("./.github/workflows/docs.yml") == (
         ".github/workflows/docs.yml"
     )
     with pytest.raises(MCPServiceContractError, match="path traversal not allowed"):
-        service._normalize_relative_path("../outside.py")
+        mcp_helpers_mod._normalize_relative_path("../outside.py")
 
     full_record = _dummy_run_record(tmp_path, "full")
     object.__setattr__(
@@ -1586,7 +1740,7 @@ def test_mcp_service_root_cache_and_projection_helpers(
         load_calls.append("loaded")
 
     monkeypatch.setattr(Cache, "load", _fake_load)
-    service._build_cache(
+    mcp_helpers_mod._build_cache(
         root_path=tmp_path,
         args=args,
         cache_path=tmp_path / "cache.json",
@@ -1602,7 +1756,7 @@ def test_mcp_service_build_args_defers_process_count_to_runtime(
     service = CodeCloneMCPService(history_limit=4)
 
     monkeypatch.setattr(
-        mcp_service_mod,
+        mcp_state_mod,
         "load_pyproject_config",
         lambda _root: {"processes": 3},
     )
@@ -1629,19 +1783,17 @@ def test_mcp_service_invalid_path_resolution_contract_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service = CodeCloneMCPService(history_limit=4)
-
     def _boom(self: Path, *args: object, **kwargs: object) -> Path:
         raise OSError("bad path")
 
     monkeypatch.setattr(Path, "resolve", _boom)
 
     with pytest.raises(MCPServiceContractError):
-        service._resolve_root(str(tmp_path))
+        mcp_helpers_mod._resolve_root(str(tmp_path))
     with pytest.raises(MCPServiceContractError, match="absolute repository root"):
-        service._resolve_root(".")
+        mcp_helpers_mod._resolve_root(".")
     with pytest.raises(MCPServiceContractError):
-        service._resolve_optional_path("cache.json", tmp_path)
+        mcp_helpers_mod._resolve_optional_path("cache.json", tmp_path)
 
 
 def test_mcp_service_granular_checks_reject_relative_root_and_allow_omission(
@@ -1699,7 +1851,10 @@ def test_mcp_service_short_finding_ids_remain_unique_for_overlapping_clones(
 def test_mcp_service_reports_missing_json_artifact(tmp_path: Path) -> None:
     _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
-    service_module = cast(Any, importlib.import_module("codeclone.mcp_service"))
+    service_module = cast(
+        Any,
+        importlib.import_module("codeclone.surfaces.mcp.session"),
+    )
     original_report = service_module.report
 
     def _fake_report(**kwargs: Any) -> object:
@@ -1713,7 +1868,7 @@ def test_mcp_service_reports_missing_json_artifact(tmp_path: Path) -> None:
         )
 
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr("codeclone.mcp_service.report", _fake_report)
+    monkeypatch.setattr(mcp_session_mod, "report", _fake_report)
     try:
         with pytest.raises(MCPServiceError):
             service.analyze_repository(
@@ -1731,19 +1886,19 @@ def test_mcp_service_low_level_runtime_helpers_and_run_store(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    console = mcp_service_mod._BufferConsole()
+    console = mcp_shared_mod._BufferConsole()
     console.print("alpha", 2)
     console.print("   ")
     assert console.messages == ["alpha 2"]
 
     monkeypatch.setattr(
-        cast(Any, mcp_service_mod).subprocess,
+        cast(Any, mcp_shared_mod).subprocess,
         "run",
         lambda *args, **kwargs: SimpleNamespace(
             stdout="pkg/a.py\npkg/b.py\npkg/a.py\n"
         ),
     )
-    assert mcp_service_mod._git_diff_lines_payload(
+    assert mcp_shared_mod._git_diff_lines_payload(
         root_path=tmp_path,
         git_diff_ref="HEAD",
     ) == ("pkg/a.py", "pkg/b.py")
@@ -1751,17 +1906,17 @@ def test_mcp_service_low_level_runtime_helpers_and_run_store(
     def _raise_subprocess(*args: object, **kwargs: object) -> object:
         raise subprocess.CalledProcessError(1, ["git", "diff"])
 
-    monkeypatch.setattr(cast(Any, mcp_service_mod).subprocess, "run", _raise_subprocess)
+    monkeypatch.setattr(cast(Any, mcp_shared_mod).subprocess, "run", _raise_subprocess)
     with pytest.raises(MCPGitDiffError):
-        mcp_service_mod._git_diff_lines_payload(root_path=tmp_path, git_diff_ref="HEAD")
+        mcp_shared_mod._git_diff_lines_payload(root_path=tmp_path, git_diff_ref="HEAD")
 
-    assert mcp_service_mod._load_report_document_payload('{"ok": true}') == {"ok": True}
+    assert mcp_shared_mod._load_report_document_payload('{"ok": true}') == {"ok": True}
     with pytest.raises(MCPServiceError):
-        mcp_service_mod._load_report_document_payload("{")
+        mcp_shared_mod._load_report_document_payload("{")
     with pytest.raises(MCPServiceError):
-        mcp_service_mod._load_report_document_payload("[]")
+        mcp_shared_mod._load_report_document_payload("[]")
 
-    store = mcp_service_mod.CodeCloneMCPRunStore(history_limit=1)
+    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=1)
     first = _dummy_run_record(tmp_path, "first")
     second = _dummy_run_record(tmp_path, "second")
     assert store.register(first) is first
@@ -1771,7 +1926,7 @@ def test_mcp_service_low_level_runtime_helpers_and_run_store(
     with pytest.raises(MCPRunNotFoundError):
         store.get("first")
     with pytest.raises(ValueError):
-        mcp_service_mod.CodeCloneMCPRunStore(history_limit=11)
+        mcp_shared_mod.CodeCloneMCPRunStore(history_limit=11)
 
 
 def test_mcp_service_branch_helpers_on_real_runs(
@@ -1900,7 +2055,7 @@ def test_mcp_service_branch_helpers_on_real_runs(
         )
 
     monkeypatch.setattr(
-        mcp_service_mod,
+        mcp_finding_mod,
         "_git_diff_lines_payload",
         lambda **kwargs: ("pkg/dup.py", "pkg/dup.py"),
     )
@@ -1944,7 +2099,7 @@ def test_mcp_service_branch_helpers_on_real_runs(
         },
     )
     assert len(duplicate_locations) == 1
-    assert service._path_matches("pkg/dup.py", ("pkg",))
+    assert mcp_helpers_mod._path_matches("pkg/dup.py", ("pkg",))
     assert service._finding_touches_paths(
         finding={"items": [{"relative_path": "pkg/dup.py"}]},
         changed_paths=("pkg",),
@@ -1978,7 +2133,7 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
     )
     _assert_comparable_comparison(comparison, verdict="improved")
     assert (
-        service._comparison_verdict(
+        mcp_helpers_mod._comparison_verdict(
             regressions=1,
             improvements=0,
             health_delta=0,
@@ -1986,7 +2141,7 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
         == "regressed"
     )
     assert (
-        service._comparison_verdict(
+        mcp_helpers_mod._comparison_verdict(
             regressions=0,
             improvements=1,
             health_delta=0,
@@ -1994,7 +2149,7 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
         == "improved"
     )
     assert (
-        service._comparison_verdict(
+        mcp_helpers_mod._comparison_verdict(
             regressions=1,
             improvements=0,
             health_delta=1,
@@ -2002,7 +2157,7 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
         == "mixed"
     )
     assert (
-        service._comparison_verdict(
+        mcp_helpers_mod._comparison_verdict(
             regressions=0,
             improvements=1,
             health_delta=-1,
@@ -2010,7 +2165,7 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
         == "mixed"
     )
     assert (
-        service._comparison_verdict(
+        mcp_helpers_mod._comparison_verdict(
             regressions=1,
             improvements=1,
             health_delta=0,
@@ -2018,7 +2173,7 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
         == "mixed"
     )
     assert (
-        service._comparison_verdict(
+        mcp_helpers_mod._comparison_verdict(
             regressions=0,
             improvements=0,
             health_delta=0,
@@ -2026,7 +2181,7 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
         == "stable"
     )
     assert (
-        service._comparison_verdict(
+        mcp_helpers_mod._comparison_verdict(
             regressions=0,
             improvements=1,
             health_delta=None,
@@ -2034,21 +2189,21 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
         == "improved"
     )
     assert (
-        service._changed_verdict(
+        mcp_helpers_mod._changed_verdict(
             changed_projection={"new": 1, "total": 1},
             health_delta=0,
         )
         == "regressed"
     )
     assert (
-        service._changed_verdict(
+        mcp_helpers_mod._changed_verdict(
             changed_projection={"new": 0, "total": 0},
             health_delta=1,
         )
         == "improved"
     )
     assert (
-        service._changed_verdict(
+        mcp_helpers_mod._changed_verdict(
             changed_projection={"new": 0, "total": 1},
             health_delta=0,
         )
@@ -2073,22 +2228,25 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
         "blast_radius": {"files": 1},
         "steps": ["one", "two"],
     }
-    assert service._project_remediation(remediation, detail_level="full") == remediation
-    summary_remediation = service._project_remediation(
+    assert (
+        mcp_helpers_mod._project_remediation(remediation, detail_level="full")
+        == remediation
+    )
+    summary_remediation = mcp_helpers_mod._project_remediation(
         remediation,
         detail_level="summary",
     )
     assert "steps" not in summary_remediation
     assert summary_remediation["shape"] == "Extract helper"
     assert summary_remediation["risk"] == "medium"
-    normal_remediation = service._project_remediation(
+    normal_remediation = mcp_helpers_mod._project_remediation(
         remediation,
         detail_level="normal",
     )
     assert normal_remediation["steps"] == ["one", "two"]
-    assert service._risk_level_for_effort("easy") == "low"
-    assert service._risk_level_for_effort("hard") == "high"
-    assert "new regression" in service._why_now_text(
+    assert mcp_helpers_mod._risk_level_for_effort("easy") == "low"
+    assert mcp_helpers_mod._risk_level_for_effort("hard") == "high"
+    assert "new regression" in mcp_helpers_mod._why_now_text(
         title="Clone group",
         severity="warning",
         novelty="new",
@@ -2137,7 +2295,7 @@ def test_mcp_service_compare_runs_marks_different_roots_incomparable(
     assert len(str(after_payload["run_id"])) == 8
     _assert_incomparable_comparison(comparison, reason="different_root")
     assert "Finding and run health deltas omitted" in str(comparison["summary"])
-    assert "known debt" in service._why_now_text(
+    assert "known debt" in mcp_helpers_mod._why_now_text(
         title="Clone group",
         severity="warning",
         novelty="known",
@@ -2148,38 +2306,38 @@ def test_mcp_service_compare_runs_marks_different_roots_incomparable(
         effort="easy",
     )
 
-    assert service._safe_refactor_shape(
+    assert mcp_helpers_mod._safe_refactor_shape(
         SimpleNamespace(category="clone", clone_type="Type-1", title="Function clone"),
     ).startswith("Keep one canonical")
-    assert service._safe_refactor_shape(
+    assert mcp_helpers_mod._safe_refactor_shape(
         SimpleNamespace(category="clone", clone_type="Type-2", title="Function clone"),
     ).startswith("Extract shared")
-    assert service._safe_refactor_shape(
+    assert mcp_helpers_mod._safe_refactor_shape(
         SimpleNamespace(category="clone", clone_type="Type-4", title="Block clone"),
     ).startswith("Extract the repeated statement")
-    assert service._safe_refactor_shape(
+    assert mcp_helpers_mod._safe_refactor_shape(
         SimpleNamespace(category="structural", clone_type="", title="Branches"),
     ).startswith("Extract the repeated branch")
-    assert service._safe_refactor_shape(
+    assert mcp_helpers_mod._safe_refactor_shape(
         SimpleNamespace(category="complexity", clone_type="", title="Complex"),
     ).startswith("Split the function")
-    assert service._safe_refactor_shape(
+    assert mcp_helpers_mod._safe_refactor_shape(
         SimpleNamespace(category="coupling", clone_type="", title="Coupling"),
     ).startswith("Isolate responsibilities")
-    assert service._safe_refactor_shape(
+    assert mcp_helpers_mod._safe_refactor_shape(
         SimpleNamespace(category="cohesion", clone_type="", title="Cohesion"),
     ).startswith("Split the class")
-    assert service._safe_refactor_shape(
+    assert mcp_helpers_mod._safe_refactor_shape(
         SimpleNamespace(category="dead_code", clone_type="", title="Dead code"),
     ).startswith("Delete the unused symbol")
-    assert service._safe_refactor_shape(
+    assert mcp_helpers_mod._safe_refactor_shape(
         SimpleNamespace(category="dependency", clone_type="", title="Cycle"),
     ).startswith("Break the cycle")
-    assert service._safe_refactor_shape(
+    assert mcp_helpers_mod._safe_refactor_shape(
         SimpleNamespace(category="other", clone_type="", title="Other"),
     ).startswith("Extract the repeated logic")
 
-    empty_markdown = service._render_pr_summary_markdown(
+    empty_markdown = mcp_helpers_mod._render_pr_summary_markdown(
         {
             "health": {"score": 81, "grade": "B"},
             "health_delta": 0,
@@ -2272,8 +2430,8 @@ def test_mcp_service_additional_projection_and_error_branches(
     run_id = str(summary["run_id"])
     record = service._runs.get(run_id)
 
-    assert mcp_service_mod._suggestion_finding_id_payload(object()) == ""
-    assert mcp_service_mod._suggestion_finding_id_payload(
+    assert mcp_shared_mod._suggestion_finding_id_payload(object()) == ""
+    assert mcp_shared_mod._suggestion_finding_id_payload(
         SimpleNamespace(
             finding_family="structural",
             finding_kind="duplicated_branches",
@@ -2282,7 +2440,7 @@ def test_mcp_service_additional_projection_and_error_branches(
             title="Structural",
         )
     ).startswith("structural:")
-    assert mcp_service_mod._suggestion_finding_id_payload(
+    assert mcp_shared_mod._suggestion_finding_id_payload(
         SimpleNamespace(
             finding_family="design",
             finding_kind="",
@@ -2291,7 +2449,7 @@ def test_mcp_service_additional_projection_and_error_branches(
             title="Dead code",
         )
     ).startswith("dead_code:")
-    assert mcp_service_mod._suggestion_finding_id_payload(
+    assert mcp_shared_mod._suggestion_finding_id_payload(
         SimpleNamespace(
             finding_family="design",
             finding_kind="",
@@ -2301,20 +2459,20 @@ def test_mcp_service_additional_projection_and_error_branches(
         )
     ).startswith("design:coupling:")
 
-    original_service_get = service.get_finding
+    original_session_get = service.session.get_finding
     original_runs_get = service._runs.get
     monkeypatch.setattr(
-        service,
+        service.session,
         "get_finding",
         lambda **kwargs: {"id": "no-remediation"},
     )
     monkeypatch.setattr(service._runs, "get", lambda run_id=None: record)
     with pytest.raises(MCPFindingNotFoundError):
         service.get_remediation(finding_id="no-remediation", run_id=run_id)
-    monkeypatch.setattr(service, "get_finding", original_service_get)
+    monkeypatch.setattr(service.session, "get_finding", original_session_get)
     monkeypatch.setattr(service._runs, "get", original_runs_get)
 
-    original_get_finding = service.get_finding
+    original_get_finding = service.session.get_finding
 
     def _patched_get_finding(
         *,
@@ -2330,7 +2488,7 @@ def test_mcp_service_additional_projection_and_error_branches(
             detail_level=detail_level,
         )
 
-    monkeypatch.setattr(service, "get_finding", _patched_get_finding)
+    monkeypatch.setattr(service.session, "get_finding", _patched_get_finding)
     service._review_state[record.run_id] = OrderedDict([("missing", None)])
     reviewed_items = service.list_reviewed_findings(run_id=run_id)
     assert reviewed_items["reviewed_count"] == 0
@@ -2645,10 +2803,13 @@ def test_mcp_service_additional_projection_and_error_branches(
         "measured_units": 1,
     }
     assert (
-        service._highest_below_threshold(values=(9,), operator=">", threshold=5) is None
+        mcp_helpers_mod._highest_below_threshold(values=(9,), operator=">", threshold=5)
+        is None
     )
     assert (
-        service._highest_below_threshold(values=(1, 2), operator="!=", threshold=5)
+        mcp_helpers_mod._highest_below_threshold(
+            values=(1, 2), operator="!=", threshold=5
+        )
         is None
     )
     detail_payload = service._project_finding_detail(
@@ -2769,7 +2930,7 @@ def test_mcp_service_additional_projection_and_error_branches(
     )
     metrics_focus = service._comparison_index(record, focus="metrics")
     assert isinstance(metrics_focus, dict)
-    resolved_markdown = service._render_pr_summary_markdown(
+    resolved_markdown = mcp_helpers_mod._render_pr_summary_markdown(
         {
             "health": {"score": 81, "grade": "B"},
             "health_delta": 1,
@@ -2843,7 +3004,7 @@ def test_mcp_service_metrics_diff_warning_and_projection_branches(
         ),
     )
     monkeypatch.setattr(
-        mcp_service_mod,
+        mcp_session_mod,
         "resolve_metrics_baseline_state",
         lambda **kwargs: SimpleNamespace(
             baseline=fake_metrics_baseline,
@@ -2859,7 +3020,11 @@ def test_mcp_service_metrics_diff_warning_and_projection_branches(
         max_size_bytes=1024 * 1024,
     )
     cache_with_warning.load_warning = "cache warning"
-    monkeypatch.setattr(service, "_build_cache", lambda **kwargs: cache_with_warning)
+    monkeypatch.setattr(
+        mcp_helpers_mod,
+        "_build_cache",
+        lambda **kwargs: cache_with_warning,
+    )
 
     summary = service.analyze_repository(
         MCPAnalysisRequest(
@@ -3165,49 +3330,119 @@ def test_mcp_service_summary_and_gate_contract_for_coverage_join(
         )
 
 
+def test_mcp_service_summary_payload_includes_security_surfaces(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    request = MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False)
+    record = MCPRunRecord(
+        run_id="security",
+        root=tmp_path,
+        request=request,
+        comparison_settings=(),
+        report_document={
+            "metrics": {
+                "families": {
+                    "security_surfaces": {
+                        "summary": {
+                            "items": 5,
+                            "category_count": 3,
+                            "production": 4,
+                            "tests": 1,
+                            "report_only": True,
+                        },
+                        "items": [],
+                    }
+                }
+            }
+        },
+        summary={
+            "run_id": "security",
+            "health": {"score": 80, "grade": "B"},
+            "inventory": {},
+            "baseline": {},
+            "metrics_baseline": {},
+            "cache": {},
+            "findings_summary": {},
+            "baseline_diff": {},
+            "metrics_diff": {},
+            "warnings": [],
+            "failures": [],
+        },
+        changed_paths=(),
+        changed_projection=None,
+        warnings=(),
+        failures=(),
+        func_clones_count=0,
+        block_clones_count=0,
+        project_metrics=None,
+        coverage_join=None,
+        suggestions=(),
+        new_func=frozenset(),
+        new_block=frozenset(),
+        metrics_diff=None,
+    )
+    payload = service._summary_payload(record.summary, record=record)
+    assert cast(dict[str, object], payload["security_surfaces"]) == {
+        "items": 5,
+        "categories": 3,
+        "production": 4,
+        "tests": 1,
+        "report_only": True,
+    }
+    empty_report_record = replace(
+        record,
+        report_document={"metrics": {"families": {}}},
+    )
+    assert "security_surfaces" not in service._summary_payload(
+        empty_report_record.summary,
+        record=empty_report_record,
+    )
+
+
 def test_mcp_service_short_id_and_comparison_helper_branches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = CodeCloneMCPService(history_limit=4)
 
-    entry = mcp_service_mod._CloneShortIdEntry(
+    entry = mcp_shared_mod._CloneShortIdEntry(
         canonical_id="clone:block:abcdefghij|rest",
         alias="blk",
         token="abcdefghijrest",
         suffix="|x2",
     )
     assert entry.render(0) == "blk:abcdefghijrest|x2"
-    assert mcp_service_mod._partitioned_short_id("design", "cohesion") == (
+    assert mcp_shared_mod._partitioned_short_id("design", "cohesion") == (
         "design:cohesion"
     )
 
-    function_entry = mcp_service_mod._clone_short_id_entry_payload(
+    function_entry = mcp_shared_mod._clone_short_id_entry_payload(
         "clone:function:abcdef123456|bucket2"
     )
     assert function_entry.alias == "fn"
     assert function_entry.token == "abcdef123456"
     assert function_entry.suffix == "|bucket2"
-    plain_function_entry = mcp_service_mod._clone_short_id_entry_payload(
+    plain_function_entry = mcp_shared_mod._clone_short_id_entry_payload(
         "clone:function:abcdef123456"
     )
     assert plain_function_entry.alias == "fn"
     assert plain_function_entry.suffix == ""
 
-    fallback_entry = mcp_service_mod._clone_short_id_entry_payload("clone:weird:opaque")
+    fallback_entry = mcp_shared_mod._clone_short_id_entry_payload("clone:weird:opaque")
     assert fallback_entry.alias == "clone"
     assert len(fallback_entry.token) == 64  # sha256 hex digest
     assert fallback_entry.suffix == "|x1"
 
     canonical_one = "clone:block:abcdefghzz|rest"
     canonical_two = "clone:block:abcdefghyy|rest"
-    clone_short_ids = mcp_service_mod._disambiguated_clone_short_ids_payload(
+    clone_short_ids = mcp_shared_mod._disambiguated_clone_short_ids_payload(
         [canonical_one, canonical_two]
     )
     assert len(set(clone_short_ids.values())) == 2
     assert all(value.startswith("blk:") for value in clone_short_ids.values())
     assert all("|x2" in value for value in clone_short_ids.values())
-    single_result = mcp_service_mod._disambiguated_clone_short_ids_payload(
+    single_result = mcp_shared_mod._disambiguated_clone_short_ids_payload(
         ["clone:block:ab"]
     )
     assert "clone:block:ab" in single_result
@@ -3254,87 +3489,99 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
     assert len(set(canonical_to_short.values())) == 2
     assert set(short_to_canonical) == set(canonical_to_short.values())
     assert (
-        service._disambiguated_short_finding_ids([canonical_one, canonical_two])
+        mcp_helpers_mod._disambiguated_short_finding_ids([canonical_one, canonical_two])
         == clone_short_ids
     )
 
-    assert service._base_short_finding_id(canonical_one) == "blk:a1c488|x2"
+    assert mcp_helpers_mod._base_short_finding_id(canonical_one) == "blk:a1c488|x2"
     assert (
-        mcp_service_mod._base_short_finding_id_payload("clone:function:abcdef123456")
+        mcp_shared_mod._base_short_finding_id_payload("clone:function:abcdef123456")
         == "fn:abcdef"
     )
-    assert service._base_short_finding_id("clone:function:abcdef123456") == "fn:abcdef"
     assert (
-        service._base_short_finding_id("structural:duplicated_branches:abcdef123456")
+        mcp_helpers_mod._base_short_finding_id("clone:function:abcdef123456")
+        == "fn:abcdef"
+    )
+    assert (
+        mcp_helpers_mod._base_short_finding_id(
+            "structural:duplicated_branches:abcdef123456"
+        )
         == "struct:duplicated_branches:abcdef"
     )
     assert (
-        mcp_service_mod._base_short_finding_id_payload(
+        mcp_shared_mod._base_short_finding_id_payload(
             "design:cohesion:pkg.mod:Runner.run"
         )
         == "design:cohesion:run"
     )
-    assert service._base_short_finding_id("custom:finding") == "custom:finding"
+    assert mcp_helpers_mod._base_short_finding_id("custom:finding") == "custom:finding"
     assert (
-        service._disambiguated_short_finding_id("clone:function:abcdef123456")
+        mcp_helpers_mod._disambiguated_short_finding_id("clone:function:abcdef123456")
         == "fn:abcdef123456"
     )
     assert (
-        service._disambiguated_short_finding_id("clone:function:abcdef123456|bucket2")
+        mcp_helpers_mod._disambiguated_short_finding_id(
+            "clone:function:abcdef123456|bucket2"
+        )
         == "fn:abcdef123456|bucket2"
     )
     assert (
-        service._disambiguated_short_finding_id("clone:block:abcdef123456|rest")
+        mcp_helpers_mod._disambiguated_short_finding_id("clone:block:abcdef123456|rest")
         == "blk:e38144d04782fe95c05f0588c53ea7d553f0efdc555788f629e73be6501597d1|x2"
     )
     assert (
-        service._disambiguated_short_finding_id("structural:dup:abc:def")
+        mcp_helpers_mod._disambiguated_short_finding_id("structural:dup:abc:def")
         == "struct:dup:abc:def"
     )
     assert (
-        service._disambiguated_short_finding_id("dead_code:pkg.mod:Runner.run")
+        mcp_helpers_mod._disambiguated_short_finding_id("dead_code:pkg.mod:Runner.run")
         == "dead:pkg.mod:Runner.run"
     )
-    assert service._disambiguated_short_finding_id("custom:finding") == "custom:finding"
     assert (
-        service._disambiguated_short_finding_id("design:cohesion:pkg.mod:Runner")
+        mcp_helpers_mod._disambiguated_short_finding_id("custom:finding")
+        == "custom:finding"
+    )
+    assert (
+        mcp_helpers_mod._disambiguated_short_finding_id(
+            "design:cohesion:pkg.mod:Runner"
+        )
         == "design:cohesion:pkg.mod:Runner"
     )
     assert (
-        mcp_service_mod._disambiguated_short_finding_id_payload(
+        mcp_shared_mod._disambiguated_short_finding_id_payload(
             "dead_code:pkg.mod:Runner.run"
         )
         == "dead:pkg.mod:Runner.run"
     )
-    mixed_short_ids = service._disambiguated_short_finding_ids(
+    mixed_short_ids = mcp_helpers_mod._disambiguated_short_finding_ids(
         [canonical_one, "design:cohesion:pkg.mod:Runner"]
     )
     assert mixed_short_ids[canonical_one].startswith("blk:")
     assert mixed_short_ids["design:cohesion:pkg.mod:Runner"] == (
         "design:cohesion:pkg.mod:Runner"
     )
-    assert service._leaf_symbol_name("") == ""
-    assert service._leaf_symbol_name("pkg.mod:Runner.run") == "run"
-    assert service._leaf_symbol_name("pkg.mod") == "mod"
-    assert mcp_service_mod._leaf_symbol_name_payload("pkg.mod:Runner.run") == "run"
-    assert json.loads(mcp_service_mod._json_text_payload({"b": 1, "a": 2})) == {
+    assert mcp_helpers_mod._leaf_symbol_name("") == ""
+    assert mcp_helpers_mod._leaf_symbol_name("pkg.mod:Runner.run") == "run"
+    assert mcp_helpers_mod._leaf_symbol_name("pkg.mod") == "mod"
+    assert mcp_shared_mod._leaf_symbol_name_payload("pkg.mod:Runner.run") == "run"
+    assert json.loads(mcp_shared_mod._json_text_payload({"b": 1, "a": 2})) == {
         "a": 2,
         "b": 1,
     }
 
     collision_service = CodeCloneMCPService(history_limit=4)
     monkeypatch.setattr(
-        collision_service,
+        collision_service.session,
         "_base_findings",
         lambda _record: [{"id": "clone:block:one"}, {"id": "clone:block:two"}],
     )
     monkeypatch.setattr(
-        collision_service,
+        mcp_helpers_mod,
         "_base_short_finding_id",
         lambda _cid: "blk:dup|x1",
     )
     monkeypatch.setattr(
-        collision_service,
+        mcp_helpers_mod,
         "_disambiguated_short_finding_ids",
         lambda _ids: {
             "clone:block:one": "blk:resolved1|x1",
@@ -3377,7 +3624,7 @@ def test_mcp_service_short_id_and_comparison_helper_branches(
         new_block=frozenset(),
         metrics_diff=None,
     )
-    scope = service._comparison_scope(before=same_root, after=different_scope)
+    scope = mcp_helpers_mod._comparison_scope(before=same_root, after=different_scope)
     assert scope["comparable"] is False
     assert scope["reason"] == "different_root_and_analysis_settings"
 
@@ -3386,13 +3633,13 @@ def test_mcp_service_clone_short_id_helper_iteration_and_fallback_branches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     iterative_entries = {
-        "clone:block:one": mcp_service_mod._CloneShortIdEntry(
+        "clone:block:one": mcp_shared_mod._CloneShortIdEntry(
             canonical_id="clone:block:one",
             alias="blk",
             token="abcdefghij",
             suffix="|x1",
         ),
-        "clone:block:two": mcp_service_mod._CloneShortIdEntry(
+        "clone:block:two": mcp_shared_mod._CloneShortIdEntry(
             canonical_id="clone:block:two",
             alias="blk",
             token="abcdefghkl",
@@ -3400,11 +3647,11 @@ def test_mcp_service_clone_short_id_helper_iteration_and_fallback_branches(
         ),
     }
     monkeypatch.setattr(
-        mcp_service_mod,
+        mcp_shared_mod,
         "_clone_short_id_entry_payload",
         lambda canonical_id: iterative_entries[canonical_id],
     )
-    assert mcp_service_mod._disambiguated_clone_short_ids_payload(
+    assert mcp_shared_mod._disambiguated_clone_short_ids_payload(
         ["clone:block:one", "clone:block:two"]
     ) == {
         "clone:block:one": "blk:abcdefghij|x1",
@@ -3412,13 +3659,13 @@ def test_mcp_service_clone_short_id_helper_iteration_and_fallback_branches(
     }
 
     fallback_entries = {
-        "clone:block:one": mcp_service_mod._CloneShortIdEntry(
+        "clone:block:one": mcp_shared_mod._CloneShortIdEntry(
             canonical_id="clone:block:one",
             alias="blk",
             token="abcdefghij",
             suffix="|x1",
         ),
-        "clone:block:two": mcp_service_mod._CloneShortIdEntry(
+        "clone:block:two": mcp_shared_mod._CloneShortIdEntry(
             canonical_id="clone:block:two",
             alias="blk",
             token="abcdefghij",
@@ -3426,11 +3673,11 @@ def test_mcp_service_clone_short_id_helper_iteration_and_fallback_branches(
         ),
     }
     monkeypatch.setattr(
-        mcp_service_mod,
+        mcp_shared_mod,
         "_clone_short_id_entry_payload",
         lambda canonical_id: fallback_entries[canonical_id],
     )
-    assert mcp_service_mod._disambiguated_clone_short_ids_payload(
+    assert mcp_shared_mod._disambiguated_clone_short_ids_payload(
         ["clone:block:one", "clone:block:two"]
     ) == {
         "clone:block:one": "blk:abcdefghij|x1",
@@ -3454,12 +3701,12 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
     missing_record = _dummy_run_record(tmp_path, "missing-finding")
     service._runs.register(missing_record)
     monkeypatch.setattr(
-        service,
+        service.session,
         "_resolve_canonical_finding_id",
         lambda _record, _finding_id: "design:cohesion:pkg.mod:Runner",
     )
     monkeypatch.setattr(
-        service,
+        service.session,
         "_base_findings",
         lambda _record: [{"id": "design:cohesion:pkg.mod:Other"}],
     )
@@ -3469,7 +3716,7 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         )
 
     monkeypatch.setattr(
-        service,
+        service.session,
         "get_finding",
         lambda **_kwargs: {"id": "design:cohesion:pkg.mod:Runner"},
     )
@@ -3480,10 +3727,10 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         )
 
     with pytest.raises(MCPServiceContractError, match="absolute repository root"):
-        service._resolve_root(None)
+        mcp_helpers_mod._resolve_root(None)
 
-    assert service._normal_location_payload({"file": "", "line": 4}) == {}
-    assert service._normal_location_payload(
+    assert mcp_helpers_mod._normal_location_payload({"file": "", "line": 4}) == {}
+    assert mcp_helpers_mod._normal_location_payload(
         {"file": "pkg/mod.py", "line": 4, "end_line": 9, "symbol": "pkg.mod:Runner.run"}
     ) == {
         "path": "pkg/mod.py",
@@ -3491,22 +3738,24 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         "end_line": 9,
         "symbol": "run",
     }
-    assert service._normal_location_payload(
+    assert mcp_helpers_mod._normal_location_payload(
         {"file": "pkg/mod.py", "line": 0, "symbol": ""}
     ) == {"path": "pkg/mod.py", "line": 0, "end_line": 0}
-    assert service._finding_display_location({"locations": []}) == "(unknown)"
+    assert mcp_helpers_mod._finding_display_location({"locations": []}) == "(unknown)"
     assert (
-        service._finding_display_location({"locations": [{"file": "", "line": 3}]})
+        mcp_helpers_mod._finding_display_location(
+            {"locations": [{"file": "", "line": 3}]}
+        )
         == "(unknown)"
     )
     assert (
-        service._finding_display_location(
+        mcp_helpers_mod._finding_display_location(
             {"locations": [{"file": "pkg/mod.py", "line": 0}]}
         )
         == "pkg/mod.py"
     )
 
-    assert service._comparison_summary_text(
+    assert mcp_helpers_mod._comparison_summary_text(
         comparable=True,
         comparability_reason="comparable",
         regressions=2,
@@ -3535,7 +3784,7 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         source_kind="tests",
         title="Reduce complexity",
     )
-    canonical_finding_id = mcp_service_mod._suggestion_finding_id_payload(suggestion)
+    canonical_finding_id = mcp_shared_mod._suggestion_finding_id_payload(suggestion)
     triage_record = MCPRunRecord(
         run_id="triage",
         root=tmp_path,
@@ -3576,7 +3825,7 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         metrics_diff=None,
     )
     monkeypatch.setattr(
-        service,
+        service.session,
         "_resolve_canonical_finding_id",
         lambda _record, _finding_id: (_ for _ in ()).throw(
             MCPFindingNotFoundError("missing")
@@ -3605,13 +3854,17 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
     with pytest.raises(MCPServiceContractError, match="section 'derived'"):
         service._derived_section_payload(_dummy_run_record(tmp_path, "no-derived"))
 
-    assert service._summary_health_payload({"analysis_mode": "clones_only"}) == {
+    assert mcp_helpers_mod._summary_health_payload(
+        {"analysis_mode": "clones_only"}
+    ) == {
         "available": False,
         "reason": "metrics_skipped",
     }
-    assert service._summary_health_score({"analysis_mode": "clones_only"}) is None
     assert (
-        service._summary_health_delta(
+        mcp_helpers_mod._summary_health_score({"analysis_mode": "clones_only"}) is None
+    )
+    assert (
+        mcp_helpers_mod._summary_health_delta(
             {
                 "analysis_mode": "clones_only",
                 "metrics_diff": {"health_delta": 7},
@@ -3619,11 +3872,11 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
         )
         is None
     )
-    assert service._summary_health_payload({}) == {
+    assert mcp_helpers_mod._summary_health_payload({}) == {
         "available": False,
         "reason": "unavailable",
     }
-    assert service._summary_cache_payload({}) == {}
+    assert mcp_helpers_mod._summary_cache_payload({}) == {}
     assert service._summary_findings_payload(
         {"findings_summary": {"total": 7}},
         record=None,
@@ -3644,7 +3897,7 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
 
     record = _dummy_run_record(tmp_path, "summary-helper")
     monkeypatch.setattr(
-        service,
+        service.session,
         "_base_findings",
         lambda _record: [
             {
@@ -3807,6 +4060,50 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
             }
         ],
     }
+    security_surfaces_payload = service._metrics_detail_payload(
+        metrics={
+            "summary": {},
+            "families": {
+                "security_surfaces": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/client.py",
+                            "module": "pkg.client",
+                            "qualname": "pkg.client",
+                            "category": "network_boundary",
+                            "capability": "requests_import",
+                            "classification_mode": "exact_import",
+                            "evidence_symbol": "requests",
+                        }
+                    ]
+                }
+            },
+        },
+        family="security_surfaces",
+        path=None,
+        offset=0,
+        limit=5,
+    )
+    assert security_surfaces_payload == {
+        "family": "security_surfaces",
+        "path": None,
+        "offset": 0,
+        "limit": 5,
+        "returned": 1,
+        "total": 1,
+        "has_more": False,
+        "items": [
+            {
+                "path": "pkg/client.py",
+                "module": "pkg.client",
+                "qualname": "pkg.client",
+                "category": "network_boundary",
+                "capability": "requests_import",
+                "classification_mode": "exact_import",
+                "evidence_symbol": "requests",
+            }
+        ],
+    }
     coverage_adoption_payload = service._metrics_detail_payload(
         metrics={
             "summary": {},
@@ -3903,7 +4200,7 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
             },
         ],
     }
-    assert service._compact_metrics_item(
+    assert mcp_helpers_mod._compact_metrics_item(
         {"qualname": "pkg.mod:run", "score": 10, "skip": None}
     ) == {"qualname": "pkg.mod:run", "score": 10}
 
@@ -3911,9 +4208,8 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
 def test_mcp_service_clone_only_short_id_fallback_branch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service = CodeCloneMCPService(history_limit=2)
     monkeypatch.setattr(
-        mcp_service_mod,
+        mcp_helpers_mod,
         "_disambiguated_clone_short_ids_payload",
         lambda _canonical_ids: {
             "clone:block:one": "blk:dup|x1",
@@ -3921,7 +4217,7 @@ def test_mcp_service_clone_only_short_id_fallback_branch(
         },
     )
 
-    result = service._disambiguated_short_finding_ids(
+    result = mcp_helpers_mod._disambiguated_short_finding_ids(
         ["clone:block:one", "clone:block:two"]
     )
     import hashlib

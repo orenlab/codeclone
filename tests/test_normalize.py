@@ -9,13 +9,13 @@ from typing import Any, cast
 
 import pytest
 
-import codeclone.normalize as normalize_mod
-from codeclone.meta_markers import CFG_META_PREFIX
-from codeclone.normalize import (
+import codeclone.analysis.normalizer as normalize_mod
+from codeclone.analysis.normalizer import (
     NormalizationConfig,
     normalized_ast_dump_from_list,
     stmt_hashes,
 )
+from codeclone.meta_markers import CFG_META_PREFIX
 from tests._assertions import assert_contains_all
 from tests._ast_helpers import fix_missing_single_function
 

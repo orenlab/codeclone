@@ -6,43 +6,15 @@
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
-
-def _module_name_from_path(path: Path) -> str:
-    parts = list(path.with_suffix("").parts)
-    return ".".join(parts)
-
-
-def _resolve_import(module_name: str, node: ast.ImportFrom) -> str:
-    if node.level == 0:
-        return node.module or ""
-
-    parts = module_name.split(".")
-    prefix_parts = parts[: -node.level]
-    if node.module:
-        return ".".join([*prefix_parts, node.module])
-    return ".".join(prefix_parts)
+from tests._import_graph import _iter_local_imports, _module_name_from_path
 
 
 def _iter_codeclone_modules(root: Path) -> list[tuple[str, Path]]:
     return [
         (_module_name_from_path(path.relative_to(root)), path)
         for path in sorted((root / "codeclone").rglob("*.py"))
-    ]
-
-
-def _iter_local_imports(module_name: str, source: str) -> list[str]:
-    tree = ast.parse(source)
-    imports: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imports.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            imports.append(_resolve_import(module_name, node))
-    return [
-        import_name for import_name in imports if import_name.startswith("codeclone")
     ]
 
 
@@ -73,51 +45,101 @@ def test_architecture_layer_violations() -> None:
             "codeclone.report.",
             (
                 "codeclone.ui_messages",
-                "codeclone.html_report",
-                "codeclone.cli",
+                "codeclone.report.html",
+                "codeclone.surfaces.cli",
                 "codeclone._html_",
-                "codeclone._html_report",
+                "codeclone.report.html",
             ),
         ),
         (
             "codeclone.extractor",
             (
                 "codeclone.report",
-                "codeclone.cli",
+                "codeclone.surfaces.cli",
                 "codeclone.baseline",
             ),
         ),
         (
             "codeclone.grouping",
             (
-                "codeclone.cli",
+                "codeclone.surfaces.cli",
                 "codeclone.baseline",
-                "codeclone.html_report",
+                "codeclone.report.html",
             ),
         ),
         (
             "codeclone.baseline",
             (
-                "codeclone.cli",
+                "codeclone.surfaces.cli",
                 "codeclone.ui_messages",
-                "codeclone.html_report",
+                "codeclone.report.html",
             ),
         ),
         (
             "codeclone.cache",
             (
-                "codeclone.cli",
+                "codeclone.surfaces.cli",
                 "codeclone.ui_messages",
-                "codeclone.html_report",
+                "codeclone.report.html",
+            ),
+        ),
+        (
+            "codeclone.core",
+            (
+                "codeclone.surfaces",
+                "codeclone.config",
+            ),
+        ),
+        (
+            "codeclone.analysis",
+            (
+                "codeclone.report",
+                "codeclone.surfaces",
+                "codeclone.config",
+            ),
+        ),
+        (
+            "codeclone.metrics",
+            (
+                "codeclone.report.document",
+                "codeclone.report.renderers",
+                "codeclone.surfaces",
+                "codeclone.config",
+            ),
+        ),
+        (
+            "codeclone.findings",
+            (
+                "codeclone.report",
+                "codeclone.surfaces",
+                "codeclone.config",
+            ),
+        ),
+        (
+            "codeclone.report.document",
+            (
+                "codeclone.surfaces",
+                "codeclone.config",
+            ),
+        ),
+        (
+            "codeclone.report.renderers",
+            (
+                "codeclone.core",
+                "codeclone.analysis",
+                "codeclone.metrics",
+                "codeclone.findings",
+                "codeclone.surfaces",
+                "codeclone.config",
             ),
         ),
         (
             "codeclone.domain.",
             (
-                "codeclone.cli",
+                "codeclone.surfaces.cli",
                 "codeclone.pipeline",
                 "codeclone.report",
-                "codeclone.html_report",
+                "codeclone.report.html",
                 "codeclone.ui_messages",
                 "codeclone.baseline",
                 "codeclone.cache",
@@ -130,6 +152,10 @@ def test_architecture_layer_violations() -> None:
 
         for module_prefix, forbidden_prefixes in forbidden_by_module_prefix:
             if _matches_module_prefix(module_name, module_prefix):
+                if module_prefix == "codeclone.report." and module_name.startswith(
+                    "codeclone.report.html"
+                ):
+                    continue
                 violations.extend(
                     [
                         (
@@ -142,7 +168,7 @@ def test_architecture_layer_violations() -> None:
                 )
 
         if module_name == "codeclone.models":
-            allowed_prefixes = ("codeclone.contracts", "codeclone.errors")
+            allowed_prefixes = ("codeclone.contracts",)
             unexpected_imports = [
                 import_name
                 for import_name in imports

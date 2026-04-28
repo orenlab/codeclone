@@ -40,3 +40,8 @@ site/
 /package-lock.json
 extensions/vscode-codeclone/node_modules
 /coverage.xml
+/.cgcignore
+/mcp.json
+/scripts/refactor_guard.sh
+/docs/refactoring-spec.md
+/smoke_cli.sh

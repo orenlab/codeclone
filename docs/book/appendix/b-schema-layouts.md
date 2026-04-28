@@ -2,17 +2,17 @@
 
 ## Purpose
 
-Compact structural layouts for baseline/cache/report contracts in `2.0.0b5`.
+Compact structural layouts for baseline/cache/report contracts in `2.0.0b6`.
 
 ## Baseline schema (`2.1`)
 
 ```json
 {
   "meta": {
-    "generator": { "name": "codeclone", "version": "2.0.0b5" },
+    "generator": { "name": "codeclone", "version": "2.0.0b6" },
     "schema_version": "2.1",
     "fingerprint_version": "1",
-    "python_tag": "cp313",
+    "python_tag": "cp314",
     "created_at": "2026-03-11T00:00:00Z",
     "payload_sha256": "...",
     "metrics_payload_sha256": "...",
@@ -60,9 +60,9 @@ Notes:
 ```json
 {
   "meta": {
-    "generator": { "name": "codeclone", "version": "2.0.0b5" },
+    "generator": { "name": "codeclone", "version": "2.0.0b6" },
     "schema_version": "1.2",
-    "python_tag": "cp313",
+    "python_tag": "cp314",
     "created_at": "2026-03-11T00:00:00Z",
     "payload_sha256": "...",
     "api_surface_payload_sha256": "..."
@@ -91,13 +91,13 @@ Notes:
 }
 ```
 
-## Cache schema (`2.5`)
+## Cache schema (`2.6`)
 
 ```json
 {
-  "v": "2.5",
+  "v": "2.6",
   "payload": {
-    "py": "cp313",
+    "py": "cp314",
     "fp": "1",
     "ap": {
       "min_loc": 10,
@@ -109,7 +109,7 @@ Notes:
       "collect_api_surface": false
     },
     "files": {
-      "codeclone/cache.py": {
+      "codeclone/cache/store.py": {
         "st": [1730000000000000000, 2048],
         "ss": [450, 12, 3, 1],
         "u": [[
@@ -126,6 +126,7 @@ Notes:
         "rq": ["pkg.dep:used_name"],
         "in": ["pkg.dep"],
         "cn": ["ClassName"],
+        "sc": [["process_boundary", "subprocess_run", "pkg.runner", "pkg.runner:run", 10, 10, "callable", "exact_call", "call", "subprocess.run"]],
         "sf": [["duplicated_branches", "key", [["stmt_seq", "Expr,Return"]], [["pkg.a:f", 10, 12]]]]
       }
     }
@@ -146,13 +147,13 @@ Notes:
 - `u` row decoder accepts both legacy 11-column rows and canonical 17-column rows
   (legacy rows map new structural fields to neutral defaults).
 
-## Report schema (`2.8`)
+## Report schema (`2.10`)
 
 ```json
 {
-  "report_schema_version": "2.8",
+  "report_schema_version": "2.10",
   "meta": {
-    "codeclone_version": "2.0.0b5",
+    "codeclone_version": "2.0.0b6",
     "project_name": "codeclone",
     "scan_root": ".",
     "analysis_mode": "full",
@@ -295,6 +296,17 @@ Notes:
         "added": 0,
         "breaking": 0,
         "strict_types": false
+      },
+      "security_surfaces": {
+        "items": 0,
+        "modules": 0,
+        "exact_items": 0,
+        "category_count": 0,
+        "production": 0,
+        "tests": 0,
+        "fixtures": 0,
+        "other": 0,
+        "report_only": true
       }
     },
     "families": {
@@ -380,6 +392,27 @@ Notes:
         },
         "items": []
       },
+      "security_surfaces": {
+        "summary": {
+          "items": 0,
+          "modules": 0,
+          "exact_items": 0,
+          "category_count": 0,
+          "categories": {},
+          "by_source_kind": {
+            "production": 0,
+            "tests": 0,
+            "fixtures": 0,
+            "other": 0
+          },
+          "production": 0,
+          "tests": 0,
+          "fixtures": 0,
+          "other": 0,
+          "report_only": true
+        },
+        "items": []
+      },
       "health": {}
     }
   },
@@ -439,7 +472,7 @@ Notes:
 ```text
 # CodeClone Report
 - Markdown schema: 1.0
-- Source report schema: 2.8
+- Source report schema: 2.10
 ...
 ## Overview
 ## Inventory
@@ -470,7 +503,7 @@ Notes:
       "tool": {
         "driver": {
           "name": "codeclone",
-          "version": "2.0.0b5",
+          "version": "2.0.0b6",
           "rules": [
             {
               "id": "CCLONE001",
@@ -509,7 +542,7 @@ Notes:
       "artifacts": [
         {
           "location": {
-            "uri": "codeclone/report/sarif.py",
+            "uri": "codeclone/report/renderers/sarif.py",
             "uriBaseId": "%SRCROOT%"
           }
         }
@@ -525,7 +558,7 @@ Notes:
       ],
       "properties": {
         "profileVersion": "1.0",
-        "reportSchemaVersion": "2.8"
+        "reportSchemaVersion": "2.10"
       },
       "results": [
         {
@@ -540,7 +573,7 @@ Notes:
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "codeclone/report/sarif.py",
+                  "uri": "codeclone/report/renderers/sarif.py",
                   "uriBaseId": "%SRCROOT%",
                   "index": 0
                 },
@@ -560,7 +593,7 @@ Notes:
             }
           ],
           "properties": {
-            "primaryPath": "codeclone/report/sarif.py",
+            "primaryPath": "codeclone/report/renderers/sarif.py",
             "primaryQualname": "codeclone.report.sarif:render_sarif_report_document",
             "primaryRegion": "1:10"
           },
@@ -598,9 +631,9 @@ INTEGRITY
 
 ## Refs
 
-- `codeclone/baseline.py`
-- `codeclone/cache.py`
-- `codeclone/report/json_contract.py`
-- `codeclone/report/serialize.py`
-- `codeclone/report/markdown.py`
-- `codeclone/report/sarif.py`
+- `codeclone/baseline/clone_baseline.py`
+- `codeclone/cache/store.py`
+- `codeclone/report/document/builder.py`
+- `codeclone/report/renderers/text.py`
+- `codeclone/report/renderers/markdown.py`
+- `codeclone/report/renderers/sarif.py`

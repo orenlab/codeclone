@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 import codeclone.scanner as scanner
-from codeclone.errors import ValidationError
+from codeclone.contracts.errors import ValidationError
 from codeclone.scanner import iter_py_files, module_name_from_path
 
 

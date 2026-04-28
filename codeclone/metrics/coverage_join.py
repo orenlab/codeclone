@@ -10,11 +10,11 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 from xml.etree import ElementTree
 
-from .._coerce import as_int, as_str
 from ..models import CoverageJoinResult, GroupItemLike, UnitCoverageFact
+from ..utils.coerce import as_int, as_str
 
 __all__ = [
     "CoverageJoinParseError",
@@ -221,8 +221,10 @@ def _resolve_unit_path(filepath: str) -> str:
 
 def _risk_level(value: object) -> _Risk:
     risk = as_str(value, "low")
-    if risk in {"low", "medium", "high"}:
-        return cast(_Risk, risk)
+    if risk == "medium":
+        return "medium"
+    if risk == "high":
+        return "high"
     return "low"
 
 

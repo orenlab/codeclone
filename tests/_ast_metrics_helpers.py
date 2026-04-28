@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ast
 
-from codeclone import extractor
+from codeclone.analysis import _module_walk as module_walk_mod
 from codeclone.qualnames import QualnameCollector
 
 
@@ -20,7 +20,7 @@ def tree_collector_and_imports(
     tree = ast.parse(source)
     collector = QualnameCollector()
     collector.visit(tree)
-    walk = extractor._collect_module_walk_data(
+    walk = module_walk_mod._collect_module_walk_data(
         tree=tree,
         module_name=module_name,
         collector=collector,

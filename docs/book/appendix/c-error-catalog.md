@@ -8,82 +8,83 @@ Map core error conditions to statuses, markers, and exits.
 
 | Category       | Marker            | Exit |
 |----------------|-------------------|------|
-| Contract error | `CONTRACT ERROR:` | 2    |
-| Gating failure | `GATING FAILURE:` | 3    |
-| Internal error | `INTERNAL ERROR:` | 5    |
+| Contract error | `CONTRACT ERROR:` | `2`  |
+| Gating failure | `GATING FAILURE:` | `3`  |
+| Internal error | `INTERNAL ERROR:` | `5`  |
 
 Refs:
 
-- `codeclone/ui_messages.py:MARKER_CONTRACT_ERROR`
-- `codeclone/contracts.py:ExitCode`
+- `codeclone/ui_messages/__init__.py:MARKER_CONTRACT_ERROR`
+- `codeclone/contracts/__init__.py:ExitCode`
 
 ## Baseline contract errors
 
-| Condition            | Baseline status                | CLI behavior                            |
-|----------------------|--------------------------------|-----------------------------------------|
-| Missing baseline     | `missing`                      | normal: empty diff; gating: exit 2      |
-| Schema mismatch      | `mismatch_schema_version`      | normal: ignore baseline; gating: exit 2 |
-| Fingerprint mismatch | `mismatch_fingerprint_version` | normal: ignore baseline; gating: exit 2 |
-| Python tag mismatch  | `mismatch_python_version`      | normal: ignore baseline; gating: exit 2 |
-| Integrity mismatch   | `integrity_failed`             | normal: ignore baseline; gating: exit 2 |
+| Condition            | Baseline status                | CLI behavior                              |
+|----------------------|--------------------------------|-------------------------------------------|
+| Missing baseline     | `missing`                      | normal: empty diff; gating: exit `2`      |
+| Schema mismatch      | `mismatch_schema_version`      | normal: ignore baseline; gating: exit `2` |
+| Fingerprint mismatch | `mismatch_fingerprint_version` | normal: ignore baseline; gating: exit `2` |
+| Python tag mismatch  | `mismatch_python_version`      | normal: ignore baseline; gating: exit `2` |
+| Integrity mismatch   | `integrity_failed`             | normal: ignore baseline; gating: exit `2` |
 
 Refs:
 
-- `codeclone/cli.py:_main_impl`
-- `codeclone/baseline.py:BaselineStatus`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
+- `codeclone/baseline/trust.py:BaselineStatus`
 
 ## Cache degradation cases
 
-| Condition                                        | Cache status                    | Behavior               |
-|--------------------------------------------------|---------------------------------|------------------------|
-| Missing cache file                               | `missing`                       | proceed without cache  |
-| Version mismatch                                 | `version_mismatch`              | ignore cache + warning |
-| Analysis profile mismatch (`min_loc`/`min_stmt`) | `analysis_profile_mismatch`     | ignore cache + warning |
-| Invalid JSON/type                                | `invalid_json` / `invalid_type` | ignore cache + warning |
-| Signature mismatch                               | `integrity_failed`              | ignore cache + warning |
-| Oversized cache                                  | `too_large`                     | ignore cache + warning |
+| Condition                 | Cache status                    | Behavior               |
+|---------------------------|---------------------------------|------------------------|
+| Missing cache file        | `missing`                       | proceed without cache  |
+| Version mismatch          | `version_mismatch`              | ignore cache + warning |
+| Analysis profile mismatch | `analysis_profile_mismatch`     | ignore cache + warning |
+| Invalid JSON/type         | `invalid_json` / `invalid_type` | ignore cache + warning |
+| Signature mismatch        | `integrity_failed`              | ignore cache + warning |
+| Oversized cache           | `too_large`                     | ignore cache + warning |
 
 Refs:
 
-- `codeclone/cache.py:CacheStatus`
-- `codeclone/cache.py:Cache._ignore_cache`
+- `codeclone/cache/versioning.py:CacheStatus`
+- `codeclone/cache/store.py:Cache._ignore_cache`
 
 ## Source IO and gating
 
 | Condition                                 | Behavior                        |
 |-------------------------------------------|---------------------------------|
 | Source read/decode failure in normal mode | file skipped; warning; continue |
-| Source read/decode failure in gating mode | contract error exit 2           |
+| Source read/decode failure in gating mode | contract error, exit `2`        |
 
 Refs:
 
-- `codeclone/cli.py:process_file`
-- `codeclone/cli.py:_main_impl`
+- `codeclone/core/worker.py:process_file`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
 
 ## Report write errors
 
-| Condition                                  | Behavior              |
-|--------------------------------------------|-----------------------|
-| Baseline write OSError                     | contract error exit 2 |
-| HTML/JSON/Markdown/SARIF/TXT write OSError | contract error exit 2 |
+| Condition                                  | Behavior                 |
+|--------------------------------------------|--------------------------|
+| Baseline write OSError                     | contract error, exit `2` |
+| HTML/JSON/Markdown/SARIF/TXT write OSError | contract error, exit `2` |
 
 Refs:
 
-- `codeclone/cli.py:_main_impl`
+- `codeclone/surfaces/cli/reports_output.py:_write_report_output`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
 
 ## MCP interface errors
 
 | Condition                                     | Behavior                                          |
 |-----------------------------------------------|---------------------------------------------------|
 | Optional `mcp` extra missing                  | `codeclone-mcp` prints install hint and exits `2` |
-| Invalid root path / invalid numeric config    | MCP service contract error                        |
+| Invalid root path / invalid config            | MCP service contract error                        |
 | Missing run or finding id                     | MCP service request error                         |
 | Unsupported MCP resource URI / report section | MCP service contract error                        |
 
 Refs:
 
-- `codeclone/mcp_server.py:main`
-- `codeclone/mcp_service.py`
+- `codeclone/surfaces/mcp/server.py:main`
+- `codeclone/surfaces/mcp/service.py`
 
 ## Locked by tests
 

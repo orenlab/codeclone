@@ -6,12 +6,6 @@
 
 from __future__ import annotations
 
-from codeclone._html_report._sections._structural import (
-    _finding_matters_html,
-    _finding_why_template_html,
-    _occurrences_table_html,
-)
-from codeclone._html_snippets import _FileCache
 from codeclone.models import StructuralFindingGroup, StructuralFindingOccurrence
 from codeclone.report.explain_contract import (
     BLOCK_HINT_ASSERT_ONLY,
@@ -21,16 +15,22 @@ from codeclone.report.findings import (
     _dedupe_items,
     _finding_scope_text,
 )
-from codeclone.report.markdown import (
+from codeclone.report.html.sections._structural import (
+    _finding_matters_html,
+    _finding_why_template_html,
+    _occurrences_table_html,
+)
+from codeclone.report.html.widgets.snippets import _FileCache
+from codeclone.report.overview import _health_snapshot
+from codeclone.report.renderers.markdown import (
     _append_findings_section,
     _append_metric_items,
     _location_text,
 )
-from codeclone.report.markdown import (
+from codeclone.report.renderers.markdown import (
     _as_float as _markdown_as_float,
 )
-from codeclone.report.overview import _health_snapshot
-from codeclone.report.sarif import _result_properties
+from codeclone.report.renderers.sarif import _result_properties
 from codeclone.report.suggestions import (
     _clone_steps,
     _clone_summary,

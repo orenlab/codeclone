@@ -7,9 +7,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil
 from typing import Literal
 
-from ..contracts import HEALTH_WEIGHTS
+from ..contracts import (
+    HEALTH_DEPENDENCY_CYCLE_PENALTY,
+    HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER,
+    HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY,
+    HEALTH_DEPENDENCY_DEPTH_P95_MARGIN,
+    HEALTH_WEIGHTS,
+)
 from ..models import HealthScore
 
 
@@ -29,6 +36,8 @@ class HealthInputs:
     low_cohesion_classes: int
     dependency_cycles: int
     dependency_max_depth: int
+    dependency_avg_depth: float
+    dependency_p95_depth: int
     dead_code_items: int
 
 
@@ -52,6 +61,26 @@ def _safe_div(numerator: float, denominator: float) -> float:
     if denominator <= 0:
         return 0.0
     return numerator / denominator
+
+
+def _dependency_expected_tail(*, avg_depth: float, p95_depth: int) -> int:
+    avg_based = ceil(max(0.0, avg_depth) * HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER)
+    p95_based = max(0, p95_depth) + HEALTH_DEPENDENCY_DEPTH_P95_MARGIN
+    return max(avg_based, p95_based)
+
+
+def _dependency_tail_pressure(
+    *,
+    max_depth: int,
+    avg_depth: float,
+    p95_depth: int,
+) -> int:
+    if max_depth <= 0:
+        return 0
+    return max(
+        0,
+        max_depth - _dependency_expected_tail(avg_depth=avg_depth, p95_depth=p95_depth),
+    )
 
 
 # Piecewise clone-density curve: mild penalty for low density,
@@ -104,8 +133,13 @@ def compute_health(inputs: HealthInputs) -> HealthScore:
     dead_code_score = _clamp_score(100 - inputs.dead_code_items * 8)
     dependency_score = _clamp_score(
         100
-        - inputs.dependency_cycles * 25
-        - max(0, inputs.dependency_max_depth - 6) * 4
+        - inputs.dependency_cycles * HEALTH_DEPENDENCY_CYCLE_PENALTY
+        - _dependency_tail_pressure(
+            max_depth=inputs.dependency_max_depth,
+            avg_depth=inputs.dependency_avg_depth,
+            p95_depth=inputs.dependency_p95_depth,
+        )
+        * HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY
     )
     coverage_score = _clamp_score(
         _safe_div(inputs.files_analyzed_or_cached * 100.0, max(1, inputs.files_found))

@@ -14,29 +14,49 @@ from typing import cast
 import orjson
 import pytest
 
-import codeclone.cli as cli
-import codeclone.pipeline as pipeline
-from codeclone._cli_gating import policy_context
-from codeclone.cache import (
-    Cache,
-    CacheEntry,
-    SegmentReportProjection,
+import codeclone.core.discovery as core_discovery
+import codeclone.core.pipeline as core_pipeline
+import codeclone.surfaces.cli.console as cli_console
+import codeclone.surfaces.cli.workflow as cli
+from codeclone.analysis.normalizer import NormalizationConfig
+from codeclone.cache._canonicalize import (
     _as_file_stat_dict,
-    _as_risk_literal,
+    _has_cache_entry_container_shape,
+)
+from codeclone.cache._validators import _is_dead_candidate_dict
+from codeclone.cache._wire_decode import (
     _decode_wire_file_entry,
     _decode_wire_structural_findings_optional,
     _decode_wire_structural_group,
     _decode_wire_structural_occurrence,
     _decode_wire_structural_signature,
     _decode_wire_unit,
-    _encode_wire_file_entry,
-    _has_cache_entry_container_shape,
-    _is_dead_candidate_dict,
-    build_segment_report_projection,
 )
-from codeclone.cache_segments import decode_segment_report_projection
-from codeclone.errors import CacheError
-from codeclone.grouping import build_segment_groups
+from codeclone.cache._wire_encode import _encode_wire_file_entry
+from codeclone.cache.entries import CacheEntry, SourceStatsDict, _as_risk_literal
+from codeclone.cache.projection import (
+    SegmentReportProjection,
+    build_segment_report_projection,
+    decode_segment_report_projection,
+)
+from codeclone.cache.store import Cache, file_stat_signature
+from codeclone.contracts.errors import CacheError
+from codeclone.core._types import (
+    AnalysisResult,
+    BootstrapResult,
+    DiscoveryResult,
+    OutputPaths,
+    ProcessingResult,
+    _coerce_segment_report_projection,
+    _segment_groups_digest,
+)
+from codeclone.core.discovery import discover
+from codeclone.core.discovery_cache import (
+    _cache_entry_source_stats,
+    decode_cached_structural_finding_group,
+)
+from codeclone.core.pipeline import analyze
+from codeclone.findings.clones.grouping import build_segment_groups
 from codeclone.models import (
     BlockUnit,
     ClassMetrics,
@@ -45,7 +65,7 @@ from codeclone.models import (
     ModuleDep,
     SegmentUnit,
 )
-from codeclone.normalize import NormalizationConfig
+from codeclone.report.gates.reasons import policy_context
 from tests._assertions import assert_contains_all
 
 
@@ -484,7 +504,7 @@ def test_pipeline_analyze_uses_cached_segment_projection(
         "size": 6,
     }
     raw_groups = build_segment_groups((seg_item_a, seg_item_b))
-    digest = pipeline._segment_groups_digest(raw_groups)
+    digest = _segment_groups_digest(raw_groups)
     cached_projection = {
         "digest": digest,
         "suppressed": 7,
@@ -522,9 +542,9 @@ def test_pipeline_analyze_uses_cached_segment_projection(
     ) -> tuple[dict[str, list[dict[str, object]]], int]:
         raise AssertionError("prepare_segment_report_groups must not be called")
 
-    monkeypatch.setattr(pipeline, "prepare_segment_report_groups", _must_not_run)
+    monkeypatch.setattr(core_pipeline, "prepare_segment_report_groups", _must_not_run)
 
-    boot = pipeline.BootstrapResult(
+    boot = BootstrapResult(
         root=Path("."),
         config=NormalizationConfig(),
         args=Namespace(
@@ -535,10 +555,10 @@ def test_pipeline_analyze_uses_cached_segment_projection(
             min_stmt=1,
             processes=1,
         ),
-        output_paths=pipeline.OutputPaths(),
+        output_paths=OutputPaths(),
         cache_path=Path("cache.json"),
     )
-    discovery = pipeline.DiscoveryResult(
+    discovery = DiscoveryResult(
         files_found=0,
         cache_hits=0,
         files_skipped=0,
@@ -553,11 +573,10 @@ def test_pipeline_analyze_uses_cached_segment_projection(
         files_to_process=(),
         skipped_warnings=(),
         cached_segment_report_projection=cast(
-            "SegmentReportProjection",
-            cached_projection,
+            SegmentReportProjection, cached_projection
         ),
     )
-    processing = pipeline.ProcessingResult(
+    processing = ProcessingResult(
         units=(),
         blocks=(),
         segments=(seg_item_a, seg_item_b),
@@ -575,30 +594,90 @@ def test_pipeline_analyze_uses_cached_segment_projection(
         source_read_failures=(),
     )
 
-    result = pipeline.analyze(boot=boot, discovery=discovery, processing=processing)
+    result = analyze(boot=boot, discovery=discovery, processing=processing)
     assert result.suppressed_segment_groups == 7
     assert result.segment_groups == cached_projection["groups"]
     assert result.segment_groups_raw_digest == digest
 
 
 def test_pipeline_coerce_segment_projection_invalid_shapes() -> None:
-    assert pipeline._coerce_segment_report_projection("bad") is None
+    assert _coerce_segment_report_projection("bad") is None
     assert (
-        pipeline._coerce_segment_report_projection(
-            {"digest": 1, "suppressed": 0, "groups": {}}
-        )
+        _coerce_segment_report_projection({"digest": 1, "suppressed": 0, "groups": {}})
         is None
     )
     assert (
-        pipeline._coerce_segment_report_projection(
+        _coerce_segment_report_projection(
             {"digest": "d", "suppressed": 0, "groups": {"k": "bad"}}
         )
         is None
     )
 
+    assert (
+        _coerce_segment_report_projection(
+            {
+                "digest": "d",
+                "suppressed": 0,
+                "groups": {"k": [{"segment_hash": "h", "segment_sig": "s"}]},
+            }
+        )
+        is None
+    )
+
+    assert (
+        _coerce_segment_report_projection(
+            {
+                "digest": "d",
+                "suppressed": 0,
+                "groups": {"k": ["bad-item"]},
+            }
+        )
+        is None
+    )
+
+
+def test_pipeline_coerce_segment_projection_valid_group_items() -> None:
+    projection = _coerce_segment_report_projection(
+        {
+            "digest": "digest",
+            "suppressed": 2,
+            "groups": {
+                "sig-1": [
+                    {
+                        "segment_hash": "hash-1",
+                        "segment_sig": "sig-1",
+                        "filepath": "pkg/mod.py",
+                        "qualname": "pkg.mod:run",
+                        "start_line": 10,
+                        "end_line": 16,
+                        "size": 6,
+                    }
+                ]
+            },
+        }
+    )
+
+    assert projection == {
+        "digest": "digest",
+        "suppressed": 2,
+        "groups": {
+            "sig-1": [
+                {
+                    "segment_hash": "hash-1",
+                    "segment_sig": "sig-1",
+                    "filepath": "pkg/mod.py",
+                    "qualname": "pkg.mod:run",
+                    "start_line": 10,
+                    "end_line": 16,
+                    "size": 6,
+                }
+            ]
+        },
+    }
+
 
 def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
-    boot = pipeline.BootstrapResult(
+    boot = BootstrapResult(
         root=Path("."),
         config=NormalizationConfig(),
         args=Namespace(
@@ -609,10 +688,10 @@ def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
             min_stmt=1,
             processes=1,
         ),
-        output_paths=pipeline.OutputPaths(),
+        output_paths=OutputPaths(),
         cache_path=Path("cache.json"),
     )
-    discovery = pipeline.DiscoveryResult(
+    discovery = DiscoveryResult(
         files_found=1,
         cache_hits=0,
         files_skipped=0,
@@ -627,7 +706,7 @@ def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
         files_to_process=(),
         skipped_warnings=(),
     )
-    processing = pipeline.ProcessingResult(
+    processing = ProcessingResult(
         units=(),
         blocks=(),
         segments=(),
@@ -655,7 +734,7 @@ def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
         source_read_failures=(),
     )
 
-    result = pipeline.analyze(boot=boot, discovery=discovery, processing=processing)
+    result = analyze(boot=boot, discovery=discovery, processing=processing)
     assert result.project_metrics is not None
     assert result.project_metrics.dead_code == ()
     assert result.suppressed_dead_code_items == 1
@@ -672,7 +751,7 @@ def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
 
 
 def test_pipeline_decode_cached_structural_group() -> None:
-    decoded = pipeline._decode_cached_structural_finding_group(
+    decoded = decode_cached_structural_finding_group(
         {
             "finding_kind": "duplicated_branches",
             "finding_key": "k",
@@ -690,7 +769,7 @@ def _discover_with_single_cached_entry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     cached_entry: dict[str, object],
-) -> pipeline.DiscoveryResult:
+) -> DiscoveryResult:
     source = tmp_path / "a.py"
     source.write_text("def f():\n    return 1\n", "utf-8")
     filepath = str(source)
@@ -701,16 +780,68 @@ def _discover_with_single_cached_entry(
         def get_file_entry(self, _path: str) -> dict[str, object]:
             return cache_entry
 
-    boot = pipeline.BootstrapResult(
+        def prune_file_entries(self, existing_filepaths: object) -> int:
+            return 0
+
+    boot = BootstrapResult(
         root=tmp_path,
         config=NormalizationConfig(),
         args=Namespace(skip_metrics=False, min_loc=1, min_stmt=1, processes=1),
-        output_paths=pipeline.OutputPaths(),
+        output_paths=OutputPaths(),
         cache_path=tmp_path / "cache.json",
     )
-    monkeypatch.setattr(pipeline, "iter_py_files", lambda _root: [filepath])
-    monkeypatch.setattr(pipeline, "file_stat_signature", lambda _path: stat)
-    return pipeline.discover(boot=boot, cache=cast(Cache, _FakeCache()))
+    monkeypatch.setattr(core_discovery, "iter_py_files", lambda _root: [filepath])
+    monkeypatch.setattr(core_discovery, "file_stat_signature", lambda _path: stat)
+    return discover(boot=boot, cache=cast(Cache, _FakeCache()))
+
+
+def test_discover_prunes_deleted_cache_entries(tmp_path: Path) -> None:
+    live = tmp_path / "a.py"
+    stale = tmp_path / "stale.py"
+    live.write_text("def f():\n    return 1\n", "utf-8")
+
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path, root=tmp_path)
+    cache.put_file_entry(
+        str(live),
+        file_stat_signature(str(live)),
+        [],
+        [],
+        [],
+        source_stats=SourceStatsDict(lines=2, functions=1, methods=0, classes=0),
+    )
+    cache.put_file_entry(
+        str(stale),
+        {"mtime_ns": 1, "size": 1},
+        [],
+        [],
+        [],
+        source_stats=SourceStatsDict(lines=0, functions=0, methods=0, classes=0),
+    )
+    cache.save()
+
+    loaded = Cache(cache_path, root=tmp_path)
+    loaded.load()
+    boot = BootstrapResult(
+        root=tmp_path,
+        config=NormalizationConfig(),
+        args=Namespace(skip_metrics=False, min_loc=1, min_stmt=1, processes=1),
+        output_paths=OutputPaths(),
+        cache_path=cache_path,
+    )
+
+    result = discover(boot=boot, cache=loaded)
+
+    assert result.files_found == 1
+    assert result.cache_hits == 1
+    assert result.files_to_process == ()
+    assert str(stale) not in loaded.data["files"]
+
+    loaded.save()
+
+    reloaded = Cache(cache_path, root=tmp_path)
+    reloaded.load()
+    assert str(stale) not in reloaded.data["files"]
 
 
 @pytest.mark.parametrize(
@@ -830,9 +961,9 @@ def test_pipeline_discover_cache_admission_branches(
 
 
 def test_pipeline_cached_source_stats_helper_invalid_shapes() -> None:
-    assert pipeline._cache_entry_source_stats(cast(CacheEntry, {})) is None
+    assert _cache_entry_source_stats(cast(CacheEntry, {})) is None
     assert (
-        pipeline._cache_entry_source_stats(
+        _cache_entry_source_stats(
             cast(
                 CacheEntry,
                 {
@@ -850,40 +981,53 @@ def test_pipeline_cached_source_stats_helper_invalid_shapes() -> None:
 
 
 def test_cli_metric_reason_parser_and_policy_context() -> None:
-    assert cli._parse_metric_reason_entry(
+    assert cli_console._parse_metric_reason_entry(
         "New high-risk functions vs metrics baseline: 1."
     ) == ("new_high_risk_functions", "1")
-    assert cli._parse_metric_reason_entry(
+    assert cli_console._parse_metric_reason_entry(
         "New high-coupling classes vs metrics baseline: 2."
     ) == ("new_high_coupling_classes", "2")
-    assert cli._parse_metric_reason_entry(
+    assert cli_console._parse_metric_reason_entry(
         "New dependency cycles vs metrics baseline: 3."
     ) == ("new_dependency_cycles", "3")
-    assert cli._parse_metric_reason_entry(
+    assert cli_console._parse_metric_reason_entry(
         "New dead code items vs metrics baseline: 4."
     ) == ("new_dead_code_items", "4")
-    assert cli._parse_metric_reason_entry(
+    assert cli_console._parse_metric_reason_entry(
         "Health score regressed vs metrics baseline: delta=-7."
     ) == ("health_delta", "-7")
-    assert cli._parse_metric_reason_entry(
+    assert cli_console._parse_metric_reason_entry(
+        "Typing coverage regressed vs metrics baseline: "
+        "params_delta=-2, returns_delta=-1."
+    ) == ("typing_coverage_delta", "-2 (returns_delta=-1)")
+    assert cli_console._parse_metric_reason_entry(
+        "Docstring coverage regressed vs metrics baseline: delta=-3."
+    ) == ("docstring_coverage_delta", "-3")
+    assert cli_console._parse_metric_reason_entry(
+        "Public API breaking changes vs metrics baseline: 5."
+    ) == ("api_breaking_changes", "5")
+    assert cli_console._parse_metric_reason_entry(
+        "Coverage hotspots detected: hotspots=2, threshold=50."
+    ) == ("coverage_hotspots", "2 (threshold=50)")
+    assert cli_console._parse_metric_reason_entry(
         "Dependency cycles detected: 3 cycle(s)."
     ) == ("dependency_cycles", "3")
-    assert cli._parse_metric_reason_entry(
+    assert cli_console._parse_metric_reason_entry(
         "Dead code detected (high confidence): 2 item(s)."
     ) == ("dead_code_items", "2")
-    assert cli._parse_metric_reason_entry(
+    assert cli_console._parse_metric_reason_entry(
         "Complexity threshold exceeded: max=11, threshold=10."
     ) == ("complexity_max", "11 (threshold=10)")
-    assert cli._parse_metric_reason_entry(
+    assert cli_console._parse_metric_reason_entry(
         "Coupling threshold exceeded: max=12, threshold=9."
     ) == ("coupling_max", "12 (threshold=9)")
-    assert cli._parse_metric_reason_entry(
+    assert cli_console._parse_metric_reason_entry(
         "Cohesion threshold exceeded: max=13, threshold=8."
     ) == ("cohesion_max", "13 (threshold=8)")
-    assert cli._parse_metric_reason_entry(
+    assert cli_console._parse_metric_reason_entry(
         "Health score below threshold: score=70, threshold=80."
     ) == ("health_score", "70 (threshold=80)")
-    assert cli._parse_metric_reason_entry("custom reason.") == (
+    assert cli_console._parse_metric_reason_entry("custom reason.") == (
         "detail",
         "custom reason",
     )
@@ -924,18 +1068,18 @@ def test_cli_run_analysis_stages_handles_cache_save_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     args = Namespace(quiet=False, no_progress=False, skip_metrics=True)
-    boot = pipeline.BootstrapResult(
+    boot = BootstrapResult(
         root=Path("."),
         config=NormalizationConfig(),
         args=args,
-        output_paths=pipeline.OutputPaths(),
+        output_paths=OutputPaths(),
         cache_path=Path("cache.json"),
     )
 
     monkeypatch.setattr(
         cli,
         "discover",
-        lambda **_kwargs: pipeline.DiscoveryResult(
+        lambda **_kwargs: DiscoveryResult(
             files_found=0,
             cache_hits=0,
             files_skipped=0,
@@ -954,7 +1098,7 @@ def test_cli_run_analysis_stages_handles_cache_save_error(
     monkeypatch.setattr(
         cli,
         "process",
-        lambda **_kwargs: pipeline.ProcessingResult(
+        lambda **_kwargs: ProcessingResult(
             units=(),
             blocks=(),
             segments=(),
@@ -975,7 +1119,7 @@ def test_cli_run_analysis_stages_handles_cache_save_error(
     monkeypatch.setattr(
         cli,
         "analyze",
-        lambda **_kwargs: pipeline.AnalysisResult(
+        lambda **_kwargs: AnalysisResult(
             func_groups={},
             block_groups={},
             block_groups_report={},
