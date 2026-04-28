@@ -12,8 +12,11 @@ const {
     formatBaselineTags,
     formatBaselineState,
     formatKind,
+    formatSecuritySurfaceLocation,
+    formatSecuritySurfaceReviewSignal,
     formatSeverity,
     formatSourceKindSummary,
+    humanizeIdentifier,
     normalizeLocations,
     number,
     safeArray,
@@ -280,10 +283,62 @@ function renderOverloadedModuleMarkdown(item) {
     return lines.join("\n");
 }
 
+function renderSecuritySurfaceMarkdown(item) {
+    const entry = safeObject(item);
+    const location = formatSecuritySurfaceLocation(entry);
+    const category = humanizeIdentifier(entry.category || "unknown");
+    const capability = humanizeIdentifier(entry.capability || "unknown");
+    const sourceKind = humanizeIdentifier(entry.source_kind || "unknown");
+    const scope = humanizeIdentifier(entry.location_scope || "unknown");
+    const classification = humanizeIdentifier(
+        entry.classification_mode || "unknown"
+    );
+    const evidence = String(entry.evidence_symbol || "(unknown)");
+    const reviewSignal = formatSecuritySurfaceReviewSignal(entry);
+    const guidance = [
+        "Treat this as a report-only boundary inventory entry, not as a vulnerability claim.",
+        entry.location_scope === "module"
+            ? "Trace the callable or entrypoint that consumes this module capability before refactoring it."
+            : "Review the exact callable behavior at this trust boundary before refactoring it.",
+    ];
+    if (entry.scope_gap_hotspot) {
+        guidance.push(
+            "Coverage Join marks this callable as a scope gap, so validate the exercised path manually before change."
+        );
+    } else if (entry.coverage_hotspot) {
+        guidance.push(
+            "Coverage Join marks this callable as low coverage, so inspect or add boundary-focused tests before change."
+        );
+    } else if (entry.coverage_overlap) {
+        guidance.push(
+            "Coverage Join overlaps with this callable, so inspect the measured tests before changing boundary behavior."
+        );
+    }
+
+    return [
+        "# Security Surface",
+        "",
+        `- Location: \`${location}\``,
+        `- Module: \`${entry.module || "unknown"}\``,
+        `- Symbol: \`${entry.qualname || entry.module || "unknown"}\``,
+        `- Category: ${category}`,
+        `- Capability: ${capability}`,
+        `- Evidence: \`${evidence}\``,
+        `- Source kind: ${sourceKind}`,
+        `- Scope: ${scope}`,
+        `- Classification: ${classification}`,
+        `- Review signal: ${reviewSignal}`,
+        "",
+        "## Review guidance",
+        markdownBulletList(guidance),
+    ].join("\n");
+}
+
 module.exports = {
     markdownBulletList,
     renderFindingMarkdown,
     renderOverloadedModuleMarkdown,
+    renderSecuritySurfaceMarkdown,
     renderHelpMarkdown,
     renderRemediationMarkdown,
     renderRestrictedModeMarkdown,

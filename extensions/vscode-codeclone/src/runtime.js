@@ -57,11 +57,12 @@ async function pathExists(filePath) {
 }
 
 async function looksLikeCodeCloneRepo(folderPath) {
-    const [hasPyproject, hasServer] = await Promise.all([
+    const [hasPyproject, hasLegacyServer, hasSurfaceServer] = await Promise.all([
         pathExists(path.join(folderPath, "pyproject.toml")),
         pathExists(path.join(folderPath, "codeclone", "mcp_server.py")),
+        pathExists(path.join(folderPath, "codeclone", "surfaces", "mcp", "server.py")),
     ]);
-    return hasPyproject && hasServer;
+    return hasPyproject && (hasLegacyServer || hasSurfaceServer);
 }
 
 async function readFileHead(filePath, maxBytes = 16384) {

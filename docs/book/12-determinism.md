@@ -6,9 +6,11 @@ Document deterministic behavior and canonicalization controls.
 
 ## Public surface
 
-- Sorting and traversal: `codeclone/scanner.py`, `codeclone/report/serialize.py`, `codeclone/cache.py`
-- Canonical hashing: `codeclone/baseline.py`, `codeclone/cache.py`
-- Golden detector snapshot policy: `tests/test_detector_golden.py`
+- Sorted file traversal: `codeclone/scanner.py`
+- Canonical report construction: `codeclone/report/document/*`
+- Deterministic text projection: `codeclone/report/renderers/text.py`
+- Baseline hashing: `codeclone/baseline/trust.py`
+- Cache signing: `codeclone/cache/integrity.py`
 
 ## Data model
 
@@ -18,57 +20,56 @@ Deterministic outputs depend on:
 - fixed baseline/cache/report schemas
 - sorted file traversal
 - sorted group keys and item records
-- canonical JSON serialization for hashes
+- canonical JSON serialization for hashes/signatures
 
 ## Contracts
 
-- JSON report uses deterministic ordering for files/groups/items.
-- TXT report uses deterministic metadata key order and group/item ordering.
+- Canonical JSON report uses deterministic ordering for files, groups, items, and summaries.
+- Text/Markdown/SARIF projections are deterministic views over the canonical report.
 - Baseline hash is canonical and independent from non-payload metadata fields.
 - Cache signature is canonical and independent from JSON whitespace.
 
 Refs:
 
-- `codeclone/report/json_contract.py:build_report_document`
-- `codeclone/report/serialize.py:render_text_report_document`
-- `codeclone/baseline.py:_compute_payload_sha256`
-- `codeclone/cache_io.py:sign_cache_payload`
+- `codeclone/report/document/builder.py:build_report_document`
+- `codeclone/report/renderers/text.py:render_text_report_document`
+- `codeclone/baseline/trust.py:_compute_payload_sha256`
+- `codeclone/cache/integrity.py:sign_cache_payload`
 
 ## Invariants (MUST)
 
 - `inventory.file_registry.items` is lexicographically sorted.
 - finding groups/items and derived hotlists are deterministically ordered.
-- Baseline clone lists are sorted and unique.
-- Golden detector test runs only on canonical Python tag from fixture metadata.
+- baseline clone lists are sorted and unique.
+- golden detector fixtures run only on the canonical Python tag from fixture metadata.
 
 Refs:
 
-- `codeclone/report/json_contract.py:_build_inventory_payload`
-- `codeclone/baseline.py:_require_sorted_unique_ids`
+- `codeclone/report/document/inventory.py:_build_inventory_payload`
+- `codeclone/baseline/trust.py:_require_sorted_unique_ids`
 - `tests/test_detector_golden.py::test_detector_output_matches_golden_fixture`
 
 ## Failure modes
 
-| Condition                           | Determinism impact                                     |
-|-------------------------------------|--------------------------------------------------------|
-| Different Python tag                | Clone IDs may differ; baseline considered incompatible |
-| Unsorted/non-canonical baseline IDs | Baseline rejected as invalid                           |
-| Cache signature mismatch            | Cache ignored and recomputed                           |
-| Different cache provenance state    | `meta.cache_*` differs by design                       |
+| Condition                           | Determinism impact                                  |
+|-------------------------------------|-----------------------------------------------------|
+| Different Python tag                | Clone IDs may differ; baseline becomes incompatible |
+| Unsorted/non-canonical baseline IDs | Baseline rejected as invalid                        |
+| Cache signature mismatch            | Cache ignored and recomputed                        |
+| Different cache provenance state    | `meta.cache_*` differs by design                    |
 
 ## Determinism / canonicalization
 
 Primary canonicalization points:
 
-- `json.dumps(..., sort_keys=True, separators=(",", ":"), ensure_ascii=False)` for baseline/cache payload
-  hash/signature.
-- tuple-based sort keys for report record arrays.
+- canonical JSON with sorted keys and compact separators for baseline/cache hashing
+- stable tuple-based sort keys for report arrays and hotlists
 
 Refs:
 
-- `codeclone/baseline.py:_compute_payload_sha256`
-- `codeclone/cache_io.py:canonical_json`
-- `codeclone/report/json_contract.py:_build_integrity_payload`
+- `codeclone/baseline/trust.py:_compute_payload_sha256`
+- `codeclone/cache/integrity.py:canonical_json`
+- `codeclone/report/document/integrity.py:_build_integrity_payload`
 
 ## Locked by tests
 
@@ -81,5 +82,4 @@ Refs:
 ## Non-guarantees
 
 - Determinism is not guaranteed across different `python_tag` values.
-- Byte-identical reports are not guaranteed across different cache provenance
-  states (`cache_status`, `cache_used`, `cache_schema_version`).
+- Byte-identical reports are not guaranteed across different cache provenance states.

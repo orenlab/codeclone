@@ -1,0 +1,1541 @@
+[
+  {
+    "input_schema": {
+      "properties": {
+        "analysis_mode": {
+          "default": "full",
+          "title": "Analysis Mode",
+          "type": "string"
+        },
+        "api_surface": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api Surface"
+        },
+        "baseline_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseline Path"
+        },
+        "block_min_loc": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Block Min Loc"
+        },
+        "block_min_stmt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Block Min Stmt"
+        },
+        "cache_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Path"
+        },
+        "cache_policy": {
+          "default": "reuse",
+          "title": "Cache Policy",
+          "type": "string"
+        },
+        "changed_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changed Paths"
+        },
+        "cohesion_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cohesion Threshold"
+        },
+        "complexity_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Complexity Threshold"
+        },
+        "coupling_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coupling Threshold"
+        },
+        "coverage_min": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coverage Min"
+        },
+        "coverage_xml": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coverage Xml"
+        },
+        "git_diff_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Git Diff Ref"
+        },
+        "max_baseline_size_mb": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Baseline Size Mb"
+        },
+        "max_cache_size_mb": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Cache Size Mb"
+        },
+        "metrics_baseline_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metrics Baseline Path"
+        },
+        "min_loc": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Loc"
+        },
+        "min_stmt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Stmt"
+        },
+        "processes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Processes"
+        },
+        "respect_pyproject": {
+          "default": true,
+          "title": "Respect Pyproject",
+          "type": "boolean"
+        },
+        "root": {
+          "title": "Root",
+          "type": "string"
+        },
+        "segment_min_loc": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Segment Min Loc"
+        },
+        "segment_min_stmt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Segment Min Stmt"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "title": "analyze_changed_pathsArguments",
+      "type": "object"
+    },
+    "name": "analyze_changed_paths"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "analysis_mode": {
+          "default": "full",
+          "title": "Analysis Mode",
+          "type": "string"
+        },
+        "api_surface": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api Surface"
+        },
+        "baseline_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseline Path"
+        },
+        "block_min_loc": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Block Min Loc"
+        },
+        "block_min_stmt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Block Min Stmt"
+        },
+        "cache_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Path"
+        },
+        "cache_policy": {
+          "default": "reuse",
+          "title": "Cache Policy",
+          "type": "string"
+        },
+        "changed_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changed Paths"
+        },
+        "cohesion_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cohesion Threshold"
+        },
+        "complexity_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Complexity Threshold"
+        },
+        "coupling_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coupling Threshold"
+        },
+        "coverage_min": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coverage Min"
+        },
+        "coverage_xml": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coverage Xml"
+        },
+        "git_diff_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Git Diff Ref"
+        },
+        "max_baseline_size_mb": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Baseline Size Mb"
+        },
+        "max_cache_size_mb": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Cache Size Mb"
+        },
+        "metrics_baseline_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metrics Baseline Path"
+        },
+        "min_loc": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Loc"
+        },
+        "min_stmt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Stmt"
+        },
+        "processes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Processes"
+        },
+        "respect_pyproject": {
+          "default": true,
+          "title": "Respect Pyproject",
+          "type": "boolean"
+        },
+        "root": {
+          "title": "Root",
+          "type": "string"
+        },
+        "segment_min_loc": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Segment Min Loc"
+        },
+        "segment_min_stmt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Segment Min Stmt"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "title": "analyze_repositoryArguments",
+      "type": "object"
+    },
+    "name": "analyze_repository"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "clone_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clone Type"
+        },
+        "detail_level": {
+          "default": "summary",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "max_results": {
+          "default": 10,
+          "title": "Max Results",
+          "type": "integer"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "source_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Kind"
+        }
+      },
+      "title": "check_clonesArguments",
+      "type": "object"
+    },
+    "name": "check_clones"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "detail_level": {
+          "default": "summary",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "max_results": {
+          "default": 10,
+          "title": "Max Results",
+          "type": "integer"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "title": "check_cohesionArguments",
+      "type": "object"
+    },
+    "name": "check_cohesion"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "detail_level": {
+          "default": "summary",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "max_results": {
+          "default": 10,
+          "title": "Max Results",
+          "type": "integer"
+        },
+        "min_complexity": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Complexity"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "title": "check_complexityArguments",
+      "type": "object"
+    },
+    "name": "check_complexity"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "detail_level": {
+          "default": "summary",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "max_results": {
+          "default": 10,
+          "title": "Max Results",
+          "type": "integer"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "title": "check_couplingArguments",
+      "type": "object"
+    },
+    "name": "check_coupling"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "detail_level": {
+          "default": "normal",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "max_results": {
+          "default": 10,
+          "title": "Max Results",
+          "type": "integer"
+        },
+        "min_severity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Severity"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "title": "check_dead_codeArguments",
+      "type": "object"
+    },
+    "name": "check_dead_code"
+  },
+  {
+    "input_schema": {
+      "properties": {},
+      "title": "clear_session_runsArguments",
+      "type": "object"
+    },
+    "name": "clear_session_runs"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "focus": {
+          "default": "all",
+          "title": "Focus",
+          "type": "string"
+        },
+        "run_id_after": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id After"
+        },
+        "run_id_before": {
+          "title": "Run Id Before",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id_before"
+      ],
+      "title": "compare_runsArguments",
+      "type": "object"
+    },
+    "name": "compare_runs"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "coverage_min": {
+          "default": 50,
+          "title": "Coverage Min",
+          "type": "integer"
+        },
+        "fail_cohesion": {
+          "default": -1,
+          "title": "Fail Cohesion",
+          "type": "integer"
+        },
+        "fail_complexity": {
+          "default": -1,
+          "title": "Fail Complexity",
+          "type": "integer"
+        },
+        "fail_coupling": {
+          "default": -1,
+          "title": "Fail Coupling",
+          "type": "integer"
+        },
+        "fail_cycles": {
+          "default": false,
+          "title": "Fail Cycles",
+          "type": "boolean"
+        },
+        "fail_dead_code": {
+          "default": false,
+          "title": "Fail Dead Code",
+          "type": "boolean"
+        },
+        "fail_health": {
+          "default": -1,
+          "title": "Fail Health",
+          "type": "integer"
+        },
+        "fail_on_api_break": {
+          "default": false,
+          "title": "Fail On Api Break",
+          "type": "boolean"
+        },
+        "fail_on_docstring_regression": {
+          "default": false,
+          "title": "Fail On Docstring Regression",
+          "type": "boolean"
+        },
+        "fail_on_new": {
+          "default": false,
+          "title": "Fail On New",
+          "type": "boolean"
+        },
+        "fail_on_new_metrics": {
+          "default": false,
+          "title": "Fail On New Metrics",
+          "type": "boolean"
+        },
+        "fail_on_typing_regression": {
+          "default": false,
+          "title": "Fail On Typing Regression",
+          "type": "boolean"
+        },
+        "fail_on_untested_hotspots": {
+          "default": false,
+          "title": "Fail On Untested Hotspots",
+          "type": "boolean"
+        },
+        "fail_threshold": {
+          "default": -1,
+          "title": "Fail Threshold",
+          "type": "integer"
+        },
+        "min_docstring_coverage": {
+          "default": -1,
+          "title": "Min Docstring Coverage",
+          "type": "integer"
+        },
+        "min_typing_coverage": {
+          "default": -1,
+          "title": "Min Typing Coverage",
+          "type": "integer"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "title": "evaluate_gatesArguments",
+      "type": "object"
+    },
+    "name": "evaluate_gates"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "changed_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changed Paths"
+        },
+        "format": {
+          "default": "markdown",
+          "title": "Format",
+          "type": "string"
+        },
+        "git_diff_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Git Diff Ref"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "title": "generate_pr_summaryArguments",
+      "type": "object"
+    },
+    "name": "generate_pr_summary"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "detail_level": {
+          "default": "normal",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "finding_id": {
+          "title": "Finding Id",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "required": [
+        "finding_id"
+      ],
+      "title": "get_findingArguments",
+      "type": "object"
+    },
+    "name": "get_finding"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "max_hotspots": {
+          "default": 3,
+          "title": "Max Hotspots",
+          "type": "integer"
+        },
+        "max_suggestions": {
+          "default": 3,
+          "title": "Max Suggestions",
+          "type": "integer"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "title": "get_production_triageArguments",
+      "type": "object"
+    },
+    "name": "get_production_triage"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "detail_level": {
+          "default": "normal",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "finding_id": {
+          "title": "Finding Id",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "required": [
+        "finding_id"
+      ],
+      "title": "get_remediationArguments",
+      "type": "object"
+    },
+    "name": "get_remediation"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "family": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Family"
+        },
+        "limit": {
+          "default": 50,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "section": {
+          "default": "all",
+          "title": "Section",
+          "type": "string"
+        }
+      },
+      "title": "get_report_sectionArguments",
+      "type": "object"
+    },
+    "name": "get_report_section"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "title": "get_run_summaryArguments",
+      "type": "object"
+    },
+    "name": "get_run_summary"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "detail": {
+          "default": "compact",
+          "title": "Detail",
+          "type": "string"
+        },
+        "topic": {
+          "title": "Topic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic"
+      ],
+      "title": "helpArguments",
+      "type": "object"
+    },
+    "name": "help"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        },
+        "changed_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changed Paths"
+        },
+        "detail_level": {
+          "default": "summary",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "exclude_reviewed": {
+          "default": false,
+          "title": "Exclude Reviewed",
+          "type": "boolean"
+        },
+        "family": {
+          "default": "all",
+          "title": "Family",
+          "type": "string"
+        },
+        "git_diff_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Git Diff Ref"
+        },
+        "limit": {
+          "default": 50,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "max_results": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Results"
+        },
+        "novelty": {
+          "default": "all",
+          "title": "Novelty",
+          "type": "string"
+        },
+        "offset": {
+          "default": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "severity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Severity"
+        },
+        "sort_by": {
+          "default": "default",
+          "title": "Sort By",
+          "type": "string"
+        },
+        "source_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Kind"
+        }
+      },
+      "title": "list_findingsArguments",
+      "type": "object"
+    },
+    "name": "list_findings"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "changed_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changed Paths"
+        },
+        "detail_level": {
+          "default": "summary",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "exclude_reviewed": {
+          "default": false,
+          "title": "Exclude Reviewed",
+          "type": "boolean"
+        },
+        "git_diff_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Git Diff Ref"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "limit": {
+          "default": 10,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "max_results": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Results"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "list_hotspotsArguments",
+      "type": "object"
+    },
+    "name": "list_hotspots"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "title": "list_reviewed_findingsArguments",
+      "type": "object"
+    },
+    "name": "list_reviewed_findings"
+  },
+  {
+    "input_schema": {
+      "properties": {
+        "finding_id": {
+          "title": "Finding Id",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "required": [
+        "finding_id"
+      ],
+      "title": "mark_finding_reviewedArguments",
+      "type": "object"
+    },
+    "name": "mark_finding_reviewed"
+  }
+]

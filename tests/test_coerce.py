@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from codeclone import _coerce
+from codeclone.utils import coerce as _coerce
 
 
 def test_as_int_handles_bool_int_str_and_default() -> None:

@@ -9,8 +9,7 @@ creating a second truth model. The extension stays read-only with respect to
 repository state and uses the same canonical report semantics as the CLI, HTML
 report, and MCP server.
 
-This extension is published as a preview while the `2.0.0b5` line is still in
-beta.
+This extension is published as a preview for the current `2.0.x` beta line.
 
 ## What it is for
 
@@ -21,6 +20,7 @@ CodeClone inside VS Code is designed for:
 - conservative first-pass analysis with an explicit deeper-review follow-up
 - baseline-aware distinction between known debt and new regressions
 - guided drill-down from hotspot to source, finding detail, and remediation
+- report-only review of security-relevant boundaries without turning them into vulnerability claims
 - lightweight code navigation without turning the sidebar into a second report app
 
 It is not a generic linter panel and it does not try to duplicate the HTML
@@ -50,13 +50,13 @@ falling back to `PATH`. Runtime and version-mismatch messages identify that reso
 Recommended install for the preview extension:
 
 ```bash
-uv tool install "codeclone[mcp]>=2.0.0b4"
+uv tool install --pre "codeclone[mcp]"
 ```
 
 If you want the launcher inside the current environment instead:
 
 ```bash
-uv pip install "codeclone[mcp]>=2.0.0b4"
+uv pip install --pre "codeclone[mcp]"
 ```
 
 Verify the launcher:
@@ -91,6 +91,7 @@ The main operational view. It focuses on:
 - new regressions
 - production hotspots
 - changed-files findings
+- report-only Security Surfaces
 - report-only Overloaded Module candidates
 
 Focus mode is explicit and persisted per workspace. The extension favors
@@ -142,7 +143,9 @@ opening raw JSON-like details by default.
 - **Source-first**: review should move you to code before it opens deeper
   detail.
 - **Report-only separation**: `Overloaded Modules` are visible but intentionally kept
-  outside findings, gates, and health.
+  outside findings, gates, and health. `Security Surfaces` follow the same rule
+  and stay framed as review-sensitive boundary inventory rather than
+  vulnerability proof.
 - **Limited Restricted Mode**: the extension keeps setup/onboarding available in
   untrusted workspaces, but local analysis and MCP stay disabled until trust is
   granted.

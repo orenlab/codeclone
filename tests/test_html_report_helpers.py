@@ -10,33 +10,32 @@ from typing import Any, cast
 
 import pytest
 
-import codeclone._html_report._assemble as assemble_mod
-import codeclone._html_report._sections._suggestions as suggestions_section
-from codeclone._html_badges import _quality_badge_html, _stat_card
-from codeclone._html_report._components import (
-    overview_source_breakdown_html,
-    overview_summary_item_html,
-)
-from codeclone._html_report._icons import section_icon_html
-from codeclone._html_report._sections._clones import (
+import codeclone.report.html.assemble as assemble_mod
+import codeclone.report.html.sections._suggestions as suggestions_section
+import codeclone.ui_messages as ui
+from codeclone.baseline.trust import current_python_tag
+from codeclone.contracts import REPORT_SCHEMA_VERSION
+from codeclone.models import MetricsDiff, ReportLocation, Suggestion
+from codeclone.report.html.sections._clones import (
     _derive_group_display_name,
     _render_group_explanation,
 )
-from codeclone._html_report._sections._dead_code import render_dead_code_panel
-from codeclone._html_report._sections._dependencies import (
+from codeclone.report.html.sections._dead_code import render_dead_code_panel
+from codeclone.report.html.sections._dependencies import (
     _hub_threshold,
+    _layout_dep_graph,
     _render_dep_nodes_and_labels,
     _select_dep_nodes,
 )
-from codeclone._html_report._sections._meta import _path_basename, render_meta_panel
-from codeclone._html_report._sections._overview import (
+from codeclone.report.html.sections._meta import _path_basename, render_meta_panel
+from codeclone.report.html.sections._overview import (
     _directory_hotspot_bucket_body,
     _directory_kind_meta_parts,
     _health_gauge_html,
     _issue_breakdown_html,
     render_overview_panel,
 )
-from codeclone._html_report._sections._suggestions import (
+from codeclone.report.html.sections._suggestions import (
     _format_source_breakdown,
     _priority_badge_label,
     _render_card,
@@ -44,10 +43,14 @@ from codeclone._html_report._sections._suggestions import (
     _spread_label,
     _suggestion_context_labels,
 )
-from codeclone._html_report._tabs import render_split_tabs
-from codeclone._html_snippets import _FileCache
-from codeclone.contracts import REPORT_SCHEMA_VERSION
-from codeclone.models import MetricsDiff, ReportLocation, Suggestion
+from codeclone.report.html.widgets.badges import _quality_badge_html, _stat_card
+from codeclone.report.html.widgets.components import (
+    overview_source_breakdown_html,
+    overview_summary_item_html,
+)
+from codeclone.report.html.widgets.icons import section_icon_html
+from codeclone.report.html.widgets.snippets import _FileCache
+from codeclone.report.html.widgets.tabs import render_split_tabs
 from tests._assertions import assert_contains_none
 
 
@@ -138,7 +141,11 @@ def test_clone_display_name_falls_back_to_short_key_when_items_have_no_labels() 
 
 def test_dependency_helpers_cover_dense_and_empty_branches() -> None:
     edges = [(f"n{i}", f"n{i + 1}") for i in range(21)]
-    nodes, filtered = _select_dep_nodes(edges)
+    nodes, filtered = _select_dep_nodes(
+        edges,
+        dep_cycles=(),
+        longest_chains=(),
+    )
     assert len(nodes) == 20
     assert len(filtered) <= 100
     assert _hub_threshold([], {}, {}) == 99
@@ -152,10 +159,84 @@ def test_dependency_helpers_cover_dense_and_empty_branches() -> None:
         cycle_node_set={"n0"},
         hub_threshold=1,
         max_per_layer=9,
+        prefer_horizontal=True,
     )
     assert len(node_svg) == 9
     assert len(label_svg) == 9
     assert "rotate(-45)" in label_svg[0]
+
+
+def test_dependency_layout_covers_horizontal_and_non_rotated_label_paths() -> None:
+    layer_groups = {
+        0: ["alpha", "beta", "gamma"],
+        1: ["delta", "epsilon", "zeta"],
+        2: ["eta"],
+        3: ["theta"],
+        4: ["iota"],
+        5: ["kappa"],
+    }
+    in_degree = {
+        "alpha": 0,
+        "beta": 1,
+        "gamma": 3,
+        "delta": 2,
+        "epsilon": 1,
+        "zeta": 1,
+        "eta": 2,
+        "theta": 1,
+        "iota": 1,
+        "kappa": 1,
+    }
+    out_degree = {
+        "alpha": 1,
+        "beta": 2,
+        "gamma": 4,
+        "delta": 2,
+        "epsilon": 1,
+        "zeta": 1,
+        "eta": 2,
+        "theta": 1,
+        "iota": 1,
+        "kappa": 0,
+    }
+    width, height, max_per_layer, positions = _layout_dep_graph(
+        layer_groups,
+        in_degree=in_degree,
+        out_degree=out_degree,
+    )
+    assert width > height
+    assert max_per_layer == 3
+    assert positions["beta"][1] != positions["gamma"][1]
+    assert positions["delta"][0] > positions["alpha"][0]
+
+    node_svg, label_svg = _render_dep_nodes_and_labels(
+        ["leaf", "hub"],
+        positions={"leaf": (10.0, 20.0), "hub": (40.0, 20.0)},
+        node_radii={"leaf": 3.0, "hub": 6.0},
+        in_degree={"leaf": 0, "hub": 2},
+        out_degree={"leaf": 1, "hub": 2},
+        cycle_node_set=set(),
+        hub_threshold=3,
+        max_per_layer=2,
+        prefer_horizontal=False,
+    )
+    assert len(node_svg) == 2
+    assert len(label_svg) == 2
+    assert 'text-anchor="middle"' in label_svg[0]
+    assert 'font-size="8"' in label_svg[0]
+    assert 'font-size="10"' in label_svg[1]
+    assert "rotate(-45)" not in label_svg[0]
+
+
+def test_cli_runtime_warning_formatter_covers_baseline_and_legacy_cache_paths() -> None:
+    rendered = ui.fmt_cli_runtime_warning(
+        "Baseline trust mismatch: python_tag=cp313\n\nLegacy cache format ignored"
+    )
+    assert (
+        rendered == "  [warning]Baseline[/warning] trust mismatch\n"
+        "    [dim]python_tag=cp313[/dim]\n\n"
+        "  [warning]Cache[/warning] Legacy cache format ignored"
+    )
 
 
 def test_render_split_tabs_returns_empty_for_no_tabs() -> None:
@@ -549,13 +630,15 @@ def test_meta_snippet_and_assembly_helpers_cover_empty_optional_paths(
 
 
 def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
+    runtime_tag = current_python_tag()
+    baseline_tag = "cp313" if runtime_tag != "cp313" else "cp314"
     meta_html = render_meta_panel(
         cast(
             Any,
             SimpleNamespace(
                 meta={
-                    "python_tag": "cp313",
-                    "baseline_python_tag": "cp312",
+                    "python_tag": runtime_tag,
+                    "baseline_python_tag": baseline_tag,
                     "cache_status": "stale",
                     "metrics_baseline_loaded": True,
                     "metrics_baseline_payload_sha256_verified": True,
@@ -565,7 +648,7 @@ def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
                 metrics_baseline_meta={},
                 runtime_meta={},
                 integrity_map={},
-                report_schema_version="2.8",
+                report_schema_version="2.9",
                 report_generated_at="2026-04-15T12:00:00Z",
             ),
         )
@@ -575,6 +658,6 @@ def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
     assert 'class="prov-badge prov-badge--amber prov-badge--inline"' in meta_html
     assert '<span class="prov-badge-val">FAILED</span>' in meta_html
     assert '<span class="prov-badge-val">stale</span>' in meta_html
-    assert '<span class="prov-badge-val">runtime cp313</span>' in meta_html
+    assert f'<span class="prov-badge-val">runtime {runtime_tag}</span>' in meta_html
     assert '<span class="prov-badge-val">verified</span>' in meta_html
     assert '<span class="prov-badge-lbl">Metrics baseline</span>' in meta_html

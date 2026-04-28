@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,7 @@ from codeclone import __version__ as codeclone_version
 from codeclone.baseline import current_python_tag
 
 BENCHMARK_SCHEMA_VERSION = "1.0"
+BENCHMARK_CLI_MODULE = "codeclone.main"
 BENCHMARK_NEUTRAL_ARGS: tuple[str, ...] = (
     "--no-fail-on-new",
     "--no-fail-on-new-metrics",
@@ -48,6 +50,8 @@ BENCHMARK_NEUTRAL_ARGS: tuple[str, ...] = (
     "-1",
     "--min-docstring-coverage",
     "-1",
+    "--no-api-surface",
+    "--no-update-metrics-baseline",
 )
 
 
@@ -161,7 +165,7 @@ def _run_cli_once(
     cmd = [
         python_executable,
         "-m",
-        "codeclone.cli",
+        BENCHMARK_CLI_MODULE,
         str(target),
         *BENCHMARK_NEUTRAL_ARGS,
         "--json",
@@ -238,6 +242,14 @@ def _validate_inventory_sample(
             f"warm scenario {scenario.name} analyzed files unexpectedly: "
             f"analyzed={measurement.files_analyzed}"
         )
+
+
+def _print_bulleted_lines(header: str, lines: Sequence[str]) -> None:
+    if not lines:
+        return
+    print(header)
+    for line in lines:
+        print(f"- {line}")
 
 
 def _scenario_result(
@@ -393,6 +405,67 @@ def _comparison_metrics(scenarios: list[dict[str, object]]) -> dict[str, float]:
     return comparisons
 
 
+def _load_benchmark_payload(path: Path) -> dict[str, object]:
+    payload_obj: object = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload_obj, dict):
+        raise RuntimeError(f"benchmark payload is not an object: {path}")
+    return payload_obj
+
+
+def _scenario_medians(payload: Mapping[str, object]) -> dict[str, float]:
+    scenarios_obj = payload.get("scenarios")
+    if not isinstance(scenarios_obj, list):
+        raise RuntimeError("benchmark payload is missing a scenarios list")
+
+    medians: dict[str, float] = {}
+    for item in scenarios_obj:
+        if not isinstance(item, dict):
+            raise RuntimeError("benchmark scenario entry is not an object")
+        name = item.get("name")
+        stats = item.get("stats_seconds")
+        if not isinstance(name, str) or not isinstance(stats, dict):
+            raise RuntimeError("benchmark scenario entry is missing name/stats_seconds")
+        median = stats.get("median")
+        if not isinstance(median, (int, float)):
+            raise RuntimeError(f"benchmark scenario {name} is missing median timing")
+        medians[name] = float(median)
+    return medians
+
+
+def _timing_regressions(
+    *,
+    current_payload: Mapping[str, object],
+    baseline_payload: Mapping[str, object],
+    max_regression_pct: float,
+) -> list[str]:
+    current_medians = _scenario_medians(current_payload)
+    baseline_medians = _scenario_medians(baseline_payload)
+
+    missing = sorted(set(baseline_medians) - set(current_medians))
+    if missing:
+        raise RuntimeError(
+            "benchmark payload is missing baseline scenario(s): " + ", ".join(missing)
+        )
+
+    regressions: list[str] = []
+    for name, baseline_median in sorted(baseline_medians.items()):
+        if baseline_median <= 0:
+            raise RuntimeError(
+                f"baseline scenario {name} has non-positive median: {baseline_median}"
+            )
+        current_median = current_medians[name]
+        allowed_median = baseline_median * (1.0 + (max_regression_pct / 100.0))
+        if current_median <= allowed_median:
+            continue
+        regression_pct = ((current_median - baseline_median) / baseline_median) * 100.0
+        regressions.append(
+            f"{name}: median {current_median:.4f}s exceeds baseline "
+            f"{baseline_median:.4f}s by {regression_pct:.2f}% "
+            f"(allowed {max_regression_pct:.2f}%)"
+        )
+    return regressions
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -440,6 +513,18 @@ def _parse_args() -> argparse.Namespace:
         default=sys.executable,
         help="Python executable used to invoke codeclone CLI",
     )
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        default=None,
+        help="Existing benchmark JSON used for per-scenario median regression checks.",
+    )
+    parser.add_argument(
+        "--max-regression-pct",
+        type=float,
+        default=5.0,
+        help="Allowed per-scenario median slowdown versus --baseline.",
+    )
     return parser.parse_args()
 
 
@@ -449,6 +534,8 @@ def main() -> int:
         raise SystemExit("--runs must be > 0")
     if args.warmups < 0:
         raise SystemExit("--warmups must be >= 0")
+    if args.max_regression_pct < 0:
+        raise SystemExit("--max-regression-pct must be >= 0")
     target = args.target.resolve()
     if not target.exists():
         raise SystemExit(f"target does not exist: {target}")
@@ -501,6 +588,22 @@ def main() -> int:
         .replace("+00:00", "Z"),
     }
 
+    regressions: list[str] = []
+    baseline_path = args.baseline.resolve() if args.baseline is not None else None
+    if baseline_path is not None:
+        baseline_payload = _load_benchmark_payload(baseline_path)
+        regressions = _timing_regressions(
+            current_payload=payload,
+            baseline_payload=baseline_payload,
+            max_regression_pct=args.max_regression_pct,
+        )
+        payload["baseline_comparison"] = {
+            "baseline_path": str(baseline_path),
+            "max_regression_pct": args.max_regression_pct,
+            "status": "regression" if regressions else "ok",
+            "regressions": regressions,
+        }
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     tmp_output = args.output.with_suffix(args.output.suffix + ".tmp")
     rendered = json.dumps(payload, ensure_ascii=False, indent=2)
@@ -522,12 +625,19 @@ def main() -> int:
             f"p95={p95_s:.4f}s stdev={stdev_s:.4f}s "
             f"digest={scenario['digest']}"
         )
-    if comparisons:
-        print("ratios:")
-        for name, value in sorted(comparisons.items()):
-            print(f"- {name}={value:.3f}x")
+    _print_bulleted_lines(
+        "ratios:",
+        [f"{name}={value:.3f}x" for name, value in sorted(comparisons.items())],
+    )
+    if baseline_path is not None:
+        print(f"baseline={baseline_path}")
+        print(f"max_regression_pct={args.max_regression_pct:.2f}")
+        if regressions:
+            _print_bulleted_lines("regressions:", regressions)
+        else:
+            print("baseline_status=ok")
     print(f"output={args.output}")
-    return 0
+    return 1 if regressions else 0
 
 
 if __name__ == "__main__":

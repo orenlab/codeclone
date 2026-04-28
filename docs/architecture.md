@@ -144,7 +144,7 @@ gating decisions.
 Detected findings can be rendered as:
 
 - interactive HTML (`--html`),
-- canonical JSON (`--json`, schema `2.8`),
+- canonical JSON (`--json`, schema `2.10`),
 - deterministic text projection (`--text`),
 - deterministic Markdown projection (`--md`),
 - deterministic SARIF projection (`--sarif`).
@@ -193,10 +193,10 @@ Current shape:
 
 Operational note:
 
-- `codeclone/mcp_server.py` is only a thin launcher/registration layer.
+- `codeclone/surfaces/mcp/server.py` is only a thin launcher/registration layer.
 - The optional MCP runtime is imported lazily so the base `codeclone` install
   and normal CI paths do not require MCP packages.
-- `codeclone/mcp_service.py` is the in-process adapter over the existing
+- `codeclone/surfaces/mcp/service.py` is the in-process adapter over the existing
   pipeline/report contracts.
 
 The MCP layer is intentionally thin. It does not add a separate analysis engine;
@@ -274,7 +274,7 @@ baseline/options contract violations.
 ## Python Tag Consistency for Baseline Checks
 
 Due to inherent AST differences across interpreter builds, baseline compatibility
-is pinned to `python_tag` (for example `cp313`).
+is pinned to `python_tag` (for example `cp314`).
 
 This preserves deterministic and reproducible clone detection results while allowing
 patch updates within the same interpreter tag.

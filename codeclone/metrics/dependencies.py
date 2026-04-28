@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from math import ceil
 from typing import TYPE_CHECKING
 
 from ..models import DepGraph, ModuleDep
@@ -14,6 +15,37 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
 DepAdjacency = dict[str, set[str]]
+
+
+def _internal_roots(
+    modules: Iterable[str],
+    deps: Sequence[ModuleDep],
+) -> frozenset[str]:
+    roots: set[str] = set()
+    for module_name in modules:
+        if module_name:
+            roots.add(module_name.split(".", 1)[0])
+    for dep in deps:
+        if dep.source:
+            roots.add(dep.source.split(".", 1)[0])
+    return frozenset(sorted(roots))
+
+
+def _is_internal_target(target: str, *, internal_roots: frozenset[str]) -> bool:
+    if not target:
+        return False
+    return target.split(".", 1)[0] in internal_roots
+
+
+def _unique_sorted_edges(deps: Sequence[ModuleDep]) -> tuple[ModuleDep, ...]:
+    return tuple(
+        sorted(
+            {
+                (dep.source, dep.target, dep.import_type, dep.line): dep for dep in deps
+            }.values(),
+            key=lambda dep: (dep.source, dep.target, dep.import_type, dep.line),
+        )
+    )
 
 
 def build_import_graph(
@@ -123,6 +155,23 @@ def max_depth(graph: DepAdjacency) -> int:
     return best
 
 
+def depth_profile(graph: DepAdjacency) -> tuple[float, int]:
+    if not graph:
+        return 0.0, 0
+
+    memo: dict[str, int] = {}
+    depths = sorted(
+        _longest_path_from(node, graph=graph, visiting=set(), memo=memo)
+        for node in sorted(graph)
+    )
+    if not depths:
+        return 0.0, 0
+
+    avg_depth = sum(depths) / len(depths)
+    percentile_index = max(0, ceil(len(depths) * 0.95) - 1)
+    return avg_depth, int(depths[percentile_index])
+
+
 def _longest_path_nodes_from(
     node: str,
     *,
@@ -180,22 +229,44 @@ def longest_chains(
 
 
 def build_dep_graph(*, modules: Iterable[str], deps: Sequence[ModuleDep]) -> DepGraph:
-    graph = build_import_graph(modules=modules, deps=deps)
-    cycles = find_cycles(graph)
-    depth = max_depth(graph)
-    chains = longest_chains(graph)
-    unique_edges = tuple(
+    base_modules = frozenset(
         sorted(
             {
-                (dep.source, dep.target, dep.import_type, dep.line): dep for dep in deps
-            }.values(),
-            key=lambda dep: (dep.source, dep.target, dep.import_type, dep.line),
+                str(module_name).strip()
+                for module_name in modules
+                if str(module_name).strip()
+            }
         )
     )
+    internal_roots = _internal_roots(base_modules, deps)
+    internal_edges = _unique_sorted_edges(
+        tuple(
+            dep
+            for dep in deps
+            if dep.source
+            and _is_internal_target(dep.target, internal_roots=internal_roots)
+        )
+    )
+    graph_modules = frozenset(
+        sorted(
+            {
+                *base_modules,
+                *(dep.source for dep in internal_edges if dep.source),
+                *(dep.target for dep in internal_edges if dep.target),
+            }
+        )
+    )
+    graph = build_import_graph(modules=graph_modules, deps=internal_edges)
+    cycles = find_cycles(graph)
+    depth = max_depth(graph)
+    avg_depth, p95_depth = depth_profile(graph)
+    chains = longest_chains(graph)
     return DepGraph(
         modules=frozenset(graph.keys()),
-        edges=unique_edges,
+        edges=internal_edges,
         cycles=cycles,
         max_depth=depth,
+        avg_depth=avg_depth,
+        p95_depth=p95_depth,
         longest_chains=chains,
     )

@@ -6,7 +6,7 @@
 
 """Deterministic structural-finding helpers for the report layer.
 
-HTML rendering lives in ``codeclone._html_report._sections._structural``.
+HTML rendering lives in ``codeclone.report.html.sections._structural``.
 """
 
 from __future__ import annotations

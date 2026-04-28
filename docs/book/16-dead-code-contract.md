@@ -8,11 +8,11 @@ Define dead-code liveness rules, canonical symbol-usage boundaries, and gating s
 
 - Dead-code detection core: `codeclone/metrics/dead_code.py:find_unused`
 - Test-path classifier: `codeclone/paths.py:is_test_filepath`
-- Inline suppression parser/binder: `codeclone/suppressions.py`
+- Inline suppression parser/binder: `codeclone/analysis/suppressions.py`
 - Extraction of referenced names/candidates:
-  `codeclone/extractor.py:extract_units_and_stats_from_source`
+  `codeclone/analysis/units.py:extract_units_and_stats_from_source`
 - Cache load boundary for referenced names:
-  `codeclone/pipeline.py:_load_cached_metrics`
+  `codeclone/core/discovery_cache.py:load_cached_metrics_extended`
 
 ## Data model
 
@@ -62,7 +62,7 @@ Refs:
 
 - `codeclone/metrics/dead_code.py:_is_non_actionable_candidate`
 - `codeclone/metrics/dead_code.py:find_unused`
-- `codeclone/pipeline.py:metric_gate_reasons`
+- `codeclone/report/gates/evaluator.py:metric_gate_reasons`
 
 ## Invariants (MUST)
 
@@ -74,8 +74,8 @@ Refs:
 Refs:
 
 - `codeclone/metrics/dead_code.py:find_unused`
-- `codeclone/extractor.py:extract_units_and_stats_from_source`
-- `codeclone/pipeline.py:_load_cached_metrics`
+- `codeclone/analysis/units.py:extract_units_and_stats_from_source`
+- `codeclone/core/discovery_cache.py:load_cached_metrics_extended`
 
 ## Failure modes
 
@@ -104,9 +104,9 @@ Refs:
 ## Locked by tests
 
 - `tests/test_extractor.py::test_dead_code_marks_symbol_dead_when_referenced_only_by_tests`
-- `tests/test_extractor.py::test_dead_code_skips_module_pep562_hooks`
-- `tests/test_extractor.py::test_dead_code_applies_inline_suppression_per_declaration`
-- `tests/test_extractor.py::test_dead_code_suppression_binding_is_scoped_to_target_symbol`
+- `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[skip_pep562_hooks]`
+- `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[inline_suppression_per_declaration]`
+- `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[suppression_binding_scoped_to_target]`
 - `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_import_aliases`
 - `tests/test_extractor.py::test_collect_dead_candidates_skips_protocol_and_stub_like_symbols`
 - `tests/test_pipeline_metrics.py::test_load_cached_metrics_ignores_referenced_names_from_test_files`
@@ -118,7 +118,7 @@ Refs:
 - `tests/test_report.py::test_report_json_dead_code_suppressed_items_are_reported_separately`
 - `tests/test_html_report.py::test_html_report_renders_dead_code_split_with_suppressed_layer`
 - `tests/test_suppressions.py::test_extract_suppression_directives_supports_inline_and_leading_forms`
-- `tests/test_suppressions.py::test_bind_suppressions_applies_only_to_adjacent_declaration_line`
+- `tests/test_suppressions.py::test_bind_suppressions_targets_expected_declaration_scope[adjacent_leading_only]`
 
 ## Non-guarantees
 

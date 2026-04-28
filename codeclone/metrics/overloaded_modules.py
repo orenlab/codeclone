@@ -11,7 +11,6 @@ from collections import Counter, defaultdict
 from collections.abc import Sequence
 from math import floor
 
-from .._coerce import as_float, as_int, as_sequence, as_str
 from ..domain.source_scope import (
     SOURCE_KIND_FIXTURES,
     SOURCE_KIND_OTHER,
@@ -20,6 +19,7 @@ from ..domain.source_scope import (
 )
 from ..models import ClassMetrics, GroupItemLike, ModuleDep
 from ..scanner import module_name_from_path
+from ..utils.coerce import as_float, as_int, as_sequence, as_str
 
 _CANDIDATE = "candidate"
 _NON_CANDIDATE = "non_candidate"

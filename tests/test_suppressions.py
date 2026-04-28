@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from codeclone.suppressions import (
+from codeclone.analysis.suppressions import (
     DeclarationTarget,
     SuppressionBinding,
     SuppressionDirective,

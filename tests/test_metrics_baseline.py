@@ -15,9 +15,14 @@ from typing import Any, cast
 import pytest
 
 import codeclone.baseline as baseline_mod
-import codeclone.metrics_baseline as mb_mod
-from codeclone.errors import BaselineValidationError
-from codeclone.metrics_baseline import MetricsBaseline, MetricsBaselineStatus
+import codeclone.baseline._metrics_baseline_payload as mb_payload
+import codeclone.baseline._metrics_baseline_validation as mb_validate
+import codeclone.baseline.metrics_baseline as mb_mod
+from codeclone.baseline.metrics_baseline import (
+    MetricsBaseline,
+    MetricsBaselineStatus,
+)
+from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import (
     ApiParamSpec,
     ApiSurfaceSnapshot,
@@ -217,7 +222,7 @@ def _valid_payload(
     schema_version: str = mb_mod.METRICS_BASELINE_SCHEMA_VERSION,
     python_tag: str | None = None,
 ) -> dict[str, object]:
-    return mb_mod._build_payload(
+    return mb_payload._build_payload(
         snapshot=_snapshot(),
         schema_version=schema_version,
         python_tag=python_tag or mb_mod.current_python_tag(),
@@ -238,7 +243,7 @@ def _ready_metrics_baseline(
 ) -> MetricsBaseline:
     baseline = MetricsBaseline(path)
     baseline.snapshot = _snapshot()
-    baseline.payload_sha256 = mb_mod._compute_payload_sha256(_snapshot())
+    baseline.payload_sha256 = mb_payload._compute_payload_sha256(_snapshot())
     baseline.has_coverage_adoption_snapshot = has_adoption
     baseline.generator_name = generator_name
     baseline.schema_version = schema_version
@@ -444,14 +449,14 @@ def test_api_surface_payload_hashes_are_order_independent() -> None:
         )
     )
 
-    assert mb_mod._compute_api_surface_payload_sha256(
+    assert mb_payload._compute_api_surface_payload_sha256(
         reordered
-    ) == mb_mod._compute_api_surface_payload_sha256(
+    ) == mb_payload._compute_api_surface_payload_sha256(
         _api_surface_snapshot(include_added=True)
     )
-    assert mb_mod._compute_legacy_api_surface_payload_sha256(
+    assert mb_payload._compute_legacy_api_surface_payload_sha256(
         reordered
-    ) == mb_mod._compute_legacy_api_surface_payload_sha256(
+    ) == mb_payload._compute_legacy_api_surface_payload_sha256(
         _api_surface_snapshot(include_added=True)
     )
 
@@ -481,10 +486,10 @@ def test_metrics_baseline_atomic_write_json_cleans_up_temp_file_on_replace_failu
         temp_holder["path"] = Path(src)
         raise OSError("replace failed")
 
-    monkeypatch.setattr("codeclone._json_io.os.replace", _boom_replace)
+    monkeypatch.setattr("codeclone.utils.json_io.os.replace", _boom_replace)
 
     with pytest.raises(OSError, match="replace failed"):
-        mb_mod._atomic_write_json(path, payload)
+        mb_validate._atomic_write_json(path, payload)
 
     assert temp_holder["path"].exists() is False
 
@@ -678,7 +683,7 @@ def test_metrics_baseline_load_tracks_adoption_snapshot_presence(
     metrics.pop("typing_return_permille")
     metrics.pop("docstring_permille")
     metrics.pop("typing_any_count")
-    meta["payload_sha256"] = mb_mod._compute_payload_sha256(
+    meta["payload_sha256"] = mb_payload._compute_payload_sha256(
         _snapshot(),
         include_adoption=False,
     )
@@ -767,7 +772,7 @@ def test_metrics_baseline_load_accepts_legacy_api_surface_qualnames(
     path = tmp_path / "metrics-baseline.json"
     snapshot = _snapshot()
     api_surface_snapshot = _api_surface_snapshot(include_added=True)
-    payload = mb_mod._build_payload(
+    payload = mb_payload._build_payload(
         snapshot=snapshot,
         schema_version=mb_mod.METRICS_BASELINE_SCHEMA_VERSION,
         python_tag=mb_mod.current_python_tag(),
@@ -784,7 +789,7 @@ def test_metrics_baseline_load_accepts_legacy_api_surface_qualnames(
         symbol["qualname"] = f"pkg.mod:{local_name}"
     meta = cast(dict[str, object], payload["meta"])
     meta["api_surface_payload_sha256"] = (
-        mb_mod._compute_legacy_api_surface_payload_sha256(
+        mb_payload._compute_legacy_api_surface_payload_sha256(
             api_surface_snapshot,
             root=path.parent,
         )
@@ -808,7 +813,7 @@ def test_metrics_baseline_load_accepts_absolute_api_surface_filepaths(
     path, absolute_filepath = _repo_metrics_baseline_path_and_abs_filepath(tmp_path)
     snapshot = _snapshot()
     api_surface_snapshot = _api_surface_snapshot_with_filepath(absolute_filepath)
-    payload = mb_mod._build_payload(
+    payload = mb_payload._build_payload(
         snapshot=snapshot,
         schema_version=mb_mod.METRICS_BASELINE_SCHEMA_VERSION,
         python_tag=mb_mod.current_python_tag(),
@@ -822,7 +827,7 @@ def test_metrics_baseline_load_accepts_absolute_api_surface_filepaths(
     modules = cast(list[dict[str, object]], api_surface["modules"])
     modules[0]["filepath"] = absolute_filepath
     meta = cast(dict[str, object], payload["meta"])
-    meta["api_surface_payload_sha256"] = mb_mod._compute_api_surface_payload_sha256(
+    meta["api_surface_payload_sha256"] = mb_payload._compute_api_surface_payload_sha256(
         api_surface_snapshot
     )
     baseline = _load_written_metrics_baseline(path, payload)
@@ -836,33 +841,40 @@ def test_metrics_baseline_json_and_structure_validators(tmp_path: Path) -> None:
     path = tmp_path / "metrics-baseline.json"
     path.write_text("[]", "utf-8")
     with pytest.raises(BaselineValidationError, match="must be an object"):
-        mb_mod._load_json_object(path)
+        mb_validate._load_json_object(path)
 
-    mb_mod._validate_top_level_structure(_valid_payload(), path=path)
+    mb_validate._validate_top_level_structure(_valid_payload(), path=path)
     with pytest.raises(BaselineValidationError, match="unexpected top-level keys"):
-        mb_mod._validate_top_level_structure(
+        mb_validate._validate_top_level_structure(
             {**_valid_payload(), "extra": 1},
             path=path,
         )
     with pytest.raises(BaselineValidationError, match="missing required fields"):
-        mb_mod._validate_required_keys(
+        mb_validate._validate_required_keys(
             {"only": "one"}, frozenset({"required"}), path=path
         )
     with pytest.raises(BaselineValidationError, match="unexpected fields"):
-        mb_mod._validate_exact_keys({"a": 1, "b": 2}, frozenset({"a"}), path=path)
+        mb_validate._validate_exact_keys(
+            {"a": 1, "b": 2},
+            frozenset({"a"}),
+            path=path,
+        )
 
 
 def test_metrics_baseline_field_parsers_and_cycle_parser(tmp_path: Path) -> None:
     path = tmp_path / "metrics-baseline.json"
 
     with pytest.raises(BaselineValidationError, match="'name' must be str"):
-        mb_mod._require_str({"name": 1}, "name", path=path)
+        mb_validate._require_str({"name": 1}, "name", path=path)
     assert (
-        mb_mod._extract_metrics_payload_sha256({"payload_sha256": "x"}, path=path)
+        mb_validate._extract_metrics_payload_sha256(
+            {"payload_sha256": "x"},
+            path=path,
+        )
         == "x"
     )
     assert (
-        mb_mod._extract_metrics_payload_sha256(
+        mb_validate._extract_metrics_payload_sha256(
             {"metrics_payload_sha256": "y", "payload_sha256": "x"},
             path=path,
         )
@@ -870,23 +882,23 @@ def test_metrics_baseline_field_parsers_and_cycle_parser(tmp_path: Path) -> None
     )
 
     with pytest.raises(BaselineValidationError, match="must be int"):
-        mb_mod._require_int({"value": True}, "value", path=path)
+        mb_validate._require_int({"value": True}, "value", path=path)
     with pytest.raises(BaselineValidationError, match="must be int"):
-        mb_mod._require_int({"value": "1"}, "value", path=path)
+        mb_validate._require_int({"value": "1"}, "value", path=path)
 
     with pytest.raises(BaselineValidationError, match="must be list\\[str\\]"):
-        mb_mod._require_str_list({"items": "bad"}, "items", path=path)
+        mb_validate._require_str_list({"items": "bad"}, "items", path=path)
     with pytest.raises(BaselineValidationError, match="must be list\\[str\\]"):
-        mb_mod._require_str_list({"items": [1]}, "items", path=path)
+        mb_validate._require_str_list({"items": [1]}, "items", path=path)
 
     with pytest.raises(BaselineValidationError, match="must be list"):
-        mb_mod._parse_cycles(
+        mb_validate._parse_cycles(
             {"dependency_cycles": "bad"}, key="dependency_cycles", path=path
         )
     with pytest.raises(
         BaselineValidationError, match="cycle item must be list\\[str\\]"
     ):
-        mb_mod._parse_cycles(
+        mb_validate._parse_cycles(
             {"dependency_cycles": ["bad"]},
             key="dependency_cycles",
             path=path,
@@ -894,12 +906,12 @@ def test_metrics_baseline_field_parsers_and_cycle_parser(tmp_path: Path) -> None
     with pytest.raises(
         BaselineValidationError, match="cycle item must be list\\[str\\]"
     ):
-        mb_mod._parse_cycles(
+        mb_validate._parse_cycles(
             {"dependency_cycles": [[1]]},
             key="dependency_cycles",
             path=path,
         )
-    assert mb_mod._parse_cycles(
+    assert mb_validate._parse_cycles(
         {"dependency_cycles": [["b", "a"], ["a", "b"], ["b", "a"]]},
         key="dependency_cycles",
         path=path,
@@ -908,31 +920,31 @@ def test_metrics_baseline_field_parsers_and_cycle_parser(tmp_path: Path) -> None
 
 def test_metrics_baseline_parse_generator_variants(tmp_path: Path) -> None:
     path = tmp_path / "metrics-baseline.json"
-    assert mb_mod._parse_generator({"generator": "codeclone"}, path=path) == (
+    assert mb_validate._parse_generator({"generator": "codeclone"}, path=path) == (
         "codeclone",
         None,
     )
-    assert mb_mod._parse_generator(
+    assert mb_validate._parse_generator(
         {"generator": "codeclone", "codeclone_version": "1.0.0"},
         path=path,
     ) == ("codeclone", "1.0.0")
     with pytest.raises(BaselineValidationError, match="generator_version must be str"):
-        mb_mod._parse_generator(
+        mb_validate._parse_generator(
             {"generator": "codeclone", "generator_version": 1},
             path=path,
         )
 
-    assert mb_mod._parse_generator(
+    assert mb_validate._parse_generator(
         {"generator": {"name": "codeclone", "version": "2.0.0"}},
         path=path,
     ) == ("codeclone", "2.0.0")
     with pytest.raises(BaselineValidationError, match="unexpected generator keys"):
-        mb_mod._parse_generator(
+        mb_validate._parse_generator(
             {"generator": {"name": "codeclone", "extra": 1}},
             path=path,
         )
     with pytest.raises(BaselineValidationError, match=r"generator\.name must be str"):
-        mb_mod._parse_generator(
+        mb_validate._parse_generator(
             {"generator": {"name": 1, "version": "2.0.0"}},
             path=path,
         )
@@ -940,14 +952,14 @@ def test_metrics_baseline_parse_generator_variants(tmp_path: Path) -> None:
         BaselineValidationError,
         match=r"generator\.version must be str",
     ):
-        mb_mod._parse_generator(
+        mb_validate._parse_generator(
             {"generator": {"name": "codeclone", "version": 2}},
             path=path,
         )
     with pytest.raises(
         BaselineValidationError, match="generator must be object or str"
     ):
-        mb_mod._parse_generator({"generator": 1}, path=path)
+        mb_validate._parse_generator({"generator": 1}, path=path)
 
 
 def test_metrics_baseline_embedded_clone_payload_and_schema_resolution(
@@ -967,17 +979,17 @@ def test_metrics_baseline_embedded_clone_payload_and_schema_resolution(
             "blocks": ["|".join(["a" * 40, "b" * 40, "c" * 40, "d" * 40])],
         },
     }
-    meta_obj, clones_obj = mb_mod._require_embedded_clone_baseline_payload(
+    meta_obj, clones_obj = mb_validate._require_embedded_clone_baseline_payload(
         valid_embedded, path=path
     )
     assert "schema_version" in meta_obj
     assert "functions" in clones_obj
     assert (
-        mb_mod._resolve_embedded_schema_version(meta_obj, path=path)
+        mb_validate._resolve_embedded_schema_version(meta_obj, path=path)
         == mb_mod.BASELINE_SCHEMA_VERSION
     )
     assert (
-        mb_mod._resolve_embedded_schema_version(
+        mb_validate._resolve_embedded_schema_version(
             {**meta_obj, "schema_version": "2.1"},
             path=path,
         )
@@ -985,12 +997,12 @@ def test_metrics_baseline_embedded_clone_payload_and_schema_resolution(
     )
 
     with pytest.raises(BaselineValidationError, match="'meta' must be object"):
-        mb_mod._require_embedded_clone_baseline_payload(
+        mb_validate._require_embedded_clone_baseline_payload(
             {"meta": [], "clones": {}},
             path=path,
         )
     with pytest.raises(BaselineValidationError, match="'clones' must be object"):
-        mb_mod._require_embedded_clone_baseline_payload(
+        mb_validate._require_embedded_clone_baseline_payload(
             {"meta": {}, "clones": []},
             path=path,
         )
@@ -998,7 +1010,7 @@ def test_metrics_baseline_embedded_clone_payload_and_schema_resolution(
         BaselineValidationError,
         match=r"'clones\.functions' must be list\[str\]",
     ):
-        mb_mod._require_embedded_clone_baseline_payload(
+        mb_validate._require_embedded_clone_baseline_payload(
             {
                 "meta": valid_embedded["meta"],
                 "clones": {"functions": [1], "blocks": []},
@@ -1009,7 +1021,7 @@ def test_metrics_baseline_embedded_clone_payload_and_schema_resolution(
         BaselineValidationError,
         match=r"'clones\.blocks' must be list\[str\]",
     ):
-        mb_mod._require_embedded_clone_baseline_payload(
+        mb_validate._require_embedded_clone_baseline_payload(
             {
                 "meta": valid_embedded["meta"],
                 "clones": {"functions": [], "blocks": [1]},
@@ -1017,7 +1029,7 @@ def test_metrics_baseline_embedded_clone_payload_and_schema_resolution(
             path=path,
         )
     with pytest.raises(BaselineValidationError, match="must be semver string"):
-        mb_mod._resolve_embedded_schema_version(
+        mb_validate._resolve_embedded_schema_version(
             {**meta_obj, "schema_version": "broken"},
             path=path,
         )
@@ -1025,10 +1037,216 @@ def test_metrics_baseline_embedded_clone_payload_and_schema_resolution(
 
 def test_metrics_baseline_parse_snapshot_grade_validation(tmp_path: Path) -> None:
     path = tmp_path / "metrics-baseline.json"
-    payload = mb_mod._snapshot_payload(_snapshot())
+    payload = mb_payload._snapshot_payload(_snapshot())
     payload["health_grade"] = "Z"
     with pytest.raises(BaselineValidationError, match="must be one of A/B/C/D/F"):
-        mb_mod._parse_snapshot(payload, path=path)
+        mb_validate._parse_snapshot(payload, path=path)
+
+
+def test_metrics_baseline_version_and_optional_string_helpers(tmp_path: Path) -> None:
+    path = tmp_path / "metrics-baseline.json"
+
+    assert (
+        mb_validate._is_compatible_metrics_schema(
+            baseline_version="1.1",
+            expected_version="1.2",
+        )
+        is True
+    )
+    assert (
+        mb_validate._is_compatible_metrics_schema(
+            baseline_version=None,
+            expected_version="1.2",
+        )
+        is False
+    )
+    assert (
+        mb_validate._is_compatible_metrics_schema(
+            baseline_version="broken",
+            expected_version="1.2",
+        )
+        is False
+    )
+    assert mb_validate._parse_major_minor("1") is None
+    assert mb_validate._parse_major_minor("1.x") is None
+    assert mb_validate._require_str_list_or_none({}, "missing", path=path) is None
+
+    with pytest.raises(BaselineValidationError, match="'qualname' must be str"):
+        mb_validate._optional_require_str({"qualname": 1}, "qualname", path=path)
+
+
+def test_metrics_baseline_enum_validation_helpers_cover_all_supported_values(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "metrics-baseline.json"
+
+    for grade in ("A", "B", "C", "D", "F"):
+        assert mb_validate._require_health_grade(grade, path=path) == grade
+    with pytest.raises(BaselineValidationError, match="must be one of A/B/C/D/F"):
+        mb_validate._require_health_grade("Z", path=path)
+
+    for kind in ("pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg"):
+        assert mb_validate._require_api_param_kind(kind, path=path) == kind
+    with pytest.raises(BaselineValidationError, match="api param 'kind' is invalid"):
+        mb_validate._require_api_param_kind("bad", path=path)
+
+    for kind in ("function", "class", "method", "constant"):
+        assert mb_validate._require_public_symbol_kind(kind, path=path) == kind
+    with pytest.raises(
+        BaselineValidationError,
+        match="public symbol 'kind' is invalid",
+    ):
+        mb_validate._require_public_symbol_kind("bad", path=path)
+
+    assert mb_validate._require_exported_via("all", path=path) == "all"
+    assert mb_validate._require_exported_via("name", path=path) == "name"
+    with pytest.raises(
+        BaselineValidationError,
+        match="public symbol 'exported_via' is invalid",
+    ):
+        mb_validate._require_exported_via("bad", path=path)
+
+
+def test_metrics_baseline_parse_api_surface_snapshot_validation_edges(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "metrics-baseline.json"
+
+    with pytest.raises(BaselineValidationError, match="'api_surface' must be object"):
+        mb_validate._parse_api_surface_snapshot([], path=path)
+
+    with pytest.raises(
+        BaselineValidationError,
+        match=r"'api_surface\.modules' must be list",
+    ):
+        mb_validate._parse_api_surface_snapshot({"modules": "bad"}, path=path)
+
+    with pytest.raises(
+        BaselineValidationError, match="api surface module must be object"
+    ):
+        mb_validate._parse_api_surface_snapshot({"modules": ["bad"]}, path=path)
+
+    with pytest.raises(
+        BaselineValidationError, match="api surface symbols must be list"
+    ):
+        mb_validate._parse_api_surface_snapshot(
+            {
+                "modules": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "pkg/mod.py",
+                        "symbols": "bad",
+                    }
+                ]
+            },
+            path=path,
+        )
+
+    with pytest.raises(
+        BaselineValidationError, match="api surface symbol must be object"
+    ):
+        mb_validate._parse_api_surface_snapshot(
+            {
+                "modules": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "pkg/mod.py",
+                        "symbols": ["bad"],
+                    }
+                ]
+            },
+            path=path,
+        )
+
+    with pytest.raises(
+        BaselineValidationError,
+        match="api surface symbol requires 'local_name' or 'qualname'",
+    ):
+        mb_validate._parse_api_surface_snapshot(
+            {
+                "modules": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "pkg/mod.py",
+                        "symbols": [{"kind": "function", "exported_via": "name"}],
+                    }
+                ]
+            },
+            path=path,
+        )
+
+    with pytest.raises(
+        BaselineValidationError, match="api surface params must be list"
+    ):
+        mb_validate._parse_api_surface_snapshot(
+            {
+                "modules": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "pkg/mod.py",
+                        "symbols": [
+                            {
+                                "local_name": "run",
+                                "kind": "function",
+                                "exported_via": "name",
+                                "params": "bad",
+                            }
+                        ],
+                    }
+                ]
+            },
+            path=path,
+        )
+
+    with pytest.raises(BaselineValidationError, match="api param must be object"):
+        mb_validate._parse_api_surface_snapshot(
+            {
+                "modules": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "pkg/mod.py",
+                        "symbols": [
+                            {
+                                "local_name": "run",
+                                "kind": "function",
+                                "exported_via": "name",
+                                "params": ["bad"],
+                            }
+                        ],
+                    }
+                ]
+            },
+            path=path,
+        )
+
+    with pytest.raises(
+        BaselineValidationError, match="api param 'has_default' must be bool"
+    ):
+        mb_validate._parse_api_surface_snapshot(
+            {
+                "modules": [
+                    {
+                        "module": "pkg.mod",
+                        "filepath": "pkg/mod.py",
+                        "symbols": [
+                            {
+                                "local_name": "run",
+                                "kind": "function",
+                                "exported_via": "name",
+                                "params": [
+                                    {
+                                        "name": "value",
+                                        "kind": "pos_or_kw",
+                                        "has_default": "bad",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+            path=path,
+        )
 
 
 def test_metrics_baseline_load_json_read_oserror_status(
@@ -1044,4 +1262,4 @@ def test_metrics_baseline_load_json_read_oserror_status(
     with pytest.raises(
         BaselineValidationError, match="Cannot read metrics baseline file"
     ):
-        mb_mod._load_json_object(path)
+        mb_validate._load_json_object(path)

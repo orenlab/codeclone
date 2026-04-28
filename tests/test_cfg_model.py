@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-from codeclone.cfg_model import CFG, Block
+from codeclone.analysis.cfg_model import CFG, Block
 
 
 def test_block_hash_and_eq() -> None:

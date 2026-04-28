@@ -9,6 +9,11 @@ This chapter describes the bundle as a local install and launcher layer over
 existing CodeClone MCP contracts. It does not define a second analysis truth
 model.
 
+!!! note "Wrapper only"
+    The Claude Desktop bundle is a thin local launcher surface over
+    `codeclone-mcp`. Analysis truth, findings, and health semantics remain in
+    the canonical MCP server.
+
 ## Position in the platform
 
 The Claude Desktop bundle is:

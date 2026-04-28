@@ -1,0 +1,120 @@
+{
+  "benchmark_schema_version": "1.0",
+  "tool": {
+    "name": "codeclone",
+    "version": "2.0.0b5",
+    "python_tag": "cp313"
+  },
+  "config": {
+    "target": "<repo-root>",
+    "runs": 3,
+    "warmups": 1,
+    "python_executable": "<python-executable>"
+  },
+  "environment": {
+    "platform": "macOS-15.7.5-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "python_version": "3.13.12",
+    "python_implementation": "CPython",
+    "python_tag": "cp313",
+    "cpu_count": 10,
+    "cpu_affinity_count": null,
+    "container_detected": false,
+    "cgroup_cpu_max": null,
+    "cgroup_memory_max": null,
+    "timestamp_utc": "2026-04-17T13:45:19Z"
+  },
+  "scenarios": [
+    {
+      "name": "cold_full",
+      "mode": "cold",
+      "extra_args": [],
+      "warmups": 1,
+      "runs": 3,
+      "deterministic": true,
+      "digest": "0e4366a01ad8a0db646c9a984e92fa913166119541e296387d963c5ae4301bc9",
+      "timings_seconds": [
+        1.0560423749998336,
+        1.0907688339998458,
+        1.0867978750002294
+      ],
+      "stats_seconds": {
+        "min": 1.0560423749998336,
+        "max": 1.0907688339998458,
+        "mean": 1.0778696946666362,
+        "median": 1.0867978750002294,
+        "p95": 1.090371738099884,
+        "stdev": 0.015519150357364984
+      },
+      "inventory_sample": {
+        "found": 180,
+        "analyzed": 180,
+        "cached": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "name": "warm_full",
+      "mode": "warm",
+      "extra_args": [],
+      "warmups": 1,
+      "runs": 3,
+      "deterministic": true,
+      "digest": "55ea63867ffdd599784d10cd0c86d15ba0944e128d62d4d6cb8e68ce8779ea2e",
+      "timings_seconds": [
+        0.2863777919997119,
+        0.2806324170001062,
+        0.27757904200007033
+      ],
+      "stats_seconds": {
+        "min": 0.27757904200007033,
+        "max": 0.2863777919997119,
+        "mean": 0.28152975033329614,
+        "median": 0.2806324170001062,
+        "p95": 0.2858032544997513,
+        "stdev": 0.003647684719762983
+      },
+      "inventory_sample": {
+        "found": 180,
+        "analyzed": 0,
+        "cached": 180,
+        "skipped": 0
+      }
+    },
+    {
+      "name": "warm_clones_only",
+      "mode": "warm",
+      "extra_args": [
+        "--skip-metrics"
+      ],
+      "warmups": 1,
+      "runs": 3,
+      "deterministic": true,
+      "digest": "8e2fbaf49e9f577b89348aa54fc8f7d6866c9c8213ff1e69d831edc2f663d907",
+      "timings_seconds": [
+        0.2363325830001486,
+        0.22605108300012944,
+        0.21571508300030473
+      ],
+      "stats_seconds": {
+        "min": 0.21571508300030473,
+        "max": 0.2363325830001486,
+        "mean": 0.2260329163335276,
+        "median": 0.22605108300012944,
+        "p95": 0.23530443300014667,
+        "stdev": 0.00841706893091738
+      },
+      "inventory_sample": {
+        "found": 180,
+        "analyzed": 0,
+        "cached": 180,
+        "skipped": 0
+      }
+    }
+  ],
+  "comparisons": {
+    "warm_full_speedup_vs_cold_full": 3.8726740360854963,
+    "warm_clones_only_speedup_vs_warm_full": 1.2414557509549535
+  },
+  "generated_at_utc": "2026-04-17T13:45:19Z"
+}

@@ -1,0 +1,116 @@
+name: publish
+run-name: >-
+  publish • ${{ github.event_name }} •
+  ${{ github.event.release.tag_name || inputs.repository || github.ref_name }}
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Target package index
+        required: true
+        default: testpypi
+        type: choice
+        options:
+          - testpypi
+          - pypi
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Verify release tag matches project version
+        if: ${{ github.event_name == 'release' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          project_version="$(python - <<'PY'
+          import pathlib, tomllib
+          payload = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+          print(payload["project"]["version"])
+          PY
+          )"
+          release_tag="${{ github.event.release.tag_name }}"
+          normalized_tag="${release_tag#v}"
+          if [ "$normalized_tag" != "$project_version" ]; then
+            echo "release tag $release_tag does not match project version $project_version" >&2
+            exit 1
+          fi
+
+      - name: Build distributions
+        run: uv run --with build python -m build --sdist --wheel
+
+      - name: Validate distributions
+        run: uv run --with twine twine check dist/*
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish-testpypi:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi' }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v5
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    if: >-
+      ${{
+        github.event_name == 'release' ||
+        (github.event_name == 'workflow_dispatch' && inputs.repository == 'pypi')
+      }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v5
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

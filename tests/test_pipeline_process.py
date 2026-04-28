@@ -14,10 +14,30 @@ from typing import Literal
 
 import pytest
 
-import codeclone.pipeline as pipeline
-from codeclone.cache import Cache, CacheEntry, SourceStatsDict, file_stat_signature
+import codeclone.core.parallelism as core_parallelism
+import codeclone.core.pipeline as core_pipeline
+import codeclone.core.worker as core_worker
+from codeclone.analysis.normalizer import NormalizationConfig
+from codeclone.cache.entries import CacheEntry, SourceStatsDict
+from codeclone.cache.store import Cache, file_stat_signature
+from codeclone.core._types import (
+    DEFAULT_RUNTIME_PROCESSES,
+    AnalysisResult,
+    BootstrapResult,
+    DiscoveryResult,
+    FileProcessResult,
+    OutputPaths,
+    ProcessingResult,
+)
+from codeclone.core.discovery_cache import usable_cached_source_stats
+from codeclone.core.parallelism import (
+    _parallel_min_files,
+    _resolve_process_count,
+    process,
+)
+from codeclone.core.pipeline import analyze
+from codeclone.core.reporting import report
 from codeclone.models import HealthScore, ProjectMetrics
-from codeclone.normalize import NormalizationConfig
 
 
 class _FailExec:
@@ -41,8 +61,8 @@ class _UnexpectedExec:
         raise AssertionError("ProcessPoolExecutor should not be used for small batches")
 
 
-def _build_boot(tmp_path: Path, *, processes: int) -> pipeline.BootstrapResult:
-    return pipeline.BootstrapResult(
+def _build_boot(tmp_path: Path, *, processes: int) -> BootstrapResult:
+    return BootstrapResult(
         root=tmp_path,
         config=NormalizationConfig(),
         args=Namespace(
@@ -55,19 +75,19 @@ def _build_boot(tmp_path: Path, *, processes: int) -> pipeline.BootstrapResult:
             segment_min_stmt=10,
             skip_metrics=True,
         ),
-        output_paths=pipeline.OutputPaths(html=None, json=None, text=None),
+        output_paths=OutputPaths(html=None, json=None, text=None),
         cache_path=tmp_path / "cache.json",
     )
 
 
 def test_resolve_process_count_defaults_in_runtime() -> None:
-    assert pipeline._resolve_process_count(None) == pipeline.DEFAULT_RUNTIME_PROCESSES
-    assert pipeline._resolve_process_count(0) == 1
-    assert pipeline._resolve_process_count(3) == 3
+    assert _resolve_process_count(None) == DEFAULT_RUNTIME_PROCESSES
+    assert _resolve_process_count(0) == 1
+    assert _resolve_process_count(3) == 3
 
 
-def _build_discovery(filepaths: tuple[str, ...]) -> pipeline.DiscoveryResult:
-    return pipeline.DiscoveryResult(
+def _build_discovery(filepaths: tuple[str, ...]) -> DiscoveryResult:
+    return DiscoveryResult(
         files_found=len(filepaths),
         cache_hits=0,
         files_skipped=0,
@@ -84,8 +104,8 @@ def _build_discovery(filepaths: tuple[str, ...]) -> pipeline.DiscoveryResult:
     )
 
 
-def _ok_result(filepath: str) -> pipeline.FileProcessResult:
-    return pipeline.FileProcessResult(
+def _ok_result(filepath: str) -> FileProcessResult:
+    return FileProcessResult(
         filepath=filepath,
         success=True,
         units=[],
@@ -115,7 +135,7 @@ def _stub_process_file(
         block_min_stmt: int = 8,
         segment_min_loc: int = 20,
         segment_min_stmt: int = 10,
-    ) -> pipeline.FileProcessResult:
+    ) -> FileProcessResult:
         if expected_root is not None:
             assert root == expected_root
         if expected_filepath is not None:
@@ -130,9 +150,9 @@ def _stub_process_file(
 
 def _build_large_batch_case(
     tmp_path: Path,
-) -> tuple[pipeline.BootstrapResult, pipeline.DiscoveryResult, Cache, list[str]]:
+) -> tuple[BootstrapResult, DiscoveryResult, Cache, list[str]]:
     filepaths: list[str] = []
-    for idx in range(pipeline._parallel_min_files(2) + 1):
+    for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
         filepaths.append(str(src))
@@ -145,7 +165,7 @@ def _build_large_batch_case(
 
 def _build_single_file_process_case(
     tmp_path: Path,
-) -> tuple[str, pipeline.BootstrapResult, pipeline.DiscoveryResult]:
+) -> tuple[str, BootstrapResult, DiscoveryResult]:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
     filepath = str(src)
@@ -159,16 +179,16 @@ def _build_report_case(
     md_out: bool = False,
     sarif_out: bool = False,
 ) -> tuple[
-    pipeline.BootstrapResult,
-    pipeline.DiscoveryResult,
-    pipeline.ProcessingResult,
-    pipeline.AnalysisResult,
+    BootstrapResult,
+    DiscoveryResult,
+    ProcessingResult,
+    AnalysisResult,
 ]:
-    boot = pipeline.BootstrapResult(
+    boot = BootstrapResult(
         root=tmp_path,
         config=NormalizationConfig(),
         args=Namespace(),
-        output_paths=pipeline.OutputPaths(
+        output_paths=OutputPaths(
             json=tmp_path / "report.json" if json_out else None,
             md=tmp_path / "report.md" if md_out else None,
             sarif=tmp_path / "report.sarif" if sarif_out else None,
@@ -176,7 +196,7 @@ def _build_report_case(
         cache_path=tmp_path / "cache.json",
     )
     discovery = _build_discovery(())
-    processing = pipeline.ProcessingResult(
+    processing = ProcessingResult(
         units=(),
         blocks=(),
         segments=(),
@@ -193,7 +213,7 @@ def _build_report_case(
         failed_files=(),
         source_read_failures=(),
     )
-    analysis = pipeline.AnalysisResult(
+    analysis = AnalysisResult(
         func_groups={},
         block_groups={},
         block_groups_report={},
@@ -217,16 +237,16 @@ def test_process_parallel_fallback_without_callback_uses_sequential(
 ) -> None:
     boot, discovery, cache, filepaths = _build_large_batch_case(tmp_path)
 
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailExec)
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailExec)
     monkeypatch.setattr(
-        pipeline,
+        core_worker,
         "process_file",
         _stub_process_file(
             expected_root=str(tmp_path),
         ),
     )
 
-    result = pipeline.process(
+    result = process(
         boot=boot,
         discovery=discovery,
         cache=cache,
@@ -249,13 +269,13 @@ def test_process_small_batch_skips_parallel_executor(
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
     callbacks: list[str] = []
 
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _UnexpectedExec)
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _UnexpectedExec)
     monkeypatch.setattr(
-        pipeline,
+        core_worker,
         "process_file",
         _stub_process_file(expected_root=str(tmp_path)),
     )
-    result = pipeline.process(
+    result = process(
         boot=boot,
         discovery=discovery,
         cache=cache,
@@ -273,13 +293,13 @@ def test_process_parallel_failure_large_batch_invokes_fallback_callback(
     boot, discovery, cache, filepaths = _build_large_batch_case(tmp_path)
     callbacks: list[str] = []
 
-    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _FailExec)
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailExec)
     monkeypatch.setattr(
-        pipeline,
+        core_worker,
         "process_file",
         _stub_process_file(expected_root=str(tmp_path)),
     )
-    result = pipeline.process(
+    result = process(
         boot=boot,
         discovery=discovery,
         cache=cache,
@@ -294,7 +314,7 @@ def test_process_parallel_failure_large_batch_invokes_fallback_callback(
 def test_process_parallel_executor_analyzes_real_files(tmp_path: Path) -> None:
     boot, discovery, cache, filepaths = _build_large_batch_case(tmp_path)
 
-    result = pipeline.process(
+    result = process(
         boot=boot,
         discovery=discovery,
         cache=cache,
@@ -333,7 +353,7 @@ def test_process_cache_put_file_entry_fallback_without_source_stats_support(
 
     cache = _LegacyCache()
     monkeypatch.setattr(
-        pipeline,
+        core_worker,
         "process_file",
         _stub_process_file(
             expected_root=str(tmp_path),
@@ -341,7 +361,7 @@ def test_process_cache_put_file_entry_fallback_without_source_stats_support(
         ),
     )
 
-    result = pipeline.process(
+    result = process(
         boot=boot,
         discovery=discovery,
         cache=cache,  # type: ignore[arg-type]
@@ -373,7 +393,7 @@ def test_process_cache_put_file_entry_type_error_is_raised(
             raise TypeError("broken cache write")
 
     monkeypatch.setattr(
-        pipeline,
+        core_worker,
         "process_file",
         _stub_process_file(
             expected_root=str(tmp_path),
@@ -382,7 +402,7 @@ def test_process_cache_put_file_entry_type_error_is_raised(
     )
 
     with pytest.raises(TypeError, match="broken cache write"):
-        pipeline.process(
+        process(
             boot=boot,
             discovery=discovery,
             cache=_BrokenCache(),  # type: ignore[arg-type]
@@ -415,13 +435,13 @@ def test_usable_cached_source_stats_respects_required_sections() -> None:
         "class_names": [],
         "structural_findings": [],
     }
-    assert pipeline._usable_cached_source_stats(
+    assert usable_cached_source_stats(
         complete_entry,
         skip_metrics=False,
         collect_structural_findings=True,
     ) == (5, 2, 1, 1)
     assert (
-        pipeline._usable_cached_source_stats(
+        usable_cached_source_stats(
             base_entry,
             skip_metrics=False,
             collect_structural_findings=False,
@@ -429,7 +449,7 @@ def test_usable_cached_source_stats_respects_required_sections() -> None:
         is None
     )
     assert (
-        pipeline._usable_cached_source_stats(
+        usable_cached_source_stats(
             {
                 **base_entry,
                 "class_metrics": [],
@@ -461,13 +481,16 @@ def test_report_json_only_does_not_import_markdown_or_sarif(
         fromlist: tuple[str, ...] = (),
         level: int = 0,
     ) -> object:
-        if name in {"codeclone.report.markdown", "codeclone.report.sarif"}:
+        if name in {
+            "codeclone.report.renderers.markdown",
+            "codeclone.report.renderers.sarif",
+        }:
             raise AssertionError(f"unexpected import: {name}")
         return original_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", _guard_import)
 
-    artifacts = pipeline.report(
+    artifacts = report(
         boot=boot,
         discovery=discovery,
         processing=processing,
@@ -488,7 +511,7 @@ def test_analyze_skips_suppressed_dead_code_scan_when_dead_code_is_disabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    boot = pipeline.BootstrapResult(
+    boot = BootstrapResult(
         root=tmp_path,
         config=NormalizationConfig(),
         args=Namespace(
@@ -497,11 +520,11 @@ def test_analyze_skips_suppressed_dead_code_scan_when_dead_code_is_disabled(
             skip_dead_code=True,
             skip_dependencies=True,
         ),
-        output_paths=pipeline.OutputPaths(),
+        output_paths=OutputPaths(),
         cache_path=tmp_path / "cache.json",
     )
     discovery = _build_discovery(())
-    processing = pipeline.ProcessingResult(
+    processing = ProcessingResult(
         units=(),
         blocks=(),
         segments=(),
@@ -541,24 +564,24 @@ def test_analyze_skips_suppressed_dead_code_scan_when_dead_code_is_disabled(
     )
 
     monkeypatch.setattr(
-        pipeline,
+        core_pipeline,
         "compute_project_metrics",
         lambda **kwargs: (project_metrics, None, ()),
     )
     monkeypatch.setattr(
-        pipeline,
+        core_pipeline,
         "find_suppressed_unused",
         lambda **kwargs: (_ for _ in ()).throw(
             AssertionError("should not compute suppressed dead-code items")
         ),
     )
-    monkeypatch.setattr(pipeline, "compute_suggestions", lambda **kwargs: ())
+    monkeypatch.setattr(core_pipeline, "compute_suggestions", lambda **kwargs: ())
     monkeypatch.setattr(
-        pipeline,
+        core_pipeline,
         "build_metrics_report_payload",
         lambda **kwargs: {"health": {"score": 100, "grade": "A", "dimensions": {}}},
     )
 
-    analysis = pipeline.analyze(boot=boot, discovery=discovery, processing=processing)
+    analysis = analyze(boot=boot, discovery=discovery, processing=processing)
     assert analysis.project_metrics == project_metrics
     assert analysis.suppressed_dead_code_items == 0

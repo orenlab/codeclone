@@ -1,0 +1,197 @@
+usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
+                 [--processes PROCESSES] [--changed-only | --no-changed-only]
+                 [--diff-against GIT_REF] [--paths-from-git-diff GIT_REF]
+                 [--cache-path [FILE]] [--cache-dir [FILE]]
+                 [--max-cache-size-mb MB] [--baseline [FILE]]
+                 [--max-baseline-size-mb MB]
+                 [--update-baseline | --no-update-baseline]
+                 [--metrics-baseline [FILE]]
+                 [--update-metrics-baseline | --no-update-metrics-baseline]
+                 [--ci | --no-ci] [--api-surface | --no-api-surface]
+                 [--coverage FILE] [--fail-on-new | --no-fail-on-new]
+                 [--fail-on-new-metrics | --no-fail-on-new-metrics]
+                 [--fail-threshold MAX_CLONES] [--fail-complexity [CC_MAX]]
+                 [--fail-coupling [CBO_MAX]] [--fail-cohesion [LCOM4_MAX]]
+                 [--fail-cycles | --no-fail-cycles]
+                 [--fail-dead-code | --no-fail-dead-code]
+                 [--fail-health [SCORE_MIN]]
+                 [--fail-on-typing-regression | --no-fail-on-typing-regression]
+                 [--fail-on-docstring-regression | --no-fail-on-docstring-regression]
+                 [--fail-on-api-break | --no-fail-on-api-break]
+                 [--fail-on-untested-hotspots | --no-fail-on-untested-hotspots]
+                 [--min-typing-coverage PERCENT]
+                 [--min-docstring-coverage PERCENT] [--coverage-min PERCENT]
+                 [--skip-metrics | --no-skip-metrics]
+                 [--skip-dead-code | --no-skip-dead-code]
+                 [--skip-dependencies | --no-skip-dependencies]
+                 [--html [FILE]] [--json [FILE]] [--md [FILE]]
+                 [--sarif [FILE]] [--text [FILE]]
+                 [--timestamped-report-paths | --no-timestamped-report-paths]
+                 [--open-html-report | --no-open-html-report] [--no-progress]
+                 [--progress] [--no-color] [--color] [--quiet | --no-quiet]
+                 [--verbose | --no-verbose] [--debug | --no-debug] [-h]
+                 [--version]
+                 [root]
+
+Structural code quality analysis for Python.
+
+Target:
+  root                  Project root directory to scan.
+                        Defaults to the current directory.
+
+Analysis:
+  --min-loc MIN_LOC     Minimum Lines of Code (LOC) required for clone analysis.
+                        Default: 10.
+  --min-stmt MIN_STMT   Minimum AST statement count required for clone analysis.
+                        Default: 6.
+  --processes PROCESSES
+                        Number of parallel worker processes.
+                        Default: 4.
+  --changed-only, --no-changed-only
+                        Limit clone gating and changed-scope summaries to findings that touch
+                        files from a git diff selection.
+  --diff-against GIT_REF
+                        Resolve changed files from `git diff --name-only <REF>`.
+                        Use together with --changed-only.
+  --paths-from-git-diff GIT_REF
+                        Shorthand for --changed-only using `git diff --name-only <REF>`.
+                        Useful for PR and CI review flows.
+  --cache-path [FILE]   Path to the cache file.
+                        If FILE is omitted, uses <root>/.cache/codeclone/cache.json.
+  --cache-dir [FILE]    Legacy alias for --cache-path.
+                        Prefer --cache-path in new configurations.
+  --max-cache-size-mb MB
+                        Maximum cache file size in MB.
+                        Default: 50.
+
+Baselines and CI:
+  --baseline [FILE]     Path to the clone baseline.
+                        If FILE is omitted, uses codeclone.baseline.json.
+  --max-baseline-size-mb MB
+                        Maximum allowed baseline size in MB.
+                        Default: 5.
+  --update-baseline, --no-update-baseline
+                        Overwrite the clone baseline with current results.
+                        Disabled by default.
+  --metrics-baseline [FILE]
+                        Path to the metrics baseline.
+                        If FILE is omitted, uses codeclone.baseline.json.
+  --update-metrics-baseline, --no-update-metrics-baseline
+                        Overwrite the metrics baseline with current metrics.
+                        Disabled by default.
+  --ci, --no-ci         Enable CI preset.
+                        Equivalent to: --fail-on-new --no-color --quiet.
+                        When a trusted metrics baseline is available, CI mode also enables
+                        metrics regression gating.
+  --api-surface, --no-api-surface
+                        Collect public API surface facts for baseline-aware compatibility review.
+                        Disabled by default.
+  --coverage FILE       Join external Cobertura XML line coverage to function spans.
+                        Pass a `coverage xml` report path.
+
+Quality gates:
+  --fail-on-new, --no-fail-on-new
+                        Exit with code 3 if NEW clone findings not present in the baseline
+                        are detected.
+  --fail-on-new-metrics, --no-fail-on-new-metrics
+                        Exit with code 3 if new metrics violations appear relative to the
+                        metrics baseline.
+  --fail-threshold MAX_CLONES
+                        Exit with code 3 if the total number of function + block clone groups
+                        exceeds this value.
+                        Disabled unless set.
+  --fail-complexity [CC_MAX]
+                        Exit with code 3 if any function exceeds the cyclomatic complexity
+                        threshold.
+                        If enabled without a value, uses 20.
+  --fail-coupling [CBO_MAX]
+                        Exit with code 3 if any class exceeds the coupling threshold.
+                        If enabled without a value, uses 10.
+  --fail-cohesion [LCOM4_MAX]
+                        Exit with code 3 if any class exceeds the cohesion threshold.
+                        If enabled without a value, uses 4.
+  --fail-cycles, --no-fail-cycles
+                        Exit with code 3 if circular module dependencies are detected.
+  --fail-dead-code, --no-fail-dead-code
+                        Exit with code 3 if high-confidence dead code is detected.
+  --fail-health [SCORE_MIN]
+                        Exit with code 3 if the overall health score falls below the threshold.
+                        If enabled without a value, uses 60.
+  --fail-on-typing-regression, --no-fail-on-typing-regression
+                        Exit with code 3 if typing adoption coverage regresses relative to the
+                        metrics baseline.
+  --fail-on-docstring-regression, --no-fail-on-docstring-regression
+                        Exit with code 3 if public docstring coverage regresses relative to the
+                        metrics baseline.
+  --fail-on-api-break, --no-fail-on-api-break
+                        Exit with code 3 if public API removals or signature breaks are detected
+                        relative to the metrics baseline.
+  --fail-on-untested-hotspots, --no-fail-on-untested-hotspots
+                        Exit with code 3 if medium/high-risk functions measured by Coverage Join
+                        fall below the joined coverage threshold.
+                        Requires --coverage.
+  --min-typing-coverage PERCENT
+                        Exit with code 3 if parameter typing coverage falls below the threshold.
+                        Threshold is a whole percent from 0 to 100.
+  --min-docstring-coverage PERCENT
+                        Exit with code 3 if public docstring coverage falls below the threshold.
+                        Threshold is a whole percent from 0 to 100.
+  --coverage-min PERCENT
+                        Coverage threshold for untested hotspot detection.
+                        Threshold is a whole percent from 0 to 100.
+                        Default: 50.
+
+Analysis stages:
+  --skip-metrics, --no-skip-metrics
+                        Skip full metrics analysis and run in clone-only mode.
+  --skip-dead-code, --no-skip-dead-code
+                        Skip dead code detection.
+  --skip-dependencies, --no-skip-dependencies
+                        Skip dependency graph analysis.
+
+Reporting:
+  --html [FILE]         Generate an HTML report.
+                        If FILE is omitted, writes to .cache/codeclone/report.html.
+  --json [FILE]         Generate the canonical JSON report.
+                        If FILE is omitted, writes to .cache/codeclone/report.json.
+  --md [FILE]           Generate a Markdown report.
+                        If FILE is omitted, writes to .cache/codeclone/report.md.
+  --sarif [FILE]        Generate a SARIF 2.1.0 report.
+                        If FILE is omitted, writes to .cache/codeclone/report.sarif.
+  --text [FILE]         Generate a plain-text report.
+                        If FILE is omitted, writes to .cache/codeclone/report.txt.
+  --timestamped-report-paths, --no-timestamped-report-paths
+                        Append a UTC timestamp to default report filenames.
+                        Applies only to report flags passed without FILE.
+
+Output and UI:
+  --open-html-report, --no-open-html-report
+                        Open the generated HTML report in the default browser.
+                        Requires --html.
+  --no-progress         Disable progress output.
+                        Recommended for CI logs.
+  --progress            Force-enable progress output.
+  --no-color            Disable ANSI colors.
+  --color               Force-enable ANSI colors.
+  --quiet, --no-quiet   Reduce output to warnings, errors, and essential summaries.
+  --verbose, --no-verbose
+                        Include detailed identifiers for NEW clone findings.
+  --debug, --no-debug   Print debug details for internal errors, including traceback and
+                        environment information.
+
+General:
+  -h, --help            Show this help message and exit.
+  --version             Print the CodeClone version and exit.
+
+Exit codes:
+  0  Success.
+  2  Contract error: untrusted or invalid baseline, invalid output
+     configuration, incompatible versions, or unreadable sources in
+     CI/gating mode.
+  3  Gating failure: new clones, threshold violations, or metrics
+     quality gate failures.
+  5  Internal error: unexpected exception.
+
+Repository: https://github.com/orenlab/codeclone
+Issues:     https://github.com/orenlab/codeclone/issues
+Docs:       https://orenlab.github.io/codeclone/

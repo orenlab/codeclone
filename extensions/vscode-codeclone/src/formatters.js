@@ -54,6 +54,11 @@ function capitalize(value) {
     return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function humanizeIdentifier(value) {
+    const text = String(value || "").trim().replace(/_/g, " ");
+    return text ? capitalize(text) : "";
+}
+
 function formatBooleanWord(value) {
     return value ? "yes" : "no";
 }
@@ -91,6 +96,10 @@ function formatCacheSummary(payload) {
 
 function coverageJoinPayload(metricsSummary) {
     return safeObject(safeObject(metricsSummary).coverage_join);
+}
+
+function securitySurfacesPayload(metricsSummary) {
+    return safeObject(safeObject(metricsSummary).security_surfaces);
 }
 
 function countedNoun(value, singular, plural = `${singular}s`) {
@@ -255,6 +264,19 @@ function reviewTargetKey(target) {
     if (target.nodeType === "overloadedModule" && safeObject(target.item).path) {
         return `overloaded:${String(target.item.path)}`;
     }
+    if (target.nodeType === "securitySurface") {
+        const item = safeObject(target.item);
+        const pathValue = String(item.path || "").trim();
+        const qualnameValue = String(item.qualname || "").trim();
+        const capabilityValue = String(item.capability || "").trim();
+        const lineValue =
+            typeof item.start_line === "number" && !Number.isNaN(item.start_line)
+                ? item.start_line
+                : 0;
+        if (pathValue) {
+            return `security:${pathValue}:${lineValue}:${qualnameValue}:${capabilityValue}`;
+        }
+    }
     if (target.findingId) {
         return `finding:${String(target.findingId)}`;
     }
@@ -303,7 +325,49 @@ function emptyReviewArtifacts() {
         productionHotspots: [],
         changedFiles: [],
         overloadedModules: [],
+        securitySurfaces: [],
     };
+}
+
+function formatSecuritySurfaceLocation(item) {
+    const entry = safeObject(item);
+    const pathValue = String(entry.path || "").trim();
+    const startLine =
+        typeof entry.start_line === "number" && !Number.isNaN(entry.start_line)
+            ? entry.start_line
+            : null;
+    const endLine =
+        typeof entry.end_line === "number" && !Number.isNaN(entry.end_line)
+            ? entry.end_line
+            : null;
+    if (!pathValue) {
+        return "(unknown)";
+    }
+    if (startLine === null || startLine <= 0) {
+        return pathValue;
+    }
+    if (endLine !== null && endLine > startLine) {
+        return `${pathValue}:${startLine}-${endLine}`;
+    }
+    return `${pathValue}:${startLine}`;
+}
+
+function formatSecuritySurfaceReviewSignal(item) {
+    const entry = safeObject(item);
+    const scopeText = humanizeIdentifier(entry.location_scope || "unknown");
+    if (entry.scope_gap_hotspot) {
+        return `${scopeText} · scope gap`;
+    }
+    if (entry.coverage_hotspot) {
+        return `${scopeText} · low coverage`;
+    }
+    if (entry.coverage_overlap) {
+        return `${scopeText} · coverage overlap`;
+    }
+    if (String(entry.location_scope || "").trim() === "module") {
+        return `${scopeText} · capability present`;
+    }
+    return `${scopeText} · exact evidence`;
 }
 
 /**
@@ -400,11 +464,14 @@ module.exports = {
     formatCoverageJoinPercent,
     formatCoverageJoinStatus,
     formatCoverageJoinSummary,
+    formatSecuritySurfaceLocation,
+    formatSecuritySurfaceReviewSignal,
     formatKind,
     formatNovelty,
     formatRunScope,
     formatSeverity,
     formatSourceKindSummary,
+    humanizeIdentifier,
     isSpecificFocusMode,
     normalizeFindingLocations,
     normalizeLocations,
@@ -413,6 +480,7 @@ module.exports = {
     reviewTargetKey,
     safeArray,
     safeObject,
+    securitySurfacesPayload,
     sameLaunchSpec,
     treeAccessibilityInformation,
     workspaceRelativePath,

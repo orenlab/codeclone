@@ -6,11 +6,13 @@ Describe effective runtime configuration and defaults that affect behavior.
 
 ## Public surface
 
-- CLI parser and defaults: `codeclone/_cli_args.py:build_parser`
-- Pyproject config loader: `codeclone/_cli_config.py`
-- Effective cache default path logic: `codeclone/cli.py:_resolve_cache_path`
-- Metrics-mode selection logic: `codeclone/cli.py:_configure_metrics_mode`
-- Debug mode sources: `codeclone/cli.py:_is_debug_enabled`
+- Option specs/defaults: `codeclone/config/spec.py`
+- CLI parser and defaults: `codeclone/config/argparse_builder.py:build_parser`
+- Pyproject config loader: `codeclone/config/pyproject_loader.py:load_pyproject_config`
+- Config resolver: `codeclone/config/resolver.py:resolve_config`
+- Effective cache default path logic: `codeclone/surfaces/cli/runtime.py:_resolve_cache_path`
+- Metrics-mode selection logic: `codeclone/surfaces/cli/runtime.py:_configure_metrics_mode`
+- Debug mode sources: `codeclone/surfaces/cli/console.py:_is_debug_enabled`
 
 ## Data model
 
@@ -51,7 +53,7 @@ Fragment-level admission thresholds (pyproject.toml only, advanced tuning):
 
 Example project-level config:
 
-```toml
+```toml title="Minimal [tool.codeclone] configuration"
 [tool.codeclone]
 min_loc = 10
 min_stmt = 6
@@ -132,8 +134,21 @@ Report outputs and local UX:
 | `verbose`     | `bool`        | `false` | Enable more verbose CLI output | `-`                                    |
 | `debug`       | `bool`        | `false` | Enable debug diagnostics       | Also enabled by `CODECLONE_DEBUG=1`    |
 
-This is the exact accepted key set from `codeclone/_cli_config.py`; unknown
+This is the exact accepted `[tool.codeclone]` key set from
+`codeclone/config/spec.py` and `codeclone/config/pyproject_loader.py`; unknown
 keys are contract errors.
+
+!!! note "Pyproject keys vs CLI flags"
+    The tables above list `[tool.codeclone]` keys, not CLI flag spellings.
+    CLI flags may map to the same internal destination under a different name.
+    Example: `coverage_xml` in `pyproject.toml` corresponds to CLI
+    `--coverage FILE`. The same pattern applies to report outputs such as
+    `html_out` ↔ `--html` and `json_out` ↔ `--json`.
+
+!!! warning "Metrics-mode conflicts are enforced"
+    Metrics update/gating flags are runtime contracts, not hints. Combinations
+    such as `skip_metrics=true` together with metrics gating or metrics
+    baseline update flags are contract errors.
 
 Notes:
 
@@ -158,11 +173,21 @@ scan root when provided as relative paths.
 
 Current-run coverage join config:
 
+- `coverage_xml` is the `[tool.codeclone]` key; the equivalent CLI flag is
+  `--coverage FILE`.
 - `coverage_xml` may be set in `pyproject.toml`; relative paths resolve from
   the scan root like other configured paths.
 - `coverage_min` and `fail_on_untested_hotspots` follow the same precedence
   rules as CLI flags.
 - Coverage join remains current-run only and does not persist to baseline.
+
+Dependency depth config note:
+
+- `dependency_max_depth` is an observed metric in reports/baselines, not a
+  CLI or `pyproject.toml` option.
+- Dependency depth now uses an internal adaptive profile based on
+  `avg_depth`, `p95_depth`, and `max_depth` for the internal module graph.
+- There is no user-facing knob to tune that model in `2.0.0b6`.
 
 Metrics baseline path selection contract:
 
@@ -178,9 +203,12 @@ Metrics baseline path selection contract:
 
 Refs:
 
-- `codeclone/_cli_args.py:build_parser`
-- `codeclone/cli.py:_main_impl`
-- `codeclone/cli.py:_configure_metrics_mode`
+- `codeclone/config/spec.py`
+- `codeclone/config/argparse_builder.py:build_parser`
+- `codeclone/config/pyproject_loader.py:load_pyproject_config`
+- `codeclone/config/resolver.py:resolve_config`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
+- `codeclone/surfaces/cli/runtime.py:_configure_metrics_mode`
 
 ## Contracts
 
@@ -192,7 +220,7 @@ Refs:
 
 Refs:
 
-- `codeclone/cli.py:_main_impl`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
 
 ## Invariants (MUST)
 
@@ -209,9 +237,10 @@ Refs:
 
 Refs:
 
-- `codeclone/extractor.py:extract_units_and_stats_from_source`
-- `codeclone/_cli_args.py:build_parser`
-- `codeclone/cli.py:_configure_metrics_mode`
+- `codeclone/analysis/units.py:extract_units_and_stats_from_source`
+- `codeclone/config/spec.py`
+- `codeclone/config/argparse_builder.py:build_parser`
+- `codeclone/surfaces/cli/runtime.py:_configure_metrics_mode`
 
 ## Failure modes
 
@@ -223,8 +252,9 @@ Refs:
 
 Refs:
 
-- `codeclone/_cli_paths.py:_validate_output_path`
-- `codeclone/cli.py:_main_impl`
+- `codeclone/surfaces/cli/reports_output.py:_validate_output_path`
+- `codeclone/surfaces/cli/startup.py:resolve_existing_root_path`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
 
 ## Determinism / canonicalization
 
@@ -233,8 +263,8 @@ Refs:
 
 Refs:
 
-- `codeclone/contracts.py:cli_help_epilog`
-- `codeclone/ui_messages.py:SUMMARY_LABEL_FILES_FOUND`
+- `codeclone/contracts/__init__.py:cli_help_epilog`
+- `codeclone/ui_messages/__init__.py:SUMMARY_LABEL_FILES_FOUND`
 
 ## Locked by tests
 

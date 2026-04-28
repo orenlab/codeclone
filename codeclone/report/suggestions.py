@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from .._coerce import as_int, as_str
 from ..domain.findings import (
     CATEGORY_CLONE,
     CATEGORY_COHESION,
@@ -36,6 +35,7 @@ from ..domain.quality import (
     SEVERITY_RANK,
     SEVERITY_WARNING,
 )
+from ..findings.structural.detectors import normalize_structural_findings
 from ..models import (
     ClassMetrics,
     GroupItemLike,
@@ -49,7 +49,7 @@ from ..report.explain_contract import (
     BLOCK_HINT_ASSERT_ONLY,
     BLOCK_PATTERN_REPEATED_STMT_HASH,
 )
-from ..structural_findings import normalize_structural_findings
+from ..utils.coerce import as_int, as_str
 from .derived import (
     combine_source_kinds,
     format_group_location_label,

@@ -1,8 +1,18 @@
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/codeclone-wordmark-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/codeclone-wordmark.svg">
-    <img alt="CodeClone" src="docs/assets/codeclone-wordmark.svg" width="320">
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="https://raw.githubusercontent.com/orenlab/codeclone/main/docs/assets/codeclone-wordmark-dark.svg"
+    >
+    <source
+      media="(prefers-color-scheme: light)"
+      srcset="https://raw.githubusercontent.com/orenlab/codeclone/main/docs/assets/codeclone-wordmark.svg"
+    >
+    <img
+      alt="CodeClone"
+      src="https://raw.githubusercontent.com/orenlab/codeclone/main/docs/assets/codeclone-wordmark.svg"
+      width="320"
+    >
   </picture>
 </div>
 
@@ -16,7 +26,7 @@
   <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main&style=flat-square" alt="Tests"></a>
   <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml/badge.svg?style=flat-square" alt="Benchmark"></a>
   <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone.svg?style=flat-square" alt="Python"></a>
-  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-89%20(B)-green" alt="codeclone 89 (B)"></a>
+  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-90%20(A)-green" alt="codeclone 90 (A)"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MPL--2.0-brightgreen?style=flat-square" alt="License"></a>
 </p>
 
@@ -25,7 +35,7 @@
 CodeClone provides deterministic structural code quality analysis for Python.
 It detects architectural duplication, computes quality metrics, and enforces CI gates — all with **baseline-aware
 governance** that separates **known** technical debt from **new** regressions.
-An optional MCP interface exposes the same canonical analysis pipeline to AI agents and IDEs.
+A triage-first MCP control surface exposes the same canonical pipeline to AI agents and IDEs.
 
 Docs: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/) ·
 Live sample report:
@@ -42,13 +52,13 @@ Live sample report:
 
 - **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
 - **Structural findings** — duplicated branch families, clone guard/exit divergence, and clone-cohort drift
-- **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, dead code,
-  health score, and overloaded-module profiling
+- **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, adaptive depth
+  profile, dead code, health score, and overloaded-module profiling
 - **Adoption & API** — type/docstring annotation coverage, public API surface inventory and baseline diff
 - **Coverage Join** — fuse external Cobertura XML into the current run to surface coverage hotspots and scope gaps
 - **Baseline governance** — separates accepted **legacy** debt from **new regressions**; CI fails only on what changed
 - **Reports** — interactive HTML, JSON, Markdown, SARIF, and text from one canonical report
-- **MCP server** — optional read-only surface for AI agents and IDEs
+- **MCP control surface** — triage-first agent and IDE interface over the same canonical pipeline; read-only by contract
 - **IDE & agent clients** — VS Code extension, Claude Desktop bundle, and Codex plugin over the same MCP contract
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Fast** — incremental caching, parallel processing, warm-run optimization
@@ -169,16 +179,21 @@ repos:
         types: [ python ]
 ```
 
-## MCP Server
+## MCP Control Surface
 
-Optional read-only MCP server for AI agents and IDE clients.
-Never mutates source, baselines, or repo state.
+Triage-first MCP server for AI agents and IDE clients, built on the same canonical pipeline as the CLI. Read-only by
+contract: never mutates source, baselines, or repo state.
 
 ```bash
-uv tool install --pre "codeclone[mcp]"       # or: uv pip install --pre "codeclone[mcp]"
+uv tool install --pre "codeclone[mcp]"
+# or
+uv pip install --pre "codeclone[mcp]"
 
-codeclone-mcp --transport stdio            # local (Claude Code, Codex, Copilot, Gemini CLI)
-codeclone-mcp --transport streamable-http  # remote / HTTP-only clients
+# local stdio clients
+codeclone-mcp --transport stdio
+
+# remote / HTTP-only clients
+codeclone-mcp --transport streamable-http
 ```
 
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/) ·
@@ -192,7 +207,7 @@ codeclone-mcp --transport streamable-http  # remote / HTTP-only clients
 | **Claude Desktop bundle** | [`extensions/claude-desktop-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone) | Local `.mcpb` install with pre-loaded instructions |
 | **Codex plugin**          | [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone)                                     | Native discovery, two skills, and MCP definition   |
 
-All three are thin wrappers over the same `codeclone-mcp` contract — no second analysis engine.
+All three are native clients over the same `codeclone-mcp` contract — no second analysis engine.
 
 [VS Code extension docs](https://orenlab.github.io/codeclone/book/21-vscode-extension/) ·
 [Claude Desktop docs](https://orenlab.github.io/codeclone/book/22-claude-desktop-bundle/) ·
@@ -268,13 +283,13 @@ Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-r
 [HTML render](https://orenlab.github.io/codeclone/book/10-html-render/)
 
 <details>
-<summary>Canonical JSON report shape (v2.8)</summary>
+<summary>Canonical JSON report shape (v2.10)</summary>
 
 ```json
 {
-  "report_schema_version": "2.8",
+  "report_schema_version": "2.10",
   "meta": {
-    "codeclone_version": "2.0.0b5",
+    "codeclone_version": "2.0.0b6",
     "project_name": "...",
     "scan_root": ".",
     "report_mode": "full",
@@ -341,15 +356,27 @@ Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-r
   "metrics": {
     "summary": {
       "...": "...",
-      "coverage_adoption": { "...": "..." },
-      "coverage_join": { "...": "..." },
-      "api_surface": { "...": "..." }
+      "coverage_adoption": {
+        "...": "..."
+      },
+      "coverage_join": {
+        "...": "..."
+      },
+      "api_surface": {
+        "...": "..."
+      }
     },
     "families": {
       "...": "...",
-      "coverage_adoption": { "...": "..." },
-      "coverage_join": { "...": "..." },
-      "api_surface": { "...": "..." }
+      "coverage_adoption": {
+        "...": "..."
+      },
+      "coverage_join": {
+        "...": "..."
+      },
+      "api_surface": {
+        "...": "..."
+      }
     }
   },
   "derived": {
@@ -455,8 +482,8 @@ in [Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmark
 
 ## License
 
-- **Code:** MPL-2.0
-- **Documentation:** MIT
+- **Code:** MPL-2.0 (`LICENSE`)
+- **Documentation and docs-site content:** MIT (`LICENSE-MIT`)
 
 Versions released before this change remain under their original license terms.
 
@@ -465,4 +492,4 @@ Versions released before this change remain under their original license terms.
 - **Docs:** <https://orenlab.github.io/codeclone/>
 - **Issues:** <https://github.com/orenlab/codeclone/issues>
 - **PyPI:** <https://pypi.org/project/codeclone/>
-- **Licenses:** [MPL-2.0](LICENSE) · [MIT docs](LICENSE-docs)
+- **Licenses:** [MPL-2.0](https://github.com/orenlab/codeclone/blob/main/LICENSE) · [MIT docs](https://github.com/orenlab/codeclone/blob/main/LICENSE-MIT) · [Scope map](https://github.com/orenlab/codeclone/blob/main/LICENSES.md)

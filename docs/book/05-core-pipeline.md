@@ -2,139 +2,106 @@
 
 ## Purpose
 
-Describe the detection pipeline from file discovery to grouped clones.
+Describe the runtime pipeline from file discovery to grouped clones, metrics,
+report assembly, and gating.
 
 ## Public surface
 
-Pipeline entrypoints:
-
-- Discovery stage: `codeclone/pipeline.py:discover`
-- Per-file processing: `codeclone/pipeline.py:process_file`
-- Extraction: `codeclone/extractor.py:extract_units_and_stats_from_source`
-- Grouping: `codeclone/grouping.py`
+- Discovery: `codeclone/core/discovery.py:discover`
+- Per-file processing: `codeclone/core/worker.py:process_file`
+- Extraction: `codeclone/analysis/units.py:extract_units_and_stats_from_source`
+- Clone grouping: `codeclone/findings/clones/grouping.py`
+- Project metrics and suggestions: `codeclone/core/pipeline.py`
+- Report/gating integration: `codeclone/core/reporting.py:report`,
+  `codeclone/core/reporting.py:gate`
 
 ## Data model
 
 Stages:
 
-1. Discover Python files (`iter_py_files`, sorted traversal)
-2. Load from cache if `stat` signature matches
-3. Process changed files:
+1. Bootstrap runtime paths and config.
+2. Discover Python files with deterministic traversal.
+3. Load usable cache entries by stat signature and compatible analysis profile.
+4. Process changed/missed files:
     - read source
-    - AST parse with limits
-    - extract units/blocks/segments
-4. Build groups:
+    - parse AST with limits
+    - extract function, block, and segment units
+    - collect referenced names/qualnames and dead-code candidates
+5. Build groups:
     - function groups by `fingerprint|loc_bucket`
     - block groups by `block_hash`
     - segment groups by `segment_sig` then `segment_hash|qualname`
-5. Report-layer post-processing:
-    - merge block windows to maximal regions
-    - merge/suppress segment report groups
-    - optionally split out clone groups fully contained in configured
-      `golden_fixture_paths`
-6. Structural report findings:
-    - duplicated branch families from per-function AST structure facts
-    - clone cohort drift families built from existing function groups (no rescan)
-7. Metrics computation (full mode only):
-    - per-function cyclomatic complexity
-    - per-class coupling (CBO) and cohesion (LCOM4)
-    - dead-code analysis: declaration-only, qualname-based liveness
-    - dependency graph and cycle detection
-8. Health scoring:
-    - seven dimension scores: clones, complexity, coupling, cohesion,
-      dead code, dependencies, coverage
-    - weighted blend → composite score (0–100) and grade (A–F)
-9. Suggestion generation:
-    - advisory cards from clone groups, structural findings, metric violations
-    - deterministic priority sort, never gates CI
-10. Current-run coverage join (optional):
-    - when `--coverage` is present, join external Cobertura XML to discovered
-      function spans
-    - invalid XML becomes `coverage_join.status="invalid"` for that run rather
-      than mutating baseline state
-11. Design finding extraction:
-    - threshold-aware findings for complexity, coupling, cohesion
-    - coverage `coverage_hotspot` / `coverage_scope_gap` findings from valid
-      coverage-join rows only
-    - thresholds recorded in `meta.analysis_thresholds.design_findings`
-12. Derived overview and hotlists:
-    - overview families, top risks, source breakdown, health snapshot
-    - directory hotspots by category (`derived.overview.directory_hotspots`)
-    - hotlists: most actionable, highest spread, production/test-fixture hotspots
-13. Gate evaluation:
-    - clone-baseline diff (NEW vs KNOWN)
-    - metric threshold gates (`--fail-complexity`, `--fail-coupling`, etc.)
-    - metric regression gates (`--fail-on-new-metrics`)
-    - coverage hotspot gate (`--fail-on-untested-hotspots`)
-    - gate reasons emitted in deterministic order
+6. Compute project metrics in full mode:
+    - complexity, coupling, cohesion
+    - dead code
+    - dependency graph and cycles
+    - health score
+    - adoption, API surface, optional coverage join
+7. Build canonical report document and deterministic projections.
+8. Evaluate clone diff and metric gates.
 
 Refs:
 
-- `codeclone/pipeline.py`
-- `codeclone/extractor.py:extract_units_and_stats_from_source`
-- `codeclone/report/blocks.py:prepare_block_report_groups`
-- `codeclone/report/segments.py:prepare_segment_report_groups`
-- `codeclone/metrics/health.py:compute_health`
-- `codeclone/metrics/coverage_join.py:build_coverage_join`
-- `codeclone/report/json_contract.py:_build_design_groups`
-- `codeclone/report/suggestions.py:generate_suggestions`
-- `codeclone/report/overview.py:build_directory_hotspots`
-- `codeclone/pipeline.py:metric_gate_reasons`
+- `codeclone/core/bootstrap.py:bootstrap`
+- `codeclone/core/discovery.py:discover`
+- `codeclone/core/worker.py:process_file`
+- `codeclone/analysis/units.py:extract_units_and_stats_from_source`
+- `codeclone/report/document/builder.py:build_report_document`
+- `codeclone/report/gates/evaluator.py:metric_gate_reasons`
+- `codeclone/core/reporting.py:gate`
 
 ## Contracts
 
-- Detection core (`extractor`, `normalize`, `cfg`, `blocks`) computes clone candidates.
+- Detection core computes facts; report layer materializes canonical findings from those facts.
 - Report-layer transformations do not change function/block grouping keys used for baseline diff.
 - Segment groups are report-only and do not participate in baseline diff/gating.
 - Structural findings are report-only and do not participate in baseline diff/gating.
-- `golden_fixture_paths` is a project-level clone exclusion policy, not a
-  fingerprint/baseline rule:
-    - it applies only to clone groups fully contained in matching
-      `tests/` / `tests/fixtures/` paths
-    - excluded groups do not affect health, clone gates, or suggestions
-    - excluded groups remain observable as suppressed canonical report facts
-- Dead-code liveness references from test paths are excluded at extraction/cache-load boundaries for both
-  local-name references and canonical qualname references.
+- `golden_fixture_paths` is a clone-policy exclusion layer:
+  excluded groups remain visible as suppressed canonical report facts, but do
+  not affect health, gates, or suggestions.
+- Test-path liveness references are filtered both on fresh extraction and on
+  cache decode.
 
 Refs:
 
-- `codeclone/cli.py:_main_impl` (diff uses only function/block groups)
-- `codeclone/baseline.py:Baseline.diff`
-- `codeclone/extractor.py:extract_units_and_stats_from_source`
-- `codeclone/pipeline.py:_load_cached_metrics`
+- `codeclone/findings/clones/grouping.py:build_groups`
+- `codeclone/report/document/_findings_groups.py:_build_clone_groups`
+- `codeclone/findings/structural/detectors.py:normalize_structural_findings`
+- `codeclone/core/discovery_cache.py:load_cached_metrics_extended`
+- `codeclone/baseline/clone_baseline.py:Baseline.diff`
 
 ## Invariants (MUST)
 
-- `Files found = Files analyzed + Cache hits + Files skipped` warning if broken.
-- In gating mode, unreadable source IO (`source_read_error`) is a contract failure.
-- Parser time/resource protections are applied in POSIX mode via `_parse_limits`.
+- `files_found = files_analyzed + cache_hits + files_skipped`, or CLI warns explicitly.
+- In gating mode, unreadable source IO is a contract failure.
+- Parser time/resource protections are applied before AST extraction.
 
 Refs:
 
-- `codeclone/_cli_summary.py:_print_summary`
-- `codeclone/cli.py:_main_impl`
-- `codeclone/extractor.py:_parse_limits`
+- `codeclone/surfaces/cli/summary.py:_print_summary`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
+- `codeclone/analysis/parser.py:_parse_limits`
 
 ## Failure modes
 
-| Condition                        | Behavior                                                                    |
-|----------------------------------|-----------------------------------------------------------------------------|
-| File stat/read/encoding error    | File skipped; tracked as failed file; source-read subset tracked separately |
-| Source read error in gating mode | Contract error exit 2                                                       |
-| Parser timeout                   | `ParseError` returned through processing failure path                       |
-| Unexpected per-file exception    | Captured as `ProcessingResult(error_kind="unexpected_error")`               |
+| Condition                        | Behavior                                         |
+|----------------------------------|--------------------------------------------------|
+| File stat/read/encoding error    | File skipped; tracked as failed file             |
+| Source read error in gating mode | Contract error, exit `2`                         |
+| Parser timeout                   | `ParseError` through processing failure path     |
+| Unexpected per-file exception    | Captured as `unexpected_error` processing result |
 
 ## Determinism / canonicalization
 
 - File list is sorted.
-- Group sorting in reports is deterministic by key and stable item sort.
+- Group sorting is deterministic by stable tuple keys.
+- Canonical report integrity is computed only from canonical sections.
 
 Refs:
 
 - `codeclone/scanner.py:iter_py_files`
-- `codeclone/report/json_contract.py:_build_clone_groups`
-- `codeclone/report/json_contract.py:_build_structural_groups`
-- `codeclone/report/json_contract.py:_build_integrity_payload`
+- `codeclone/findings/clones/grouping.py:build_groups`
+- `codeclone/report/document/integrity.py:_build_integrity_payload`
 
 ## Locked by tests
 
@@ -143,16 +110,8 @@ Refs:
 - `tests/test_cli_inprocess.py::test_cli_unreadable_source_fails_in_ci_with_contract_error`
 - `tests/test_extractor.py::test_parse_limits_triggers_timeout`
 - `tests/test_extractor.py::test_dead_code_marks_symbol_dead_when_referenced_only_by_tests`
-- `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_import_aliases`
 - `tests/test_pipeline_metrics.py::test_load_cached_metrics_ignores_referenced_names_from_test_files`
 
 ## Non-guarantees
 
-- Parallel scheduling order is not guaranteed; only final grouped output determinism is guaranteed.
-
-## See also
-
-- [08-report.md](08-report.md)
-- [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
-- [16-dead-code-contract.md](16-dead-code-contract.md)
-- [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)
+- Parallel worker scheduling order is not guaranteed; only final output determinism is guaranteed.

@@ -13,8 +13,8 @@ from typing import cast
 
 import pytest
 
-import codeclone.report.json_contract as json_contract_mod
-from codeclone import _coerce
+import codeclone.report.document._common as document_common_mod
+from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import REPORT_SCHEMA_VERSION
 from codeclone.models import (
     ReportLocation,
@@ -24,77 +24,81 @@ from codeclone.models import (
 )
 from codeclone.report import derived as derived_mod
 from codeclone.report import overview as overview_mod
-from codeclone.report.json_contract import (
-    _build_design_groups,
-    _clone_group_assessment,
+from codeclone.report.document._common import (
     _collect_paths_from_metrics,
     _collect_report_file_list,
-    _combined_impact_scope,
     _contract_path,
     _count_file_lines,
     _count_file_lines_for_path,
-    _csv_values,
-    _derive_inventory_code_counts,
-    _findings_summary,
     _is_absolute_path,
     _normalize_block_machine_facts,
     _normalize_nested_string_rows,
     _parse_ratio_percent,
     _source_scope_from_filepaths,
     _source_scope_from_locations,
-    _structural_group_assessment,
-    _suggestion_finding_id,
-    build_report_document,
 )
-from codeclone.report.markdown import (
+from codeclone.report.document._design_groups import _build_design_groups
+from codeclone.report.document._findings_groups import (
+    _clone_group_assessment,
+    _csv_values,
+    _structural_group_assessment,
+)
+from codeclone.report.document.builder import build_report_document
+from codeclone.report.document.derived import (
+    _combined_impact_scope,
+    _suggestion_finding_id,
+)
+from codeclone.report.document.findings import _findings_summary
+from codeclone.report.document.inventory import _derive_inventory_code_counts
+from codeclone.report.renderers.markdown import (
     render_markdown_report_document,
     to_markdown_report,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _baseline_state as _sarif_baseline_state,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _location_entry as _sarif_location_entry,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _location_message as _sarif_location_message,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _logical_locations as _sarif_logical_locations,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _partial_fingerprints as _sarif_partial_fingerprints,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _primary_location_properties as _sarif_primary_location_properties,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _result_entry as _sarif_result_entry,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _result_message as _sarif_result_message,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _result_properties as _sarif_result_properties,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _rule_name as _sarif_rule_name,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _rule_spec as _sarif_rule_spec,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _scan_root_uri as _sarif_scan_root_uri,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _severity_to_level,
     render_sarif_report_document,
     to_sarif_report,
 )
-from codeclone.report.sarif import (
+from codeclone.report.renderers.sarif import (
     _text as _sarif_text,
 )
-from codeclone.report.serialize import (
+from codeclone.report.renderers.text import (
     _append_clone_section,
     _append_single_item_findings,
     _append_structural_findings,
@@ -103,6 +107,7 @@ from codeclone.report.serialize import (
     _structural_kind_label,
     render_text_report_document,
 )
+from codeclone.utils import coerce as _coerce
 from tests._assertions import assert_contains_all, assert_mapping_entries
 
 
@@ -522,12 +527,13 @@ def _rich_report_document() -> dict[str, object]:
             source_breakdown=(("production", 2),),
         ),
     )
+    runtime_tag = current_python_tag()
     meta = {
         "codeclone_version": "2.0.0b2",
         "project_name": "codeclone",
         "scan_root": "/repo/codeclone",
-        "python_version": "3.13.11",
-        "python_tag": "cp313",
+        "python_version": f"{runtime_tag[2]}.{runtime_tag[3:]}",
+        "python_tag": runtime_tag,
         "analysis_mode": "full",
         "report_mode": "full",
         "min_loc": 10,
@@ -1341,6 +1347,152 @@ def test_report_contract_renderers_include_coverage_join_section_when_present() 
     )
 
 
+def test_report_contract_renderers_include_security_surfaces_section() -> None:
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics={
+            "security_surfaces": {
+                "summary": {
+                    "items": 2,
+                    "modules": 2,
+                    "exact_items": 2,
+                    "category_count": 2,
+                    "categories": {
+                        "network_boundary": 1,
+                        "process_boundary": 1,
+                    },
+                    "by_source_kind": {
+                        "production": 1,
+                        "tests": 1,
+                        "fixtures": 0,
+                        "other": 0,
+                    },
+                    "production": 1,
+                    "tests": 1,
+                    "fixtures": 0,
+                    "other": 0,
+                    "report_only": True,
+                },
+                "items": [
+                    {
+                        "category": "network_boundary",
+                        "capability": "requests_import",
+                        "module": "pkg.client",
+                        "filepath": "/repo/pkg/client.py",
+                        "qualname": "pkg.client",
+                        "start_line": 1,
+                        "end_line": 1,
+                        "source_kind": "production",
+                        "location_scope": "module",
+                        "classification_mode": "exact_import",
+                        "evidence_kind": "import",
+                        "evidence_symbol": "requests",
+                    },
+                    {
+                        "category": "process_boundary",
+                        "capability": "subprocess_run",
+                        "module": "tests.test_cli",
+                        "filepath": "/repo/tests/test_cli.py",
+                        "qualname": "tests.test_cli:run_case",
+                        "start_line": 10,
+                        "end_line": 10,
+                        "source_kind": "tests",
+                        "location_scope": "callable",
+                        "classification_mode": "exact_call",
+                        "evidence_kind": "call",
+                        "evidence_symbol": "subprocess.run",
+                    },
+                ],
+            }
+        },
+    )
+
+    text = render_text_report_document(payload)
+    markdown = render_markdown_report_document(payload)
+
+    assert_contains_all(
+        text,
+        "SECURITY SURFACES (top 10)",
+        "category=network_boundary",
+        "capability=requests_import",
+    )
+    assert_contains_all(
+        markdown,
+        '<a id="security-surfaces"></a>',
+        "### Security Surfaces",
+        "capability=requests_import",
+    )
+
+
+def test_report_contract_markdown_renders_empty_suppressed_clone_section() -> None:
+    payload = _rich_report_document()
+    findings = cast(dict[str, object], payload["findings"])
+    groups = cast(dict[str, object], findings["groups"])
+    clone_groups = cast(dict[str, object], groups["clones"])
+    clone_groups["suppressed"] = {"functions": [], "blocks": [], "segments": []}
+
+    markdown = render_markdown_report_document(payload)
+
+    assert "Suppressed Golden Fixture Clone Groups" in markdown
+    assert "_None._" in markdown
+
+
+def test_report_contract_markdown_truncates_suppressed_clone_locations() -> None:
+    payload = _rich_report_document()
+    findings = cast(dict[str, object], payload["findings"])
+    groups = cast(dict[str, object], findings["groups"])
+    clone_groups = cast(dict[str, object], groups["clones"])
+    clone_groups["suppressed"] = {
+        "functions": [
+            {
+                "id": "clone:function:golden",
+                "category": "function",
+                "clone_type": "Type-2",
+                "severity": "warning",
+                "source_scope": {
+                    "impact_scope": "runtime",
+                    "dominant_kind": "production",
+                },
+                "spread": {"files": 7, "functions": 7},
+                "count": 7,
+                "suppression_rule": "golden_fixture",
+                "suppression_source": "project_config",
+                "matched_patterns": ["tests/fixtures/golden_*"],
+                "items": [
+                    {
+                        "relative_path": f"tests/golden_{idx}.py",
+                        "qualname": f"tests.golden_{idx}:run",
+                        "start_line": 10 + idx,
+                        "end_line": 11 + idx,
+                    }
+                    for idx in range(7)
+                ],
+            }
+        ],
+        "blocks": [],
+        "segments": [],
+    }
+
+    markdown = render_markdown_report_document(payload)
+
+    assert "... and 2 more occurrence(s)" in markdown
+
+
+def test_report_contract_markdown_supports_legacy_god_modules_metrics_key() -> None:
+    payload = _rich_report_document()
+    metrics = cast(dict[str, object], payload["metrics"])
+    families = cast(dict[str, object], metrics["families"])
+    families["god_modules"] = families.pop("overloaded_modules")
+
+    markdown = render_markdown_report_document(payload)
+
+    assert "### Overloaded Modules" in markdown
+    assert "candidate_status=candidate" in markdown
+
+
 def test_report_contract_includes_canonical_overloaded_modules_family() -> None:
     payload = _rich_report_document()
 
@@ -1608,6 +1760,115 @@ def test_report_contract_includes_canonical_coverage_join_family() -> None:
     )
     assert coverage_group["kind"] == "coverage_hotspot"
     assert cast(dict[str, object], coverage_group["facts"])["coverage_permille"] == 250
+
+
+def test_report_contract_includes_canonical_security_surfaces_family() -> None:
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics={
+            "security_surfaces": {
+                "summary": {
+                    "items": 2,
+                    "modules": 2,
+                    "exact_items": 2,
+                    "category_count": 2,
+                    "categories": {
+                        "network_boundary": 1,
+                        "process_boundary": 1,
+                    },
+                    "by_source_kind": {
+                        "production": 1,
+                        "tests": 1,
+                        "fixtures": 0,
+                        "other": 0,
+                    },
+                    "production": 1,
+                    "tests": 1,
+                    "fixtures": 0,
+                    "other": 0,
+                    "report_only": True,
+                },
+                "items": [
+                    {
+                        "category": "network_boundary",
+                        "capability": "requests_import",
+                        "module": "pkg.client",
+                        "filepath": "/repo/pkg/client.py",
+                        "qualname": "pkg.client",
+                        "start_line": 1,
+                        "end_line": 1,
+                        "source_kind": "production",
+                        "location_scope": "module",
+                        "classification_mode": "exact_import",
+                        "evidence_kind": "import",
+                        "evidence_symbol": "requests",
+                    },
+                    {
+                        "category": "process_boundary",
+                        "capability": "subprocess_run",
+                        "module": "tests.test_cli",
+                        "filepath": "/repo/tests/test_cli.py",
+                        "qualname": "tests.test_cli:run_case",
+                        "start_line": 10,
+                        "end_line": 10,
+                        "source_kind": "tests",
+                        "location_scope": "callable",
+                        "classification_mode": "exact_call",
+                        "evidence_kind": "call",
+                        "evidence_symbol": "subprocess.run",
+                    },
+                ],
+            }
+        },
+    )
+
+    summary, security_surfaces, items = _metric_family_payload(
+        payload,
+        "security_surfaces",
+    )
+    security_summary = cast(dict[str, object], security_surfaces["summary"])
+    assert summary["security_surfaces"] == security_summary
+    assert security_summary == {
+        "items": 2,
+        "modules": 2,
+        "exact_items": 2,
+        "category_count": 2,
+        "categories": {
+            "network_boundary": 1,
+            "process_boundary": 1,
+        },
+        "by_source_kind": {
+            "production": 1,
+            "tests": 1,
+            "fixtures": 0,
+            "other": 0,
+        },
+        "production": 1,
+        "tests": 1,
+        "fixtures": 0,
+        "other": 0,
+        "report_only": True,
+    }
+    assert (
+        items[0]["relative_path"],
+        items[0]["module"],
+        items[0]["classification_mode"],
+        items[0]["evidence_symbol"],
+    ) == ("pkg/client.py", "pkg.client", "exact_import", "requests")
+    assert (
+        items[1]["relative_path"],
+        items[1]["qualname"],
+        items[1]["location_scope"],
+        items[1]["source_kind"],
+    ) == (
+        "tests/test_cli.py",
+        "tests.test_cli:run_case",
+        "callable",
+        "tests",
+    )
 
 
 def test_sarif_helper_level_mapping() -> None:
@@ -2270,6 +2531,15 @@ def test_render_sarif_report_document_without_srcroot_keeps_relative_payload() -
     assert cast(str, cast(dict[str, object], result["message"])["text"]).endswith(".")
 
 
+def test_sarif_rule_spec_covers_coverage_scope_gap_design_findings() -> None:
+    spec = _sarif_rule_spec(
+        {"family": "design", "category": "coverage", "kind": "coverage_scope_gap"}
+    )
+
+    assert spec.rule_id == "CDESIGN006"
+    assert spec.short_description == "Coverage scope gap"
+
+
 def test_collect_paths_from_metrics_covers_all_metric_families_and_skips_missing() -> (
     None
 ):
@@ -2354,7 +2624,7 @@ def test_collect_report_file_list_deterministically_merges_all_sources(
             self.items = tuple(_Occurrence(path) for path in paths)
 
     monkeypatch.setattr(
-        json_contract_mod,
+        document_common_mod,
         "normalize_structural_findings",
         lambda _findings: [_Group("/repo/struct.py", "")],
     )

@@ -12,9 +12,11 @@ from typing import Any, cast
 import pytest
 
 import codeclone.baseline as baseline_mod
+import codeclone.baseline.clone_baseline as clone_baseline_mod
+import codeclone.baseline.trust as baseline_trust_mod
 from codeclone.baseline import Baseline, BaselineStatus, coerce_baseline_status
 from codeclone.contracts import BASELINE_FINGERPRINT_VERSION, BASELINE_SCHEMA_VERSION
-from codeclone.errors import BaselineValidationError
+from codeclone.contracts.errors import BaselineValidationError
 
 
 def _python_tag() -> str:
@@ -47,7 +49,7 @@ def _trusted_payload(
     created_at: str | None = "2026-02-08T11:43:16Z",
     generator_version: str = "1.4.0",
 ) -> dict[str, object]:
-    payload = baseline_mod._baseline_payload(
+    payload = clone_baseline_mod._baseline_payload(
         functions=set(functions or [_func_id()]),
         blocks=set(blocks or [_block_id()]),
         generator="codeclone",
@@ -164,7 +166,7 @@ def test_baseline_load_too_large(
 ) -> None:
     baseline_path = tmp_path / "baseline.json"
     _write_payload(baseline_path, _trusted_payload())
-    monkeypatch.setattr(baseline_mod, "MAX_BASELINE_SIZE_BYTES", 1)
+    monkeypatch.setattr(baseline_trust_mod, "MAX_BASELINE_SIZE_BYTES", 1)
     baseline = Baseline(baseline_path)
     with pytest.raises(BaselineValidationError, match="too large") as exc:
         baseline.load()
@@ -576,13 +578,13 @@ def test_baseline_payload_fields_contract_invariant(tmp_path: Path) -> None:
 
 
 def test_baseline_hash_canonical_determinism() -> None:
-    hash_a = baseline_mod._compute_payload_sha256(
+    hash_a = baseline_trust_mod._compute_payload_sha256(
         functions={"a" * 40 + "|0-19", "b" * 40 + "|0-19"},
         blocks={_block_id()},
         fingerprint_version="1",
         python_tag="cp313",
     )
-    hash_b = baseline_mod._compute_payload_sha256(
+    hash_b = baseline_trust_mod._compute_payload_sha256(
         functions={"b" * 40 + "|0-19", "a" * 40 + "|0-19"},
         blocks={_block_id()},
         fingerprint_version="1",
@@ -803,7 +805,7 @@ def test_baseline_safe_stat_size_oserror(
     with pytest.raises(
         BaselineValidationError, match="Cannot stat baseline file"
     ) as exc:
-        baseline_mod._safe_stat_size(path)
+        baseline_trust_mod._safe_stat_size(path)
     assert exc.value.status == "invalid_type"
 
 
@@ -818,10 +820,10 @@ def test_baseline_atomic_write_json_cleans_up_temp_file_on_replace_failure(
         temp_holder["path"] = Path(src)
         raise OSError("replace failed")
 
-    monkeypatch.setattr("codeclone._json_io.os.replace", _boom_replace)
+    monkeypatch.setattr("codeclone.utils.json_io.os.replace", _boom_replace)
 
     with pytest.raises(OSError, match="replace failed"):
-        baseline_mod._atomic_write_json(path, _trusted_payload())
+        clone_baseline_mod._atomic_write_json(path, _trusted_payload())
 
     assert temp_holder["path"].exists() is False
 
@@ -841,18 +843,18 @@ def test_baseline_load_json_read_error(
     with pytest.raises(
         BaselineValidationError, match="Cannot read baseline file"
     ) as exc:
-        baseline_mod._load_json_object(path)
+        baseline_trust_mod._load_json_object(path)
     assert exc.value.status == "invalid_json"
 
 
 def test_baseline_optional_str_paths(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
-    assert baseline_mod._optional_str({}, "generator_version", path=path) is None
+    assert baseline_trust_mod._optional_str({}, "generator_version", path=path) is None
     with pytest.raises(
         BaselineValidationError,
         match="'generator_version' must be string",
     ) as exc:
-        baseline_mod._optional_str(
+        baseline_trust_mod._optional_str(
             {"generator_version": 1},
             "generator_version",
             path=path,
@@ -868,7 +870,7 @@ def test_baseline_require_utc_iso8601_z_rejects_invalid_calendar_date(
         BaselineValidationError,
         match="'created_at' must be UTC ISO-8601 with Z",
     ) as exc:
-        baseline_mod._require_utc_iso8601_z(
+        baseline_trust_mod._require_utc_iso8601_z(
             {"created_at": "2026-02-31T00:00:00Z"},
             "created_at",
             path=path,
@@ -894,7 +896,7 @@ def test_baseline_load_legacy_codeclone_version_alias(tmp_path: Path) -> None:
 
 def test_parse_generator_meta_string_legacy_alias(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
-    name, version = baseline_mod._parse_generator_meta(
+    name, version = baseline_trust_mod._parse_generator_meta(
         {
             "generator": "codeclone",
             "codeclone_version": "1.4.0",
@@ -907,7 +909,7 @@ def test_parse_generator_meta_string_legacy_alias(tmp_path: Path) -> None:
 
 def test_parse_generator_meta_string_prefers_generator_version(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
-    name, version = baseline_mod._parse_generator_meta(
+    name, version = baseline_trust_mod._parse_generator_meta(
         {
             "generator": "codeclone",
             "generator_version": "1.4.2",
@@ -921,7 +923,7 @@ def test_parse_generator_meta_string_prefers_generator_version(tmp_path: Path) -
 
 def test_parse_generator_meta_object_top_level_fallback(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
-    name, version = baseline_mod._parse_generator_meta(
+    name, version = baseline_trust_mod._parse_generator_meta(
         {
             "generator": {"name": "codeclone"},
             "generator_version": "1.4.1",
@@ -937,7 +939,7 @@ def test_parse_generator_meta_rejects_extra_generator_keys(tmp_path: Path) -> No
     with pytest.raises(
         BaselineValidationError, match="unexpected generator keys"
     ) as exc:
-        baseline_mod._parse_generator_meta(
+        baseline_trust_mod._parse_generator_meta(
             {"generator": {"name": "codeclone", "version": "1.4.0", "extra": "x"}},
             path=path,
         )
@@ -946,7 +948,11 @@ def test_parse_generator_meta_rejects_extra_generator_keys(tmp_path: Path) -> No
 
 def test_baseline_parse_semver_three_parts(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
-    assert baseline_mod._parse_semver("1.2.3", key="schema_version", path=path) == (
+    assert baseline_trust_mod._parse_semver(
+        "1.2.3",
+        key="schema_version",
+        path=path,
+    ) == (
         1,
         2,
         3,
@@ -959,10 +965,10 @@ def test_baseline_require_sorted_unique_ids_non_string(tmp_path: Path) -> None:
         BaselineValidationError,
         match="'functions' must be list\\[str\\]",
     ) as exc:
-        baseline_mod._require_sorted_unique_ids(
+        baseline_trust_mod._require_sorted_unique_ids(
             {"functions": [1]},
             "functions",
-            pattern=baseline_mod._FUNCTION_ID_RE,
+            pattern=clone_baseline_mod._FUNCTION_ID_RE,
             path=path,
         )
     assert exc.value.status == "invalid_type"
@@ -1050,7 +1056,12 @@ def test_baseline_save_preserves_embedded_metrics_without_hash(tmp_path: Path) -
 def test_preserve_embedded_metrics_variants(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
     _write_payload(path, {"meta": {}, "clones": {"functions": [], "blocks": []}})
-    assert baseline_mod._preserve_embedded_metrics(path) == (None, None, None, None)
+    assert clone_baseline_mod._preserve_embedded_metrics(path) == (
+        None,
+        None,
+        None,
+        None,
+    )
 
     _write_payload(
         path,
@@ -1060,7 +1071,7 @@ def test_preserve_embedded_metrics_variants(tmp_path: Path) -> None:
             "metrics": {"x": 1},
         },
     )
-    assert baseline_mod._preserve_embedded_metrics(path) == (
+    assert clone_baseline_mod._preserve_embedded_metrics(path) == (
         {"x": 1},
         None,
         None,
@@ -1075,7 +1086,7 @@ def test_preserve_embedded_metrics_variants(tmp_path: Path) -> None:
             "metrics": {"x": 2},
         },
     )
-    assert baseline_mod._preserve_embedded_metrics(path) == (
+    assert clone_baseline_mod._preserve_embedded_metrics(path) == (
         {"x": 2},
         None,
         None,
@@ -1090,7 +1101,7 @@ def test_preserve_embedded_metrics_variants(tmp_path: Path) -> None:
             "metrics": {"x": 3},
         },
     )
-    assert baseline_mod._preserve_embedded_metrics(path) == (
+    assert clone_baseline_mod._preserve_embedded_metrics(path) == (
         {"x": 3},
         "a" * 64,
         None,
@@ -1109,7 +1120,7 @@ def test_preserve_embedded_metrics_variants(tmp_path: Path) -> None:
             "api_surface": {"modules": [{"module": "pkg.mod"}]},
         },
     )
-    assert baseline_mod._preserve_embedded_metrics(path) == (
+    assert clone_baseline_mod._preserve_embedded_metrics(path) == (
         {"x": 3},
         "a" * 64,
         {"modules": [{"module": "pkg.mod"}]},
@@ -1133,9 +1144,9 @@ def test_baseline_save_defensive_non_mapping_meta(
             "clones": {"functions": [], "blocks": []},
         }
 
-    monkeypatch.setattr(baseline_mod, "_baseline_payload", _payload)
+    monkeypatch.setattr(clone_baseline_mod, "_baseline_payload", _payload)
     monkeypatch.setattr(
-        baseline_mod,
+        clone_baseline_mod,
         "_preserve_embedded_metrics",
         lambda _path: ({"health_score": 1}, "a" * 64, None, None),
     )
@@ -1167,7 +1178,7 @@ def test_baseline_save_syncs_generator_when_meta_uses_string(
             "clones": {"functions": [], "blocks": []},
         }
 
-    monkeypatch.setattr(baseline_mod, "_baseline_payload", _payload)
+    monkeypatch.setattr(clone_baseline_mod, "_baseline_payload", _payload)
     baseline.save()
 
     _assert_baseline_runtime_meta(
@@ -1207,7 +1218,7 @@ def test_baseline_save_skips_non_string_meta_updates(
             "clones": {"functions": [], "blocks": []},
         }
 
-    monkeypatch.setattr(baseline_mod, "_baseline_payload", _payload)
+    monkeypatch.setattr(clone_baseline_mod, "_baseline_payload", _payload)
     baseline.save()
 
     _assert_baseline_runtime_meta(
@@ -1263,7 +1274,7 @@ def test_baseline_save_ignores_non_string_non_mapping_generator(
             "clones": {"functions": [], "blocks": []},
         }
 
-    monkeypatch.setattr(baseline_mod, "_baseline_payload", _payload)
+    monkeypatch.setattr(clone_baseline_mod, "_baseline_payload", _payload)
     baseline.save()
 
     assert baseline.generator == "keep-generator"

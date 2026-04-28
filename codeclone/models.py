@@ -93,6 +93,8 @@ class DepGraph:
     edges: tuple[ModuleDep, ...]
     cycles: tuple[tuple[str, ...], ...]
     max_depth: int
+    avg_depth: float
+    p95_depth: int
     longest_chains: tuple[tuple[str, ...], ...]
 
 
@@ -117,6 +119,42 @@ class DeadCandidate:
     suppressed_rules: tuple[str, ...] = field(default_factory=tuple)
 
 
+SecuritySurfaceCategory = Literal[
+    "archive_extraction",
+    "crypto_transport",
+    "database_boundary",
+    "deserialization",
+    "dynamic_execution",
+    "dynamic_loading",
+    "filesystem_mutation",
+    "identity_token",
+    "network_boundary",
+    "process_boundary",
+]
+SecuritySurfaceLocationScope = Literal["module", "class", "callable"]
+SecuritySurfaceClassificationMode = Literal[
+    "exact_builtin",
+    "exact_call",
+    "exact_import",
+]
+SecuritySurfaceEvidenceKind = Literal["builtin", "call", "import"]
+
+
+@dataclass(frozen=True, slots=True)
+class SecuritySurface:
+    category: SecuritySurfaceCategory
+    capability: str
+    module: str
+    filepath: str
+    qualname: str
+    start_line: int
+    end_line: int
+    location_scope: SecuritySurfaceLocationScope
+    classification_mode: SecuritySurfaceClassificationMode
+    evidence_kind: SecuritySurfaceEvidenceKind
+    evidence_symbol: str
+
+
 @dataclass(frozen=True, slots=True)
 class FileMetrics:
     class_metrics: tuple[ClassMetrics, ...]
@@ -125,6 +163,7 @@ class FileMetrics:
     referenced_names: frozenset[str]
     import_names: frozenset[str]
     class_names: frozenset[str]
+    security_surfaces: tuple[SecuritySurface, ...] = ()
     referenced_qualnames: frozenset[str] = field(default_factory=frozenset)
     typing_coverage: ModuleTypingCoverage | None = None
     docstring_coverage: ModuleDocstringCoverage | None = None
