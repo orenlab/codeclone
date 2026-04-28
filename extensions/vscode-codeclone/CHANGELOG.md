@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.2.5
+
+- pin the packaging toolchain to `@vscode/vsce@2.25.0` to remove the vulnerable transitive `uuid<14` chain from the
+  extension lockfile
+- keep the generated `.vsix` package behavior unchanged after the packaging dependency refresh
+
 ## 0.2.4
 
 - restore repo-local `uv run codeclone-mcp` fallback for the refactored MCP server layout

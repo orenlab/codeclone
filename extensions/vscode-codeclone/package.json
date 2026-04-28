@@ -2,7 +2,7 @@
   "name": "codeclone",
   "displayName": "CodeClone",
   "description": "Baseline-aware, triage-first structural review for Python, powered by CodeClone MCP.",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "preview": true,
   "publisher": "orenlab",
   "license": "MPL-2.0",
@@ -776,7 +776,7 @@
   "devDependencies": {
     "@types/node": "^25.5.2",
     "@types/vscode": "1.100.0",
-    "@vscode/vsce": "^3.7.1",
+    "@vscode/vsce": "2.25.0",
     "esbuild": "^0.28.0",
     "typescript": "^6.0.2"
   }

@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.0.0b7] - 2026-04-28
+
+`2.0.0b7` is a beta hotfix for packaging-only issues found after the `2.0.0b6` publish.
+
+### Packaging
+
+- Constrain the optional MCP extra to `httpx>=0.27.1,<1` so prerelease install flows such as
+  `uv tool install --pre "codeclone[mcp]"` do not resolve incompatible `httpx 1.0.dev*` builds through the upstream MCP
+  dependency graph.
+- Pin the preview VS Code extension packaging tool to `@vscode/vsce@2.25.0`, removing the vulnerable transitive
+  `uuid<14` chain from `package-lock.json` while preserving `.vsix` packaging.
+- Keep local pre-commit runs stable after package builds by letting mypy use the configured source roots and ignoring
+  generated `build/` and `site/` artifacts.
+
 ## [2.0.0b6] - 2026-04-28
 
 The global package refactor lands here: the entire runtime moves onto the
