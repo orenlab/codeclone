@@ -24,6 +24,9 @@ const {
     formatCoverageJoinPercent,
     formatCoverageJoinStatus,
     formatCoverageJoinSummary,
+    formatSecuritySurfaceLocation,
+    formatSecuritySurfaceReviewSignal,
+    securitySurfacesPayload,
 } = require("../src/formatters");
 
 moduleInternals._load = originalLoad;
@@ -64,4 +67,45 @@ test("coverage join payload normalizes missing or null metrics family entries", 
     assert.deepEqual(coverageJoinPayload({coverage_join: {status: "ok"}}), {
         status: "ok",
     });
+});
+
+test("security surfaces formatters keep summary payloads and review cues explicit", () => {
+    assert.deepEqual(securitySurfacesPayload(undefined), {});
+    assert.deepEqual(securitySurfacesPayload({}), {});
+    assert.deepEqual(
+        securitySurfacesPayload({
+            security_surfaces: {
+                items: 5,
+                production: 3,
+                report_only: true,
+            },
+        }),
+        {
+            items: 5,
+            production: 3,
+            report_only: true,
+        }
+    );
+
+    assert.equal(
+        formatSecuritySurfaceLocation({
+            path: "pkg/client.py",
+            start_line: 12,
+            end_line: 18,
+        }),
+        "pkg/client.py:12-18"
+    );
+    assert.equal(
+        formatSecuritySurfaceReviewSignal({
+            location_scope: "callable",
+            coverage_hotspot: true,
+        }),
+        "Callable · low coverage"
+    );
+    assert.equal(
+        formatSecuritySurfaceReviewSignal({
+            location_scope: "module",
+        }),
+        "Module · capability present"
+    );
 });

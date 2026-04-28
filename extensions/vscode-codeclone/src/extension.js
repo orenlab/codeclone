@@ -37,8 +37,11 @@ const {
     formatKind,
     formatNovelty,
     formatRunScope,
+    formatSecuritySurfaceLocation,
+    formatSecuritySurfaceReviewSignal,
     formatSeverity,
     formatSourceKindSummary,
+    humanizeIdentifier,
     isSpecificFocusMode,
     normalizeFindingLocations,
     normalizeRelativePath,
@@ -46,6 +49,7 @@ const {
     reviewTargetKey,
     safeArray,
     safeObject,
+    securitySurfacesPayload,
     sameLaunchSpec,
     treeAccessibilityInformation,
     workspaceRelativePath,
@@ -55,6 +59,7 @@ const {
     markdownBulletList,
     renderFindingMarkdown,
     renderOverloadedModuleMarkdown,
+    renderSecuritySurfaceMarkdown,
     renderHelpMarkdown,
     renderRemediationMarkdown,
     renderRestrictedModeMarkdown,
@@ -341,6 +346,15 @@ class CodeCloneController {
             ),
             vscode.commands.registerCommand("codeclone.reviewOverloadedModule", (node) =>
                 this.reviewOverloadedModule(node)
+            ),
+            vscode.commands.registerCommand("codeclone.openSecuritySurface", (node) =>
+                this.openSecuritySurface(node)
+            ),
+            vscode.commands.registerCommand("codeclone.copySecuritySurfaceBrief", (node) =>
+                this.copySecuritySurfaceBrief(node)
+            ),
+            vscode.commands.registerCommand("codeclone.reviewSecuritySurface", (node) =>
+                this.reviewSecuritySurface(node)
             ),
         ];
         this.context.subscriptions.push(...subscriptions);
@@ -782,11 +796,15 @@ class CodeCloneController {
         const diffRef = vscode.workspace
             .getConfiguration("codeclone", state.folder.uri)
             .get("analysis.changedDiffRef", "HEAD");
+        const coverageJoin = coverageJoinPayload(state.metricsSummary);
+        const securitySurfaces = securitySurfacesPayload(state.metricsSummary);
         const [
             newRegressionsResponse,
             productionHotspotsResponse,
             changedFilesResponse,
             overloadedModulesResponse,
+            securitySurfacesResponse,
+            coverageJoinResponse,
         ] = await Promise.all([
             this.client.callTool("list_findings", {
                 run_id: runId,
@@ -820,15 +838,36 @@ class CodeCloneController {
                 family: "overloaded_modules",
                 limit: 25,
             }),
+            Number(securitySurfaces.items || 0) > 0
+                ? this.client.callTool("get_report_section", {
+                    run_id: runId,
+                    section: "metrics_detail",
+                    family: "security_surfaces",
+                    limit: 100,
+                })
+                : Promise.resolve({items: []}),
+            String(coverageJoin.status || "").trim().toLowerCase() === "ok"
+                ? this.client.callTool("get_report_section", {
+                    run_id: runId,
+                    section: "metrics_detail",
+                    family: "coverage_join",
+                    limit: 200,
+                })
+                : Promise.resolve({items: []}),
         ]);
         if (this.disposed) {
             return;
         }
+        const normalizedSecuritySurfaces = this.normalizeSecuritySurfaceItems(
+            safeArray(securitySurfacesResponse.items),
+            safeArray(coverageJoinResponse.items)
+        );
         state.reviewArtifacts = {
             newRegressions: safeArray(newRegressionsResponse.items),
             productionHotspots: safeArray(productionHotspotsResponse.items),
             changedFiles: safeArray(changedFilesResponse.items),
             overloadedModules: safeArray(overloadedModulesResponse.items),
+            securitySurfaces: normalizedSecuritySurfaces,
         };
         state.groupCache.clear();
         this.rebuildFileDecorations();
@@ -1142,6 +1181,7 @@ class CodeCloneController {
         if (
             !candidate ||
             candidate.nodeType === "overloadedModule" ||
+            candidate.nodeType === "securitySurface" ||
             !candidate.findingId
         ) {
             return null;
@@ -1161,6 +1201,18 @@ class CodeCloneController {
         return candidate;
     }
 
+    activeSecuritySurfaceTarget(node) {
+        const candidate = node || this.activeReviewTarget;
+        if (
+            !candidate ||
+            candidate.nodeType !== "securitySurface" ||
+            !safeObject(candidate.item).path
+        ) {
+            return null;
+        }
+        return candidate;
+    }
+
     isTargetVisibleInEditor(target, editor = vscode.window.activeTextEditor) {
         if (!target || !editor || !editor.document) {
             return false;
@@ -1172,6 +1224,11 @@ class CodeCloneController {
                 return false;
             }
             return workspaceRelativePath(state.folder, fsPath) === normalizeRelativePath(target.item.path);
+        }
+        if (target.nodeType === "securitySurface") {
+            return safeArray(target.locations).some(
+                (location) => location.absolutePath === fsPath
+            );
         }
         return safeArray(target.locations).some(
             (location) => location.absolutePath === fsPath
@@ -1227,6 +1284,37 @@ class CodeCloneController {
         return resolved;
     }
 
+    normalizeSecuritySurfaceItems(items, coverageJoinItems) {
+        const coverageIndex = new Map();
+        for (const item of safeArray(coverageJoinItems)) {
+            const pathValue = String(safeObject(item).path || "").trim();
+            const qualnameValue = String(safeObject(item).qualname || "").trim();
+            if (!pathValue || !qualnameValue) {
+                continue;
+            }
+            coverageIndex.set(`${pathValue}::${qualnameValue}`, {
+                coverage_overlap: true,
+                coverage_hotspot: Boolean(safeObject(item).coverage_hotspot),
+                scope_gap_hotspot: Boolean(safeObject(item).scope_gap_hotspot),
+            });
+        }
+        return safeArray(items).map((item) => {
+            const entry = safeObject(item);
+            const pathValue = String(entry.path || "").trim();
+            const qualnameValue = String(entry.qualname || "").trim();
+            const coverageEntry =
+                pathValue && qualnameValue
+                    ? coverageIndex.get(`${pathValue}::${qualnameValue}`)
+                    : null;
+            return {
+                ...entry,
+                coverage_overlap: Boolean(coverageEntry?.coverage_overlap),
+                coverage_hotspot: Boolean(coverageEntry?.coverage_hotspot),
+                scope_gap_hotspot: Boolean(coverageEntry?.scope_gap_hotspot),
+            };
+        });
+    }
+
     reviewArtifactItems(state, groupId) {
         if (!state) {
             return [];
@@ -1241,6 +1329,8 @@ class CodeCloneController {
                 return safeArray(artifacts.changedFiles);
             case "overloadedModules":
                 return safeArray(artifacts.overloadedModules);
+            case "securitySurfaces":
+                return safeArray(artifacts.securitySurfaces);
             default:
                 return [];
         }
@@ -1388,13 +1478,89 @@ class CodeCloneController {
         };
     }
 
+    toSecuritySurfaceNodes(state, items) {
+        return items.map((item) => this.buildSecuritySurfaceNode(state, item));
+    }
+
+    securitySurfaceLocations(state, item) {
+        return [
+            {
+                path: String(item.path || ""),
+                line:
+                    typeof item.start_line === "number" && !Number.isNaN(item.start_line)
+                        ? item.start_line
+                        : null,
+                end_line:
+                    typeof item.end_line === "number" && !Number.isNaN(item.end_line)
+                        ? item.end_line
+                        : null,
+                symbol: item.qualname ? String(item.qualname) : null,
+                absolutePath:
+                    resolveWorkspacePath(
+                        state.folder.uri.fsPath,
+                        String(item.path || "")
+                    ) || "",
+            },
+        ].filter((location) => location.absolutePath);
+    }
+
+    hydrateSecuritySurfaceNode(state, node) {
+        const locations =
+            safeArray(node.locations).length > 0
+                ? safeArray(node.locations)
+                : this.securitySurfaceLocations(state, safeObject(node.item));
+        return {
+            ...node,
+            nodeType: "securitySurface",
+            locations,
+        };
+    }
+
+    buildSecuritySurfaceNode(state, item) {
+        const locationLabel = formatSecuritySurfaceLocation(item);
+        const locations = this.securitySurfaceLocations(state, item);
+        return {
+            nodeType: "securitySurface",
+            workspaceKey: state.folder.uri.toString(),
+            runId: state.currentRunId,
+            item,
+            label: locationLabel,
+            description: `${humanizeIdentifier(item.capability)} · ${formatSecuritySurfaceReviewSignal(item)}`,
+            tooltip:
+                `${humanizeIdentifier(item.category)} · ${humanizeIdentifier(item.source_kind)}\n` +
+                `Evidence: ${String(item.evidence_symbol || "(unknown)")}`,
+            icon: new vscode.ThemeIcon("shield"),
+            contextValue: "codeclone.securitySurface",
+            locations,
+            command: {
+                command: "codeclone.reviewSecuritySurface",
+                title: "Review Security Surface",
+                arguments: [
+                    {
+                        workspaceKey: state.folder.uri.toString(),
+                        runId: state.currentRunId,
+                        item,
+                        nodeType: "securitySurface",
+                        locations,
+                    },
+                ],
+            },
+        };
+    }
+
     currentPriorityQueue(state) {
         const artifacts = safeObject(state.reviewArtifacts);
         const groupIds =
             this.hotspotFocusMode === "recommended"
                 ? ["changedFiles", "newRegressions", "productionHotspots"]
                 : this.hotspotFocusMode === "all"
-                    ? ["changedFiles", "newRegressions", "productionHotspots", "overloadedModules"]
+                    ? [
+                        "changedFiles",
+                        "newRegressions",
+                        "productionHotspots",
+                        "securitySurfaces",
+                        "overloadedModules",
+                    ]
                     : this.activeHotspotGroupIds(state);
         const queue = [];
         const seen = new Set();
@@ -1403,6 +1569,20 @@ class CodeCloneController {
                 for (const node of this.toOverloadedModuleNodes(
                     state,
                     safeArray(artifacts.overloadedModules)
+                )) {
+                    const key = reviewTargetKey(node);
+                    if (!key || seen.has(key)) {
+                        continue;
+                    }
+                    seen.add(key);
+                    queue.push(node);
+                }
+                continue;
+            }
+            if (groupId === "securitySurfaces") {
+                for (const node of this.toSecuritySurfaceNodes(
+                    state,
+                    safeArray(artifacts.securitySurfaces)
                 )) {
                     const key = reviewTargetKey(node);
                     if (!key || seen.has(key)) {
@@ -1428,9 +1608,21 @@ class CodeCloneController {
         if (
             this.hotspotFocusMode === "recommended" &&
             queue.length === 0 &&
-            safeArray(artifacts.overloadedModules).length > 0
+            (
+                safeArray(artifacts.securitySurfaces).length > 0 ||
+                safeArray(artifacts.overloadedModules).length > 0
+            )
         ) {
-            return this.toOverloadedModuleNodes(state, safeArray(artifacts.overloadedModules));
+            return [
+                ...this.toSecuritySurfaceNodes(
+                    state,
+                    safeArray(artifacts.securitySurfaces)
+                ),
+                ...this.toOverloadedModuleNodes(
+                    state,
+                    safeArray(artifacts.overloadedModules)
+                ),
+            ];
         }
         return queue;
     }
@@ -1473,6 +1665,10 @@ class CodeCloneController {
         const nextNode = queue[nextIndex];
         if (nextNode.nodeType === "overloadedModule") {
             await this.revealOverloadedModuleSource(nextNode);
+            return;
+        }
+        if (nextNode.nodeType === "securitySurface") {
+            await this.revealSecuritySurfaceSource(nextNode);
             return;
         }
         await this.revealFindingSource(nextNode);
@@ -1536,6 +1732,8 @@ class CodeCloneController {
             if (picked) {
                 if (picked.node.nodeType === "overloadedModule") {
                     await this.reviewOverloadedModule(picked.node);
+                } else if (picked.node.nodeType === "securitySurface") {
+                    await this.reviewSecuritySurface(picked.node);
                 } else {
                     await this.reviewFinding(picked.node);
                 }
@@ -1970,6 +2168,32 @@ class CodeCloneController {
         await this.revealWorkspacePath(state.folder, activeNode.item.path);
     }
 
+    async revealSecuritySurfaceSource(node) {
+        const activeNode = this.activeSecuritySurfaceTarget(node);
+        if (!activeNode) {
+            return;
+        }
+        const state = this.states.get(activeNode.workspaceKey);
+        if (!state) {
+            return;
+        }
+        const resolved = this.hydrateSecuritySurfaceNode(state, activeNode);
+        this.setActiveReviewTarget(resolved);
+        const location = firstNormalizedLocation(state.folder, resolved.locations);
+        if (!location || !location.path) {
+            await vscode.window.showInformationMessage(
+                "This security surface does not expose a source location."
+            );
+            return;
+        }
+        await this.revealWorkspacePath(
+            state.folder,
+            location.path,
+            location.line ?? undefined,
+            location.end_line ?? undefined
+        );
+    }
+
     /**
      * @param {any} folder
      * @param {string} relativePath
@@ -2157,6 +2381,118 @@ class CodeCloneController {
         );
     }
 
+    async openSecuritySurface(node) {
+        const activeNode = this.activeSecuritySurfaceTarget(node);
+        if (!activeNode) {
+            return;
+        }
+        const state = this.states.get(activeNode.workspaceKey);
+        if (!state) {
+            return;
+        }
+        const resolved = this.hydrateSecuritySurfaceNode(state, activeNode);
+        this.setActiveReviewTarget(resolved);
+        await this.showMarkdownDocument(renderSecuritySurfaceMarkdown(resolved.item));
+    }
+
+    async reviewSecuritySurface(node) {
+        const activeNode = this.activeSecuritySurfaceTarget(node);
+        if (!activeNode) {
+            return;
+        }
+        const state = this.states.get(activeNode.workspaceKey);
+        if (!state) {
+            return;
+        }
+        const resolved = this.hydrateSecuritySurfaceNode(state, activeNode);
+        this.setActiveReviewTarget(resolved);
+        const picked = await vscode.window.showQuickPick(
+            [
+                {
+                    label: "Reveal source",
+                    description: "Recommended",
+                    action: "reveal",
+                },
+                {
+                    label: "Show report-only detail",
+                    description: "Open Security Surface summary",
+                    action: "detail",
+                },
+                {
+                    label: "Copy security review brief",
+                    description: "AI handoff",
+                    action: "brief",
+                },
+            ],
+            {
+                title: "Review Security Surface",
+                placeHolder: `What do you want to do with ${formatSecuritySurfaceLocation(resolved.item)}?`,
+            }
+        );
+        if (!picked) {
+            return;
+        }
+        if (picked.action === "reveal") {
+            await this.revealSecuritySurfaceSource(resolved);
+            return;
+        }
+        if (picked.action === "brief") {
+            await this.copySecuritySurfaceBrief(resolved);
+            return;
+        }
+        await this.openSecuritySurface(resolved);
+    }
+
+    async copySecuritySurfaceBrief(node) {
+        const activeNode = this.activeSecuritySurfaceTarget(node);
+        if (!activeNode) {
+            return;
+        }
+        const state = this.states.get(activeNode.workspaceKey);
+        if (!state) {
+            return;
+        }
+        const resolved = this.hydrateSecuritySurfaceNode(state, activeNode);
+        this.setActiveReviewTarget(resolved);
+        const item = resolved.item;
+        const lines = [
+            "# CodeClone Security Surface Brief",
+            "",
+            `Repository: ${state.folder.name || "unknown"}`,
+            `Location: ${formatSecuritySurfaceLocation(item)}`,
+            `Module: ${item.module || "unknown"}`,
+            `Symbol: ${item.qualname || item.module || "unknown"}`,
+            `Category: ${humanizeIdentifier(item.category || "unknown")}`,
+            `Capability: ${humanizeIdentifier(item.capability || "unknown")}`,
+            `Evidence: ${item.evidence_symbol || "(unknown)"}`,
+            `Source kind: ${humanizeIdentifier(item.source_kind || "unknown")}`,
+            `Review signal: ${formatSecuritySurfaceReviewSignal(item)}`,
+            "",
+            "Treat this as a report-only trust-boundary inventory entry, not as a vulnerability claim or gate result.",
+            "Keep behavior unchanged unless review shows that the boundary contract itself needs to move.",
+        ];
+        if (item.scope_gap_hotspot) {
+            lines.push(
+                "",
+                "Coverage Join does not map this callable cleanly, so validate the exercised path manually before refactor."
+            );
+        } else if (item.coverage_hotspot) {
+            lines.push(
+                "",
+                "Coverage Join marks this callable as low coverage, so inspect or add boundary-focused tests before change."
+            );
+        } else if (item.coverage_overlap) {
+            lines.push(
+                "",
+                "Coverage Join overlaps with this callable, so inspect the measured tests before change."
+            );
+        }
+        await vscode.env.clipboard.writeText(lines.join("\n"));
+        await vscode.window.showInformationMessage(
+            `Copied security review brief for ${formatSecuritySurfaceLocation(item)}.`
+        );
+    }
+
     async clearSessionState() {
         const folder = this.getPreferredFolder();
         if (!folder) {
@@ -2255,6 +2591,38 @@ class CodeCloneController {
                 }),
             ];
         }
+        if (target.nodeType === "securitySurface") {
+            const state = this.states.get(target.workspaceKey);
+            if (!state) {
+                return [];
+            }
+            const location = firstNormalizedLocation(state.folder, target.locations);
+            if (!location || location.absolutePath !== document.uri.fsPath) {
+                return [];
+            }
+            const startLine = Math.max(Number(location.line || 1) - 1, 0);
+            const range = new vscode.Range(startLine, 0, startLine, 0);
+            return [
+                new vscode.CodeLens(range, {
+                    command: "codeclone.previousReviewItem",
+                    title: "$(arrow-up) Previous hotspot",
+                }),
+                new vscode.CodeLens(range, {
+                    command: "codeclone.nextReviewItem",
+                    title: "$(arrow-down) Next hotspot",
+                }),
+                new vscode.CodeLens(range, {
+                    command: "codeclone.openSecuritySurface",
+                    title: "$(shield) Report-only detail",
+                    arguments: [target],
+                }),
+                new vscode.CodeLens(range, {
+                    command: "codeclone.copySecuritySurfaceBrief",
+                    title: "$(copy) Copy security brief",
+                    arguments: [target],
+                }),
+            ];
+        }
         const state = this.states.get(target.workspaceKey);
         if (!state) {
             return [];
@@ -2328,10 +2696,12 @@ class CodeCloneController {
             changed: this.reviewArtifactCount(state, "changedFiles"),
             new: this.reviewArtifactCount(state, "newRegressions"),
             production: this.reviewArtifactCount(state, "productionHotspots"),
+            securitySurfaces: this.reviewArtifactCount(state, "securitySurfaces"),
             overloadedModules: this.reviewArtifactCount(state, "overloadedModules"),
         };
         const baselineDrift = this.baselineDrift(state);
         const coverageJoin = coverageJoinPayload(state.metricsSummary);
+        const securitySurfaces = securitySurfacesPayload(state.metricsSummary);
         if (!node) {
             const sections = [
                 {
@@ -2385,6 +2755,16 @@ class CodeCloneController {
                     label: "Overloaded Modules",
                     description: `${overloadedModules.candidates} candidates · top ${decimal(overloadedModules.top_score)} (report-only)`,
                     icon: new vscode.ThemeIcon("symbol-module"),
+                });
+            }
+            if (Object.keys(securitySurfaces).length > 0) {
+                sections.push({
+                    nodeType: "section",
+                    id: "overview.securitySurfaces",
+                    label: "Security Surfaces",
+                    description:
+                        `${number(securitySurfaces.items)} items · ${number(securitySurfaces.production)} production · report-only`,
+                    icon: new vscode.ThemeIcon("shield"),
                 });
             }
             if (Object.keys(coverageJoin).length > 0) {
@@ -2545,6 +2925,30 @@ class CodeCloneController {
                 this.detailNode(
                     "Review surface",
                     `${number(reviewCounts.overloadedModules)} visible in Hotspots`
+                ),
+            ];
+        }
+        if (node.id === "overview.securitySurfaces") {
+            const categoryCounts = safeObject(securitySurfaces.categories);
+            const activeCategories = Object.entries(categoryCounts)
+                .filter(([, count]) => typeof count === "number" && count > 0)
+                .sort((left, right) => Number(right[1]) - Number(left[1]));
+            return [
+                this.detailNode("Items", number(securitySurfaces.items)),
+                this.detailNode("Categories", number(securitySurfaces.category_count)),
+                this.detailNode("Modules", number(securitySurfaces.modules)),
+                this.detailNode("Production", number(securitySurfaces.production)),
+                this.detailNode("Tests", number(securitySurfaces.tests)),
+                this.detailNode("Exact items", number(securitySurfaces.exact_items)),
+                this.detailNode(
+                    "Review surface",
+                    `${number(reviewCounts.securitySurfaces)} visible in Hotspots`
+                ),
+                this.detailNode(
+                    "Top category",
+                    activeCategories.length > 0
+                        ? `${humanizeIdentifier(activeCategories[0][0])} · ${number(activeCategories[0][1])}`
+                        : "none"
                 ),
             ];
         }
@@ -2792,6 +3196,12 @@ class CodeCloneController {
                         this.reviewArtifactItems(state, "overloadedModules")
                     );
                     break;
+                case "securitySurfaces":
+                    nodes = this.toSecuritySurfaceNodes(
+                        state,
+                        this.reviewArtifactItems(state, "securitySurfaces")
+                    );
+                    break;
                 default:
                     nodes = [];
             }
@@ -2874,6 +3284,8 @@ class CodeCloneController {
                 return state.changedSummary
                     ? `${this.reviewArtifactCount(state, "changedFiles")} visible · ${state.changedSummary.verdict}`
                     : "not analyzed";
+            case "securitySurfaces":
+                return `${this.reviewArtifactCount(state, "securitySurfaces")} report-only`;
             case "overloadedModules":
                 return `${this.reviewArtifactCount(state, "overloadedModules")} report-only`;
             default:
@@ -2889,6 +3301,8 @@ class CodeCloneController {
                 return "No production hotspots are visible.";
             case "changedFiles":
                 return "No findings touching changed files are visible.";
+            case "securitySurfaces":
+                return "No report-only Security Surfaces are visible.";
             case "overloadedModules":
                 return "No report-only Overloaded Module candidates are visible.";
             default:
@@ -2918,6 +3332,8 @@ class CodeCloneController {
                     return this.hotspotFocusMode === "changed";
                 }
                 return specificMode || this.reviewArtifactCount(state, "changedFiles") > 0;
+            case "securitySurfaces":
+                return specificMode || this.reviewArtifactCount(state, "securitySurfaces") > 0;
             case "overloadedModules":
                 return specificMode || this.reviewArtifactCount(state, "overloadedModules") > 0;
             default:
@@ -2959,6 +3375,13 @@ class CodeCloneController {
                 label: "Review production hotspots",
                 command: "codeclone.reviewPriorityQueue",
                 title: "Review production hotspots",
+            };
+        }
+        if (this.reviewArtifactCount(state, "securitySurfaces") > 0) {
+            return {
+                label: "Review security-relevant boundaries",
+                command: "codeclone.reviewPriorityQueue",
+                title: "Review security-relevant boundaries",
             };
         }
         if (this.reviewArtifactCount(state, "overloadedModules") > 0) {
@@ -3043,6 +3466,18 @@ class CodeCloneController {
                 item.command = node.command;
                 break;
             }
+            case "securitySurface": {
+                item = new vscode.TreeItem(
+                    node.label,
+                    vscode.TreeItemCollapsibleState.None
+                );
+                item.description = node.description;
+                item.tooltip = node.tooltip;
+                item.iconPath = node.icon;
+                item.contextValue = "codeclone.securitySurface";
+                item.command = node.command;
+                break;
+            }
             case "helpTopic": {
                 item = new vscode.TreeItem(
                     node.label,
@@ -3118,9 +3553,13 @@ class CodeCloneController {
                 newCount + productionCount,
                 changedCount
             );
+            const securitySurfaceCount = Number(
+                this.reviewArtifactCount(state, "securitySurfaces")
+            );
             const overloadedModuleCount = Number(
                 this.reviewArtifactCount(state, "overloadedModules")
             );
+            const reportOnlyCount = securitySurfaceCount + overloadedModuleCount;
             let badgeValue = 0;
             let badgeTooltip = "";
             switch (this.hotspotFocusMode) {
@@ -3137,15 +3576,17 @@ class CodeCloneController {
                     badgeTooltip = `${changedCount} changed-files review items are visible in Hotspots`;
                     break;
                 case "reportOnly":
-                    badgeValue = overloadedModuleCount;
-                    badgeTooltip = `${overloadedModuleCount} report-only Overloaded Module candidates are visible in Hotspots`;
+                    badgeValue = reportOnlyCount;
+                    badgeTooltip = reportOnlyCount > 0
+                        ? `${reportOnlyCount} report-only review items are visible in Hotspots`
+                        : "No report-only review items are visible in Hotspots";
                     break;
                 default:
-                    badgeValue = actionableCount > 0 ? actionableCount : overloadedModuleCount;
+                    badgeValue = actionableCount > 0 ? actionableCount : reportOnlyCount;
                     badgeTooltip =
                         actionableCount > 0
                             ? `${actionableCount} review items need attention`
-                            : `${overloadedModuleCount} report-only Overloaded Module candidates are visible in Hotspots`;
+                            : `${reportOnlyCount} report-only review items are visible in Hotspots`;
                     break;
             }
             this.hotspotsView.badge =
@@ -3203,7 +3644,7 @@ class CodeCloneController {
         void vscode.commands.executeCommand(
             "setContext",
             "codeclone.activeReviewTargetIsFinding",
-            Boolean(activeTarget && activeTarget.nodeType !== "overloadedModule")
+            Boolean(activeTarget && activeTarget.nodeType === "finding")
         );
         void vscode.commands.executeCommand(
             "setContext",
@@ -3214,6 +3655,11 @@ class CodeCloneController {
             "setContext",
             "codeclone.activeReviewTargetIsOverloadedModule",
             Boolean(activeTarget && activeTarget.nodeType === "overloadedModule")
+        );
+        void vscode.commands.executeCommand(
+            "setContext",
+            "codeclone.activeReviewTargetIsSecuritySurface",
+            Boolean(activeTarget && activeTarget.nodeType === "securitySurface")
         );
         void vscode.commands.executeCommand(
             "setContext",

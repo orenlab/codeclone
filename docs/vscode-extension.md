@@ -20,6 +20,7 @@ The extension helps you:
 - jump directly to source locations
 - open canonical finding or remediation detail only when needed
 - inspect current-run `Coverage Join` facts without inventing extension-local interpretations
+- inspect report-only `Security Surfaces` as security-relevant boundary inventory
 - inspect report-only Overloaded Module candidates without treating them like findings
 
 It does not create a second truth model and it does not mutate the repository.
@@ -63,6 +64,8 @@ the resolved project cache path.
 Compact health, current run state, baseline drift, and next-best review action.
 When the current run includes external Cobertura join facts, Overview also
 shows a factual `Coverage Join` section sourced from canonical MCP metrics.
+When MCP exposes `security_surfaces`, Overview also shows a compact report-only
+`Security Surfaces` section.
 
 ### Hotspots
 
@@ -71,6 +74,7 @@ Primary operational view for:
 - new regressions
 - production hotspots
 - changed-files findings
+- report-only Security Surfaces
 - report-only Overloaded Module candidates
 
 ### Runs & Session
@@ -94,6 +98,8 @@ The extension stays source-first:
   review target
 - Explorer decorations stay lightweight and focus on new, production, or
   changed-scope relevance
+- report-only Security Surfaces stay source-first: reveal source, open compact
+  detail, or copy a review brief without promoting them to findings
 
 `Open in HTML Report` exists as an explicit bridge to the richer human report,
 not as the primary IDE workflow.

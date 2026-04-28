@@ -57,7 +57,8 @@ It also provides:
 - command palette entry points for analysis and review
 - one onboarding walkthrough
 - markdown detail panels for findings, remediation, help topics, setup help,
-  restricted-mode guidance, and report-only Overloaded Module detail
+  restricted-mode guidance, and report-only detail for `Security Surfaces` and
+  `Overloaded Modules`
 - lightweight Explorer file decorations for review-relevant files
 - editor-local CodeLens and title actions for the active review target
 
@@ -84,9 +85,11 @@ The extension currently supports:
 - conservative default analysis with an explicit deeper-review or custom-threshold
   follow-up profile
 - compact overview of structural health, current run state, baseline drift, and
-  current-run `Coverage Join` facts when MCP exposes `metrics.coverage_join`
+  current-run `Coverage Join` facts when MCP exposes `metrics.coverage_join`,
+  plus report-only `Security Surfaces` when MCP exposes
+  `metrics.security_surfaces`
 - review queues for new regressions, production hotspots, changed-scope
-  findings, and report-only `Overloaded Modules`
+  findings, and report-only `Security Surfaces` / `Overloaded Modules`
 - source reveal, peek, canonical finding detail, remediation detail, and
   session-local reviewed markers
 - bounded MCP help topics inside the IDE, with the optional `coverage` topic on
@@ -158,7 +161,8 @@ For this reason:
 - **Source-first**: findings prefer `Reveal Source` over detail panels;
   canonical detail and HTML report bridge are opt-in.
 - **Report-only separation**: Overloaded Modules stay visually distinct from
-  findings, gates, and health.
+  findings, gates, and health. `Security Surfaces` stay visually distinct too
+  and remain boundary inventory rather than vulnerability claims.
 - **Safe HTML bridge**: `Open in HTML Report` verifies the local file exists
   and is not older than the current run.
 - **Session-local state**: reviewed markers shape review UX but never leak

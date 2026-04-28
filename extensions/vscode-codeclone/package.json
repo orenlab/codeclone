@@ -79,6 +79,8 @@
     "onCommand:codeclone.openSetupHelp",
     "onCommand:codeclone.openOverloadedModule",
     "onCommand:codeclone.copyOverloadedModuleBrief",
+    "onCommand:codeclone.openSecuritySurface",
+    "onCommand:codeclone.copySecuritySurfaceBrief",
     "onCommand:codeclone.manageWorkspaceTrust"
   ],
   "main": "./dist/extension.js",
@@ -317,6 +319,23 @@
         "icon": "$(copy)"
       },
       {
+        "command": "codeclone.openSecuritySurface",
+        "title": "Open Security Surface Detail",
+        "category": "CodeClone",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "codeclone.reviewSecuritySurface",
+        "title": "Review Security Surface",
+        "category": "CodeClone"
+      },
+      {
+        "command": "codeclone.copySecuritySurfaceBrief",
+        "title": "Copy Security Review Brief",
+        "category": "CodeClone",
+        "icon": "$(copy)"
+      },
+      {
         "command": "codeclone.openOverview",
         "title": "Open Overview",
         "category": "CodeClone"
@@ -384,6 +403,18 @@
         },
         {
           "command": "codeclone.reviewOverloadedModule",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.openSecuritySurface",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.copySecuritySurfaceBrief",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.reviewSecuritySurface",
           "when": "false"
         }
       ],
@@ -554,6 +585,16 @@
           "command": "codeclone.copyOverloadedModuleBrief",
           "when": "viewItem == codeclone.overloadedModule",
           "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.openSecuritySurface",
+          "when": "viewItem == codeclone.securitySurface",
+          "group": "inline@1"
+        },
+        {
+          "command": "codeclone.copySecuritySurfaceBrief",
+          "when": "viewItem == codeclone.securitySurface",
+          "group": "navigation@1"
         }
       ],
       "editor/title": [
@@ -590,6 +631,11 @@
         {
           "command": "codeclone.copyOverloadedModuleBrief",
           "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsOverloadedModule",
+          "group": "secondary@4"
+        },
+        {
+          "command": "codeclone.copySecuritySurfaceBrief",
+          "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsSecuritySurface",
           "group": "secondary@4"
         }
       ]
