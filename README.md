@@ -32,11 +32,6 @@
     <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/benchmark.yml?style=flat-square&label=benchmark" alt="Benchmark"></a>
   </p>
 
-  <p>
-    <a href="https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone"><img src="https://img.shields.io/visual-studio-marketplace/v/orenlab.codeclone?style=flat-square&color=6366f1&label=VS%20Code" alt="VS Code"></a>
-    <a href="https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone"><img src="https://img.shields.io/visual-studio-marketplace/i/orenlab.codeclone?style=flat-square&color=6366f1&label=installs" alt="VS Code Installs"></a>
-  </p>
-
 </div>
 
 ---
