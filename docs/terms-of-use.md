@@ -39,7 +39,7 @@ you build and secure that deployment separately.
 
 ## Support and updates
 
-CodeClone integrations may evolve during the `2.0.x` beta line. Published docs,
+CodeClone integrations may evolve during the `2.x` release line. Published docs,
 tests, and changelog entries define the intended contract surface for each
 release.
 

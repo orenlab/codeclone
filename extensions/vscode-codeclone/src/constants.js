@@ -11,7 +11,7 @@ const HELP_TOPICS = [
 ];
 
 const OPTIONAL_HELP_TOPICS = [
-    {topic: "coverage", minimumVersion: "2.0.0b5"},
+    {topic: "coverage", minimumVersion: "2.0.0"},
 ];
 
 const KNOWN_HELP_TOPICS = [

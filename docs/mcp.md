@@ -17,13 +17,13 @@ Works with any MCP-capable client regardless of backend model.
 === "Standalone tool"
 
     ```bash title="Install the MCP launcher as a standalone tool"
-    uv tool install --pre "codeclone[mcp]"
+    uv tool install "codeclone[mcp]"
     ```
 
 === "Existing environment"
 
     ```bash title="Install the MCP extra into the current environment"
-    uv pip install --pre "codeclone[mcp]"
+    uv pip install "codeclone[mcp]"
     ```
 
 ## Quick client setup
@@ -103,7 +103,7 @@ Run retention is bounded: default `4`, max `10` (`--history-limit`).
 If a tool request omits `processes`, MCP defers process-count policy to the
 core CodeClone runtime.
 
-Current `b6` MCP surface: `21` tools, `7` fixed resources, and `3`
+Current CodeClone `2.0` MCP surface: `21` tools, `7` fixed resources, and `3`
 run-scoped URI templates.
 
 ## Tool surface
@@ -121,7 +121,7 @@ run-scoped URI templates.
 | `get_remediation`        | Remediation payload for one finding                                                                      |
 | `list_hotspots`          | Priority-ranked hotspot views; preferred before broad listing                                            |
 | `get_report_section`     | Read report sections; `metrics_detail` is paginated with family/path filters                             |
-| `evaluate_gates`         | Preview CI gating decisions                                                                              |
+| `evaluate_gates`         | Evaluate CI gating decisions                                                                             |
 | `check_clones`           | Clone findings only; narrower than `list_findings`                                                       |
 | `check_complexity`       | Complexity hotspots only                                                                                 |
 | `check_coupling`         | Coupling hotspots only                                                                                   |
@@ -344,13 +344,13 @@ If `codeclone-mcp` is not on `PATH`, use an absolute path to the launcher.
 
 ## Troubleshooting
 
-| Problem                                                   | Fix                                                                                 |
-|-----------------------------------------------------------|-------------------------------------------------------------------------------------|
-| `CodeClone MCP support requires the optional 'mcp' extra` | `uv tool install --pre "codeclone[mcp]"` or `uv pip install --pre "codeclone[mcp]"` |
-| Client cannot find `codeclone-mcp`                        | `uv tool install --pre "codeclone[mcp]"` or use an absolute launcher path           |
-| Client only accepts remote MCP                            | Use `streamable-http` transport                                                     |
-| Agent reads stale results                                 | Call `analyze_repository` again; `latest` always points to the most recent run      |
-| `changed_paths` rejected                                  | Pass a `list[str]` of repo-relative paths, not a comma-separated string             |
+| Problem                                                   | Fix                                                                            |
+|-----------------------------------------------------------|--------------------------------------------------------------------------------|
+| `CodeClone MCP support requires the optional 'mcp' extra` | `uv tool install "codeclone[mcp]"` or `uv pip install "codeclone[mcp]"`       |
+| Client cannot find `codeclone-mcp`                        | `uv tool install "codeclone[mcp]"` or use an absolute launcher path            |
+| Client only accepts remote MCP                            | Use `streamable-http` transport                                                |
+| Agent reads stale results                                 | Call `analyze_repository` again; `latest` always points to the most recent run |
+| `changed_paths` rejected                                  | Pass a `list[str]` of repo-relative paths, not a comma-separated string        |
 
 ## See also
 

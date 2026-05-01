@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -100,7 +101,7 @@ def test_render_pr_comment_uses_canonical_report_summary() -> None:
     action_impl = _load_action_impl()
     report = {
         "meta": {
-            "codeclone_version": "2.0.0b4",
+            "codeclone_version": "2.0.0",
             "baseline": {"status": "ok"},
             "cache": {"used": True},
         },
@@ -123,7 +124,36 @@ def test_render_pr_comment_uses_canonical_report_summary() -> None:
                 "health": {
                     "score": 81,
                     "grade": "B",
-                }
+                },
+                "complexity": {"max": 20, "high_risk": 0},
+                "coupling": {"max": 10, "high_risk": 0},
+                "cohesion": {"max": 3, "low_cohesion": 0},
+                "dependencies": {
+                    "avg_depth": 4.0,
+                    "p95_depth": 13,
+                    "max_depth": 16,
+                    "cycles": 0,
+                },
+                "dead_code": {"high_confidence": 0, "suppressed": 2},
+                "overloaded_modules": {"candidates": 13},
+                "coverage_join": {
+                    "status": "ok",
+                    "overall_permille": 994,
+                    "coverage_hotspots": 1,
+                    "scope_gap_hotspots": 2,
+                },
+                "security_surfaces": {
+                    "items": 58,
+                    "category_count": 4,
+                    "production": 28,
+                },
+                "api_surface": {
+                    "enabled": True,
+                    "public_symbols": 2119,
+                    "modules": 208,
+                    "breaking": 0,
+                    "added": 0,
+                },
             }
         },
     }
@@ -134,14 +164,19 @@ def test_render_pr_comment_uses_canonical_report_summary() -> None:
         body,
         (
             "<!-- codeclone-report -->",
-            "CodeClone Report",
+            "CodeClone Review",
+            "Review snapshot",
             "**81/100 (B)**",
-            ":x: Failed (gating)",
-            "Clones: 8 (1 new, 7 known)",
-            "Structural: 15",
-            "Dead code: 0",
-            "Design: 3",
-            "`2.0.0b4`",
+            "**:x: Failed (gating)**",
+            "8 total, 1 new, 7 known",
+            "CC max 20, CBO max 10, LCOM4 max 3, overloaded 13",
+            "avg 4.0, p95 13, max 16, cycles 0",
+            "99.4% overall, 1 hotspots, 2 scope gaps",
+            "58 surfaces, 4 categories, 28 production",
+            "2119 symbols, 208 modules",
+            "CI gates failed; start with rows marked as gating-sensitive.",
+            "Security Surfaces are report-only capability inventory",
+            "`2.0.0`",
         ),
     )
 
@@ -156,7 +191,7 @@ def test_resolve_install_target_uses_repo_source_for_local_action_checkout(
     target = _resolve_install_target(
         action_path=action_path,
         workspace=repo_root,
-        package_version="2.0.0b4",
+        package_version="2.0.0",
     )
 
     assert target.source == "repo"
@@ -173,9 +208,9 @@ def test_resolve_install_target_uses_pypi_for_remote_checkout(tmp_path: Path) ->
     pinned = _resolve_install_target(
         action_path=action_path,
         workspace=workspace_root,
-        package_version="2.0.0b4",
+        package_version="2.0.0",
     )
-    latest = _resolve_install_target(
+    default = _resolve_install_target(
         action_path=action_path,
         workspace=workspace_root,
         package_version="",
@@ -184,11 +219,25 @@ def test_resolve_install_target_uses_pypi_for_remote_checkout(tmp_path: Path) ->
     assert (
         pinned.source,
         pinned.requirement,
-        latest.source,
-        latest.requirement,
+        default.source,
+        default.requirement,
     ) == (
         "pypi-version",
-        "codeclone==2.0.0b4",
-        "pypi-latest",
-        "codeclone",
+        "codeclone==2.0.0",
+        "pypi-default",
+        "codeclone==2.0.0",
     )
+
+
+def test_action_default_package_version_tracks_release_version() -> None:
+    action_impl = _load_action_impl()
+    action_metadata = Path(".github/actions/codeclone/action.yml").read_text(
+        encoding="utf-8"
+    )
+    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+    version_match = re.search(r'^version = "([^"]+)"$', pyproject, re.MULTILINE)
+    assert version_match is not None
+    version = version_match.group(1)
+
+    assert version == action_impl.DEFAULT_CODECLONE_PACKAGE_VERSION
+    assert f'default: "{version}"' in action_metadata

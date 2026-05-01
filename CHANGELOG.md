@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.0.0] - 2026-04-30
+
+`2.0.0` promotes the completed 2.0 release line to the stable public contract.
+
+### Release
+
+- Mark the Python package as stable (`2.0.0`) while keeping the established baseline, cache, report, and metrics
+  baseline schemas unchanged.
+- Make stable install guidance the default across README, docs, MCP guides, and local integration surfaces; prerelease
+  installs remain available only as explicit version pins.
+- Align VS Code, Claude Desktop, and Codex integration metadata with the final CodeClone 2.0 MCP package.
+- Preserve the 2.0 behavior set: canonical package layout, adaptive dependency depth profiling, Coverage Join,
+  report-only Security Surfaces, read-only MCP, and native IDE/agent projections.
+
 ## [2.0.0b7] - 2026-04-28
 
 `2.0.0b7` is a beta hotfix for packaging-only issues found after the `2.0.0b6` publish.

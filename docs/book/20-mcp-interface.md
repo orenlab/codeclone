@@ -2,15 +2,15 @@
 
 ## Purpose
 
-Define the current public MCP surface in the `2.0` beta line.
+Define the current public MCP surface in the CodeClone `2.0` release line.
 
 The MCP layer is optional, read-only, and built on the same canonical
 pipeline/report contracts as the CLI. It does not create a second analysis
 engine or a second persistence model.
 
 !!! note "Read-only integration contract"
-MCP surfaces the same canonical report and run state as the CLI and HTML
-report. It must not mutate source, baseline, cache, or report artifacts.
+    MCP surfaces the same canonical report and run state as the CLI and HTML
+    report. It must not mutate source, baseline, cache, or report artifacts.
 
 ## Public surface
 
@@ -45,9 +45,9 @@ Current server characteristics:
       or `off`
 
 !!! warning "Absolute roots and remote exposure"
-Analysis tools require an absolute repository root, and HTTP exposure
-beyond loopback is intentionally explicit. Keep `stdio` as the default for
-local IDE and agent clients.
+    Analysis tools require an absolute repository root, and HTTP exposure
+    beyond loopback is intentionally explicit. Keep `stdio` as the default for
+    local IDE and agent clients.
 
 ## Tools
 
@@ -66,7 +66,7 @@ second, then drill into one finding or one hotspot family.
 | `get_production_triage` | `run_id`, `max_hotspots`, `max_suggestions`                                                                                  | Production-first first-pass view over one stored run.                                                                                        |
 | `help`                  | `topic`, `detail`                                                                                                            | Bounded workflow/contract guidance for supported MCP topics.                                                                                 |
 | `compare_runs`          | `run_id_before`, `run_id_after`, `focus`                                                                                     | Run-to-run delta view over findings and health; returns `incomparable` when roots/settings differ.                                           |
-| `evaluate_gates`        | `run_id`, gate flags, threshold overrides, `coverage_min`                                                                    | Preview CI/gating decisions against a stored run without mutating process or repo state.                                                     |
+| `evaluate_gates`        | `run_id`, gate flags, threshold overrides, `coverage_min`                                                                    | Evaluate CI/gating decisions against a stored run without mutating process or repo state.                                                    |
 
 ### Report and finding projection tools
 

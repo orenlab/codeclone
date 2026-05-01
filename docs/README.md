@@ -4,8 +4,8 @@ This site is built with MkDocs and published to
 [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/).
 
 !!! note "Version Notice"
-    This site currently documents the in-development `v2.0.x` line from `main`.
-    For the latest stable CodeClone documentation (`v1.4.4`), see the
+    This site documents the CodeClone `2.0` release line.
+    For the previous `1.4.x` line, see the
     [`v1.4.4` README](https://github.com/orenlab/codeclone/blob/v1.4.4/README.md)
     and the
     [`v1.4.4` docs tree](https://github.com/orenlab/codeclone/tree/v1.4.4/docs).

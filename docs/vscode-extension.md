@@ -1,7 +1,6 @@
 # VS Code Extension
 
-CodeClone ships a preview VS Code extension in
-`extensions/vscode-codeclone/`.
+CodeClone ships a stable VS Code extension in `extensions/vscode-codeclone/`.
 
 It is a native IDE surface over `codeclone-mcp` and is designed for
 baseline-aware, triage-first structural review inside the editor.
@@ -29,21 +28,21 @@ It does not create a second truth model and it does not mutate the repository.
 
 The extension needs a local `codeclone-mcp` launcher.
 
-Minimum supported CodeClone version: `2.0.0b4`.
+Minimum supported CodeClone version: `2.0.0`.
 
 In `auto` mode, it checks the current workspace virtualenv before falling back
 to `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.
 
-Recommended install for the preview extension:
+Recommended install:
 
 ```bash
-uv tool install --pre "codeclone[mcp]"
+uv tool install "codeclone[mcp]"
 ```
 
 If you want the launcher inside the current environment instead:
 
 ```bash
-uv pip install --pre "codeclone[mcp]"
+uv pip install "codeclone[mcp]"
 ```
 
 Verify the launcher:

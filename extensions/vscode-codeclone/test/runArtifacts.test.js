@@ -51,14 +51,14 @@ test("loadRunArtifacts starts MCP reads and git snapshot together", async () => 
     assert.ok(resolveTriage);
     assert.ok(resolveMetrics);
     assert.ok(resolveReviewed);
-    resolveSummary({version: "2.0.0b6"});
+    resolveSummary({version: "2.0.0"});
     resolveTriage({hotspots: []});
     resolveMetrics({summary: {health: {score: 90}}});
     resolveReviewed({items: [{id: "f1"}]});
     resolveGitSnapshot({head: "abc123"});
 
     assert.deepEqual(await promise, {
-        summary: {version: "2.0.0b6"},
+        summary: {version: "2.0.0"},
         triage: {hotspots: []},
         metricsSummary: {health: {score: 90}},
         reviewedItems: [{id: "f1"}],

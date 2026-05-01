@@ -146,13 +146,13 @@ test("launchSpecOrigin makes launcher provenance explicit", () => {
 
 test("unsupportedVersionMessage includes launcher provenance and next step", () => {
     assert.equal(
-        unsupportedVersionMessage("1.27.0", "2.0.0b4", {
+        unsupportedVersionMessage("1.27.0", "2.0.0", {
             command: "/workspace/repo/.venv/bin/codeclone-mcp",
             args: [],
             cwd: "/workspace/repo",
             source: "workspaceLocal",
         }),
-        "The local CodeClone MCP server is not supported. It reported version 1.27.0; this extension requires CodeClone >= 2.0.0b4. The extension resolved workspace-local launcher (/workspace/repo/.venv/bin/codeclone-mcp). Update that environment or set codeclone.mcp.command to a newer launcher."
+        "The local CodeClone MCP server is not supported. It reported version 1.27.0; this extension requires CodeClone >= 2.0.0. The extension resolved workspace-local launcher (/workspace/repo/.venv/bin/codeclone-mcp). Update that environment or set codeclone.mcp.command to a newer launcher."
     );
 });
 
@@ -323,13 +323,10 @@ test("compareCodeCloneVersions keeps beta, rc, and final ordering", () => {
 });
 
 test("minimum supported CodeClone version and install command stay aligned", () => {
-    assert.equal(MINIMUM_SUPPORTED_CODECLONE_VERSION, "2.0.0b4");
-    assert.equal(isMinimumSupportedCodeCloneVersion("2.0.0b4"), true);
+    assert.equal(MINIMUM_SUPPORTED_CODECLONE_VERSION, "2.0.0");
+    assert.equal(isMinimumSupportedCodeCloneVersion("2.0.0"), true);
     assert.equal(isMinimumSupportedCodeCloneVersion("2.0.1"), true);
-    assert.equal(isMinimumSupportedCodeCloneVersion("2.0.0b3"), false);
+    assert.equal(isMinimumSupportedCodeCloneVersion("2.0.0rc2"), false);
     assert.equal(isMinimumSupportedCodeCloneVersion("1.27.0"), false);
-    assert.equal(
-        PREVIEW_INSTALL_COMMAND,
-        'uv tool install --pre "codeclone[mcp]"'
-    );
+    assert.equal(PREVIEW_INSTALL_COMMAND, 'uv tool install "codeclone[mcp]"');
 });

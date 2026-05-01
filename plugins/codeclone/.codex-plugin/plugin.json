@@ -1,6 +1,6 @@
 {
   "name": "codeclone",
-  "version": "2.0.0-b6.0",
+  "version": "2.0.0",
   "description": "Baseline-aware structural code quality analysis for Codex through the local CodeClone MCP server.",
   "author": {
     "name": "Den Rozhnovskiy",
@@ -41,7 +41,7 @@
       "Run a changed-files CodeClone review for my current diff.",
       "Check CodeClone health and explain what to fix first."
     ],
-    "brandColor": "#58A6FF",
+    "brandColor": "#6366f1",
     "composerIcon": "./assets/icon.png",
     "logo": "./assets/logo.png"
   }

@@ -7,7 +7,7 @@ author: OrenLab
 
 branding:
   icon: copy
-  color: blue
+  color: purple
 
 inputs:
   python-version:
@@ -18,7 +18,7 @@ inputs:
   package-version:
     description: "CodeClone version from PyPI for remote installs (ignored when the action runs from the checked-out CodeClone repo)"
     required: false
-    default: ""
+    default: "2.0.0"
 
   path:
     description: "Project root"
