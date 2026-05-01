@@ -36,7 +36,7 @@ Recommended workspace-local setup:
 
 ```bash
 uv venv
-uv pip install --python .venv/bin/python --pre "codeclone[mcp]"
+uv pip install --python .venv/bin/python "codeclone[mcp]"
 .venv/bin/codeclone-mcp --help
 ```
 
@@ -45,7 +45,7 @@ If your workspace uses Poetry, install CodeClone into that Poetry environment.
 Global fallback:
 
 ```bash
-uv tool install --pre "codeclone[mcp]"
+uv tool install "codeclone[mcp]"
 codeclone-mcp --help
 ```
 

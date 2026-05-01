@@ -16,7 +16,7 @@ body:
     attributes:
       label: CodeClone version
       description: Output of `codeclone --version`
-      placeholder: "2.0.0b4"
+      placeholder: "2.0.0"
     validations:
       required: true
 

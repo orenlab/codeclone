@@ -1,5 +1,10 @@
 # Change Log
 
+## 0.2.6
+
+- align setup guidance with the stable CodeClone `2.0.0` MCP package
+- require CodeClone `2.0.0` or newer for the final 2.0 release line
+
 ## 0.2.5
 
 - pin the packaging toolchain to `@vscode/vsce@2.25.0` to remove the vulnerable transitive `uuid<14` chain from the

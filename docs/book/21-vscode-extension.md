@@ -135,7 +135,7 @@ The extension runs as a workspace extension and requires:
 - local filesystem access
 - local git access for changed-files review
 - a local `codeclone-mcp` launcher, or an explicitly configured launcher
-- CodeClone `2.0.0b4` or newer
+- CodeClone `2.0.0` or newer
 
 In `auto` mode, launcher resolution prefers the current workspace virtualenv
 before `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.
@@ -181,7 +181,7 @@ For this reason:
 
 ## Non-guarantees
 
-- Exact view grouping and copy may evolve between beta releases.
+- Exact view grouping and copy may evolve between extension releases.
 - Internal client-side caching and view-model shaping may evolve as long as the
   extension remains faithful to MCP and canonical report semantics.
 - Explorer decoration styling, review-loop polish, and other non-contract UI

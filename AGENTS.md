@@ -61,10 +61,10 @@ Key artifacts:
 - `.cache/codeclone/cache.json` — analysis cache (integrity-checked)
 - `.cache/codeclone/report.html|report.json|report.md|report.sarif|report.txt` — reports
 - `codeclone-mcp` — optional read-only MCP server (install via `codeclone[mcp]`)
-- `extensions/vscode-codeclone/` — preview VS Code extension as a native, read-only IDE client over `codeclone-mcp`
-- `extensions/claude-desktop-codeclone/` — preview Claude Desktop `.mcpb` bundle as a local install wrapper over
+- `extensions/vscode-codeclone/` — stable VS Code extension as a native, read-only IDE client over `codeclone-mcp`
+- `extensions/claude-desktop-codeclone/` — stable Claude Desktop `.mcpb` bundle as a local install wrapper over
   `codeclone-mcp`
-- `plugins/codeclone/` + `.agents/plugins/marketplace.json` — preview Codex plugin as a native local discovery layer
+- `plugins/codeclone/` + `.agents/plugins/marketplace.json` — stable Codex plugin as a native local discovery layer
   over `codeclone-mcp`, with a bundled CodeClone review skill
 - MCP runs are in-memory only; review markers are session-local and must never
   leak into baseline/cache/report artifacts
@@ -109,7 +109,7 @@ smoke:
 
 ```bash
 cd extensions/vscode-codeclone
-vsce package --pre-release --out /tmp/codeclone.vsix
+vsce package --out /tmp/codeclone.vsix
 ```
 
 If you touched the Claude Desktop bundle surface, also run:
@@ -463,11 +463,11 @@ Use this map to route changes to the right owner module.
 - `codeclone/ui_messages/*` — CLI text/marker/help constants and formatter helpers. Keep message policy centralized.
 - `docs/`, `mkdocs.yml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py` — docs-site source,
   publication workflow, and live sample-report generation; keep published docs aligned with code contracts.
-- `extensions/vscode-codeclone/*` — preview VS Code extension surface; keep it baseline-aware, triage-first,
+- `extensions/vscode-codeclone/*` — stable VS Code extension surface; keep it baseline-aware, triage-first,
   source-first, and faithful to MCP/canonical report semantics rather than building a second analyzer or report model.
-- `extensions/claude-desktop-codeclone/*` — preview Claude Desktop bundle surface; keep it local-stdio-only,
+- `extensions/claude-desktop-codeclone/*` — stable Claude Desktop bundle surface; keep it local-stdio-only,
   launcher-focused, and faithful to `codeclone-mcp` rather than re-implementing MCP semantics in the bundle layer.
-- `plugins/codeclone/*`, `.agents/plugins/marketplace.json` — preview Codex plugin surface; keep it Codex-native,
+- `plugins/codeclone/*`, `.agents/plugins/marketplace.json` — stable Codex plugin surface; keep it Codex-native,
   conservative-first, skills-guided, and faithful to `codeclone-mcp` rather than inventing plugin-only analysis logic.
 - `tests/` — executable specification: architecture rules, contracts, goldens, invariants, regressions.
 

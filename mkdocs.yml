@@ -6,6 +6,8 @@ repo_name: orenlab/codeclone
 docs_dir: docs
 edit_uri: blob/main/docs/
 strict: true
+exclude_docs: |
+  README-pypi.md
 
 theme:
   name: material

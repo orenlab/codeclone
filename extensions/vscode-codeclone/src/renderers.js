@@ -69,7 +69,7 @@ function renderSetupMarkdown() {
         "",
         `Minimum supported CodeClone version: \`${MINIMUM_SUPPORTED_CODECLONE_VERSION}\``,
         "",
-        "## Recommended install for the preview extension",
+        "## Recommended install",
         "",
         "```bash",
         PREVIEW_INSTALL_COMMAND,

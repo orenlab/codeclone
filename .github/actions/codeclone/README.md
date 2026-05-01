@@ -30,13 +30,19 @@ source under test. Remote consumers still install from PyPI.
 ## Basic usage
 
 ```yaml
-- uses: orenlab/codeclone/.github/actions/codeclone@main
+- uses: orenlab/codeclone/.github/actions/codeclone@v2
   with:
     fail-on-new: "true"
 ```
 
-For released references, prefer pinning to a major version tag such as `@v2`
-or to an immutable commit SHA.
+For strict reproducibility, pin the full release tag:
+
+```yaml
+- uses: orenlab/codeclone/.github/actions/codeclone@v2.0.0
+```
+
+For long-lived workflows, `@v2` follows the latest compatible 2.x action
+metadata.
 
 ## PR workflow example
 
@@ -61,7 +67,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: orenlab/codeclone/.github/actions/codeclone@main
+      - uses: orenlab/codeclone/.github/actions/codeclone@v2
         with:
           fail-on-new: "true"
           fail-health: "60"
@@ -74,7 +80,7 @@ jobs:
 | Input                   | Default                         | Purpose                                                                                                           |
 |-------------------------|---------------------------------|-------------------------------------------------------------------------------------------------------------------|
 | `python-version`        | `3.14`                          | Python version used to run the action                                                                             |
-| `package-version`       | `""`                            | CodeClone version from PyPI for remote installs; ignored when the action runs from the checked-out CodeClone repo |
+| `package-version`       | `2.0.0`                         | CodeClone version from PyPI for remote installs; ignored when the action runs from the checked-out CodeClone repo |
 | `path`                  | `.`                             | Project root to analyze                                                                                           |
 | `json-path`             | `.cache/codeclone/report.json`  | JSON report output path                                                                                           |
 | `sarif`                 | `true`                          | Generate SARIF and try to upload it                                                                               |
@@ -136,26 +142,27 @@ Notes:
 - if you only want gating and JSON output, you can disable `sarif` and
   `pr-comment`
 
-## Stable vs prerelease installs
+## Install policy
 
-Stable:
+Released action tags pin the PyPI package version in action metadata. For
+example, `@v2.0.0` installs `codeclone==2.0.0` unless you override
+`package-version`.
 
-```yaml
-with:
-  package-version: ""
-```
-
-Explicit prerelease:
+Explicit prerelease or smoke-test override:
 
 ```yaml
 with:
-  package-version: "2.0.0b4"
+  package-version: "<version>"
 ```
 
 Local/self-repo validation:
 
+```yaml
+- uses: ./.github/actions/codeclone
+```
+
 - `uses: ./.github/actions/codeclone` installs CodeClone from the checked-out
-  repository source, so beta branches and unreleased commits do not depend on
+  repository source, so release branches and unreleased commits do not depend on
   PyPI publication.
 
 ## Notes and limitations

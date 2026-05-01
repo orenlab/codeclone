@@ -9,8 +9,6 @@ creating a second truth model. The extension stays read-only with respect to
 repository state and uses the same canonical report semantics as the CLI, HTML
 report, and MCP server.
 
-This extension is published as a preview for the current `2.0.x` beta line.
-
 ## What it is for
 
 CodeClone inside VS Code is designed for:
@@ -42,21 +40,21 @@ report inside the sidebar.
 
 CodeClone for VS Code needs a local `codeclone-mcp` launcher.
 
-Minimum supported CodeClone version: `2.0.0b4`.
+Minimum supported CodeClone version: `2.0.0`.
 
 In `auto` mode, the extension checks the current workspace virtualenv before
 falling back to `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.
 
-Recommended install for the preview extension:
+Recommended install:
 
 ```bash
-uv tool install --pre "codeclone[mcp]"
+uv tool install "codeclone[mcp]"
 ```
 
 If you want the launcher inside the current environment instead:
 
 ```bash
-uv pip install --pre "codeclone[mcp]"
+uv pip install "codeclone[mcp]"
 ```
 
 Verify the launcher:

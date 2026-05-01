@@ -1,4 +1,5 @@
 <div align="center">
+
   <picture>
     <source
       media="(prefers-color-scheme: dark)"
@@ -14,21 +15,27 @@
       width="320"
     >
   </picture>
+
+  <p><strong>Structural code quality analysis for Python</strong></p>
+
+  <p>
+    <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/v/codeclone?style=flat-square&color=6366f1" alt="PyPI"></a>
+    <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/status/codeclone?style=flat-square&color=6366f1" alt="Status"></a>
+    <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/dm/codeclone?style=flat-square&color=6366f1" alt="Downloads"></a>
+    <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/tests.yml?branch=main&style=flat-square&label=tests" alt="Tests"></a>
+    <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/benchmark.yml?style=flat-square&label=benchmark" alt="Benchmark"></a>
+    <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone?style=flat-square&color=6366f1" alt="Python"></a>
+    <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-90%20(A)-6366f1?style=flat-square" alt="codeclone 90 (A)"></a>
+    <a href="#license"><img src="https://img.shields.io/badge/license-MPL--2.0-6366f1?style=flat-square" alt="License"></a>
+  </p>
+
+  <p>
+    <a href="https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone"><img src="https://img.shields.io/visual-studio-marketplace/v/orenlab.codeclone?style=flat-square&color=6366f1&label=VS%20Code" alt="VS Code"></a>
+    <a href="https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone"><img src="https://img.shields.io/visual-studio-marketplace/i/orenlab.codeclone?style=flat-square&color=6366f1&label=installs" alt="VS Code Installs"></a>
+    <a href="https://github.com/orenlab/codeclone/discussions"><img src="https://img.shields.io/github/discussions/orenlab/codeclone?style=flat-square&color=6366f1" alt="Discussions"></a>
+  </p>
+
 </div>
-
-<p align="center">
-  <strong>Structural code quality analysis for Python</strong>
-</p>
-
-<p align="center">
-  <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/v/codeclone.svg?style=flat-square" alt="PyPI"></a>
-  <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/dm/codeclone.svg?style=flat-square" alt="Downloads"></a>
-  <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/tests.yml/badge.svg?branch=main&style=flat-square" alt="Tests"></a>
-  <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml/badge.svg?style=flat-square" alt="Benchmark"></a>
-  <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone.svg?style=flat-square" alt="Python"></a>
-  <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-90%20(A)-green" alt="codeclone 90 (A)"></a>
-  <a href="#license"><img src="https://img.shields.io/badge/license-MPL--2.0-brightgreen?style=flat-square" alt="License"></a>
-</p>
 
 ---
 
@@ -42,8 +49,8 @@ Live sample report:
 [orenlab.github.io/codeclone/examples/report/](https://orenlab.github.io/codeclone/examples/report/)
 
 > [!NOTE]
-> This README and docs site track the in-development `v2.0.x` line from `main`.
-> For the latest stable CodeClone documentation (`v1.4.4`), see the
+> This README and docs site document the CodeClone `2.0` release line.
+> For the previous `1.4.x` line, see the
 > [`v1.4.4` README](https://github.com/orenlab/codeclone/blob/v1.4.4/README.md)
 > and the
 > [`v1.4.4` docs tree](https://github.com/orenlab/codeclone/tree/v1.4.4/docs).
@@ -66,7 +73,7 @@ Live sample report:
 ## Quick Start
 
 ```bash
-uv tool install codeclone      # use --pre for beta
+uv tool install codeclone
 
 codeclone .                    # analyze
 codeclone . --html             # HTML report
@@ -112,17 +119,22 @@ codeclone . --ci
 
 <details>
 <summary>What <code>--ci</code> enables</summary>
-The <code>--ci</code> preset equals <code>--fail-on-new --no-color --quiet</code>.
+
+The `--ci` preset equals `--fail-on-new --no-color --quiet`.
 When a trusted metrics baseline is loaded, CI mode also enables
-<code>--fail-on-new-metrics</code>.
+`--fail-on-new-metrics`.
 </details>
+
+> [!TIP]
+> Run `codeclone . --update-baseline` once after install to establish your CI reference point.
+> Commit the baseline file — it becomes the contract CI enforces on every push.
 
 ### GitHub Action
 
 CodeClone also ships a composite GitHub Action for PR and CI workflows:
 
 ```yaml
-- uses: orenlab/codeclone/.github/actions/codeclone@main
+- uses: orenlab/codeclone/.github/actions/codeclone@v2
   with:
     fail-on-new: "true"
     sarif: "true"
@@ -185,9 +197,9 @@ Triage-first MCP server for AI agents and IDE clients, built on the same canonic
 contract: never mutates source, baselines, or repo state.
 
 ```bash
-uv tool install --pre "codeclone[mcp]"
+uv tool install "codeclone[mcp]"
 # or
-uv pip install --pre "codeclone[mcp]"
+uv pip install "codeclone[mcp]"
 
 # local stdio clients
 codeclone-mcp --transport stdio
@@ -195,6 +207,11 @@ codeclone-mcp --transport stdio
 # remote / HTTP-only clients
 codeclone-mcp --transport streamable-http
 ```
+
+> [!WARNING]
+> Analysis tools require an absolute repository root. Relative roots such as `.` are rejected.
+> Keep `stdio` as the default transport for local IDE and agent clients; HTTP exposure beyond
+> loopback requires explicit `--allow-remote`.
 
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/) ·
 [MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
@@ -289,7 +306,7 @@ Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-r
 {
   "report_schema_version": "2.10",
   "meta": {
-    "codeclone_version": "2.0.0b6",
+    "codeclone_version": "2.0.0",
     "project_name": "...",
     "scan_root": ".",
     "report_mode": "full",
@@ -301,82 +318,41 @@ Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-r
       "segment_min_loc": 20,
       "segment_min_stmt": 10
     },
-    "analysis_thresholds": {
-      "design_findings": {
-        "...": "..."
-      }
-    },
-    "baseline": {
-      "...": "..."
-    },
-    "cache": {
-      "...": "..."
-    },
-    "metrics_baseline": {
-      "...": "..."
-    },
+    "analysis_thresholds": { "design_findings": { "...": "..." } },
+    "baseline": { "...": "..." },
+    "cache": { "...": "..." },
+    "metrics_baseline": { "...": "..." },
     "runtime": {
       "analysis_started_at_utc": "...",
       "report_generated_at_utc": "..."
     }
   },
   "inventory": {
-    "files": {
-      "...": "..."
-    },
-    "code": {
-      "...": "..."
-    },
-    "file_registry": {
-      "encoding": "relative_path",
-      "items": []
-    }
+    "files": { "...": "..." },
+    "code": { "...": "..." },
+    "file_registry": { "encoding": "relative_path", "items": [] }
   },
   "findings": {
-    "summary": {
-      "...": "..."
-    },
+    "summary": { "...": "..." },
     "groups": {
-      "clones": {
-        "functions": [],
-        "blocks": [],
-        "segments": []
-      },
-      "structural": {
-        "groups": []
-      },
-      "dead_code": {
-        "groups": []
-      },
-      "design": {
-        "groups": []
-      }
+      "clones": { "functions": [], "blocks": [], "segments": [] },
+      "structural": { "groups": [] },
+      "dead_code": { "groups": [] },
+      "design": { "groups": [] }
     }
   },
   "metrics": {
     "summary": {
       "...": "...",
-      "coverage_adoption": {
-        "...": "..."
-      },
-      "coverage_join": {
-        "...": "..."
-      },
-      "api_surface": {
-        "...": "..."
-      }
+      "coverage_adoption": { "...": "..." },
+      "coverage_join": { "...": "..." },
+      "api_surface": { "...": "..." }
     },
     "families": {
       "...": "...",
-      "coverage_adoption": {
-        "...": "..."
-      },
-      "coverage_join": {
-        "...": "..."
-      },
-      "api_surface": {
-        "...": "..."
-      }
+      "coverage_adoption": { "...": "..." },
+      "coverage_join": { "...": "..." },
+      "api_surface": { "...": "..." }
     }
   },
   "derived": {
@@ -396,15 +372,8 @@ Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-r
     }
   },
   "integrity": {
-    "canonicalization": {
-      "version": "1",
-      "scope": "canonical_only"
-    },
-    "digest": {
-      "algorithm": "sha256",
-      "verified": true,
-      "value": "..."
-    }
+    "canonicalization": { "version": "1", "scope": "canonical_only" },
+    "digest": { "algorithm": "sha256", "verified": true, "value": "..." }
   }
 }
 ```
@@ -434,13 +403,39 @@ Suppression contract:
 
 ## How It Works
 
-1. **Parse** — Python source to AST
-2. **Normalize** — canonical structure (robust to renaming, formatting)
-3. **CFG** — per-function control flow graph
-4. **Fingerprint** — stable hash computation
-5. **Group** — function, block, and segment clone groups
-6. **Metrics** — complexity, coupling, cohesion, dependencies, dead code, health
-7. **Gate** — baseline comparison, threshold checks
+<details>
+<summary>Pipeline overview</summary>
+
+```
+Python source
+     │
+     ▼
+  Parse ──────── AST per file
+     │
+     ▼
+  Normalize ───── canonical structure (rename/format-resistant)
+     │
+     ▼
+  CFG ─────────── per-function control flow graph
+     │
+     ▼
+  Fingerprint ──── stable hash per function / block / segment
+     │
+     ▼
+  Group ────────── clone groups + structural findings
+     │
+     ▼
+  Metrics ─────── complexity · coupling · cohesion · dependencies
+                  dead code · adoption · security surfaces · health
+     │
+     ▼
+  Gate ────────── baseline diff · threshold checks · CI exit codes
+     │
+     ▼
+  Report ─────── HTML · JSON · Markdown · SARIF · text
+```
+
+</details>
 
 Architecture: [Architecture narrative](https://orenlab.github.io/codeclone/architecture/) ·
 CFG semantics: [CFG semantics](https://orenlab.github.io/codeclone/cfg/)
@@ -491,5 +486,6 @@ Versions released before this change remain under their original license terms.
 
 - **Docs:** <https://orenlab.github.io/codeclone/>
 - **Issues:** <https://github.com/orenlab/codeclone/issues>
+- **Discussions:** <https://github.com/orenlab/codeclone/discussions>
 - **PyPI:** <https://pypi.org/project/codeclone/>
 - **Licenses:** [MPL-2.0](https://github.com/orenlab/codeclone/blob/main/LICENSE) · [MIT docs](https://github.com/orenlab/codeclone/blob/main/LICENSE-MIT) · [Scope map](https://github.com/orenlab/codeclone/blob/main/LICENSES.md)

@@ -1,34 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="4 3 22 24" fill="none">
-    <rect
-            x="9"
-            y="4"
-            width="15"
-            height="19"
-            rx="3.2"
-            stroke="#58A6FF"
-            stroke-width="1.8"
-            opacity="0.28"
-    />
-    <rect
-            x="6"
-            y="7"
-            width="15"
-            height="19"
-            rx="3.2"
-            stroke="#58A6FF"
-            stroke-width="1.8"
-    />
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+    <rect x="24" y="10" width="31" height="40" rx="7" fill="#6366f1" opacity="0.22"/>
+    <rect x="16" y="18" width="31" height="40" rx="7" fill="#6366f1"/>
     <path
-            d="M11.2 13.8L8.9 16.1L11.2 18.4"
-            stroke="#58A6FF"
-            stroke-width="2.15"
+            d="M27 32.5L21 38.5L27 44.5"
+            stroke="white"
+            stroke-width="4"
             stroke-linecap="round"
             stroke-linejoin="round"
     />
     <path
-            d="M15.8 13.8L18.1 16.1L15.8 18.4"
-            stroke="#58A6FF"
-            stroke-width="2.15"
+            d="M36.5 32.5L42.5 38.5L36.5 44.5"
+            stroke="white"
+            stroke-width="4"
             stroke-linecap="round"
             stroke-linejoin="round"
     />

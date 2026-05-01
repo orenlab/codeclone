@@ -187,7 +187,7 @@ Dependency depth config note:
   CLI or `pyproject.toml` option.
 - Dependency depth now uses an internal adaptive profile based on
   `avg_depth`, `p95_depth`, and `max_depth` for the internal module graph.
-- There is no user-facing knob to tune that model in `2.0.0b6`.
+- There is no user-facing knob to tune that model in `2.0.0`.
 
 Metrics baseline path selection contract:
 

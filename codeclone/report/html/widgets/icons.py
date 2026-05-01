@@ -27,15 +27,15 @@ def _svg_with_class(size: int, sw: str, body: str, *, class_name: str = "") -> s
 
 
 BRAND_LOGO = (
-    '<svg class="brand-logo" width="32" height="32" viewBox="0 0 32 32" fill="none">'
-    '<rect x="9" y="3" width="18" height="23" rx="3.5" '
-    'stroke="var(--accent-primary)" stroke-width="1.5" opacity="0.25"/>'
-    '<rect x="5" y="6" width="18" height="23" rx="3.5" '
-    'stroke="var(--accent-primary)" stroke-width="1.5"/>'
-    '<path d="M11 14L7.5 17.5 11 21" stroke="var(--accent-primary)" '
-    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
-    '<path d="M17 14l3.5 3.5L17 21" stroke="var(--accent-primary)" '
-    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+    '<svg class="brand-logo" width="32" height="32" viewBox="0 0 64 64" fill="none">'
+    '<rect x="24" y="10" width="31" height="40" rx="7" '
+    'fill="var(--accent-primary)" opacity="0.22"/>'
+    '<rect x="16" y="18" width="31" height="40" rx="7" '
+    'fill="var(--accent-primary)"/>'
+    '<path d="M27 32.5L21 38.5L27 44.5" stroke="white" '
+    'stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>'
+    '<path d="M36.5 32.5L42.5 38.5L36.5 44.5" stroke="white" '
+    'stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>'
     "</svg>"
 )
 
