@@ -22,17 +22,19 @@
     <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/v/codeclone?style=flat-square&color=6366f1" alt="PyPI"></a>
     <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/status/codeclone?style=flat-square&color=6366f1" alt="Status"></a>
     <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/dm/codeclone?style=flat-square&color=6366f1" alt="Downloads"></a>
-    <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/tests.yml?branch=main&style=flat-square&label=tests" alt="Tests"></a>
-    <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/benchmark.yml?style=flat-square&label=benchmark" alt="Benchmark"></a>
     <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone?style=flat-square&color=6366f1" alt="Python"></a>
     <a href="https://github.com/orenlab/codeclone"><img src="https://img.shields.io/badge/codeclone-90%20(A)-6366f1?style=flat-square" alt="codeclone 90 (A)"></a>
     <a href="#license"><img src="https://img.shields.io/badge/license-MPL--2.0-6366f1?style=flat-square" alt="License"></a>
   </p>
 
   <p>
+    <a href="https://github.com/orenlab/codeclone/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/tests.yml?branch=main&style=flat-square&label=tests" alt="Tests"></a>
+    <a href="https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml"><img src="https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/benchmark.yml?style=flat-square&label=benchmark" alt="Benchmark"></a>
+  </p>
+
+  <p>
     <a href="https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone"><img src="https://img.shields.io/visual-studio-marketplace/v/orenlab.codeclone?style=flat-square&color=6366f1&label=VS%20Code" alt="VS Code"></a>
     <a href="https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone"><img src="https://img.shields.io/visual-studio-marketplace/i/orenlab.codeclone?style=flat-square&color=6366f1&label=installs" alt="VS Code Installs"></a>
-    <a href="https://github.com/orenlab/codeclone/discussions"><img src="https://img.shields.io/github/discussions/orenlab/codeclone?style=flat-square&color=6366f1" alt="Discussions"></a>
   </p>
 
 </div>
@@ -318,41 +320,82 @@ Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-r
       "segment_min_loc": 20,
       "segment_min_stmt": 10
     },
-    "analysis_thresholds": { "design_findings": { "...": "..." } },
-    "baseline": { "...": "..." },
-    "cache": { "...": "..." },
-    "metrics_baseline": { "...": "..." },
+    "analysis_thresholds": {
+      "design_findings": {
+        "...": "..."
+      }
+    },
+    "baseline": {
+      "...": "..."
+    },
+    "cache": {
+      "...": "..."
+    },
+    "metrics_baseline": {
+      "...": "..."
+    },
     "runtime": {
       "analysis_started_at_utc": "...",
       "report_generated_at_utc": "..."
     }
   },
   "inventory": {
-    "files": { "...": "..." },
-    "code": { "...": "..." },
-    "file_registry": { "encoding": "relative_path", "items": [] }
+    "files": {
+      "...": "..."
+    },
+    "code": {
+      "...": "..."
+    },
+    "file_registry": {
+      "encoding": "relative_path",
+      "items": []
+    }
   },
   "findings": {
-    "summary": { "...": "..." },
+    "summary": {
+      "...": "..."
+    },
     "groups": {
-      "clones": { "functions": [], "blocks": [], "segments": [] },
-      "structural": { "groups": [] },
-      "dead_code": { "groups": [] },
-      "design": { "groups": [] }
+      "clones": {
+        "functions": [],
+        "blocks": [],
+        "segments": []
+      },
+      "structural": {
+        "groups": []
+      },
+      "dead_code": {
+        "groups": []
+      },
+      "design": {
+        "groups": []
+      }
     }
   },
   "metrics": {
     "summary": {
       "...": "...",
-      "coverage_adoption": { "...": "..." },
-      "coverage_join": { "...": "..." },
-      "api_surface": { "...": "..." }
+      "coverage_adoption": {
+        "...": "..."
+      },
+      "coverage_join": {
+        "...": "..."
+      },
+      "api_surface": {
+        "...": "..."
+      }
     },
     "families": {
       "...": "...",
-      "coverage_adoption": { "...": "..." },
-      "coverage_join": { "...": "..." },
-      "api_surface": { "...": "..." }
+      "coverage_adoption": {
+        "...": "..."
+      },
+      "coverage_join": {
+        "...": "..."
+      },
+      "api_surface": {
+        "...": "..."
+      }
     }
   },
   "derived": {
@@ -372,8 +415,15 @@ Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-r
     }
   },
   "integrity": {
-    "canonicalization": { "version": "1", "scope": "canonical_only" },
-    "digest": { "algorithm": "sha256", "verified": true, "value": "..." }
+    "canonicalization": {
+      "version": "1",
+      "scope": "canonical_only"
+    },
+    "digest": {
+      "algorithm": "sha256",
+      "verified": true,
+      "value": "..."
+    }
   }
 }
 ```
@@ -488,4 +538,5 @@ Versions released before this change remain under their original license terms.
 - **Issues:** <https://github.com/orenlab/codeclone/issues>
 - **Discussions:** <https://github.com/orenlab/codeclone/discussions>
 - **PyPI:** <https://pypi.org/project/codeclone/>
-- **Licenses:** [MPL-2.0](https://github.com/orenlab/codeclone/blob/main/LICENSE) · [MIT docs](https://github.com/orenlab/codeclone/blob/main/LICENSE-MIT) · [Scope map](https://github.com/orenlab/codeclone/blob/main/LICENSES.md)
+- **Licenses:
+  ** [MPL-2.0](https://github.com/orenlab/codeclone/blob/main/LICENSE) · [MIT docs](https://github.com/orenlab/codeclone/blob/main/LICENSE-MIT) · [Scope map](https://github.com/orenlab/codeclone/blob/main/LICENSES.md)
