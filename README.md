@@ -12,7 +12,7 @@
     <img
       alt="CodeClone"
       src="https://raw.githubusercontent.com/orenlab/codeclone/main/docs/assets/codeclone-wordmark.svg"
-      width="320"
+      width="280"
     >
   </picture>
 
