@@ -20,6 +20,7 @@ from ..models import (
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
+    RuntimeReachabilityFact,
     SecuritySurface,
     SegmentGroupItem,
     SegmentUnit,
@@ -101,6 +102,20 @@ class SecuritySurfaceDict(SecuritySurfaceDictBase):
     pass
 
 
+class RuntimeReachabilityFactDict(TypedDict):
+    target_qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    target_kind: str
+    framework: str
+    edge_kind: str
+    confidence: str
+    evidence: str
+    evidence_symbol: str
+    source_qualname: str
+
+
 class ModuleTypingCoverageDict(TypedDict):
     module: str
     filepath: str
@@ -163,24 +178,40 @@ class _FileEntryBase(TypedDict):
     segments: list[SegmentDict]
 
 
-class _FileEntryV26(_FileEntryBase, total=False):
+class _FileEntryAnalysisFacts(TypedDict, total=False):
     source_stats: SourceStatsDict
-    class_metrics: list[ClassMetricsDict]
     module_deps: list[ModuleDepDict]
     dead_candidates: list[DeadCandidateDict]
     referenced_names: list[str]
     referenced_qualnames: list[str]
     import_names: list[str]
     class_names: list[str]
+    runtime_reachability: list[RuntimeReachabilityFactDict]
+
+
+class _FileEntryQualityFacts(TypedDict, total=False):
+    class_metrics: list[ClassMetricsDict]
     security_surfaces: list[SecuritySurfaceDict]
     typing_coverage: ModuleTypingCoverageDict
     docstring_coverage: ModuleDocstringCoverageDict
+
+
+class _FileEntryReportFacts(TypedDict, total=False):
     api_surface: ModuleApiSurfaceDict
     structural_findings: list[StructuralFindingGroupDict]
 
 
+class _FileEntryV27(
+    _FileEntryBase,
+    _FileEntryAnalysisFacts,
+    _FileEntryQualityFacts,
+    _FileEntryReportFacts,
+):
+    pass
+
+
 CacheEntryBase = _FileEntryBase
-CacheEntry = _FileEntryV26
+CacheEntry = _FileEntryV27
 
 
 def _normalize_cached_structural_group(
@@ -299,6 +330,52 @@ def _as_security_surface_evidence_kind(value: object) -> str | None:
             return None
 
 
+def _as_runtime_reachability_framework(value: object) -> str | None:
+    match value:
+        case (
+            "celery"
+            | "click"
+            | "dependency_injector"
+            | "django"
+            | "fastapi"
+            | "starlette"
+            | "typer"
+        ):
+            return value
+        case _:
+            return None
+
+
+def _as_runtime_reachability_edge_kind(value: object) -> str | None:
+    match value:
+        case (
+            "declares_dependency"
+            | "provides"
+            | "registers_command"
+            | "registers_handler"
+            | "registers_task"
+        ):
+            return value
+        case _:
+            return None
+
+
+def _as_runtime_reachability_confidence(value: object) -> str | None:
+    match value:
+        case "high" | "medium" | "low":
+            return value
+        case _:
+            return None
+
+
+def _as_runtime_reachability_target_kind(value: object) -> str | None:
+    match value:
+        case "function" | "class" | "method":
+            return value
+        case _:
+            return None
+
+
 def _new_optional_metrics_payload() -> tuple[
     list[ClassMetricsDict],
     list[ModuleDepDict],
@@ -307,12 +384,13 @@ def _new_optional_metrics_payload() -> tuple[
     list[str],
     list[str],
     list[str],
+    list[RuntimeReachabilityFactDict],
     list[SecuritySurfaceDict],
     ModuleTypingCoverageDict | None,
     ModuleDocstringCoverageDict | None,
     ModuleApiSurfaceDict | None,
 ]:
-    return [], [], [], [], [], [], [], [], None, None, None
+    return [], [], [], [], [], [], [], [], [], None, None, None
 
 
 def _unit_dict_from_model(unit: Unit, filepath: str) -> UnitDict:
@@ -493,6 +571,25 @@ def _security_surface_dict_from_model(
     )
 
 
+def _runtime_reachability_dict_from_model(
+    fact: RuntimeReachabilityFact,
+    filepath: str,
+) -> RuntimeReachabilityFactDict:
+    return RuntimeReachabilityFactDict(
+        target_qualname=fact.target_qualname,
+        filepath=filepath,
+        start_line=fact.start_line,
+        end_line=fact.end_line,
+        target_kind=fact.target_kind,
+        framework=fact.framework,
+        edge_kind=fact.edge_kind,
+        confidence=fact.confidence,
+        evidence=fact.evidence,
+        evidence_symbol=fact.evidence_symbol,
+        source_qualname=fact.source_qualname,
+    )
+
+
 def _structural_occurrence_dict_from_model(
     occurrence: StructuralFindingOccurrence,
 ) -> StructuralFindingOccurrenceDict:
@@ -530,6 +627,7 @@ __all__ = [
     "ModuleDocstringCoverageDict",
     "ModuleTypingCoverageDict",
     "PublicSymbolDict",
+    "RuntimeReachabilityFactDict",
     "SecuritySurfaceDict",
     "SegmentDict",
     "SourceStatsDict",
@@ -538,6 +636,10 @@ __all__ = [
     "UnitDict",
     "_api_surface_dict_from_model",
     "_as_risk_literal",
+    "_as_runtime_reachability_confidence",
+    "_as_runtime_reachability_edge_kind",
+    "_as_runtime_reachability_framework",
+    "_as_runtime_reachability_target_kind",
     "_as_security_surface_category",
     "_as_security_surface_classification_mode",
     "_as_security_surface_evidence_kind",
@@ -550,6 +652,7 @@ __all__ = [
     "_new_optional_metrics_payload",
     "_normalize_cached_structural_group",
     "_normalize_cached_structural_groups",
+    "_runtime_reachability_dict_from_model",
     "_security_surface_dict_from_model",
     "_segment_dict_from_model",
     "_structural_group_dict_from_model",

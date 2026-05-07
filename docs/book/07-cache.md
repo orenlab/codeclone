@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define cache schema `2.6`, integrity verification, stale-entry pruning, and
+Define cache schema `2.7`, integrity verification, stale-entry pruning, and
 fail-open behavior.
 
 ## Public surface
@@ -17,7 +17,7 @@ fail-open behavior.
 
 ## Data model
 
-On-disk schema (`v == "2.6"`):
+On-disk schema (`v == "2.7"`):
 
 - top-level: `v`, `payload`, `sig`
 - `payload` keys: `py`, `fp`, `ap`, `files`, optional `sr`
@@ -25,7 +25,8 @@ On-disk schema (`v == "2.6"`):
   `min_loc`, `min_stmt`, `block_min_loc`, `block_min_stmt`,
   `segment_min_loc`, `segment_min_stmt`, `collect_api_surface`
 - `files` stores compact per-file entries with stat signature, extracted units,
-  optional metrics sections (including report-only `security_surfaces`),
+  optional metrics sections (including runtime reachability evidence and
+  report-only `security_surfaces`),
   referenced names/qualnames, and cached source stats
 - `sr` stores optional segment-report projection payload
 
@@ -63,6 +64,8 @@ Refs:
 - Empty sections are omitted from wire entries.
 - Referenced names/qualnames are serialized as sorted unique arrays and omitted when empty.
 - Cached public-API symbol payloads preserve declared parameter order.
+- Cached runtime reachability facts are required for cold/warm dead-code
+  equivalence across supported framework registration patterns.
 - Legacy `.cache_secret` is warning-only and never used for trust.
 
 Refs:

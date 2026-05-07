@@ -16,6 +16,7 @@ from ..models import (
     SecuritySurfaceEvidenceKind,
     SecuritySurfaceLocationScope,
 )
+from .ast_helpers import ast_node_end_line, ast_node_start_line
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,23 +160,6 @@ _CALL_RULES: tuple[_CallRule, ...] = (
 )
 
 
-def _node_start_line(node: ast.AST) -> int | None:
-    line = getattr(node, "lineno", None)
-    if isinstance(line, int) and line > 0:
-        return line
-    return None
-
-
-def _node_end_line(node: ast.AST) -> int:
-    start_line = _node_start_line(node)
-    if start_line is None:
-        return 0
-    end_line = getattr(node, "end_lineno", None)
-    return (
-        end_line if isinstance(end_line, int) and end_line >= start_line else start_line
-    )
-
-
 def _is_type_checking_guard(test: ast.AST) -> bool:
     match test:
         case ast.Name(id="TYPE_CHECKING"):
@@ -249,7 +233,7 @@ class _SecuritySurfaceVisitor(ast.NodeVisitor):
         evidence_kind: SecuritySurfaceEvidenceKind,
         evidence_symbol: str,
     ) -> None:
-        start_line = _node_start_line(node)
+        start_line = ast_node_start_line(node)
         if start_line is None:
             return
         qualname, location_scope = self._current_scope()
@@ -258,7 +242,7 @@ class _SecuritySurfaceVisitor(ast.NodeVisitor):
             capability,
             qualname,
             start_line,
-            _node_end_line(node),
+            ast_node_end_line(node),
             classification_mode,
             evidence_kind,
             evidence_symbol,
@@ -274,7 +258,7 @@ class _SecuritySurfaceVisitor(ast.NodeVisitor):
                 filepath=self._filepath,
                 qualname=qualname,
                 start_line=start_line,
-                end_line=_node_end_line(node),
+                end_line=ast_node_end_line(node),
                 location_scope=location_scope,
                 classification_mode=classification_mode,
                 evidence_kind=evidence_kind,

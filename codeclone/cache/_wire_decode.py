@@ -37,12 +37,17 @@ from .entries import (
     ModuleDocstringCoverageDict,
     ModuleTypingCoverageDict,
     PublicSymbolDict,
+    RuntimeReachabilityFactDict,
     SecuritySurfaceDict,
     SegmentDict,
     SourceStatsDict,
     StructuralFindingGroupDict,
     StructuralFindingOccurrenceDict,
     UnitDict,
+    _as_runtime_reachability_confidence,
+    _as_runtime_reachability_edge_kind,
+    _as_runtime_reachability_framework,
+    _as_runtime_reachability_target_kind,
     _as_security_surface_category,
     _as_security_surface_classification_mode,
     _as_security_surface_evidence_kind,
@@ -130,6 +135,10 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
         filepath=filepath,
     )
     api_surface = _decode_optional_wire_api_surface(obj=obj, filepath=filepath)
+    runtime_reachability = _decode_optional_wire_runtime_reachability(
+        obj=obj,
+        filepath=filepath,
+    )
     security_surfaces = _decode_optional_wire_security_surfaces(
         obj=obj,
         filepath=filepath,
@@ -137,7 +146,7 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
     coupled_classes_map = _decode_optional_wire_coupled_classes(obj=obj, key="cc")
     if coupled_classes_map is None:
         return None
-    if security_surfaces is None:
+    if runtime_reachability is None or security_surfaces is None:
         return None
 
     for metric in class_metrics:
@@ -167,6 +176,7 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
         typing_coverage=typing_coverage,
         docstring_coverage=docstring_coverage,
         api_surface=api_surface,
+        runtime_reachability=runtime_reachability,
         security_surfaces=security_surfaces,
         source_stats=source_stats,
         structural_findings=(
@@ -365,6 +375,63 @@ def _decode_optional_wire_security_surfaces(
         decode_item=_decode_wire_security_surface,
     )
     return rows
+
+
+def _decode_optional_wire_runtime_reachability(
+    *,
+    obj: dict[str, object],
+    filepath: str,
+) -> list[RuntimeReachabilityFactDict] | None:
+    return _decode_optional_wire_items_for_filepath(
+        obj=obj,
+        key="rr",
+        filepath=filepath,
+        decode_item=_decode_wire_runtime_reachability,
+    )
+
+
+def _decode_wire_runtime_reachability(
+    row_raw: object,
+    filepath: str,
+) -> RuntimeReachabilityFactDict | None:
+    row = _decode_wire_row(row_raw, valid_lengths={10})
+    if row is None:
+        return None
+    target_qualname = _as_str(row[0])
+    lines = _decode_wire_int_fields(row, 1, 2)
+    target_kind = _as_runtime_reachability_target_kind(_as_str(row[3]))
+    framework = _as_runtime_reachability_framework(_as_str(row[4]))
+    edge_kind = _as_runtime_reachability_edge_kind(_as_str(row[5]))
+    confidence = _as_runtime_reachability_confidence(_as_str(row[6]))
+    evidence = _as_str(row[7])
+    evidence_symbol = _as_str(row[8])
+    source_qualname = _as_str(row[9])
+    if (
+        target_qualname is None
+        or lines is None
+        or target_kind is None
+        or framework is None
+        or edge_kind is None
+        or confidence is None
+        or evidence is None
+        or evidence_symbol is None
+        or source_qualname is None
+    ):
+        return None
+    start_line, end_line = lines
+    return RuntimeReachabilityFactDict(
+        target_qualname=target_qualname,
+        filepath=filepath,
+        start_line=start_line,
+        end_line=end_line,
+        target_kind=target_kind,
+        framework=framework,
+        edge_kind=edge_kind,
+        confidence=confidence,
+        evidence=evidence,
+        evidence_symbol=evidence_symbol,
+        source_qualname=source_qualname,
+    )
 
 
 def _decode_wire_security_surface(

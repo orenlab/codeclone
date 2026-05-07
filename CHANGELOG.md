@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Dead code
+
+- Add framework-aware runtime reachability facts for dead-code analysis: FastAPI/Starlette routes and dependencies,
+  Django URL patterns, Dependency Injector providers, Typer/Click commands, and Celery tasks.
+- Keep the model evidence-based and deterministic: supported registrations suppress false dead-code findings, while the
+  new cache `2.7` and report schema `2.11` carry the reachability facts for cold/warm parity and report explainability.
+
 ## [2.0.0] - 2026-04-30
 
 `2.0.0` promotes the completed 2.0 release line to the stable public contract.

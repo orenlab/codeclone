@@ -18,6 +18,7 @@ from ._validators import (
     _is_module_dep_dict,
     _is_module_docstring_coverage_dict,
     _is_module_typing_coverage_dict,
+    _is_runtime_reachability_fact_dict,
     _is_security_surface_dict,
     _is_segment_dict,
     _is_source_stats_dict,
@@ -36,6 +37,7 @@ from .entries import (
     ModuleDocstringCoverageDict,
     ModuleTypingCoverageDict,
     PublicSymbolDict,
+    RuntimeReachabilityFactDict,
     SecuritySurfaceDict,
     SegmentDict,
     SourceStatsDict,
@@ -116,6 +118,12 @@ def _as_typed_security_surfaces_list(value: object) -> list[SecuritySurfaceDict]
     return _as_typed_list(value, predicate=_is_security_surface_dict)
 
 
+def _as_typed_runtime_reachability_list(
+    value: object,
+) -> list[RuntimeReachabilityFactDict] | None:
+    return _as_typed_list(value, predicate=_is_runtime_reachability_fact_dict)
+
+
 def _as_typed_string_list(value: object) -> list[str] | None:
     return _as_typed_list(value, predicate=_is_str_item)
 
@@ -176,6 +184,7 @@ def _has_cache_entry_container_shape(entry: Mapping[str, object]) -> bool:
         "referenced_qualnames",
         "import_names",
         "class_names",
+        "runtime_reachability",
         "security_surfaces",
         "structural_findings",
     )
@@ -206,6 +215,7 @@ def _decode_optional_cache_sections(
         list[str],
         list[str],
         list[str],
+        list[RuntimeReachabilityFactDict],
         list[SecuritySurfaceDict],
         ModuleTypingCoverageDict | None,
         ModuleDocstringCoverageDict | None,
@@ -226,6 +236,9 @@ def _decode_optional_cache_sections(
     )
     import_names_raw = _as_typed_string_list(entry.get("import_names", []))
     class_names_raw = _as_typed_string_list(entry.get("class_names", []))
+    runtime_reachability_raw = _as_typed_runtime_reachability_list(
+        entry.get("runtime_reachability", [])
+    )
     security_surfaces_raw = _as_typed_security_surfaces_list(
         entry.get("security_surfaces", [])
     )
@@ -237,6 +250,7 @@ def _decode_optional_cache_sections(
         or referenced_qualnames_raw is None
         or import_names_raw is None
         or class_names_raw is None
+        or runtime_reachability_raw is None
         or security_surfaces_raw is None
     ):
         return None
@@ -258,6 +272,7 @@ def _decode_optional_cache_sections(
         referenced_qualnames_raw,
         import_names_raw,
         class_names_raw,
+        runtime_reachability_raw,
         security_surfaces_raw,
         typing_coverage_raw,
         docstring_coverage_raw,
@@ -273,6 +288,7 @@ def _attach_optional_cache_sections(
     typing_coverage: ModuleTypingCoverageDict | None = None,
     docstring_coverage: ModuleDocstringCoverageDict | None = None,
     api_surface: ModuleApiSurfaceDict | None = None,
+    runtime_reachability: list[RuntimeReachabilityFactDict] | None = None,
     security_surfaces: list[SecuritySurfaceDict] | None = None,
     source_stats: SourceStatsDict | None = None,
     structural_findings: list[StructuralFindingGroupDict] | None = None,
@@ -283,6 +299,8 @@ def _attach_optional_cache_sections(
         entry["docstring_coverage"] = docstring_coverage
     if api_surface is not None:
         entry["api_surface"] = api_surface
+    if runtime_reachability is not None:
+        entry["runtime_reachability"] = runtime_reachability
     if security_surfaces is not None:
         entry["security_surfaces"] = security_surfaces
     if source_stats is not None:
@@ -356,6 +374,17 @@ def _canonicalize_cache_entry(entry: CacheEntry) -> CacheEntry:
         "referenced_qualnames": sorted(set(entry.get("referenced_qualnames", []))),
         "import_names": sorted(set(entry["import_names"])),
         "class_names": sorted(set(entry["class_names"])),
+        "runtime_reachability": sorted(
+            entry.get("runtime_reachability", []),
+            key=lambda item: (
+                item["start_line"],
+                item["end_line"],
+                item["target_qualname"],
+                item["framework"],
+                item["edge_kind"],
+                item["evidence_symbol"],
+            ),
+        ),
         "security_surfaces": sorted(
             entry.get("security_surfaces", []),
             key=lambda item: (
@@ -444,6 +473,7 @@ __all__ = [
     "_as_typed_class_metrics_list",
     "_as_typed_dead_candidates_list",
     "_as_typed_module_deps_list",
+    "_as_typed_runtime_reachability_list",
     "_as_typed_security_surfaces_list",
     "_as_typed_segment_list",
     "_as_typed_string_list",

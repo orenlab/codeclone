@@ -91,11 +91,11 @@ Notes:
 }
 ```
 
-## Cache schema (`2.6`)
+## Cache schema (`2.7`)
 
 ```json
 {
-  "v": "2.6",
+  "v": "2.7",
   "payload": {
     "py": "cp314",
     "fp": "1",
@@ -126,6 +126,7 @@ Notes:
         "rq": ["pkg.dep:used_name"],
         "in": ["pkg.dep"],
         "cn": ["ClassName"],
+        "rr": [["pkg.api:list_items", 20, 24, "function", "fastapi", "registers_handler", "medium", "route decorator", "router.get", "pkg.api:router"]],
         "sc": [["process_boundary", "subprocess_run", "pkg.runner", "pkg.runner:run", 10, 10, "callable", "exact_call", "call", "subprocess.run"]],
         "sf": [["duplicated_branches", "key", [["stmt_seq", "Expr,Return"]], [["pkg.a:f", 10, 12]]]]
       }
@@ -142,16 +143,18 @@ Notes:
 - `ss` stores per-file source stats and is required for full cache-hit accounting
   in discovery.
 - `rn`/`rq` are optional and decode to empty arrays when absent.
+- `rr` stores runtime reachability facts used to keep dead-code behavior
+  equivalent between cold and cached runs.
 - Cached public-API symbol payloads preserve declaration order for `params`;
   canonicalization must not rewrite callable signature order.
 - `u` row decoder accepts both legacy 11-column rows and canonical 17-column rows
   (legacy rows map new structural fields to neutral defaults).
 
-## Report schema (`2.10`)
+## Report schema (`2.11`)
 
 ```json
 {
-  "report_schema_version": "2.10",
+  "report_schema_version": "2.11",
   "meta": {
     "codeclone_version": "2.0.0",
     "project_name": "codeclone",
@@ -325,7 +328,16 @@ Notes:
           {
             "...": "..."
           }
-        ]
+        ],
+        "runtime_reachability": {
+          "summary": {
+            "total": 0,
+            "by_framework": {},
+            "by_edge_kind": {},
+            "by_confidence": {}
+          },
+          "items": []
+        }
       },
       "overloaded_modules": {
         "summary": {
@@ -472,7 +484,7 @@ Notes:
 ```text
 # CodeClone Report
 - Markdown schema: 1.0
-- Source report schema: 2.10
+- Source report schema: 2.11
 ...
 ## Overview
 ## Inventory
@@ -558,7 +570,7 @@ Notes:
       ],
       "properties": {
         "profileVersion": "1.0",
-        "reportSchemaVersion": "2.10"
+        "reportSchemaVersion": "2.11"
       },
       "results": [
         {

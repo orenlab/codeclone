@@ -12,7 +12,7 @@ from typing import Literal
 from ..analysis.suppressions import DEAD_CODE_RULE_ID
 from ..domain.findings import SYMBOL_KIND_FUNCTION, SYMBOL_KIND_METHOD
 from ..domain.quality import CONFIDENCE_HIGH, CONFIDENCE_MEDIUM
-from ..models import DeadCandidate, DeadItem
+from ..models import DeadCandidate, DeadItem, RuntimeReachabilityFact
 from ..paths import is_test_filepath
 
 _TEST_NAME_PREFIXES = ("test_", "pytest_")
@@ -37,13 +37,16 @@ def find_unused(
     definitions: tuple[DeadCandidate, ...],
     referenced_names: frozenset[str],
     referenced_qualnames: frozenset[str] = frozenset(),
+    runtime_reachability: tuple[RuntimeReachabilityFact, ...] = (),
 ) -> tuple[DeadItem, ...]:
     items: list[DeadItem] = []
+    runtime_reachable_qualnames = _runtime_reachable_qualnames(runtime_reachability)
     for symbol in definitions:
         if _should_skip_dead_candidate(
             symbol,
             referenced_names=referenced_names,
             referenced_qualnames=referenced_qualnames,
+            runtime_reachable_qualnames=runtime_reachable_qualnames,
         ):
             continue
 
@@ -81,6 +84,7 @@ def find_suppressed_unused(
     definitions: tuple[DeadCandidate, ...],
     referenced_names: frozenset[str],
     referenced_qualnames: frozenset[str] = frozenset(),
+    runtime_reachability: tuple[RuntimeReachabilityFact, ...] = (),
 ) -> tuple[DeadItem, ...]:
     suppressed_definitions = tuple(
         replace(symbol, suppressed_rules=())
@@ -93,6 +97,7 @@ def find_suppressed_unused(
         definitions=suppressed_definitions,
         referenced_names=referenced_names,
         referenced_qualnames=referenced_qualnames,
+        runtime_reachability=runtime_reachability,
     )
 
 
@@ -121,11 +126,13 @@ def _should_skip_dead_candidate(
     *,
     referenced_names: frozenset[str],
     referenced_qualnames: frozenset[str],
+    runtime_reachable_qualnames: frozenset[str],
 ) -> bool:
     return (
         DEAD_CODE_RULE_ID in symbol.suppressed_rules
         or _is_non_actionable_candidate(symbol)
         or symbol.qualname in referenced_qualnames
+        or symbol.qualname in runtime_reachable_qualnames
         or symbol.local_name in referenced_names
     )
 
@@ -142,3 +149,13 @@ def _dead_item_confidence(
 
 def _is_dunder(name: str) -> bool:
     return len(name) > 4 and name.startswith("__") and name.endswith("__")
+
+
+def _runtime_reachable_qualnames(
+    facts: tuple[RuntimeReachabilityFact, ...],
+) -> frozenset[str]:
+    return frozenset(
+        fact.target_qualname
+        for fact in facts
+        if fact.confidence in {CONFIDENCE_HIGH, CONFIDENCE_MEDIUM}
+    )

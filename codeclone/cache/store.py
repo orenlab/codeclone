@@ -49,6 +49,7 @@ from .entries import (
     _module_dep_dict_from_model,
     _new_optional_metrics_payload,
     _normalize_cached_structural_groups,
+    _runtime_reachability_dict_from_model,
     _security_surface_dict_from_model,
     _segment_dict_from_model,
     _structural_group_dict_from_model,
@@ -502,6 +503,7 @@ class Cache:
             referenced_qualnames_raw,
             import_names_raw,
             class_names_raw,
+            runtime_reachability_raw,
             security_surfaces_raw,
             typing_coverage_raw,
             docstring_coverage_raw,
@@ -523,11 +525,13 @@ class Cache:
                 referenced_qualnames=referenced_qualnames_raw,
                 import_names=import_names_raw,
                 class_names=class_names_raw,
+                runtime_reachability=runtime_reachability_raw,
                 security_surfaces=security_surfaces_raw,
             ),
             typing_coverage=typing_coverage_raw,
             docstring_coverage=docstring_coverage_raw,
             api_surface=api_surface_raw,
+            runtime_reachability=runtime_reachability_raw,
             security_surfaces=security_surfaces_raw,
             source_stats=source_stats,
             structural_findings=structural_findings,
@@ -569,6 +573,7 @@ class Cache:
             referenced_qualnames,
             import_names,
             class_names,
+            runtime_reachability,
             security_surfaces,
             typing_coverage,
             docstring_coverage,
@@ -590,6 +595,10 @@ class Cache:
             referenced_qualnames = sorted(set(file_metrics.referenced_qualnames))
             import_names = sorted(set(file_metrics.import_names))
             class_names = sorted(set(file_metrics.class_names))
+            runtime_reachability = [
+                _runtime_reachability_dict_from_model(fact, runtime_path)
+                for fact in file_metrics.runtime_reachability
+            ]
             security_surfaces = [
                 _security_surface_dict_from_model(surface, runtime_path)
                 for surface in file_metrics.security_surfaces
@@ -626,6 +635,7 @@ class Cache:
             referenced_qualnames=referenced_qualnames,
             import_names=import_names,
             class_names=class_names,
+            runtime_reachability=runtime_reachability,
             security_surfaces=security_surfaces,
         )
         if typing_coverage is not None:

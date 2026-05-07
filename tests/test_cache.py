@@ -29,6 +29,7 @@ from codeclone.cache._validators import (
     _is_module_api_surface_dict,
     _is_module_dep_dict,
     _is_public_symbol_dict,
+    _is_runtime_reachability_fact_dict,
     _is_security_surface_dict,
 )
 from codeclone.cache._wire_decode import (
@@ -44,6 +45,7 @@ from codeclone.cache._wire_decode import (
     _decode_wire_file_sections,
     _decode_wire_module_dep,
     _decode_wire_name_sections,
+    _decode_wire_runtime_reachability,
     _decode_wire_security_surface,
     _decode_wire_segment,
     _decode_wire_unit,
@@ -56,6 +58,10 @@ from codeclone.cache._wire_helpers import (
 )
 from codeclone.cache.entries import (
     CacheEntry,
+    _as_runtime_reachability_confidence,
+    _as_runtime_reachability_edge_kind,
+    _as_runtime_reachability_framework,
+    _as_runtime_reachability_target_kind,
     _as_security_surface_category,
     _as_security_surface_classification_mode,
     _as_security_surface_evidence_kind,
@@ -79,6 +85,7 @@ from codeclone.models import (
     FileMetrics,
     ModuleApiSurface,
     PublicSymbol,
+    RuntimeReachabilityFact,
     SecuritySurface,
     SegmentUnit,
     Unit,
@@ -324,6 +331,50 @@ def test_cache_roundtrip_preserves_security_surfaces(tmp_path: Path) -> None:
     ]
 
 
+def test_cache_roundtrip_preserves_runtime_reachability(tmp_path: Path) -> None:
+    entry = _roundtrip_cache_entry_with_metrics(
+        tmp_path,
+        file_metrics=FileMetrics(
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=frozenset(),
+            import_names=frozenset(),
+            class_names=frozenset(),
+            runtime_reachability=(
+                RuntimeReachabilityFact(
+                    target_qualname="pkg.api:list_items",
+                    filepath="x.py",
+                    start_line=12,
+                    end_line=14,
+                    target_kind="function",
+                    framework="fastapi",
+                    edge_kind="registers_handler",
+                    confidence="medium",
+                    evidence="route decorator",
+                    evidence_symbol="router.get",
+                    source_qualname="pkg.api:router",
+                ),
+            ),
+        ),
+    )
+    assert entry["runtime_reachability"] == [
+        {
+            "target_qualname": "pkg.api:list_items",
+            "filepath": "x.py",
+            "start_line": 12,
+            "end_line": 14,
+            "target_kind": "function",
+            "framework": "fastapi",
+            "edge_kind": "registers_handler",
+            "confidence": "medium",
+            "evidence": "route decorator",
+            "evidence_symbol": "router.get",
+            "source_qualname": "pkg.api:router",
+        }
+    ]
+
+
 def test_security_surface_cache_helpers_reject_invalid_values() -> None:
     assert _as_security_surface_category("process_boundary") == "process_boundary"
     assert _as_security_surface_category("broken") is None
@@ -345,6 +396,70 @@ def test_security_surface_cache_helpers_reject_invalid_values() -> None:
         is False
     )
     assert _is_security_surface_dict(object()) is False
+
+
+def test_runtime_reachability_cache_helpers_reject_invalid_values() -> None:
+    assert _as_runtime_reachability_framework("fastapi") == "fastapi"
+    assert _as_runtime_reachability_framework("broken") is None
+    assert _as_runtime_reachability_edge_kind("registers_handler") == (
+        "registers_handler"
+    )
+    assert _as_runtime_reachability_edge_kind("broken") is None
+    assert _as_runtime_reachability_confidence("medium") == "medium"
+    assert _as_runtime_reachability_confidence("broken") is None
+    assert _as_runtime_reachability_target_kind("function") == "function"
+    assert _as_runtime_reachability_target_kind("broken") is None
+    assert _is_runtime_reachability_fact_dict(object()) is False
+
+
+def test_decode_wire_runtime_reachability_covers_valid_and_invalid_rows() -> None:
+    assert _decode_wire_runtime_reachability(object(), "pkg/mod.py") is None
+    assert (
+        _decode_wire_runtime_reachability(
+            [
+                "pkg.mod:run",
+                10,
+                12,
+                "function",
+                "broken",
+                "registers_handler",
+                "medium",
+                "route decorator",
+                "router.get",
+                "pkg.mod:router",
+            ],
+            "pkg/mod.py",
+        )
+        is None
+    )
+    decoded = _decode_wire_runtime_reachability(
+        [
+            "pkg.mod:run",
+            10,
+            12,
+            "function",
+            "fastapi",
+            "registers_handler",
+            "medium",
+            "route decorator",
+            "router.get",
+            "pkg.mod:router",
+        ],
+        "pkg/mod.py",
+    )
+    assert decoded == {
+        "target_qualname": "pkg.mod:run",
+        "filepath": "pkg/mod.py",
+        "start_line": 10,
+        "end_line": 12,
+        "target_kind": "function",
+        "framework": "fastapi",
+        "edge_kind": "registers_handler",
+        "confidence": "medium",
+        "evidence": "route decorator",
+        "evidence_symbol": "router.get",
+        "source_qualname": "pkg.mod:router",
+    }
 
 
 def test_decode_wire_security_surface_covers_valid_and_invalid_rows() -> None:

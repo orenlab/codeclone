@@ -199,6 +199,7 @@ def test_resolve_install_target_uses_repo_source_for_local_action_checkout(
 
 
 def test_resolve_install_target_uses_pypi_for_remote_checkout(tmp_path: Path) -> None:
+    action_impl = _load_action_impl()
     workspace_root = tmp_path / "consumer"
     action_repo = tmp_path / "_actions" / "orenlab" / "codeclone" / "main"
     action_path = action_repo / ".github" / "actions" / "codeclone"
@@ -225,7 +226,7 @@ def test_resolve_install_target_uses_pypi_for_remote_checkout(tmp_path: Path) ->
         "pypi-version",
         "codeclone==2.0.0",
         "pypi-default",
-        "codeclone==2.0.0",
+        f"codeclone=={action_impl.DEFAULT_CODECLONE_PACKAGE_VERSION}",
     )
 
 

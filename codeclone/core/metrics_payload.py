@@ -24,6 +24,7 @@ from ..models import (
     MetricsDiff,
     ModuleDep,
     ProjectMetrics,
+    RuntimeReachabilityFact,
     SecuritySurface,
 )
 from ..utils.coerce import as_int, as_mapping, as_sequence, as_str
@@ -113,6 +114,7 @@ def build_metrics_report_payload(
     units: Sequence[GroupItemLike],
     class_metrics: Sequence[ClassMetrics],
     module_deps: Sequence[ModuleDep] = (),
+    runtime_reachability: Sequence[RuntimeReachabilityFact] = (),
     security_surfaces: Sequence[SecuritySurface] = (),
     source_stats_by_file: Sequence[tuple[str, int, int, int, int]] = (),
     suppressed_dead_code: Sequence[DeadItem] = (),
@@ -175,6 +177,10 @@ def build_metrics_report_payload(
     api_surface_items = _api_surface_rows(project_metrics.api_surface)
     coverage_join_summary = _coverage_join_summary(coverage_join)
     coverage_join_items = _coverage_join_rows(coverage_join)
+    runtime_reachability_items = _runtime_reachability_rows(runtime_reachability)
+    runtime_reachability_summary = _runtime_reachability_summary(
+        runtime_reachability_items
+    )
 
     def _serialize_dead_item(
         item: DeadItem,
@@ -268,6 +274,10 @@ def build_metrics_report_payload(
                 ),
                 "suppressed": len(suppressed_dead_items),
             },
+            "runtime_reachability": {
+                "summary": runtime_reachability_summary,
+                "items": runtime_reachability_items,
+            },
         },
         "health": {
             "score": project_metrics.health.total,
@@ -321,3 +331,56 @@ def build_metrics_report_payload(
             "items": coverage_join_items,
         }
     return payload
+
+
+def _runtime_reachability_rows(
+    runtime_reachability: Sequence[RuntimeReachabilityFact],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "target_qualname": fact.target_qualname,
+            "filepath": fact.filepath,
+            "start_line": fact.start_line,
+            "end_line": fact.end_line,
+            "target_kind": fact.target_kind,
+            "framework": fact.framework,
+            "edge_kind": fact.edge_kind,
+            "confidence": fact.confidence,
+            "evidence": fact.evidence,
+            "evidence_symbol": fact.evidence_symbol,
+            "source_qualname": fact.source_qualname,
+        }
+        for fact in sorted(
+            runtime_reachability,
+            key=lambda item: (
+                item.filepath,
+                item.start_line,
+                item.end_line,
+                item.target_qualname,
+                item.framework,
+                item.edge_kind,
+                item.evidence_symbol,
+            ),
+        )
+    ]
+
+
+def _runtime_reachability_summary(
+    rows: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    by_framework: dict[str, int] = {}
+    by_edge_kind: dict[str, int] = {}
+    by_confidence: dict[str, int] = {}
+    for row in rows:
+        framework = as_str(row.get("framework"))
+        edge_kind = as_str(row.get("edge_kind"))
+        confidence = as_str(row.get("confidence"))
+        by_framework[framework] = by_framework.get(framework, 0) + 1
+        by_edge_kind[edge_kind] = by_edge_kind.get(edge_kind, 0) + 1
+        by_confidence[confidence] = by_confidence.get(confidence, 0) + 1
+    return {
+        "total": len(rows),
+        "by_framework": dict(sorted(by_framework.items())),
+        "by_edge_kind": dict(sorted(by_edge_kind.items())),
+        "by_confidence": dict(sorted(by_confidence.items())),
+    }

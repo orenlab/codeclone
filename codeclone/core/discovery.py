@@ -17,6 +17,7 @@ from ..models import (
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
+    RuntimeReachabilityFact,
     SecuritySurface,
     StructuralFindingGroup,
 )
@@ -51,6 +52,7 @@ DiscoveryBuffers = tuple[
     list[ModuleTypingCoverage],
     list[ModuleDocstringCoverage],
     list[ModuleApiSurface],
+    list[RuntimeReachabilityFact],
     list[SecuritySurface],
     list[str],
     list[str],
@@ -63,7 +65,7 @@ def _group_items_from_cache(rows: Sequence[Mapping[str, object]]) -> list[GroupI
 
 def _new_discovery_buffers() -> DiscoveryBuffers:
     # Keep buffer order aligned with DiscoveryBuffers above.
-    return [], [], [], [], [], [], set(), set(), [], [], [], [], [], []
+    return [], [], [], [], [], [], set(), set(), [], [], [], [], [], [], []
 
 
 def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
@@ -86,6 +88,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         cached_typing_modules,
         cached_docstring_modules,
         cached_api_modules,
+        cached_runtime_reachability,
         cached_security_surfaces,
         files_to_process,
         skipped_warnings,
@@ -139,6 +142,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                     typing_coverage,
                     docstring_coverage,
                     api_surface,
+                    runtime_reachability,
                     security_surfaces,
                 ) = _load_cached_metrics_extended(cached, filepath=filepath)
                 cached_class_metrics.extend(class_metrics)
@@ -152,6 +156,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                     cached_docstring_modules.append(docstring_coverage)
                 if api_surface is not None:
                     cached_api_modules.append(api_surface)
+                cached_runtime_reachability.extend(runtime_reachability)
                 cached_security_surfaces.extend(security_surfaces)
             if collect_structural_findings:
                 cached_sf.extend(
@@ -179,6 +184,20 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
             sorted(cached_dead_candidates, key=_dead_candidate_sort_key)
         ),
         cached_referenced_names=frozenset(cached_referenced_names),
+        cached_runtime_reachability=tuple(
+            sorted(
+                cached_runtime_reachability,
+                key=lambda item: (
+                    item.filepath,
+                    item.start_line,
+                    item.end_line,
+                    item.target_qualname,
+                    item.framework,
+                    item.edge_kind,
+                    item.evidence_symbol,
+                ),
+            )
+        ),
         cached_security_surfaces=tuple(
             sorted(
                 cached_security_surfaces,

@@ -18,14 +18,17 @@ Define dead-code liveness rules, canonical symbol-usage boundaries, and gating s
 
 - Candidate model: `DeadCandidate`
 - Output model: `DeadItem` (`confidence=high|medium`)
+- Runtime reachability evidence: `RuntimeReachabilityFact`
 - Global liveness input:
     - `referenced_names: frozenset[str]`
     - `referenced_qualnames: frozenset[str]`
+    - `runtime_reachability: tuple[RuntimeReachabilityFact, ...]`
 
 Refs:
 
 - `codeclone/models.py:DeadCandidate`
 - `codeclone/models.py:DeadItem`
+- `codeclone/models.py:RuntimeReachabilityFact`
 
 ## Contracts
 
@@ -51,6 +54,13 @@ Refs:
 - A symbol referenced by local name is not dead.
 - A symbol referenced only by qualified-name suffix (without canonical module
   match) downgrades confidence to `medium`.
+- Runtime framework registration facts can mark a symbol live when the extractor
+  observes a deterministic edge from modern Python runtime surfaces:
+  FastAPI/Starlette route and dependency registration, Django URL patterns,
+  Dependency Injector providers, Typer/Click commands, and Celery tasks.
+- Runtime reachability facts are evidence, not a full call graph. High- and
+  medium-confidence facts prevent false dead-code findings; low-confidence
+  facts, if introduced later, must remain report-only until explicitly wired.
 - `--fail-dead-code` gate counts only high-confidence dead-code items.
 - Suppressed dead-code candidates are excluded from active dead-code findings
   and from health-score dead-code penalties.
@@ -62,6 +72,7 @@ Refs:
 
 - `codeclone/metrics/dead_code.py:_is_non_actionable_candidate`
 - `codeclone/metrics/dead_code.py:find_unused`
+- `codeclone/analysis/reachability.py:collect_runtime_reachability`
 - `codeclone/report/gates/evaluator.py:metric_gate_reasons`
 
 ## Invariants (MUST)
@@ -70,6 +81,9 @@ Refs:
   `(filepath, start_line, end_line, qualname, kind)`.
 - Test-path suppression is applied both on fresh extraction and cached-metrics
   load for both `referenced_names` and `referenced_qualnames`.
+- Runtime reachability facts are collected during AST extraction, cached with
+  the file metrics payload, and reused on warm runs so dead-code behavior is
+  identical for cold and cached analysis.
 
 Refs:
 
@@ -88,11 +102,14 @@ Refs:
 | Definition appears only in tests                   | Candidate skipped                      |
 | Symbol used only from tests                        | Remains actionable dead-code candidate |
 | Symbol used through import alias / module alias    | Matched via canonical qualname usage   |
+| Symbol registered through a supported runtime edge | Candidate skipped as runtime-reachable |
 | `--fail-dead-code` with high-confidence dead items | Gating failure, exit `3`               |
 
 ## Determinism / canonicalization
 
 - Filtering rules are deterministic string/path predicates.
+- Runtime reachability is based on exact AST evidence for known framework
+  contracts; it does not execute imports or inspect installed packages.
 - Candidate and result ordering is deterministic.
 
 Refs:
@@ -107,6 +124,10 @@ Refs:
 - `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[skip_pep562_hooks]`
 - `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[inline_suppression_per_declaration]`
 - `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[suppression_binding_scoped_to_target]`
+- `tests/test_extractor.py::test_dead_code_uses_fastapi_route_and_dependency_reachability`
+- `tests/test_extractor.py::test_dead_code_uses_django_urlpattern_reachability`
+- `tests/test_extractor.py::test_dead_code_uses_dependency_injector_provider_reachability`
+- `tests/test_extractor.py::test_dead_code_uses_cli_and_task_registration_reachability`
 - `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_import_aliases`
 - `tests/test_extractor.py::test_collect_dead_candidates_skips_protocol_and_stub_like_symbols`
 - `tests/test_pipeline_metrics.py::test_load_cached_metrics_ignores_referenced_names_from_test_files`
@@ -122,7 +143,11 @@ Refs:
 
 ## Non-guarantees
 
-- No full runtime call-graph resolution is performed.
+- No full runtime call-graph, points-to, or framework container execution is
+  performed.
+- Unsupported frameworks may still need explicit
+  `# codeclone: ignore[dead-code]` suppressions until their registration
+  contracts are modeled.
 - Medium-confidence dead items are informational and not used by
   `--fail-dead-code` gating.
 

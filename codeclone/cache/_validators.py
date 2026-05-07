@@ -20,6 +20,7 @@ from .entries import (
     ModuleDocstringCoverageDict,
     ModuleTypingCoverageDict,
     PublicSymbolDict,
+    RuntimeReachabilityFactDict,
     SecuritySurfaceDict,
     SegmentDict,
     SourceStatsDict,
@@ -236,6 +237,28 @@ def _is_security_surface_dict(value: object) -> TypeGuard[SecuritySurfaceDict]:
     )
 
 
+def _is_runtime_reachability_fact_dict(
+    value: object,
+) -> TypeGuard[RuntimeReachabilityFactDict]:
+    if not isinstance(value, dict):
+        return False
+    return _has_typed_fields(
+        value,
+        string_keys=(
+            "target_qualname",
+            "filepath",
+            "target_kind",
+            "framework",
+            "edge_kind",
+            "confidence",
+            "evidence",
+            "evidence_symbol",
+            "source_qualname",
+        ),
+        int_keys=("start_line", "end_line"),
+    )
+
+
 def _is_string_list(value: object) -> TypeGuard[list[str]]:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
@@ -263,6 +286,7 @@ __all__ = [
     "_is_module_docstring_coverage_dict",
     "_is_module_typing_coverage_dict",
     "_is_public_symbol_dict",
+    "_is_runtime_reachability_fact_dict",
     "_is_security_surface_dict",
     "_is_segment_dict",
     "_is_source_stats_dict",
