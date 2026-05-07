@@ -18,9 +18,9 @@
 
   <p><strong>A structural review layer for Python — baseline-aware, deterministic, built for CI and AI agents</strong></p>
 
-  [![][pypi-shield]][pypi-link] [![][status-shield]][pypi-link] [![][downloads-shield]][pypi-link] [![][python-shield]][pypi-link] [![][score-shield]][score-link] [![][license-shield]][license-link]
+[![][pypi-shield]][pypi-link] [![][status-shield]][pypi-link] [![][downloads-shield]][pypi-link] [![][python-shield]][pypi-link] [![][score-shield]][score-link] [![][license-shield]][license-link]
 
-  [![][tests-shield]][tests-link] [![][benchmark-shield]][benchmark-link]
+[![][tests-shield]][tests-link] [![][benchmark-shield]][benchmark-link]
 
 </div>
 
@@ -45,22 +45,27 @@ Live sample report: [orenlab.github.io/codeclone/examples/report/](https://orenl
 ## Features
 
 **Control & governance**
+
 - **Baseline governance** — separates accepted **legacy** debt from **new regressions**; CI fails only on what changed
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Reports** — interactive HTML, JSON, Markdown, SARIF, and text from one canonical report
 
 **Detection & analysis**
+
 - **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
 - **Structural findings** — duplicated branch families, clone guard/exit divergence, and clone-cohort drift
-- **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, adaptive depth profile, dead code, health score, and overloaded-module profiling
+- **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, adaptive depth
+  profile, dead code, health score, and overloaded-module profiling
 - **Adoption & API** — type/docstring annotation coverage, public API surface inventory and baseline diff
 - **Coverage Join** — fuse external Cobertura XML into the current run to surface coverage hotspots and scope gaps
 
 **Surfaces & integrations**
+
 - **MCP control surface** — triage-first agent and IDE interface over the same canonical pipeline; read-only by contract
 - **IDE & agent clients** — VS Code extension, Claude Desktop bundle, and Codex plugin over the same MCP contract
 
 **Performance**
+
 - **Fast** — incremental caching, parallel processing, warm-run optimization
 
 ## How It Works
@@ -164,7 +169,8 @@ CodeClone ships a composite GitHub Action for PR and CI workflows:
 It can run baseline-aware gating, generate JSON and SARIF reports, upload SARIF to GitHub Code Scanning,
 and post or update a PR summary comment.
 
-Action docs: [.github/actions/codeclone/README.md](https://github.com/orenlab/codeclone/blob/main/.github/actions/codeclone/README.md)
+Action
+docs: [.github/actions/codeclone/README.md](https://github.com/orenlab/codeclone/blob/main/.github/actions/codeclone/README.md)
 
 ### Quality Gates
 
@@ -228,11 +234,11 @@ codeclone-mcp --transport streamable-http
 
 ### Native Client Surfaces
 
-| Surface | Location | Purpose |
-|---|---|---|
-| **VS Code extension** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone) | Triage-first structural review in the editor |
+| Surface                   | Location                                                                                                                     | Purpose                                            |
+|---------------------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------|
+| **VS Code extension**     | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)                                 | Triage-first structural review in the editor       |
 | **Claude Desktop bundle** | [`extensions/claude-desktop-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone) | Local `.mcpb` install with pre-loaded instructions |
-| **Codex plugin** | [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone) | Native discovery, two skills, and MCP definition |
+| **Codex plugin**          | [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone)                                     | Native discovery, two skills, and MCP definition   |
 
 All three are native clients over the same `codeclone-mcp` contract — no second analysis engine.
 
@@ -280,12 +286,12 @@ Full contract: [Baseline contract](https://orenlab.github.io/codeclone/book/06-b
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Success |
-| `2` | Contract error — untrusted baseline, invalid config, unreadable sources in CI |
-| `3` | Gating failure — new clones or metric threshold exceeded |
-| `5` | Internal error |
+| Code | Meaning                                                                       |
+|------|-------------------------------------------------------------------------------|
+| `0`  | Success                                                                       |
+| `2`  | Contract error — untrusted baseline, invalid config, unreadable sources in CI |
+| `3`  | Gating failure — new clones or metric threshold exceeded                      |
+| `5`  | Internal error                                                                |
 
 Contract errors (`2`) take precedence over gating failures (`3`).
 
@@ -293,13 +299,13 @@ Full policy: [Exit codes and failure policy](https://orenlab.github.io/codeclone
 
 ## Reports
 
-| Format | Flag | Default path |
-|--------|------|-|
-| HTML | `--html` | `.cache/codeclone/report.html` |
-| JSON | `--json` | `.cache/codeclone/report.json` |
-| Markdown | `--md` | `.cache/codeclone/report.md` |
-| SARIF | `--sarif` | `.cache/codeclone/report.sarif` |
-| Text | `--text` | `.cache/codeclone/report.txt` |
+| Format   | Flag      | Default path                    |
+|----------|-----------|---------------------------------|
+| HTML     | `--html`  | `.cache/codeclone/report.html`  |
+| JSON     | `--json`  | `.cache/codeclone/report.json`  |
+| Markdown | `--md`    | `.cache/codeclone/report.md`    |
+| SARIF    | `--sarif` | `.cache/codeclone/report.sarif` |
+| Text     | `--text`  | `.cache/codeclone/report.txt`   |
 
 All formats are rendered from one canonical JSON report.
 `--open-html-report` opens the HTML in the default browser.
@@ -318,29 +324,75 @@ Top-level keys: `report_schema_version`, `meta`, `inventory`, `findings`, `metri
 ```json
 {
   "report_schema_version": "2.11",
-  "meta": { "codeclone_version": "2.0.0", "project_name": "...", "scan_root": ".", "..." : "..." },
-  "inventory": { "files": {}, "code": {}, "file_registry": { "encoding": "relative_path", "items": [] } },
+  "meta": {
+    "codeclone_version": "2.0.0",
+    "project_name": "...",
+    "scan_root": ".",
+    "...": "..."
+  },
+  "inventory": {
+    "files": {},
+    "code": {},
+    "file_registry": {
+      "encoding": "relative_path",
+      "items": []
+    }
+  },
   "findings": {
     "summary": {},
     "groups": {
-      "clones":     { "functions": [], "blocks": [], "segments": [] },
-      "structural": { "groups": [] },
-      "dead_code":  { "groups": [] },
-      "design":     { "groups": [] }
+      "clones": {
+        "functions": [],
+        "blocks": [],
+        "segments": []
+      },
+      "structural": {
+        "groups": []
+      },
+      "dead_code": {
+        "groups": []
+      },
+      "design": {
+        "groups": []
+      }
     }
   },
   "metrics": {
-    "summary":  { "coverage_adoption": {}, "coverage_join": {}, "api_surface": {} },
-    "families": { "coverage_adoption": {}, "coverage_join": {}, "api_surface": {} }
+    "summary": {
+      "coverage_adoption": {},
+      "coverage_join": {},
+      "api_surface": {}
+    },
+    "families": {
+      "coverage_adoption": {},
+      "coverage_join": {},
+      "api_surface": {}
+    }
   },
   "derived": {
     "suggestions": [],
-    "overview":  { "families": {}, "top_risks": [], "health_snapshot": {}, "directory_hotspots": {} },
-    "hotlists":  { "most_actionable_ids": [], "highest_spread_ids": [], "production_hotspot_ids": [] }
+    "overview": {
+      "families": {},
+      "top_risks": [],
+      "health_snapshot": {},
+      "directory_hotspots": {}
+    },
+    "hotlists": {
+      "most_actionable_ids": [],
+      "highest_spread_ids": [],
+      "production_hotspot_ids": []
+    }
   },
   "integrity": {
-    "canonicalization": { "version": "1", "scope": "canonical_only" },
-    "digest": { "algorithm": "sha256", "verified": true, "value": "..." }
+    "canonicalization": {
+      "version": "1",
+      "scope": "canonical_only"
+    },
+    "digest": {
+      "algorithm": "sha256",
+      "verified": true,
+      "value": "..."
+    }
   }
 }
 ```
@@ -416,6 +468,7 @@ Versions released before this change remain under their original license terms.
 - **Licenses:** [MPL-2.0](https://github.com/orenlab/codeclone/blob/main/LICENSE) · [MIT docs](https://github.com/orenlab/codeclone/blob/main/LICENSE-MIT) · [Scope map](https://github.com/orenlab/codeclone/blob/main/LICENSES.md)
 
 <!-- Shields -->
+
 [pypi-shield]: https://img.shields.io/pypi/v/codeclone?style=flat-square&color=6366f1
 [status-shield]: https://img.shields.io/pypi/status/codeclone?style=flat-square&color=6366f1
 [downloads-shield]: https://img.shields.io/pypi/dm/codeclone?style=flat-square&color=6366f1

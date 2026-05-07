@@ -11,13 +11,13 @@
     <img
       alt="CodeClone"
       src="https://raw.githubusercontent.com/orenlab/codeclone/main/docs/assets/codeclone-wordmark.svg"
-      width="320"
+      width="280"
     >
   </picture>
 </p>
 
 <p align="center">
-  <strong>Structural code quality analysis for Python</strong>
+  <strong>A structural review layer for Python — baseline-aware, deterministic, built for CI and AI agents</strong>
 </p>
 
 <p align="center">
@@ -27,13 +27,13 @@
   <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone?style=flat-square&color=6366f1" alt="Python"></a>
 </p>
 
-CodeClone provides deterministic structural code quality analysis for Python.
-It detects architectural duplication, computes quality metrics, and enforces
-CI gates with baseline-aware governance: known technical debt stays accepted,
-new regressions stay visible.
+CodeClone adds a control layer between analysis and CI: it isolates structural
+regressions from historical debt, so merges are blocked only by what actually
+got worse.
 
 The same analysis pipeline powers CLI reports, CI checks, the MCP server, and
-native IDE/agent clients.
+native IDE/agent clients — so humans and AI agents operate on identical,
+deterministic facts.
 
 - Documentation: <https://orenlab.github.io/codeclone/>
 - Live sample report: <https://orenlab.github.io/codeclone/examples/report/>
@@ -42,19 +42,24 @@ native IDE/agent clients.
 
 ## Features
 
-- Clone detection: function, block, and report-only segment clones.
-- Structural findings: duplicated branch families, clone guard/exit divergence,
-  and clone-cohort drift.
-- Quality metrics: complexity, coupling, cohesion, dependency cycles, adaptive
-  dependency depth, dead code, health score, and overloaded-module profiling.
-- Coverage Join: combines Cobertura XML with CodeClone units to surface
-  coverage hotspots and scope gaps.
-- Security Surfaces: report-only inventory of security-relevant boundaries and
-  sensitive capabilities. It does not claim vulnerabilities.
-- Baseline governance: separates accepted legacy debt from new regressions.
-- Reports: HTML, JSON, Markdown, SARIF, and text from one report payload.
-- MCP control surface: read-only agent/IDE interface over the same pipeline.
-- Native clients: VS Code extension, Claude Desktop bundle, and Codex plugin.
+**Control & governance**
+- **Baseline governance** — separates accepted **legacy** debt from **new regressions**; CI fails only on what changed
+- **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
+- **Reports** — interactive HTML, JSON, Markdown, SARIF, and text from one canonical report
+
+**Detection & analysis**
+- **Clone detection** — function (CFG fingerprint), block (statement windows), and segment (report-only) clones
+- **Structural findings** — duplicated branch families, clone guard/exit divergence, and clone-cohort drift
+- **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, adaptive depth profile, dead code, health score, and overloaded-module profiling
+- **Adoption & API** — type/docstring annotation coverage, public API surface inventory and baseline diff
+- **Coverage Join** — fuse external Cobertura XML into the current run to surface coverage hotspots and scope gaps
+
+**Surfaces & integrations**
+- **MCP control surface** — triage-first agent and IDE interface over the same canonical pipeline; read-only by contract
+- **IDE & agent clients** — VS Code extension, Claude Desktop bundle, and Codex plugin over the same MCP contract
+
+**Performance**
+- **Fast** — incremental caching, parallel processing, warm-run optimization
 
 ## Quick Start
 
@@ -62,7 +67,7 @@ native IDE/agent clients.
 uv tool install codeclone
 
 codeclone .                    # analyze
-codeclone . --html             # write HTML report
+codeclone . --html             # HTML report
 codeclone . --html --open-html-report
 codeclone . --json --md --sarif --text
 codeclone . --ci               # CI mode
@@ -84,14 +89,19 @@ codeclone . --update-baseline
 codeclone . --ci
 ```
 
-`--ci` enables baseline-aware gating and exits with deterministic status codes:
+`--ci` equals `--fail-on-new --no-color --quiet`. When a trusted metrics
+baseline is loaded, CI mode also enables `--fail-on-new-metrics`.
 
-| Code | Meaning |
-|------|---------|
-| `0`  | Success |
-| `2`  | Contract error, such as an untrusted baseline or invalid config |
-| `3`  | Gating failure, such as new clones or failed metric thresholds |
-| `5`  | Internal error |
+Exit codes:
+
+| Code | Meaning                                                                       |
+|------|-------------------------------------------------------------------------------|
+| `0`  | Success                                                                       |
+| `2`  | Contract error — untrusted baseline, invalid config, unreadable sources in CI |
+| `3`  | Gating failure — new clones or metric threshold exceeded                      |
+| `5`  | Internal error                                                                |
+
+Contract errors (`2`) take precedence over gating failures (`3`).
 
 ## Reports
 
@@ -103,16 +113,11 @@ codeclone . --sarif
 codeclone . --text
 ```
 
-All report formats are rendered from the same deterministic report payload.
-The HTML report is intended for human review; JSON, SARIF, Markdown, and text
-are intended for automation and CI surfaces.
+All formats are rendered from one canonical report payload.
 
-Report contract:
-<https://orenlab.github.io/codeclone/book/08-report/>
+Report contract: <https://orenlab.github.io/codeclone/book/08-report/>
 
 ## MCP and Native Clients
-
-Install the optional MCP runtime when you want CodeClone in AI agents or IDEs:
 
 ```bash
 uv tool install "codeclone[mcp]"
@@ -120,23 +125,18 @@ uv tool install "codeclone[mcp]"
 codeclone-mcp --transport stdio
 ```
 
-The MCP server is read-only by contract. It does not mutate source files,
+The MCP server is read-only by contract: it never mutates source files,
 baselines, cache, or repository state.
 
-Client surfaces:
-
-| Surface | Link |
-|---------|------|
-| VS Code extension | <https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone> |
+| Surface               | Link                                                                                 |
+|-----------------------|--------------------------------------------------------------------------------------|
+| VS Code extension     | <https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone>              |
 | Claude Desktop bundle | <https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone> |
-| Codex plugin | <https://github.com/orenlab/codeclone/tree/main/plugins/codeclone> |
+| Codex plugin          | <https://github.com/orenlab/codeclone/tree/main/plugins/codeclone>                   |
 
-MCP docs:
-<https://orenlab.github.io/codeclone/book/20-mcp-interface/>
+MCP docs: <https://orenlab.github.io/codeclone/book/20-mcp-interface/>
 
 ## Configuration
-
-CodeClone reads project configuration from `pyproject.toml`:
 
 ```toml
 [tool.codeclone]
@@ -151,19 +151,13 @@ fail_dead_code = true
 fail_health = 80
 ```
 
-Precedence is deterministic:
+Precedence: CLI flags > `pyproject.toml` > built-in defaults.
 
-```text
-CLI flags > pyproject.toml > built-in defaults
-```
-
-Config reference:
-<https://orenlab.github.io/codeclone/book/04-config-and-defaults/>
+Config reference: <https://orenlab.github.io/codeclone/book/04-config-and-defaults/>
 
 ## License
 
 - Code: MPL-2.0 (`LICENSE`)
 - Documentation and docs-site content: MIT (`LICENSE-MIT`)
 
-License scope map:
-<https://github.com/orenlab/codeclone/blob/main/LICENSES.md>
+License scope map: <https://github.com/orenlab/codeclone/blob/main/LICENSES.md>
