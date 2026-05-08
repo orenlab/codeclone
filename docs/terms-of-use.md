@@ -67,28 +67,6 @@ Hosted, unattended, multi-tenant, or internet-exposed deployments may require
 additional operational controls, sandboxing, authentication, and access
 restrictions outside the scope of the default local integrations.
 
-## Commercial hosted usage
-
-The default open-source distribution of CodeClone is intended for local,
-team, and self-managed use.
-
-Providing CodeClone as a hosted service, managed analysis platform,
-multi-tenant SaaS/PaaS offering, or externally operated commercial review
-service may require separate commercial licensing or written authorization,
-depending on the deployment model and redistribution scope.
-
-This includes, but is not limited to:
-
-- hosted structural analysis platforms
-- commercial CI review services built on top of CodeClone
-- externally managed multi-tenant deployments
-- paid analysis or governance services exposing CodeClone functionality
-  to third parties
-
-For commercial licensing or deployment questions, contact:
-
-- <mailto:sudo@secuapp.ru>
-
 ## Compatibility and evolution
 
 The `2.x` release line evolves under documented compatibility contracts.
