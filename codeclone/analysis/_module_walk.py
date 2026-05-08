@@ -118,6 +118,8 @@ def _dotted_expr_name(expr: ast.expr) -> str | None:
         if prefix is None:
             return None
         return f"{prefix}.{expr.attr}"
+    if isinstance(expr, ast.Subscript):
+        return _dotted_expr_name(expr.value)
     return None
 
 
@@ -425,6 +427,8 @@ def _collect_dead_candidates(
             candidates.append(candidate)
 
     for class_qualname, class_node in collector.class_nodes:
+        if class_qualname in protocol_class_qualnames:
+            continue
         span = _node_line_span(class_node)
         if span is not None:
             start, end = span

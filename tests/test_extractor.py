@@ -905,7 +905,7 @@ class B(te.Protocol[int]):
         protocol_symbol_aliases=protocol_symbol_aliases,
         protocol_module_aliases=protocol_module_aliases,
     )
-    assert not module_walk_mod._is_protocol_class(
+    assert module_walk_mod._is_protocol_class(
         class_b,
         protocol_symbol_aliases=protocol_symbol_aliases,
         protocol_module_aliases=protocol_module_aliases,
@@ -1794,10 +1794,15 @@ def wrapper():
 def test_collect_dead_candidates_skips_protocol_and_stub_like_symbols() -> None:
     src = """
 from abc import abstractmethod
-from typing import Protocol, overload
+from typing import Protocol, TypeVar, overload
+
+T = TypeVar("T")
 
 class _Reader(Protocol):
     def read(self) -> str: ...
+
+class _Box(Protocol[T]):
+    def get(self) -> T: ...
 
 class _Base:
     @abstractmethod
@@ -1819,7 +1824,10 @@ def parse_value(value: object) -> str:
         protocol_module_aliases=walk.protocol_module_aliases,
     )
     qualnames = {item.qualname for item in dead}
+    assert "pkg.mod:_Reader" not in qualnames
     assert "pkg.mod:_Reader.read" not in qualnames
+    assert "pkg.mod:_Box" not in qualnames
+    assert "pkg.mod:_Box.get" not in qualnames
     assert "pkg.mod:_Base.parse" not in qualnames
     assert "pkg.mod:parse_value" in qualnames
 

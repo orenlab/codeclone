@@ -48,7 +48,7 @@ Refs:
 - Suppression is declaration-scoped (`def`, `async def`, `class`) and does not
   implicitly propagate to unrelated declaration targets.
 - Candidate extraction excludes non-runtime declaration surfaces:
-  methods on `Protocol` classes, and callables decorated with
+  `Protocol` classes, methods on `Protocol` classes, and callables decorated with
   `@overload` / `@abstractmethod`.
 - A symbol referenced by exact canonical qualname is not dead.
 - A symbol referenced by local name is not dead.
