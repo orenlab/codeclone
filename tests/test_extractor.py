@@ -1832,6 +1832,26 @@ def parse_value(value: object) -> str:
     assert "pkg.mod:parse_value" in qualnames
 
 
+def test_dead_code_keeps_explicitly_inherited_abc_base_live() -> None:
+    source = """
+from abc import ABC, abstractmethod
+
+class _Base(ABC):
+    @abstractmethod
+    def parse(self) -> str:
+        raise NotImplementedError
+
+class _Impl(_Base):
+    def parse(self) -> str:
+        return "ok"
+"""
+    qualnames = set(_dead_qualnames_from_source(source))
+    assert "pkg.mod:_Base" not in qualnames
+    assert "pkg.mod:_Base.parse" not in qualnames
+    assert "pkg.mod:_Impl" in qualnames
+    assert "pkg.mod:_Impl.parse" in qualnames
+
+
 def test_extract_syntax_error() -> None:
     with pytest.raises(ParseError):
         extract_units_from_source(
