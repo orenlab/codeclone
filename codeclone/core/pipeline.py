@@ -59,6 +59,7 @@ from ._types import (
     _should_collect_structural_findings,
 )
 from .bootstrap import _resolve_optional_runtime_path
+from .entrypoints import collect_project_entrypoint_qualnames
 from .metrics_payload import build_metrics_report_payload
 
 
@@ -273,13 +274,22 @@ def analyze(
         *cohort_structural_findings,
     )
     if not boot.args.skip_metrics:
+        referenced_qualnames = frozenset(
+            {
+                *processing.referenced_qualnames,
+                *collect_project_entrypoint_qualnames(
+                    root=boot.root,
+                    dead_candidates=processing.dead_candidates,
+                ),
+            }
+        )
         project_metrics, dep_graph, _ = compute_project_metrics(
             units=processing.units,
             class_metrics=processing.class_metrics,
             module_deps=processing.module_deps,
             dead_candidates=processing.dead_candidates,
             referenced_names=processing.referenced_names,
-            referenced_qualnames=processing.referenced_qualnames,
+            referenced_qualnames=referenced_qualnames,
             runtime_reachability=processing.runtime_reachability,
             security_surfaces=processing.security_surfaces,
             typing_modules=processing.typing_modules,
@@ -296,7 +306,7 @@ def analyze(
             suppressed_dead_items = find_suppressed_unused(
                 definitions=tuple(processing.dead_candidates),
                 referenced_names=processing.referenced_names,
-                referenced_qualnames=processing.referenced_qualnames,
+                referenced_qualnames=referenced_qualnames,
                 runtime_reachability=processing.runtime_reachability,
             )
         suggestions = compute_suggestions(

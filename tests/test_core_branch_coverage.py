@@ -9,12 +9,14 @@ from __future__ import annotations
 from argparse import Namespace
 from hashlib import sha256
 from pathlib import Path
-from typing import cast
+from types import SimpleNamespace
+from typing import Literal, cast
 
 import orjson
 import pytest
 
 import codeclone.core.discovery as core_discovery
+import codeclone.core.entrypoints as entrypoints_mod
 import codeclone.core.pipeline as core_pipeline
 import codeclone.surfaces.cli.console as cli_console
 import codeclone.surfaces.cli.workflow as cli
@@ -55,6 +57,7 @@ from codeclone.core.discovery_cache import (
     _cache_entry_source_stats,
     decode_cached_structural_finding_group,
 )
+from codeclone.core.entrypoints import collect_project_entrypoint_qualnames
 from codeclone.core.pipeline import analyze
 from codeclone.findings.clones.grouping import build_segment_groups
 from codeclone.models import (
@@ -67,6 +70,22 @@ from codeclone.models import (
 )
 from codeclone.report.gates.reasons import policy_context
 from tests._assertions import assert_contains_all
+
+
+def _dead_candidate(
+    qualname: str,
+    *,
+    kind: str = "function",
+) -> DeadCandidate:
+    module_path, _, local_name = qualname.partition(":")
+    return DeadCandidate(
+        qualname=qualname,
+        local_name=local_name.rsplit(".", 1)[-1],
+        filepath=f"{module_path.replace('.', '/')}.py",
+        start_line=1,
+        end_line=2,
+        kind=cast(Literal["class", "function", "method"], kind),
+    )
 
 
 def test_cache_risk_and_shape_helpers() -> None:
@@ -748,6 +767,258 @@ def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
         "high_confidence": 0,
         "suppressed": 1,
     }
+
+
+def test_project_entrypoints_mark_exact_and_unique_layout_symbols_live(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project.scripts]
+exact = "pkg.cli:main"
+src-layout = "pkg.worker:run"
+ambiguous = "pkg.dup:main"
+invalid = "pkg.dynamic"
+
+[project.gui-scripts]
+gui = "pkg.gui:start [gui]"
+
+[project.entry-points."codeclone.plugins"]
+plugin = "pkg.plugins:Plugin"
+
+[tool.poetry.scripts]
+poetry-cli = "pkg.poetry:main"
+""".strip(),
+        "utf-8",
+    )
+    candidates = (
+        _dead_candidate("pkg.cli:main"),
+        _dead_candidate("src.pkg.worker:run"),
+        _dead_candidate("pkg.gui:start"),
+        _dead_candidate("pkg.plugins:Plugin", kind="class"),
+        _dead_candidate("pkg.poetry:main"),
+        _dead_candidate("src.pkg.dup:main"),
+        _dead_candidate("vendor.pkg.dup:main"),
+    )
+
+    assert collect_project_entrypoint_qualnames(
+        root=tmp_path,
+        dead_candidates=candidates,
+    ) == frozenset(
+        {
+            "pkg.cli:main",
+            "src.pkg.worker:run",
+            "pkg.gui:start",
+            "pkg.plugins:Plugin",
+            "pkg.poetry:main",
+        }
+    )
+
+
+def test_project_entrypoints_ignore_invalid_metadata_shapes(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project.scripts]
+not-string = 42
+bad-module = "pkg-dash.cli:main"
+bad-local = "pkg.cli:bad-name"
+valid = "pkg.valid:run"
+
+[project.entry-points]
+broken-group = "not a table"
+
+[project.entry-points."codeclone.plugins"]
+plugin = "pkg.plugins:Plugin"
+invalid-plugin = "pkg.plugins"
+
+[tool.poetry.scripts]
+not-string = 1
+poetry-cli = "pkg.poetry:main"
+""".strip(),
+        "utf-8",
+    )
+    candidates = (
+        _dead_candidate("pkg.valid:run"),
+        _dead_candidate("pkg.plugins:Plugin", kind="class"),
+        _dead_candidate("pkg.poetry:main"),
+    )
+
+    assert collect_project_entrypoint_qualnames(
+        root=tmp_path,
+        dead_candidates=candidates,
+    ) == frozenset(
+        {
+            "pkg.valid:run",
+            "pkg.plugins:Plugin",
+            "pkg.poetry:main",
+        }
+    )
+
+
+def test_project_entrypoint_loader_handles_invalid_toml_and_legacy_tomli(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing_path = tmp_path / "missing.toml"
+    assert entrypoints_mod._load_toml_payload(missing_path) == {}
+
+    invalid_path = tmp_path / "pyproject.toml"
+    invalid_path.write_text("[project", "utf-8")
+    assert entrypoints_mod._load_toml_payload(invalid_path) == {}
+
+    original_resolve = Path.resolve
+    escaped_path = tmp_path.parent / "escaped.toml"
+
+    def _resolve_outside_repo(self: Path) -> Path:
+        if self == invalid_path:
+            return escaped_path
+        return original_resolve(self)
+
+    invalid_path.write_text(
+        """
+[project.scripts]
+tool = "pkg.cli:main"
+""".strip(),
+        "utf-8",
+    )
+    with monkeypatch.context() as path_patch:
+        path_patch.setattr(Path, "resolve", _resolve_outside_repo)
+        assert entrypoints_mod._load_toml_payload(invalid_path) == {}
+
+    invalid_path.write_text("", "utf-8")
+    monkeypatch.setattr(
+        entrypoints_mod,
+        "sys",
+        SimpleNamespace(version_info=(3, 10)),
+    )
+
+    def _missing_tomli(_name: str) -> object:
+        raise ModuleNotFoundError("tomli")
+
+    monkeypatch.setattr(
+        entrypoints_mod,
+        "importlib",
+        SimpleNamespace(import_module=_missing_tomli),
+    )
+    assert entrypoints_mod._load_toml_payload(invalid_path) == {}
+
+    class _NoLoad:
+        load = None
+
+    monkeypatch.setattr(
+        entrypoints_mod,
+        "importlib",
+        SimpleNamespace(import_module=lambda _name: _NoLoad),
+    )
+    assert entrypoints_mod._load_toml_payload(invalid_path) == {}
+
+    class _BadLoad:
+        @staticmethod
+        def load(_file: object) -> object:
+            raise ValueError("bad toml")
+
+    monkeypatch.setattr(
+        entrypoints_mod,
+        "importlib",
+        SimpleNamespace(import_module=lambda _name: _BadLoad),
+    )
+    assert entrypoints_mod._load_toml_payload(invalid_path) == {}
+
+    class _GoodLoad:
+        @staticmethod
+        def load(_file: object) -> object:
+            return {"project": {"scripts": {"tool": "pkg.cli:main"}}}
+
+    monkeypatch.setattr(
+        entrypoints_mod,
+        "importlib",
+        SimpleNamespace(import_module=lambda _name: _GoodLoad),
+    )
+    assert entrypoints_mod._load_toml_payload(invalid_path) == {
+        "project": {"scripts": {"tool": "pkg.cli:main"}}
+    }
+
+
+def test_pipeline_analyze_uses_project_entrypoints_for_dead_code(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[project.scripts]
+tool = "pkg.cli:main"
+""".strip(),
+        "utf-8",
+    )
+    boot = BootstrapResult(
+        root=tmp_path,
+        config=NormalizationConfig(),
+        args=Namespace(
+            skip_metrics=False,
+            skip_dependencies=True,
+            skip_dead_code=False,
+            min_loc=1,
+            min_stmt=1,
+            processes=1,
+        ),
+        output_paths=OutputPaths(),
+        cache_path=tmp_path / "cache.json",
+    )
+    discovery = DiscoveryResult(
+        files_found=1,
+        cache_hits=0,
+        files_skipped=0,
+        all_file_paths=("pkg/cli.py",),
+        cached_units=(),
+        cached_blocks=(),
+        cached_segments=(),
+        cached_class_metrics=(),
+        cached_module_deps=(),
+        cached_dead_candidates=(),
+        cached_referenced_names=frozenset(),
+        files_to_process=(),
+        skipped_warnings=(),
+    )
+    processing = ProcessingResult(
+        units=(),
+        blocks=(),
+        segments=(),
+        class_metrics=(),
+        module_deps=(),
+        dead_candidates=(
+            DeadCandidate(
+                qualname="pkg.cli:main",
+                local_name="main",
+                filepath="pkg/cli.py",
+                start_line=1,
+                end_line=2,
+                kind="function",
+            ),
+            DeadCandidate(
+                qualname="pkg.cli:unused",
+                local_name="unused",
+                filepath="pkg/cli.py",
+                start_line=4,
+                end_line=5,
+                kind="function",
+            ),
+        ),
+        referenced_names=frozenset(),
+        files_analyzed=1,
+        files_skipped=0,
+        analyzed_lines=5,
+        analyzed_functions=2,
+        analyzed_methods=0,
+        analyzed_classes=0,
+        failed_files=(),
+        source_read_failures=(),
+    )
+
+    result = analyze(boot=boot, discovery=discovery, processing=processing)
+
+    assert result.project_metrics is not None
+    assert [item.qualname for item in result.project_metrics.dead_code] == [
+        "pkg.cli:unused"
+    ]
 
 
 def test_pipeline_decode_cached_structural_group() -> None:

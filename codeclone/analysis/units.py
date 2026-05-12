@@ -134,6 +134,8 @@ def extract_units_and_stats_from_source(
     referenced_qualnames = _walk.referenced_qualnames
     protocol_symbol_aliases = _walk.protocol_symbol_aliases
     protocol_module_aliases = _walk.protocol_module_aliases
+    non_runtime_decorator_aliases = _walk.non_runtime_decorator_aliases
+    pydantic_module_aliases = _walk.pydantic_module_aliases
 
     suppression_index = _build_suppression_index_for_source(
         source=source,
@@ -260,6 +262,8 @@ def extract_units_and_stats_from_source(
         collector=collector,
         protocol_symbol_aliases=protocol_symbol_aliases,
         protocol_module_aliases=protocol_module_aliases,
+        non_runtime_decorator_aliases=non_runtime_decorator_aliases,
+        pydantic_module_aliases=pydantic_module_aliases,
         suppression_rules_by_target=suppression_index,
     )
 

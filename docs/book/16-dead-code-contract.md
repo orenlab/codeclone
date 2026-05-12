@@ -13,6 +13,8 @@ Define dead-code liveness rules, canonical symbol-usage boundaries, and gating s
   `codeclone/analysis/units.py:extract_units_and_stats_from_source`
 - Cache load boundary for referenced names:
   `codeclone/core/discovery_cache.py:load_cached_metrics_extended`
+- Package entry-point liveness:
+  `codeclone/core/entrypoints.py:collect_project_entrypoint_qualnames`
 
 ## Data model
 
@@ -50,14 +52,27 @@ Refs:
 - Candidate extraction excludes non-runtime declaration surfaces:
   `Protocol` classes, methods on `Protocol` classes, and callables decorated with
   `@overload` / `@abstractmethod`.
+- Candidate extraction also excludes exact Pydantic runtime hooks when their
+  decorators are resolved from `pydantic` / `pydantic.v1` imports or module
+  aliases: validators, model/field validators, serializers, and computed fields.
 - A symbol referenced by exact canonical qualname is not dead.
 - A symbol referenced by local name is not dead.
+- A top-level symbol listed in a literal `__all__` export is not dead. This is
+  resolved to exact module-level function/class qualnames and does not mark
+  same-named methods live.
+- A symbol referenced by package metadata entry points is not dead when
+  `[project.scripts]`, `[project.gui-scripts]`, `[project.entry-points.*]`, or
+  `[tool.poetry.scripts]` resolves to an exact known candidate qualname. Unique
+  suffix matches are allowed only for common `src.<package>` style layouts;
+  ambiguous matches are ignored.
 - A symbol referenced only by qualified-name suffix (without canonical module
   match) downgrades confidence to `medium`.
 - Runtime framework registration facts can mark a symbol live when the extractor
   observes a deterministic edge from modern Python runtime surfaces:
-  FastAPI/Starlette route and dependency registration, Django URL patterns,
-  Dependency Injector providers, Typer/Click commands, and Celery tasks.
+  FastAPI/Starlette route and dependency registration, including
+  `Annotated[..., Depends(...)]` and `Annotated[..., Security(...)]` route
+  parameters, Django URL patterns, Dependency Injector providers, Typer/Click
+  commands, and Celery tasks.
 - Runtime reachability facts are evidence, not a full call graph. High- and
   medium-confidence facts prevent false dead-code findings; low-confidence
   facts, if introduced later, must remain report-only until explicitly wired.
@@ -84,6 +99,8 @@ Refs:
 - Runtime reachability facts are collected during AST extraction, cached with
   the file metrics payload, and reused on warm runs so dead-code behavior is
   identical for cold and cached analysis.
+- Package entry-point liveness is a project-level pass over `pyproject.toml` and
+  is not stored in per-file cache entries.
 
 Refs:
 
@@ -93,23 +110,29 @@ Refs:
 
 ## Failure modes
 
-| Condition                                          | Behavior                               |
-|----------------------------------------------------|----------------------------------------|
-| Dynamic method pattern (dunder/visitor/setup hook) | Candidate skipped as non-actionable    |
-| Module PEP 562 hook (`__getattr__`/`__dir__`)      | Candidate skipped as non-actionable    |
-| Malformed/unknown `# codeclone: ignore[...]` rule  | Ignored safely                         |
-| Protocol or stub-like declaration surface          | Candidate skipped as non-actionable    |
-| Definition appears only in tests                   | Candidate skipped                      |
-| Symbol used only from tests                        | Remains actionable dead-code candidate |
-| Symbol used through import alias / module alias    | Matched via canonical qualname usage   |
-| Symbol registered through a supported runtime edge | Candidate skipped as runtime-reachable |
-| `--fail-dead-code` with high-confidence dead items | Gating failure, exit `3`               |
+| Condition                                          | Behavior                                  |
+|----------------------------------------------------|-------------------------------------------|
+| Dynamic method pattern (dunder/visitor/setup hook) | Candidate skipped as non-actionable       |
+| Module PEP 562 hook (`__getattr__`/`__dir__`)      | Candidate skipped as non-actionable       |
+| Malformed/unknown `# codeclone: ignore[...]` rule  | Ignored safely                            |
+| Protocol or stub-like declaration surface          | Candidate skipped as non-actionable       |
+| Definition appears only in tests                   | Candidate skipped                         |
+| Symbol used only from tests                        | Remains actionable dead-code candidate    |
+| Symbol used through import alias / module alias    | Matched via canonical qualname usage      |
+| Symbol exported through literal `__all__`          | Matched via exact module-level qualname   |
+| Symbol exposed through package entry point         | Matched via exact/unique project qualname |
+| Symbol registered through a supported runtime edge | Candidate skipped as runtime-reachable    |
+| `--fail-dead-code` with high-confidence dead items | Gating failure, exit `3`                  |
 
 ## Determinism / canonicalization
 
 - Filtering rules are deterministic string/path predicates.
 - Runtime reachability is based on exact AST evidence for known framework
   contracts; it does not execute imports or inspect installed packages.
+- Framework-specific non-runtime hooks are import/alias-resolved; CodeClone does
+  not suppress arbitrary same-named local decorators.
+- Package entry-point liveness reads only local project metadata and ignores
+  invalid, dynamic, or ambiguous entry-point references.
 - Candidate and result ordering is deterministic.
 
 Refs:
@@ -125,11 +148,16 @@ Refs:
 - `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[inline_suppression_per_declaration]`
 - `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[suppression_binding_scoped_to_target]`
 - `tests/test_extractor.py::test_dead_code_uses_fastapi_route_and_dependency_reachability`
+- `tests/test_extractor.py::test_dead_code_uses_fastapi_annotated_dependency_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_django_urlpattern_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_dependency_injector_provider_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_cli_and_task_registration_reachability`
 - `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_import_aliases`
+- `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_module_all_exports`
 - `tests/test_extractor.py::test_collect_dead_candidates_skips_protocol_and_stub_like_symbols`
+- `tests/test_extractor.py::test_collect_dead_candidates_skips_pydantic_hooks_and_dataclass_post_init`
+- `tests/test_core_branch_coverage.py::test_project_entrypoints_mark_exact_and_unique_layout_symbols_live`
+- `tests/test_core_branch_coverage.py::test_pipeline_analyze_uses_project_entrypoints_for_dead_code`
 - `tests/test_pipeline_metrics.py::test_load_cached_metrics_ignores_referenced_names_from_test_files`
 - `tests/test_metrics_modules.py::test_find_unused_filters_non_actionable_and_preserves_ordering`
 - `tests/test_metrics_modules.py::test_find_unused_respects_referenced_qualnames`

@@ -923,6 +923,26 @@ def f(x):
     assert isinstance(runtime_candidate, ast.FunctionDef)
     assert module_walk_mod._is_non_runtime_candidate(runtime_candidate)
 
+    dynamic_decorator_candidate = ast.parse(
+        """
+@(lambda fn: fn)
+def dynamic():
+    return None
+""".strip()
+    ).body[0]
+    assert isinstance(dynamic_decorator_candidate, ast.FunctionDef)
+    assert not module_walk_mod._is_non_runtime_candidate(dynamic_decorator_candidate)
+
+    dotted_overload_candidate = ast.parse(
+        """
+@typing.overload
+def typed(value):
+    return value
+""".strip()
+    ).body[0]
+    assert isinstance(dotted_overload_candidate, ast.FunctionDef)
+    assert module_walk_mod._is_non_runtime_candidate(dotted_overload_candidate)
+
 
 def test_resolve_referenced_qualnames_covers_module_class_and_attr_branches() -> None:
     src = """
@@ -1310,6 +1330,43 @@ def orphan():
     )
 
 
+def test_dead_code_uses_fastapi_annotated_dependency_reachability() -> None:
+    source = """
+from typing import Annotated
+from fastapi import APIRouter, Depends, Security
+
+router = APIRouter()
+
+def require_user():
+    return "user"
+
+def require_token():
+    return "token"
+
+def require_extra():
+    return "extra"
+
+def require_kwargs():
+    return "kwargs"
+
+@router.get("/items")
+def list_items(
+    current_user: Annotated[str, Depends(require_user)],
+    *extra: Annotated[str, Depends(require_extra)],
+    token: Annotated[str, Security(dependency=require_token)],
+    optional: list[str] | None = None,
+    broken: Annotated[str] | None = None,
+    **kwargs: Annotated[str, Depends(require_kwargs)],
+):
+    return [current_user, token, extra, optional, broken, kwargs]
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == ("pkg.mod:orphan",)
+
+
 def test_runtime_reachability_helper_symbol_edges() -> None:
     tree = ast.parse(
         """
@@ -1376,6 +1433,7 @@ class Container(containers.DeclarativeContainer):
 
 def test_runtime_reachability_covers_fastapi_aliases_and_dependency_edges() -> None:
     source = """
+from typing_extensions import Annotated as Ann
 from fastapi import APIRouter as Router, Depends as Inject, FastAPI
 
 router = Router()
@@ -1390,8 +1448,15 @@ def require_user():
 def require_token():
     return "token"
 
+def require_session():
+    return "session"
+
 @router.post("/items", dependencies=Inject(require_user))
 async def create_item(token=Inject(dependency=require_token)):
+    return token
+
+@router.get("/annotated")
+def annotated_dependency(token: Ann[str, Inject(require_session)]):
     return token
 
 @also_router.websocket("/ws")
@@ -1410,6 +1475,12 @@ def websocket_endpoint():
     )
     assert by_target[
         ("pkg.mod:require_token", "declares_dependency")
+    ].evidence_symbol == ("fastapi.Depends")
+    assert by_target[
+        ("pkg.mod:annotated_dependency", "registers_handler")
+    ].confidence == ("high")
+    assert by_target[
+        ("pkg.mod:require_session", "declares_dependency")
     ].evidence_symbol == ("fastapi.Depends")
     assert by_target[
         ("pkg.mod:websocket_endpoint", "registers_handler")
@@ -1791,6 +1862,73 @@ def wrapper():
     assert "pkg.helpers:decorate" in file_metrics.referenced_qualnames
 
 
+def test_extract_collects_referenced_qualnames_for_module_all_exports() -> None:
+    source = """
+__all__ = ["PublicClass"] + ("public_func",)
+__all__: list[str] = ["TypedPublic"]
+__all__ += ["AugmentedPublic"]
+__all__.append("AlsoPublic")
+__all__.extend(["exported_later"])
+__all__.append(object())
+__all__.extend([["NestedInvalid"]])
+
+class PublicClass:
+    pass
+
+class TypedPublic:
+    pass
+
+class AugmentedPublic:
+    pass
+
+class AlsoPublic:
+    pass
+
+class Internal:
+    def public_func(self):
+        return 1
+
+def public_func():
+    return 2
+
+def exported_later():
+    return 3
+
+def internal_func():
+    __all__ = ["NestedOnly"]
+    return 4
+
+def NestedOnly():
+    return 5
+
+def NestedInvalid():
+    return 6
+"""
+    dead = set(_dead_qualnames_from_source(source))
+
+    exported = {
+        "pkg.mod:PublicClass",
+        "pkg.mod:TypedPublic",
+        "pkg.mod:AugmentedPublic",
+        "pkg.mod:AlsoPublic",
+        "pkg.mod:public_func",
+        "pkg.mod:exported_later",
+    }
+    still_dead = {
+        "pkg.mod:Internal",
+        "pkg.mod:Internal.public_func",
+        "pkg.mod:internal_func",
+        "pkg.mod:NestedOnly",
+        "pkg.mod:NestedInvalid",
+    }
+    assert dead.isdisjoint(exported)
+    assert still_dead <= dead
+
+    state = module_walk_mod._ModuleWalkState()
+    module_walk_mod._collect_module_all_exports(ast.Pass(), state)
+    assert state.exported_names == set()
+
+
 def test_collect_dead_candidates_skips_protocol_and_stub_like_symbols() -> None:
     src = """
 from abc import abstractmethod
@@ -1809,6 +1947,10 @@ class _Base:
     def parse(self) -> str:
         raise NotImplementedError
 
+class _DynamicBase(factory()):
+    def hook(self) -> str:
+        return "runtime"
+
 @overload
 def parse_value(value: int) -> str: ...
 
@@ -1824,12 +1966,81 @@ def parse_value(value: object) -> str:
         protocol_module_aliases=walk.protocol_module_aliases,
     )
     qualnames = {item.qualname for item in dead}
-    assert "pkg.mod:_Reader" not in qualnames
-    assert "pkg.mod:_Reader.read" not in qualnames
-    assert "pkg.mod:_Box" not in qualnames
-    assert "pkg.mod:_Box.get" not in qualnames
-    assert "pkg.mod:_Base.parse" not in qualnames
+    type_only = {
+        "pkg.mod:_Reader",
+        "pkg.mod:_Reader.read",
+        "pkg.mod:_Box",
+        "pkg.mod:_Box.get",
+        "pkg.mod:_Base.parse",
+    }
+    assert qualnames.isdisjoint(type_only)
     assert "pkg.mod:parse_value" in qualnames
+
+
+def test_collect_dead_candidates_skips_pydantic_hooks_and_dataclass_post_init() -> None:
+    source = """
+from dataclasses import dataclass
+from pydantic import BaseModel, computed_field, field_validator as validate_field
+from pydantic.v1 import validator as legacy_validator
+import pydantic as pyd
+
+class User(BaseModel):
+    @validate_field("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return value
+
+    @pyd.model_validator(mode="after")
+    def validate_model(self):
+        return self
+
+    @computed_field
+    @property
+    def display_name(self) -> str:
+        return "user"
+
+    @legacy_validator("legacy")
+    def validate_legacy(cls, value: str) -> str:
+        return value
+
+class Plain:
+    def validate_name(self) -> str:
+        return "unused"
+
+@dataclass
+class Config:
+    name: str
+
+    def __post_init__(self) -> None:
+        self.name = self.name.strip()
+
+    def helper(self) -> None:
+        return None
+"""
+    _tree, collector, walk = _collect_module_walk(source)
+    candidates = module_walk_mod._collect_dead_candidates(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        collector=collector,
+        protocol_symbol_aliases=walk.protocol_symbol_aliases,
+        protocol_module_aliases=walk.protocol_module_aliases,
+        non_runtime_decorator_aliases=walk.non_runtime_decorator_aliases,
+        pydantic_module_aliases=walk.pydantic_module_aliases,
+    )
+    candidate_qualnames = {item.qualname for item in candidates}
+
+    pydantic_hooks = {
+        "pkg.mod:User.validate_name",
+        "pkg.mod:User.validate_model",
+        "pkg.mod:User.display_name",
+        "pkg.mod:User.validate_legacy",
+    }
+    assert candidate_qualnames.isdisjoint(pydantic_hooks)
+    assert "pkg.mod:Plain.validate_name" in candidate_qualnames
+    assert "pkg.mod:Config.helper" in set(_dead_qualnames_from_source(source))
+    assert "pkg.mod:Config.__post_init__" not in set(
+        _dead_qualnames_from_source(source)
+    )
 
 
 def test_dead_code_keeps_explicitly_inherited_abc_base_live() -> None:

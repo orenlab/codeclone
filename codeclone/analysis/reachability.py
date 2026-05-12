@@ -41,6 +41,10 @@ _FASTAPI_DEPENDENCY_SYMBOLS = {
     "fastapi.params.Depends",
     "fastapi.params.Security",
 }
+_ANNOTATED_SYMBOLS = {
+    "typing.Annotated",
+    "typing_extensions.Annotated",
+}
 _DJANGO_URL_SYMBOLS = {
     "django.urls.path",
     "django.urls.re_path",
@@ -499,6 +503,7 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
                 [default for default in node.args.kw_defaults if default is not None]
             )
         )
+        dependency_nodes.extend(self._dependency_calls_from_annotations(node.args))
         for call in dependency_nodes:
             target = self._target_from_dependency_call(call)
             if target is None:
@@ -531,6 +536,40 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
         self, defaults: list[ast.expr]
     ) -> list[ast.Call]:
         return [item for item in defaults if isinstance(item, ast.Call)]
+
+    def _dependency_calls_from_annotations(
+        self, arguments: ast.arguments
+    ) -> list[ast.Call]:
+        calls: list[ast.Call] = []
+        args: list[ast.arg] = [*arguments.posonlyargs, *arguments.args]
+        if arguments.vararg is not None:
+            args.append(arguments.vararg)
+        args.extend(arguments.kwonlyargs)
+        if arguments.kwarg is not None:
+            args.append(arguments.kwarg)
+        for arg in args:
+            if arg.annotation is not None:
+                calls.extend(self._dependency_calls_from_annotation(arg.annotation))
+        return calls
+
+    def _dependency_calls_from_annotation(self, annotation: ast.expr) -> list[ast.Call]:
+        calls: list[ast.Call] = []
+        for node in ast.walk(annotation):
+            if not isinstance(node, ast.Subscript):
+                continue
+            if _resolve_symbol(node.value, self._aliases) not in _ANNOTATED_SYMBOLS:
+                continue
+            calls.extend(
+                item
+                for item in self._annotated_metadata_elements(node.slice)
+                if isinstance(item, ast.Call)
+            )
+        return calls
+
+    def _annotated_metadata_elements(self, node: ast.AST) -> tuple[ast.AST, ...]:
+        if not isinstance(node, ast.Tuple) or len(node.elts) < 2:
+            return ()
+        return tuple(node.elts[1:])
 
     def _target_from_dependency_call(self, call: ast.Call) -> _Target | None:
         if not _is_call_to_symbol(call, _FASTAPI_DEPENDENCY_SYMBOLS, self._aliases):
