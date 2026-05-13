@@ -39,6 +39,7 @@ from ...config.spec import (
     DEFAULT_SEGMENT_MIN_STMT,
 )
 from ...contracts import (
+    BASELINE_SCHEMA_VERSION,
     DEFAULT_COVERAGE_MIN,
     DEFAULT_JSON_REPORT_PATH,
     DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
@@ -539,8 +540,9 @@ _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         ),
         key_points=(
             (
-                "Canonical baseline schema is v2.0 with meta and clone keys; "
-                "metrics may be embedded for unified flows."
+                f"Canonical baseline schema is v{BASELINE_SCHEMA_VERSION} "
+                "with meta and clone keys; metrics may be embedded for "
+                "unified flows."
             ),
             (
                 "Compatibility depends on generator identity, supported "

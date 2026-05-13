@@ -29,7 +29,7 @@ from codeclone.baseline import Baseline, current_python_tag
 from codeclone.baseline.metrics_baseline import MetricsBaseline
 from codeclone.cache.store import Cache
 from codeclone.config.pyproject_loader import ConfigValidationError
-from codeclone.contracts import REPORT_SCHEMA_VERSION
+from codeclone.contracts import BASELINE_SCHEMA_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.models import MetricsDiff
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
@@ -581,6 +581,12 @@ def test_mcp_service_help_covers_analysis_profiles() -> None:
 
 def test_mcp_service_help_validates_topic_and_detail() -> None:
     service = CodeCloneMCPService(history_limit=4)
+
+    baseline_help = service.get_help(topic="baseline")
+    assert any(
+        f"v{BASELINE_SCHEMA_VERSION}" in point
+        for point in cast("list[str]", baseline_help["key_points"])
+    )
 
     with pytest.raises(MCPServiceContractError, match="Invalid value for topic"):
         service.get_help(topic="gates")
