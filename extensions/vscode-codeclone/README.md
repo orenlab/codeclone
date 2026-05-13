@@ -1,229 +1,159 @@
 # CodeClone for VS Code
 
-CodeClone for VS Code is a native IDE surface for `codeclone-mcp`.
+[![License](https://img.shields.io/github/license/orenlab/codeclone?style=flat-square&color=6366f1)](LICENSE)
+[![Requires CodeClone](https://img.shields.io/badge/requires-codeclone_%3E%3D2.0.0-6366f1?style=flat-square)](https://orenlab.github.io/codeclone/)
 
-Marketplace: [CodeClone for VS Code](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)
+Native VS Code surface for [codeclone-mcp](https://orenlab.github.io/codeclone/mcp/).
+Brings baseline-aware structural analysis into the editor — triage-first, read-only,
+and driven by the same canonical report as the CLI and HTML output.
 
-It brings CodeClone's baseline-aware structural analysis into the editor without
-creating a second truth model. The extension stays read-only with respect to
-repository state and uses the same canonical report semantics as the CLI, HTML
-report, and MCP server.
+> **Not a linter panel.** CodeClone for VS Code is designed for structural review and
+> refactoring flow, not diagnostics or Problems integration.
 
-## What it is for
+---
 
-CodeClone inside VS Code is designed for:
+## Features
 
-- triage-first structural review
-- changed-files review against the current diff
-- conservative first-pass analysis with an explicit deeper-review follow-up
-- baseline-aware distinction between known debt and new regressions
-- guided drill-down from hotspot to source, finding detail, and remediation
-- report-only review of security-relevant boundaries without turning them into vulnerability claims
-- lightweight code navigation without turning the sidebar into a second report app
+- **Hotspots view** — new regressions, production hotspots, and changed-files findings
+  at a glance; report-only Security Surfaces and Overloaded Modules kept visually separate
+- **Baseline-aware** — distinguishes known debt from new regressions against the stored baseline
+- **Changed-files review** — `Review Changes` scopes analysis to the current diff via a configurable git ref
+- **Coverage Join** — integrates `coverage.xml` to surface untested hotspots when available
+- **Source-first navigation** — `Reveal Source` opens the exact location; `Next / Previous Hotspot`
+  steps through active targets in the editor
+- **Lightweight decorations** — Explorer file decorations and CodeLens appear only where relevant;
+  no sidebar duplication of the HTML report
+- **`Open in HTML Report`** — explicit bridge to the full report when a fresh local `report.html` exists
 
-It is not a generic linter panel and it does not try to duplicate the HTML
-report inside the sidebar.
+---
 
-## Product principles
+## Requirements
 
-- **Canonical-report-first**: IDE views are projections over the same report
-  truth exposed by CodeClone.
-- **Baseline-aware**: the extension prefers new and relevant findings over
-  broad full-repository listing.
-- **Triage-first**: the default path is review, not enumeration.
-- **Read-only**: the extension does not edit source files, baselines, caches,
-  or report artifacts.
-- **Guided**: the extension should make the cheapest useful path the most
-  obvious path.
+- VS Code `1.85+`
+- Python workspace (trusted)
+- `codeclone-mcp` launcher (`codeclone >= 2.0.0`)
+
+---
 
 ## Install
 
-CodeClone for VS Code needs a local `codeclone-mcp` launcher.
+Install the `codeclone-mcp` launcher before enabling the extension.
 
-Minimum supported CodeClone version: `2.0.0`.
-
-In `auto` mode, the extension checks the current workspace virtualenv before
-falling back to `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.
-
-Recommended install:
+**Recommended (global tool via uv):**
 
 ```bash
 uv tool install "codeclone[mcp]"
 ```
 
-If you want the launcher inside the current environment instead:
+**Current environment only:**
 
 ```bash
 uv pip install "codeclone[mcp]"
 ```
 
-Verify the launcher:
+**Verify:**
 
 ```bash
 codeclone-mcp --help
 ```
 
-## First run
+In `auto` mode the extension checks the current workspace virtualenv first,
+then falls back to `PATH`. Version-mismatch messages identify the resolved launcher source.
+
+---
+
+## Getting started
 
 1. Open a trusted Python workspace.
-2. Open the `CodeClone` view container.
-3. Run `Analyze Workspace`.
-4. Use `Review Priorities` or `Review Changes` as the first pass.
-5. If the first pass looks clean but you want smaller repeated units, open
-   `Set Analysis Depth`.
+2. Open the **CodeClone** view container.
+3. Run **Analyze Workspace**.
+4. Start with **Review Priorities** or **Review Changes** as the first pass.
+5. To tune sensitivity, open **Set Analysis Depth**.
 
-If the local launcher is missing, use `Open Setup Help` from the view or command
-palette.
+If the launcher is missing, use **Open Setup Help** from the view or the command palette.
 
-## Main surfaces
+---
+
+## Main views
 
 ### Overview
 
-Compact repository health, current run state, baseline drift, and next-best
+Compact repository health, current run state, baseline drift, and the next recommended
 review action.
 
 ### Hotspots
 
-The main operational view. It focuses on:
+The primary operational view. Surfaces:
 
-- new regressions
-- production hotspots
-- changed-files findings
-- report-only Security Surfaces
+- new regressions and production hotspots
+- changed-files findings against the configured diff ref
+- Coverage Join items when `coverage.xml` is available
+- report-only Security Surfaces (boundary inventory, not vulnerability claims)
 - report-only Overloaded Module candidates
 
-Focus mode is explicit and persisted per workspace. The extension favors
-`Recommended` by default and keeps report-only candidates visually separate from
-findings.
+Focus mode is explicit and persisted per workspace; `Recommended` is the default.
 
 ### Runs & Session
 
-Bounded MCP session state:
+Bounded MCP session state: server availability, current run identity, reviewed findings,
+and help topics. Reviewed markers are session-local and do not mutate the repository or report.
 
-- local server availability
-- current run identity
-- reviewed findings
-- help topics
-
-Reviewed markers are session-local only and do not mutate the repository or the
-canonical report.
-
-### Editor interaction
-
-- `Reveal Source` is the default review action for findings
-- active review targets can be stepped with `Next Hotspot` / `Previous Hotspot`
-- review-relevant files receive lightweight Explorer decorations
-- CodeLens and editor-title actions appear only when the current editor matches
-  the active review target
-- `Open in HTML Report` is available as an explicit bridge, not as the primary
-  review surface
-
-## Interaction model
-
-The extension is intentionally code-centered:
-
-- findings prefer `Reveal Source` as the default review action
-- source locations are opened in the editor and softly highlighted
-- deeper actions stay explicit:
-    - `Open Finding`
-    - `Show Remediation`
-    - `Mark Reviewed`
-
-This keeps the extension focused on review and refactoring flow instead of
-opening raw JSON-like details by default.
-
-## Product decisions
-
-- **Native VS Code first**: tree views, status bar, file decorations, and
-  editor actions come before any richer custom surface.
-- **No second truth model**: health, findings, and drift come from CodeClone
-  MCP and canonical report semantics only.
-- **Source-first**: review should move you to code before it opens deeper
-  detail.
-- **Report-only separation**: `Overloaded Modules` are visible but intentionally kept
-  outside findings, gates, and health. `Security Surfaces` follow the same rule
-  and stay framed as review-sensitive boundary inventory rather than
-  vulnerability proof.
-- **Limited Restricted Mode**: the extension keeps setup/onboarding available in
-  untrusted workspaces, but local analysis and MCP stay disabled until trust is
-  granted.
-
-## Current limits
-
-- The extension does not run background analysis on every save.
-- It does not populate VS Code Problems or try to behave like a linter.
-- Reviewed markers are session-local only.
-- `Open in HTML Report` only uses a local `report.html` when one already exists
-  and looks fresh enough for the current run.
-- Virtual workspaces are not supported.
+---
 
 ## Settings
 
-### `codeclone.mcp.command`
+| Setting                             | Default        | Scope    | Description                                                                                         |
+|-------------------------------------|----------------|----------|-----------------------------------------------------------------------------------------------------|
+| `codeclone.mcp.command`             | `auto`         | Machine  | Launcher used to start the local CodeClone server. `auto` checks workspace virtualenv, then `PATH`. |
+| `codeclone.mcp.args`                | `[]`           | Machine  | Extra arguments passed to the launcher.                                                             |
+| `codeclone.analysis.cachePolicy`    | —              | Resource | Default cache policy for analysis requests. Can differ per workspace or folder.                     |
+| `codeclone.analysis.changedDiffRef` | —              | Resource | Git revision used by **Review Changes**.                                                            |
+| `codeclone.analysis.profile`        | `conservative` | Resource | Analysis sensitivity. Use `deeper` or `custom` only as deliberate follow-ups.                       |
+| `codeclone.analysis.minLoc`         | —              | Resource | Function/block/segment thresholds — active only when profile is `custom`.                           |
+| `codeclone.analysis.coverageXml`    | —              | Resource | Path to `coverage.xml`. Auto-detects workspace-root file when unset.                                |
+| `codeclone.ui.showStatusBar`        | `true`         | Window   | Show or hide the workspace-level status bar item.                                                   |
 
-Launcher used to start the local CodeClone server. Leave it as `auto` for the
-default behavior. This is a machine-scoped setting, so it belongs in user or
-remote settings rather than workspace settings.
+---
 
-### `codeclone.mcp.args`
+## Limitations
 
-Extra arguments passed to the configured launcher. This is also machine-scoped.
+- No background analysis on save; no VS Code Problems / diagnostics integration.
+- Reviewed markers are session-local only.
+- `Open in HTML Report` requires a local `report.html` that is fresh for the current run.
+- Virtual workspaces are not supported.
 
-### `codeclone.analysis.cachePolicy`
+---
 
-Default cache policy for analysis requests. Analysis settings are resource-scoped,
-so they can differ per workspace or folder.
+## Trust model
 
-### `codeclone.analysis.changedDiffRef`
+The extension accesses local filesystem and git state to run structural analysis.
+Untrusted workspaces are supported in a limited setup/onboarding mode only;
+full analysis and MCP are disabled until workspace trust is granted.
 
-Git revision used by `Review Changes`.
+---
 
-### `codeclone.analysis.profile`
+## Design decisions
 
-Keeps the default conservative pass explicit and exposes `Deeper review` or
-`Custom` only as deliberate higher-sensitivity follow-ups.
+- **No second truth model** — health, findings, and drift come exclusively from
+  `codeclone-mcp` and canonical report semantics.
+- **Read-only** — the extension never edits source files, baselines, caches, or report artifacts.
+- **Report-only separation** — Security Surfaces and Overloaded Modules are visible but
+  intentionally excluded from findings, gates, and health scoring.
+- **Source-first** — the default review action moves you to code before opening deeper detail.
 
-### `codeclone.analysis.minLoc` and related threshold settings
+---
 
-Function, block, and segment thresholds used only when
-`codeclone.analysis.profile` is set to `custom`.
-
-### `codeclone.ui.showStatusBar`
-
-Show or hide the workspace-level status bar item for the current VS Code window.
-
-## Trust and workspace model
-
-This extension runs structural analysis against the current repository and uses
-local filesystem and git state. For that reason:
-
-- untrusted workspaces are supported only in a limited onboarding/setup mode
-- virtual workspaces are not supported
-- the extension runs as a workspace extension
-
-## Source of truth
-
-The extension is a client over `codeclone-mcp`.
-
-It does not:
-
-- recompute findings independently
-- redefine health semantics
-- mutate the repository
-- rewrite baselines or reports
-
-If you need the contract-level documentation behind the extension behavior, see:
+## Documentation
 
 - [CodeClone documentation](https://orenlab.github.io/codeclone/)
 - [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
 - [MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
 
+---
+
 ## Development
 
-Open this folder in VS Code and press `F5` to run an Extension Development
-Host.
-
-Useful local checks:
+Open this folder in VS Code and press `F5` to launch an Extension Development Host.
 
 ```bash
 node --check src/support.js

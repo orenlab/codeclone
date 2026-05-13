@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const {looksLikeCodeCloneRepo} = require("../src/runtime");
+const {looksLikeCodeCloneRepo, resolveCoverageXmlPath} = require("../src/runtime");
 
 test("looksLikeCodeCloneRepo accepts the current MCP surface layout", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "codeclone-vscode-runtime-"));
@@ -40,4 +40,18 @@ test("looksLikeCodeCloneRepo rejects non-CodeClone workspaces", async () => {
     await assert.doesNotReject(async () => {
         assert.equal(await looksLikeCodeCloneRepo(root), false);
     });
+});
+
+test("resolveCoverageXmlPath keeps coverage input workspace-local and auto-detectable", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "codeclone-vscode-runtime-"));
+    const coverageXml = path.join(root, "coverage.xml");
+    fs.writeFileSync(coverageXml, "<coverage />\n");
+
+    assert.equal(await resolveCoverageXmlPath(root, "", true), coverageXml);
+    assert.equal(
+        await resolveCoverageXmlPath(root, "reports/coverage.xml", true, async () => false),
+        path.join(root, "reports", "coverage.xml")
+    );
+    assert.equal(await resolveCoverageXmlPath(root, "", false), null);
+    assert.equal(await resolveCoverageXmlPath(root, "../coverage.xml", true), null);
 });

@@ -1,4 +1,7 @@
 .vscode/**
+.cache/**
+.coverage*
+coverage.xml
 .DS_Store
 DESIGN.md
 esbuild.config.mjs

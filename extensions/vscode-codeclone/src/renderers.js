@@ -11,7 +11,10 @@ const {
     decimal,
     formatBaselineTags,
     formatBaselineState,
+    formatCoverageJoinLocation,
+    formatCoverageJoinReviewSignal,
     formatKind,
+    formatOverloadedModuleStatus,
     formatSecuritySurfaceLocation,
     formatSecuritySurfaceReviewSignal,
     formatSeverity,
@@ -260,11 +263,13 @@ function renderTriageMarkdown(state) {
 
 function renderOverloadedModuleMarkdown(item) {
     const reasons = safeArray(item.candidate_reasons);
+    const status = formatOverloadedModuleStatus(item);
     const lines = [
-        "# Overloaded Module Candidate",
+        "# Overloaded Module",
         "",
         `- Path: \`${item.path}\``,
         `- Module: \`${item.module}\``,
+        `- Status: ${status}`,
         `- Source kind: ${item.source_kind || "unknown"}`,
         `- Score: ${decimal(item.score)}`,
         `- LOC: ${number(item.loc)}`,
@@ -279,8 +284,50 @@ function renderOverloadedModuleMarkdown(item) {
     ];
     if (reasons.length > 0) {
         lines.push("", "## Candidate reasons", markdownBulletList(reasons));
+    } else if (status !== "candidate") {
+        lines.push(
+            "",
+            "## Review guidance",
+            markdownBulletList([
+                "This ranked row is report-only context, not an overloaded-module candidate.",
+                "Use it as surrounding signal after reviewing candidate rows first.",
+            ])
+        );
     }
     return lines.join("\n");
+}
+
+function renderCoverageJoinMarkdown(item) {
+    const location = formatCoverageJoinLocation(item);
+    const coveragePercent =
+        typeof item.coverage_permille === "number" && !Number.isNaN(item.coverage_permille)
+            ? `${compactDecimal(item.coverage_permille / 10)}%`
+            : "n/a";
+    const guidance = [
+        "Treat this as joined coverage review context, not as a clone or structural finding.",
+    ];
+    if (item.scope_gap_hotspot) {
+        guidance.push(
+            "The callable is in CodeClone analysis but not mapped from coverage.xml; verify whether tests exercise it under another path or add focused coverage."
+        );
+    } else if (item.coverage_hotspot) {
+        guidance.push(
+            "The callable is structurally risky and below the configured coverage threshold; inspect or add focused tests before refactoring."
+        );
+    }
+    return [
+        "# Coverage Join Review Item",
+        "",
+        `- Location: \`${location}\``,
+        `- Function: \`${item.qualname || "(unknown)"}\``,
+        `- Review signal: ${formatCoverageJoinReviewSignal(item)}`,
+        `- Risk: ${item.risk || "low"}`,
+        `- CC: ${number(item.cyclomatic_complexity || 0)}`,
+        `- Coverage: ${coveragePercent}`,
+        "",
+        "## Review guidance",
+        markdownBulletList(guidance),
+    ].join("\n");
 }
 
 function renderSecuritySurfaceMarkdown(item) {
@@ -337,6 +384,7 @@ function renderSecuritySurfaceMarkdown(item) {
 module.exports = {
     markdownBulletList,
     renderFindingMarkdown,
+    renderCoverageJoinMarkdown,
     renderOverloadedModuleMarkdown,
     renderSecuritySurfaceMarkdown,
     renderHelpMarkdown,

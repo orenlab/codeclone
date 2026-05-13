@@ -67,6 +67,11 @@ test("configuration settings declare explicit scopes that match their usage", ()
     assert.equal(properties["codeclone.mcp.args"].scope, "machine");
     assert.equal(properties["codeclone.analysis.cachePolicy"].scope, "resource");
     assert.equal(properties["codeclone.analysis.changedDiffRef"].scope, "resource");
+    assert.equal(properties["codeclone.analysis.coverageXml"].scope, "resource");
+    assert.equal(
+        properties["codeclone.analysis.autoDetectCoverageXml"].scope,
+        "resource"
+    );
     assert.equal(properties["codeclone.analysis.profile"].scope, "resource");
     assert.equal(properties["codeclone.analysis.minLoc"].scope, "resource");
     assert.equal(properties["codeclone.analysis.minStmt"].scope, "resource");

@@ -78,6 +78,9 @@
     "onCommand:codeclone.openSetupHelp",
     "onCommand:codeclone.openOverloadedModule",
     "onCommand:codeclone.copyOverloadedModuleBrief",
+    "onCommand:codeclone.openCoverageJoin",
+    "onCommand:codeclone.reviewCoverageJoin",
+    "onCommand:codeclone.copyCoverageJoinBrief",
     "onCommand:codeclone.openSecuritySurface",
     "onCommand:codeclone.copySecuritySurfaceBrief",
     "onCommand:codeclone.manageWorkspaceTrust"
@@ -318,6 +321,23 @@
         "icon": "$(copy)"
       },
       {
+        "command": "codeclone.openCoverageJoin",
+        "title": "Open Coverage Join Detail",
+        "category": "CodeClone",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "codeclone.reviewCoverageJoin",
+        "title": "Review Coverage Join Item",
+        "category": "CodeClone"
+      },
+      {
+        "command": "codeclone.copyCoverageJoinBrief",
+        "title": "Copy Coverage Review Brief",
+        "category": "CodeClone",
+        "icon": "$(copy)"
+      },
+      {
         "command": "codeclone.openSecuritySurface",
         "title": "Open Security Surface Detail",
         "category": "CodeClone",
@@ -402,6 +422,18 @@
         },
         {
           "command": "codeclone.reviewOverloadedModule",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.openCoverageJoin",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.copyCoverageJoinBrief",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.reviewCoverageJoin",
           "when": "false"
         },
         {
@@ -586,9 +618,24 @@
           "group": "navigation@1"
         },
         {
+          "command": "codeclone.openCoverageJoin",
+          "when": "viewItem == codeclone.coverageJoin",
+          "group": "inline@1"
+        },
+        {
+          "command": "codeclone.copyCoverageJoinBrief",
+          "when": "viewItem == codeclone.coverageJoin",
+          "group": "navigation@1"
+        },
+        {
           "command": "codeclone.openSecuritySurface",
           "when": "viewItem == codeclone.securitySurface",
           "group": "inline@1"
+        },
+        {
+          "command": "codeclone.copyCoverageJoinBrief",
+          "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsCoverageJoin",
+          "group": "secondary@4"
         },
         {
           "command": "codeclone.copySecuritySurfaceBrief",
@@ -709,6 +756,18 @@
           "scope": "resource",
           "default": "HEAD",
           "description": "Git revision used for changed-files analysis."
+        },
+        "codeclone.analysis.coverageXml": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "Optional workspace-local Cobertura coverage.xml path passed to CodeClone Coverage Join. Leave empty to auto-detect coverage.xml in the workspace root."
+        },
+        "codeclone.analysis.autoDetectCoverageXml": {
+          "type": "boolean",
+          "scope": "resource",
+          "default": true,
+          "description": "When coverageXml is empty, automatically pass workspace-root coverage.xml to CodeClone if the file exists."
         },
         "codeclone.analysis.profile": {
           "type": "string",

@@ -23,7 +23,9 @@ const {
     formatBaselineTags,
 } = require("../src/formatters");
 const {
+    renderCoverageJoinMarkdown,
     renderSecuritySurfaceMarkdown,
+    renderOverloadedModuleMarkdown,
     renderTriageMarkdown,
 } = require("../src/renderers");
 
@@ -108,4 +110,51 @@ test("renderSecuritySurfaceMarkdown keeps report-only security posture explicit"
     assert.match(markdown, /Review signal: Callable · scope gap/);
     assert.match(markdown, /not as a vulnerability claim/);
     assert.match(markdown, /Coverage Join marks this callable as a scope gap/);
+});
+
+test("renderOverloadedModuleMarkdown does not call non-candidates candidates", () => {
+    const markdown = renderOverloadedModuleMarkdown({
+        path: "pkg/large.py",
+        module: "pkg.large",
+        candidate_status: "non_candidate",
+        source_kind: "production",
+        score: 0.83,
+        loc: 500,
+        callable_count: 12,
+        complexity_total: 42,
+        complexity_max: 9,
+        fan_in: 4,
+        fan_out: 7,
+        total_deps: 11,
+        import_edges: 8,
+        reimport_edges: 1,
+        reimport_ratio: 0.125,
+        instability: 0.63,
+        hub_balance: 0.72,
+        candidate_reasons: [],
+    });
+
+    assert.match(markdown, /# Overloaded Module/);
+    assert.match(markdown, /Status: non-candidate/);
+    assert.doesNotMatch(markdown, /# Overloaded Module Candidate/);
+    assert.match(markdown, /not an overloaded-module candidate/);
+});
+
+test("renderCoverageJoinMarkdown explains joined coverage review context", () => {
+    const markdown = renderCoverageJoinMarkdown({
+        path: "pkg/service.py",
+        start_line: 12,
+        end_line: 18,
+        qualname: "pkg.service:run",
+        cyclomatic_complexity: 11,
+        risk: "medium",
+        coverage_permille: 420,
+        coverage_hotspot: true,
+    });
+
+    assert.match(markdown, /# Coverage Join Review Item/);
+    assert.match(markdown, /Location: `pkg\/service.py:12-18`/);
+    assert.match(markdown, /Review signal: low coverage/);
+    assert.match(markdown, /Coverage: 42%/);
+    assert.match(markdown, /joined coverage review context/);
 });

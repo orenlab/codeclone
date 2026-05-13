@@ -98,6 +98,33 @@ function coverageJoinPayload(metricsSummary) {
     return safeObject(safeObject(metricsSummary).coverage_join);
 }
 
+function isCoverageJoinReviewItem(item) {
+    const entry = safeObject(item);
+    return Boolean(
+        entry.coverage_review_item ||
+        entry.coverage_hotspot ||
+        entry.scope_gap_hotspot
+    );
+}
+
+function coverageJoinReviewItemCount(summary, items) {
+    const entry = safeObject(summary);
+    if (
+        Object.prototype.hasOwnProperty.call(entry, "coverage_hotspots") ||
+        Object.prototype.hasOwnProperty.call(entry, "scope_gap_hotspots")
+    ) {
+        return (
+            (finiteInteger(entry.coverage_hotspots) ?? 0) +
+            (finiteInteger(entry.scope_gap_hotspots) ?? 0)
+        );
+    }
+    return safeArray(items).filter(isCoverageJoinReviewItem).length;
+}
+
+function metricSummaryCount(metricsSummary, family, key) {
+    return finiteInteger(safeObject(safeObject(metricsSummary)[family])[key]) ?? 0;
+}
+
 function securitySurfacesPayload(metricsSummary) {
     return safeObject(safeObject(metricsSummary).security_surfaces);
 }
@@ -175,6 +202,21 @@ function formatCoverageJoinSummary(payload) {
         parts.push(path.basename(source));
     }
     return parts.join(" · ");
+}
+
+function formatCoverageJoinLocation(item) {
+    return formatSecuritySurfaceLocation(item);
+}
+
+function formatCoverageJoinReviewSignal(item) {
+    const entry = safeObject(item);
+    if (entry.scope_gap_hotspot) {
+        return "scope gap";
+    }
+    if (entry.coverage_hotspot) {
+        return "low coverage";
+    }
+    return String(entry.coverage_status || "measured").replace(/_/g, " ");
 }
 
 function formatRunScope(value) {
@@ -277,6 +319,18 @@ function reviewTargetKey(target) {
             return `security:${pathValue}:${lineValue}:${qualnameValue}:${capabilityValue}`;
         }
     }
+    if (target.nodeType === "coverageJoin") {
+        const item = safeObject(target.item);
+        const pathValue = String(item.path || "").trim();
+        const qualnameValue = String(item.qualname || "").trim();
+        const lineValue =
+            typeof item.start_line === "number" && !Number.isNaN(item.start_line)
+                ? item.start_line
+                : 0;
+        if (pathValue) {
+            return `coverage:${pathValue}:${lineValue}:${qualnameValue}`;
+        }
+    }
     if (target.findingId) {
         return `finding:${String(target.findingId)}`;
     }
@@ -324,6 +378,7 @@ function emptyReviewArtifacts() {
         newRegressions: [],
         productionHotspots: [],
         changedFiles: [],
+        coverageJoin: [],
         overloadedModules: [],
         securitySurfaces: [],
     };
@@ -368,6 +423,93 @@ function formatSecuritySurfaceReviewSignal(item) {
         return `${scopeText} · capability present`;
     }
     return `${scopeText} · exact evidence`;
+}
+
+function finiteInteger(value) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.max(0, Math.trunc(value));
+    }
+    const parsed = Number.parseInt(String(value || ""), 10);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
+}
+
+function formatOverloadedModuleStatus(item) {
+    const entry = safeObject(item);
+    const rawStatus = String(entry.candidate_status || "").trim().toLowerCase();
+    switch (rawStatus) {
+        case "candidate":
+            return "candidate";
+        case "ranked_only":
+            return "ranked-only";
+        case "non_candidate":
+            return "non-candidate";
+        default:
+            return "ranked";
+    }
+}
+
+function isOverloadedModuleCandidate(item) {
+    return formatOverloadedModuleStatus(item) === "candidate";
+}
+
+function overloadedModuleCandidateCount(summary, items) {
+    const candidateCount = finiteInteger(safeObject(summary).candidates);
+    if (candidateCount !== null) {
+        return candidateCount;
+    }
+    return safeArray(items).filter(isOverloadedModuleCandidate).length;
+}
+
+function qualityReviewItemCount(metricsSummary, artifacts = {}) {
+    const summary = safeObject(metricsSummary);
+    const artifactItems = safeObject(artifacts);
+    const securitySurfaces = securitySurfacesPayload(summary);
+    const securitySurfaceCount =
+        finiteInteger(securitySurfaces.items) ??
+        safeArray(artifactItems.securitySurfaces).length;
+    return (
+        metricSummaryCount(summary, "complexity", "high_risk") +
+        metricSummaryCount(summary, "coupling", "high_risk") +
+        metricSummaryCount(summary, "cohesion", "low_cohesion") +
+        overloadedModuleCandidateCount(
+            safeObject(summary.overloaded_modules),
+            safeArray(artifactItems.overloadedModules)
+        ) +
+        coverageJoinReviewItemCount(
+            coverageJoinPayload(summary),
+            safeArray(artifactItems.coverageJoin)
+        ) +
+        securitySurfaceCount
+    );
+}
+
+function reportReviewItemCount(latestSummary, metricsSummary, triage, artifacts = {}) {
+    const summary = safeObject(latestSummary);
+    const metrics = safeObject(metricsSummary);
+    const findings = safeObject(summary.findings);
+    const byFamily = safeObject(findings.by_family);
+    const deadCode = safeObject(metrics.dead_code);
+    const dependencies = safeObject(metrics.dependencies);
+    const suggestions = safeObject(safeObject(triage).suggestions);
+    return (
+        (finiteInteger(byFamily.clones) ?? 0) +
+        qualityReviewItemCount(metrics, artifacts) +
+        (finiteInteger(dependencies.cycles) ?? 0) +
+        (finiteInteger(deadCode.high_confidence) ?? 0) +
+        (finiteInteger(suggestions.total) ?? 0) +
+        (finiteInteger(byFamily.structural) ?? 0)
+    );
+}
+
+function formatOverloadedModulesSummary(summary, items) {
+    const rows = safeArray(items);
+    const payload = safeObject(summary);
+    const candidates = overloadedModuleCandidateCount(payload, rows);
+    const visible = rows.length;
+    if (visible > 0 && visible !== candidates) {
+        return `${number(candidates)} candidates · top ${number(visible)} ranked`;
+    }
+    return `${number(candidates)} candidates`;
 }
 
 /**
@@ -460,10 +602,15 @@ module.exports = {
     formatBooleanWord,
     formatCacheSummary,
     coverageJoinPayload,
+    coverageJoinReviewItemCount,
     formatCoverageJoinMeasuredUnits,
     formatCoverageJoinPercent,
+    formatCoverageJoinLocation,
+    formatCoverageJoinReviewSignal,
     formatCoverageJoinStatus,
     formatCoverageJoinSummary,
+    formatOverloadedModuleStatus,
+    formatOverloadedModulesSummary,
     formatSecuritySurfaceLocation,
     formatSecuritySurfaceReviewSignal,
     formatKind,
@@ -472,11 +619,16 @@ module.exports = {
     formatSeverity,
     formatSourceKindSummary,
     humanizeIdentifier,
+    isCoverageJoinReviewItem,
+    isOverloadedModuleCandidate,
     isSpecificFocusMode,
     normalizeFindingLocations,
     normalizeLocations,
     normalizeRelativePath,
     number,
+    overloadedModuleCandidateCount,
+    qualityReviewItemCount,
+    reportReviewItemCount,
     reviewTargetKey,
     safeArray,
     safeObject,

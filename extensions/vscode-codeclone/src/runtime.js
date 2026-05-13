@@ -56,6 +56,45 @@ async function pathExists(filePath) {
     }
 }
 
+function workspaceLocalPath(rootPath, candidatePath) {
+    const root = String(rootPath || "").trim();
+    const candidate = String(candidatePath || "").trim();
+    if (!root || !candidate) {
+        return null;
+    }
+    const resolved = path.isAbsolute(candidate)
+        ? path.resolve(candidate)
+        : path.resolve(root, candidate);
+    const relativeToRoot = path.relative(root, resolved);
+    if (
+        relativeToRoot === "" ||
+        (!relativeToRoot.startsWith("..") && !path.isAbsolute(relativeToRoot))
+    ) {
+        return resolved;
+    }
+    return null;
+}
+
+async function resolveCoverageXmlPath(
+    rootPath,
+    configuredPath = "",
+    autoDetect = true,
+    exists = pathExists
+) {
+    const configured = String(configuredPath || "").trim();
+    if (configured) {
+        return workspaceLocalPath(rootPath, configured);
+    }
+    if (!autoDetect) {
+        return null;
+    }
+    const detected = workspaceLocalPath(rootPath, "coverage.xml");
+    if (!detected) {
+        return null;
+    }
+    return (await exists(detected)) ? detected : null;
+}
+
 async function looksLikeCodeCloneRepo(folderPath) {
     const [hasPyproject, hasLegacyServer, hasSurfaceServer] = await Promise.all([
         pathExists(path.join(folderPath, "pyproject.toml")),
@@ -81,5 +120,6 @@ module.exports = {
     looksLikeCodeCloneRepo,
     pathExists,
     readFileHead,
+    resolveCoverageXmlPath,
     sameGitSnapshot,
 };
