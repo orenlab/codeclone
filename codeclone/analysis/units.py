@@ -41,6 +41,7 @@ from .class_metrics import _class_metrics_for_node, _node_line_span
 from .fingerprint import _cfg_fingerprint_and_complexity, bucket_loc
 from .normalizer import NormalizationConfig, stmt_hashes
 from .parser import PARSE_TIMEOUT_SECONDS, _parse_with_limits
+from .reachability import collect_runtime_reachability
 from .security_surfaces import collect_security_surfaces
 
 __all__ = ["extract_units_and_stats_from_source"]
@@ -133,6 +134,8 @@ def extract_units_and_stats_from_source(
     referenced_qualnames = _walk.referenced_qualnames
     protocol_symbol_aliases = _walk.protocol_symbol_aliases
     protocol_module_aliases = _walk.protocol_module_aliases
+    non_runtime_decorator_aliases = _walk.non_runtime_decorator_aliases
+    pydantic_module_aliases = _walk.pydantic_module_aliases
 
     suppression_index = _build_suppression_index_for_source(
         source=source,
@@ -259,6 +262,8 @@ def extract_units_and_stats_from_source(
         collector=collector,
         protocol_symbol_aliases=protocol_symbol_aliases,
         protocol_module_aliases=protocol_module_aliases,
+        non_runtime_decorator_aliases=non_runtime_decorator_aliases,
+        pydantic_module_aliases=pydantic_module_aliases,
         suppression_rules_by_target=suppression_index,
     )
 
@@ -295,6 +300,12 @@ def extract_units_and_stats_from_source(
         module_name=module_name,
         filepath=filepath,
     )
+    runtime_reachability = collect_runtime_reachability(
+        tree=tree,
+        module_name=module_name,
+        filepath=filepath,
+        collector=collector,
+    )
 
     return (
         units,
@@ -313,6 +324,7 @@ def extract_units_and_stats_from_source(
             referenced_names=referenced_names,
             import_names=import_names,
             class_names=class_names,
+            runtime_reachability=runtime_reachability,
             security_surfaces=security_surfaces,
             referenced_qualnames=referenced_qualnames,
             typing_coverage=typing_coverage,

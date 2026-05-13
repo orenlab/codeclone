@@ -31,6 +31,7 @@ from ..models import (
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
     ProjectMetrics,
+    RuntimeReachabilityFact,
     SecuritySurface,
     SegmentGroupItem,
     SegmentUnit,
@@ -81,6 +82,7 @@ class DiscoveryResult:
     cached_referenced_names: frozenset[str]
     files_to_process: tuple[str, ...]
     skipped_warnings: tuple[str, ...]
+    cached_runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     cached_security_surfaces: tuple[SecuritySurface, ...] = ()
     cached_referenced_qualnames: frozenset[str] = frozenset()
     cached_typing_modules: tuple[ModuleTypingCoverage, ...] = ()
@@ -130,6 +132,7 @@ class ProcessingResult:
     analyzed_classes: int
     failed_files: tuple[str, ...]
     source_read_failures: tuple[str, ...]
+    runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     security_surfaces: tuple[SecuritySurface, ...] = ()
     referenced_qualnames: frozenset[str] = frozenset()
     typing_modules: tuple[ModuleTypingCoverage, ...] = ()

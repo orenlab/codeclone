@@ -119,6 +119,41 @@ class DeadCandidate:
     suppressed_rules: tuple[str, ...] = field(default_factory=tuple)
 
 
+RuntimeReachabilityFramework = Literal[
+    "celery",
+    "click",
+    "dependency_injector",
+    "django",
+    "fastapi",
+    "starlette",
+    "typer",
+]
+RuntimeReachabilityEdgeKind = Literal[
+    "declares_dependency",
+    "provides",
+    "registers_command",
+    "registers_handler",
+    "registers_task",
+]
+RuntimeReachabilityConfidence = Literal["high", "medium", "low"]
+RuntimeReachabilityTargetKind = Literal["function", "class", "method"]
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeReachabilityFact:
+    target_qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    target_kind: RuntimeReachabilityTargetKind
+    framework: RuntimeReachabilityFramework
+    edge_kind: RuntimeReachabilityEdgeKind
+    confidence: RuntimeReachabilityConfidence
+    evidence: str
+    evidence_symbol: str
+    source_qualname: str = ""
+
+
 SecuritySurfaceCategory = Literal[
     "archive_extraction",
     "crypto_transport",
@@ -163,6 +198,7 @@ class FileMetrics:
     referenced_names: frozenset[str]
     import_names: frozenset[str]
     class_names: frozenset[str]
+    runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     security_surfaces: tuple[SecuritySurface, ...] = ()
     referenced_qualnames: frozenset[str] = field(default_factory=frozenset)
     typing_coverage: ModuleTypingCoverage | None = None
@@ -251,6 +287,7 @@ class ProjectMetrics:
     docstring_public_documented: int = 0
     typing_modules: tuple[ModuleTypingCoverage, ...] = ()
     docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
+    runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     api_surface: ApiSurfaceSnapshot | None = None
 
 

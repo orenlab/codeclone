@@ -41,6 +41,7 @@ from ..models import (
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
     ProjectMetrics,
+    RuntimeReachabilityFact,
     SecuritySurface,
     StructuralFindingGroup,
     Suggestion,
@@ -58,6 +59,7 @@ from ._types import (
     _should_collect_structural_findings,
 )
 from .bootstrap import _resolve_optional_runtime_path
+from .entrypoints import collect_project_entrypoint_qualnames
 from .metrics_payload import build_metrics_report_payload
 
 
@@ -82,6 +84,7 @@ def compute_project_metrics(
     dead_candidates: Sequence[DeadCandidate],
     referenced_names: frozenset[str],
     referenced_qualnames: frozenset[str],
+    runtime_reachability: Sequence[RuntimeReachabilityFact] = (),
     security_surfaces: Sequence[SecuritySurface] = (),
     typing_modules: Sequence[ModuleTypingCoverage] = (),
     docstring_modules: Sequence[ModuleDocstringCoverage] = (),
@@ -100,6 +103,7 @@ def compute_project_metrics(
         dead_candidates=tuple(dead_candidates),
         referenced_names=referenced_names,
         referenced_qualnames=referenced_qualnames,
+        runtime_reachability=tuple(runtime_reachability),
         security_surfaces=tuple(security_surfaces),
         typing_modules=tuple(typing_modules),
         docstring_modules=tuple(docstring_modules),
@@ -270,13 +274,23 @@ def analyze(
         *cohort_structural_findings,
     )
     if not boot.args.skip_metrics:
+        referenced_qualnames = frozenset(
+            {
+                *processing.referenced_qualnames,
+                *collect_project_entrypoint_qualnames(
+                    root=boot.root,
+                    dead_candidates=processing.dead_candidates,
+                ),
+            }
+        )
         project_metrics, dep_graph, _ = compute_project_metrics(
             units=processing.units,
             class_metrics=processing.class_metrics,
             module_deps=processing.module_deps,
             dead_candidates=processing.dead_candidates,
             referenced_names=processing.referenced_names,
-            referenced_qualnames=processing.referenced_qualnames,
+            referenced_qualnames=referenced_qualnames,
+            runtime_reachability=processing.runtime_reachability,
             security_surfaces=processing.security_surfaces,
             typing_modules=processing.typing_modules,
             docstring_modules=processing.docstring_modules,
@@ -292,7 +306,8 @@ def analyze(
             suppressed_dead_items = find_suppressed_unused(
                 definitions=tuple(processing.dead_candidates),
                 referenced_names=processing.referenced_names,
-                referenced_qualnames=processing.referenced_qualnames,
+                referenced_qualnames=referenced_qualnames,
+                runtime_reachability=processing.runtime_reachability,
             )
         suggestions = compute_suggestions(
             project_metrics=project_metrics,
@@ -336,6 +351,7 @@ def analyze(
             units=processing.units,
             class_metrics=processing.class_metrics,
             module_deps=processing.module_deps,
+            runtime_reachability=processing.runtime_reachability,
             security_surfaces=processing.security_surfaces,
             source_stats_by_file=processing.source_stats_by_file,
             suppressed_dead_code=suppressed_dead_items,

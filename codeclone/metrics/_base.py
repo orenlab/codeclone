@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         ModuleDep,
         ModuleDocstringCoverage,
         ModuleTypingCoverage,
+        RuntimeReachabilityFact,
         SecuritySurface,
     )
 
@@ -40,6 +41,7 @@ class MetricProjectContext:
     dead_candidates: tuple[DeadCandidate, ...]
     referenced_names: frozenset[str]
     referenced_qualnames: frozenset[str]
+    runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     security_surfaces: tuple[SecuritySurface, ...] = ()
     typing_modules: tuple[ModuleTypingCoverage, ...] = ()
     docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()

@@ -1,48 +1,81 @@
 # Terms of Use
 
-These terms describe the intended use of CodeClone's local integration surfaces,
-including the Codex plugin and Claude Desktop bundle.
+These terms describe the intended operational and integration boundaries of
+CodeClone and its local integration surfaces, including the MCP server,
+VS Code extension, Codex plugin, and Claude Desktop bundle.
 
-## Local tool scope
+## Local-first execution model
 
-CodeClone is distributed as a local analysis tool and local integration layer.
+CodeClone is distributed as a local structural review and analysis tool.
 
-That means:
+Analysis executes against repositories available to the local process or
+explicitly configured execution environment. CodeClone does not provide a
+hosted SaaS analysis backend and does not transmit repository contents to
+external services unless the surrounding client, transport, or deployment
+explicitly does so.
 
-- CodeClone source code is provided as-is under MPL-2.0, and repository
-  documentation is provided as-is under MIT
-- local integrations are wrappers over local CodeClone execution, not hosted
-  managed services
-- users are responsible for reviewing the commands, configuration, and
-  repository access they enable on their own machines
+CodeClone source code is licensed under MPL-2.0.
+Documentation content and the published docs site are licensed under MIT.
 
 ## Integration boundaries
 
-CodeClone local integrations:
+CodeClone integrations are local control surfaces over the same canonical
+analysis pipeline.
 
-- do not grant additional repository permissions beyond what the local client
-  and local process already have
-- do not override the security or account terms of Claude Desktop, Codex, or
-  other host applications
-- do not change Anthropic or OpenAI platform terms for those host applications
+Integrations:
+
+- inherit the repository and filesystem access already granted to the local
+  execution environment
+- do not elevate privileges or bypass operating-system, editor, repository,
+  or host-application security controls
+- do not grant additional repository permissions beyond those already available
+  to the executing process or connected client
+
+CodeClone integrations do not modify or replace the security, account,
+privacy, or usage policies of third-party host applications such as
+Claude Desktop, Codex, VS Code, Anthropic services, or OpenAI services.
+
+Those platforms remain governed by their own applicable terms and policies.
+
+## MCP and automation surfaces
+
+The MCP interface is read-only by contract.
+
+CodeClone MCP integrations are intended for deterministic structural analysis,
+review, and triage workflows. They expose canonical findings, metrics, and
+review data, but do not mutate:
+
+- source files
+- git history
+- baselines
+- repository state
+- CI configuration
+
+Remote, shared, or network-exposed MCP deployments are the responsibility of
+the operator securing and governing those environments.
 
 ## Intended usage
 
-CodeClone integrations are intended for:
+CodeClone is intended for:
 
-- local structural analysis and review
-- local CI and developer workflows
-- read-only MCP-based inspection of repository state
+- structural review and architectural analysis
+- baseline-aware CI governance
+- deterministic review workflows
+- local IDE, CI, and AI-agent integrations
 
-They are not intended to operate as unattended hosted analysis services unless
-you build and secure that deployment separately.
+Hosted, unattended, multi-tenant, or internet-exposed deployments may require
+additional operational controls, sandboxing, authentication, and access
+restrictions outside the scope of the default local integrations.
 
-## Support and updates
+## Compatibility and evolution
 
-CodeClone integrations may evolve during the `2.x` release line. Published docs,
-tests, and changelog entries define the intended contract surface for each
-release.
+The `2.x` release line evolves under documented compatibility contracts.
 
-Questions or issues can be reported at:
+Canonical schemas, exit codes, report structures, and interface guarantees are
+defined by the published documentation and locked regression tests.
+
+## Support
+
+Questions, issues, and false-positive reports can be submitted at:
 
 - <https://github.com/orenlab/codeclone/issues>

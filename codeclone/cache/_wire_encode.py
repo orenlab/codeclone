@@ -233,6 +233,36 @@ def _encode_security_surfaces(entry: CacheEntry, wire: dict[str, object]) -> Non
         ]
 
 
+def _encode_runtime_reachability(entry: CacheEntry, wire: dict[str, object]) -> None:
+    runtime_reachability = sorted(
+        entry.get("runtime_reachability", []),
+        key=lambda item: (
+            item["start_line"],
+            item["end_line"],
+            item["target_qualname"],
+            item["framework"],
+            item["edge_kind"],
+            item["evidence_symbol"],
+        ),
+    )
+    if runtime_reachability:
+        wire["rr"] = [
+            [
+                item["target_qualname"],
+                item["start_line"],
+                item["end_line"],
+                item["target_kind"],
+                item["framework"],
+                item["edge_kind"],
+                item["confidence"],
+                item["evidence"],
+                item["evidence_symbol"],
+                item["source_qualname"],
+            ]
+            for item in runtime_reachability
+        ]
+
+
 def _encode_optional_metrics_sections(
     entry: CacheEntry, wire: dict[str, object]
 ) -> None:
@@ -311,6 +341,7 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
     _encode_module_deps(entry, wire)
     _encode_dead_candidates(entry, wire)
     _encode_name_lists(entry, wire)
+    _encode_runtime_reachability(entry, wire)
     _encode_security_surfaces(entry, wire)
     _encode_optional_metrics_sections(entry, wire)
     _encode_structural_findings(entry, wire)

@@ -1,0 +1,346 @@
+/* =========================================================
+   CodeClone Docs UI
+   ========================================================= */
+
+/* ---------------------------------------------------------
+   Brand tokens
+   --------------------------------------------------------- */
+
+:root {
+    --md-primary-fg-color: #4f46e5;
+    --md-accent-fg-color: #6366f1;
+
+    --cc-bg-light: #fcfcfd;
+    --cc-surface-light: #ffffff;
+    --cc-border-light: #e8e8ef;
+
+    --cc-bg-dark: #0f1115;
+    --cc-surface-dark: #151821;
+    --cc-surface-dark-2: #1a1e29;
+    --cc-border-dark: #262b38;
+
+    --cc-text-dark: #e6e8ee;
+    --cc-text-muted-dark: #9aa3b2;
+}
+
+/* ---------------------------------------------------------
+   Global typography
+   --------------------------------------------------------- */
+
+.md-typeset {
+    font-size: 0.78rem;
+    line-height: 1.72;
+}
+
+.md-typeset h1 {
+    font-weight: 760;
+    letter-spacing: -0.03em;
+}
+
+.md-typeset h2 {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.md-typeset h3 {
+    font-weight: 650;
+}
+
+/* ---------------------------------------------------------
+   Layout width
+   --------------------------------------------------------- */
+
+.md-grid {
+    max-width: 1480px;
+}
+
+.md-content {
+    max-width: 920px;
+}
+
+/* ---------------------------------------------------------
+   Header
+   --------------------------------------------------------- */
+
+.md-header {
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-bottom: 1px solid rgba(255, 255, 255, .04);
+    background: rgba(15, 17, 21, .82);
+}
+
+.md-tabs {
+    background: rgba(15, 17, 21, .72);
+    border-bottom: 1px solid rgba(255, 255, 255, .04);
+}
+
+/* ---------------------------------------------------------
+   Logo sizing
+   --------------------------------------------------------- */
+
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+    height: 24px;
+    width: auto;
+}
+
+/* ---------------------------------------------------------
+   Navigation
+   --------------------------------------------------------- */
+
+.md-nav__title {
+    font-weight: 700;
+}
+
+.md-nav__link--active {
+    color: #818cf8 !important;
+}
+
+/* ---------------------------------------------------------
+   Links
+   --------------------------------------------------------- */
+
+.md-typeset a {
+    color: #818cf8;
+}
+
+.md-typeset a:hover {
+    color: #a5b4fc;
+}
+
+/* ---------------------------------------------------------
+   Code blocks
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="slate"] .md-typeset pre {
+    background: #12151d;
+    border: 1px solid var(--cc-border-dark);
+    border-radius: 14px;
+}
+
+.md-typeset code {
+    border-radius: 6px;
+}
+
+/* ---------------------------------------------------------
+   Tables
+   --------------------------------------------------------- */
+
+.md-typeset table:not([class]) {
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--cc-border-dark);
+}
+
+/* ---------------------------------------------------------
+   Admonitions
+   --------------------------------------------------------- */
+
+.md-typeset .admonition,
+.md-typeset details {
+    border-radius: 16px;
+    border-width: 1px;
+    box-shadow: none;
+}
+
+/* Remove electric glow feeling */
+[data-md-color-scheme="slate"] .md-typeset .admonition {
+    background: rgba(255, 255, 255, .02);
+}
+
+/* ---------------------------------------------------------
+   Search
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="slate"] .md-search__form {
+    background: rgba(255, 255, 255, .04);
+    border: 1px solid rgba(255, 255, 255, .05);
+    border-radius: 12px;
+}
+
+/* ---------------------------------------------------------
+   Sidebar surfaces
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="slate"] .md-sidebar {
+    background: transparent;
+}
+
+/* ---------------------------------------------------------
+   TOC
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="slate"] .md-sidebar--secondary {
+    border-left: 1px solid rgba(255, 255, 255, .04);
+}
+
+/* ---------------------------------------------------------
+   Images / SVG
+   --------------------------------------------------------- */
+
+.md-typeset img,
+.md-typeset svg {
+    border-radius: 12px;
+}
+
+/* ---------------------------------------------------------
+   Dark palette refinement
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="slate"] {
+    --md-default-bg-color: var(--cc-bg-dark);
+    --md-default-fg-color: var(--cc-text-dark);
+
+    --md-default-fg-color--light: var(--cc-text-muted-dark);
+
+    --md-code-bg-color: #12151d;
+
+    --md-typeset-table-color: rgba(255, 255, 255, .08);
+}
+
+/* ---------------------------------------------------------
+   Light mode refinement
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="default"] {
+    --md-default-bg-color: var(--cc-bg-light);
+}
+
+/* ---------------------------------------------------------
+   Reduce visual noise
+   --------------------------------------------------------- */
+
+.md-typeset hr {
+    border-bottom: 1px solid rgba(255, 255, 255, .06);
+}
+
+[data-md-color-scheme="slate"] .md-typeset kbd {
+    background: #1c2230;
+    border-color: #30384b;
+}
+
+/* ---------------------------------------------------------
+   Better spacing rhythm
+   --------------------------------------------------------- */
+
+.md-typeset h2 {
+    margin-top: 2.8em;
+}
+
+.md-typeset h3 {
+    margin-top: 2em;
+}
+
+/* =========================================================
+   Light theme refinement
+   ========================================================= */
+
+[data-md-color-scheme="default"] {
+    --md-default-bg-color: #fcfcfe;
+    --md-default-fg-color: #1f2430;
+    --md-default-fg-color--light: #5b6475;
+
+    --md-typeset-a-color: #4f46e5;
+
+    --md-code-bg-color: #f4f5fa;
+
+    background: #fcfcfe;
+}
+
+/* ---------------------------------------------------------
+   Header / tabs
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="default"] .md-header {
+    background: rgba(255, 255, 255, .86);
+    border-bottom: 1px solid #ececf3;
+
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+}
+
+[data-md-color-scheme="default"] .md-tabs {
+    background: rgba(255, 255, 255, .72);
+    border-bottom: 1px solid #f0f1f6;
+}
+
+/* ---------------------------------------------------------
+   Search
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="default"] .md-search__form {
+    background: #f4f5fa;
+    border: 1px solid #e7e9f2;
+    border-radius: 12px;
+}
+
+/* ---------------------------------------------------------
+   Sidebar
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="default"] .md-sidebar--secondary {
+    border-left: 1px solid #ececf3;
+}
+
+/* ---------------------------------------------------------
+   Tables / code
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="default"] .md-typeset table:not([class]) {
+    border: 1px solid #e9ebf2;
+    background: white;
+}
+
+[data-md-color-scheme="default"] .md-typeset pre {
+    background: #f6f7fb;
+    border: 1px solid #e6e8f0;
+}
+
+/* ---------------------------------------------------------
+   Admonitions
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="default"] .md-typeset .admonition,
+[data-md-color-scheme="default"] .md-typeset details {
+    background: #ffffff;
+    border-color: #dfe3f3;
+}
+
+/* ---------------------------------------------------------
+   Navigation
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="default"] .md-nav__link--active {
+    color: #4338ca !important;
+    font-weight: 600;
+}
+
+/* ---------------------------------------------------------
+   Content surface feeling
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="default"] .md-content__inner {
+    background: transparent;
+}
+
+/* ---------------------------------------------------------
+   TOC readability
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="default"] .md-nav--secondary .md-nav__title {
+    color: #5d6678;
+}
+
+/* ---------------------------------------------------------
+   Logo text balance
+   --------------------------------------------------------- */
+
+[data-md-color-scheme="default"] .md-header__title {
+    color: #121826;
+}
+
+.md-typeset .admonition,
+.md-typeset details {
+    box-shadow: none !important;
+    border-width: 1px;
+}

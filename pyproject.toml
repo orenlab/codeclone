@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codeclone"
-version = "2.0.0"
-description = "Structural code quality analysis for Python"
+version = "2.0.1b1"
+description = "A structural review layer for Python — baseline-aware, deterministic, built for CI and AI agents"
 readme = { file = "docs/README-pypi.md", content-type = "text/markdown" }
 license = "MPL-2.0 AND MIT"
 license-files = ["LICENSE", "LICENSE-MIT"]
@@ -20,7 +20,7 @@ maintainers = [
 requires-python = ">=3.10"
 
 dependencies = [
-    "orjson>=3.11.8",
+    "orjson>=3.11.9",
     "pygments>=2.20.0",
     "rich>=15.0.0",
     "tomli>=2.0.1; python_version < '3.11'",

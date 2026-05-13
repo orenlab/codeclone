@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import ast
 
+from codeclone.analysis.ast_helpers import ast_node_end_line, ast_node_start_line
 from codeclone.analysis.security_surfaces import (
-    _node_end_line,
-    _node_start_line,
     _SecuritySurfaceVisitor,
     collect_security_surfaces,
 )
@@ -191,8 +190,8 @@ class Writer:
 
 
 def test_security_surface_helper_edges_cover_line_fallbacks_and_blank_imports() -> None:
-    assert _node_start_line(ast.Name(id="value")) is None
-    assert _node_end_line(ast.Name(id="value")) == 0
+    assert ast_node_start_line(ast.Name(id="value")) is None
+    assert ast_node_end_line(ast.Name(id="value")) == 0
 
     visitor = _SecuritySurfaceVisitor(
         module_name="pkg.mod",

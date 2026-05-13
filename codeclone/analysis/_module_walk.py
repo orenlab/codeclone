@@ -36,6 +36,29 @@ if TYPE_CHECKING:
 
 _NamedDeclarationNode = _qualnames.FunctionNode | ast.ClassDef
 _PROTOCOL_MODULE_NAMES = frozenset({"typing", "typing_extensions"})
+_NON_RUNTIME_DECORATOR_SYMBOLS = frozenset({"overload", "abstractmethod"})
+_PYDANTIC_MODULE_NAMES = frozenset(
+    {
+        "pydantic",
+        "pydantic.class_validators",
+        "pydantic.deprecated.class_validators",
+        "pydantic.functional_serializers",
+        "pydantic.functional_validators",
+        "pydantic.v1",
+        "pydantic.v1.class_validators",
+    }
+)
+_PYDANTIC_DECORATOR_NAMES = frozenset(
+    {
+        "computed_field",
+        "field_serializer",
+        "field_validator",
+        "model_serializer",
+        "model_validator",
+        "root_validator",
+        "validator",
+    }
+)
 
 
 def _resolve_import_target(
@@ -62,10 +85,15 @@ class _ModuleWalkState:
     imported_module_aliases: dict[str, str] = field(default_factory=dict)
     name_nodes: list[ast.Name] = field(default_factory=list)
     attr_nodes: list[ast.Attribute] = field(default_factory=list)
+    exported_names: set[str] = field(default_factory=set)
     protocol_symbol_aliases: set[str] = field(default_factory=lambda: {"Protocol"})
     protocol_module_aliases: set[str] = field(
         default_factory=lambda: set(_PROTOCOL_MODULE_NAMES)
     )
+    non_runtime_decorator_aliases: set[str] = field(
+        default_factory=lambda: set(_NON_RUNTIME_DECORATOR_SYMBOLS)
+    )
+    pydantic_module_aliases: set[str] = field(default_factory=lambda: {"pydantic"})
 
 
 def _append_module_dep(
@@ -108,6 +136,15 @@ def _collect_import_node(
             state.imported_module_aliases[alias_name] = alias.name
         if alias.name in _PROTOCOL_MODULE_NAMES:
             state.protocol_module_aliases.add(alias_name)
+        if alias.name in _PYDANTIC_MODULE_NAMES or alias.name.startswith("pydantic."):
+            state.pydantic_module_aliases.add(alias_name)
+
+
+def _matching_import_aliases(
+    node: ast.ImportFrom,
+    names: frozenset[str],
+) -> set[str]:
+    return {alias.asname or alias.name for alias in node.names if alias.name in names}
 
 
 def _dotted_expr_name(expr: ast.expr) -> str | None:
@@ -118,7 +155,72 @@ def _dotted_expr_name(expr: ast.expr) -> str | None:
         if prefix is None:
             return None
         return f"{prefix}.{expr.attr}"
+    if isinstance(expr, ast.Subscript):
+        return _dotted_expr_name(expr.value)
     return None
+
+
+def _decorator_expr_name(expr: ast.expr) -> str | None:
+    if isinstance(expr, ast.Call):
+        return _dotted_expr_name(expr.func)
+    return _dotted_expr_name(expr)
+
+
+def _string_literals_from_export_value(value: ast.AST) -> tuple[str, ...]:
+    match value:
+        case ast.Constant(value=str() as name):
+            return (name,)
+        case ast.List(elts=elts) | ast.Tuple(elts=elts) | ast.Set(elts=elts):
+            return tuple(
+                item.value
+                for item in elts
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            )
+        case ast.BinOp(left=left, op=ast.Add(), right=right):
+            return (
+                *_string_literals_from_export_value(left),
+                *_string_literals_from_export_value(right),
+            )
+        case _:
+            return ()
+
+
+def _collect_all_export_node(node: ast.AST, state: _ModuleWalkState) -> None:
+    match node:
+        case ast.Assign(targets=targets, value=value):
+            if any(
+                isinstance(target, ast.Name) and target.id == "__all__"
+                for target in targets
+            ):
+                state.exported_names.update(_string_literals_from_export_value(value))
+        case ast.AnnAssign(target=ast.Name(id="__all__"), value=value):
+            if value is not None:
+                state.exported_names.update(_string_literals_from_export_value(value))
+        case ast.AugAssign(target=ast.Name(id="__all__"), value=value):
+            state.exported_names.update(_string_literals_from_export_value(value))
+        case ast.Expr(
+            value=ast.Call(
+                func=ast.Attribute(value=ast.Name(id="__all__"), attr="append"),
+                args=[arg],
+            )
+        ):
+            state.exported_names.update(_string_literals_from_export_value(arg))
+        case ast.Expr(
+            value=ast.Call(
+                func=ast.Attribute(value=ast.Name(id="__all__"), attr="extend"),
+                args=[arg],
+            )
+        ):
+            state.exported_names.update(_string_literals_from_export_value(arg))
+        case _:
+            pass
+
+
+def _collect_module_all_exports(tree: ast.AST, state: _ModuleWalkState) -> None:
+    if not isinstance(tree, ast.Module):
+        return
+    for statement in tree.body:
+        _collect_all_export_node(statement, state)
 
 
 def _collect_import_from_node(
@@ -140,9 +242,16 @@ def _collect_import_from_node(
         )
 
     if node.module in _PROTOCOL_MODULE_NAMES:
-        for alias in node.names:
-            if alias.name == "Protocol":
-                state.protocol_symbol_aliases.add(alias.asname or alias.name)
+        state.protocol_symbol_aliases.update(
+            _matching_import_aliases(node, frozenset({"Protocol"}))
+        )
+
+    if node.module in _PYDANTIC_MODULE_NAMES or str(node.module).startswith(
+        "pydantic."
+    ):
+        state.non_runtime_decorator_aliases.update(
+            _matching_import_aliases(node, _PYDANTIC_DECORATOR_NAMES)
+        )
 
     if not collect_referenced_names or not target:
         return
@@ -189,13 +298,42 @@ def _is_protocol_class(
     return False
 
 
-def _is_non_runtime_candidate(node: _qualnames.FunctionNode) -> bool:
+def _is_known_pydantic_decorator(
+    name: str,
+    *,
+    pydantic_module_aliases: frozenset[str],
+) -> bool:
+    terminal = name.rsplit(".", 1)[-1]
+    if terminal not in _PYDANTIC_DECORATOR_NAMES or "." not in name:
+        return False
+    module_alias = name.rsplit(".", 1)[0]
+    return any(
+        module_alias == alias or module_alias.startswith(f"{alias}.")
+        for alias in pydantic_module_aliases
+    )
+
+
+def _is_non_runtime_candidate(
+    node: _qualnames.FunctionNode,
+    *,
+    non_runtime_decorator_aliases: frozenset[str] = frozenset(
+        _NON_RUNTIME_DECORATOR_SYMBOLS
+    ),
+    pydantic_module_aliases: frozenset[str] = frozenset({"pydantic"}),
+) -> bool:
     for decorator in node.decorator_list:
-        name = _dotted_expr_name(decorator)
+        name = _decorator_expr_name(decorator)
         if name is None:
             continue
+        if name in non_runtime_decorator_aliases:
+            return True
         terminal = name.rsplit(".", 1)[-1]
-        if terminal in {"overload", "abstractmethod"}:
+        if terminal in _NON_RUNTIME_DECORATOR_SYMBOLS:
+            return True
+        if _is_known_pydantic_decorator(
+            name,
+            pydantic_module_aliases=pydantic_module_aliases,
+        ):
             return True
     return False
 
@@ -209,8 +347,14 @@ def _should_skip_dead_candidate(
     node: _qualnames.FunctionNode,
     *,
     protocol_class_qualnames: set[str],
+    non_runtime_decorator_aliases: frozenset[str],
+    pydantic_module_aliases: frozenset[str],
 ) -> bool:
-    if _is_non_runtime_candidate(node):
+    if _is_non_runtime_candidate(
+        node,
+        non_runtime_decorator_aliases=non_runtime_decorator_aliases,
+        pydantic_module_aliases=pydantic_module_aliases,
+    ):
         return True
     if "." not in local_name:
         return False
@@ -258,6 +402,8 @@ def _dead_candidate_for_unit(
     filepath: str,
     suppression_index: Mapping[SuppressionTargetKey, tuple[str, ...]],
     protocol_class_qualnames: set[str],
+    non_runtime_decorator_aliases: frozenset[str],
+    pydantic_module_aliases: frozenset[str],
 ) -> DeadCandidate | None:
     span = _node_line_span(node)
     if span is None:
@@ -266,6 +412,8 @@ def _dead_candidate_for_unit(
         local_name,
         node,
         protocol_class_qualnames=protocol_class_qualnames,
+        non_runtime_decorator_aliases=non_runtime_decorator_aliases,
+        pydantic_module_aliases=pydantic_module_aliases,
     ):
         return None
     start, end = span
@@ -291,6 +439,11 @@ def _resolve_referenced_qualnames(
         class_qualname: class_qualname
         for class_qualname, _class_node in collector.class_nodes
         if "." not in class_qualname
+    }
+    top_level_function_by_name = {
+        local_name: local_name
+        for local_name, _node in collector.units
+        if "." not in local_name
     }
     local_method_qualnames = frozenset(
         f"{module_name}:{local_name}"
@@ -318,6 +471,15 @@ def _resolve_referenced_qualnames(
                     if local_method_qualname in local_method_qualnames:
                         resolved.add(local_method_qualname)
 
+    for exported_name in state.exported_names:
+        local_qualname = top_level_function_by_name.get(exported_name)
+        if local_qualname is not None:
+            resolved.add(f"{module_name}:{local_qualname}")
+            continue
+        class_qualname = top_level_class_by_name.get(exported_name)
+        if class_qualname is not None:
+            resolved.add(f"{module_name}:{class_qualname}")
+
     return frozenset(resolved)
 
 
@@ -328,6 +490,8 @@ class _ModuleWalkResult(NamedTuple):
     referenced_qualnames: frozenset[str]
     protocol_symbol_aliases: frozenset[str]
     protocol_module_aliases: frozenset[str]
+    non_runtime_decorator_aliases: frozenset[str]
+    pydantic_module_aliases: frozenset[str]
 
 
 def _collect_module_walk_data(
@@ -342,6 +506,7 @@ def _collect_module_walk_data(
     Reduces the hot path to one tree walk plus one local qualname resolution phase.
     """
     state = _ModuleWalkState()
+    _collect_module_all_exports(tree, state)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             _collect_import_node(
@@ -383,6 +548,8 @@ def _collect_module_walk_data(
         referenced_qualnames=resolved,
         protocol_symbol_aliases=frozenset(state.protocol_symbol_aliases),
         protocol_module_aliases=frozenset(state.protocol_module_aliases),
+        non_runtime_decorator_aliases=frozenset(state.non_runtime_decorator_aliases),
+        pydantic_module_aliases=frozenset(state.pydantic_module_aliases),
     )
 
 
@@ -395,6 +562,10 @@ def _collect_dead_candidates(
     protocol_module_aliases: frozenset[str] = frozenset(
         {"typing", "typing_extensions"}
     ),
+    non_runtime_decorator_aliases: frozenset[str] = frozenset(
+        _NON_RUNTIME_DECORATOR_SYMBOLS
+    ),
+    pydantic_module_aliases: frozenset[str] = frozenset({"pydantic"}),
     suppression_rules_by_target: Mapping[SuppressionTargetKey, tuple[str, ...]]
     | None = None,
 ) -> tuple[DeadCandidate, ...]:
@@ -420,11 +591,15 @@ def _collect_dead_candidates(
             filepath=filepath,
             suppression_index=suppression_index,
             protocol_class_qualnames=protocol_class_qualnames,
+            non_runtime_decorator_aliases=non_runtime_decorator_aliases,
+            pydantic_module_aliases=pydantic_module_aliases,
         )
         if candidate is not None:
             candidates.append(candidate)
 
     for class_qualname, class_node in collector.class_nodes:
+        if class_qualname in protocol_class_qualnames:
+            continue
         span = _node_line_span(class_node)
         if span is not None:
             start, end = span

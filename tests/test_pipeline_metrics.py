@@ -77,6 +77,7 @@ from codeclone.models import (
     ModuleTypingCoverage,
     ProjectMetrics,
     PublicSymbol,
+    RuntimeReachabilityFact,
     SecuritySurface,
     UnitCoverageFact,
 )
@@ -299,6 +300,51 @@ def test_compute_project_metrics_respects_skip_flags() -> None:
     assert project_metrics.dead_code == ()
 
 
+def test_compute_project_metrics_uses_runtime_reachability_for_dead_code() -> None:
+    project_metrics, _dep_graph, dead_items = compute_project_metrics(
+        units=(),
+        class_metrics=(),
+        module_deps=(),
+        dead_candidates=(
+            DeadCandidate(
+                qualname="pkg.api:list_items",
+                local_name="list_items",
+                filepath="pkg/api.py",
+                start_line=12,
+                end_line=14,
+                kind="function",
+            ),
+        ),
+        referenced_names=frozenset(),
+        referenced_qualnames=frozenset(),
+        runtime_reachability=(
+            RuntimeReachabilityFact(
+                target_qualname="pkg.api:list_items",
+                filepath="pkg/api.py",
+                start_line=12,
+                end_line=14,
+                target_kind="function",
+                framework="fastapi",
+                edge_kind="registers_handler",
+                confidence="medium",
+                evidence="route decorator",
+                evidence_symbol="router.get",
+                source_qualname="pkg.api:router",
+            ),
+        ),
+        files_found=1,
+        files_analyzed_or_cached=1,
+        function_clone_groups=0,
+        block_clone_groups=0,
+        skip_dependencies=False,
+        skip_dead_code=False,
+    )
+
+    assert dead_items == ()
+    assert project_metrics.dead_code == ()
+    assert len(project_metrics.runtime_reachability) == 1
+
+
 def test_build_metrics_report_payload_includes_suppressed_dead_code_items() -> None:
     payload = build_metrics_report_payload(
         project_metrics=_project_metrics(dead_confidence="high"),
@@ -496,6 +542,55 @@ def test_build_metrics_report_payload_includes_security_surfaces_family() -> Non
             "evidence_kind": "call",
             "evidence_symbol": "subprocess.run",
         },
+    ]
+
+
+def test_build_metrics_report_payload_includes_runtime_reachability_facts() -> None:
+    payload = build_metrics_report_payload(
+        scan_root="/repo",
+        project_metrics=_project_metrics(dead_confidence="high"),
+        units=(),
+        class_metrics=(),
+        runtime_reachability=(
+            RuntimeReachabilityFact(
+                target_qualname="pkg.api:list_items",
+                filepath="/repo/pkg/api.py",
+                start_line=12,
+                end_line=14,
+                target_kind="function",
+                framework="fastapi",
+                edge_kind="registers_handler",
+                confidence="medium",
+                evidence="route decorator",
+                evidence_symbol="router.get",
+                source_qualname="pkg.api:router",
+            ),
+        ),
+        suppressed_dead_code=(),
+    )
+
+    dead_code = cast(dict[str, object], payload["dead_code"])
+    runtime_reachability = cast(dict[str, object], dead_code["runtime_reachability"])
+    assert runtime_reachability["summary"] == {
+        "total": 1,
+        "by_framework": {"fastapi": 1},
+        "by_edge_kind": {"registers_handler": 1},
+        "by_confidence": {"medium": 1},
+    }
+    assert runtime_reachability["items"] == [
+        {
+            "target_qualname": "pkg.api:list_items",
+            "filepath": "/repo/pkg/api.py",
+            "start_line": 12,
+            "end_line": 14,
+            "target_kind": "function",
+            "framework": "fastapi",
+            "edge_kind": "registers_handler",
+            "confidence": "medium",
+            "evidence": "route decorator",
+            "evidence_symbol": "router.get",
+            "source_qualname": "pkg.api:router",
+        }
     ]
 
 
@@ -839,6 +934,21 @@ def test_load_cached_metrics_extended_decodes_adoption_api_and_security_surfaces
                 }
             ],
         },
+        "runtime_reachability": [
+            {
+                "target_qualname": "pkg.mod:run",
+                "filepath": "pkg/mod.py",
+                "start_line": 10,
+                "end_line": 12,
+                "target_kind": "function",
+                "framework": "fastapi",
+                "edge_kind": "registers_handler",
+                "confidence": "medium",
+                "evidence": "route decorator",
+                "evidence_symbol": "router.get",
+                "source_qualname": "pkg.mod:router",
+            }
+        ],
         "security_surfaces": [
             {
                 "category": "network_boundary",
@@ -855,11 +965,16 @@ def test_load_cached_metrics_extended_decodes_adoption_api_and_security_surfaces
             }
         ],
     }
-    *_, typing_coverage, docstring_coverage, api_surface, security_surfaces = (
-        _load_cached_metrics_extended(
-            entry,
-            filepath="pkg/mod.py",
-        )
+    (
+        *_,
+        typing_coverage,
+        docstring_coverage,
+        api_surface,
+        runtime_reachability,
+        security_surfaces,
+    ) = _load_cached_metrics_extended(
+        entry,
+        filepath="pkg/mod.py",
     )
     assert typing_coverage is not None
     assert docstring_coverage is not None
@@ -867,6 +982,21 @@ def test_load_cached_metrics_extended_decodes_adoption_api_and_security_surfaces
     assert typing_coverage.any_annotation_count == 1
     assert docstring_coverage.public_symbol_documented == 2
     assert api_surface.symbols[0].qualname == "pkg.mod:run"
+    assert runtime_reachability == (
+        RuntimeReachabilityFact(
+            target_qualname="pkg.mod:run",
+            filepath="pkg/mod.py",
+            start_line=10,
+            end_line=12,
+            target_kind="function",
+            framework="fastapi",
+            edge_kind="registers_handler",
+            confidence="medium",
+            evidence="route decorator",
+            evidence_symbol="router.get",
+            source_qualname="pkg.mod:router",
+        ),
+    )
     assert security_surfaces == (
         SecuritySurface(
             category="network_boundary",

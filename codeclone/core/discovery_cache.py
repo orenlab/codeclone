@@ -14,6 +14,7 @@ from ..cache.entries import (
     ClassMetricsDict,
     DeadCandidateDict,
     ModuleDepDict,
+    RuntimeReachabilityFactDict,
     SecuritySurfaceDict,
     StructuralFindingGroupDict,
 )
@@ -26,6 +27,11 @@ from ..models import (
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
     PublicSymbol,
+    RuntimeReachabilityConfidence,
+    RuntimeReachabilityEdgeKind,
+    RuntimeReachabilityFact,
+    RuntimeReachabilityFramework,
+    RuntimeReachabilityTargetKind,
     SecuritySurface,
     SecuritySurfaceCategory,
     SecuritySurfaceClassificationMode,
@@ -166,6 +172,60 @@ def _security_surface_evidence_kind(
 ) -> SecuritySurfaceEvidenceKind | None:
     match value:
         case "builtin" | "call" | "import":
+            return value
+        case _:
+            return None
+
+
+def _runtime_reachability_framework(
+    value: object,
+) -> RuntimeReachabilityFramework | None:
+    match value:
+        case (
+            "celery"
+            | "click"
+            | "dependency_injector"
+            | "django"
+            | "fastapi"
+            | "starlette"
+            | "typer"
+        ):
+            return value
+        case _:
+            return None
+
+
+def _runtime_reachability_edge_kind(
+    value: object,
+) -> RuntimeReachabilityEdgeKind | None:
+    match value:
+        case (
+            "declares_dependency"
+            | "provides"
+            | "registers_command"
+            | "registers_handler"
+            | "registers_task"
+        ):
+            return value
+        case _:
+            return None
+
+
+def _runtime_reachability_confidence(
+    value: object,
+) -> RuntimeReachabilityConfidence | None:
+    match value:
+        case "high" | "medium" | "low":
+            return value
+        case _:
+            return None
+
+
+def _runtime_reachability_target_kind(
+    value: object,
+) -> RuntimeReachabilityTargetKind | None:
+    match value:
+        case "function" | "class" | "method":
             return value
         case _:
             return None
@@ -514,6 +574,35 @@ def _security_surface_from_cache_row(
     )
 
 
+def _runtime_reachability_from_cache_row(
+    fact_row: RuntimeReachabilityFactDict,
+) -> RuntimeReachabilityFact | None:
+    target_kind = _runtime_reachability_target_kind(fact_row.get("target_kind"))
+    framework = _runtime_reachability_framework(fact_row.get("framework"))
+    edge_kind = _runtime_reachability_edge_kind(fact_row.get("edge_kind"))
+    confidence = _runtime_reachability_confidence(fact_row.get("confidence"))
+    if (
+        target_kind is None
+        or framework is None
+        or edge_kind is None
+        or confidence is None
+    ):
+        return None
+    return RuntimeReachabilityFact(
+        target_qualname=fact_row["target_qualname"],
+        filepath=fact_row["filepath"],
+        start_line=fact_row["start_line"],
+        end_line=fact_row["end_line"],
+        target_kind=target_kind,
+        framework=framework,
+        edge_kind=edge_kind,
+        confidence=confidence,
+        evidence=fact_row["evidence"],
+        evidence_symbol=fact_row["evidence_symbol"],
+        source_qualname=fact_row["source_qualname"],
+    )
+
+
 def load_cached_metrics_extended(
     entry: CacheEntry,
     *,
@@ -527,6 +616,7 @@ def load_cached_metrics_extended(
     ModuleTypingCoverage | None,
     ModuleDocstringCoverage | None,
     ModuleApiSurface | None,
+    tuple[RuntimeReachabilityFact, ...],
     tuple[SecuritySurface, ...],
 ]:
     class_metrics_rows: list[ClassMetricsDict] = entry.get("class_metrics", [])
@@ -568,6 +658,14 @@ def load_cached_metrics_extended(
         parsed_surface = _security_surface_from_cache_row(surface_row)
         if parsed_surface is not None:
             security_surface_items.append(parsed_surface)
+    reachability_rows: list[RuntimeReachabilityFactDict] = entry.get(
+        "runtime_reachability", []
+    )
+    reachability_items: list[RuntimeReachabilityFact] = []
+    for fact_row in reachability_rows:
+        parsed_fact = _runtime_reachability_from_cache_row(fact_row)
+        if parsed_fact is not None:
+            reachability_items.append(parsed_fact)
     return (
         class_metrics,
         module_deps,
@@ -577,5 +675,6 @@ def load_cached_metrics_extended(
         _typing_coverage_from_cache_dict(entry.get("typing_coverage")),
         _docstring_coverage_from_cache_dict(entry.get("docstring_coverage")),
         _api_surface_from_cache_dict(entry.get("api_surface")),
+        tuple(reachability_items),
         tuple(security_surface_items),
     )

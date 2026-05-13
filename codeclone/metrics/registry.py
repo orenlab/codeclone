@@ -20,6 +20,7 @@ from ..models import (
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
     ProjectMetrics,
+    RuntimeReachabilityFact,
 )
 from ..utils.coerce import as_int as _as_int
 from ..utils.coerce import as_str as _as_str
@@ -115,6 +116,14 @@ def _is_tuple_of_module_deps(value: object) -> TypeGuard[tuple[ModuleDep, ...]]:
     )
 
 
+def _is_tuple_of_runtime_reachability(
+    value: object,
+) -> TypeGuard[tuple[RuntimeReachabilityFact, ...]]:
+    return isinstance(value, tuple) and all(
+        isinstance(item, RuntimeReachabilityFact) for item in value
+    )
+
+
 def _is_tuple_of_typing_modules(
     value: object,
 ) -> TypeGuard[tuple[ModuleTypingCoverage, ...]]:
@@ -149,6 +158,7 @@ def project_metrics_defaults() -> dict[str, object]:
         "dependency_max_depth": 0,
         "dependency_longest_chains": (),
         "dead_code": (),
+        "runtime_reachability": (),
         "health": _EMPTY_HEALTH_SCORE,
         "typing_param_total": 0,
         "typing_param_annotated": 0,
@@ -190,6 +200,10 @@ def build_project_metrics(project_fields: dict[str, object]) -> ProjectMetrics:
             "dependency_longest_chains",
         ),
         dead_code=_result_dead_items(project_fields, "dead_code"),
+        runtime_reachability=_result_runtime_reachability(
+            project_fields,
+            "runtime_reachability",
+        ),
         health=_result_health(project_fields, "health"),
         typing_param_total=_result_int(project_fields, "typing_param_total"),
         typing_param_annotated=_result_int(project_fields, "typing_param_annotated"),
@@ -249,6 +263,14 @@ def _result_module_deps(
 ) -> tuple[ModuleDep, ...]:
     value = result.get(key, ())
     return value if _is_tuple_of_module_deps(value) else ()
+
+
+def _result_runtime_reachability(
+    result: dict[str, object],
+    key: str,
+) -> tuple[RuntimeReachabilityFact, ...]:
+    value = result.get(key, ())
+    return value if _is_tuple_of_runtime_reachability(value) else ()
 
 
 def _result_health(result: dict[str, object], key: str) -> HealthScore:
@@ -484,10 +506,12 @@ def _build_dead_code_result(context: MetricProjectContext) -> MetricResult:
             definitions=tuple(context.dead_candidates),
             referenced_names=context.referenced_names,
             referenced_qualnames=context.referenced_qualnames,
+            runtime_reachability=context.runtime_reachability,
         )
     return {
         "dead_code": dead_items,
         "dead_items": dead_items,
+        "runtime_reachability": tuple(context.runtime_reachability),
     }
 
 
@@ -505,6 +529,10 @@ def _aggregate_dead_code_family(results: list[MetricResult]) -> MetricAggregate:
     return MetricAggregate(
         project_fields={
             "dead_code": _result_dead_items(result, "dead_code"),
+            "runtime_reachability": _result_runtime_reachability(
+                result,
+                "runtime_reachability",
+            ),
         },
         artifacts=({"dead_items": dead_items} if isinstance(dead_items, tuple) else {}),
     )

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the canonical report contract in `2.0.0`: report schema `2.10` plus
+Define the canonical report contract in `2.0.1`: report schema `2.11` plus
 deterministic text/Markdown/SARIF/HTML projections.
 
 ## Public surface
@@ -84,6 +84,9 @@ Refs:
 - `security_surfaces` is a report-only exact inventory of security-relevant
   capabilities and trust-boundary code. It does not claim vulnerabilities or
   exploitability.
+- `dead_code.runtime_reachability` carries exact framework registration facts
+  used by the dead-code liveness filter. It is explanatory evidence, not a
+  second findings family or a vulnerability/security signal.
 - Clone groups excluded by project policy are carried only under suppressed clone buckets and do not affect active
   findings, health, clone gating, or suggestions.
 

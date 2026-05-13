@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Dead code
+
+- Add framework-aware runtime reachability for dead-code analysis: FastAPI/Starlette
+  routes and `Annotated[..., Depends/Security(...)]` dependencies, Django URL patterns,
+  Dependency Injector providers, Typer/Click commands, Celery tasks, top-level `__all__`
+  exports, package entry points, and Pydantic validator/serializer hooks. Supported
+  registrations suppress false dead-code findings without framework execution or
+  name-only heuristics.
+- Treat `typing.Protocol` and `typing_extensions.Protocol` declarations, including
+  generic `Protocol[T]`, as type-only contracts so structural interfaces do not produce
+  false-positive dead-code findings.
+- Bump cache schema to `2.7` and report schema to `2.11` to carry reachability facts
+  for cold/warm parity and report explainability.
+
 ## [2.0.0] - 2026-04-30
 
 `2.0.0` promotes the completed 2.0 release line to the stable public contract.

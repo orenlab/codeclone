@@ -17,12 +17,20 @@ import pytest
 
 import codeclone.analysis._module_walk as module_walk_mod
 import codeclone.analysis.parser as parser_mod
+import codeclone.analysis.reachability as reachability_mod
 import codeclone.analysis.units as units_mod
 from codeclone import qualnames
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.contracts.errors import ParseError
 from codeclone.metrics.dead_code import find_unused
-from codeclone.models import BlockUnit, ClassMetrics, ModuleDep, SegmentUnit, Unit
+from codeclone.models import (
+    BlockUnit,
+    ClassMetrics,
+    ModuleDep,
+    RuntimeReachabilityFact,
+    SegmentUnit,
+    Unit,
+)
 from codeclone.qualnames import FunctionNode, QualnameCollector
 
 
@@ -103,8 +111,26 @@ def _dead_qualnames_from_source(
         definitions=file_metrics.dead_candidates,
         referenced_names=file_metrics.referenced_names,
         referenced_qualnames=file_metrics.referenced_qualnames,
+        runtime_reachability=file_metrics.runtime_reachability,
     )
     return tuple(item.qualname for item in dead)
+
+
+def _runtime_reachability_from_source(
+    source: str,
+    *,
+    filepath: str = "pkg/mod.py",
+    module_name: str = "pkg.mod",
+) -> tuple[RuntimeReachabilityFact, ...]:
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath=filepath,
+        module_name=module_name,
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    return file_metrics.runtime_reachability
 
 
 def test_extracts_function_unit() -> None:
@@ -879,7 +905,7 @@ class B(te.Protocol[int]):
         protocol_symbol_aliases=protocol_symbol_aliases,
         protocol_module_aliases=protocol_module_aliases,
     )
-    assert not module_walk_mod._is_protocol_class(
+    assert module_walk_mod._is_protocol_class(
         class_b,
         protocol_symbol_aliases=protocol_symbol_aliases,
         protocol_module_aliases=protocol_module_aliases,
@@ -896,6 +922,26 @@ def f(x):
     ).body[0]
     assert isinstance(runtime_candidate, ast.FunctionDef)
     assert module_walk_mod._is_non_runtime_candidate(runtime_candidate)
+
+    dynamic_decorator_candidate = ast.parse(
+        """
+@(lambda fn: fn)
+def dynamic():
+    return None
+""".strip()
+    ).body[0]
+    assert isinstance(dynamic_decorator_candidate, ast.FunctionDef)
+    assert not module_walk_mod._is_non_runtime_candidate(dynamic_decorator_candidate)
+
+    dotted_overload_candidate = ast.parse(
+        """
+@typing.overload
+def typed(value):
+    return value
+""".strip()
+    ).body[0]
+    assert isinstance(dotted_overload_candidate, ast.FunctionDef)
+    assert module_walk_mod._is_non_runtime_candidate(dotted_overload_candidate)
 
 
 def test_resolve_referenced_qualnames_covers_module_class_and_attr_branches() -> None:
@@ -1257,6 +1303,492 @@ def test_dead_code_respects_runtime_hooks_and_inline_suppressions(
     assert _dead_qualnames_from_source(source) == expected_dead
 
 
+def test_dead_code_uses_fastapi_route_and_dependency_reachability() -> None:
+    source = """
+from fastapi import APIRouter, Depends
+
+router = APIRouter()
+
+def require_user():
+    return "user"
+
+@router.get("/items", dependencies=[Depends(require_user)])
+def list_items(current_user=Depends(require_user)):
+    return [current_user]
+
+@fake.get("/items")
+def fake_handler():
+    return []
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == (
+        "pkg.mod:fake_handler",
+        "pkg.mod:orphan",
+    )
+
+
+def test_dead_code_uses_fastapi_annotated_dependency_reachability() -> None:
+    source = """
+from typing import Annotated
+from fastapi import APIRouter, Depends, Security
+
+router = APIRouter()
+
+def require_user():
+    return "user"
+
+def require_token():
+    return "token"
+
+def require_extra():
+    return "extra"
+
+def require_kwargs():
+    return "kwargs"
+
+@router.get("/items")
+def list_items(
+    current_user: Annotated[str, Depends(require_user)],
+    *extra: Annotated[str, Depends(require_extra)],
+    token: Annotated[str, Security(dependency=require_token)],
+    optional: list[str] | None = None,
+    broken: Annotated[str] | None = None,
+    **kwargs: Annotated[str, Depends(require_kwargs)],
+):
+    return [current_user, token, extra, optional, broken, kwargs]
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == ("pkg.mod:orphan",)
+
+
+def test_runtime_reachability_helper_symbol_edges() -> None:
+    tree = ast.parse(
+        """
+if TYPE_CHECKING:
+    pass
+
+if typing.TYPE_CHECKING:
+    pass
+
+target = loader()[name]
+"""
+    )
+    guarded_if = cast(ast.If, tree.body[0])
+    typing_guarded_if = cast(ast.If, tree.body[1])
+    subscript_value = cast(ast.Assign, tree.body[2]).value
+
+    assert reachability_mod._is_type_checking_guard(guarded_if.test) is True
+    assert reachability_mod._is_type_checking_guard(typing_guarded_if.test) is True
+    assert reachability_mod._dotted_name(subscript_value) == "loader"
+    assert reachability_mod._resolve_symbol(ast.Constant(value=1), {}) is None
+
+
+def test_runtime_reachability_internal_guards_stay_safe() -> None:
+    empty_collector = QualnameCollector()
+    visitor = reachability_mod._RuntimeReachabilityVisitor(
+        module_name="pkg.mod",
+        filepath="pkg/mod.py",
+        collector=empty_collector,
+        aliases={
+            "containers": "dependency_injector.containers",
+            "providers": "dependency_injector.providers",
+        },
+        runtime_objects={},
+        included_routers=set(),
+    )
+    tree = ast.parse(
+        """
+def unindexed_function():
+    return None
+
+class Container(containers.DeclarativeContainer):
+    service = providers.Factory(Service)
+"""
+    )
+
+    visitor.visit(tree)
+    visitor._emit(
+        target=reachability_mod._Target(
+            qualname="pkg.mod:missing",
+            start_line=0,
+            end_line=0,
+            kind="function",
+        ),
+        framework="fastapi",
+        edge_kind="registers_handler",
+        confidence="high",
+        evidence="manual guard",
+        evidence_symbol="manual",
+        source_qualname="pkg.mod",
+    )
+
+    assert visitor.facts == []
+
+
+def test_runtime_reachability_covers_fastapi_aliases_and_dependency_edges() -> None:
+    source = """
+from typing_extensions import Annotated as Ann
+from fastapi import APIRouter as Router, Depends as Inject, FastAPI
+
+router = Router()
+also_router = Router()
+app = FastAPI()
+app.include_router(router)
+app.include_router(router=also_router)
+
+def require_user():
+    return "user"
+
+def require_token():
+    return "token"
+
+def require_session():
+    return "session"
+
+@router.post("/items", dependencies=Inject(require_user))
+async def create_item(token=Inject(dependency=require_token)):
+    return token
+
+@router.get("/annotated")
+def annotated_dependency(token: Ann[str, Inject(require_session)]):
+    return token
+
+@also_router.websocket("/ws")
+def websocket_endpoint():
+    return None
+"""
+
+    facts = _runtime_reachability_from_source(source)
+    by_target = {(fact.target_qualname, fact.edge_kind): fact for fact in facts}
+
+    assert by_target[("pkg.mod:create_item", "registers_handler")].confidence == (
+        "high"
+    )
+    assert by_target[("pkg.mod:require_user", "declares_dependency")].evidence == (
+        "dependency registration"
+    )
+    assert by_target[
+        ("pkg.mod:require_token", "declares_dependency")
+    ].evidence_symbol == ("fastapi.Depends")
+    assert by_target[
+        ("pkg.mod:annotated_dependency", "registers_handler")
+    ].confidence == ("high")
+    assert by_target[
+        ("pkg.mod:require_session", "declares_dependency")
+    ].evidence_symbol == ("fastapi.Depends")
+    assert by_target[
+        ("pkg.mod:websocket_endpoint", "registers_handler")
+    ].confidence == ("high")
+
+
+def test_runtime_reachability_ignores_type_checking_only_frameworks() -> None:
+    source = """
+from typing import TYPE_CHECKING
+from fastapi import APIRouter
+
+router = APIRouter()
+
+if TYPE_CHECKING:
+    from fastapi import Depends as Inject
+
+def dep():
+    return 1
+
+@router.get("/items")
+def view(value=Inject(dep)):
+    return value
+"""
+
+    facts = _runtime_reachability_from_source(source)
+
+    assert [fact.target_qualname for fact in facts] == ["pkg.mod:view"]
+
+
+def test_runtime_reachability_covers_binding_edge_cases() -> None:
+    source = """
+from . import relative_import
+from framework import *
+from fastapi import APIRouter, Depends, FastAPI
+
+router = APIRouter()
+app = FastAPI()
+other = object()
+app.attr = FastAPI()
+ann_only: FastAPI
+
+FastAPI.include_router(router)
+app.include_router(42)
+app.include_router(router=42)
+app.include_router(prefix="/api")
+other.include_router(router)
+
+def dep():
+    return 1
+
+@router.get
+def bare_route_decorator():
+    return 1
+
+@router.get("/name", name="items")
+def named_route():
+    return 2
+
+@router.get("/bad-dependencies", dependencies=dependency_list)
+def dependency_list_route():
+    return 3
+
+@router.get("/empty-dependency")
+def empty_dependency(value=Depends()):
+    return value
+
+@router.get("/kw-dependency")
+def keyword_dependency(value=Depends(dep, use_cache=False)):
+    return value
+"""
+
+    facts = _runtime_reachability_from_source(source)
+    by_target = {(fact.target_qualname, fact.edge_kind): fact for fact in facts}
+
+    assert by_target[("pkg.mod:bare_route_decorator", "registers_handler")]
+    assert by_target[("pkg.mod:named_route", "registers_handler")]
+    assert by_target[("pkg.mod:dependency_list_route", "registers_handler")]
+    assert by_target[("pkg.mod:empty_dependency", "registers_handler")]
+    assert by_target[("pkg.mod:keyword_dependency", "registers_handler")]
+    assert by_target[("pkg.mod:dep", "declares_dependency")].evidence_symbol == (
+        "fastapi.Depends"
+    )
+
+
+def test_dead_code_uses_django_urlpattern_reachability() -> None:
+    source = """
+from django.urls import path
+
+class ItemView:
+    def get(self, request):
+        return request
+
+    def helper(self):
+        return 1
+
+def list_items(request):
+    return request
+
+urlpatterns = [
+    path("items/", list_items),
+    path("items/<int:item_id>/", ItemView.as_view()),
+]
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == (
+        "pkg.mod:ItemView.helper",
+        "pkg.mod:orphan",
+    )
+
+
+def test_runtime_reachability_covers_django_re_path_and_urlpattern_concat() -> None:
+    source = """
+from django.urls import path, re_path
+
+def home(request):
+    return request
+
+def search(request):
+    return request
+
+urlpatterns = [
+    object(),
+    path("home/", home),
+] + (
+    re_path(r"^search/$", search),
+    re_path(r"^broken/$"),
+)
+"""
+
+    facts = _runtime_reachability_from_source(source)
+
+    assert [fact.target_qualname for fact in facts] == [
+        "pkg.mod:home",
+        "pkg.mod:search",
+    ]
+    assert {fact.evidence_symbol for fact in facts} == {
+        "django.urls.path",
+        "django.urls.re_path",
+    }
+
+
+def test_runtime_reachability_ignores_unresolved_django_url_entries() -> None:
+    source = """
+from django.urls import path
+
+def local_view(request):
+    return request
+
+urlpatterns = make_patterns()
+urlpatterns = [
+    "not a call",
+    path("missing/"),
+    path("external/", external.view),
+    path("local/", local_view),
+]
+"""
+
+    facts = _runtime_reachability_from_source(source)
+
+    assert [fact.target_qualname for fact in facts] == ["pkg.mod:local_view"]
+
+
+def test_dead_code_uses_dependency_injector_provider_reachability() -> None:
+    source = """
+from dependency_injector import containers, providers
+
+class Service:
+    pass
+
+class Unused:
+    pass
+
+class Container(containers.DeclarativeContainer):
+    service = providers.Factory(Service)
+"""
+
+    assert _dead_qualnames_from_source(source) == ("pkg.mod:Unused",)
+
+
+def test_runtime_reachability_covers_di_annassign_and_invalid_provider() -> None:
+    source = """
+from dependency_injector import containers, providers
+
+class Service:
+    pass
+
+class Repository:
+    pass
+
+class Container(containers.DeclarativeContainer):
+    config = object()
+    missing = providers.Factory()
+    raw = object
+    service: object = providers.Singleton(Service)
+    repository = providers.Factory(Repository)
+    (tuple_provider,) = providers.Factory(Service)
+    literal = providers.Factory(1)
+
+    def helper(self):
+        return None
+"""
+
+    facts = _runtime_reachability_from_source(source)
+    provider_targets = {
+        fact.target_qualname: fact
+        for fact in facts
+        if fact.evidence == "Dependency Injector provider"
+    }
+
+    assert sorted(provider_targets) == [
+        "pkg.mod:Repository",
+        "pkg.mod:Service",
+    ]
+    assert provider_targets["pkg.mod:Service"].source_qualname == (
+        "pkg.mod:Container.service"
+    )
+
+
+def test_dead_code_uses_cli_and_task_registration_reachability() -> None:
+    source = """
+import click
+import typer
+from celery import Celery, shared_task
+
+cli = typer.Typer()
+celery_app = Celery("demo")
+
+@cli.command()
+def run_typer():
+    return 1
+
+@click.command()
+def run_click():
+    return 2
+
+@celery_app.task
+def run_task():
+    return 3
+
+@shared_task
+def run_shared_task():
+    return 4
+
+def orphan():
+    return 5
+"""
+
+    assert _dead_qualnames_from_source(source) == ("pkg.mod:orphan",)
+
+
+def test_runtime_reachability_covers_starlette_click_group_and_celery_aliases() -> None:
+    source = """
+import click
+from celery import Celery as CeleryApp
+from starlette.applications import Starlette
+from starlette.routing import Router
+
+app: Starlette = Starlette()
+router = Router()
+worker = CeleryApp("demo")
+not_worker = object()
+group = click.Group()
+
+@app.route("/home")
+def home(request):
+    return request
+
+@router.route("/internal")
+def internal(request):
+    return request
+
+@click.group()
+def cli():
+    return None
+
+@cli.callback()
+def configure_cli():
+    return None
+
+@group.command()
+def grouped_command():
+    return None
+
+@worker.task()
+def run_task():
+    return None
+
+@not_worker.task()
+def not_registered_task():
+    return None
+"""
+
+    facts = _runtime_reachability_from_source(source)
+    by_target = {fact.target_qualname: fact for fact in facts}
+
+    assert by_target["pkg.mod:home"].framework == "starlette"
+    assert by_target["pkg.mod:home"].confidence == "high"
+    assert by_target["pkg.mod:internal"].confidence == "medium"
+    assert by_target["pkg.mod:cli"].framework == "click"
+    assert by_target["pkg.mod:configure_cli"].evidence_symbol == "cli.callback"
+    assert by_target["pkg.mod:grouped_command"].evidence_symbol == "group.command"
+    assert by_target["pkg.mod:run_task"].framework == "celery"
+    assert "pkg.mod:not_registered_task" not in by_target
+
+
 def test_collect_dead_candidates_and_extract_skip_classes_without_lineno(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1330,18 +1862,94 @@ def wrapper():
     assert "pkg.helpers:decorate" in file_metrics.referenced_qualnames
 
 
+def test_extract_collects_referenced_qualnames_for_module_all_exports() -> None:
+    source = """
+__all__ = ["PublicClass"] + ("public_func",)
+__all__: list[str] = ["TypedPublic"]
+__all__ += ["AugmentedPublic"]
+__all__.append("AlsoPublic")
+__all__.extend(["exported_later"])
+__all__.append(object())
+__all__.extend([["NestedInvalid"]])
+
+class PublicClass:
+    pass
+
+class TypedPublic:
+    pass
+
+class AugmentedPublic:
+    pass
+
+class AlsoPublic:
+    pass
+
+class Internal:
+    def public_func(self):
+        return 1
+
+def public_func():
+    return 2
+
+def exported_later():
+    return 3
+
+def internal_func():
+    __all__ = ["NestedOnly"]
+    return 4
+
+def NestedOnly():
+    return 5
+
+def NestedInvalid():
+    return 6
+"""
+    dead = set(_dead_qualnames_from_source(source))
+
+    exported = {
+        "pkg.mod:PublicClass",
+        "pkg.mod:TypedPublic",
+        "pkg.mod:AugmentedPublic",
+        "pkg.mod:AlsoPublic",
+        "pkg.mod:public_func",
+        "pkg.mod:exported_later",
+    }
+    still_dead = {
+        "pkg.mod:Internal",
+        "pkg.mod:Internal.public_func",
+        "pkg.mod:internal_func",
+        "pkg.mod:NestedOnly",
+        "pkg.mod:NestedInvalid",
+    }
+    assert dead.isdisjoint(exported)
+    assert still_dead <= dead
+
+    state = module_walk_mod._ModuleWalkState()
+    module_walk_mod._collect_module_all_exports(ast.Pass(), state)
+    assert state.exported_names == set()
+
+
 def test_collect_dead_candidates_skips_protocol_and_stub_like_symbols() -> None:
     src = """
 from abc import abstractmethod
-from typing import Protocol, overload
+from typing import Protocol, TypeVar, overload
+
+T = TypeVar("T")
 
 class _Reader(Protocol):
     def read(self) -> str: ...
+
+class _Box(Protocol[T]):
+    def get(self) -> T: ...
 
 class _Base:
     @abstractmethod
     def parse(self) -> str:
         raise NotImplementedError
+
+class _DynamicBase(factory()):
+    def hook(self) -> str:
+        return "runtime"
 
 @overload
 def parse_value(value: int) -> str: ...
@@ -1358,9 +1966,101 @@ def parse_value(value: object) -> str:
         protocol_module_aliases=walk.protocol_module_aliases,
     )
     qualnames = {item.qualname for item in dead}
-    assert "pkg.mod:_Reader.read" not in qualnames
-    assert "pkg.mod:_Base.parse" not in qualnames
+    type_only = {
+        "pkg.mod:_Reader",
+        "pkg.mod:_Reader.read",
+        "pkg.mod:_Box",
+        "pkg.mod:_Box.get",
+        "pkg.mod:_Base.parse",
+    }
+    assert qualnames.isdisjoint(type_only)
     assert "pkg.mod:parse_value" in qualnames
+
+
+def test_collect_dead_candidates_skips_pydantic_hooks_and_dataclass_post_init() -> None:
+    source = """
+from dataclasses import dataclass
+from pydantic import BaseModel, computed_field, field_validator as validate_field
+from pydantic.v1 import validator as legacy_validator
+import pydantic as pyd
+
+class User(BaseModel):
+    @validate_field("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return value
+
+    @pyd.model_validator(mode="after")
+    def validate_model(self):
+        return self
+
+    @computed_field
+    @property
+    def display_name(self) -> str:
+        return "user"
+
+    @legacy_validator("legacy")
+    def validate_legacy(cls, value: str) -> str:
+        return value
+
+class Plain:
+    def validate_name(self) -> str:
+        return "unused"
+
+@dataclass
+class Config:
+    name: str
+
+    def __post_init__(self) -> None:
+        self.name = self.name.strip()
+
+    def helper(self) -> None:
+        return None
+"""
+    _tree, collector, walk = _collect_module_walk(source)
+    candidates = module_walk_mod._collect_dead_candidates(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        collector=collector,
+        protocol_symbol_aliases=walk.protocol_symbol_aliases,
+        protocol_module_aliases=walk.protocol_module_aliases,
+        non_runtime_decorator_aliases=walk.non_runtime_decorator_aliases,
+        pydantic_module_aliases=walk.pydantic_module_aliases,
+    )
+    candidate_qualnames = {item.qualname for item in candidates}
+
+    pydantic_hooks = {
+        "pkg.mod:User.validate_name",
+        "pkg.mod:User.validate_model",
+        "pkg.mod:User.display_name",
+        "pkg.mod:User.validate_legacy",
+    }
+    assert candidate_qualnames.isdisjoint(pydantic_hooks)
+    assert "pkg.mod:Plain.validate_name" in candidate_qualnames
+    assert "pkg.mod:Config.helper" in set(_dead_qualnames_from_source(source))
+    assert "pkg.mod:Config.__post_init__" not in set(
+        _dead_qualnames_from_source(source)
+    )
+
+
+def test_dead_code_keeps_explicitly_inherited_abc_base_live() -> None:
+    source = """
+from abc import ABC, abstractmethod
+
+class _Base(ABC):
+    @abstractmethod
+    def parse(self) -> str:
+        raise NotImplementedError
+
+class _Impl(_Base):
+    def parse(self) -> str:
+        return "ok"
+"""
+    qualnames = set(_dead_qualnames_from_source(source))
+    assert "pkg.mod:_Base" not in qualnames
+    assert "pkg.mod:_Base.parse" not in qualnames
+    assert "pkg.mod:_Impl" in qualnames
+    assert "pkg.mod:_Impl.parse" in qualnames
 
 
 def test_extract_syntax_error() -> None:
