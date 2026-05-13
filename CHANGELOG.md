@@ -1,6 +1,9 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.1] - 2026-05-13
+
+`2.0.1` is a focused stability release for dead-code precision and cache/report
+contract parity after the 2.0 line.
 
 ### Dead code
 

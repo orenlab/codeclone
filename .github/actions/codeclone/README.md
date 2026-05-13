@@ -80,7 +80,7 @@ jobs:
 | Input                   | Default                         | Purpose                                                                                                           |
 |-------------------------|---------------------------------|-------------------------------------------------------------------------------------------------------------------|
 | `python-version`        | `3.14`                          | Python version used to run the action                                                                             |
-| `package-version`       | `2.0.0`                         | CodeClone version from PyPI for remote installs; ignored when the action runs from the checked-out CodeClone repo |
+| `package-version`       | `2.0.1`                         | CodeClone version from PyPI for remote installs; ignored when the action runs from the checked-out CodeClone repo |
 | `path`                  | `.`                             | Project root to analyze                                                                                           |
 | `json-path`             | `.cache/codeclone/report.json`  | JSON report output path                                                                                           |
 | `sarif`                 | `true`                          | Generate SARIF and try to upload it                                                                               |
