@@ -35,13 +35,6 @@ IDE, and MCP — for both **human reviewers** and **AI agents**.
 Docs: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/) ·
 Live sample report: [orenlab.github.io/codeclone/examples/report/](https://orenlab.github.io/codeclone/examples/report/)
 
-> [!NOTE]
-> This README and docs site document the CodeClone `2.0` release line.
-> For the previous `1.4.x` line, see the
-> [`v1.4.4` README](https://github.com/orenlab/codeclone/blob/v1.4.4/README.md)
-> and the
-> [`v1.4.4` docs tree](https://github.com/orenlab/codeclone/tree/v1.4.4/docs).
-
 ## Features
 
 **Control & governance**

@@ -12,11 +12,6 @@ This documentation site has two complementary layers:
 - **Contracts Book** — canonical behavioral contracts derived from code and locked tests
 - **Deep Dives** — architecture, CFG semantics, integrations, and operational rationale
 
-!!! note "Version Notice"
-    This site documents the CodeClone `2.0` release line.
-    For the previous `1.4.x` line, see the
-    [`v1.4.4` README](https://github.com/orenlab/codeclone/blob/v1.4.4/README.md) and the [`v1.4.4` docs tree](https://github.com/orenlab/codeclone/tree/v1.4.4/docs).
-
 !!! note "Licensing"
     CodeClone source code is licensed under MPL-2.0.
 
