@@ -23,6 +23,7 @@ const HOTSPOT_GROUPS = [
     {id: "newRegressions", label: "New Regressions", icon: "diff-added"},
     {id: "productionHotspots", label: "Production Hotspots", icon: "target"},
     {id: "changedFiles", label: "Changed Files", icon: "git-commit"},
+    {id: "coverageJoin", label: "Coverage Join", icon: "beaker"},
     {id: "securitySurfaces", label: "Security Surfaces", icon: "shield"},
     {id: "overloadedModules", label: "Overloaded Modules", icon: "symbol-module"},
 ];

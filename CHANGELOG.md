@@ -1,6 +1,9 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.1] - 2026-05-14
+
+`2.0.1` is a focused stability release for dead-code precision and cache/report
+contract parity after the 2.0 line.
 
 ### Dead code
 
@@ -13,6 +16,9 @@
 - Treat `typing.Protocol` and `typing_extensions.Protocol` declarations, including
   generic `Protocol[T]`, as type-only contracts so structural interfaces do not produce
   false-positive dead-code findings.
+- Show a one-time interactive CLI migration note for projects upgrading from
+  the 2.0.0 line when the refined reachability model may reduce dead-code
+  findings.
 - Bump cache schema to `2.7` and report schema to `2.11` to carry reachability facts
   for cold/warm parity and report explainability.
 

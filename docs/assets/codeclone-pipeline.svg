@@ -1,39 +1,42 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" viewBox="0 0 760 720" role="img">
+<svg xmlns="http://www.w3.org/2000/svg" width="860" viewBox="0 0 860 730" role="img">
     <title>CodeClone analysis pipeline</title>
-    <desc>Deterministic structural analysis pipeline with canonical report, baseline-aware gating, and multi-surface
-        outputs
+    <desc>Deterministic CodeClone pipeline from source discovery and cache reuse to canonical report, gates, and
+        human or agent-facing projections.
     </desc>
 
     <style>
         .box-gray { fill: #F1EFE8; stroke: #888780; }
-        .box-purple { fill: #EEEDFE; stroke: #534AB7; }
+        .box-purple { fill: #ECEBFF; stroke: #4F46E5; }
         .box-teal { fill: #E1F5EE; stroke: #0F6E56; }
         .box-amber { fill: #FAEEDA; stroke: #854F0B; }
 
         .t-gray { fill: #444441; }
-        .t-purple { fill: #3C3489; }
+        .t-purple { fill: #3730A3; }
         .t-teal { fill: #085041; }
         .t-amber { fill: #633806; }
 
         .note { fill: #6B6A65; }
         .arr { stroke: #888780; stroke-width: 1.5; fill: none; }
+        .arr-purple { stroke: #4F46E5; stroke-width: 1.5; fill: none; }
 
-        .lbl { font: 500 14px/1 'JetBrains Mono', monospace; }
+        .lbl { font: 600 14px/1 'JetBrains Mono', monospace; }
         .sub { font: 400 12px/1 'JetBrains Mono', monospace; }
+        .tiny { font: 400 11px/1 'JetBrains Mono', monospace; }
 
         @media (prefers-color-scheme: dark) {
         .box-gray { fill: #444441; stroke: #B4B2A9; }
-        .box-purple { fill: #3C3489; stroke: #AFA9EC; }
+        .box-purple { fill: #252158; stroke: #6366F1; }
         .box-teal { fill: #085041; stroke: #5DCAA5; }
         .box-amber { fill: #633806; stroke: #EF9F27; }
 
         .t-gray { fill: #D3D1C7; }
-        .t-purple { fill: #CECBF6; }
+        .t-purple { fill: #DCD9FF; }
         .t-teal { fill: #9FE1CB; }
         .t-amber { fill: #FAC775; }
 
         .note { fill: #C8C6BC; }
         .arr { stroke: #B4B2A9; }
+        .arr-purple { stroke: #6366F1; }
         }
     </style>
 
@@ -43,93 +46,82 @@
         </marker>
     </defs>
 
-    <!-- LEGEND -->
-    <rect x="520" y="40" width="12" height="12" rx="2" class="box-gray"/>
-    <text x="540" y="50" class="sub note">Input / control</text>
+    <!-- Main deterministic spine -->
+    <rect x="295" y="34" width="270" height="58" rx="10" class="box-gray"/>
+    <text x="430" y="57" text-anchor="middle" class="lbl t-gray">Source + config</text>
+    <text x="430" y="75" text-anchor="middle" class="sub note">files · CLI · pyproject</text>
 
-    <rect x="520" y="62" width="12" height="12" rx="2" class="box-purple"/>
-    <text x="540" y="72" class="sub note">Detection pipeline</text>
+    <line x1="430" y1="92" x2="430" y2="114" class="arr" marker-end="url(#arr)"/>
 
-    <rect x="520" y="84" width="12" height="12" rx="2" class="box-teal"/>
-    <text x="540" y="94" class="sub note">Analysis / canonical data</text>
+    <rect x="295" y="116" width="270" height="58" rx="10" class="box-gray"/>
+    <text x="430" y="139" text-anchor="middle" class="lbl t-gray">Discover + cache</text>
+    <text x="430" y="157" text-anchor="middle" class="sub note">sorted scan · compatible facts</text>
 
-    <rect x="520" y="106" width="12" height="12" rx="2" class="box-amber"/>
-    <text x="540" y="116" class="sub note">CI / governance</text>
+    <line x1="430" y1="174" x2="430" y2="196" class="arr" marker-end="url(#arr)"/>
 
-    <!-- PIPELINE -->
+    <rect x="295" y="198" width="270" height="58" rx="10" class="box-purple"/>
+    <text x="430" y="221" text-anchor="middle" class="lbl t-purple">Process misses</text>
+    <text x="430" y="239" text-anchor="middle" class="sub note">parallel or sequential workers</text>
 
-    <!-- Python source -->
-    <rect x="60" y="40" width="200" height="44" rx="8" class="box-gray"/>
-    <text x="160" y="62" text-anchor="middle" class="lbl t-gray">Python source</text>
+    <line x1="430" y1="256" x2="430" y2="278" class="arr-purple" marker-end="url(#arr)"/>
 
-    <line x1="160" y1="84" x2="160" y2="100" class="arr" marker-end="url(#arr)"/>
+    <rect x="295" y="280" width="270" height="76" rx="10" class="box-purple"/>
+    <text x="430" y="303" text-anchor="middle" class="lbl t-purple">Extract facts</text>
+    <text x="430" y="322" text-anchor="middle" class="sub note">AST/CFG · clone units</text>
+    <text x="430" y="340" text-anchor="middle" class="sub note">refs · reachability · security/API</text>
 
-    <!-- Parse -->
-    <rect x="60" y="102" width="200" height="44" rx="8" class="box-purple"/>
-    <text x="160" y="124" text-anchor="middle" class="lbl t-purple">Parse</text>
-    <text x="280" y="124" class="sub note">AST per file</text>
+    <line x1="430" y1="356" x2="430" y2="378" class="arr-purple" marker-end="url(#arr)"/>
 
-    <line x1="160" y1="146" x2="160" y2="162" class="arr" marker-end="url(#arr)"/>
+    <rect x="295" y="380" width="270" height="58" rx="10" class="box-purple"/>
+    <text x="430" y="403" text-anchor="middle" class="lbl t-purple">Group + policy</text>
+    <text x="430" y="421" text-anchor="middle" class="sub note">clones · findings · suppressions</text>
 
-    <!-- Normalize -->
-    <rect x="60" y="164" width="200" height="44" rx="8" class="box-purple"/>
-    <text x="160" y="186" text-anchor="middle" class="lbl t-purple">Normalize</text>
-    <text x="280" y="186" class="sub note">canonical form · rename-safe</text>
+    <line x1="430" y1="438" x2="430" y2="460" class="arr" marker-end="url(#arr)"/>
 
-    <line x1="160" y1="208" x2="160" y2="224" class="arr" marker-end="url(#arr)"/>
+    <rect x="295" y="462" width="270" height="76" rx="10" class="box-teal"/>
+    <text x="430" y="485" text-anchor="middle" class="lbl t-teal">Project metrics</text>
+    <text x="430" y="504" text-anchor="middle" class="sub note">health · deps · dead code</text>
+    <text x="430" y="522" text-anchor="middle" class="sub note">coverage join · suggestions</text>
 
-    <!-- CFG -->
-    <rect x="60" y="226" width="200" height="44" rx="8" class="box-purple"/>
-    <text x="160" y="248" text-anchor="middle" class="lbl t-purple">CFG</text>
-    <text x="280" y="248" class="sub note">control-flow graph</text>
+    <line x1="430" y1="538" x2="430" y2="560" class="arr" marker-end="url(#arr)"/>
 
-    <line x1="160" y1="270" x2="160" y2="286" class="arr" marker-end="url(#arr)"/>
+    <rect x="295" y="562" width="270" height="62" rx="10" class="box-teal"/>
+    <text x="430" y="586" text-anchor="middle" class="lbl t-teal">Canonical report</text>
+    <text x="430" y="604" text-anchor="middle" class="sub note">one JSON truth · facts only</text>
 
-    <!-- Fingerprint -->
-    <rect x="60" y="288" width="200" height="44" rx="8" class="box-purple"/>
-    <text x="160" y="310" text-anchor="middle" class="lbl t-purple">Fingerprint</text>
-    <text x="280" y="310" class="sub note">stable hash (fn / block / segment)</text>
+    <!-- Persistence sidecars -->
+    <rect x="610" y="112" width="190" height="66" rx="10" class="box-gray"/>
+    <text x="705" y="136" text-anchor="middle" class="lbl t-gray">Cache</text>
+    <text x="705" y="154" text-anchor="middle" class="sub note">optimization only</text>
+    <text x="705" y="170" text-anchor="middle" class="tiny note">never analysis truth</text>
+    <line x1="610" y1="145" x2="565" y2="145" class="arr" marker-end="url(#arr)"/>
 
-    <line x1="160" y1="332" x2="160" y2="348" class="arr" marker-end="url(#arr)"/>
+    <!-- Updated cache: height increased 66→76 to fit split tiny line -->
+    <rect x="610" y="284" width="190" height="76" rx="10" class="box-gray"/>
+    <text x="705" y="306" text-anchor="middle" class="lbl t-gray">Updated cache</text>
+    <text x="705" y="323" text-anchor="middle" class="sub note">fresh file facts</text>
+    <text x="705" y="338" text-anchor="middle" class="tiny note">stats · reachability</text>
+    <text x="705" y="351" text-anchor="middle" class="tiny note">surfaces · signals</text>
+    <line x1="565" y1="318" x2="610" y2="318" class="arr" marker-end="url(#arr)"/>
 
-    <!-- Group -->
-    <rect x="60" y="350" width="200" height="44" rx="8" class="box-purple"/>
-    <text x="160" y="372" text-anchor="middle" class="lbl t-purple">Group</text>
-    <text x="280" y="372" class="sub note">clone groups · structural findings</text>
+    <!-- Governance and projection branches -->
+    <rect x="60" y="544" width="205" height="64" rx="10" class="box-gray"/>
+    <text x="162" y="568" text-anchor="middle" class="lbl t-gray">Baselines</text>
+    <text x="162" y="586" text-anchor="middle" class="sub note">trusted diff state</text>
+    <text x="162" y="602" text-anchor="middle" class="tiny note">clone + metrics snapshots</text>
 
-    <line x1="160" y1="394" x2="160" y2="410" class="arr" marker-end="url(#arr)"/>
+    <rect x="60" y="638" width="205" height="64" rx="10" class="box-amber"/>
+    <text x="162" y="662" text-anchor="middle" class="lbl t-amber">Gates</text>
+    <text x="162" y="680" text-anchor="middle" class="sub note">diff · metrics · exit code</text>
 
-    <!-- Metrics -->
-    <rect x="60" y="412" width="200" height="44" rx="8" class="box-teal"/>
-    <text x="160" y="434" text-anchor="middle" class="lbl t-teal">Metrics</text>
-    <text x="280" y="434" class="sub note">complexity · coupling · cohesion · dead code</text>
+    <rect x="595" y="638" width="205" height="64" rx="10" class="box-teal"/>
+    <text x="697" y="662" text-anchor="middle" class="lbl t-teal">Projections</text>
+    <text x="697" y="680" text-anchor="middle" class="sub note">CLI · HTML · MCP · IDE</text>
+    <text x="697" y="696" text-anchor="middle" class="tiny note">JSON · MD · SARIF · TXT</text>
 
-    <line x1="160" y1="456" x2="160" y2="472" class="arr" marker-end="url(#arr)"/>
+    <line x1="162" y1="608" x2="162" y2="638" class="arr" marker-end="url(#arr)"/>
+    <path d="M390 624 C340 645 286 660 265 670" class="arr" marker-end="url(#arr)"/>
+    <path d="M470 624 C520 645 574 660 595 670" class="arr" marker-end="url(#arr)"/>
 
-    <!-- Canonical Report -->
-    <rect x="60" y="474" width="200" height="44" rx="8" class="box-teal"/>
-    <text x="160" y="496" text-anchor="middle" class="lbl t-teal">Canonical Report</text>
-    <text x="280" y="496" class="sub note">single source of truth (JSON)</text>
-
-    <line x1="160" y1="518" x2="160" y2="534" class="arr" marker-end="url(#arr)"/>
-
-    <!-- Gate -->
-    <rect x="60" y="536" width="200" height="44" rx="8" class="box-amber"/>
-    <text x="160" y="558" text-anchor="middle" class="lbl t-amber">Gate</text>
-    <text x="280" y="558" class="sub note">baseline diff · CI decision</text>
-
-    <line x1="160" y1="580" x2="160" y2="596" class="arr" marker-end="url(#arr)"/>
-
-    <!-- Surfaces -->
-    <rect x="60" y="598" width="200" height="44" rx="8" class="box-teal"/>
-    <text x="160" y="620" text-anchor="middle" class="lbl t-teal">Surfaces</text>
-    <text x="280" y="620" class="sub note">CLI · HTML · IDE · MCP · CI</text>
-
-    <!-- Baseline -->
-
-    <rect x="490" y="530" width="200" height="56" rx="8" class="box-gray"/>
-    <text x="590" y="552" text-anchor="middle" class="lbl t-gray">Baseline</text>
-    <text x="590" y="570" text-anchor="middle" class="sub note">trusted reference state</text>
-    <line x1="490" y1="578" x2="260" y2="578" class="arr" marker-end="url(#arr)"/>
-
+    <text x="430" y="725" text-anchor="middle" class="sub note">One canonical report powers local review, CI, IDE clients, and agent workflows.</text>
 </svg>

@@ -31,10 +31,18 @@ async function loadRunArtifacts(
         captureGitSnapshot(folder),
     ]);
 
+    const metricsSummary = {...(metrics.summary || metrics)};
+    if (summary.coverage_join && !metricsSummary.coverage_join) {
+        metricsSummary.coverage_join = summary.coverage_join;
+    }
+    if (summary.security_surfaces && !metricsSummary.security_surfaces) {
+        metricsSummary.security_surfaces = summary.security_surfaces;
+    }
+
     return {
         summary,
         triage,
-        metricsSummary: metrics.summary || metrics,
+        metricsSummary,
         reviewedItems: arrayItems(reviewed.items),
         gitSnapshot,
     };

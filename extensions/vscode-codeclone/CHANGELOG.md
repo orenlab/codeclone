@@ -4,6 +4,8 @@
 
 - align setup guidance with the stable CodeClone `2.0.0` MCP package
 - require CodeClone `2.0.0` or newer for the final 2.0 release line
+- surface Coverage Join review items in Hotspots when coverage data is available
+- auto-detect workspace-root `coverage.xml` or use `codeclone.analysis.coverageXml`
 
 ## 0.2.5
 

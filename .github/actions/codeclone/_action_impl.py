@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Literal
 
 COMMENT_MARKER = "<!-- codeclone-report -->"
-DEFAULT_CODECLONE_PACKAGE_VERSION = "2.0.1b1"
+DEFAULT_CODECLONE_PACKAGE_VERSION = "2.0.1"
 
 
 @dataclass(frozen=True, slots=True)

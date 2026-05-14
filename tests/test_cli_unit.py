@@ -339,6 +339,124 @@ def test_cli_vscode_extension_tip_respects_context_gates(
     assert printer.lines == []
 
 
+@pytest.mark.parametrize(
+    ("baseline_version", "current_version", "expected"),
+    [
+        ("2.0.0b1", "2.0.1", True),
+        ("2.0.0b7", "2.0.1", True),
+        ("2.0.0", "2.0.1", True),
+        ("2.0.0", "2.1.0", True),
+        ("2.0.0b0", "2.0.1", False),
+        ("1.4.4", "2.0.1", False),
+        ("2.0.1", "2.0.1", False),
+        ("dev-build", "2.0.1", False),
+        ("2.0.0", "dev-build", False),
+        (None, "2.0.1", False),
+    ],
+)
+def test_cli_dead_code_reachability_migration_note_version_gate(
+    baseline_version: str | None,
+    current_version: str,
+    expected: bool,
+) -> None:
+    assert (
+        cli_tips._dead_code_reachability_migration_applies(
+            baseline_generator_version=baseline_version,
+            codeclone_version=current_version,
+        )
+        is expected
+    )
+
+
+def test_cli_dead_code_reachability_migration_note_uses_one_shot_cache(
+    tmp_path: Path,
+) -> None:
+    printer = _RecordingPrinter()
+    args = SimpleNamespace(quiet=False, ci=False)
+    cache_path = tmp_path / ".cache" / "codeclone" / "cache.json"
+
+    shown = cli_tips.maybe_print_dead_code_reachability_migration_note(
+        args=args,
+        console=printer,
+        codeclone_version="2.0.1",
+        cache_path=cache_path,
+        baseline_generator_version="2.0.0b7",
+        baseline_trusted_for_diff=True,
+        environ={},
+        stream=_TTYStream(is_tty=True),
+    )
+
+    assert shown is True
+    assert len(printer.lines) == 1
+    assert "Dead-code reachability was refined in 2.0.1" in printer.lines[0]
+    assert "not weaker detection" in printer.lines[0]
+
+    tips_path = cache_path.parent / "tips.json"
+    state = json.loads(tips_path.read_text("utf-8"))
+    assert (
+        state["tips"]["dead_code_reachability_2_0_1_migration_shown"]["shown"] is True
+    )
+
+    shown_again = cli_tips.maybe_print_dead_code_reachability_migration_note(
+        args=args,
+        console=printer,
+        codeclone_version="2.0.1",
+        cache_path=cache_path,
+        baseline_generator_version="2.0.0b7",
+        baseline_trusted_for_diff=True,
+        environ={},
+        stream=_TTYStream(is_tty=True),
+    )
+
+    assert shown_again is False
+    assert len(printer.lines) == 1
+
+
+@pytest.mark.parametrize(
+    ("args", "env", "isatty", "trusted", "baseline_version", "current_version"),
+    [
+        (SimpleNamespace(quiet=True, ci=False), {}, True, True, "2.0.0", "2.0.1"),
+        (SimpleNamespace(quiet=False, ci=True), {}, True, True, "2.0.0", "2.0.1"),
+        (
+            SimpleNamespace(quiet=False, ci=False),
+            {"CI": "1"},
+            True,
+            True,
+            "2.0.0",
+            "2.0.1",
+        ),
+        (SimpleNamespace(quiet=False, ci=False), {}, False, True, "2.0.0", "2.0.1"),
+        (SimpleNamespace(quiet=False, ci=False), {}, True, False, "2.0.0", "2.0.1"),
+        (SimpleNamespace(quiet=False, ci=False), {}, True, True, "2.0.1", "2.0.1"),
+        (SimpleNamespace(quiet=False, ci=False), {}, True, True, "2.0.0", "2.0.0"),
+    ],
+)
+def test_cli_dead_code_reachability_migration_note_respects_gates(
+    tmp_path: Path,
+    args: SimpleNamespace,
+    env: dict[str, str],
+    isatty: bool,
+    trusted: bool,
+    baseline_version: str,
+    current_version: str,
+) -> None:
+    printer = _RecordingPrinter()
+
+    shown = cli_tips.maybe_print_dead_code_reachability_migration_note(
+        args=args,
+        console=printer,
+        codeclone_version=current_version,
+        cache_path=tmp_path / ".cache" / "codeclone" / "cache.json",
+        baseline_generator_version=baseline_version,
+        baseline_trusted_for_diff=trusted,
+        environ=env,
+        stream=_TTYStream(is_tty=isatty),
+    )
+
+    assert shown is False
+    assert printer.lines == []
+
+
 def test_cli_module_main_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["codeclone", "--help"])
     with pytest.raises(SystemExit) as exc:

@@ -68,8 +68,8 @@ The wrapper:
 4. launches the child process with `shell: false`
 5. proxies stdio until shutdown
 
-The wrapper may auto-discover a few common global install locations, but it is
-now prefers:
+The wrapper may auto-discover a few common global install locations, but it now
+prefers:
 
 - a workspace-local `.venv`
 - the active Poetry environment for the current workspace

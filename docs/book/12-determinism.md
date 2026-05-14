@@ -6,7 +6,7 @@ Document deterministic behavior and canonicalization controls.
 
 ## Public surface
 
-- Sorted file traversal: `codeclone/scanner.py`
+- Sorted file traversal: `codeclone/scanner/__init__.py`
 - Canonical report construction: `codeclone/report/document/*`
 - Deterministic text projection: `codeclone/report/renderers/text.py`
 - Baseline hashing: `codeclone/baseline/trust.py`

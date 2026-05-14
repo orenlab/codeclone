@@ -38,7 +38,7 @@ from ..domain.quality import (
     HEALTH_GRADE_F,
 )
 
-BANNER_SUBTITLE = "Structural code analysis"
+BANNER_SUBTITLE = "Structural review layer"
 
 MARKER_CONTRACT_ERROR = "[error]CONTRACT ERROR:[/error]"
 MARKER_INTERNAL_ERROR = "[error]INTERNAL ERROR:[/error]"
@@ -360,6 +360,12 @@ TIP_VSCODE_EXTENSION = (
     "navigation.\n"
     "[dim]{url}[/dim]"
 )
+NOTE_DEAD_CODE_REACHABILITY_MIGRATION = (
+    "\n[dim]Note:[/dim] Dead-code reachability was refined in 2.0.1 for "
+    "common Python frameworks.\n"
+    "[dim]Fewer dead-code findings after upgrading from 2.0.0 are expected: "
+    "this usually means reduced false positives, not weaker detection.[/dim]"
+)
 
 _RICH_MARKUP_TAG_RE = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_ .#:-]*]")
 
@@ -437,6 +443,10 @@ def fmt_cache_save_failed(error: object) -> str:
 
 def fmt_vscode_extension_tip(*, url: str) -> str:
     return TIP_VSCODE_EXTENSION.format(url=url)
+
+
+def fmt_dead_code_reachability_migration_note() -> str:
+    return NOTE_DEAD_CODE_REACHABILITY_MIGRATION
 
 
 def fmt_legacy_cache_warning(*, legacy_path: Path, new_path: Path) -> str:

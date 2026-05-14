@@ -89,7 +89,10 @@ The extension currently supports:
   plus report-only `Security Surfaces` when MCP exposes
   `metrics.security_surfaces`
 - review queues for new regressions, production hotspots, changed-scope
-  findings, and report-only `Security Surfaces` / `Overloaded Modules`
+  findings, `Coverage Join` review items, and report-only `Security Surfaces` /
+  `Overloaded Modules`
+- optional Coverage Join input through `codeclone.analysis.coverageXml`, with
+  workspace-root `coverage.xml` auto-detected when present
 - source reveal, peek, canonical finding detail, remediation detail, and
   session-local reviewed markers
 - bounded MCP help topics inside the IDE, with the optional `coverage` topic on

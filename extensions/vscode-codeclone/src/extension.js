@@ -21,6 +21,7 @@ const {
     capitalize,
     compactDecimal,
     coverageJoinPayload,
+    coverageJoinReviewItemCount,
     decimal,
     emptyReviewArtifacts,
     findingIcon,
@@ -32,8 +33,12 @@ const {
     formatCacheSummary,
     formatCoverageJoinMeasuredUnits,
     formatCoverageJoinPercent,
+    formatCoverageJoinLocation,
+    formatCoverageJoinReviewSignal,
     formatCoverageJoinStatus,
     formatCoverageJoinSummary,
+    formatOverloadedModuleStatus,
+    formatOverloadedModulesSummary,
     formatKind,
     formatNovelty,
     formatRunScope,
@@ -42,10 +47,15 @@ const {
     formatSeverity,
     formatSourceKindSummary,
     humanizeIdentifier,
+    isCoverageJoinReviewItem,
+    isOverloadedModuleCandidate,
     isSpecificFocusMode,
     normalizeFindingLocations,
     normalizeRelativePath,
     number,
+    overloadedModuleCandidateCount,
+    qualityReviewItemCount,
+    reportReviewItemCount,
     reviewTargetKey,
     safeArray,
     safeObject,
@@ -57,6 +67,7 @@ const {
 const {CodeCloneMcpClient, MCPClientError} = require("./mcpClient");
 const {
     markdownBulletList,
+    renderCoverageJoinMarkdown,
     renderFindingMarkdown,
     renderOverloadedModuleMarkdown,
     renderSecuritySurfaceMarkdown,
@@ -80,6 +91,7 @@ const {
     looksLikeCodeCloneRepo,
     pathExists,
     readFileHead,
+    resolveCoverageXmlPath,
     sameGitSnapshot,
 } = require("./runtime");
 const {
@@ -346,6 +358,15 @@ class CodeCloneController {
             ),
             vscode.commands.registerCommand("codeclone.reviewOverloadedModule", (node) =>
                 this.reviewOverloadedModule(node)
+            ),
+            vscode.commands.registerCommand("codeclone.openCoverageJoin", (node) =>
+                this.openCoverageJoin(node)
+            ),
+            vscode.commands.registerCommand("codeclone.copyCoverageJoinBrief", (node) =>
+                this.copyCoverageJoinBrief(node)
+            ),
+            vscode.commands.registerCommand("codeclone.reviewCoverageJoin", (node) =>
+                this.reviewCoverageJoin(node)
             ),
             vscode.commands.registerCommand("codeclone.openSecuritySurface", (node) =>
                 this.openSecuritySurface(node)
@@ -862,10 +883,13 @@ class CodeCloneController {
             safeArray(securitySurfacesResponse.items),
             safeArray(coverageJoinResponse.items)
         );
+        const normalizedCoverageJoinItems =
+            safeArray(coverageJoinResponse.items).filter(isCoverageJoinReviewItem);
         state.reviewArtifacts = {
             newRegressions: safeArray(newRegressionsResponse.items),
             productionHotspots: safeArray(productionHotspotsResponse.items),
             changedFiles: safeArray(changedFilesResponse.items),
+            coverageJoin: normalizedCoverageJoinItems,
             overloadedModules: safeArray(overloadedModulesResponse.items),
             securitySurfaces: normalizedSecuritySurfaces,
         };
@@ -1067,6 +1091,14 @@ class CodeCloneController {
         const config = vscode.workspace.getConfiguration("codeclone", folder.uri);
         const cachePolicy = config.get("analysis.cachePolicy", "reuse");
         const diffRef = config.get("analysis.changedDiffRef", "HEAD");
+        const coverageXmlPath = await resolveCoverageXmlPath(
+            folder.uri.fsPath,
+            config.get("analysis.coverageXml", ""),
+            config.get("analysis.autoDetectCoverageXml", true)
+        );
+        const coverageOverride = coverageXmlPath
+            ? {coverage_xml: coverageXmlPath}
+            : {};
         const analysisSettings = this.configuredAnalysisSettings(folder);
         const title = changedMode
             ? `CodeClone: Analyzing changed files in ${folder.name}`
@@ -1091,11 +1123,13 @@ class CodeCloneController {
                             root: folder.uri.fsPath,
                             git_diff_ref: diffRef,
                             cache_policy: cachePolicy,
+                            ...coverageOverride,
                             ...analysisSettings.overrides,
                         })
                         : await this.client.callTool("analyze_repository", {
                             root: folder.uri.fsPath,
                             cache_policy: cachePolicy,
+                            ...coverageOverride,
                             ...analysisSettings.overrides,
                         });
                     const runId = String(analysisPayload.run_id);
@@ -1182,6 +1216,7 @@ class CodeCloneController {
             !candidate ||
             candidate.nodeType === "overloadedModule" ||
             candidate.nodeType === "securitySurface" ||
+            candidate.nodeType === "coverageJoin" ||
             !candidate.findingId
         ) {
             return null;
@@ -1194,6 +1229,18 @@ class CodeCloneController {
         if (
             !candidate ||
             candidate.nodeType !== "overloadedModule" ||
+            !safeObject(candidate.item).path
+        ) {
+            return null;
+        }
+        return candidate;
+    }
+
+    activeCoverageJoinTarget(node) {
+        const candidate = node || this.activeReviewTarget;
+        if (
+            !candidate ||
+            candidate.nodeType !== "coverageJoin" ||
             !safeObject(candidate.item).path
         ) {
             return null;
@@ -1226,6 +1273,11 @@ class CodeCloneController {
             return workspaceRelativePath(state.folder, fsPath) === normalizeRelativePath(target.item.path);
         }
         if (target.nodeType === "securitySurface") {
+            return safeArray(target.locations).some(
+                (location) => location.absolutePath === fsPath
+            );
+        }
+        if (target.nodeType === "coverageJoin") {
             return safeArray(target.locations).some(
                 (location) => location.absolutePath === fsPath
             );
@@ -1327,6 +1379,8 @@ class CodeCloneController {
                 return safeArray(artifacts.productionHotspots);
             case "changedFiles":
                 return safeArray(artifacts.changedFiles);
+            case "coverageJoin":
+                return safeArray(artifacts.coverageJoin);
             case "overloadedModules":
                 return safeArray(artifacts.overloadedModules);
             case "securitySurfaces":
@@ -1336,7 +1390,29 @@ class CodeCloneController {
         }
     }
 
+    overloadedModulesSummary(state) {
+        return safeObject(safeObject(state?.metricsSummary).overloaded_modules);
+    }
+
+    overloadedModuleCandidateItems(state) {
+        return this.reviewArtifactItems(state, "overloadedModules").filter(
+            isOverloadedModuleCandidate
+        );
+    }
+
     reviewArtifactCount(state, groupId) {
+        if (groupId === "overloadedModules") {
+            return overloadedModuleCandidateCount(
+                this.overloadedModulesSummary(state),
+                this.reviewArtifactItems(state, "overloadedModules")
+            );
+        }
+        if (groupId === "coverageJoin") {
+            return coverageJoinReviewItemCount(
+                coverageJoinPayload(state?.metricsSummary),
+                this.reviewArtifactItems(state, "coverageJoin")
+            );
+        }
         return this.reviewArtifactItems(state, groupId).length;
     }
 
@@ -1453,14 +1529,18 @@ class CodeCloneController {
     }
 
     buildOverloadedModuleNode(state, item) {
+        const status = formatOverloadedModuleStatus(item);
+        const pathLabel = item.path || item.relative_path || item.module || "(unknown)";
         return {
             nodeType: "overloadedModule",
             workspaceKey: state.folder.uri.toString(),
             runId: state.currentRunId,
             item,
-            label: item.path,
-            description: `${decimal(item.score)} · ${item.source_kind} · report-only`,
-            tooltip: `${item.module} · ${number(item.loc)} LOC · ${item.total_deps} deps`,
+            label: pathLabel,
+            description: `${status} · ${decimal(item.score)} · ${item.source_kind} · report-only`,
+            tooltip:
+                `${item.module} · ${status}\n` +
+                `${number(item.loc)} LOC · ${item.total_deps} deps`,
             icon: new vscode.ThemeIcon("symbol-module"),
             contextValue: "codeclone.overloadedModule",
             command: {
@@ -1472,6 +1552,76 @@ class CodeCloneController {
                         runId: state.currentRunId,
                         item,
                         nodeType: "overloadedModule",
+                    },
+                ],
+            },
+        };
+    }
+
+    toCoverageJoinNodes(state, items) {
+        return items.map((item) => this.buildCoverageJoinNode(state, item));
+    }
+
+    coverageJoinLocations(state, item) {
+        return [
+            {
+                path: String(item.path || ""),
+                line:
+                    typeof item.start_line === "number" && !Number.isNaN(item.start_line)
+                        ? item.start_line
+                        : null,
+                end_line:
+                    typeof item.end_line === "number" && !Number.isNaN(item.end_line)
+                        ? item.end_line
+                        : null,
+                symbol: item.qualname ? String(item.qualname) : null,
+                absolutePath:
+                    resolveWorkspacePath(
+                        state.folder.uri.fsPath,
+                        String(item.path || "")
+                    ) || "",
+            },
+        ].filter((location) => location.absolutePath);
+    }
+
+    hydrateCoverageJoinNode(state, node) {
+        const locations =
+            safeArray(node.locations).length > 0
+                ? safeArray(node.locations)
+                : this.coverageJoinLocations(state, safeObject(node.item));
+        return {
+            ...node,
+            nodeType: "coverageJoin",
+            locations,
+        };
+    }
+
+    buildCoverageJoinNode(state, item) {
+        const locationLabel = formatCoverageJoinLocation(item);
+        const locations = this.coverageJoinLocations(state, item);
+        return {
+            nodeType: "coverageJoin",
+            workspaceKey: state.folder.uri.toString(),
+            runId: state.currentRunId,
+            item,
+            label: locationLabel,
+            description: `${formatCoverageJoinReviewSignal(item)} · ${item.risk || "low"} risk`,
+            tooltip:
+                `${item.qualname || "(unknown)"}\n` +
+                `Coverage: ${formatCoverageJoinReviewSignal(item)}`,
+            icon: new vscode.ThemeIcon("beaker"),
+            contextValue: "codeclone.coverageJoin",
+            locations,
+            command: {
+                command: "codeclone.reviewCoverageJoin",
+                title: "Review Coverage Join Item",
+                arguments: [
+                    {
+                        workspaceKey: state.folder.uri.toString(),
+                        runId: state.currentRunId,
+                        item,
+                        nodeType: "coverageJoin",
+                        locations,
                     },
                 ],
             },
@@ -1552,12 +1702,13 @@ class CodeCloneController {
         const artifacts = safeObject(state.reviewArtifacts);
         const groupIds =
             this.hotspotFocusMode === "recommended"
-                ? ["changedFiles", "newRegressions", "productionHotspots"]
+                ? ["changedFiles", "newRegressions", "productionHotspots", "coverageJoin"]
                 : this.hotspotFocusMode === "all"
                     ? [
                         "changedFiles",
                         "newRegressions",
                         "productionHotspots",
+                        "coverageJoin",
                         "securitySurfaces",
                         "overloadedModules",
                     ]
@@ -1568,7 +1719,21 @@ class CodeCloneController {
             if (groupId === "overloadedModules") {
                 for (const node of this.toOverloadedModuleNodes(
                     state,
-                    safeArray(artifacts.overloadedModules)
+                    this.overloadedModuleCandidateItems(state)
+                )) {
+                    const key = reviewTargetKey(node);
+                    if (!key || seen.has(key)) {
+                        continue;
+                    }
+                    seen.add(key);
+                    queue.push(node);
+                }
+                continue;
+            }
+            if (groupId === "coverageJoin") {
+                for (const node of this.toCoverageJoinNodes(
+                    state,
+                    this.reviewArtifactItems(state, "coverageJoin")
                 )) {
                     const key = reviewTargetKey(node);
                     if (!key || seen.has(key)) {
@@ -1614,13 +1779,17 @@ class CodeCloneController {
             )
         ) {
             return [
+                ...this.toCoverageJoinNodes(
+                    state,
+                    this.reviewArtifactItems(state, "coverageJoin")
+                ),
                 ...this.toSecuritySurfaceNodes(
                     state,
                     safeArray(artifacts.securitySurfaces)
                 ),
                 ...this.toOverloadedModuleNodes(
                     state,
-                    safeArray(artifacts.overloadedModules)
+                    this.overloadedModuleCandidateItems(state)
                 ),
             ];
         }
@@ -1669,6 +1838,10 @@ class CodeCloneController {
         }
         if (nextNode.nodeType === "securitySurface") {
             await this.revealSecuritySurfaceSource(nextNode);
+            return;
+        }
+        if (nextNode.nodeType === "coverageJoin") {
+            await this.revealCoverageJoinSource(nextNode);
             return;
         }
         await this.revealFindingSource(nextNode);
@@ -1732,6 +1905,8 @@ class CodeCloneController {
             if (picked) {
                 if (picked.node.nodeType === "overloadedModule") {
                     await this.reviewOverloadedModule(picked.node);
+                } else if (picked.node.nodeType === "coverageJoin") {
+                    await this.reviewCoverageJoin(picked.node);
                 } else if (picked.node.nodeType === "securitySurface") {
                     await this.reviewSecuritySurface(picked.node);
                 } else {
@@ -2194,6 +2369,32 @@ class CodeCloneController {
         );
     }
 
+    async revealCoverageJoinSource(node) {
+        const activeNode = this.activeCoverageJoinTarget(node);
+        if (!activeNode) {
+            return;
+        }
+        const state = this.states.get(activeNode.workspaceKey);
+        if (!state) {
+            return;
+        }
+        const resolved = this.hydrateCoverageJoinNode(state, activeNode);
+        this.setActiveReviewTarget(resolved);
+        const location = firstNormalizedLocation(state.folder, resolved.locations);
+        if (!location || !location.path) {
+            await vscode.window.showInformationMessage(
+                "This Coverage Join item does not expose a source location."
+            );
+            return;
+        }
+        await this.revealWorkspacePath(
+            state.folder,
+            location.path,
+            location.line ?? undefined,
+            location.end_line ?? undefined
+        );
+    }
+
     /**
      * @param {any} folder
      * @param {string} relativePath
@@ -2393,6 +2594,98 @@ class CodeCloneController {
         const resolved = this.hydrateSecuritySurfaceNode(state, activeNode);
         this.setActiveReviewTarget(resolved);
         await this.showMarkdownDocument(renderSecuritySurfaceMarkdown(resolved.item));
+    }
+
+    async openCoverageJoin(node) {
+        const activeNode = this.activeCoverageJoinTarget(node);
+        if (!activeNode) {
+            return;
+        }
+        const state = this.states.get(activeNode.workspaceKey);
+        if (!state) {
+            return;
+        }
+        const resolved = this.hydrateCoverageJoinNode(state, activeNode);
+        this.setActiveReviewTarget(resolved);
+        await this.showMarkdownDocument(renderCoverageJoinMarkdown(resolved.item));
+    }
+
+    async reviewCoverageJoin(node) {
+        const activeNode = this.activeCoverageJoinTarget(node);
+        if (!activeNode) {
+            return;
+        }
+        const state = this.states.get(activeNode.workspaceKey);
+        if (!state) {
+            return;
+        }
+        const resolved = this.hydrateCoverageJoinNode(state, activeNode);
+        this.setActiveReviewTarget(resolved);
+        const picked = await vscode.window.showQuickPick(
+            [
+                {
+                    label: "Reveal source",
+                    description: "Recommended",
+                    action: "reveal",
+                },
+                {
+                    label: "Show Coverage Join detail",
+                    description: "Open joined coverage summary",
+                    action: "detail",
+                },
+                {
+                    label: "Copy coverage review brief",
+                    description: "AI handoff",
+                    action: "brief",
+                },
+            ],
+            {
+                title: "Review Coverage Join Item",
+                placeHolder: `What do you want to do with ${formatCoverageJoinLocation(resolved.item)}?`,
+            }
+        );
+        if (!picked) {
+            return;
+        }
+        if (picked.action === "reveal") {
+            await this.revealCoverageJoinSource(resolved);
+            return;
+        }
+        if (picked.action === "brief") {
+            await this.copyCoverageJoinBrief(resolved);
+            return;
+        }
+        await this.openCoverageJoin(resolved);
+    }
+
+    async copyCoverageJoinBrief(node) {
+        const activeNode = this.activeCoverageJoinTarget(node);
+        if (!activeNode) {
+            return;
+        }
+        const state = this.states.get(activeNode.workspaceKey);
+        if (!state) {
+            return;
+        }
+        const resolved = this.hydrateCoverageJoinNode(state, activeNode);
+        this.setActiveReviewTarget(resolved);
+        const item = resolved.item;
+        const lines = [
+            "# CodeClone Coverage Join Brief",
+            "",
+            `Repository: ${state.folder.name || "unknown"}`,
+            `Location: ${formatCoverageJoinLocation(item)}`,
+            `Function: ${item.qualname || "(unknown)"}`,
+            `Review signal: ${formatCoverageJoinReviewSignal(item)}`,
+            `Risk: ${item.risk || "low"}`,
+            `CC: ${number(item.cyclomatic_complexity || 0)}`,
+            "",
+            "Treat this as joined coverage review context. Verify coverage before refactoring structurally risky code.",
+        ];
+        await vscode.env.clipboard.writeText(lines.join("\n"));
+        await vscode.window.showInformationMessage(
+            `Copied coverage review brief for ${formatCoverageJoinLocation(item)}.`
+        );
     }
 
     async reviewSecuritySurface(node) {
@@ -2623,6 +2916,38 @@ class CodeCloneController {
                 }),
             ];
         }
+        if (target.nodeType === "coverageJoin") {
+            const state = this.states.get(target.workspaceKey);
+            if (!state) {
+                return [];
+            }
+            const location = firstNormalizedLocation(state.folder, target.locations);
+            if (!location || location.absolutePath !== document.uri.fsPath) {
+                return [];
+            }
+            const startLine = Math.max(Number(location.line || 1) - 1, 0);
+            const range = new vscode.Range(startLine, 0, startLine, 0);
+            return [
+                new vscode.CodeLens(range, {
+                    command: "codeclone.previousReviewItem",
+                    title: "$(arrow-up) Previous hotspot",
+                }),
+                new vscode.CodeLens(range, {
+                    command: "codeclone.nextReviewItem",
+                    title: "$(arrow-down) Next hotspot",
+                }),
+                new vscode.CodeLens(range, {
+                    command: "codeclone.openCoverageJoin",
+                    title: "$(beaker) Coverage detail",
+                    arguments: [target],
+                }),
+                new vscode.CodeLens(range, {
+                    command: "codeclone.copyCoverageJoinBrief",
+                    title: "$(copy) Copy coverage brief",
+                    arguments: [target],
+                }),
+            ];
+        }
         const state = this.states.get(target.workspaceKey);
         if (!state) {
             return [];
@@ -2696,12 +3021,15 @@ class CodeCloneController {
             changed: this.reviewArtifactCount(state, "changedFiles"),
             new: this.reviewArtifactCount(state, "newRegressions"),
             production: this.reviewArtifactCount(state, "productionHotspots"),
+            coverageJoin: this.reviewArtifactCount(state, "coverageJoin"),
             securitySurfaces: this.reviewArtifactCount(state, "securitySurfaces"),
             overloadedModules: this.reviewArtifactCount(state, "overloadedModules"),
         };
         const baselineDrift = this.baselineDrift(state);
         const coverageJoin = coverageJoinPayload(state.metricsSummary);
         const securitySurfaces = securitySurfacesPayload(state.metricsSummary);
+        const overloadedModules = this.overloadedModulesSummary(state);
+        const overloadedModuleRows = this.reviewArtifactItems(state, "overloadedModules");
         if (!node) {
             const sections = [
                 {
@@ -2747,13 +3075,12 @@ class CodeCloneController {
                     icon: new vscode.ThemeIcon("git-commit"),
                 });
             }
-            if (safeObject(state.metricsSummary).overloaded_modules) {
-                const overloadedModules = safeObject(state.metricsSummary).overloaded_modules;
+            if (Object.keys(overloadedModules).length > 0) {
                 sections.push({
                     nodeType: "section",
                     id: "overview.god",
                     label: "Overloaded Modules",
-                    description: `${overloadedModules.candidates} candidates · top ${decimal(overloadedModules.top_score)} (report-only)`,
+                    description: `${formatOverloadedModulesSummary(overloadedModules, overloadedModuleRows)} · top ${decimal(overloadedModules.top_score)}`,
                     icon: new vscode.ThemeIcon("symbol-module"),
                 });
             }
@@ -2773,7 +3100,7 @@ class CodeCloneController {
                     id: "overview.coverageJoin",
                     label: "Coverage Join",
                     description: formatCoverageJoinSummary(coverageJoin),
-                    icon: new vscode.ThemeIcon("shield"),
+                    icon: new vscode.ThemeIcon("beaker"),
                 });
             }
             return sections;
@@ -2915,16 +3242,15 @@ class CodeCloneController {
             ];
         }
         if (node.id === "overview.god") {
-            const overloadedModules = safeObject(state.metricsSummary).overloaded_modules;
             return [
                 this.detailNode("Candidates", number(overloadedModules.candidates)),
-                this.detailNode("Ranked modules", number(overloadedModules.total)),
+                this.detailNode("Analyzed modules", number(overloadedModules.total)),
                 this.detailNode("Top score", decimal(overloadedModules.top_score)),
                 this.detailNode("Average score", decimal(overloadedModules.average_score)),
                 this.detailNode("Population", String(overloadedModules.population_status)),
                 this.detailNode(
                     "Review surface",
-                    `${number(reviewCounts.overloadedModules)} visible in Hotspots`
+                    formatOverloadedModulesSummary(overloadedModules, overloadedModuleRows)
                 ),
             ];
         }
@@ -3190,6 +3516,12 @@ class CodeCloneController {
                         this.reviewArtifactItems(state, "changedFiles")
                     );
                     break;
+                case "coverageJoin":
+                    nodes = this.toCoverageJoinNodes(
+                        state,
+                        this.reviewArtifactItems(state, "coverageJoin")
+                    );
+                    break;
                 case "overloadedModules":
                     nodes = this.toOverloadedModuleNodes(
                         state,
@@ -3284,10 +3616,15 @@ class CodeCloneController {
                 return state.changedSummary
                     ? `${this.reviewArtifactCount(state, "changedFiles")} visible · ${state.changedSummary.verdict}`
                     : "not analyzed";
+            case "coverageJoin":
+                return `${this.reviewArtifactCount(state, "coverageJoin")} review`;
             case "securitySurfaces":
                 return `${this.reviewArtifactCount(state, "securitySurfaces")} report-only`;
             case "overloadedModules":
-                return `${this.reviewArtifactCount(state, "overloadedModules")} report-only`;
+                return formatOverloadedModulesSummary(
+                    this.overloadedModulesSummary(state),
+                    this.reviewArtifactItems(state, "overloadedModules")
+                );
             default:
                 return "";
         }
@@ -3301,6 +3638,8 @@ class CodeCloneController {
                 return "No production hotspots are visible.";
             case "changedFiles":
                 return "No findings touching changed files are visible.";
+            case "coverageJoin":
+                return "No Coverage Join review items are visible.";
             case "securitySurfaces":
                 return "No report-only Security Surfaces are visible.";
             case "overloadedModules":
@@ -3332,6 +3671,8 @@ class CodeCloneController {
                     return this.hotspotFocusMode === "changed";
                 }
                 return specificMode || this.reviewArtifactCount(state, "changedFiles") > 0;
+            case "coverageJoin":
+                return specificMode || this.reviewArtifactCount(state, "coverageJoin") > 0;
             case "securitySurfaces":
                 return specificMode || this.reviewArtifactCount(state, "securitySurfaces") > 0;
             case "overloadedModules":
@@ -3466,6 +3807,18 @@ class CodeCloneController {
                 item.command = node.command;
                 break;
             }
+            case "coverageJoin": {
+                item = new vscode.TreeItem(
+                    node.label,
+                    vscode.TreeItemCollapsibleState.None
+                );
+                item.description = node.description;
+                item.tooltip = node.tooltip;
+                item.iconPath = node.icon;
+                item.contextValue = "codeclone.coverageJoin";
+                item.command = node.command;
+                break;
+            }
             case "securitySurface": {
                 item = new vscode.TreeItem(
                     node.label,
@@ -3549,8 +3902,11 @@ class CodeCloneController {
                 this.reviewArtifactCount(state, "productionHotspots")
             );
             const changedCount = Number(this.reviewArtifactCount(state, "changedFiles"));
+            const coverageJoinCount = Number(
+                this.reviewArtifactCount(state, "coverageJoin")
+            );
             const actionableCount = Math.max(
-                newCount + productionCount,
+                newCount + productionCount + coverageJoinCount,
                 changedCount
             );
             const securitySurfaceCount = Number(
@@ -3558,6 +3914,20 @@ class CodeCloneController {
             );
             const overloadedModuleCount = Number(
                 this.reviewArtifactCount(state, "overloadedModules")
+            );
+            const qualityCount = Number(
+                qualityReviewItemCount(
+                    state?.metricsSummary,
+                    safeObject(state?.reviewArtifacts)
+                )
+            );
+            const reportCount = Number(
+                reportReviewItemCount(
+                    state?.latestSummary,
+                    state?.metricsSummary,
+                    state?.latestTriage,
+                    safeObject(state?.reviewArtifacts)
+                )
             );
             const reportOnlyCount = securitySurfaceCount + overloadedModuleCount;
             let badgeValue = 0;
@@ -3575,6 +3945,10 @@ class CodeCloneController {
                     badgeValue = changedCount;
                     badgeTooltip = `${changedCount} changed-files review items are visible in Hotspots`;
                     break;
+                case "coverageJoin":
+                    badgeValue = coverageJoinCount;
+                    badgeTooltip = `${coverageJoinCount} Coverage Join review items are visible in Hotspots`;
+                    break;
                 case "reportOnly":
                     badgeValue = reportOnlyCount;
                     badgeTooltip = reportOnlyCount > 0
@@ -3582,10 +3956,21 @@ class CodeCloneController {
                         : "No report-only review items are visible in Hotspots";
                     break;
                 default:
-                    badgeValue = actionableCount > 0 ? actionableCount : reportOnlyCount;
+                    badgeValue =
+                        reportCount > 0
+                            ? reportCount
+                            : qualityCount > 0
+                                ? qualityCount
+                            : actionableCount > 0
+                                ? actionableCount
+                                : reportOnlyCount;
                     badgeTooltip =
-                        actionableCount > 0
-                            ? `${actionableCount} review items need attention`
+                        reportCount > 0
+                            ? `${reportCount} report review items are visible in CodeClone`
+                            : qualityCount > 0
+                                ? `${qualityCount} Quality review items are visible in Hotspots`
+                            : actionableCount > 0
+                                ? `${actionableCount} review items need attention`
                             : `${reportOnlyCount} report-only review items are visible in Hotspots`;
                     break;
             }
@@ -3655,6 +4040,11 @@ class CodeCloneController {
             "setContext",
             "codeclone.activeReviewTargetIsOverloadedModule",
             Boolean(activeTarget && activeTarget.nodeType === "overloadedModule")
+        );
+        void vscode.commands.executeCommand(
+            "setContext",
+            "codeclone.activeReviewTargetIsCoverageJoin",
+            Boolean(activeTarget && activeTarget.nodeType === "coverageJoin")
         );
         void vscode.commands.executeCommand(
             "setContext",

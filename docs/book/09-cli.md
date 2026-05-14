@@ -56,6 +56,10 @@ Refs:
   after summary output. The hint is suppressed in `--quiet`, CI, and non-TTY
   contexts, and is tracked per CodeClone version next to the resolved project
   cache path.
+- In interactive non-CI runs, the CLI may print a one-time migration note when
+  a trusted baseline from the `2.0.0` line is analyzed by `2.0.1` or newer. The
+  note explains expected dead-code count reductions from the refined framework
+  reachability model and is remembered next to the resolved project cache path.
 - Changed-scope review uses:
     - `--changed-only`
     - `--diff-against`
