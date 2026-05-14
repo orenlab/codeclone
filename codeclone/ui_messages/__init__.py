@@ -38,7 +38,7 @@ from ..domain.quality import (
     HEALTH_GRADE_F,
 )
 
-BANNER_SUBTITLE = "Structural code analysis"
+BANNER_SUBTITLE = "Structural review layer"
 
 MARKER_CONTRACT_ERROR = "[error]CONTRACT ERROR:[/error]"
 MARKER_INTERNAL_ERROR = "[error]INTERNAL ERROR:[/error]"
