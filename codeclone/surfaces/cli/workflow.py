@@ -114,6 +114,9 @@ print_metrics_if_available = cli_post_run.print_metrics_if_available
 resolve_changed_clone_gate = cli_post_run.resolve_changed_clone_gate
 warn_new_clones_without_fail = cli_post_run.warn_new_clones_without_fail
 maybe_print_vscode_extension_tip = cli_tips.maybe_print_vscode_extension_tip
+maybe_print_dead_code_reachability_migration_note = (
+    cli_tips.maybe_print_dead_code_reachability_migration_note
+)
 
 _report_path_origins = cli_reports_output._report_path_origins
 _resolve_output_paths = cli_reports_output._resolve_output_paths
@@ -521,6 +524,14 @@ def _main_impl() -> None:
         args=args,
         notice_new_clones_count=notice_new_clones_count,
         console=_console(),
+    )
+    maybe_print_dead_code_reachability_migration_note(
+        args=args,
+        console=_console(),
+        codeclone_version=__version__,
+        cache_path=cache_path,
+        baseline_generator_version=baseline_state.baseline.generator_version,
+        baseline_trusted_for_diff=baseline_state.trusted_for_diff,
     )
     maybe_print_vscode_extension_tip(
         args=args,
