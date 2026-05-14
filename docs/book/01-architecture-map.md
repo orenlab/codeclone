@@ -103,7 +103,7 @@ Refs:
 
 Refs:
 
-- `codeclone/scanner.py:iter_py_files`
+- `codeclone/scanner/__init__.py:iter_py_files`
 - `codeclone/report/document/integrity.py:_build_integrity_payload`
 - `codeclone/baseline/trust.py:_compute_payload_sha256`
 - `codeclone/cache/integrity.py:canonical_json`

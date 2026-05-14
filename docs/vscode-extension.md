@@ -149,6 +149,12 @@ the local MCP launcher.
   explicit and exposes `Deeper review` and `Custom` as deliberate follow-ups
 - `codeclone.analysis.cachePolicy` and the threshold settings below are
   resource-scoped, so they can vary by workspace or folder
+- `codeclone.analysis.changedDiffRef` selects the git revision used by
+  changed-files review
+- `codeclone.analysis.coverageXml` passes an explicit Cobertura XML path to
+  Coverage Join
+- `codeclone.analysis.autoDetectCoverageXml` passes workspace-root
+  `coverage.xml` when present and `coverageXml` is empty
 - `codeclone.analysis.minLoc`
 - `codeclone.analysis.minStmt`
 - `codeclone.analysis.blockMinLoc`

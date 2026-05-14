@@ -99,7 +99,7 @@ Refs:
 
 Refs:
 
-- `codeclone/scanner.py:iter_py_files`
+- `codeclone/scanner/__init__.py:iter_py_files`
 - `codeclone/findings/clones/grouping.py:build_groups`
 - `codeclone/report/document/integrity.py:_build_integrity_payload`
 

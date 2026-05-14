@@ -51,6 +51,7 @@ Live sample report: [orenlab.github.io/codeclone/examples/report/](https://orenl
   profile, dead code, health score, and overloaded-module profiling
 - **Adoption & API** — type/docstring annotation coverage, public API surface inventory and baseline diff
 - **Coverage Join** — fuse external Cobertura XML into the current run to surface coverage hotspots and scope gaps
+- **Security Surfaces** — report-only inventory of security-relevant capability boundaries without vulnerability claims
 
 **Surfaces & integrations**
 
@@ -318,7 +319,7 @@ Top-level keys: `report_schema_version`, `meta`, `inventory`, `findings`, `metri
 {
   "report_schema_version": "2.11",
   "meta": {
-    "codeclone_version": "2.0.0",
+    "codeclone_version": "2.0.1",
     "project_name": "...",
     "scan_root": ".",
     "...": "..."

@@ -35,7 +35,7 @@ Refs:
 - `codeclone/blocks/__init__.py`
 - `codeclone/baseline/trust.py:current_python_tag`
 - `codeclone/baseline/clone_baseline.py:Baseline.verify_compatibility`
-- `codeclone/scanner.py:classify_source_kind`
+- `codeclone/paths/__init__.py:classify_source_kind`
 - `codeclone/metrics/health.py:compute_health`
 - `codeclone/report/document/_common.py:_design_findings_thresholds_payload`
 - `codeclone/report/suggestions.py:generate_suggestions`

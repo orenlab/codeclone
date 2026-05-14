@@ -6,7 +6,7 @@ Describe implemented protections and explicit security boundaries.
 
 ## Public surface
 
-- Scanner path validation: `codeclone/scanner.py:iter_py_files`
+- Scanner path validation: `codeclone/scanner/__init__.py:iter_py_files`
 - File read and parser limits: `codeclone/core/worker.py:process_file`,
   `codeclone/analysis/parser.py:_parse_limits`
 - Baseline/cache validation: `codeclone/baseline/*`, `codeclone/cache/*`
@@ -39,8 +39,8 @@ Security-relevant input classes:
 Refs:
 
 - `codeclone/analysis/parser.py:_parse_with_limits`
-- `codeclone/scanner.py:SENSITIVE_DIRS`
-- `codeclone/scanner.py:iter_py_files`
+- `codeclone/scanner/__init__.py:SENSITIVE_DIRS`
+- `codeclone/scanner/__init__.py:iter_py_files`
 - `codeclone/report/html/primitives/escape.py:_escape_html`
 
 ## Invariants (MUST)

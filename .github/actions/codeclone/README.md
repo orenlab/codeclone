@@ -38,7 +38,7 @@ source under test. Remote consumers still install from PyPI.
 For strict reproducibility, pin the full release tag:
 
 ```yaml
-- uses: orenlab/codeclone/.github/actions/codeclone@v2.0.0
+- uses: orenlab/codeclone/.github/actions/codeclone@v2.0.1
 ```
 
 For long-lived workflows, `@v2` follows the latest compatible 2.x action
@@ -145,7 +145,7 @@ Notes:
 ## Install policy
 
 Released action tags pin the PyPI package version in action metadata. For
-example, `@v2.0.0` installs `codeclone==2.0.0` unless you override
+example, `@v2.0.1` installs `codeclone==2.0.1` unless you override
 `package-version`.
 
 Explicit prerelease or smoke-test override:

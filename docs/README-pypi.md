@@ -53,6 +53,7 @@ deterministic facts.
 - **Quality metrics** — cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, adaptive depth profile, dead code, health score, and overloaded-module profiling
 - **Adoption & API** — type/docstring annotation coverage, public API surface inventory and baseline diff
 - **Coverage Join** — fuse external Cobertura XML into the current run to surface coverage hotspots and scope gaps
+- **Security Surfaces** — report-only inventory of security-relevant capability boundaries without vulnerability claims
 
 **Surfaces & integrations**
 - **MCP control surface** — triage-first agent and IDE interface over the same canonical pipeline; read-only by contract
