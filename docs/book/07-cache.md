@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define cache schema `2.7`, integrity verification, stale-entry pruning, and
+Define cache schema `2.8`, integrity verification, stale-entry pruning, and
 fail-open behavior.
 
 ## Public surface
@@ -17,7 +17,7 @@ fail-open behavior.
 
 ## Data model
 
-On-disk schema (`v == "2.7"`):
+On-disk schema (`v == "2.8"`):
 
 - top-level: `v`, `payload`, `sig`
 - `payload` keys: `py`, `fp`, `ap`, `files`, optional `sr`

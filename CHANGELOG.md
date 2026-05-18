@@ -2,8 +2,8 @@
 
 ## [2.0.2] - 2026-05-15
 
-`2.0.2` is a focused patch release for VS Code extension packaging metadata
-and README link behavior.
+`2.0.2` is a focused patch release for VS Code extension packaging metadata,
+README link behavior, and dead-code runtime reachability precision.
 
 ### Dead code
 
@@ -11,6 +11,8 @@ and README link behavior.
   observer decorators, Starlette `BaseHTTPMiddleware.dispatch` hooks,
   Flask/Blueprint routes, and aiohttp `RouteTableDef` route decorators to
   reduce false-positive dead-code findings without name-only heuristics.
+- Bump cache schema to `2.8` so projects rebuild cached dead-code and runtime
+  reachability facts after the refined framework model.
 
 ### Packaging
 

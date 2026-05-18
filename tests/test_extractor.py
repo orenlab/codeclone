@@ -2190,6 +2190,31 @@ class Config:
     )
 
 
+def test_dead_code_skips_pydantic_field_validators_without_direct_calls() -> None:
+    source = """
+from typing import Any
+from pydantic import BaseModel, Field, field_validator
+
+class AllowedAction(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    parameters: dict[str, Any] | None = Field(default=None)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("parameters")
+    @classmethod
+    def validate_parameters(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        return value
+"""
+    assert _dead_qualnames_from_source(source) == ("pkg.mod:AllowedAction",)
+
+
 def test_dead_code_keeps_explicitly_inherited_abc_base_live() -> None:
     source = """
 from abc import ABC, abstractmethod

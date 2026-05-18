@@ -91,11 +91,11 @@ Notes:
 }
 ```
 
-## Cache schema (`2.7`)
+## Cache schema (`2.8`)
 
 ```json
 {
-  "v": "2.7",
+  "v": "2.8",
   "payload": {
     "py": "cp314",
     "fp": "1",

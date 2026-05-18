@@ -938,7 +938,7 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     assert loaded.cache_schema_version == "0.0"
 
 
-@pytest.mark.parametrize("version", ["0.0", "2.2"])
+@pytest.mark.parametrize("version", ["0.0", "2.2", "2.7"])
 def test_cache_v_field_version_mismatch_warns(tmp_path: Path, version: str) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
