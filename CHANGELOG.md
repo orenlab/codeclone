@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.0.2] - 2026-05-15
+
+`2.0.2` is a focused patch release for VS Code extension packaging metadata
+and README link behavior.
+
+### Packaging
+
+- Bump the Python package and composite GitHub Action default install version to
+  `2.0.2`.
+- Record the VS Code extension `0.2.7` metadata that matches the Marketplace
+  build carrying Coverage Join hotspot support and workspace-root
+  `coverage.xml` discovery.
+- Fix README package badges so PyPI/status/download/Python-version links open
+  the PyPI project page instead of scrolling to the installation section.
+
 ## [2.0.1] - 2026-05-14
 
 `2.0.1` is a focused stability release for dead-code precision and cache/report

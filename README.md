@@ -319,7 +319,7 @@ Top-level keys: `report_schema_version`, `meta`, `inventory`, `findings`, `metri
 {
   "report_schema_version": "2.11",
   "meta": {
-    "codeclone_version": "2.0.1",
+    "codeclone_version": "2.0.2",
     "project_name": "...",
     "scan_root": ".",
     "...": "..."
@@ -473,7 +473,7 @@ Versions released before this change remain under their original license terms.
 [benchmark-shield]: https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/benchmark.yml?style=flat-square&label=benchmark
 
 <!-- Links -->
-[pypi-link]: #installation
+[pypi-link]: https://pypi.org/project/codeclone/
 [score-link]: #how-it-works
 [license-link]: #license
 [tests-link]: https://github.com/orenlab/codeclone/actions/workflows/tests.yml
