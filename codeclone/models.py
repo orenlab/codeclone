@@ -120,11 +120,14 @@ class DeadCandidate:
 
 
 RuntimeReachabilityFramework = Literal[
+    "aiogram",
+    "aiohttp",
     "celery",
     "click",
     "dependency_injector",
     "django",
     "fastapi",
+    "flask",
     "starlette",
     "typer",
 ]

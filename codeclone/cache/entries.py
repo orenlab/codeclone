@@ -333,7 +333,10 @@ def _as_security_surface_evidence_kind(value: object) -> str | None:
 def _as_runtime_reachability_framework(value: object) -> str | None:
     match value:
         case (
-            "celery"
+            "aiogram"
+            | "aiohttp"
+            | "flask"
+            | "celery"
             | "click"
             | "dependency_injector"
             | "django"

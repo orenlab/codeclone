@@ -5,6 +5,13 @@
 `2.0.2` is a focused patch release for VS Code extension packaging metadata
 and README link behavior.
 
+### Dead code
+
+- Extend runtime reachability with exact Aiogram `Router`/`Dispatcher`
+  observer decorators, Starlette `BaseHTTPMiddleware.dispatch` hooks,
+  Flask/Blueprint routes, and aiohttp `RouteTableDef` route decorators to
+  reduce false-positive dead-code findings without name-only heuristics.
+
 ### Packaging
 
 - Bump the Python package and composite GitHub Action default install version to

@@ -1487,6 +1487,153 @@ def websocket_endpoint():
     ].confidence == ("high")
 
 
+def test_dead_code_uses_aiogram_router_observer_reachability() -> None:
+    source = """
+from aiogram import F, Dispatcher, Router
+from aiogram.filters import Command
+
+router = Router()
+dp = Dispatcher()
+not_router = object()
+
+def get_router():
+    return router
+
+@router.message(Command("start"))
+async def cmd_start(message):
+    return message
+
+@router.callback_query(F.data.startswith("docker:container:"))
+async def show_container_detail(callback):
+    return callback
+
+@dp.inline_query()
+async def inline_search(query):
+    return query
+
+@not_router.message()
+async def fake_message(message):
+    return message
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == (
+        "pkg.mod:get_router",
+        "pkg.mod:fake_message",
+        "pkg.mod:orphan",
+    )
+    observed = {
+        fact.target_qualname: (fact.framework, fact.evidence_symbol, fact.confidence)
+        for fact in _runtime_reachability_from_source(source)
+    }
+    assert {
+        key: observed[key]
+        for key in (
+            "pkg.mod:cmd_start",
+            "pkg.mod:show_container_detail",
+            "pkg.mod:inline_search",
+        )
+    } == {
+        "pkg.mod:cmd_start": ("aiogram", "router.message", "medium"),
+        "pkg.mod:show_container_detail": (
+            "aiogram",
+            "router.callback_query",
+            "medium",
+        ),
+        "pkg.mod:inline_search": ("aiogram", "dp.inline_query", "high"),
+    }
+    assert "pkg.mod:fake_message" not in observed
+
+
+def test_dead_code_uses_flask_and_aiohttp_route_reachability() -> None:
+    source = """
+from aiohttp import web
+from flask import Blueprint, Flask
+
+app = Flask(__name__)
+bp = Blueprint("api", __name__)
+aio_routes = web.RouteTableDef()
+aio_app = web.Application()
+other = object()
+
+app.register_blueprint(bp)
+aio_app.add_routes(aio_routes)
+
+@app.route("/")
+def flask_index():
+    return "ok"
+
+@bp.get("/items")
+def flask_items():
+    return "items"
+
+@aio_routes.post("/items")
+async def aio_items(request):
+    return request
+
+@other.route("/")
+def fake_route():
+    return "fake"
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == (
+        "pkg.mod:fake_route",
+        "pkg.mod:orphan",
+    )
+    observed = {
+        fact.target_qualname: (fact.framework, fact.confidence)
+        for fact in _runtime_reachability_from_source(source)
+    }
+    assert observed == {
+        "pkg.mod:flask_index": ("flask", "high"),
+        "pkg.mod:flask_items": ("flask", "high"),
+        "pkg.mod:aio_items": ("aiohttp", "high"),
+    }
+
+
+def test_dead_code_uses_starlette_base_http_middleware_dispatch_hook() -> None:
+    source = """
+from starlette.middleware.base import BaseHTTPMiddleware as MiddlewareBase
+
+class SecurityAuditMiddleware(MiddlewareBase):
+    async def dispatch(self, request, call_next):
+        return await call_next(request)
+
+    async def helper(self):
+        return None
+
+class PlainMiddleware:
+    async def dispatch(self, request, call_next):
+        return await call_next(request)
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == (
+        "pkg.mod:SecurityAuditMiddleware",
+        "pkg.mod:SecurityAuditMiddleware.helper",
+        "pkg.mod:PlainMiddleware",
+        "pkg.mod:PlainMiddleware.dispatch",
+        "pkg.mod:orphan",
+    )
+    facts = _runtime_reachability_from_source(source)
+    by_target = {fact.target_qualname: fact for fact in facts}
+    assert by_target["pkg.mod:SecurityAuditMiddleware.dispatch"].framework == (
+        "starlette"
+    )
+    assert (
+        by_target["pkg.mod:SecurityAuditMiddleware.dispatch"].evidence_symbol
+        == "BaseHTTPMiddleware.dispatch"
+    )
+    assert "pkg.mod:PlainMiddleware.dispatch" not in by_target
+
+
 def test_runtime_reachability_ignores_type_checking_only_frameworks() -> None:
     source = """
 from typing import TYPE_CHECKING

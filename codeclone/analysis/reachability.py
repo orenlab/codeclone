@@ -35,6 +35,52 @@ _FASTAPI_ROUTE_METHODS = {
     "websocket",
     "websocket_route",
 }
+_AIOGRAM_OBSERVER_METHODS = {
+    "business_connection",
+    "business_message",
+    "callback_query",
+    "channel_post",
+    "chat_boost",
+    "chat_join_request",
+    "chat_member",
+    "chosen_inline_result",
+    "deleted_business_messages",
+    "edited_business_message",
+    "edited_channel_post",
+    "edited_message",
+    "error",
+    "inline_query",
+    "message",
+    "message_reaction",
+    "message_reaction_count",
+    "my_chat_member",
+    "poll",
+    "poll_answer",
+    "pre_checkout_query",
+    "purchased_paid_media",
+    "shipping_query",
+}
+_AIOHTTP_ROUTE_METHODS = {
+    "delete",
+    "get",
+    "head",
+    "options",
+    "patch",
+    "post",
+    "put",
+    "route",
+    "view",
+}
+_FLASK_ROUTE_METHODS = {
+    "delete",
+    "get",
+    "head",
+    "options",
+    "patch",
+    "post",
+    "put",
+    "route",
+}
 _FASTAPI_DEPENDENCY_SYMBOLS = {
     "fastapi.Depends",
     "fastapi.Security",
@@ -64,6 +110,12 @@ _DI_PROVIDER_NAMES = {
     "ThreadLocalSingleton",
 }
 _DI_PROVIDER_SYMBOLS = {f"{_DI_PROVIDER_PREFIX}{name}" for name in _DI_PROVIDER_NAMES}
+_STARLETTE_BASE_HTTP_MIDDLEWARE = "starlette.middleware.base.BaseHTTPMiddleware"
+_RUNTIME_REGISTRATION_METHODS = {
+    "add_routes": ("aiohttp_app", "first_arg"),
+    "include_router": ("fastapi_app", "include_router"),
+    "register_blueprint": ("flask_app", "first_arg"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,12 +252,7 @@ class _RuntimeBindingVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         symbol = _resolve_symbol(node.func, self._aliases)
-        match node.func:
-            case ast.Attribute(value=ast.Name(id=owner), attr="include_router"):
-                if self.objects.get(owner) == "fastapi_app":
-                    self._collect_include_router_arg(node)
-            case _:
-                pass
+        self._collect_runtime_registration(node)
         if symbol == "fastapi.FastAPI.include_router":
             self._collect_include_router_arg(node)
         self.generic_visit(node)
@@ -240,15 +287,50 @@ class _RuntimeBindingVisitor(ast.NodeVisitor):
                 if router is not None:
                     self.included_routers.add(router)
 
+    def _collect_runtime_registration(self, node: ast.Call) -> None:
+        match node.func:
+            case ast.Attribute(value=ast.Name(id=owner), attr=method):
+                expected = _RUNTIME_REGISTRATION_METHODS.get(method)
+            case _:
+                return
+        if expected is None:
+            return
+        expected_kind, collector = expected
+        if self.objects.get(owner) != expected_kind:
+            return
+        if collector == "include_router":
+            self._collect_include_router_arg(node)
+        else:
+            self._collect_first_arg_object(node)
+
+    def _collect_first_arg_object(self, node: ast.Call) -> None:
+        if not node.args:
+            return
+        target = _dotted_name(node.args[0])
+        if target is not None:
+            self.included_routers.add(target)
+
     def _runtime_object_kind(self, value: ast.AST) -> _RuntimeObjectKind | None:
         if not isinstance(value, ast.Call):
             return None
         symbol = _resolve_symbol(value.func, self._aliases)
         match symbol:
+            case "aiogram.Dispatcher":
+                return "aiogram_dispatcher"
+            case "aiogram.Router":
+                return "aiogram_router"
+            case "aiohttp.web.Application":
+                return "aiohttp_app"
+            case "aiohttp.web.RouteTableDef":
+                return "aiohttp_routes"
             case "fastapi.FastAPI":
                 return "fastapi_app"
             case "fastapi.APIRouter":
                 return "fastapi_router"
+            case "flask.Blueprint":
+                return "flask_blueprint"
+            case "flask.Flask":
+                return "flask_app"
             case "starlette.applications.Starlette":
                 return "starlette_app"
             case "starlette.routing.Router":
@@ -351,6 +433,7 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._handle_dependency_injector_container(node)
+        self._handle_starlette_base_http_middleware(node)
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
@@ -390,24 +473,15 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
         func = call.func if call is not None else decorator
         match func:
             case ast.Attribute(value=ast.Name(id=obj_name), attr=method):
-                if method not in _FASTAPI_ROUTE_METHODS:
-                    return None
                 obj_kind = self._runtime_objects.get(obj_name)
-                if obj_kind not in {
-                    "fastapi_app",
-                    "fastapi_router",
-                    "starlette_app",
-                    "starlette_router",
-                }:
+                route = self._decorator_route_registration(
+                    obj_name=obj_name,
+                    obj_kind=obj_kind,
+                    method=method,
+                )
+                if route is None:
                     return None
-                framework: RuntimeReachabilityFramework = (
-                    "starlette" if obj_kind.startswith("starlette") else "fastapi"
-                )
-                confidence: RuntimeReachabilityConfidence = (
-                    "high"
-                    if obj_kind.endswith("_app") or obj_name in self._included_routers
-                    else "medium"
-                )
+                framework, confidence = route
                 return _RouteRegistration(
                     framework=framework,
                     confidence=confidence,
@@ -416,6 +490,61 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
                 )
             case _:
                 return None
+
+    def _decorator_route_registration(
+        self,
+        *,
+        obj_name: str,
+        obj_kind: _RuntimeObjectKind | None,
+        method: str,
+    ) -> tuple[RuntimeReachabilityFramework, RuntimeReachabilityConfidence] | None:
+        match obj_kind:
+            case "aiogram_dispatcher":
+                framework: RuntimeReachabilityFramework = "aiogram"
+                route_methods = _AIOGRAM_OBSERVER_METHODS
+                high_when = True
+            case "aiogram_router":
+                framework = "aiogram"
+                route_methods = _AIOGRAM_OBSERVER_METHODS
+                high_when = False
+            case "aiohttp_routes":
+                framework = "aiohttp"
+                route_methods = _AIOHTTP_ROUTE_METHODS
+                high_when = False
+            case "flask_app":
+                framework = "flask"
+                route_methods = _FLASK_ROUTE_METHODS
+                high_when = True
+            case "flask_blueprint":
+                framework = "flask"
+                route_methods = _FLASK_ROUTE_METHODS
+                high_when = False
+            case "fastapi_app" | "fastapi_router":
+                framework = "fastapi"
+                route_methods = _FASTAPI_ROUTE_METHODS
+                high_when = obj_kind == "fastapi_app"
+            case "starlette_app" | "starlette_router":
+                framework = "starlette"
+                route_methods = _FASTAPI_ROUTE_METHODS
+                high_when = obj_kind == "starlette_app"
+            case _:
+                return None
+        if method not in route_methods:
+            return None
+        return framework, self._registration_confidence(
+            obj_name,
+            high_when=high_when,
+        )
+
+    def _registration_confidence(
+        self,
+        obj_name: str,
+        *,
+        high_when: bool = False,
+    ) -> RuntimeReachabilityConfidence:
+        if high_when or obj_name in self._included_routers:
+            return "high"
+        return "medium"
 
     def _handle_cli_or_task_decorator(
         self,
@@ -647,6 +776,33 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
                 return self._target_from_expr(value)
             case _:
                 return self._target_from_expr(node)
+
+    def _handle_starlette_base_http_middleware(self, node: ast.ClassDef) -> None:
+        if not any(
+            _resolve_symbol(base, self._aliases) == _STARLETTE_BASE_HTTP_MIDDLEWARE
+            for base in node.bases
+        ):
+            return
+        class_target = self._class_targets.get(id(node))
+        class_qualname = (
+            class_target.qualname.split(":", 1)[-1]
+            if class_target is not None
+            else node.name
+        )
+        for method in self._methods_by_class.get(class_qualname, []):
+            if method.qualname.rsplit(".", 1)[-1] != "dispatch":
+                continue
+            self._emit(
+                target=method,
+                framework="starlette",
+                edge_kind="registers_handler",
+                confidence="medium",
+                evidence="Starlette BaseHTTPMiddleware dispatch hook",
+                evidence_symbol="BaseHTTPMiddleware.dispatch",
+                source_qualname=class_target.qualname
+                if class_target is not None
+                else f"{self._module_name}:{node.name}",
+            )
 
     def _handle_dependency_injector_container(self, node: ast.ClassDef) -> None:
         if not any(
