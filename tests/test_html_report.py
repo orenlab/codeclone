@@ -3467,6 +3467,26 @@ def test_html_report_uses_jetbrains_mono_for_stat_card_content() -> None:
     )
 
 
+def test_html_report_jetbrains_links_preserve_path_separators_for_line_navigation() -> (
+    None
+):
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+    )
+
+    _assert_html_contains(
+        html,
+        "function jetbrainsReferencePath(f,l)",
+        ".replace(/%2F/gi,'/')",
+        "+':'+lineNo(l);",
+        "'jetbrains://pycharm/navigate/reference?project='",
+        "'&path='+jetbrainsReferencePath(f,l)",
+    )
+    assert "encodeURIComponent(relPath(f))+':'+l" not in html
+
+
 def test_html_report_uses_jetbrains_mono_for_health_radar_labels() -> None:
     html = build_html_report(
         func_groups={},

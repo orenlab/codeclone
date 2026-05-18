@@ -16,6 +16,8 @@ README link behavior, and dead-code runtime reachability precision.
   dependencies do not appear as project dead-code findings.
 - Bump cache schema to `2.8` so projects rebuild cached dead-code and runtime
   reachability facts after the refined framework model.
+- Fix HTML report PyCharm/IntelliJ source links so they preserve line
+  navigation when opening files from report tables.
 
 ### Packaging
 
