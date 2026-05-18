@@ -403,10 +403,12 @@ def test_runtime_reachability_cache_helpers_reject_invalid_values() -> None:
     assert _as_runtime_reachability_framework("aiohttp") == "aiohttp"
     assert _as_runtime_reachability_framework("fastapi") == "fastapi"
     assert _as_runtime_reachability_framework("flask") == "flask"
+    assert _as_runtime_reachability_framework("sqlalchemy") == "sqlalchemy"
     assert _as_runtime_reachability_framework("broken") is None
     assert _as_runtime_reachability_edge_kind("registers_handler") == (
         "registers_handler"
     )
+    assert _as_runtime_reachability_edge_kind("runtime_hook") == "runtime_hook"
     assert _as_runtime_reachability_edge_kind("broken") is None
     assert _as_runtime_reachability_confidence("medium") == "medium"
     assert _as_runtime_reachability_confidence("broken") is None

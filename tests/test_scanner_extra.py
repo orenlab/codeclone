@@ -57,6 +57,22 @@ def test_iter_py_files_excludes(tmp_path: Path) -> None:
     assert str(skip) not in files
 
 
+def test_iter_py_files_excludes_node_modules(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    good = src / "app.py"
+    good.write_text("x = 1\n", "utf-8")
+    vendored = tmp_path / "frontend" / "node_modules" / "flatted" / "python"
+    vendored.mkdir(parents=True)
+    vendored_file = vendored / "flatted.py"
+    vendored_file.write_text("def stringify(value):\n    return value\n", "utf-8")
+
+    files = list(iter_py_files(str(tmp_path)))
+
+    assert str(good) in files
+    assert str(vendored_file) not in files
+
+
 def test_iter_py_files_deterministic_sorted_order(tmp_path: Path) -> None:
     z_file = tmp_path / "z.py"
     z_file.write_text("z = 1\n", "utf-8")

@@ -1401,6 +1401,7 @@ def test_runtime_reachability_internal_guards_stay_safe() -> None:
         },
         runtime_objects={},
         included_routers=set(),
+        route_decorator_factories={},
     )
     tree = ast.parse(
         """
@@ -1485,6 +1486,36 @@ def websocket_endpoint():
     assert by_target[
         ("pkg.mod:websocket_endpoint", "registers_handler")
     ].confidence == ("high")
+
+
+def test_dead_code_uses_fastapi_route_decorator_factory_reachability() -> None:
+    source = """
+from typing import cast
+from fastapi import APIRouter, status
+
+router = APIRouter()
+
+def _typed_get(*args: object, **kwargs: object):
+    route_get = cast(object, router.get)
+    return route_get(*args, **kwargs)
+
+@_typed_get("", status_code=status.HTTP_200_OK)
+async def get_system_metrics():
+    return {}
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == ("pkg.mod:orphan",)
+    facts = _runtime_reachability_from_source(source)
+    by_target = {fact.target_qualname: fact for fact in facts}
+
+    assert by_target["pkg.mod:get_system_metrics"].framework == "fastapi"
+    assert by_target["pkg.mod:get_system_metrics"].evidence == (
+        "route decorator factory"
+    )
+    assert by_target["pkg.mod:get_system_metrics"].evidence_symbol == "_typed_get"
 
 
 def test_dead_code_uses_aiogram_router_observer_reachability() -> None:
@@ -1632,6 +1663,40 @@ def orphan():
         == "BaseHTTPMiddleware.dispatch"
     )
     assert "pkg.mod:PlainMiddleware.dispatch" not in by_target
+
+
+def test_dead_code_uses_sqlalchemy_type_decorator_runtime_hooks() -> None:
+    source = """
+from sqlalchemy import JSON
+from sqlalchemy.types import TypeDecorator
+
+class OrjsonJSON(TypeDecorator[object]):
+    impl = JSON
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return value
+
+    def process_result_value(self, value, dialect):
+        return value
+
+    def helper(self):
+        return None
+"""
+
+    dead = set(_dead_qualnames_from_source(source))
+
+    assert "pkg.mod:OrjsonJSON.process_bind_param" not in dead
+    assert "pkg.mod:OrjsonJSON.process_result_value" not in dead
+    assert "pkg.mod:OrjsonJSON.helper" in dead
+    facts = _runtime_reachability_from_source(source)
+    by_target = {fact.target_qualname: fact for fact in facts}
+    assert by_target["pkg.mod:OrjsonJSON.process_bind_param"].framework == (
+        "sqlalchemy"
+    )
+    assert by_target["pkg.mod:OrjsonJSON.process_result_value"].edge_kind == (
+        "runtime_hook"
+    )
 
 
 def test_runtime_reachability_ignores_type_checking_only_frameworks() -> None:

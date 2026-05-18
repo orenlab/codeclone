@@ -9,8 +9,11 @@ README link behavior, and dead-code runtime reachability precision.
 
 - Extend runtime reachability with exact Aiogram `Router`/`Dispatcher`
   observer decorators, Starlette `BaseHTTPMiddleware.dispatch` hooks,
-  Flask/Blueprint routes, and aiohttp `RouteTableDef` route decorators to
+  Flask/Blueprint routes, aiohttp `RouteTableDef` route decorators, FastAPI
+  route decorator factories, and SQLAlchemy `TypeDecorator` runtime hooks to
   reduce false-positive dead-code findings without name-only heuristics.
+- Exclude `node_modules` from the default Python scanner so vendored frontend
+  dependencies do not appear as project dead-code findings.
 - Bump cache schema to `2.8` so projects rebuild cached dead-code and runtime
   reachability facts after the refined framework model.
 

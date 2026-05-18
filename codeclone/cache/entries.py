@@ -341,6 +341,7 @@ def _as_runtime_reachability_framework(value: object) -> str | None:
             | "dependency_injector"
             | "django"
             | "fastapi"
+            | "sqlalchemy"
             | "starlette"
             | "typer"
         ):
@@ -357,6 +358,7 @@ def _as_runtime_reachability_edge_kind(value: object) -> str | None:
             | "registers_command"
             | "registers_handler"
             | "registers_task"
+            | "runtime_hook"
         ):
             return value
         case _:
