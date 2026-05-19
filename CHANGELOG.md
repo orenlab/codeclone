@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [2.0.2] - 2026-05-19
 
 `2.0.2` is a focused patch release for VS Code extension packaging metadata,
 README link behavior, and dead-code runtime reachability precision.
