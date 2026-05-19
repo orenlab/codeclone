@@ -399,11 +399,16 @@ def test_security_surface_cache_helpers_reject_invalid_values() -> None:
 
 
 def test_runtime_reachability_cache_helpers_reject_invalid_values() -> None:
+    assert _as_runtime_reachability_framework("aiogram") == "aiogram"
+    assert _as_runtime_reachability_framework("aiohttp") == "aiohttp"
     assert _as_runtime_reachability_framework("fastapi") == "fastapi"
+    assert _as_runtime_reachability_framework("flask") == "flask"
+    assert _as_runtime_reachability_framework("sqlalchemy") == "sqlalchemy"
     assert _as_runtime_reachability_framework("broken") is None
     assert _as_runtime_reachability_edge_kind("registers_handler") == (
         "registers_handler"
     )
+    assert _as_runtime_reachability_edge_kind("runtime_hook") == "runtime_hook"
     assert _as_runtime_reachability_edge_kind("broken") is None
     assert _as_runtime_reachability_confidence("medium") == "medium"
     assert _as_runtime_reachability_confidence("broken") is None
@@ -935,7 +940,7 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     assert loaded.cache_schema_version == "0.0"
 
 
-@pytest.mark.parametrize("version", ["0.0", "2.2"])
+@pytest.mark.parametrize("version", ["0.0", "2.2", "2.7"])
 def test_cache_v_field_version_mismatch_warns(tmp_path: Path, version: str) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)

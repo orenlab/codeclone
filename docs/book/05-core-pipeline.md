@@ -61,6 +61,10 @@ Refs:
   not affect health, gates, or suggestions.
 - Test-path liveness references are filtered both on fresh extraction and on
   cache decode.
+- Default discovery skips generated/dependency directories such as `.git`,
+  virtualenvs, `site-packages`, `node_modules`, migrations, `dist`, and
+  `build`; users can still pass explicit scanner excludes for project-specific
+  layouts.
 
 Refs:
 
@@ -106,6 +110,7 @@ Refs:
 ## Locked by tests
 
 - `tests/test_scanner_extra.py::test_iter_py_files_deterministic_sorted_order`
+- `tests/test_scanner_extra.py::test_iter_py_files_excludes_node_modules`
 - `tests/test_cli_inprocess.py::test_cli_summary_cache_miss_metrics`
 - `tests/test_cli_inprocess.py::test_cli_unreadable_source_fails_in_ci_with_contract_error`
 - `tests/test_extractor.py::test_parse_limits_triggers_timeout`

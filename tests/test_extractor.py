@@ -26,6 +26,7 @@ from codeclone.metrics.dead_code import find_unused
 from codeclone.models import (
     BlockUnit,
     ClassMetrics,
+    FileMetrics,
     ModuleDep,
     RuntimeReachabilityFact,
     SegmentUnit,
@@ -114,6 +115,43 @@ def _dead_qualnames_from_source(
         runtime_reachability=file_metrics.runtime_reachability,
     )
     return tuple(item.qualname for item in dead)
+
+
+def _file_metrics_from_source(
+    source: str,
+    *,
+    filepath: str,
+    module_name: str,
+) -> FileMetrics:
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath=filepath,
+        module_name=module_name,
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    return file_metrics
+
+
+def _dead_qualnames_from_metrics(
+    definitions: FileMetrics,
+    *references: FileMetrics,
+) -> set[str]:
+    referenced_names: set[str] = set()
+    referenced_qualnames: set[str] = set()
+    for file_metrics in (definitions, *references):
+        referenced_names.update(file_metrics.referenced_names)
+        referenced_qualnames.update(file_metrics.referenced_qualnames)
+
+    return {
+        item.qualname
+        for item in find_unused(
+            definitions=definitions.dead_candidates,
+            referenced_names=frozenset(referenced_names),
+            referenced_qualnames=frozenset(referenced_qualnames),
+        )
+    }
 
 
 def _runtime_reachability_from_source(
@@ -1401,6 +1439,7 @@ def test_runtime_reachability_internal_guards_stay_safe() -> None:
         },
         runtime_objects={},
         included_routers=set(),
+        route_decorator_factories={},
     )
     tree = ast.parse(
         """
@@ -1485,6 +1524,217 @@ def websocket_endpoint():
     assert by_target[
         ("pkg.mod:websocket_endpoint", "registers_handler")
     ].confidence == ("high")
+
+
+def test_dead_code_uses_fastapi_route_decorator_factory_reachability() -> None:
+    source = """
+from typing import cast
+from fastapi import APIRouter, status
+
+router = APIRouter()
+
+def _typed_get(*args: object, **kwargs: object):
+    route_get = cast(object, router.get)
+    return route_get(*args, **kwargs)
+
+@_typed_get("", status_code=status.HTTP_200_OK)
+async def get_system_metrics():
+    return {}
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == ("pkg.mod:orphan",)
+    facts = _runtime_reachability_from_source(source)
+    by_target = {fact.target_qualname: fact for fact in facts}
+
+    assert by_target["pkg.mod:get_system_metrics"].framework == "fastapi"
+    assert by_target["pkg.mod:get_system_metrics"].evidence == (
+        "route decorator factory"
+    )
+    assert by_target["pkg.mod:get_system_metrics"].evidence_symbol == "_typed_get"
+
+
+def test_dead_code_uses_aiogram_router_observer_reachability() -> None:
+    source = """
+from aiogram import F, Dispatcher, Router
+from aiogram.filters import Command
+
+router = Router()
+dp = Dispatcher()
+not_router = object()
+
+def get_router():
+    return router
+
+@router.message(Command("start"))
+async def cmd_start(message):
+    return message
+
+@router.callback_query(F.data.startswith("docker:container:"))
+async def show_container_detail(callback):
+    return callback
+
+@dp.inline_query()
+async def inline_search(query):
+    return query
+
+@not_router.message()
+async def fake_message(message):
+    return message
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == (
+        "pkg.mod:get_router",
+        "pkg.mod:fake_message",
+        "pkg.mod:orphan",
+    )
+    observed = {
+        fact.target_qualname: (fact.framework, fact.evidence_symbol, fact.confidence)
+        for fact in _runtime_reachability_from_source(source)
+    }
+    assert {
+        key: observed[key]
+        for key in (
+            "pkg.mod:cmd_start",
+            "pkg.mod:show_container_detail",
+            "pkg.mod:inline_search",
+        )
+    } == {
+        "pkg.mod:cmd_start": ("aiogram", "router.message", "medium"),
+        "pkg.mod:show_container_detail": (
+            "aiogram",
+            "router.callback_query",
+            "medium",
+        ),
+        "pkg.mod:inline_search": ("aiogram", "dp.inline_query", "high"),
+    }
+    assert "pkg.mod:fake_message" not in observed
+
+
+def test_dead_code_uses_flask_and_aiohttp_route_reachability() -> None:
+    source = """
+from aiohttp import web
+from flask import Blueprint, Flask
+
+app = Flask(__name__)
+bp = Blueprint("api", __name__)
+aio_routes = web.RouteTableDef()
+aio_app = web.Application()
+other = object()
+
+app.register_blueprint(bp)
+aio_app.add_routes(aio_routes)
+
+@app.route("/")
+def flask_index():
+    return "ok"
+
+@bp.get("/items")
+def flask_items():
+    return "items"
+
+@aio_routes.post("/items")
+async def aio_items(request):
+    return request
+
+@other.route("/")
+def fake_route():
+    return "fake"
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == (
+        "pkg.mod:fake_route",
+        "pkg.mod:orphan",
+    )
+    observed = {
+        fact.target_qualname: (fact.framework, fact.confidence)
+        for fact in _runtime_reachability_from_source(source)
+    }
+    assert observed == {
+        "pkg.mod:flask_index": ("flask", "high"),
+        "pkg.mod:flask_items": ("flask", "high"),
+        "pkg.mod:aio_items": ("aiohttp", "high"),
+    }
+
+
+def test_dead_code_uses_starlette_base_http_middleware_dispatch_hook() -> None:
+    source = """
+from starlette.middleware.base import BaseHTTPMiddleware as MiddlewareBase
+
+class SecurityAuditMiddleware(MiddlewareBase):
+    async def dispatch(self, request, call_next):
+        return await call_next(request)
+
+    async def helper(self):
+        return None
+
+class PlainMiddleware:
+    async def dispatch(self, request, call_next):
+        return await call_next(request)
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == (
+        "pkg.mod:SecurityAuditMiddleware",
+        "pkg.mod:SecurityAuditMiddleware.helper",
+        "pkg.mod:PlainMiddleware",
+        "pkg.mod:PlainMiddleware.dispatch",
+        "pkg.mod:orphan",
+    )
+    facts = _runtime_reachability_from_source(source)
+    by_target = {fact.target_qualname: fact for fact in facts}
+    assert by_target["pkg.mod:SecurityAuditMiddleware.dispatch"].framework == (
+        "starlette"
+    )
+    assert (
+        by_target["pkg.mod:SecurityAuditMiddleware.dispatch"].evidence_symbol
+        == "BaseHTTPMiddleware.dispatch"
+    )
+    assert "pkg.mod:PlainMiddleware.dispatch" not in by_target
+
+
+def test_dead_code_uses_sqlalchemy_type_decorator_runtime_hooks() -> None:
+    source = """
+from sqlalchemy import JSON
+from sqlalchemy.types import TypeDecorator
+
+class OrjsonJSON(TypeDecorator[object]):
+    impl = JSON
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return value
+
+    def process_result_value(self, value, dialect):
+        return value
+
+    def helper(self):
+        return None
+"""
+
+    dead = set(_dead_qualnames_from_source(source))
+
+    assert "pkg.mod:OrjsonJSON.process_bind_param" not in dead
+    assert "pkg.mod:OrjsonJSON.process_result_value" not in dead
+    assert "pkg.mod:OrjsonJSON.helper" in dead
+    facts = _runtime_reachability_from_source(source)
+    by_target = {fact.target_qualname: fact for fact in facts}
+    assert by_target["pkg.mod:OrjsonJSON.process_bind_param"].framework == (
+        "sqlalchemy"
+    )
+    assert by_target["pkg.mod:OrjsonJSON.process_result_value"].edge_kind == (
+        "runtime_hook"
+    )
 
 
 def test_runtime_reachability_ignores_type_checking_only_frameworks() -> None:
@@ -1866,6 +2116,7 @@ def test_extract_collects_referenced_qualnames_for_module_all_exports() -> None:
     source = """
 __all__ = ["PublicClass"] + ("public_func",)
 __all__: list[str] = ["TypedPublic"]
+__all__: tuple[str, ...]
 __all__ += ["AugmentedPublic"]
 __all__.append("AlsoPublic")
 __all__.extend(["exported_later"])
@@ -1927,6 +2178,168 @@ def NestedInvalid():
     state = module_walk_mod._ModuleWalkState()
     module_walk_mod._collect_module_all_exports(ast.Pass(), state)
     assert state.exported_names == set()
+
+
+def test_module_walk_export_and_dynamic_getattr_helpers_cover_safe_edges() -> None:
+    invalid_exports = cast(
+        ast.Assign,
+        ast.parse('_EXPORTS = {"Good": "pkg.good", 42: "bad", "Bad": object()}').body[
+            0
+        ],
+    )
+    assert module_walk_mod._string_mapping_from_literal_dict(ast.Pass()) == {}
+    assert module_walk_mod._string_mapping_from_literal_dict(invalid_exports.value) == {
+        "Good": "pkg.good"
+    }
+    assert module_walk_mod._literal_getattr_name(ast.Pass()) is None
+    assert (
+        module_walk_mod._literal_getattr_name(
+            ast.parse("getattr(obj)", mode="eval").body
+        )
+        is None
+    )
+    assert (
+        module_walk_mod._literal_getattr_name(
+            ast.parse('getattr(obj, "not-valid")', mode="eval").body
+        )
+        is None
+    )
+    assert module_walk_mod._collect_dynamic_getattr_names(ast.Pass()) == set()
+
+    tree = ast.parse(
+        """
+class Runtime:
+    def dispatch(self) -> object | None:
+        first = second = getattr(self, "multi_lookup", None)
+        annotated: object = getattr(self, "annotated_lookup", None)
+        ignored = getattr(self, "not-valid", None)
+        if callable(first):
+            first()
+        if callable(annotated):
+            annotated()
+
+        def nested() -> None:
+            hidden = getattr(self, "nested_lookup", None)
+            if callable(hidden):
+                hidden()
+
+        class Inner:
+            def method(self) -> None:
+                inner = getattr(self, "inner_lookup", None)
+                if callable(inner):
+                    inner()
+
+        return second
+"""
+    )
+    assert module_walk_mod._collect_dynamic_getattr_names(tree) == {
+        "annotated_lookup",
+        "multi_lookup",
+    }
+
+
+def test_extract_resolves_public_reexports_to_source_symbols() -> None:
+    sources = {
+        "common": (
+            "pkg/common.py",
+            "pkg.common",
+            """
+class MetricValueDTO:
+    pass
+""",
+        ),
+        "reexport": (
+            "pkg/__init__.py",
+            "pkg",
+            """
+from pkg.common import MetricValueDTO
+
+__all__ = ["MetricValueDTO"]
+""",
+        ),
+        "handlers": (
+            "pkg/handlers.py",
+            "pkg.handlers",
+            """
+class ListContainersHandler:
+    pass
+""",
+        ),
+        "lazy_exports": (
+            "pkg/__init__.py",
+            "pkg",
+            """
+__all__ = ["ListContainersHandler"]
+
+_EXPORTS = {
+    "ListContainersHandler": "pkg.handlers",
+}
+
+def __getattr__(name: str):
+    module_path = _EXPORTS.get(name)
+    if module_path is None:
+        raise AttributeError(name)
+    module = __import__(module_path, fromlist=[name])
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
+""",
+        ),
+    }
+    metrics = {
+        name: _file_metrics_from_source(
+            source=source,
+            filepath=filepath,
+            module_name=module_name,
+        )
+        for name, (filepath, module_name, source) in sources.items()
+    }
+
+    dead_reexports = _dead_qualnames_from_metrics(
+        metrics["common"],
+        metrics["reexport"],
+    )
+    dead_lazy = _dead_qualnames_from_metrics(
+        metrics["handlers"],
+        metrics["lazy_exports"],
+    )
+    assert "pkg.common:MetricValueDTO" not in dead_reexports
+    assert "pkg.handlers:ListContainersHandler" not in dead_lazy
+
+
+def test_extract_treats_guarded_dynamic_getattr_call_as_runtime_reference() -> None:
+    source = """
+class Repository:
+    def find_latest_artifact_by_format(self, expected_format: str) -> object | None:
+        return None
+
+class BootstrapService:
+    def __init__(self, repository: object) -> None:
+        self._repository = repository
+
+    async def bootstrap(self) -> object | None:
+        finder = getattr(self._repository, "find_latest_artifact_by_format", None)
+        if not callable(finder):
+            return None
+        return await finder("onnx")
+"""
+    dead = set(_dead_qualnames_from_source(source))
+    assert "pkg.mod:Repository.find_latest_artifact_by_format" not in dead
+
+
+def test_extract_ignores_uncalled_dynamic_getattr_probe() -> None:
+    source = """
+class Repository:
+    def find_latest_artifact_by_format(self, expected_format: str) -> object | None:
+        return None
+
+class BootstrapService:
+    def probe(self) -> bool:
+        finder = getattr(self, "find_latest_artifact_by_format", None)
+        return callable(finder)
+"""
+    dead = set(_dead_qualnames_from_source(source))
+    assert "pkg.mod:Repository.find_latest_artifact_by_format" in dead
 
 
 def test_collect_dead_candidates_skips_protocol_and_stub_like_symbols() -> None:
@@ -2041,6 +2454,31 @@ class Config:
     assert "pkg.mod:Config.__post_init__" not in set(
         _dead_qualnames_from_source(source)
     )
+
+
+def test_dead_code_skips_pydantic_field_validators_without_direct_calls() -> None:
+    source = """
+from typing import Any
+from pydantic import BaseModel, Field, field_validator
+
+class AllowedAction(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    parameters: dict[str, Any] | None = Field(default=None)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("parameters")
+    @classmethod
+    def validate_parameters(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        return value
+"""
+    assert _dead_qualnames_from_source(source) == ("pkg.mod:AllowedAction",)
 
 
 def test_dead_code_keeps_explicitly_inherited_abc_base_live() -> None:

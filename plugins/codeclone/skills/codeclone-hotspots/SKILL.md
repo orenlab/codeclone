@@ -50,6 +50,8 @@ analyze_repository → evaluate_gates
 - Use MCP tools only when invoked through the CodeClone plugin.
 - If no latest MCP run exists, call `analyze_repository` yourself before reading `latest/*` resources.
 - Use default thresholds — this is a quick check, not an exploratory deep-dive.
+- For `check_*` tools, use `detail_level="summary"`, `"normal"`, or
+  `"full"` only. `compact` is valid only for `help(detail="compact")`.
 - One tool call is better than three when answering a simple question.
 - Summarize concisely — the user wants a snapshot, not a report.
 - Do not fall back to CLI or local report files.

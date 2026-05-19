@@ -70,9 +70,12 @@ Refs:
 - Runtime framework registration facts can mark a symbol live when the extractor
   observes a deterministic edge from modern Python runtime surfaces:
   FastAPI/Starlette route and dependency registration, including
-  `Annotated[..., Depends(...)]` and `Annotated[..., Security(...)]` route
-  parameters, Django URL patterns, Dependency Injector providers, Typer/Click
-  commands, and Celery tasks.
+  typed route decorator factories, `Annotated[..., Depends(...)]` and
+  `Annotated[..., Security(...)]` route parameters, Starlette
+  `BaseHTTPMiddleware.dispatch` hooks, Aiogram router observer decorators,
+  Flask/Blueprint routes, aiohttp `RouteTableDef` decorators, Django URL
+  patterns, Dependency Injector providers, Typer/Click commands, Celery tasks,
+  and SQLAlchemy `TypeDecorator` runtime hooks.
 - Runtime reachability facts are evidence, not a full call graph. High- and
   medium-confidence facts prevent false dead-code findings; low-confidence
   facts, if introduced later, must remain report-only until explicitly wired.
@@ -149,6 +152,11 @@ Refs:
 - `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[suppression_binding_scoped_to_target]`
 - `tests/test_extractor.py::test_dead_code_uses_fastapi_route_and_dependency_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_fastapi_annotated_dependency_reachability`
+- `tests/test_extractor.py::test_dead_code_uses_fastapi_route_decorator_factory_reachability`
+- `tests/test_extractor.py::test_dead_code_uses_aiogram_router_observer_reachability`
+- `tests/test_extractor.py::test_dead_code_uses_flask_and_aiohttp_route_reachability`
+- `tests/test_extractor.py::test_dead_code_uses_starlette_base_http_middleware_dispatch_hook`
+- `tests/test_extractor.py::test_dead_code_uses_sqlalchemy_type_decorator_runtime_hooks`
 - `tests/test_extractor.py::test_dead_code_uses_django_urlpattern_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_dependency_injector_provider_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_cli_and_task_registration_reachability`

@@ -120,11 +120,15 @@ class DeadCandidate:
 
 
 RuntimeReachabilityFramework = Literal[
+    "aiogram",
+    "aiohttp",
     "celery",
     "click",
     "dependency_injector",
     "django",
     "fastapi",
+    "flask",
+    "sqlalchemy",
     "starlette",
     "typer",
 ]
@@ -134,6 +138,7 @@ RuntimeReachabilityEdgeKind = Literal[
     "registers_command",
     "registers_handler",
     "registers_task",
+    "runtime_hook",
 ]
 RuntimeReachabilityConfidence = Literal["high", "medium", "low"]
 RuntimeReachabilityTargetKind = Literal["function", "class", "method"]

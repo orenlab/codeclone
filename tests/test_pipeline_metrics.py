@@ -44,6 +44,8 @@ from codeclone.core.discovery_cache import (
     _public_symbol_from_cache_dict,
     _public_symbol_kind,
     _risk_level,
+    _runtime_reachability_edge_kind,
+    _runtime_reachability_framework,
     _security_surface_category,
     _security_surface_classification_mode,
     _security_surface_evidence_kind,
@@ -1117,6 +1119,47 @@ def test_discovery_cache_literal_helpers_accept_known_values_and_reject_unknowns
     ),
 )
 def test_discovery_cache_security_surface_helpers_accept_and_reject(
+    helper: Callable[[object], object | None],
+    accepted: tuple[str, ...],
+) -> None:
+    for value in accepted:
+        assert helper(value) == value
+    assert helper("broken") is None
+
+
+@pytest.mark.parametrize(
+    ("helper", "accepted"),
+    (
+        (
+            _runtime_reachability_framework,
+            (
+                "aiogram",
+                "aiohttp",
+                "celery",
+                "click",
+                "dependency_injector",
+                "django",
+                "fastapi",
+                "flask",
+                "sqlalchemy",
+                "starlette",
+                "typer",
+            ),
+        ),
+        (
+            _runtime_reachability_edge_kind,
+            (
+                "declares_dependency",
+                "provides",
+                "registers_command",
+                "registers_handler",
+                "registers_task",
+                "runtime_hook",
+            ),
+        ),
+    ),
+)
+def test_discovery_cache_runtime_reachability_helpers_accept_and_reject(
     helper: Callable[[object], object | None],
     accepted: tuple[str, ...],
 ) -> None:

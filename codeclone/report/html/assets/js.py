@@ -692,19 +692,33 @@ _IDE_LINKS = r"""
     return abs;
   }
 
+  function lineNo(value){
+    var n=parseInt(value,10);
+    return Number.isFinite(n)&&n>0?n:1;
+  }
+
+  function jetbrainsReferencePath(f,l){
+    // JetBrains parses the path query value as "path/to/file.py:line".
+    // Keep path separators literal; fully encoded slashes can open the file
+    // while preventing the trailing line reference from being recognized.
+    return encodeURIComponent(relPath(f))
+      .replace(/%2F/gi,'/')
+      .replace(/%3A/gi,':')+':'+lineNo(l);
+  }
+
   const SCHEMES={
     pycharm:{label:'PyCharm',
-      url:function(f,l){return 'jetbrains://pycharm/navigate/reference?project='+encodeURIComponent(projectName)+'&path='+encodeURIComponent(relPath(f))+':'+l}},
+      url:function(f,l){return 'jetbrains://pycharm/navigate/reference?project='+encodeURIComponent(projectName)+'&path='+jetbrainsReferencePath(f,l)}},
     idea:{label:'IntelliJ IDEA',
-      url:function(f,l){return 'jetbrains://idea/navigate/reference?project='+encodeURIComponent(projectName)+'&path='+encodeURIComponent(relPath(f))+':'+l}},
+      url:function(f,l){return 'jetbrains://idea/navigate/reference?project='+encodeURIComponent(projectName)+'&path='+jetbrainsReferencePath(f,l)}},
     vscode:{label:'VS Code',
-      url:function(f,l){return 'vscode://file'+f+':'+l}},
+      url:function(f,l){return 'vscode://file'+f+':'+lineNo(l)}},
     cursor:{label:'Cursor',
-      url:function(f,l){return 'cursor://file'+f+':'+l}},
+      url:function(f,l){return 'cursor://file'+f+':'+lineNo(l)}},
     fleet:{label:'Fleet',
-      url:function(f,l){return 'fleet://open?file='+encodeURIComponent(f)+'&line='+l}},
+      url:function(f,l){return 'fleet://open?file='+encodeURIComponent(f)+'&line='+lineNo(l)}},
     zed:{label:'Zed',
-      url:function(f,l){return 'zed://file'+f+':'+l}},
+      url:function(f,l){return 'zed://file'+f+':'+lineNo(l)}},
     '': {label:'None',url:null}
   };
 

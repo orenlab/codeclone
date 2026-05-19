@@ -21,6 +21,7 @@ DEFAULT_EXCLUDES = (
     ".venv",
     "venv",
     "__pycache__",
+    "node_modules",
     "site-packages",
     "migrations",
     "alembic",

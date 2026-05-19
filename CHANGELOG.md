@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+`2.0.2` is a focused patch release for VS Code extension packaging metadata,
+README link behavior, and dead-code runtime reachability precision.
+
+### Enhancements
+
+- Extend runtime reachability with exact Aiogram `Router`/`Dispatcher`
+  observer decorators, Starlette `BaseHTTPMiddleware.dispatch` hooks,
+  Flask/Blueprint routes, aiohttp `RouteTableDef` route decorators, FastAPI
+  route decorator factories, and SQLAlchemy `TypeDecorator` runtime hooks to
+  reduce false-positive dead-code findings without name-only heuristics.
+- Exclude `node_modules` from the default Python scanner so vendored frontend
+  dependencies do not appear as project dead-code findings.
+
+### Bug Fixes
+
+- Fix HTML report PyCharm/IntelliJ source links so they preserve line
+  navigation when opening files from report tables.
+- Fix README package badges so PyPI/status/download/Python-version links open
+  the PyPI project page instead of scrolling to the installation section.
+- Treat `__all__` re-exports, PEP 562 lazy `_EXPORTS` modules, and guarded
+  dynamic `getattr(..., "method")` callable dispatch as dead-code reachability
+  evidence.
+
+### Internal
+
+- Bump cache schema to `2.8` so projects rebuild cached dead-code and runtime
+  reachability facts after the refined framework model.
+- Bump the Python package and composite GitHub Action default install version to
+  `2.0.2`.
+- Record the VS Code extension `0.2.7` metadata that matches the Marketplace
+  build carrying Coverage Join hotspot support and workspace-root
+  `coverage.xml` discovery.
+
 ## [2.0.1] - 2026-05-14
 
 `2.0.1` is a focused stability release for dead-code precision and cache/report

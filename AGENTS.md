@@ -144,7 +144,7 @@ from another doc.** Current values (verified at write time):
 |-----------------------------------|-----------------------------------|---------------|
 | `BASELINE_SCHEMA_VERSION`         | `codeclone/contracts/__init__.py` | `2.1`         |
 | `BASELINE_FINGERPRINT_VERSION`    | `codeclone/contracts/__init__.py` | `1`           |
-| `CACHE_VERSION`                   | `codeclone/contracts/__init__.py` | `2.7`         |
+| `CACHE_VERSION`                   | `codeclone/contracts/__init__.py` | `2.8`         |
 | `REPORT_SCHEMA_VERSION`           | `codeclone/contracts/__init__.py` | `2.11`        |
 | `METRICS_BASELINE_SCHEMA_VERSION` | `codeclone/contracts/__init__.py` | `1.2`         |
 

@@ -38,7 +38,7 @@ source under test. Remote consumers still install from PyPI.
 For strict reproducibility, pin the full release tag:
 
 ```yaml
-- uses: orenlab/codeclone/.github/actions/codeclone@v2.0.1
+- uses: orenlab/codeclone/.github/actions/codeclone@v2.0.2
 ```
 
 For long-lived workflows, `@v2` follows the latest compatible 2.x action
@@ -80,7 +80,7 @@ jobs:
 | Input                   | Default                         | Purpose                                                                                                           |
 |-------------------------|---------------------------------|-------------------------------------------------------------------------------------------------------------------|
 | `python-version`        | `3.14`                          | Python version used to run the action                                                                             |
-| `package-version`       | `2.0.1`                         | CodeClone version from PyPI for remote installs; ignored when the action runs from the checked-out CodeClone repo |
+| `package-version`       | `2.0.2`                         | CodeClone version from PyPI for remote installs; ignored when the action runs from the checked-out CodeClone repo |
 | `path`                  | `.`                             | Project root to analyze                                                                                           |
 | `json-path`             | `.cache/codeclone/report.json`  | JSON report output path                                                                                           |
 | `sarif`                 | `true`                          | Generate SARIF and try to upload it                                                                               |
@@ -145,7 +145,7 @@ Notes:
 ## Install policy
 
 Released action tags pin the PyPI package version in action metadata. For
-example, `@v2.0.1` installs `codeclone==2.0.1` unless you override
+example, `@v2.0.2` installs `codeclone==2.0.2` unless you override
 `package-version`.
 
 Explicit prerelease or smoke-test override:

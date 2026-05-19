@@ -182,11 +182,15 @@ def _runtime_reachability_framework(
 ) -> RuntimeReachabilityFramework | None:
     match value:
         case (
-            "celery"
+            "aiogram"
+            | "aiohttp"
+            | "celery"
             | "click"
             | "dependency_injector"
             | "django"
             | "fastapi"
+            | "flask"
+            | "sqlalchemy"
             | "starlette"
             | "typer"
         ):
@@ -205,6 +209,7 @@ def _runtime_reachability_edge_kind(
             | "registers_command"
             | "registers_handler"
             | "registers_task"
+            | "runtime_hook"
         ):
             return value
         case _:

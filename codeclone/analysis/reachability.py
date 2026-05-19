@@ -35,6 +35,52 @@ _FASTAPI_ROUTE_METHODS = {
     "websocket",
     "websocket_route",
 }
+_AIOGRAM_OBSERVER_METHODS = {
+    "business_connection",
+    "business_message",
+    "callback_query",
+    "channel_post",
+    "chat_boost",
+    "chat_join_request",
+    "chat_member",
+    "chosen_inline_result",
+    "deleted_business_messages",
+    "edited_business_message",
+    "edited_channel_post",
+    "edited_message",
+    "error",
+    "inline_query",
+    "message",
+    "message_reaction",
+    "message_reaction_count",
+    "my_chat_member",
+    "poll",
+    "poll_answer",
+    "pre_checkout_query",
+    "purchased_paid_media",
+    "shipping_query",
+}
+_AIOHTTP_ROUTE_METHODS = {
+    "delete",
+    "get",
+    "head",
+    "options",
+    "patch",
+    "post",
+    "put",
+    "route",
+    "view",
+}
+_FLASK_ROUTE_METHODS = {
+    "delete",
+    "get",
+    "head",
+    "options",
+    "patch",
+    "post",
+    "put",
+    "route",
+}
 _FASTAPI_DEPENDENCY_SYMBOLS = {
     "fastapi.Depends",
     "fastapi.Security",
@@ -64,6 +110,31 @@ _DI_PROVIDER_NAMES = {
     "ThreadLocalSingleton",
 }
 _DI_PROVIDER_SYMBOLS = {f"{_DI_PROVIDER_PREFIX}{name}" for name in _DI_PROVIDER_NAMES}
+_STARLETTE_BASE_HTTP_MIDDLEWARE = "starlette.middleware.base.BaseHTTPMiddleware"
+_SQLALCHEMY_TYPE_DECORATOR_SYMBOLS = {
+    "sqlalchemy.TypeDecorator",
+    "sqlalchemy.sql.type_api.TypeDecorator",
+    "sqlalchemy.types.TypeDecorator",
+}
+_SQLALCHEMY_TYPE_DECORATOR_HOOKS = {
+    "bind_expression",
+    "coerce_compared_value",
+    "column_expression",
+    "compare_values",
+    "load_dialect_impl",
+    "process_bind_param",
+    "process_literal_param",
+    "process_result_value",
+}
+_TYPING_CAST_SYMBOLS = {
+    "typing.cast",
+    "typing_extensions.cast",
+}
+_RUNTIME_REGISTRATION_METHODS = {
+    "add_routes": ("aiohttp_app", "first_arg"),
+    "include_router": ("fastapi_app", "include_router"),
+    "register_blueprint": ("flask_app", "first_arg"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,8 +149,16 @@ class _Target:
 class _RouteRegistration:
     framework: RuntimeReachabilityFramework
     confidence: RuntimeReachabilityConfidence
+    evidence: str
     evidence_symbol: str
     source_qualname: str
+
+
+@dataclass(frozen=True, slots=True)
+class _RouteDecoratorFactory:
+    obj_name: str
+    obj_kind: _RuntimeObjectKind
+    method: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +166,64 @@ class _ProviderRegistration:
     target: _Target
     provider_name: str
     evidence_symbol: str
+
+
+def _registration_confidence(
+    obj_name: str,
+    *,
+    included_routers: set[str],
+    high_when: bool = False,
+) -> RuntimeReachabilityConfidence:
+    if high_when or obj_name in included_routers:
+        return "high"
+    return "medium"
+
+
+def _route_registration_for_runtime_object(
+    *,
+    obj_name: str,
+    obj_kind: _RuntimeObjectKind | None,
+    method: str,
+    included_routers: set[str],
+) -> tuple[RuntimeReachabilityFramework, RuntimeReachabilityConfidence] | None:
+    match obj_kind:
+        case "aiogram_dispatcher":
+            framework: RuntimeReachabilityFramework = "aiogram"
+            route_methods = _AIOGRAM_OBSERVER_METHODS
+            high_when = True
+        case "aiogram_router":
+            framework = "aiogram"
+            route_methods = _AIOGRAM_OBSERVER_METHODS
+            high_when = False
+        case "aiohttp_routes":
+            framework = "aiohttp"
+            route_methods = _AIOHTTP_ROUTE_METHODS
+            high_when = False
+        case "flask_app":
+            framework = "flask"
+            route_methods = _FLASK_ROUTE_METHODS
+            high_when = True
+        case "flask_blueprint":
+            framework = "flask"
+            route_methods = _FLASK_ROUTE_METHODS
+            high_when = False
+        case "fastapi_app" | "fastapi_router":
+            framework = "fastapi"
+            route_methods = _FASTAPI_ROUTE_METHODS
+            high_when = obj_kind == "fastapi_app"
+        case "starlette_app" | "starlette_router":
+            framework = "starlette"
+            route_methods = _FASTAPI_ROUTE_METHODS
+            high_when = obj_kind == "starlette_app"
+        case _:
+            return None
+    if method not in route_methods:
+        return None
+    return framework, _registration_confidence(
+        obj_name,
+        included_routers=included_routers,
+        high_when=high_when,
+    )
 
 
 def _is_type_checking_guard(test: ast.AST) -> bool:
@@ -167,12 +304,20 @@ class _ImportAliasVisitor(ast.NodeVisitor):
 
 
 class _RuntimeBindingVisitor(ast.NodeVisitor):
-    __slots__ = ("_aliases", "included_routers", "objects")
+    __slots__ = (
+        "_aliases",
+        "_scope_depth",
+        "included_routers",
+        "objects",
+        "route_decorator_factories",
+    )
 
     def __init__(self, aliases: dict[str, str]) -> None:
         self._aliases = aliases
+        self._scope_depth = 0
         self.objects: dict[str, _RuntimeObjectKind] = {}
         self.included_routers: set[str] = set()
+        self.route_decorator_factories: dict[str, _RouteDecoratorFactory] = {}
 
     def visit_If(self, node: ast.If) -> None:
         if _is_type_checking_guard(node.test):
@@ -200,23 +345,35 @@ class _RuntimeBindingVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         symbol = _resolve_symbol(node.func, self._aliases)
-        match node.func:
-            case ast.Attribute(value=ast.Name(id=owner), attr="include_router"):
-                if self.objects.get(owner) == "fastapi_app":
-                    self._collect_include_router_arg(node)
-            case _:
-                pass
+        self._collect_runtime_registration(node)
         if symbol == "fastapi.FastAPI.include_router":
             self._collect_include_router_arg(node)
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._collect_click_group_binding(node)
-        self.generic_visit(node)
+        if self._scope_depth == 0:
+            self._collect_click_group_binding(node)
+            self._collect_route_decorator_factory(node)
+        self._visit_nested_scope(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._collect_click_group_binding(node)
-        self.generic_visit(node)
+        if self._scope_depth == 0:
+            self._collect_click_group_binding(node)
+            self._collect_route_decorator_factory(node)
+        self._visit_nested_scope(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._visit_nested_scope(node)
+
+    def _visit_nested_scope(
+        self,
+        node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
+        self._scope_depth += 1
+        try:
+            self.generic_visit(node)
+        finally:
+            self._scope_depth -= 1
 
     def _collect_click_group_binding(
         self,
@@ -229,6 +386,85 @@ class _RuntimeBindingVisitor(ast.NodeVisitor):
             if symbol in {"click.group", "click.Group"}:
                 self.objects[node.name] = "click_group"
 
+    def _collect_route_decorator_factory(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
+        local_route_aliases: dict[str, _RouteDecoratorFactory] = {}
+        for statement in node.body:
+            alias = self._route_method_assignment(statement)
+            if alias is not None:
+                name, factory = alias
+                local_route_aliases[name] = factory
+                continue
+            returned_factory = self._returned_route_factory(
+                statement, local_route_aliases
+            )
+            if returned_factory is not None:
+                self.route_decorator_factories[node.name] = returned_factory
+                return
+
+    def _route_method_assignment(
+        self,
+        statement: ast.stmt,
+    ) -> tuple[str, _RouteDecoratorFactory] | None:
+        match statement:
+            case ast.Assign(targets=[ast.Name(id=name), *_], value=value):
+                factory = self._route_method_reference(value)
+            case ast.AnnAssign(target=ast.Name(id=name), value=value):
+                factory = (
+                    self._route_method_reference(value) if value is not None else None
+                )
+            case _:
+                return None
+        if factory is None:
+            return None
+        return name, factory
+
+    def _returned_route_factory(
+        self,
+        statement: ast.stmt,
+        local_route_aliases: dict[str, _RouteDecoratorFactory],
+    ) -> _RouteDecoratorFactory | None:
+        match statement:
+            case ast.Return(value=ast.Call(func=ast.Name(id=name))):
+                return local_route_aliases.get(name)
+            case ast.Return(value=ast.Call(func=func)):
+                return self._route_method_reference(func)
+            case _:
+                return None
+
+    def _route_method_reference(self, value: ast.AST) -> _RouteDecoratorFactory | None:
+        if (
+            isinstance(value, ast.Call)
+            and _resolve_symbol(value.func, self._aliases) in _TYPING_CAST_SYMBOLS
+        ):
+            if len(value.args) < 2:
+                return None
+            return self._route_method_reference(value.args[1])
+        match value:
+            case ast.Attribute(value=ast.Name(id=obj_name), attr=method):
+                obj_kind = self.objects.get(obj_name)
+                if obj_kind is None:
+                    return None
+                if (
+                    _route_registration_for_runtime_object(
+                        obj_name=obj_name,
+                        obj_kind=obj_kind,
+                        method=method,
+                        included_routers=self.included_routers,
+                    )
+                    is None
+                ):
+                    return None
+                return _RouteDecoratorFactory(
+                    obj_name=obj_name,
+                    obj_kind=obj_kind,
+                    method=method,
+                )
+            case _:
+                return None
+
     def _collect_include_router_arg(self, node: ast.Call) -> None:
         if node.args:
             router = _dotted_name(node.args[0])
@@ -240,15 +476,50 @@ class _RuntimeBindingVisitor(ast.NodeVisitor):
                 if router is not None:
                     self.included_routers.add(router)
 
+    def _collect_runtime_registration(self, node: ast.Call) -> None:
+        match node.func:
+            case ast.Attribute(value=ast.Name(id=owner), attr=method):
+                expected = _RUNTIME_REGISTRATION_METHODS.get(method)
+            case _:
+                return
+        if expected is None:
+            return
+        expected_kind, collector = expected
+        if self.objects.get(owner) != expected_kind:
+            return
+        if collector == "include_router":
+            self._collect_include_router_arg(node)
+        else:
+            self._collect_first_arg_object(node)
+
+    def _collect_first_arg_object(self, node: ast.Call) -> None:
+        if not node.args:
+            return
+        target = _dotted_name(node.args[0])
+        if target is not None:
+            self.included_routers.add(target)
+
     def _runtime_object_kind(self, value: ast.AST) -> _RuntimeObjectKind | None:
         if not isinstance(value, ast.Call):
             return None
         symbol = _resolve_symbol(value.func, self._aliases)
         match symbol:
+            case "aiogram.Dispatcher":
+                return "aiogram_dispatcher"
+            case "aiogram.Router":
+                return "aiogram_router"
+            case "aiohttp.web.Application":
+                return "aiohttp_app"
+            case "aiohttp.web.RouteTableDef":
+                return "aiohttp_routes"
             case "fastapi.FastAPI":
                 return "fastapi_app"
             case "fastapi.APIRouter":
                 return "fastapi_router"
+            case "flask.Blueprint":
+                return "flask_blueprint"
+            case "flask.Flask":
+                return "flask_app"
             case "starlette.applications.Starlette":
                 return "starlette_app"
             case "starlette.routing.Router":
@@ -272,6 +543,7 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
         "_included_routers",
         "_methods_by_class",
         "_module_name",
+        "_route_decorator_factories",
         "_runtime_objects",
         "_seen",
         "_targets_by_name",
@@ -287,12 +559,14 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
         aliases: dict[str, str],
         runtime_objects: dict[str, _RuntimeObjectKind],
         included_routers: set[str],
+        route_decorator_factories: dict[str, _RouteDecoratorFactory],
     ) -> None:
         self._module_name = module_name
         self._filepath = filepath
         self._aliases = aliases
         self._runtime_objects = runtime_objects
         self._included_routers = included_routers
+        self._route_decorator_factories = route_decorator_factories
         self._function_targets: dict[int, _Target] = {}
         self._class_targets: dict[int, _Target] = {}
         self._methods_by_class: dict[str, list[_Target]] = {}
@@ -351,6 +625,8 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._handle_dependency_injector_container(node)
+        self._handle_starlette_base_http_middleware(node)
+        self._handle_sqlalchemy_type_decorator(node)
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
@@ -373,7 +649,7 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
                     framework=route.framework,
                     edge_kind="registers_handler",
                     confidence=route.confidence,
-                    evidence="route decorator",
+                    evidence=route.evidence,
                     evidence_symbol=route.evidence_symbol,
                     source_qualname=route.source_qualname,
                 )
@@ -390,29 +666,42 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
         func = call.func if call is not None else decorator
         match func:
             case ast.Attribute(value=ast.Name(id=obj_name), attr=method):
-                if method not in _FASTAPI_ROUTE_METHODS:
-                    return None
                 obj_kind = self._runtime_objects.get(obj_name)
-                if obj_kind not in {
-                    "fastapi_app",
-                    "fastapi_router",
-                    "starlette_app",
-                    "starlette_router",
-                }:
+                route = _route_registration_for_runtime_object(
+                    obj_name=obj_name,
+                    obj_kind=obj_kind,
+                    method=method,
+                    included_routers=self._included_routers,
+                )
+                if route is None:
                     return None
-                framework: RuntimeReachabilityFramework = (
-                    "starlette" if obj_kind.startswith("starlette") else "fastapi"
-                )
-                confidence: RuntimeReachabilityConfidence = (
-                    "high"
-                    if obj_kind.endswith("_app") or obj_name in self._included_routers
-                    else "medium"
-                )
+                framework, confidence = route
                 return _RouteRegistration(
                     framework=framework,
                     confidence=confidence,
+                    evidence="route decorator",
                     evidence_symbol=f"{obj_name}.{method}",
                     source_qualname=f"{self._module_name}:{obj_name}",
+                )
+            case ast.Name(id=factory_name):
+                factory = self._route_decorator_factories.get(factory_name)
+                if factory is None:
+                    return None
+                route = _route_registration_for_runtime_object(
+                    obj_name=factory.obj_name,
+                    obj_kind=factory.obj_kind,
+                    method=factory.method,
+                    included_routers=self._included_routers,
+                )
+                if route is None:
+                    return None
+                framework, confidence = route
+                return _RouteRegistration(
+                    framework=framework,
+                    confidence=confidence,
+                    evidence="route decorator factory",
+                    evidence_symbol=factory_name,
+                    source_qualname=f"{self._module_name}:{factory_name}",
                 )
             case _:
                 return None
@@ -648,6 +937,64 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
             case _:
                 return self._target_from_expr(node)
 
+    def _handle_starlette_base_http_middleware(self, node: ast.ClassDef) -> None:
+        if not any(
+            _resolve_symbol(base, self._aliases) == _STARLETTE_BASE_HTTP_MIDDLEWARE
+            for base in node.bases
+        ):
+            return
+        class_target = self._class_targets.get(id(node))
+        class_qualname = (
+            class_target.qualname.split(":", 1)[-1]
+            if class_target is not None
+            else node.name
+        )
+        for method in self._methods_by_class.get(class_qualname, []):
+            if method.qualname.rsplit(".", 1)[-1] != "dispatch":
+                continue
+            self._emit(
+                target=method,
+                framework="starlette",
+                edge_kind="registers_handler",
+                confidence="medium",
+                evidence="Starlette BaseHTTPMiddleware dispatch hook",
+                evidence_symbol="BaseHTTPMiddleware.dispatch",
+                source_qualname=class_target.qualname
+                if class_target is not None
+                else f"{self._module_name}:{node.name}",
+            )
+
+    def _handle_sqlalchemy_type_decorator(self, node: ast.ClassDef) -> None:
+        if not any(
+            _resolve_symbol(base, self._aliases) in _SQLALCHEMY_TYPE_DECORATOR_SYMBOLS
+            for base in node.bases
+        ):
+            return
+        class_target = self._class_targets.get(id(node))
+        class_qualname = (
+            class_target.qualname.split(":", 1)[-1]
+            if class_target is not None
+            else node.name
+        )
+        source_qualname = (
+            class_target.qualname
+            if class_target is not None
+            else f"{self._module_name}:{node.name}"
+        )
+        for method in self._methods_by_class.get(class_qualname, []):
+            method_name = method.qualname.rsplit(".", 1)[-1]
+            if method_name not in _SQLALCHEMY_TYPE_DECORATOR_HOOKS:
+                continue
+            self._emit(
+                target=method,
+                framework="sqlalchemy",
+                edge_kind="runtime_hook",
+                confidence="medium",
+                evidence="SQLAlchemy TypeDecorator hook",
+                evidence_symbol=f"TypeDecorator.{method_name}",
+                source_qualname=source_qualname,
+            )
+
     def _handle_dependency_injector_container(self, node: ast.ClassDef) -> None:
         if not any(
             self._is_dependency_injector_container_base(base) for base in node.bases
@@ -791,6 +1138,7 @@ def collect_runtime_reachability(
         aliases=alias_visitor.aliases,
         runtime_objects=binding_visitor.objects,
         included_routers=binding_visitor.included_routers,
+        route_decorator_factories=binding_visitor.route_decorator_factories,
     )
     visitor.visit(tree)
     return tuple(
