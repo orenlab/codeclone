@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Define the canonical report contract in `2.0.1`: report schema `2.11` plus
-deterministic text/Markdown/SARIF/HTML projections.
+Define the canonical report contract for the current 2.0 release line: report
+schema `2.11` plus deterministic text/Markdown/SARIF/HTML projections.
 
 ## Public surface
 

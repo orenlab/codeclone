@@ -10,7 +10,7 @@ import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TextIO
+from typing import NamedTuple, TextIO
 
 from packaging.version import InvalidVersion, Version
 
@@ -20,16 +20,16 @@ from .attrs import bool_attr
 from .types import PrinterLike
 
 _VSCODE_EXTENSION_TIP_KEY = "vscode_extension"
-_DEAD_CODE_REACHABILITY_MIGRATION_TIP_KEY = (
+_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION_TIP_KEY = (
     "dead_code_reachability_2_0_1_migration_shown"
+)
+_DEAD_CODE_REACHABILITY_2_0_2_MIGRATION_TIP_KEY = (
+    "dead_code_reachability_2_0_2_migration_shown"
 )
 _TIPS_SCHEMA_VERSION = 1
 _VSCODE_EXTENSION_URL = (
     "https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone"
 )
-_DEAD_CODE_REACHABILITY_BASELINE_MIN = Version("2.0.0b1")
-_DEAD_CODE_REACHABILITY_BASELINE_MAX = Version("2.0.0")
-_DEAD_CODE_REACHABILITY_CURRENT_MIN = Version("2.0.1")
 _CI_ENV_KEYS: tuple[str, ...] = (
     "CI",
     "GITHUB_ACTIONS",
@@ -41,6 +41,35 @@ _VSCODE_ENV_KEYS: tuple[str, ...] = (
     "VSCODE_PID",
     "VSCODE_IPC_HOOK",
     "VSCODE_CWD",
+)
+
+
+class _DeadCodeReachabilityMigration(NamedTuple):
+    tip_key: str
+    baseline_min: Version
+    baseline_max: Version
+    current_min: Version
+    target_version: str
+
+
+_DEAD_CODE_REACHABILITY_MIGRATIONS: tuple[
+    _DeadCodeReachabilityMigration,
+    ...,
+] = (
+    _DeadCodeReachabilityMigration(
+        tip_key=_DEAD_CODE_REACHABILITY_2_0_2_MIGRATION_TIP_KEY,
+        baseline_min=Version("2.0.1"),
+        baseline_max=Version("2.0.1"),
+        current_min=Version("2.0.2"),
+        target_version="2.0.2",
+    ),
+    _DeadCodeReachabilityMigration(
+        tip_key=_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION_TIP_KEY,
+        baseline_min=Version("2.0.0b1"),
+        baseline_max=Version("2.0.0"),
+        current_min=Version("2.0.1"),
+        target_version="2.0.1",
+    ),
 )
 
 
@@ -165,24 +194,25 @@ def _tip_context_allowed(
     return _stream_is_tty(stream)
 
 
-def _dead_code_reachability_migration_applies(
+def _dead_code_reachability_migration(
     *,
     baseline_generator_version: str | None,
     codeclone_version: str,
-) -> bool:
+) -> _DeadCodeReachabilityMigration | None:
     if not baseline_generator_version:
-        return False
+        return None
     try:
         baseline_version = Version(baseline_generator_version)
         current_version = Version(codeclone_version)
     except InvalidVersion:
-        return False
-    return (
-        _DEAD_CODE_REACHABILITY_BASELINE_MIN
-        <= baseline_version
-        <= _DEAD_CODE_REACHABILITY_BASELINE_MAX
-        and current_version >= _DEAD_CODE_REACHABILITY_CURRENT_MIN
-    )
+        return None
+    for migration in _DEAD_CODE_REACHABILITY_MIGRATIONS:
+        if (
+            migration.baseline_min <= baseline_version <= migration.baseline_max
+            and current_version >= migration.current_min
+        ):
+            return migration
+    return None
 
 
 def maybe_print_vscode_extension_tip(
@@ -239,10 +269,11 @@ def maybe_print_dead_code_reachability_migration_note(
 ) -> bool:
     if not baseline_trusted_for_diff:
         return False
-    if not _dead_code_reachability_migration_applies(
+    migration = _dead_code_reachability_migration(
         baseline_generator_version=baseline_generator_version,
         codeclone_version=codeclone_version,
-    ):
+    )
+    if migration is None:
         return False
 
     effective_environ = os.environ if environ is None else environ
@@ -258,16 +289,20 @@ def maybe_print_dead_code_reachability_migration_note(
     state = _load_tips_state(state_path)
     if _tip_was_shown(
         state,
-        tip_key=_DEAD_CODE_REACHABILITY_MIGRATION_TIP_KEY,
+        tip_key=migration.tip_key,
     ):
         return False
 
-    console.print(ui.fmt_dead_code_reachability_migration_note())
+    console.print(
+        ui.fmt_dead_code_reachability_migration_note(
+            target_version=migration.target_version,
+        )
+    )
     try:
         _remember_tip_shown(
             path=state_path,
             state=state,
-            tip_key=_DEAD_CODE_REACHABILITY_MIGRATION_TIP_KEY,
+            tip_key=migration.tip_key,
         )
     except OSError:
         return True

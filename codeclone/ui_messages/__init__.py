@@ -360,12 +360,19 @@ TIP_VSCODE_EXTENSION = (
     "navigation.\n"
     "[dim]{url}[/dim]"
 )
-NOTE_DEAD_CODE_REACHABILITY_MIGRATION = (
+NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION = (
     "\n[dim]Note:[/dim] Dead-code reachability was refined in 2.0.1 for "
     "common Python frameworks.\n"
     "[dim]Fewer dead-code findings after upgrading from 2.0.0 are expected: "
     "this usually means reduced false positives, not weaker detection.[/dim]"
 )
+NOTE_DEAD_CODE_REACHABILITY_2_0_2_MIGRATION = (
+    "\n[dim]Note:[/dim] Dead-code reachability was refined again in 2.0.2.\n"
+    "[dim]Fewer dead-code findings after upgrading from 2.0.1 are expected: "
+    "framework hooks, public exports, and guarded dynamic dispatch now produce "
+    "fewer false positives, not weaker detection.[/dim]"
+)
+NOTE_DEAD_CODE_REACHABILITY_MIGRATION = NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION
 
 _RICH_MARKUP_TAG_RE = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_ .#:-]*]")
 
@@ -445,8 +452,13 @@ def fmt_vscode_extension_tip(*, url: str) -> str:
     return TIP_VSCODE_EXTENSION.format(url=url)
 
 
-def fmt_dead_code_reachability_migration_note() -> str:
-    return NOTE_DEAD_CODE_REACHABILITY_MIGRATION
+def fmt_dead_code_reachability_migration_note(
+    *,
+    target_version: str = "2.0.1",
+) -> str:
+    if target_version == "2.0.2":
+        return NOTE_DEAD_CODE_REACHABILITY_2_0_2_MIGRATION
+    return NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION
 
 
 def fmt_legacy_cache_warning(*, legacy_path: Path, new_path: Path) -> str:

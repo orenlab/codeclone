@@ -60,6 +60,13 @@ Refs:
 - A top-level symbol listed in a literal `__all__` export is not dead. This is
   resolved to exact module-level function/class qualnames and does not mark
   same-named methods live.
+- A symbol re-exported through a literal `__all__` entry and an exact
+  `from module import Symbol` binding is resolved back to the imported
+  canonical qualname.
+- A symbol exposed through a PEP 562 lazy-export module is resolved when the
+  module has a module-level `__getattr__`, a literal `_EXPORTS` mapping, and a
+  matching literal `__all__` entry. Dynamic or non-literal export maps are not
+  interpreted.
 - A symbol referenced by package metadata entry points is not dead when
   `[project.scripts]`, `[project.gui-scripts]`, `[project.entry-points.*]`, or
   `[tool.poetry.scripts]` resolves to an exact known candidate qualname. Unique
@@ -67,6 +74,10 @@ Refs:
   ambiguous matches are ignored.
 - A symbol referenced only by qualified-name suffix (without canonical module
   match) downgrades confidence to `medium`.
+- A method name observed through guarded dynamic lookup is treated as a
+  referenced local name only when the same callable scope contains all three
+  pieces of evidence: `getattr(obj, "method", ...)`, `callable(local)` guard,
+  and a subsequent call through that same local binding.
 - Runtime framework registration facts can mark a symbol live when the extractor
   observes a deterministic edge from modern Python runtime surfaces:
   FastAPI/Starlette route and dependency registration, including
@@ -123,7 +134,10 @@ Refs:
 | Symbol used only from tests                        | Remains actionable dead-code candidate    |
 | Symbol used through import alias / module alias    | Matched via canonical qualname usage      |
 | Symbol exported through literal `__all__`          | Matched via exact module-level qualname   |
+| Symbol re-exported through literal `__all__`       | Matched via exact imported qualname       |
+| Symbol exposed through literal lazy `_EXPORTS`     | Matched via exact lazy-export qualname    |
 | Symbol exposed through package entry point         | Matched via exact/unique project qualname |
+| Guarded `getattr(obj, "method")` callable dispatch | Method name becomes runtime reference     |
 | Symbol registered through a supported runtime edge | Candidate skipped as runtime-reachable    |
 | `--fail-dead-code` with high-confidence dead items | Gating failure, exit `3`                  |
 
@@ -136,6 +150,9 @@ Refs:
   not suppress arbitrary same-named local decorators.
 - Package entry-point liveness reads only local project metadata and ignores
   invalid, dynamic, or ambiguous entry-point references.
+- Lazy export and guarded dynamic `getattr` handling require literal AST
+  evidence and same-scope call evidence; CodeClone does not execute import
+  hooks or infer arbitrary dynamic dispatch.
 - Candidate and result ordering is deterministic.
 
 Refs:
@@ -162,6 +179,9 @@ Refs:
 - `tests/test_extractor.py::test_dead_code_uses_cli_and_task_registration_reachability`
 - `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_import_aliases`
 - `tests/test_extractor.py::test_extract_collects_referenced_qualnames_for_module_all_exports`
+- `tests/test_extractor.py::test_extract_resolves_public_reexports_to_source_symbols`
+- `tests/test_extractor.py::test_extract_treats_guarded_dynamic_getattr_call_as_runtime_reference`
+- `tests/test_extractor.py::test_extract_ignores_uncalled_dynamic_getattr_probe`
 - `tests/test_extractor.py::test_collect_dead_candidates_skips_protocol_and_stub_like_symbols`
 - `tests/test_extractor.py::test_collect_dead_candidates_skips_pydantic_hooks_and_dataclass_post_init`
 - `tests/test_core_branch_coverage.py::test_project_entrypoints_mark_exact_and_unique_layout_symbols_live`
