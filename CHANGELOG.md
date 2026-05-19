@@ -24,6 +24,9 @@ README link behavior, and dead-code runtime reachability precision.
 - Treat `__all__` re-exports, PEP 562 lazy `_EXPORTS` modules, and guarded
   dynamic `getattr(..., "method")` callable dispatch as dead-code reachability
   evidence.
+- Show a one-time interactive CLI migration note when a trusted `2.0.1`
+  baseline is analyzed by `2.0.2`, clarifying that fewer dead-code findings are
+  expected after the refined reachability model.
 
 ### Internal
 

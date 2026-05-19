@@ -2338,16 +2338,34 @@ def test_cli_shows_vscode_extension_tip_once_per_version(
     assert "VS Code detected" not in second_out
 
 
+@pytest.mark.parametrize(
+    ("generator_version", "expected_message", "expected_tip_key"),
+    [
+        (
+            "2.0.0",
+            "Dead-code reachability was refined in 2.0.1",
+            "dead_code_reachability_2_0_1_migration_shown",
+        ),
+        (
+            "2.0.1",
+            "Dead-code reachability was refined again in 2.0.2",
+            "dead_code_reachability_2_0_2_migration_shown",
+        ),
+    ],
+)
 def test_cli_shows_dead_code_reachability_migration_note_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    generator_version: str,
+    expected_message: str,
+    expected_tip_key: str,
 ) -> None:
     _write_default_source(tmp_path)
     baseline_path = _write_baseline(
         tmp_path / "baseline.json",
         python_version=_current_py_minor(),
-        generator_version="2.0.0",
+        generator_version=generator_version,
     )
     tips_path = tmp_path / ".cache" / "codeclone" / "tips.json"
 
@@ -2371,14 +2389,12 @@ def test_cli_shows_dead_code_reachability_migration_note_once(
     _assert_after_summary(
         first_out,
         "Note:",
-        "Dead-code reachability was refined in 2.0.1",
+        expected_message,
         "not weaker detection",
     )
 
     state = json.loads(tips_path.read_text("utf-8"))
-    assert (
-        state["tips"]["dead_code_reachability_2_0_1_migration_shown"]["shown"] is True
-    )
+    assert state["tips"][expected_tip_key]["shown"] is True
 
     _run_parallel_main(
         monkeypatch,
@@ -2392,7 +2408,7 @@ def test_cli_shows_dead_code_reachability_migration_note_once(
     )
     second_out = capsys.readouterr().out
 
-    assert "Dead-code reachability was refined in 2.0.1" not in second_out
+    assert expected_message not in second_out
 
 
 def test_cli_update_baseline_skips_version_check(
