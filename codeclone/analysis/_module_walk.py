@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import tokenize
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
@@ -86,6 +87,8 @@ class _ModuleWalkState:
     name_nodes: list[ast.Name] = field(default_factory=list)
     attr_nodes: list[ast.Attribute] = field(default_factory=list)
     exported_names: set[str] = field(default_factory=set)
+    lazy_export_bindings: dict[str, set[str]] = field(default_factory=dict)
+    has_module_getattr: bool = False
     protocol_symbol_aliases: set[str] = field(default_factory=lambda: {"Protocol"})
     protocol_module_aliases: set[str] = field(
         default_factory=lambda: set(_PROTOCOL_MODULE_NAMES)
@@ -185,6 +188,21 @@ def _string_literals_from_export_value(value: ast.AST) -> tuple[str, ...]:
             return ()
 
 
+def _string_mapping_from_literal_dict(value: ast.AST) -> dict[str, str]:
+    if not isinstance(value, ast.Dict):
+        return {}
+    mapping: dict[str, str] = {}
+    for key, val in zip(value.keys, value.values, strict=True):
+        if (
+            isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+            and isinstance(val, ast.Constant)
+            and isinstance(val.value, str)
+        ):
+            mapping[key.value] = val.value
+    return mapping
+
+
 def _collect_all_export_node(node: ast.AST, state: _ModuleWalkState) -> None:
     match node:
         case ast.Assign(targets=targets, value=value):
@@ -216,11 +234,128 @@ def _collect_all_export_node(node: ast.AST, state: _ModuleWalkState) -> None:
             pass
 
 
+def _collect_lazy_export_node(node: ast.AST, state: _ModuleWalkState) -> None:
+    match node:
+        case ast.Assign(targets=targets, value=value):
+            names = {target.id for target in targets if isinstance(target, ast.Name)}
+        case ast.AnnAssign(target=ast.Name(id=name), value=value):
+            names = {name}
+        case (
+            ast.FunctionDef(name="__getattr__")
+            | ast.AsyncFunctionDef(name="__getattr__")
+        ):
+            state.has_module_getattr = True
+            return
+        case _:
+            return
+    if "_EXPORTS" not in names or value is None:
+        return
+    for exported_name, module_path in _string_mapping_from_literal_dict(value).items():
+        state.lazy_export_bindings.setdefault(exported_name, set()).add(module_path)
+
+
 def _collect_module_all_exports(tree: ast.AST, state: _ModuleWalkState) -> None:
     if not isinstance(tree, ast.Module):
         return
     for statement in tree.body:
         _collect_all_export_node(statement, state)
+        _collect_lazy_export_node(statement, state)
+
+
+def _literal_getattr_name(value: ast.AST | None) -> str | None:
+    if not isinstance(value, ast.Call):
+        return None
+    if not isinstance(value.func, ast.Name) or value.func.id != "getattr":
+        return None
+    if len(value.args) < 2:
+        return None
+    attr_arg = value.args[1]
+    if not isinstance(attr_arg, ast.Constant) or not isinstance(attr_arg.value, str):
+        return None
+    if attr_arg.value.isidentifier():
+        return attr_arg.value
+    return None
+
+
+def _iter_runtime_callable_scopes(
+    tree: ast.AST,
+) -> Iterator[ast.FunctionDef | ast.AsyncFunctionDef]:
+    if not isinstance(tree, ast.Module):
+        return
+    stack = list(reversed(tree.body))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            yield node
+            continue
+        if isinstance(node, ast.ClassDef):
+            stack.extend(reversed(node.body))
+
+
+def _iter_scope_body_nodes(body: list[ast.stmt]) -> Iterator[ast.AST]:
+    stack: list[ast.AST] = list(reversed(body))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        yield node
+        stack.extend(reversed(list(ast.iter_child_nodes(node))))
+
+
+def _dynamic_getattr_names_from_scope(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> set[str]:
+    getattr_bindings: dict[str, str] = {}
+    callable_guards: set[str] = set()
+    called_locals: set[str] = set()
+    for scope_node in _iter_scope_body_nodes(node.body):
+        match scope_node:
+            case ast.Assign(targets=targets, value=value):
+                attr_name = _literal_getattr_name(value)
+                if attr_name is not None:
+                    for target in targets:
+                        if isinstance(target, ast.Name):
+                            getattr_bindings[target.id] = attr_name
+            case ast.AnnAssign(target=ast.Name(id=name), value=value):
+                attr_name = _literal_getattr_name(value)
+                if attr_name is not None:
+                    getattr_bindings[name] = attr_name
+            case ast.Call(
+                func=ast.Name(id="callable"),
+                args=[ast.Name(id=name), *_],
+            ):
+                callable_guards.add(name)
+            case ast.Call(func=ast.Name(id=name)):
+                called_locals.add(name)
+            case _:
+                pass
+    return {
+        attr_name
+        for local_name, attr_name in getattr_bindings.items()
+        if local_name in callable_guards and local_name in called_locals
+    }
+
+
+def _collect_dynamic_getattr_names(tree: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for scope in _iter_runtime_callable_scopes(tree):
+        names.update(_dynamic_getattr_names_from_scope(scope))
+    return names
+
+
+def _local_export_qualname(
+    *,
+    module_name: str,
+    exported_name: str,
+    functions_by_name: dict[str, str],
+    classes_by_name: dict[str, str],
+) -> str | None:
+    local_qualname = functions_by_name.get(exported_name)
+    if local_qualname is None:
+        local_qualname = classes_by_name.get(exported_name)
+    if local_qualname is None:
+        return None
+    return f"{module_name}:{local_qualname}"
 
 
 def _collect_import_from_node(
@@ -472,13 +607,19 @@ def _resolve_referenced_qualnames(
                         resolved.add(local_method_qualname)
 
     for exported_name in state.exported_names:
-        local_qualname = top_level_function_by_name.get(exported_name)
-        if local_qualname is not None:
-            resolved.add(f"{module_name}:{local_qualname}")
+        local_export_qualname = _local_export_qualname(
+            module_name=module_name,
+            exported_name=exported_name,
+            functions_by_name=top_level_function_by_name,
+            classes_by_name=top_level_class_by_name,
+        )
+        if local_export_qualname is not None:
+            resolved.add(local_export_qualname)
             continue
-        class_qualname = top_level_class_by_name.get(exported_name)
-        if class_qualname is not None:
-            resolved.add(f"{module_name}:{class_qualname}")
+        resolved.update(state.imported_symbol_bindings.get(exported_name, ()))
+        if state.has_module_getattr:
+            for module_path in state.lazy_export_bindings.get(exported_name, ()):
+                resolved.add(f"{module_path}:{exported_name}")
 
     return frozenset(resolved)
 
@@ -524,6 +665,8 @@ def _collect_module_walk_data(
             )
         elif collect_referenced_names:
             _collect_load_reference_node(node=node, state=state)
+    if collect_referenced_names:
+        state.referenced_names.update(_collect_dynamic_getattr_names(tree))
 
     deps_sorted = tuple(
         sorted(

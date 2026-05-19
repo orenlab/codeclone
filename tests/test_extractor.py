@@ -26,6 +26,7 @@ from codeclone.metrics.dead_code import find_unused
 from codeclone.models import (
     BlockUnit,
     ClassMetrics,
+    FileMetrics,
     ModuleDep,
     RuntimeReachabilityFact,
     SegmentUnit,
@@ -114,6 +115,43 @@ def _dead_qualnames_from_source(
         runtime_reachability=file_metrics.runtime_reachability,
     )
     return tuple(item.qualname for item in dead)
+
+
+def _file_metrics_from_source(
+    source: str,
+    *,
+    filepath: str,
+    module_name: str,
+) -> FileMetrics:
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath=filepath,
+        module_name=module_name,
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    return file_metrics
+
+
+def _dead_qualnames_from_metrics(
+    definitions: FileMetrics,
+    *references: FileMetrics,
+) -> set[str]:
+    referenced_names: set[str] = set()
+    referenced_qualnames: set[str] = set()
+    for file_metrics in (definitions, *references):
+        referenced_names.update(file_metrics.referenced_names)
+        referenced_qualnames.update(file_metrics.referenced_qualnames)
+
+    return {
+        item.qualname
+        for item in find_unused(
+            definitions=definitions.dead_candidates,
+            referenced_names=frozenset(referenced_names),
+            referenced_qualnames=frozenset(referenced_qualnames),
+        )
+    }
 
 
 def _runtime_reachability_from_source(
@@ -2078,6 +2116,7 @@ def test_extract_collects_referenced_qualnames_for_module_all_exports() -> None:
     source = """
 __all__ = ["PublicClass"] + ("public_func",)
 __all__: list[str] = ["TypedPublic"]
+__all__: tuple[str, ...]
 __all__ += ["AugmentedPublic"]
 __all__.append("AlsoPublic")
 __all__.extend(["exported_later"])
@@ -2139,6 +2178,168 @@ def NestedInvalid():
     state = module_walk_mod._ModuleWalkState()
     module_walk_mod._collect_module_all_exports(ast.Pass(), state)
     assert state.exported_names == set()
+
+
+def test_module_walk_export_and_dynamic_getattr_helpers_cover_safe_edges() -> None:
+    invalid_exports = cast(
+        ast.Assign,
+        ast.parse('_EXPORTS = {"Good": "pkg.good", 42: "bad", "Bad": object()}').body[
+            0
+        ],
+    )
+    assert module_walk_mod._string_mapping_from_literal_dict(ast.Pass()) == {}
+    assert module_walk_mod._string_mapping_from_literal_dict(invalid_exports.value) == {
+        "Good": "pkg.good"
+    }
+    assert module_walk_mod._literal_getattr_name(ast.Pass()) is None
+    assert (
+        module_walk_mod._literal_getattr_name(
+            ast.parse("getattr(obj)", mode="eval").body
+        )
+        is None
+    )
+    assert (
+        module_walk_mod._literal_getattr_name(
+            ast.parse('getattr(obj, "not-valid")', mode="eval").body
+        )
+        is None
+    )
+    assert module_walk_mod._collect_dynamic_getattr_names(ast.Pass()) == set()
+
+    tree = ast.parse(
+        """
+class Runtime:
+    def dispatch(self) -> object | None:
+        first = second = getattr(self, "multi_lookup", None)
+        annotated: object = getattr(self, "annotated_lookup", None)
+        ignored = getattr(self, "not-valid", None)
+        if callable(first):
+            first()
+        if callable(annotated):
+            annotated()
+
+        def nested() -> None:
+            hidden = getattr(self, "nested_lookup", None)
+            if callable(hidden):
+                hidden()
+
+        class Inner:
+            def method(self) -> None:
+                inner = getattr(self, "inner_lookup", None)
+                if callable(inner):
+                    inner()
+
+        return second
+"""
+    )
+    assert module_walk_mod._collect_dynamic_getattr_names(tree) == {
+        "annotated_lookup",
+        "multi_lookup",
+    }
+
+
+def test_extract_resolves_public_reexports_to_source_symbols() -> None:
+    sources = {
+        "common": (
+            "pkg/common.py",
+            "pkg.common",
+            """
+class MetricValueDTO:
+    pass
+""",
+        ),
+        "reexport": (
+            "pkg/__init__.py",
+            "pkg",
+            """
+from pkg.common import MetricValueDTO
+
+__all__ = ["MetricValueDTO"]
+""",
+        ),
+        "handlers": (
+            "pkg/handlers.py",
+            "pkg.handlers",
+            """
+class ListContainersHandler:
+    pass
+""",
+        ),
+        "lazy_exports": (
+            "pkg/__init__.py",
+            "pkg",
+            """
+__all__ = ["ListContainersHandler"]
+
+_EXPORTS = {
+    "ListContainersHandler": "pkg.handlers",
+}
+
+def __getattr__(name: str):
+    module_path = _EXPORTS.get(name)
+    if module_path is None:
+        raise AttributeError(name)
+    module = __import__(module_path, fromlist=[name])
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
+""",
+        ),
+    }
+    metrics = {
+        name: _file_metrics_from_source(
+            source=source,
+            filepath=filepath,
+            module_name=module_name,
+        )
+        for name, (filepath, module_name, source) in sources.items()
+    }
+
+    dead_reexports = _dead_qualnames_from_metrics(
+        metrics["common"],
+        metrics["reexport"],
+    )
+    dead_lazy = _dead_qualnames_from_metrics(
+        metrics["handlers"],
+        metrics["lazy_exports"],
+    )
+    assert "pkg.common:MetricValueDTO" not in dead_reexports
+    assert "pkg.handlers:ListContainersHandler" not in dead_lazy
+
+
+def test_extract_treats_guarded_dynamic_getattr_call_as_runtime_reference() -> None:
+    source = """
+class Repository:
+    def find_latest_artifact_by_format(self, expected_format: str) -> object | None:
+        return None
+
+class BootstrapService:
+    def __init__(self, repository: object) -> None:
+        self._repository = repository
+
+    async def bootstrap(self) -> object | None:
+        finder = getattr(self._repository, "find_latest_artifact_by_format", None)
+        if not callable(finder):
+            return None
+        return await finder("onnx")
+"""
+    dead = set(_dead_qualnames_from_source(source))
+    assert "pkg.mod:Repository.find_latest_artifact_by_format" not in dead
+
+
+def test_extract_ignores_uncalled_dynamic_getattr_probe() -> None:
+    source = """
+class Repository:
+    def find_latest_artifact_by_format(self, expected_format: str) -> object | None:
+        return None
+
+class BootstrapService:
+    def probe(self) -> bool:
+        finder = getattr(self, "find_latest_artifact_by_format", None)
+        return callable(finder)
+"""
+    dead = set(_dead_qualnames_from_source(source))
+    assert "pkg.mod:Repository.find_latest_artifact_by_format" in dead
 
 
 def test_collect_dead_candidates_skips_protocol_and_stub_like_symbols() -> None:
