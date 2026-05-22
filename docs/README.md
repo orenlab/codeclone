@@ -1,11 +1,13 @@
 # CodeClone Docs
 
-> Deterministic structural review for Python codebases.
+> Structural change controller for Python codebases.
 > One canonical analysis across CI, HTML reports, IDEs, and AI agents.
 
-CodeClone is a structural review layer for Python focused on deterministic
-analysis, baseline-aware governance, and review surfaces for both humans and
-AI-assisted workflows.
+CodeClone is a structural change controller for Python. It starts before the
+first edit — when an agent declares what it intends to change — maps the
+structural blast radius, verifies that the patch stayed inside its declared
+boundary, and leaves an auditable receipt. The same deterministic facts power
+CI gates, human reviews, and AI-assisted workflows.
 
 This documentation site has two complementary layers:
 
@@ -24,11 +26,19 @@ This documentation site has two complementary layers:
 
 ### New to CodeClone?
 
-Understand the deterministic review model and governance philosophy.
+Understand the deterministic change control model and governance philosophy.
 
 - [Contracts and guarantees](book/00-intro.md)
 - [Architecture map (components + ownership)](book/01-architecture-map.md)
 - [Terminology](book/02-terminology.md)
+
+### Governing AI-assisted changes?
+
+Understand the structural change controller: intent, blast radius, patch contract,
+review receipt, and claim guard.
+
+- [Structural Change Controller](book/24-structural-change-controller.md)
+- [MCP interface contract](book/20-mcp-interface.md)
 
 ### Integrating into CI?
 
@@ -68,6 +78,7 @@ The Contracts Book defines:
 - determinism guarantees
 - trust and compatibility rules
 - review surface contracts
+- change controller workflow and tool contracts
 
 ### Core Contracts
 
@@ -77,6 +88,10 @@ The Contracts Book defines:
 - [Baseline contract (schema v2.1)](book/06-baseline.md)
 - [Cache contract (schema v2.8)](book/07-cache.md)
 - [Report contract (schema v2.11)](book/08-report.md)
+
+### Change Controller
+
+- [Structural Change Controller](book/24-structural-change-controller.md)
 
 ### Interfaces
 

@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <strong>A structural review layer for Python — baseline-aware, deterministic, built for CI and AI agents</strong>
+  <strong>Structural change controller for Python — deterministic, baseline-aware, built for CI and AI agents</strong>
 </p>
 
 <p align="center">
@@ -27,9 +27,10 @@
   <a href="https://pypi.org/project/codeclone/"><img src="https://img.shields.io/pypi/pyversions/codeclone?style=flat-square&color=6366f1" alt="Python"></a>
 </p>
 
-CodeClone adds a control layer between analysis and CI: it isolates structural
-regressions from historical debt, so merges are blocked only by what actually
-got worse.
+CodeClone is a structural change controller for Python. It starts before the
+first edit — when an agent declares what it intends to change — maps the
+structural blast radius, verifies that the patch stayed inside its declared
+boundary, and leaves an auditable receipt.
 
 The same analysis pipeline powers CLI reports, CI checks, the MCP server, and
 native IDE/agent clients — so humans and AI agents operate on identical,
@@ -40,10 +41,31 @@ deterministic facts.
 - Source: <https://github.com/orenlab/codeclone>
 - Issues: <https://github.com/orenlab/codeclone/issues>
 
+## Change Controller
+
+When an AI agent edits code, CodeClone governs the structural boundary:
+
+1. **Declare intent** — agent states what it plans to change, which files, and why
+2. **Map blast radius** — reverse imports, clone cohorts, dependency cycles, do-not-touch signals
+3. **Check patch contract** — planned pre-edit regression budget and post-edit boundary verification
+4. **Generate receipt** — planned auditable artifact: intent + scope + patch status + structural delta
+5. **Validate claims** — planned cross-check of review text against the canonical report
+
+Each step is deterministic — structural facts, no LLM inference.
+
+Docs: <https://orenlab.github.io/codeclone/book/24-structural-change-controller/>
+
 ## Features
 
-**Control & governance**
-- **Baseline governance** — separates accepted **legacy** debt from **new regressions**; CI fails only on what changed
+**Change control**
+- **Intent declaration** — agent states what it plans to change; CodeClone tracks scope, expiry, and status
+- **Blast radius** — structural risk projection: reverse imports, clone cohorts, dependency cycles, do-not-touch signals
+- **Patch contract** — planned pre-edit regression budget and post-edit boundary verification
+- **Review receipt** — planned auditable artifact linking intent, scope, patch verification, and structural delta
+- **Claim guard** — planned citation-based validation of review text against the canonical report
+
+**Baseline governance**
+- **Regression isolation** — separates accepted **legacy** debt from **new regressions**; CI fails only on what changed
 - **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
 - **Reports** — interactive HTML, JSON, Markdown, SARIF, and text from one canonical report
 
@@ -56,7 +78,7 @@ deterministic facts.
 - **Security Surfaces** — report-only inventory of security-relevant capability boundaries without vulnerability claims
 
 **Surfaces & integrations**
-- **MCP control surface** — triage-first agent and IDE interface over the same canonical pipeline; read-only by contract
+- **MCP control surface** — 23-tool agent and IDE interface over the same canonical pipeline; read-only by contract
 - **IDE & agent clients** — VS Code extension, Claude Desktop bundle, and Codex plugin over the same MCP contract
 
 **Performance**

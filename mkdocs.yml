@@ -106,6 +106,7 @@ nav:
           - VS Code Extension: book/21-vscode-extension.md
           - Claude Desktop Bundle: book/22-claude-desktop-bundle.md
           - Codex Plugin: book/23-codex-plugin.md
+          - Structural Change Controller: book/24-structural-change-controller.md
           - HTML Render: book/10-html-render.md
 
       - System Properties:
