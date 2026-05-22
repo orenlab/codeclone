@@ -871,6 +871,102 @@
     }
   },
   {
+    "name": "check_patch_contract",
+    "input_schema": {
+      "properties": {
+        "mode": {
+          "title": "Mode",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "before_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before Run Id"
+        },
+        "after_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After Run Id"
+        },
+        "intent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Intent Id"
+        },
+        "strictness": {
+          "default": "ci",
+          "title": "Strictness",
+          "type": "string"
+        },
+        "diff_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Diff Ref"
+        },
+        "changed_files": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changed Files"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "check_patch_contractArguments",
+      "type": "object"
+    }
+  },
+  {
     "name": "clear_session_runs",
     "input_schema": {
       "properties": {},

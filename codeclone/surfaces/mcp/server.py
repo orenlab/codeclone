@@ -375,6 +375,38 @@ def build_mcp_server(
         )
 
     @tool(
+        title="Check Patch Contract",
+        description=(
+            "Pre-edit budget query (mode='budget') or post-edit structural "
+            "verification (mode='verify'). Composes stored runs, gate "
+            "evaluation, run comparison, and session-local change intent "
+            "without running analysis or mutating repository state."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def check_patch_contract(
+        mode: str,
+        run_id: str | None = None,
+        before_run_id: str | None = None,
+        after_run_id: str | None = None,
+        intent_id: str | None = None,
+        strictness: str = "ci",
+        diff_ref: str | None = None,
+        changed_files: list[str] | None = None,
+    ) -> dict[str, object]:
+        return service.check_patch_contract(
+            mode=mode,
+            run_id=run_id,
+            before_run_id=before_run_id,
+            after_run_id=after_run_id,
+            intent_id=intent_id,
+            strictness=strictness,
+            diff_ref=diff_ref,
+            changed_files=changed_files,
+        )
+
+    @tool(
         title="Help",
         description=(
             "Explain a supported CodeClone workflow or contract topic and "

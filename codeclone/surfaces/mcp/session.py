@@ -16,7 +16,7 @@ from ._session_baseline import (
     resolve_clone_baseline_state,
     resolve_metrics_baseline_state,
 )
-from ._session_intent_mixin import _MCPSessionIntentMixin
+from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
 from ._session_shared import (
     _REPORT_DUMMY_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -77,7 +77,7 @@ __all__ = [
 ]
 
 
-class MCPSession(_MCPSessionIntentMixin):
+class MCPSession(_MCPSessionPatchContractMixin):
     def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
         self._runs = CodeCloneMCPRunStore(history_limit=history_limit)
         self._state_lock = RLock()

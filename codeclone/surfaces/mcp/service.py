@@ -64,6 +64,12 @@ class _QueryServiceMixin:
     ) -> dict[str, object]:
         return self._run_dict("manage_change_intent", **params)
 
+    def check_patch_contract(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("check_patch_contract", **params)
+
     def generate_pr_summary(
         self: _RunDictService,
         **params: object,
@@ -222,6 +228,16 @@ def _apply_public_method_signatures() -> None:
             _kwonly("run_id", "str | None", None),
             _kwonly("depth", "str", "direct"),
             _kwonly("include", "Sequence[str] | None", None),
+        ),
+        "check_patch_contract": (
+            _kwonly("mode", "str"),
+            _kwonly("run_id", "str | None", None),
+            _kwonly("before_run_id", "str | None", None),
+            _kwonly("after_run_id", "str | None", None),
+            _kwonly("intent_id", "str | None", None),
+            _kwonly("strictness", "str", "ci"),
+            _kwonly("diff_ref", "str | None", None),
+            _kwonly("changed_files", "Sequence[str] | None", None),
         ),
         "manage_change_intent": (
             _kwonly("action", "str"),

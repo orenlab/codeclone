@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib
 import json
 import subprocess
@@ -19,6 +20,7 @@ from typing import Any, cast
 import pytest
 
 import codeclone.surfaces.mcp._blast_radius as mcp_blast_radius_mod
+import codeclone.surfaces.mcp._patch_contract as mcp_patch_contract_mod
 import codeclone.surfaces.mcp._session_baseline as mcp_baseline_mod
 import codeclone.surfaces.mcp._session_finding_mixin as mcp_finding_mod
 import codeclone.surfaces.mcp._session_helpers as mcp_helpers_mod
@@ -312,6 +314,71 @@ def _blast_radius_run_record(
         _dummy_run_record(root, run_id),
         report_document=_blast_radius_report_document(digest),
     )
+
+
+def _patch_contract_report_document(
+    *,
+    digest: str,
+    include_regression: bool,
+    complexity: int,
+    baseline_status: str = "ok",
+) -> dict[str, object]:
+    report_document = copy.deepcopy(_blast_radius_report_document(digest))
+    report_document["meta"] = {"baseline": {"status": baseline_status}}
+    findings = cast("dict[str, object]", report_document["findings"])
+    groups = cast("dict[str, object]", findings["groups"])
+    clones = cast("dict[str, object]", groups["clones"])
+    functions = cast(
+        "list[dict[str, object]]",
+        clones["functions"],
+    )
+    if not include_regression:
+        del functions[1:]
+    metrics = cast("dict[str, object]", report_document["metrics"])
+    families = cast("dict[str, object]", metrics["families"])
+    complexity_family = cast("dict[str, object]", families["complexity"])
+    complexity_items = cast(
+        "list[dict[str, object]]",
+        complexity_family["items"],
+    )
+    complexity_items[0]["qualname"] = "pkg.b.handle"
+    complexity_items[0]["cyclomatic_complexity"] = complexity
+    return report_document
+
+
+def _patch_contract_run_record(
+    root: Path,
+    *,
+    run_id: str,
+    digest: str,
+    include_regression: bool,
+    complexity: int,
+    health: int = 80,
+    baseline_status: str = "ok",
+    request: MCPAnalysisRequest | None = None,
+    new_func: frozenset[str] = frozenset(),
+) -> MCPRunRecord:
+    return replace(
+        _dummy_run_record(root, run_id),
+        request=request or MCPAnalysisRequest(root=str(root), respect_pyproject=False),
+        report_document=_patch_contract_report_document(
+            digest=digest,
+            include_regression=include_regression,
+            complexity=complexity,
+            baseline_status=baseline_status,
+        ),
+        summary={"run_id": run_id, "health": {"score": health, "grade": "B"}},
+        func_clones_count=2 if include_regression else 1,
+        block_clones_count=0,
+        new_func=new_func,
+    )
+
+
+def _payload_dicts(
+    payload: Mapping[str, object],
+    keys: tuple[str, ...],
+) -> tuple[dict[str, object], ...]:
+    return tuple(cast("dict[str, object]", payload[key]) for key in keys)
 
 
 def _two_clone_fixture_roots(tmp_path: Path) -> tuple[Path, Path]:
@@ -2328,6 +2395,268 @@ def test_mcp_service_manage_change_intent_validation_expiry_and_prune(
     )
     service._prune_session_state()
     assert service._active_intents == {}
+
+
+def test_mcp_patch_contract_profiles_and_baseline_abuse() -> None:
+    ci_budget = mcp_patch_contract_mod.budgets_for_strictness(
+        strictness="ci",
+        coverage_min=None,
+        complexity_threshold=10,
+        coupling_threshold=5,
+        cohesion_threshold=3,
+    )
+    strict_budget = mcp_patch_contract_mod.budgets_for_strictness(
+        strictness="strict",
+        coverage_min=None,
+        complexity_threshold=None,
+        coupling_threshold=None,
+        cohesion_threshold=None,
+    )
+    relaxed_budget = mcp_patch_contract_mod.budgets_for_strictness(
+        strictness="relaxed",
+        coverage_min=80,
+        complexity_threshold=10,
+        coupling_threshold=5,
+        cohesion_threshold=3,
+    )
+
+    assert {
+        "clone_regression": ci_budget.clone_regression,
+        "complexity_delta": ci_budget.complexity_delta,
+        "coupling_delta": ci_budget.coupling_delta,
+        "cohesion_delta": ci_budget.cohesion_delta,
+    } == {
+        "clone_regression": 0,
+        "complexity_delta": 10,
+        "coupling_delta": 5,
+        "cohesion_delta": 3,
+    }
+    assert {
+        "strict_dead_code": strict_budget.dead_code_regression,
+        "strict_health_floor": strict_budget.health_floor,
+        "relaxed_clone_regression": relaxed_budget.clone_regression,
+        "relaxed_coverage_min": relaxed_budget.coverage_min,
+    } == {
+        "strict_dead_code": True,
+        "strict_health_floor": 70,
+        "relaxed_clone_regression": -1,
+        "relaxed_coverage_min": -1,
+    }
+    abuse = mcp_patch_contract_mod.detect_baseline_abuse(
+        before_gate_would_fail=True,
+        after_gate_would_fail=False,
+        after_baseline_status="updated",
+        regressions=2,
+        changed_files=1,
+        intent_available=False,
+    )
+    assert abuse == {
+        "detected": True,
+        "triggers": [
+            "baseline_changed_with_functional_code",
+            "baseline_updated_while_regressions_present",
+            "baseline_updated_without_intent",
+            "ci_greened_by_accepting_debt",
+        ],
+    }
+    assert (
+        mcp_patch_contract_mod.baseline_status(
+            {"meta": {"baseline": {"status": "updated"}}}
+        )
+        == "updated"
+    )
+
+
+def test_mcp_service_check_patch_contract_budget_uses_intent_and_gate_preview(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    request = MCPAnalysisRequest(
+        root=str(tmp_path),
+        respect_pyproject=False,
+        complexity_threshold=10,
+        coupling_threshold=5,
+        cohesion_threshold=3,
+        coverage_min=80,
+    )
+    record = _patch_contract_run_record(
+        tmp_path,
+        run_id="abcdef1234567890",
+        digest="budget-digest",
+        include_regression=False,
+        complexity=6,
+        health=90,
+        request=request,
+    )
+    service._runs.register(record)
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id="abcdef12",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="adjust pkg.a behavior",
+    )
+
+    payload = service.check_patch_contract(
+        mode="budget",
+        run_id="abcdef12",
+        intent_id=str(declared["intent_id"]),
+    )
+    budgets, current_state, headroom, gate_preview = _payload_dicts(
+        payload,
+        ("budgets", "current_state", "headroom", "gate_preview"),
+    )
+
+    assert payload["run_id"] == "abcdef12"
+    assert payload["strictness"] == "ci"
+    assert payload["scope"] == "changed"
+    assert payload["declared_scope"] == {
+        "allowed_files": ["pkg/a.py"],
+        "allowed_related": [],
+        "forbidden": [".cache/codeclone/**", "codeclone.baseline.json"],
+    }
+    assert (
+        cast("dict[str, object]", payload["blast_radius_summary"])["radius_level"]
+        == "medium"
+    )
+    assert {
+        "clone_regression": budgets["clone_regression"],
+        "complexity_delta": budgets["complexity_delta"],
+        "coverage_min": budgets["coverage_min"],
+        "complexity_max": current_state["complexity_max"],
+        "clone_groups": current_state["clone_groups"],
+    } == {
+        "clone_regression": 0,
+        "complexity_delta": 10,
+        "coverage_min": 80,
+        "complexity_max": 6,
+        "clone_groups": 1,
+    }
+    assert headroom["complexity_headroom"] == 4
+    assert gate_preview["would_fail"] is False
+
+    relaxed = service.check_patch_contract(
+        mode="budget",
+        run_id="abcdef12",
+        strictness="relaxed",
+    )
+    assert cast("dict[str, object]", relaxed["budgets"])["clone_regression"] == -1
+    assert cast("dict[str, object]", relaxed["gate_preview"])["would_fail"] is False
+    assert "advisory" in str(relaxed["message"])
+    with pytest.raises(MCPServiceContractError, match="Invalid value for strictness"):
+        service.check_patch_contract(mode="budget", strictness="wild")
+    with pytest.raises(MCPServiceContractError, match="Invalid value for mode"):
+        service.check_patch_contract(mode="inspect")
+
+
+def test_mcp_service_check_patch_contract_verify_composes_existing_primitives(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    before = _patch_contract_run_record(
+        tmp_path,
+        run_id="before1234567890",
+        digest="before-digest",
+        include_regression=False,
+        complexity=6,
+        health=85,
+    )
+    after = _patch_contract_run_record(
+        tmp_path,
+        run_id="after1234567890",
+        digest="after-digest",
+        include_regression=True,
+        complexity=14,
+        health=70,
+        baseline_status="updated",
+        new_func=frozenset({"clone:function:g2"}),
+    )
+    service._runs.register(before)
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id="before12",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="adjust pkg.a behavior",
+        expected_effects=["no new clone group"],
+    )
+    service._runs.register(after)
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id="before12",
+        after_run_id="after12",
+        intent_id=str(declared["intent_id"]),
+        changed_files=["pkg/a.py"],
+    )
+    structural_delta, gate_preview, scope_check, baseline_abuse = _payload_dicts(
+        verified,
+        ("structural_delta", "gate_preview", "scope_check", "baseline_abuse"),
+    )
+    worsened = cast("list[dict[str, object]]", verified["worsened"])
+
+    assert verified["status"] == "violated"
+    assert len(cast("list[dict[str, object]]", structural_delta["regressions"])) == 1
+    assert structural_delta["verdict"] == "regressed"
+    assert gate_preview["would_fail"] is True
+    assert scope_check["status"] == "clean"
+    assert scope_check["actual_changed_files"] == ["pkg/a.py"]
+    assert baseline_abuse["triggers"] == [
+        "baseline_changed_with_functional_code",
+        "baseline_updated_while_regressions_present",
+    ]
+    assert worsened[0] == {
+        "family": "complexity",
+        "path": "pkg/b.py",
+        "symbol": "pkg.b.handle",
+        "before": 6,
+        "after": 14,
+        "delta": 8,
+    }
+    assert verified["contract_violations"] == [
+        "structural_regressions",
+        "gate_failures",
+        "baseline_abuse:baseline_changed_with_functional_code",
+        "baseline_abuse:baseline_updated_while_regressions_present",
+    ]
+    assert verified["blocking_violations"] == verified["contract_violations"]
+
+    relaxed = service.check_patch_contract(
+        mode="verify",
+        before_run_id="before12",
+        after_run_id="after12",
+        intent_id=str(declared["intent_id"]),
+        strictness="relaxed",
+        changed_files=["pkg/a.py"],
+    )
+    assert relaxed["status"] == "accepted"
+    assert relaxed["contract_violations"] == [
+        "structural_regressions",
+        "baseline_abuse:baseline_changed_with_functional_code",
+        "baseline_abuse:baseline_updated_while_regressions_present",
+    ]
+    assert relaxed["blocking_violations"] == []
+
+    no_before = service.check_patch_contract(mode="verify")
+    no_after = service.check_patch_contract(
+        mode="verify",
+        before_run_id="before12",
+    )
+    unknown_before = service.check_patch_contract(
+        mode="verify",
+        before_run_id="missing",
+    )
+    unknown_after = service.check_patch_contract(
+        mode="verify",
+        before_run_id="before12",
+        after_run_id="missing",
+    )
+    assert no_before["status"] == "unverified"
+    assert no_before["reason"] == "no_before_run"
+    assert no_after["status"] == "unverified"
+    assert no_after["reason"] == "no_after_run"
+    assert unknown_before["status"] == "unverified"
+    assert unknown_before["reason"] == "no_before_run"
+    assert unknown_after["status"] == "unverified"
+    assert unknown_after["reason"] == "no_after_run"
 
 
 def test_mcp_service_branch_helpers_on_real_runs(

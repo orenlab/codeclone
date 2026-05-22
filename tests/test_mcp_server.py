@@ -125,6 +125,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "get_run_summary",
         "get_production_triage",
         "get_blast_radius",
+        "check_patch_contract",
         "evaluate_gates",
         "get_report_section",
         "list_findings",
@@ -157,6 +158,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "get_run_summary",
                 "get_production_triage",
                 "get_blast_radius",
+                "check_patch_contract",
                 "evaluate_gates",
                 "help",
                 "get_report_section",
@@ -199,6 +201,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     )
     assert "structural risk boundary" in str(tools["get_blast_radius"].description)
     assert "review-only context" in str(tools["get_blast_radius"].description)
+    assert "mode='budget'" in str(tools["check_patch_contract"].description)
     assert "Intent is session-local" in str(tools["manage_change_intent"].description)
     assert "bounded guidance, not a full manual" in str(tools["help"].description)
     assert "workflow, analysis_profile, suppressions, baseline" in str(
@@ -378,6 +381,20 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     )
     assert change_intent["status"] == "active"
     assert intent_check["status"] == "clean"
+    patch_budget = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "check_patch_contract",
+                {
+                    "mode": "budget",
+                    "run_id": run_id,
+                    "intent_id": intent_id,
+                },
+            )
+        )
+    )
+    assert patch_budget["mode"] == "budget"
+    assert patch_budget["intent_id"] == intent_id
 
     latest_report_resource = list(
         asyncio.run(server.read_resource("codeclone://latest/report.json"))
