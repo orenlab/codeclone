@@ -354,8 +354,9 @@ def build_mcp_server(
         description=(
             "Return the deterministic structural risk boundary for changing "
             "the given files. Shows direct dependents, clone cohort members, "
-            "coverage gaps, and do-not-touch paths. Derived from the canonical "
-            "report; no new analysis is performed."
+            "coverage gaps, actionable do-not-touch paths, and review-only "
+            "context. Derived from the canonical report; no new analysis is "
+            "performed."
         ),
         annotations=read_only_tool,
         structured_output=True,

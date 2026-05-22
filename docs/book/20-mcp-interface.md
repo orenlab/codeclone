@@ -56,18 +56,26 @@ Current tool set: `23` tools.
 The MCP surface is intentionally triage-first: analyze first, summarize/triage
 second, then drill into one finding or one hotspot family.
 
+`get_blast_radius` keeps hard guardrails separate from review context.
+`do_not_touch` is limited to actionable negative context such as baselines,
+generated CodeClone state, explicit forbidden paths, or files affected by the
+blast radius but outside the declared edit scope. Report-only signals such as
+security boundary inventory and overloaded-module candidates are returned as
+`review_context`, not as edit prohibitions. Long context sections include
+`total`, `shown`, and `truncated` summaries.
+
 ### Analysis and run-level tools
 
-| Tool                    | Key parameters                                                                                                               | Purpose                                                                                                                                      |
-|-------------------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
-| `analyze_repository`    | `root`, `analysis_mode`, thresholds, `api_surface`, `coverage_xml`, `baseline_path`, `metrics_baseline_path`, `cache_policy` | Full deterministic analysis of one repo root; registers the latest in-memory run.                                                            |
-| `analyze_changed_paths` | `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, thresholds, `api_surface`, `coverage_xml`, `cache_policy`        | Diff-aware analysis with changed-files projection over the same canonical run/report contract.                                               |
-| `get_run_summary`       | `run_id`                                                                                                                     | Cheapest run-level snapshot. Start here after analysis when you need health, findings, baseline/cache status, and inventory in compact form. |
-| `get_production_triage` | `run_id`, `max_hotspots`, `max_suggestions`                                                                                  | Production-first first-pass view over one stored run.                                                                                        |
-| `get_blast_radius`      | `run_id`, `files`, `depth`, `include`                                                                                        | Derived pre-change risk boundary: direct dependents, clone cohorts, coverage gaps, risk signals, and do-not-touch paths.                    |
-| `help`                  | `topic`, `detail`                                                                                                            | Bounded workflow/contract guidance for supported MCP topics.                                                                                 |
-| `compare_runs`          | `run_id_before`, `run_id_after`, `focus`                                                                                     | Run-to-run delta view over findings and health; returns `incomparable` when roots/settings differ.                                           |
-| `evaluate_gates`        | `run_id`, gate flags, threshold overrides, `coverage_min`                                                                    | Evaluate CI/gating decisions against a stored run without mutating process or repo state.                                                    |
+| Tool                    | Key parameters                                                                                                               | Purpose                                                                                                                                                  |
+|-------------------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `analyze_repository`    | `root`, `analysis_mode`, thresholds, `api_surface`, `coverage_xml`, `baseline_path`, `metrics_baseline_path`, `cache_policy` | Full deterministic analysis of one repo root; registers the latest in-memory run.                                                                        |
+| `analyze_changed_paths` | `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, thresholds, `api_surface`, `coverage_xml`, `cache_policy`        | Diff-aware analysis with changed-files projection over the same canonical run/report contract.                                                           |
+| `get_run_summary`       | `run_id`                                                                                                                     | Cheapest run-level snapshot. Start here after analysis when you need health, findings, baseline/cache status, and inventory in compact form.             |
+| `get_production_triage` | `run_id`, `max_hotspots`, `max_suggestions`                                                                                  | Production-first first-pass view over one stored run.                                                                                                    |
+| `get_blast_radius`      | `run_id`, `files`, `depth`, `include`                                                                                        | Derived pre-change risk boundary: direct dependents, clone cohorts, coverage gaps, risk signals, actionable do-not-touch paths, and review-only context. |
+| `help`                  | `topic`, `detail`                                                                                                            | Bounded workflow/contract guidance for supported MCP topics.                                                                                             |
+| `compare_runs`          | `run_id_before`, `run_id_after`, `focus`                                                                                     | Run-to-run delta view over findings and health; returns `incomparable` when roots/settings differ.                                                       |
+| `evaluate_gates`        | `run_id`, gate flags, threshold overrides, `coverage_min`                                                                    | Evaluate CI/gating decisions against a stored run without mutating process or repo state.                                                                |
 
 ### Report and finding projection tools
 
@@ -92,12 +100,12 @@ second, then drill into one finding or one hotspot family.
 
 ### Session-local tools
 
-| Tool                     | Key parameters                 | Purpose                                                                             |
-|--------------------------|--------------------------------|-------------------------------------------------------------------------------------|
-| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note` | Mark a finding as reviewed in the current in-memory MCP session.                    |
-| `list_reviewed_findings` | `run_id`                       | Return reviewed markers currently held in process memory.                           |
-| `manage_change_intent`   | `action`, `run_id`, `intent_id`, `scope`, `changed_files` or `diff_ref` | Declare, inspect, check, or clear session-local change intent for governed edits. |
-| `clear_session_runs`     | none                           | Clear in-memory run history and session-local review state for this server process. |
+| Tool                     | Key parameters                                                          | Purpose                                                                             |
+|--------------------------|-------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
+| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note`                                          | Mark a finding as reviewed in the current in-memory MCP session.                    |
+| `list_reviewed_findings` | `run_id`                                                                | Return reviewed markers currently held in process memory.                           |
+| `manage_change_intent`   | `action`, `run_id`, `intent_id`, `scope`, `changed_files` or `diff_ref` | Declare, inspect, check, or clear session-local change intent for governed edits.   |
+| `clear_session_runs`     | none                                                                    | Clear in-memory run history and session-local review state for this server process. |
 
 ## Resources
 

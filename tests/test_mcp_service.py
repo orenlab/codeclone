@@ -2100,9 +2100,68 @@ def test_mcp_blast_radius_projection_is_deterministic() -> None:
     assert direct.radius_level == "medium"
     assert direct.structural_risk["high_complexity_in_blast_zone"] == ["pkg/b.py"]
     assert direct.structural_risk["low_coverage_in_blast_zone"] == ["pkg/a.py"]
+    assert [item["path"] for item in direct.do_not_touch] == [
+        ".cache/codeclone/**",
+        "codeclone.baseline.json",
+    ]
+    assert direct.review_context == (
+        {
+            "path": "pkg/b.py",
+            "reason": "report-only design signal",
+            "category": "report_only_context",
+            "severity": "context",
+        },
+    )
     assert transitive.direct_dependents == ("pkg/b.py",)
     assert transitive.transitive_dependents == ("pkg/c.py",)
-    assert direct.to_payload(include=("do_not_touch",))["direct_dependents"] == []
+    assert [item["category"] for item in transitive.review_context] == [
+        "report_only_context",
+        "known_baseline_debt",
+        "security_boundary_context",
+    ]
+    do_not_touch_only = direct.to_payload(include=("do_not_touch",))
+    assert do_not_touch_only["direct_dependents"] == []
+    assert do_not_touch_only["review_context"] == []
+    assert (
+        cast(dict[str, object], do_not_touch_only["do_not_touch_summary"])["total"] == 2
+    )
+
+
+def test_mcp_blast_radius_payload_bounds_context_sections() -> None:
+    review_context = tuple(
+        {
+            "path": f"pkg/context_{index}.py",
+            "reason": "report-only design signal",
+            "category": "report_only_context",
+            "severity": "context",
+        }
+        for index in range(25)
+    )
+    result = mcp_blast_radius_mod.BlastRadiusResult(
+        run_id="abcdef12",
+        origin=("pkg/a.py",),
+        depth="direct",
+        radius_level="low",
+        direct_dependents=(),
+        transitive_dependents=(),
+        clone_cohort_members=(),
+        in_dependency_cycle=(),
+        structural_risk={},
+        do_not_touch=(),
+        review_context=review_context,
+        guardrails=(),
+    )
+
+    payload = result.to_payload(include=("review_context",))
+
+    assert len(cast("list[dict[str, object]]", payload["review_context"])) == 20
+    assert cast(dict[str, object], payload["review_context_summary"]) == {
+        "total": 25,
+        "shown": 20,
+        "truncated": True,
+        "top_categories": {"report_only_context": 25},
+        "top_reasons": {"report-only design signal": 25},
+    }
 
 
 def test_mcp_service_get_blast_radius_uses_cache_and_include_filter(
@@ -2127,8 +2186,22 @@ def test_mcp_service_get_blast_radius_uses_cache_and_include_filter(
     assert cast(dict[str, object], first["structural_risk"])[
         "overloaded_modules_in_blast_zone"
     ] == ["pkg/b.py"]
+    assert [
+        item["category"]
+        for item in cast("list[dict[str, str]]", first["review_context"])
+    ] == [
+        "report_only_context",
+        "known_baseline_debt",
+        "security_boundary_context",
+    ]
     assert second["direct_dependents"] == []
-    assert cast("list[dict[str, object]]", second["do_not_touch"])
+    assert [
+        item["path"] for item in cast("list[dict[str, str]]", second["do_not_touch"])
+    ] == [
+        ".cache/codeclone/**",
+        "codeclone.baseline.json",
+    ]
+    assert second["review_context"] == []
     assert len(service._blast_radius_cache) == 1
     with pytest.raises(MCPServiceContractError, match="requires at least one file"):
         service.get_blast_radius(files=())
@@ -2166,7 +2239,34 @@ def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
         ]
         == 1
     )
-    assert cast("list[dict[str, object]]", declared["do_not_touch"])
+    assert (
+        cast(dict[str, object], declared["blast_radius_summary"])["do_not_touch_count"]
+        == 5
+    )
+    assert (
+        cast(dict[str, object], declared["blast_radius_summary"])[
+            "review_context_count"
+        ]
+        == 1
+    )
+    assert [
+        item["category"]
+        for item in cast("list[dict[str, str]]", declared["do_not_touch"])
+    ] == [
+        "baseline_or_generated_state",
+        "baseline_or_generated_state",
+        "affected_but_not_allowed",
+        "explicit_forbidden",
+        "affected_but_not_allowed",
+    ]
+    assert cast("list[dict[str, str]]", declared["review_context"]) == [
+        {
+            "path": "tests/test_a.py",
+            "reason": "golden fixture clone suppression surface",
+            "category": "golden_fixture_surface",
+            "severity": "context",
+        }
+    ]
 
     fetched = service.manage_change_intent(action="get", intent_id=intent_id)
     assert fetched["intent_id"] == intent_id

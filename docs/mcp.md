@@ -108,31 +108,31 @@ run-scoped URI templates.
 
 ## Tool surface
 
-| Tool                     | Purpose                                                                                                  |
-|--------------------------|----------------------------------------------------------------------------------------------------------|
-| `analyze_repository`     | Full analysis → compact summary; use `get_run_summary` or `get_production_triage` as the first pass      |
-| `analyze_changed_paths`  | Diff-aware analysis via `changed_paths` or `git_diff_ref`; compact changed-files snapshot                |
-| `get_run_summary`        | Cheapest run snapshot: health, findings, baseline, inventory, active thresholds                          |
-| `get_production_triage`  | Production-first view: health, hotspots, suggestions, active thresholds; best first pass for noisy repos |
-| `get_blast_radius`       | Pre-change risk boundary: direct dependents, clone cohorts, coverage gaps, and do-not-touch paths        |
-| `help`                   | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope       |
-| `compare_runs`           | Run-to-run delta: regressions, improvements, health change                                               |
-| `list_findings`          | Filtered, paginated findings; use after hotspots or `check_*`                                            |
-| `get_finding`            | Single finding detail by id; defaults to `normal` detail level                                           |
-| `get_remediation`        | Remediation payload for one finding                                                                      |
-| `list_hotspots`          | Priority-ranked hotspot views; preferred before broad listing                                            |
-| `get_report_section`     | Read report sections; `metrics_detail` is paginated with family/path filters                             |
-| `evaluate_gates`         | Evaluate CI gating decisions                                                                             |
-| `check_clones`           | Clone findings only; narrower than `list_findings`                                                       |
-| `check_complexity`       | Complexity hotspots only                                                                                 |
-| `check_coupling`         | Coupling hotspots only                                                                                   |
-| `check_cohesion`         | Cohesion hotspots only                                                                                   |
-| `check_dead_code`        | Dead-code findings only                                                                                  |
-| `generate_pr_summary`    | PR-friendly markdown or JSON summary                                                                     |
-| `mark_finding_reviewed`  | Session-local review marker (in-memory)                                                                  |
-| `list_reviewed_findings` | List reviewed findings for a run                                                                         |
-| `manage_change_intent`   | Declare, inspect, check, or clear session-local edit scope intent                                        |
-| `clear_session_runs`     | Reset in-memory runs and session state                                                                   |
+| Tool                     | Purpose                                                                                                                           |
+|--------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| `analyze_repository`     | Full analysis → compact summary; use `get_run_summary` or `get_production_triage` as the first pass                               |
+| `analyze_changed_paths`  | Diff-aware analysis via `changed_paths` or `git_diff_ref`; compact changed-files snapshot                                         |
+| `get_run_summary`        | Cheapest run snapshot: health, findings, baseline, inventory, active thresholds                                                   |
+| `get_production_triage`  | Production-first view: health, hotspots, suggestions, active thresholds; best first pass for noisy repos                          |
+| `get_blast_radius`       | Pre-change risk boundary: direct dependents, clone cohorts, coverage gaps, actionable do-not-touch paths, and review-only context |
+| `help`                   | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope                                |
+| `compare_runs`           | Run-to-run delta: regressions, improvements, health change                                                                        |
+| `list_findings`          | Filtered, paginated findings; use after hotspots or `check_*`                                                                     |
+| `get_finding`            | Single finding detail by id; defaults to `normal` detail level                                                                    |
+| `get_remediation`        | Remediation payload for one finding                                                                                               |
+| `list_hotspots`          | Priority-ranked hotspot views; preferred before broad listing                                                                     |
+| `get_report_section`     | Read report sections; `metrics_detail` is paginated with family/path filters                                                      |
+| `evaluate_gates`         | Evaluate CI gating decisions                                                                                                      |
+| `check_clones`           | Clone findings only; narrower than `list_findings`                                                                                |
+| `check_complexity`       | Complexity hotspots only                                                                                                          |
+| `check_coupling`         | Coupling hotspots only                                                                                                            |
+| `check_cohesion`         | Cohesion hotspots only                                                                                                            |
+| `check_dead_code`        | Dead-code findings only                                                                                                           |
+| `generate_pr_summary`    | PR-friendly markdown or JSON summary                                                                                              |
+| `mark_finding_reviewed`  | Session-local review marker (in-memory)                                                                                           |
+| `list_reviewed_findings` | List reviewed findings for a run                                                                                                  |
+| `manage_change_intent`   | Declare, inspect, check, or clear session-local edit scope intent                                                                 |
+| `clear_session_runs`     | Reset in-memory runs and session state                                                                                            |
 
 > `check_*` tools query stored runs only. Call `analyze_repository` or
 > `analyze_changed_paths` first.
@@ -140,6 +140,11 @@ run-scoped URI templates.
 **Payload conventions:**
 
 - `check_*` responses include only the relevant health dimension.
+- `get_blast_radius` separates edit prohibitions from context:
+  `do_not_touch` contains actionable negative context such as baselines,
+  generated CodeClone state, explicit forbidden paths, and affected files
+  outside declared scope. Report-only signals are returned as `review_context`.
+  Long context sections include `total`, `shown`, and `truncated` summaries.
 - Empty design `check_*` responses may also include a compact
   `threshold_context` (`metric`, `threshold`, `measured_units`,
   `highest_below_threshold`) to show whether the run is genuinely quiet or
@@ -350,7 +355,7 @@ If `codeclone-mcp` is not on `PATH`, use an absolute path to the launcher.
 
 | Problem                                                   | Fix                                                                            |
 |-----------------------------------------------------------|--------------------------------------------------------------------------------|
-| `CodeClone MCP support requires the optional 'mcp' extra` | `uv tool install "codeclone[mcp]"` or `uv pip install "codeclone[mcp]"`       |
+| `CodeClone MCP support requires the optional 'mcp' extra` | `uv tool install "codeclone[mcp]"` or `uv pip install "codeclone[mcp]"`        |
 | Client cannot find `codeclone-mcp`                        | `uv tool install "codeclone[mcp]"` or use an absolute launcher path            |
 | Client only accepts remote MCP                            | Use `streamable-http` transport                                                |
 | Agent reads stale results                                 | Call `analyze_repository` again; `latest` always points to the most recent run |

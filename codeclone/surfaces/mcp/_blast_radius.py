@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from fnmatch import fnmatchcase
 from typing import Final, Literal
 
 BlastRadiusDepth = Literal["direct", "transitive"]
@@ -19,6 +18,7 @@ BlastRadiusInclude = Literal[
     "coverage",
     "risk_signals",
     "do_not_touch",
+    "review_context",
     "cycles",
 ]
 
@@ -30,6 +30,7 @@ VALID_BLAST_RADIUS_INCLUDE: Final[frozenset[str]] = frozenset(
         "coverage",
         "risk_signals",
         "do_not_touch",
+        "review_context",
         "cycles",
     }
 )
@@ -39,12 +40,14 @@ DEFAULT_BLAST_RADIUS_INCLUDE: Final[tuple[BlastRadiusInclude, ...]] = (
     "coverage",
     "risk_signals",
     "do_not_touch",
+    "review_context",
     "cycles",
 )
 DEFAULT_DO_NOT_TOUCH_PATTERNS: Final[tuple[str, ...]] = (
     "codeclone.baseline.json",
     ".cache/codeclone/**",
 )
+MAX_CONTEXT_ITEMS: Final[int] = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +62,7 @@ class BlastRadiusResult:
     in_dependency_cycle: tuple[str, ...]
     structural_risk: dict[str, list[str]]
     do_not_touch: tuple[dict[str, str], ...]
+    review_context: tuple[dict[str, str], ...]
     guardrails: tuple[str, ...]
 
     def to_payload(
@@ -79,6 +83,10 @@ class BlastRadiusResult:
                 "overloaded_modules_in_blast_zone",
             ):
                 structural_risk.pop(key, None)
+        do_not_touch = self.do_not_touch if "do_not_touch" in include_set else ()
+        review_context = self.review_context if "review_context" in include_set else ()
+        do_not_touch_payload = _bounded_entries(do_not_touch)
+        review_context_payload = _bounded_entries(review_context)
         return {
             "run_id": self.run_id,
             "origin": list(self.origin),
@@ -101,10 +109,15 @@ class BlastRadiusResult:
                 list(self.in_dependency_cycle) if "cycles" in include_set else []
             ),
             "structural_risk": structural_risk,
-            "do_not_touch": (
-                [dict(item) for item in self.do_not_touch]
-                if "do_not_touch" in include_set
-                else []
+            "do_not_touch": do_not_touch_payload,
+            "do_not_touch_summary": _entry_summary(
+                entries=do_not_touch,
+                shown=len(do_not_touch_payload),
+            ),
+            "review_context": review_context_payload,
+            "review_context_summary": _entry_summary(
+                entries=review_context,
+                shown=len(review_context_payload),
             ),
             "guardrails": list(self.guardrails),
         }
@@ -164,8 +177,38 @@ def _dedupe_sorted(values: Sequence[str] | set[str]) -> tuple[str, ...]:
     return tuple(sorted({value for value in values if value}))
 
 
-def _path_matches_glob(path: str, patterns: Sequence[str]) -> bool:
-    return any(fnmatchcase(path, pattern) for pattern in patterns)
+def _bounded_entries(
+    entries: Sequence[Mapping[str, str]],
+    *,
+    limit: int = MAX_CONTEXT_ITEMS,
+) -> list[dict[str, str]]:
+    return [dict(item) for item in entries[:limit]]
+
+
+def _count_by_field(
+    entries: Sequence[Mapping[str, str]],
+    *,
+    field: str,
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for entry in entries:
+        key = str(entry.get(field, "")).strip() or "unknown"
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+
+def _entry_summary(
+    *,
+    entries: Sequence[Mapping[str, str]],
+    shown: int,
+) -> dict[str, object]:
+    return {
+        "total": len(entries),
+        "shown": shown,
+        "truncated": shown < len(entries),
+        "top_categories": _count_by_field(entries, field="category"),
+        "top_reasons": _count_by_field(entries, field="reason"),
+    }
 
 
 def _item_path(item: Mapping[str, object]) -> str:
@@ -444,80 +487,141 @@ def _all_finding_groups(
     return tuple(result)
 
 
-def _append_do_not_touch(
-    entries: dict[str, str],
+def _append_boundary_entry(
+    entries: dict[str, dict[str, str]],
     *,
     path: str,
     reason: str,
+    category: str,
+    severity: str,
 ) -> None:
     if not path:
         return
-    entries.setdefault(path, reason)
+    entries.setdefault(
+        path,
+        {
+            "path": path,
+            "reason": reason,
+            "category": category,
+            "severity": severity,
+        },
+    )
 
 
-def _compute_do_not_touch(
+def _append_review_entry(
+    entries: dict[tuple[str, str, str], dict[str, str]],
+    *,
+    path: str,
+    reason: str,
+    category: str,
+    severity: str = "context",
+) -> None:
+    if not path:
+        return
+    entries.setdefault(
+        (path, category, reason),
+        {
+            "path": path,
+            "reason": reason,
+            "category": category,
+            "severity": severity,
+        },
+    )
+
+
+def _compute_change_boundaries(
     *,
     report_document: Mapping[str, object],
     origin_paths: Sequence[str],
     blast_zone_paths: set[str],
     forbidden_patterns: Sequence[str],
     allowed_scope: Sequence[str] = (),
-) -> tuple[dict[str, str], ...]:
-    entries: dict[str, str] = {}
+) -> tuple[tuple[dict[str, str], ...], tuple[dict[str, str], ...]]:
+    do_not_touch_entries: dict[str, dict[str, str]] = {}
+    review_entries: dict[tuple[str, str, str], dict[str, str]] = {}
     origin_set = set(origin_paths)
     allowed_set = set(allowed_scope)
     for pattern in DEFAULT_DO_NOT_TOUCH_PATTERNS:
-        _append_do_not_touch(
-            entries,
+        _append_boundary_entry(
+            do_not_touch_entries,
             path=pattern,
             reason=(
                 "baseline, cache, and generated CodeClone state require explicit "
                 "separate changes"
             ),
+            category="baseline_or_generated_state",
+            severity="hard",
         )
     for pattern in forbidden_patterns:
-        _append_do_not_touch(entries, path=pattern, reason="declared forbidden path")
+        _append_boundary_entry(
+            do_not_touch_entries,
+            path=pattern,
+            reason="declared forbidden path",
+            category="explicit_forbidden",
+            severity="hard",
+        )
     for group in _all_finding_groups(report_document):
         if str(group.get("novelty", "")).strip() != "known":
             continue
         for path in _finding_paths(group):
-            if path not in origin_set:
-                _append_do_not_touch(
-                    entries,
+            if path in blast_zone_paths and path not in origin_set:
+                _append_review_entry(
+                    review_entries,
                     path=path,
                     reason="known baseline debt outside declared origin",
+                    category="known_baseline_debt",
                 )
     for group in _suppressed_clone_buckets(report_document):
         for path in _finding_paths(group):
-            _append_do_not_touch(
-                entries,
-                path=path,
-                reason="golden fixture clone suppression surface",
-            )
+            if path in blast_zone_paths:
+                _append_review_entry(
+                    review_entries,
+                    path=path,
+                    reason="golden fixture clone suppression surface",
+                    category="golden_fixture_surface",
+                )
     metrics = _as_mapping(report_document.get("metrics"))
     families = _as_mapping(metrics.get("families"))
-    for family_name, reason in (
-        ("security_surfaces", "report-only security boundary inventory"),
-        ("overloaded_modules", "report-only design signal"),
+    for family_name, reason, category in (
+        (
+            "security_surfaces",
+            "report-only security boundary inventory",
+            "security_boundary_context",
+        ),
+        ("overloaded_modules", "report-only design signal", "report_only_context"),
     ):
         family = _as_mapping(families.get(family_name))
         for raw_item in _as_sequence(family.get("items")):
             path = _item_path(_as_mapping(raw_item))
-            if path and path not in origin_set:
-                _append_do_not_touch(entries, path=path, reason=reason)
+            if path in blast_zone_paths and path not in origin_set:
+                _append_review_entry(
+                    review_entries,
+                    path=path,
+                    reason=reason,
+                    category=category,
+                )
     if allowed_set:
         for path in blast_zone_paths:
             if path not in allowed_set:
-                _append_do_not_touch(
-                    entries,
+                _append_boundary_entry(
+                    do_not_touch_entries,
                     path=path,
                     reason="affected by blast radius but outside declared edit scope",
+                    category="affected_but_not_allowed",
+                    severity="requires_expansion",
                 )
-    return tuple(
-        {"path": path, "reason": entries[path]}
-        for path in sorted(entries)
-        if path and (_path_matches_glob(path, forbidden_patterns) or path in entries)
+    do_not_touch = tuple(
+        do_not_touch_entries[path] for path in sorted(do_not_touch_entries) if path
     )
+    review_context = tuple(
+        entry
+        for entry in sorted(
+            review_entries.values(),
+            key=lambda item: (item["path"], item["category"], item["reason"]),
+        )
+        if entry["path"] not in do_not_touch_entries
+    )
+    return do_not_touch, review_context
 
 
 def _guardrails(
@@ -602,7 +706,7 @@ def compute_blast_radius(
         report_document=report_document,
         blast_zone_paths=zone,
     )
-    do_not_touch = _compute_do_not_touch(
+    do_not_touch, review_context = _compute_change_boundaries(
         report_document=report_document,
         origin_paths=origin_paths,
         blast_zone_paths=zone,
@@ -620,5 +724,6 @@ def compute_blast_radius(
         in_dependency_cycle=dependency_cycle_members,
         structural_risk=risk,
         do_not_touch=do_not_touch,
+        review_context=review_context,
         guardrails=_guardrails(radius_level=radius_level, do_not_touch=do_not_touch),
     )

@@ -134,6 +134,9 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             short_run_id=_helpers._short_run_id(record.run_id)
         )
         payload["do_not_touch"] = blast_payload["do_not_touch"]
+        payload["do_not_touch_summary"] = blast_payload["do_not_touch_summary"]
+        payload["review_context"] = blast_payload["review_context"]
+        payload["review_context_summary"] = blast_payload["review_context_summary"]
         return payload
 
     def _check_change_intent(
@@ -284,6 +287,9 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 )
             ),
             "do_not_touch_count": len(_as_sequence(blast_payload.get("do_not_touch"))),
+            "review_context_count": len(
+                _as_sequence(blast_payload.get("review_context"))
+            ),
         }
 
     def _intent_check_result(

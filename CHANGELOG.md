@@ -8,7 +8,8 @@
 
 - Add MCP `get_blast_radius` as a deterministic pre-change projection over the
   canonical report: direct dependents, clone cohorts, dependency-cycle
-  membership, coverage/risk signals, and do-not-touch paths.
+  membership, coverage/risk signals, actionable do-not-touch paths, and
+  bounded review-only context.
 - Add MCP `manage_change_intent` for session-local change intent lifecycle:
   declare intended scope, inspect active intent, check actual changed files
   against scope, and clear intent state.

@@ -198,6 +198,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         tools["get_production_triage"].description
     )
     assert "structural risk boundary" in str(tools["get_blast_radius"].description)
+    assert "review-only context" in str(tools["get_blast_radius"].description)
     assert "Intent is session-local" in str(tools["manage_change_intent"].description)
     assert "bounded guidance, not a full manual" in str(tools["help"].description)
     assert "workflow, analysis_profile, suppressions, baseline" in str(
@@ -346,6 +347,8 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     )
     assert blast_radius["origin"] == ["pkg/dup.py"]
     assert blast_radius["radius_level"] in {"low", "medium", "high"}
+    assert "review_context" in blast_radius
+    assert "do_not_touch_summary" in blast_radius
 
     change_intent = _structured_tool_result(
         asyncio.run(
