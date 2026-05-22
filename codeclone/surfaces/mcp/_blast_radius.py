@@ -1,0 +1,624 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
+from __future__ import annotations
+
+from collections import deque
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from fnmatch import fnmatchcase
+from typing import Final, Literal
+
+BlastRadiusDepth = Literal["direct", "transitive"]
+BlastRadiusInclude = Literal[
+    "imports",
+    "clone_cohorts",
+    "coverage",
+    "risk_signals",
+    "do_not_touch",
+    "cycles",
+]
+
+VALID_BLAST_RADIUS_DEPTHS: Final[frozenset[str]] = frozenset({"direct", "transitive"})
+VALID_BLAST_RADIUS_INCLUDE: Final[frozenset[str]] = frozenset(
+    {
+        "imports",
+        "clone_cohorts",
+        "coverage",
+        "risk_signals",
+        "do_not_touch",
+        "cycles",
+    }
+)
+DEFAULT_BLAST_RADIUS_INCLUDE: Final[tuple[BlastRadiusInclude, ...]] = (
+    "imports",
+    "clone_cohorts",
+    "coverage",
+    "risk_signals",
+    "do_not_touch",
+    "cycles",
+)
+DEFAULT_DO_NOT_TOUCH_PATTERNS: Final[tuple[str, ...]] = (
+    "codeclone.baseline.json",
+    ".cache/codeclone/**",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class BlastRadiusResult:
+    run_id: str
+    origin: tuple[str, ...]
+    depth: BlastRadiusDepth
+    radius_level: str
+    direct_dependents: tuple[str, ...]
+    transitive_dependents: tuple[str, ...]
+    clone_cohort_members: tuple[str, ...]
+    in_dependency_cycle: tuple[str, ...]
+    structural_risk: dict[str, list[str]]
+    do_not_touch: tuple[dict[str, str], ...]
+    guardrails: tuple[str, ...]
+
+    def to_payload(
+        self,
+        *,
+        include: Sequence[str] = DEFAULT_BLAST_RADIUS_INCLUDE,
+    ) -> dict[str, object]:
+        include_set = {str(item) for item in include}
+        imports_enabled = "imports" in include_set
+        risk_enabled = "risk_signals" in include_set or "coverage" in include_set
+        structural_risk = dict(self.structural_risk) if risk_enabled else {}
+        if "coverage" not in include_set:
+            structural_risk.pop("low_coverage_in_blast_zone", None)
+        if "risk_signals" not in include_set:
+            for key in (
+                "high_complexity_in_blast_zone",
+                "high_coupling_in_blast_zone",
+                "overloaded_modules_in_blast_zone",
+            ):
+                structural_risk.pop(key, None)
+        return {
+            "run_id": self.run_id,
+            "origin": list(self.origin),
+            "depth": self.depth,
+            "radius_level": self.radius_level,
+            "direct_dependents": (
+                list(self.direct_dependents) if imports_enabled else []
+            ),
+            "transitive_dependents": (
+                list(self.transitive_dependents)
+                if imports_enabled and self.depth == "transitive"
+                else []
+            ),
+            "clone_cohort_members": (
+                list(self.clone_cohort_members)
+                if "clone_cohorts" in include_set
+                else []
+            ),
+            "in_dependency_cycle": (
+                list(self.in_dependency_cycle) if "cycles" in include_set else []
+            ),
+            "structural_risk": structural_risk,
+            "do_not_touch": (
+                [dict(item) for item in self.do_not_touch]
+                if "do_not_touch" in include_set
+                else []
+            ),
+            "guardrails": list(self.guardrails),
+        }
+
+
+def _as_mapping(value: object) -> Mapping[str, object]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _as_sequence(value: object) -> Sequence[object]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return value
+    return ()
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return default
+    return default
+
+
+def _normalize_relative_path(path: object) -> str:
+    text = str(path).replace("\\", "/").strip()
+    if text == ".":
+        return ""
+    if text.startswith("./"):
+        text = text[2:]
+    return text.rstrip("/")
+
+
+def _path_to_module(path: str) -> str:
+    normalized = _normalize_relative_path(path)
+    if not normalized.endswith(".py"):
+        return normalized.replace("/", ".")
+    without_suffix = normalized[:-3]
+    if without_suffix.endswith("/__init__"):
+        without_suffix = without_suffix[: -len("/__init__")]
+    if without_suffix == "__init__":
+        without_suffix = ""
+    return without_suffix.replace("/", ".").strip(".")
+
+
+def _module_to_candidate_path(module: str) -> str:
+    return f"{module.replace('.', '/')}.py" if module else ""
+
+
+def _dedupe_sorted(values: Sequence[str] | set[str]) -> tuple[str, ...]:
+    return tuple(sorted({value for value in values if value}))
+
+
+def _path_matches_glob(path: str, patterns: Sequence[str]) -> bool:
+    return any(fnmatchcase(path, pattern) for pattern in patterns)
+
+
+def _item_path(item: Mapping[str, object]) -> str:
+    for key in ("relative_path", "path", "filepath", "file"):
+        value = _normalize_relative_path(item.get(key, ""))
+        if value:
+            return value
+    return ""
+
+
+def _module_path_index(report_document: Mapping[str, object]) -> dict[str, str]:
+    modules: dict[str, str] = {}
+    inventory = _as_mapping(report_document.get("inventory"))
+    file_registry = _as_mapping(inventory.get("file_registry"))
+    for raw_path in _as_sequence(file_registry.get("items")):
+        path = _normalize_relative_path(raw_path)
+        module = _path_to_module(path)
+        if module and path:
+            modules.setdefault(module, path)
+    metrics = _as_mapping(report_document.get("metrics"))
+    families = _as_mapping(metrics.get("families"))
+    for family_name in (
+        "complexity",
+        "coupling",
+        "cohesion",
+        "coverage_join",
+        "overloaded_modules",
+        "security_surfaces",
+        "api_surface",
+        "coverage_adoption",
+    ):
+        family = _as_mapping(families.get(family_name))
+        for raw_item in _as_sequence(family.get("items")):
+            item = _as_mapping(raw_item)
+            path = _item_path(item)
+            module = str(item.get("module", "")).strip() or _path_to_module(path)
+            if module and path:
+                modules.setdefault(module, path)
+    return modules
+
+
+def _module_to_output(module: str, module_paths: Mapping[str, str]) -> str:
+    return module_paths.get(module, _module_to_candidate_path(module) or module)
+
+
+def _build_reverse_import_graph(
+    edges: Sequence[Mapping[str, object]],
+) -> dict[str, set[str]]:
+    reverse: dict[str, set[str]] = {}
+    for edge in edges:
+        source = str(edge.get("source", "")).strip()
+        target = str(edge.get("target", "")).strip()
+        if source and target:
+            reverse.setdefault(target, set()).add(source)
+    return reverse
+
+
+def _dependency_edges(
+    report_document: Mapping[str, object],
+) -> tuple[Mapping[str, object], ...]:
+    metrics = _as_mapping(report_document.get("metrics"))
+    families = _as_mapping(metrics.get("families"))
+    dependencies = _as_mapping(families.get("dependencies"))
+    return tuple(_as_mapping(item) for item in _as_sequence(dependencies.get("items")))
+
+
+def _dependency_cycles(
+    report_document: Mapping[str, object],
+) -> tuple[tuple[str, ...], ...]:
+    metrics = _as_mapping(report_document.get("metrics"))
+    families = _as_mapping(metrics.get("families"))
+    dependencies = _as_mapping(families.get("dependencies"))
+    cycles: list[tuple[str, ...]] = []
+    for raw_cycle in _as_sequence(dependencies.get("cycles")):
+        cycle = tuple(
+            str(module).strip()
+            for module in _as_sequence(raw_cycle)
+            if str(module).strip()
+        )
+        if cycle:
+            cycles.append(cycle)
+    return tuple(sorted(cycles, key=lambda item: (len(item), item)))
+
+
+def _compute_direct_dependents(
+    *,
+    origin_modules: Sequence[str],
+    reverse_graph: Mapping[str, set[str]],
+) -> tuple[str, ...]:
+    dependents: set[str] = set()
+    for module in origin_modules:
+        dependents.update(reverse_graph.get(module, set()))
+    return _dedupe_sorted(dependents)
+
+
+def _compute_transitive_dependents(
+    *,
+    origin_modules: Sequence[str],
+    reverse_graph: Mapping[str, set[str]],
+) -> tuple[str, ...]:
+    seen: set[str] = set()
+    queue: deque[str] = deque(origin_modules)
+    origin_set = set(origin_modules)
+    while queue:
+        current = queue.popleft()
+        for dependent in sorted(reverse_graph.get(current, set())):
+            if dependent in seen or dependent in origin_set:
+                continue
+            seen.add(dependent)
+            queue.append(dependent)
+    return _dedupe_sorted(seen)
+
+
+def _clone_group_buckets(
+    report_document: Mapping[str, object],
+) -> tuple[Mapping[str, object], ...]:
+    findings = _as_mapping(report_document.get("findings"))
+    groups = _as_mapping(findings.get("groups"))
+    clones = _as_mapping(groups.get("clones"))
+    buckets: list[Mapping[str, object]] = []
+    for bucket_name in ("functions", "blocks", "segments"):
+        buckets.extend(
+            _as_mapping(item) for item in _as_sequence(clones.get(bucket_name))
+        )
+    return tuple(buckets)
+
+
+def _suppressed_clone_buckets(
+    report_document: Mapping[str, object],
+) -> tuple[Mapping[str, object], ...]:
+    findings = _as_mapping(report_document.get("findings"))
+    groups = _as_mapping(findings.get("groups"))
+    clones = _as_mapping(groups.get("clones"))
+    suppressed = _as_mapping(clones.get("suppressed"))
+    buckets: list[Mapping[str, object]] = []
+    for bucket_name in (
+        "function",
+        "block",
+        "segment",
+        "functions",
+        "blocks",
+        "segments",
+    ):
+        buckets.extend(
+            _as_mapping(item) for item in _as_sequence(suppressed.get(bucket_name))
+        )
+    return tuple(buckets)
+
+
+def _compute_clone_cohort_members(
+    *,
+    report_document: Mapping[str, object],
+    origin_paths: Sequence[str],
+) -> tuple[str, ...]:
+    origin_set = set(origin_paths)
+    cohort_paths: set[str] = set()
+    for group in _clone_group_buckets(report_document):
+        item_paths = {
+            _item_path(_as_mapping(item)) for item in _as_sequence(group.get("items"))
+        }
+        item_paths.discard("")
+        if origin_set.intersection(item_paths):
+            cohort_paths.update(item_paths - origin_set)
+    return _dedupe_sorted(cohort_paths)
+
+
+def _compute_cycle_membership(
+    *,
+    origin_modules: Sequence[str],
+    origin_by_module: Mapping[str, str],
+    report_document: Mapping[str, object],
+) -> tuple[str, ...]:
+    cycle_modules = {
+        module for cycle in _dependency_cycles(report_document) for module in cycle
+    }
+    return _dedupe_sorted(
+        {
+            origin_by_module[module]
+            for module in origin_modules
+            if module in cycle_modules and origin_by_module.get(module)
+        }
+    )
+
+
+def _compute_radius_level(
+    *,
+    direct_dependents: Sequence[str],
+    clone_cohort_members: Sequence[str],
+) -> str:
+    total_affected = len(direct_dependents) + len(clone_cohort_members)
+    if total_affected == 0:
+        return "low"
+    if total_affected <= 5:
+        return "medium"
+    return "high"
+
+
+def _blast_zone(
+    *,
+    origin_paths: Sequence[str],
+    direct_dependents: Sequence[str],
+    transitive_dependents: Sequence[str],
+    clone_cohort_members: Sequence[str],
+) -> set[str]:
+    return {
+        *origin_paths,
+        *direct_dependents,
+        *transitive_dependents,
+        *clone_cohort_members,
+    }
+
+
+def _compute_risk_signals(
+    *,
+    report_document: Mapping[str, object],
+    blast_zone_paths: set[str],
+) -> dict[str, list[str]]:
+    metrics = _as_mapping(report_document.get("metrics"))
+    families = _as_mapping(metrics.get("families"))
+    complexity = _as_mapping(families.get("complexity"))
+    coupling = _as_mapping(families.get("coupling"))
+    coverage_join = _as_mapping(families.get("coverage_join"))
+    overloaded_modules = _as_mapping(families.get("overloaded_modules"))
+
+    high_complexity = {
+        _item_path(_as_mapping(item))
+        for item in _as_sequence(complexity.get("items"))
+        if str(_as_mapping(item).get("risk", "")).strip() == "high"
+        and _item_path(_as_mapping(item)) in blast_zone_paths
+    }
+    high_coupling = {
+        _item_path(_as_mapping(item))
+        for item in _as_sequence(coupling.get("items"))
+        if str(_as_mapping(item).get("risk", "")).strip() == "high"
+        and _item_path(_as_mapping(item)) in blast_zone_paths
+    }
+    low_coverage = {
+        _item_path(_as_mapping(item))
+        for item in _as_sequence(coverage_join.get("items"))
+        if (
+            bool(_as_mapping(item).get("coverage_hotspot"))
+            or bool(_as_mapping(item).get("scope_gap_hotspot"))
+        )
+        and _item_path(_as_mapping(item)) in blast_zone_paths
+    }
+    overloaded = {
+        _item_path(_as_mapping(item))
+        for item in _as_sequence(overloaded_modules.get("items"))
+        if str(_as_mapping(item).get("candidate_status", "")).strip() == "candidate"
+        and _item_path(_as_mapping(item)) in blast_zone_paths
+    }
+    return {
+        "high_complexity_in_blast_zone": list(_dedupe_sorted(high_complexity)),
+        "high_coupling_in_blast_zone": list(_dedupe_sorted(high_coupling)),
+        "low_coverage_in_blast_zone": list(_dedupe_sorted(low_coverage)),
+        "overloaded_modules_in_blast_zone": list(_dedupe_sorted(overloaded)),
+    }
+
+
+def _finding_paths(finding: Mapping[str, object]) -> tuple[str, ...]:
+    return _dedupe_sorted(
+        {_item_path(_as_mapping(item)) for item in _as_sequence(finding.get("items"))}
+    )
+
+
+def _all_finding_groups(
+    report_document: Mapping[str, object],
+) -> tuple[Mapping[str, object], ...]:
+    findings = _as_mapping(report_document.get("findings"))
+    groups = _as_mapping(findings.get("groups"))
+    result: list[Mapping[str, object]] = []
+    for family_payload in groups.values():
+        family_map = _as_mapping(family_payload)
+        for value in family_map.values():
+            result.extend(_as_mapping(item) for item in _as_sequence(value))
+    return tuple(result)
+
+
+def _append_do_not_touch(
+    entries: dict[str, str],
+    *,
+    path: str,
+    reason: str,
+) -> None:
+    if not path:
+        return
+    entries.setdefault(path, reason)
+
+
+def _compute_do_not_touch(
+    *,
+    report_document: Mapping[str, object],
+    origin_paths: Sequence[str],
+    blast_zone_paths: set[str],
+    forbidden_patterns: Sequence[str],
+    allowed_scope: Sequence[str] = (),
+) -> tuple[dict[str, str], ...]:
+    entries: dict[str, str] = {}
+    origin_set = set(origin_paths)
+    allowed_set = set(allowed_scope)
+    for pattern in DEFAULT_DO_NOT_TOUCH_PATTERNS:
+        _append_do_not_touch(
+            entries,
+            path=pattern,
+            reason=(
+                "baseline, cache, and generated CodeClone state require explicit "
+                "separate changes"
+            ),
+        )
+    for pattern in forbidden_patterns:
+        _append_do_not_touch(entries, path=pattern, reason="declared forbidden path")
+    for group in _all_finding_groups(report_document):
+        if str(group.get("novelty", "")).strip() != "known":
+            continue
+        for path in _finding_paths(group):
+            if path not in origin_set:
+                _append_do_not_touch(
+                    entries,
+                    path=path,
+                    reason="known baseline debt outside declared origin",
+                )
+    for group in _suppressed_clone_buckets(report_document):
+        for path in _finding_paths(group):
+            _append_do_not_touch(
+                entries,
+                path=path,
+                reason="golden fixture clone suppression surface",
+            )
+    metrics = _as_mapping(report_document.get("metrics"))
+    families = _as_mapping(metrics.get("families"))
+    for family_name, reason in (
+        ("security_surfaces", "report-only security boundary inventory"),
+        ("overloaded_modules", "report-only design signal"),
+    ):
+        family = _as_mapping(families.get(family_name))
+        for raw_item in _as_sequence(family.get("items")):
+            path = _item_path(_as_mapping(raw_item))
+            if path and path not in origin_set:
+                _append_do_not_touch(entries, path=path, reason=reason)
+    if allowed_set:
+        for path in blast_zone_paths:
+            if path not in allowed_set:
+                _append_do_not_touch(
+                    entries,
+                    path=path,
+                    reason="affected by blast radius but outside declared edit scope",
+                )
+    return tuple(
+        {"path": path, "reason": entries[path]}
+        for path in sorted(entries)
+        if path and (_path_matches_glob(path, forbidden_patterns) or path in entries)
+    )
+
+
+def _guardrails(
+    *,
+    radius_level: str,
+    do_not_touch: Sequence[Mapping[str, str]],
+) -> tuple[str, ...]:
+    guardrails = [
+        "review direct dependents before editing public behavior",
+        "treat clone cohort members as comparison context, not automatic edit targets",
+    ]
+    if radius_level == "high":
+        guardrails.append("high blast radius requires explicit human scope approval")
+    if do_not_touch:
+        guardrails.append("do-not-touch paths require separate explicit approval")
+    return tuple(guardrails)
+
+
+def compute_blast_radius(
+    *,
+    run_id: str,
+    report_document: Mapping[str, object],
+    files: Sequence[str],
+    depth: BlastRadiusDepth = "direct",
+    forbidden_patterns: Sequence[str] = DEFAULT_DO_NOT_TOUCH_PATTERNS,
+    allowed_scope: Sequence[str] = (),
+) -> BlastRadiusResult:
+    origin_paths = _dedupe_sorted(
+        tuple(_normalize_relative_path(path) for path in files)
+    )
+    module_paths = _module_path_index(report_document)
+    origin_by_module = {
+        module: path
+        for path in origin_paths
+        for module in (_path_to_module(path),)
+        if module
+    }
+    origin_modules = tuple(sorted(origin_by_module))
+    reverse_graph = _build_reverse_import_graph(_dependency_edges(report_document))
+    direct_modules = _compute_direct_dependents(
+        origin_modules=origin_modules,
+        reverse_graph=reverse_graph,
+    )
+    transitive_modules = (
+        _compute_transitive_dependents(
+            origin_modules=origin_modules,
+            reverse_graph=reverse_graph,
+        )
+        if depth == "transitive"
+        else ()
+    )
+    direct_dependents = _dedupe_sorted(
+        tuple(_module_to_output(module, module_paths) for module in direct_modules)
+    )
+    transitive_dependents = _dedupe_sorted(
+        tuple(
+            _module_to_output(module, module_paths)
+            for module in transitive_modules
+            if module not in set(direct_modules)
+        )
+    )
+    clone_cohort_members = _compute_clone_cohort_members(
+        report_document=report_document,
+        origin_paths=origin_paths,
+    )
+    dependency_cycle_members = _compute_cycle_membership(
+        origin_modules=origin_modules,
+        origin_by_module=origin_by_module,
+        report_document=report_document,
+    )
+    radius_level = _compute_radius_level(
+        direct_dependents=direct_dependents,
+        clone_cohort_members=clone_cohort_members,
+    )
+    zone = _blast_zone(
+        origin_paths=origin_paths,
+        direct_dependents=direct_dependents,
+        transitive_dependents=transitive_dependents,
+        clone_cohort_members=clone_cohort_members,
+    )
+    risk = _compute_risk_signals(
+        report_document=report_document,
+        blast_zone_paths=zone,
+    )
+    do_not_touch = _compute_do_not_touch(
+        report_document=report_document,
+        origin_paths=origin_paths,
+        blast_zone_paths=zone,
+        forbidden_patterns=forbidden_patterns,
+        allowed_scope=allowed_scope,
+    )
+    return BlastRadiusResult(
+        run_id=run_id,
+        origin=origin_paths,
+        depth=depth,
+        radius_level=radius_level,
+        direct_dependents=direct_dependents,
+        transitive_dependents=transitive_dependents,
+        clone_cohort_members=clone_cohort_members,
+        in_dependency_cycle=dependency_cycle_members,
+        structural_risk=risk,
+        do_not_touch=do_not_touch,
+        guardrails=_guardrails(radius_level=radius_level, do_not_touch=do_not_touch),
+    )

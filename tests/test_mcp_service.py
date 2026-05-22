@@ -18,6 +18,7 @@ from typing import Any, cast
 
 import pytest
 
+import codeclone.surfaces.mcp._blast_radius as mcp_blast_radius_mod
 import codeclone.surfaces.mcp._session_baseline as mcp_baseline_mod
 import codeclone.surfaces.mcp._session_finding_mixin as mcp_finding_mod
 import codeclone.surfaces.mcp._session_helpers as mcp_helpers_mod
@@ -169,6 +170,147 @@ def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
         new_func=frozenset(),
         new_block=frozenset(),
         metrics_diff=None,
+    )
+
+
+def _blast_radius_report_document(digest: str = "digest-a") -> dict[str, object]:
+    return {
+        "integrity": {
+            "digest": {
+                "value": digest,
+                "algorithm": "sha256",
+                "verified": True,
+            }
+        },
+        "inventory": {
+            "file_registry": {
+                "items": [
+                    "pkg/a.py",
+                    "pkg/b.py",
+                    "pkg/c.py",
+                    "pkg/clone_peer.py",
+                    "tests/test_a.py",
+                ]
+            }
+        },
+        "metrics": {
+            "families": {
+                "dependencies": {
+                    "items": [
+                        {
+                            "source": "pkg.b",
+                            "target": "pkg.a",
+                            "import_type": "import",
+                            "line": 1,
+                        },
+                        {
+                            "source": "pkg.c",
+                            "target": "pkg.b",
+                            "import_type": "from_import",
+                            "line": 2,
+                        },
+                    ],
+                    "cycles": [["pkg.a", "pkg.b"]],
+                    "longest_chains": [],
+                },
+                "complexity": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/b.py",
+                            "risk": "high",
+                            "cyclomatic_complexity": 25,
+                        }
+                    ]
+                },
+                "coupling": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/c.py",
+                            "risk": "high",
+                            "cbo": 12,
+                        }
+                    ]
+                },
+                "coverage_join": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/a.py",
+                            "coverage_hotspot": True,
+                            "scope_gap_hotspot": False,
+                        }
+                    ]
+                },
+                "overloaded_modules": {
+                    "items": [
+                        {
+                            "module": "pkg.b",
+                            "relative_path": "pkg/b.py",
+                            "candidate_status": "candidate",
+                        }
+                    ]
+                },
+                "security_surfaces": {
+                    "items": [
+                        {
+                            "relative_path": "pkg/c.py",
+                            "category": "network_boundary",
+                        }
+                    ]
+                },
+            }
+        },
+        "findings": {
+            "groups": {
+                "clones": {
+                    "functions": [
+                        {
+                            "id": "clone:function:g1",
+                            "family": "clone",
+                            "category": "function",
+                            "novelty": "new",
+                            "items": [
+                                {"relative_path": "pkg/a.py"},
+                                {"relative_path": "pkg/clone_peer.py"},
+                            ],
+                        },
+                        {
+                            "id": "clone:function:g2",
+                            "family": "clone",
+                            "category": "function",
+                            "novelty": "known",
+                            "items": [{"relative_path": "pkg/c.py"}],
+                        },
+                    ],
+                    "blocks": [],
+                    "segments": [],
+                    "suppressed": {
+                        "function": [
+                            {
+                                "id": "clone:function:fixture",
+                                "items": [{"relative_path": "tests/test_a.py"}],
+                            }
+                        ],
+                        "block": [],
+                        "segment": [],
+                    },
+                },
+                "design": {"groups": []},
+                "dead_code": {"groups": []},
+                "structural": {"groups": []},
+            }
+        },
+    }
+
+
+def _blast_radius_run_record(
+    root: Path,
+    run_id: str = "abcdef1234567890",
+    *,
+    digest: str = "digest-a",
+) -> MCPRunRecord:
+    return replace(
+        _dummy_run_record(root, run_id),
+        report_document=_blast_radius_report_document(digest),
     )
 
 
@@ -1935,6 +2077,159 @@ def test_mcp_service_low_level_runtime_helpers_and_run_store(
         mcp_shared_mod.CodeCloneMCPRunStore(history_limit=11)
 
 
+def test_mcp_blast_radius_projection_is_deterministic() -> None:
+    report_document = _blast_radius_report_document()
+
+    direct = mcp_blast_radius_mod.compute_blast_radius(
+        run_id="abcdef12",
+        report_document=report_document,
+        files=("pkg/a.py",),
+        depth="direct",
+    )
+    transitive = mcp_blast_radius_mod.compute_blast_radius(
+        run_id="abcdef12",
+        report_document=report_document,
+        files=("pkg/a.py",),
+        depth="transitive",
+    )
+
+    assert direct.direct_dependents == ("pkg/b.py",)
+    assert direct.transitive_dependents == ()
+    assert direct.clone_cohort_members == ("pkg/clone_peer.py",)
+    assert direct.in_dependency_cycle == ("pkg/a.py",)
+    assert direct.radius_level == "medium"
+    assert direct.structural_risk["high_complexity_in_blast_zone"] == ["pkg/b.py"]
+    assert direct.structural_risk["low_coverage_in_blast_zone"] == ["pkg/a.py"]
+    assert transitive.direct_dependents == ("pkg/b.py",)
+    assert transitive.transitive_dependents == ("pkg/c.py",)
+    assert direct.to_payload(include=("do_not_touch",))["direct_dependents"] == []
+
+
+def test_mcp_service_get_blast_radius_uses_cache_and_include_filter(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    record = _blast_radius_run_record(tmp_path)
+    service._runs.register(record)
+
+    first = service.get_blast_radius(files=("pkg/a.py",), depth="transitive")
+    second = service.get_blast_radius(
+        files=("pkg/a.py",),
+        depth="transitive",
+        include=("do_not_touch",),
+    )
+
+    assert first["run_id"] == "abcdef12"
+    assert first["origin"] == ["pkg/a.py"]
+    assert first["direct_dependents"] == ["pkg/b.py"]
+    assert first["transitive_dependents"] == ["pkg/c.py"]
+    assert first["clone_cohort_members"] == ["pkg/clone_peer.py"]
+    assert cast(dict[str, object], first["structural_risk"])[
+        "overloaded_modules_in_blast_zone"
+    ] == ["pkg/b.py"]
+    assert second["direct_dependents"] == []
+    assert cast("list[dict[str, object]]", second["do_not_touch"])
+    assert len(service._blast_radius_cache) == 1
+    with pytest.raises(MCPServiceContractError, match="requires at least one file"):
+        service.get_blast_radius(files=())
+    with pytest.raises(MCPServiceContractError, match="Invalid value for depth"):
+        service.get_blast_radius(files=("pkg/a.py",), depth="full")
+
+
+def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    record = _blast_radius_run_record(tmp_path)
+    service._runs.register(record)
+
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id="abcdef12",
+        scope={
+            "allowed_files": ["pkg/a.py"],
+            "allowed_related": ["tests/test_a.py"],
+            "forbidden": ["pkg/c.py"],
+        },
+        intent="adjust pkg.a behavior",
+        expected_effects=["no new clone group", "no baseline update"],
+    )
+    intent_id = str(declared["intent_id"])
+
+    assert declared["status"] == "active"
+    assert cast(dict[str, object], declared["scope"])["forbidden"] == [
+        ".cache/codeclone/**",
+        "codeclone.baseline.json",
+        "pkg/c.py",
+    ]
+    assert (
+        cast(dict[str, object], declared["blast_radius_summary"])[
+            "direct_dependents_count"
+        ]
+        == 1
+    )
+    assert cast("list[dict[str, object]]", declared["do_not_touch"])
+
+    fetched = service.manage_change_intent(action="get", intent_id=intent_id)
+    assert fetched["intent_id"] == intent_id
+    expanded = service.manage_change_intent(
+        action="check",
+        intent_id=intent_id,
+        changed_files=["pkg/a.py", "tests/test_a.py"],
+    )
+    assert expanded["status"] == "expanded"
+    assert expanded["required_action"] is None
+
+    violated = service.manage_change_intent(
+        action="check",
+        intent_id=intent_id,
+        changed_files=["pkg/a.py", "pkg/c.py", "pkg/unplanned.py"],
+    )
+    assert violated["status"] == "violated"
+    assert violated["required_action"] == "human_approval"
+    assert violated["forbidden_touched"] == ["pkg/c.py"]
+    assert violated["unexpected_files"] == ["pkg/unplanned.py"]
+
+    cleared = service.manage_change_intent(action="clear", intent_id=intent_id)
+    assert cleared == {"cleared": 1, "cleared_intent_ids": [intent_id]}
+    with pytest.raises(MCPServiceContractError, match="No active change intent"):
+        service.manage_change_intent(action="get", run_id="abcdef12")
+
+
+def test_mcp_service_manage_change_intent_validation_expiry_and_prune(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=1)
+    record = _blast_radius_run_record(tmp_path)
+    service._runs.register(record)
+
+    with pytest.raises(MCPServiceContractError, match="allowed_files"):
+        service.manage_change_intent(
+            action="declare",
+            scope={"allowed_files": []},
+            intent="missing scope",
+        )
+    with pytest.raises(MCPServiceContractError, match="Invalid value for action"):
+        service.manage_change_intent(action="unknown")
+
+    declared = service.manage_change_intent(
+        action="declare",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="change pkg.a",
+    )
+    intent_id = str(declared["intent_id"])
+    with pytest.raises(MCPServiceContractError, match="requires diff_ref"):
+        service.manage_change_intent(action="check", intent_id=intent_id)
+
+    service._runs.register(_blast_radius_run_record(tmp_path, digest="digest-b"))
+    expired = service.manage_change_intent(action="get", intent_id=intent_id)
+    assert expired["status"] == "expired"
+
+    service._runs.register(
+        _blast_radius_run_record(tmp_path, run_id="fedcba9876543210")
+    )
+    service._prune_session_state()
+    assert service._active_intents == {}
+
+
 def test_mcp_service_branch_helpers_on_real_runs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2980,12 +3275,32 @@ def test_mcp_service_clear_session_runs_clears_in_memory_state(tmp_path: Path) -
         note="triaged",
     )
     service.evaluate_gates(MCPGateRequest(run_id=run_id, fail_threshold=0))
+    service.get_blast_radius(files=("pkg/dup.py",), run_id=run_id)
+    service.manage_change_intent(
+        action="declare",
+        run_id=run_id,
+        scope={"allowed_files": ["pkg/dup.py"]},
+        intent="touch duplicate fixture",
+    )
 
     cleared = service.clear_session_runs()
 
-    assert cleared["cleared_runs"] == 1
-    assert cleared["cleared_review_entries"] == 1
-    assert cleared["cleared_gate_results"] == 1
+    assert {
+        key: cleared[key]
+        for key in (
+            "cleared_runs",
+            "cleared_review_entries",
+            "cleared_gate_results",
+            "cleared_blast_radius_entries",
+            "cleared_intents",
+        )
+    } == {
+        "cleared_runs": 1,
+        "cleared_review_entries": 1,
+        "cleared_gate_results": 1,
+        "cleared_blast_radius_entries": 1,
+        "cleared_intents": 1,
+    }
     with pytest.raises(MCPRunNotFoundError):
         service.get_run_summary()
 

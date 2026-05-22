@@ -10,10 +10,13 @@ from ...cache.store import resolve_cache_status
 from ...report.meta import build_report_meta as _build_report_meta
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
 from . import _session_helpers as _helpers
+from ._blast_radius import BlastRadiusResult
+from ._intent import IntentRecord
 from ._session_baseline import (
     resolve_clone_baseline_state,
     resolve_metrics_baseline_state,
 )
+from ._session_intent_mixin import _MCPSessionIntentMixin
 from ._session_shared import (
     _REPORT_DUMMY_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -54,7 +57,6 @@ from ._session_shared import (
     process,
     report,
 )
-from ._session_state_mixin import _MCPSessionStateMixin
 
 __all__ = [
     "DEFAULT_MCP_HISTORY_LIMIT",
@@ -75,13 +77,19 @@ __all__ = [
 ]
 
 
-class MCPSession(_MCPSessionStateMixin):
+class MCPSession(_MCPSessionIntentMixin):
     def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
         self._runs = CodeCloneMCPRunStore(history_limit=history_limit)
         self._state_lock = RLock()
         self._review_state: dict[str, OrderedDict[str, str | None]] = {}
         self._last_gate_results: dict[str, dict[str, object]] = {}
         self._spread_max_cache: dict[str, int] = {}
+        self._blast_radius_cache: dict[
+            tuple[str, tuple[str, ...], str],
+            BlastRadiusResult,
+        ] = {}
+        self._active_intents: dict[str, IntentRecord] = {}
+        self._intent_sequence = 0
 
     def analyze_repository(self, request: MCPAnalysisRequest) -> dict[str, object]:
         self._validate_analysis_request(request)

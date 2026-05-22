@@ -52,6 +52,18 @@ class _QueryServiceMixin:
     def get_help(self: _RunDictService, **params: object) -> dict[str, object]:
         return self._run_dict("get_help", **params)
 
+    def get_blast_radius(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("get_blast_radius", **params)
+
+    def manage_change_intent(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("manage_change_intent", **params)
+
     def generate_pr_summary(
         self: _RunDictService,
         **params: object,
@@ -204,6 +216,22 @@ def _apply_public_method_signatures() -> None:
             _kwonly("run_id", "str | None", None),
             _kwonly("max_hotspots", "int", 3),
             _kwonly("max_suggestions", "int", 3),
+        ),
+        "get_blast_radius": (
+            _kwonly("files", "Sequence[str]"),
+            _kwonly("run_id", "str | None", None),
+            _kwonly("depth", "str", "direct"),
+            _kwonly("include", "Sequence[str] | None", None),
+        ),
+        "manage_change_intent": (
+            _kwonly("action", "str"),
+            _kwonly("run_id", "str | None", None),
+            _kwonly("intent_id", "str | None", None),
+            _kwonly("scope", "dict[str, object] | None", None),
+            _kwonly("intent", "str | None", None),
+            _kwonly("expected_effects", "Sequence[str] | None", None),
+            _kwonly("diff_ref", "str | None", None),
+            _kwonly("changed_files", "Sequence[str] | None", None),
         ),
         "get_remediation": (
             _kwonly("finding_id", "str"),

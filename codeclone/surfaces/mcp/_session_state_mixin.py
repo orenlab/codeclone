@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from ...baseline.metrics_baseline import probe_metrics_baseline_section
 from . import _session_helpers as _helpers
+from ._blast_radius import BlastRadiusResult
+from ._intent import IntentRecord
 from ._session_baseline import (
     CloneBaselineState,
     MetricsBaselineState,
@@ -782,6 +784,9 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
     _review_state: dict[str, OrderedDict[str, str | None]]
     _last_gate_results: dict[str, dict[str, object]]
     _spread_max_cache: dict[str, int]
+    _blast_radius_cache: dict[tuple[str, tuple[str, ...], str], BlastRadiusResult]
+    _active_intents: dict[str, IntentRecord]
+    _intent_sequence: int
 
     def evaluate_gates(self, request: MCPGateRequest) -> dict[str, object]:
         record = self._runs.get(request.run_id)
@@ -1116,9 +1121,14 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             )
             cleared_gate_results = len(self._last_gate_results)
             cleared_spread_cache_entries = len(self._spread_max_cache)
+            cleared_blast_radius_entries = len(self._blast_radius_cache)
+            cleared_intents = len(self._active_intents)
             self._review_state.clear()
             self._last_gate_results.clear()
             self._spread_max_cache.clear()
+            self._blast_radius_cache.clear()
+            self._active_intents.clear()
+            self._intent_sequence = 0
         return {
             "cleared_runs": len(removed_run_ids),
             "cleared_run_ids": [
@@ -1127,6 +1137,8 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             "cleared_review_entries": cleared_review_entries,
             "cleared_gate_results": cleared_gate_results,
             "cleared_spread_cache_entries": cleared_spread_cache_entries,
+            "cleared_blast_radius_entries": cleared_blast_radius_entries,
+            "cleared_intents": cleared_intents,
         }
 
     def read_resource(self, uri: str) -> str:
@@ -1209,3 +1221,17 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 ]
                 for run_id in stale_run_ids:
                     state_map.pop(run_id, None)
+            stale_blast_radius_keys = [
+                cache_key
+                for cache_key in self._blast_radius_cache
+                if cache_key[0] not in active_run_ids
+            ]
+            for cache_key in stale_blast_radius_keys:
+                self._blast_radius_cache.pop(cache_key, None)
+            stale_intent_ids = [
+                intent_id
+                for intent_id, intent in self._active_intents.items()
+                if intent.run_id not in active_run_ids
+            ]
+            for intent_id in stale_intent_ids:
+                self._active_intents.pop(intent_id, None)

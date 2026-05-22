@@ -350,6 +350,30 @@ def build_mcp_server(
         )
 
     @tool(
+        title="Get Blast Radius",
+        description=(
+            "Return the deterministic structural risk boundary for changing "
+            "the given files. Shows direct dependents, clone cohort members, "
+            "coverage gaps, and do-not-touch paths. Derived from the canonical "
+            "report; no new analysis is performed."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_blast_radius(
+        files: list[str],
+        run_id: str | None = None,
+        depth: str = "direct",
+        include: list[str] | None = None,
+    ) -> dict[str, object]:
+        return service.get_blast_radius(
+            files=files,
+            run_id=run_id,
+            depth=depth,
+            include=include,
+        )
+
+    @tool(
         title="Help",
         description=(
             "Explain a supported CodeClone workflow or contract topic and "
@@ -782,6 +806,39 @@ def build_mcp_server(
     )
     def list_reviewed_findings(run_id: str | None = None) -> dict[str, object]:
         return service.list_reviewed_findings(run_id=run_id)
+
+    @tool(
+        title="Manage Change Intent",
+        description=(
+            "Manage the agent change intent lifecycle for the current MCP "
+            "session. Actions: 'declare' to declare intended scope before "
+            "editing, 'get' to retrieve active intent, 'check' to verify "
+            "actual diff against declared scope, and 'clear' to remove intent. "
+            "Intent is session-local and in-memory."
+        ),
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def manage_change_intent(
+        action: str,
+        run_id: str | None = None,
+        intent_id: str | None = None,
+        scope: dict[str, object] | None = None,
+        intent: str | None = None,
+        expected_effects: list[str] | None = None,
+        diff_ref: str | None = None,
+        changed_files: list[str] | None = None,
+    ) -> dict[str, object]:
+        return service.manage_change_intent(
+            action=action,
+            run_id=run_id,
+            intent_id=intent_id,
+            scope=scope,
+            intent=intent,
+            expected_effects=expected_effects,
+            diff_ref=diff_ref,
+            changed_files=changed_files,
+        )
 
     @tool(
         title="Clear Session Runs",

@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.1.0a1] - 2026-05-22
+
+`2.1.0a1` opens the v2.1 alpha line for structural change control.
+
+### Added
+
+- Add MCP `get_blast_radius` as a deterministic pre-change projection over the
+  canonical report: direct dependents, clone cohorts, dependency-cycle
+  membership, coverage/risk signals, and do-not-touch paths.
+- Add MCP `manage_change_intent` for session-local change intent lifecycle:
+  declare intended scope, inspect active intent, check actual changed files
+  against scope, and clear intent state.
+
+### Internal
+
+- Keep intent and blast-radius cache state in MCP process memory only; they do
+  not mutate source files, baselines, cache artifacts, reports, or canonical
+  report integrity.
+- Mark the package as `2.1.0a1` with the PyPI alpha classifier while v2.1
+  controller features are under development.
+
 ## [2.0.2] - 2026-05-19
 
 `2.0.2` is a focused patch release for VS Code extension packaging metadata,

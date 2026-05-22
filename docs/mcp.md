@@ -103,7 +103,7 @@ Run retention is bounded: default `4`, max `10` (`--history-limit`).
 If a tool request omits `processes`, MCP defers process-count policy to the
 core CodeClone runtime.
 
-Current CodeClone `2.0` MCP surface: `21` tools, `7` fixed resources, and `3`
+Current CodeClone `2.1` MCP surface: `23` tools, `7` fixed resources, and `3`
 run-scoped URI templates.
 
 ## Tool surface
@@ -114,6 +114,7 @@ run-scoped URI templates.
 | `analyze_changed_paths`  | Diff-aware analysis via `changed_paths` or `git_diff_ref`; compact changed-files snapshot                |
 | `get_run_summary`        | Cheapest run snapshot: health, findings, baseline, inventory, active thresholds                          |
 | `get_production_triage`  | Production-first view: health, hotspots, suggestions, active thresholds; best first pass for noisy repos |
+| `get_blast_radius`       | Pre-change risk boundary: direct dependents, clone cohorts, coverage gaps, and do-not-touch paths        |
 | `help`                   | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope       |
 | `compare_runs`           | Run-to-run delta: regressions, improvements, health change                                               |
 | `list_findings`          | Filtered, paginated findings; use after hotspots or `check_*`                                            |
@@ -130,6 +131,7 @@ run-scoped URI templates.
 | `generate_pr_summary`    | PR-friendly markdown or JSON summary                                                                     |
 | `mark_finding_reviewed`  | Session-local review marker (in-memory)                                                                  |
 | `list_reviewed_findings` | List reviewed findings for a run                                                                         |
+| `manage_change_intent`   | Declare, inspect, check, or clear session-local edit scope intent                                        |
 | `clear_session_runs`     | Reset in-memory runs and session state                                                                   |
 
 > `check_*` tools query stored runs only. Call `analyze_repository` or
@@ -206,8 +208,9 @@ trigger analysis.
 `codeclone://latest/*` always resolves to the most recent run registered in the
 current MCP server session. A later `analyze_repository` or
 `analyze_changed_paths` call moves that pointer.
-`mark_finding_reviewed` and `clear_session_runs` mutate only in-memory session
-state. They never touch source files, baselines, cache, or report artifacts.
+`mark_finding_reviewed`, `manage_change_intent`, and `clear_session_runs`
+mutate only in-memory session state. They never touch source files, baselines,
+cache, or report artifacts.
 
 ## Recommended workflows
 
@@ -338,7 +341,8 @@ If `codeclone-mcp` is not on `PATH`, use an absolute path to the launcher.
 ## Security
 
 - Read-only by design: no source mutation, no baseline/cache writes.
-- Run history and review markers are in-memory only — lost on process stop.
+- Run history, review markers, and change intents are in-memory only — lost on
+  process stop.
 - Repository access is limited to what the server process can read locally.
 - `streamable-http` binds to loopback by default; `--allow-remote` is explicit opt-in.
 

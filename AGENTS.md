@@ -66,8 +66,8 @@ Key artifacts:
   `codeclone-mcp`
 - `plugins/codeclone/` + `.agents/plugins/marketplace.json` — stable Codex plugin as a native local discovery layer
   over `codeclone-mcp`, with a bundled CodeClone review skill
-- MCP runs are in-memory only; review markers are session-local and must never
-  leak into baseline/cache/report artifacts
+- MCP runs are in-memory only; review markers and change intents are
+  session-local and must never leak into baseline/cache/report artifacts
 - `docs/`, `mkdocs.yml`, `.github/workflows/docs.yml` — published documentation site and docs build pipeline
 
 ---
@@ -232,7 +232,8 @@ Reports come in:
 
 MCP is a separate optional interface, not a report format. It must remain a
 read-only agent layer over the same canonical report/baseline/cache contracts.
-Session review markers are allowed only as ephemeral MCP process state.
+Session review markers and change intents are allowed only as ephemeral MCP
+process state.
 
 ### Report invariants
 

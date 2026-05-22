@@ -124,6 +124,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "help",
         "get_run_summary",
         "get_production_triage",
+        "get_blast_radius",
         "evaluate_gates",
         "get_report_section",
         "list_findings",
@@ -139,6 +140,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "generate_pr_summary",
         "mark_finding_reviewed",
         "list_reviewed_findings",
+        "manage_change_intent",
     }
     for name, tool in tools.items():
         assert tool.annotations is not None
@@ -154,6 +156,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "check_dead_code",
                 "get_run_summary",
                 "get_production_triage",
+                "get_blast_radius",
                 "evaluate_gates",
                 "help",
                 "get_report_section",
@@ -167,7 +170,12 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
             }
         )
         assert tool.annotations.destructiveHint is (
-            name in {"mark_finding_reviewed", "clear_session_runs"}
+            name
+            in {
+                "mark_finding_reviewed",
+                "manage_change_intent",
+                "clear_session_runs",
+            }
         )
         assert tool.annotations.idempotentHint is True
     assert "cache_policy='off'" in str(tools["analyze_repository"].description)
@@ -189,6 +197,8 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "default first-pass review" in str(
         tools["get_production_triage"].description
     )
+    assert "structural risk boundary" in str(tools["get_blast_radius"].description)
+    assert "Intent is session-local" in str(tools["manage_change_intent"].description)
     assert "bounded guidance, not a full manual" in str(tools["help"].description)
     assert "workflow, analysis_profile, suppressions, baseline" in str(
         tools["help"].description
@@ -325,6 +335,46 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     )
     assert production_triage["run_id"] == run_id
     assert _mapping_child(production_triage, "cache")["freshness"]
+
+    blast_radius = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_blast_radius",
+                {"run_id": run_id, "files": ["pkg/dup.py"]},
+            )
+        )
+    )
+    assert blast_radius["origin"] == ["pkg/dup.py"]
+    assert blast_radius["radius_level"] in {"low", "medium", "high"}
+
+    change_intent = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "manage_change_intent",
+                {
+                    "action": "declare",
+                    "run_id": run_id,
+                    "scope": {"allowed_files": ["pkg/dup.py"]},
+                    "intent": "review duplicate fixture",
+                },
+            )
+        )
+    )
+    intent_id = str(change_intent["intent_id"])
+    intent_check = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "manage_change_intent",
+                {
+                    "action": "check",
+                    "intent_id": intent_id,
+                    "changed_files": ["pkg/dup.py"],
+                },
+            )
+        )
+    )
+    assert change_intent["status"] == "active"
+    assert intent_check["status"] == "clean"
 
     latest_report_resource = list(
         asyncio.run(server.read_resource("codeclone://latest/report.json"))
@@ -576,6 +626,7 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         asyncio.run(server.call_tool("clear_session_runs", {}))
     )
     assert cast(int, cleared["cleared_runs"]) >= 1
+    assert cast(int, cleared["cleared_intents"]) >= 1
     assert run_id in cast("list[str]", cleared["cleared_run_ids"])
     from mcp.server.fastmcp.exceptions import ResourceError
 
