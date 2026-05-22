@@ -6,18 +6,19 @@ over stored MCP runs and the canonical report contract.
 
 ## Status
 
-The v2.1 alpha starts with the pre-change phase:
+The v2.1 alpha currently includes intent, blast-radius, and patch-contract
+checks:
 
 | Phase | Status | MCP surface |
 |-------|--------|-------------|
 | Intent declaration | Live in `2.1.0a1` | `manage_change_intent` |
 | Blast radius | Live in `2.1.0a1` | `get_blast_radius` |
-| Patch contract | Planned | `check_patch_contract` |
+| Patch contract | Live in `2.1.0a1` | `check_patch_contract` |
 | Review receipt | Planned | `create_review_receipt` |
 | Claim guard | Planned | `validate_review_claims` |
 
-Planned tools are roadmap items until implemented and tested. Public clients
-must not assume they exist in the current MCP tool list.
+Receipt and claim guard are roadmap items until implemented and tested. Public
+clients must not assume they exist in the current MCP tool list.
 
 ## Contract
 
@@ -34,11 +35,21 @@ must not assume they exist in the current MCP tool list.
 2. Declare scope with `manage_change_intent(action="declare")`.
 3. Inspect the returned `blast_radius_summary`.
 4. Optionally call `get_blast_radius` for full dependent/context detail.
-5. After editing, call `manage_change_intent(action="check")` with
+5. Call `check_patch_contract(mode="budget")` to inspect the active regression
+   budget and metric headroom before editing.
+6. After editing, call `manage_change_intent(action="check")` with
    `changed_files` or `diff_ref`.
+7. Run analysis again, then call `check_patch_contract(mode="verify")` with
+   explicit `before_run_id` and `after_run_id`.
 
 `manage_change_intent` can return `clean`, `expanded`, `violated`, or
 `expired`. Expiry means the report digest changed since declaration.
+
+`check_patch_contract` never runs analysis itself. Budget mode reads one stored
+run and optional intent. Verify mode compares explicit before/after stored runs,
+previews gates, validates scope when intent is available, and reports baseline
+abuse signals. Missing before or after runs return `status="unverified"` with
+`reason="no_before_run"` or `reason="no_after_run"`.
 
 ## Blast Radius Payload
 

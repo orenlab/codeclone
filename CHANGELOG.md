@@ -13,6 +13,9 @@
 - Add MCP `manage_change_intent` for session-local change intent lifecycle:
   declare intended scope, inspect active intent, check actual changed files
   against scope, and clear intent state.
+- Add MCP `check_patch_contract` with read-only `budget` and `verify` modes:
+  pre-edit gate budget/headroom, post-edit before/after comparison, gate
+  preview, intent-scope validation, and baseline-abuse signals.
 
 ### Internal
 

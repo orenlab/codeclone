@@ -26,6 +26,20 @@
 
 ---
 
+CodeClone is a **structural change controller** for Python — deterministic static analysis that
+combines clone detection, code-quality metrics, and baseline-aware CI gating with first-class
+governance for AI coding agents.
+
+In the current v2.1 alpha, CodeClone records the declared intent before the first edit, maps the
+structural blast radius, and verifies explicit before/after runs against the patch contract.
+Receipt and claim-guard tools are planned next.
+
+**One canonical analysis, many surfaces.** CLI, HTML reports, IDE, and MCP all read the same
+deterministic facts — for both human reviewers and AI agents.
+
+Docs: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/) ·
+Live sample report: [orenlab.github.io/codeclone/examples/report/](https://orenlab.github.io/codeclone/examples/report/)
+
 > [!NOTE]
 > This README tracks the in-development **v2.1** line.
 > For the latest stable release, see the
@@ -33,36 +47,24 @@
 > and the
 > [`v2.0.2` docs](https://github.com/orenlab/codeclone/tree/v2.0.2/docs).
 
-CodeClone is a **structural change controller** for Python. It starts before the
-first edit — when an agent declares what it intends to change — maps the
-structural blast radius, verifies that the patch stayed inside its declared
-boundary, and leaves an auditable receipt.
-
-**One canonical analysis.** The same **deterministic facts** across CLI, HTML reports,
-IDE, and MCP — for both **human reviewers** and **AI agents**.
-
-Docs: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/) ·
-Live sample report: [orenlab.github.io/codeclone/examples/report/](https://orenlab.github.io/codeclone/examples/report/)
-
 ## Change Controller
 
-When an AI agent edits code, CodeClone governs the structural boundary:
+When an AI agent edits code, CodeClone governs the structural boundary across five stages:
 
-| Step | Tool | What it does |
-|------|------|-------------|
-| 1. Declare intent | `manage_change_intent` | Agent states what it plans to change, which files, and why |
-| 2. Map blast radius | `get_blast_radius` | Reverse imports, clone cohorts, dependency cycles, do-not-touch signals |
-| 3. Check patch contract | planned | Pre-edit regression budget with headroom; post-edit boundary verification |
-| 4. Generate receipt | planned | Auditable artifact linking intent, scope, patch status, and structural delta |
-| 5. Validate claims | planned | Cross-check the agent's review text against the canonical report |
+| Step                    | Tool                   | What it does                                                                 |
+|-------------------------|------------------------|------------------------------------------------------------------------------|
+| 1. Declare intent       | `manage_change_intent` | Agent states what it plans to change, which files, and why                   |
+| 2. Map blast radius     | `get_blast_radius`     | Reverse imports, clone cohorts, dependency cycles, do-not-touch signals      |
+| 3. Check patch contract | `check_patch_contract` | Pre-edit regression budget with headroom; post-edit boundary verification    |
+| 4. Generate receipt     | _planned_              | Auditable artifact linking intent, scope, patch status, and structural delta |
+| 5. Validate claims      | _planned_              | Cross-check the agent's review text against the canonical report             |
 
-Each step is deterministic — structural facts from the canonical report, no LLM inference.
+Every step is deterministic — structural facts from the canonical report, no LLM inference.
 
-The v2.1 alpha starts with two live MCP tools, `manage_change_intent` and
-`get_blast_radius`, composed over the existing read-only analysis surface.
-Patch contract, receipt, and claim guard tools are planned follow-ups in the
-same controller line. Controller state is session-local and in-memory — no
-files created, no repo state mutated.
+The v2.1 alpha ships steps 1–3 as live MCP tools (`manage_change_intent`, `get_blast_radius`,
+`check_patch_contract`) composed over the existing read-only analysis surface. Steps 4–5 are
+planned follow-ups in the same controller line. Controller state is session-local and
+in-memory — no files created, no repo state mutated.
 
 Change controller docs: [Structural Change Controller](https://orenlab.github.io/codeclone/book/24-structural-change-controller/)
 
@@ -72,14 +74,14 @@ Change controller docs: [Structural Change Controller](https://orenlab.github.io
 
 - **Intent declaration** — agent states what it plans to change; CodeClone tracks scope, expiry, and status
 - **Blast radius** — structural risk projection: reverse imports, clone cohorts, dependency cycles, do-not-touch signals
-- **Patch contract** — planned pre-edit regression budget and post-edit boundary verification
-- **Review receipt** — planned auditable artifact linking intent, scope, patch verification, and structural delta
-- **Claim guard** — planned citation-based validation of review text against the canonical report
+- **Patch contract** — pre-edit regression budget and post-edit boundary verification over explicit before/after runs
+- **Review receipt** _(planned)_ — auditable artifact linking intent, scope, patch verification, and structural delta
+- **Claim guard** _(planned)_ — citation-based validation of review text against the canonical report
 
 **Baseline governance**
 
 - **Regression isolation** — separates accepted **legacy** debt from **new regressions**; CI fails only on what changed
-- **CI-first** — deterministic output, stable ordering, exit code contract, pre-commit support
+- **CI-first** — deterministic output, stable ordering, exit-code contract, pre-commit support
 - **Reports** — interactive HTML, JSON, Markdown, SARIF, and text from one canonical report
 
 **Detection & analysis**
@@ -90,11 +92,11 @@ Change controller docs: [Structural Change Controller](https://orenlab.github.io
   profile, dead code, health score, and overloaded-module profiling
 - **Adoption & API** — type/docstring annotation coverage, public API surface inventory and baseline diff
 - **Coverage Join** — fuse external Cobertura XML into the current run to surface coverage hotspots and scope gaps
-- **Security Surfaces** — report-only inventory of security-relevant capability boundaries without vulnerability claims
+- **Security surfaces** — report-only inventory of security-relevant capability boundaries (no vulnerability claims)
 
 **Surfaces & integrations**
 
-- **MCP control surface** — 23-tool agent and IDE interface over the same canonical pipeline; read-only by contract
+- **MCP control surface** — 24-tool agent and IDE interface over the same canonical pipeline; read-only by contract
 - **IDE & agent clients** — VS Code extension, Claude Desktop bundle, and Codex plugin over the same MCP contract
 
 **Performance**
@@ -103,11 +105,15 @@ Change controller docs: [Structural Change Controller](https://orenlab.github.io
 
 ## How It Works
 
+CodeClone runs a single deterministic pipeline and emits one canonical JSON report. Every
+other surface — HTML, Markdown, SARIF, MCP, IDE — is a projection of that report, so structural
+facts stay consistent across consumers.
+
 <details>
 <summary>Pipeline overview</summary>
 <br>
 <img
-  alt="CodeClone pipeline"
+  alt="CodeClone pipeline diagram"
   src="docs/assets/codeclone-pipeline.svg"
   width="680"
 >
@@ -142,7 +148,7 @@ uvx codeclone@latest .
 ## Quick Start
 
 ```bash
-codeclone .                                    # analyze
+codeclone .                                    # analyze current directory
 codeclone . --html                             # HTML report
 codeclone . --html --open-html-report          # open in browser
 codeclone . --json --md --sarif --text         # all formats
@@ -199,8 +205,8 @@ CodeClone ships a composite GitHub Action for PR and CI workflows:
     pr-comment: "true"
 ```
 
-It can run baseline-aware gating, generate JSON and SARIF reports, upload SARIF to GitHub Code Scanning,
-and post or update a PR summary comment.
+It runs baseline-aware gating, generates JSON and SARIF reports, uploads SARIF to GitHub Code
+Scanning, and posts or updates a PR summary comment.
 
 Action
 docs: [.github/actions/codeclone/README.md](https://github.com/orenlab/codeclone/blob/main/.github/actions/codeclone/README.md)
@@ -246,8 +252,8 @@ repos:
 
 ## MCP Control Surface
 
-23-tool MCP server for AI agents and IDE clients, built on the same canonical pipeline as the CLI.
-Read-only by contract: never mutates source, baselines, or repo state.
+A 24-tool MCP server for AI agents and IDE clients, built on the same canonical pipeline as the CLI.
+Read-only by contract — never mutates source, baselines, or repo state.
 
 ```bash
 # local stdio clients
@@ -257,10 +263,10 @@ codeclone-mcp --transport stdio
 codeclone-mcp --transport streamable-http
 ```
 
-21 analysis and triage tools provide the canonical read-only surface. 2 phase-1
-change controller tools (`manage_change_intent`, `get_blast_radius`) compose
-over that surface to govern the structural boundary of AI-assisted changes.
-Patch contract, review receipt, and claim guard are planned v2.1 follow-ups.
+Of the 24 tools, 21 expose the canonical read-only analysis and triage surface. The remaining
+three — `manage_change_intent`, `get_blast_radius`, and `check_patch_contract` — are the change
+controller, composed over that surface to govern the structural boundary of AI-assisted edits.
+Review receipt and claim guard tools are planned v2.1 follow-ups.
 
 > [!WARNING]
 > Analysis tools require an absolute repository root. Relative roots such as `.` are rejected.
@@ -507,7 +513,6 @@ Versions released before this change remain under their original license terms.
 - **Licenses:** [MPL-2.0](https://github.com/orenlab/codeclone/blob/main/LICENSE) · [MIT docs](https://github.com/orenlab/codeclone/blob/main/LICENSE-MIT) · [Scope map](https://github.com/orenlab/codeclone/blob/main/LICENSES.md)
 
 <!-- Shields -->
-
 [pypi-shield]: https://img.shields.io/pypi/v/codeclone?style=flat-square&color=6366f1
 [status-shield]: https://img.shields.io/pypi/status/codeclone?style=flat-square&color=6366f1
 [downloads-shield]: https://img.shields.io/pypi/dm/codeclone?style=flat-square&color=6366f1
