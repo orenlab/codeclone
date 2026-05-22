@@ -32,6 +32,6 @@ test("manifest keeps the setup surface bounded and local", () => {
     ]);
     assert.equal(manifest.documentation, "https://orenlab.github.io/codeclone/claude-desktop-bundle/");
     assert.equal(manifest.tools_generated, true);
-    assert.equal(manifest.tools.length, 11);
+    assert.equal(manifest.tools.length, 23);
     assert.equal("instructions" in manifest, false);
 });

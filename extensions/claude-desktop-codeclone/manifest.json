@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "codeclone",
   "display_name": "CodeClone",
-  "version": "2.0.0",
-  "description": "Baseline-aware structural review for Claude Desktop through a local CodeClone MCP launcher.",
-  "long_description": "CodeClone for Claude Desktop wraps the local codeclone-mcp launcher as an MCP bundle. It keeps Claude on the same canonical MCP surface used by the CLI, HTML report, VS Code extension, and Codex plugin — read-only, baseline-aware, local stdio only.",
+  "version": "2.1.0",
+  "description": "Structural change controller for Python — deterministic, baseline-aware, built for CI and AI agents.",
+  "long_description": "CodeClone for Claude Desktop wraps the local codeclone-mcp launcher as an MCP bundle. It keeps Claude on the same canonical 23-tool MCP surface used by the CLI, HTML report, VS Code extension, and Codex plugin — read-only, baseline-aware, local stdio only. The v2.1 change controller starts with intent declaration and blast radius; patch contract, review receipt, and claim guard are planned follow-ups.",
   "author": {
     "name": "Den Rozhnovskiy",
     "email": "pytelemonbot@mail.ru",
@@ -25,38 +25,76 @@
     "mcp",
     "claude-desktop",
     "codeclone",
+    "change-controller",
     "structural-review",
     "baseline-aware",
+    "blast-radius",
     "code-quality"
   ],
   "tools": [
     {
       "name": "analyze_repository",
-      "description": "Run a baseline-aware CodeClone analysis for the current repository."
+      "description": "Run a deterministic CodeClone analysis and register it as the latest MCP run."
     },
     {
       "name": "analyze_changed_paths",
-      "description": "Run changed-files analysis for PR-style structural review."
-    },
-    {
-      "name": "get_production_triage",
-      "description": "Return the cheapest production-first hotspot and health snapshot."
+      "description": "Run a deterministic CodeClone analysis and return a changed-files projection."
     },
     {
       "name": "get_run_summary",
-      "description": "Cheapest run snapshot: health, findings, baseline, inventory."
+      "description": "Cheapest run-level snapshot: health, findings, baseline, inventory."
+    },
+    {
+      "name": "get_production_triage",
+      "description": "Production-first triage: health, hotspots, suggestions, source-kind counters."
+    },
+    {
+      "name": "get_blast_radius",
+      "description": "Structural risk boundary: dependents, clone cohorts, do-not-touch paths, review context."
+    },
+    {
+      "name": "manage_change_intent",
+      "description": "Change intent lifecycle: declare scope, get status, check diff, clear intent."
     },
     {
       "name": "list_hotspots",
       "description": "Priority-ranked hotspot views by kind."
     },
     {
+      "name": "list_findings",
+      "description": "List canonical finding groups with filters, pagination, and summary cards."
+    },
+    {
       "name": "get_finding",
-      "description": "Open one canonical finding by id."
+      "description": "Return a single canonical finding group by short or full id."
     },
     {
       "name": "get_remediation",
-      "description": "Return remediation guidance for one canonical finding."
+      "description": "Return actionable remediation guidance for a single finding."
+    },
+    {
+      "name": "get_report_section",
+      "description": "Return a canonical report section for the latest or specified run."
+    },
+    {
+      "name": "check_clones",
+      "description": "Return clone findings from a compatible stored run."
+    },
+    {
+      "name": "check_complexity",
+      "description": "Return complexity hotspots from a compatible stored run."
+    },
+    {
+      "name": "check_coupling",
+      "description": "Return coupling hotspots from a compatible stored run."
+    },
+    {
+      "name": "check_cohesion",
+      "description": "Return cohesion hotspots from a compatible stored run."
+    },
+    {
+      "name": "check_dead_code",
+      "description": "Return dead-code findings from a compatible stored run."
     },
     {
       "name": "compare_runs",
@@ -64,15 +102,27 @@
     },
     {
       "name": "evaluate_gates",
-      "description": "Evaluate CI gating decisions for the current run."
+      "description": "Evaluate CI gate conditions against an existing MCP run."
     },
     {
       "name": "generate_pr_summary",
-      "description": "PR-friendly markdown or JSON summary of the analysis."
+      "description": "PR-friendly markdown or JSON summary of changed files."
+    },
+    {
+      "name": "mark_finding_reviewed",
+      "description": "Mark a finding as reviewed in the current in-memory MCP session."
+    },
+    {
+      "name": "list_reviewed_findings",
+      "description": "List in-memory reviewed findings for the current or specified run."
+    },
+    {
+      "name": "clear_session_runs",
+      "description": "Clear all in-memory MCP analysis runs and ephemeral session state."
     },
     {
       "name": "help",
-      "description": "Semantic guide for workflow, analysis profile, baseline, coverage, and review state."
+      "description": "Explain a CodeClone workflow or contract topic and suggest the safest next step."
     }
   ],
   "tools_generated": true,
