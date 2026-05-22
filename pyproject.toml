@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codeclone"
-version = "2.0.2"
+version = "2.1.0a1"
 description = "A structural review layer for Python — baseline-aware, deterministic, built for CI and AI agents"
 readme = { file = "docs/README-pypi.md", content-type = "text/markdown" }
 license = "MPL-2.0 AND MIT"
@@ -40,7 +40,7 @@ keywords = [
 ]
 
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Quality Assurance",
     "Topic :: Software Development :: Testing",
@@ -73,7 +73,7 @@ dev = [
     "build>=1.4.3",
     "twine>=6.2.0",
     "mypy>=1.20.1",
-    "ruff>=0.15.13",
+    "ruff>=0.15.14",
     "pre-commit>=4.5.1",
 ]
 

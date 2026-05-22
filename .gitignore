@@ -45,3 +45,5 @@ extensions/vscode-codeclone/node_modules
 /scripts/refactor_guard.sh
 /docs/refactoring-spec.md
 /smoke_cli.sh
+/codeclone-v2.1-roadmap.md
+/specs/
