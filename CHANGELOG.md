@@ -16,6 +16,10 @@
 - Add MCP `check_patch_contract` with read-only `budget` and `verify` modes:
   pre-edit gate budget/headroom, post-edit before/after comparison, gate
   preview, intent-scope validation, and baseline-abuse signals.
+- Add MCP `create_review_receipt` for deterministic markdown/JSON audit
+  artifacts that compose report provenance, intent scope, blast radius,
+  reviewed findings, structural delta, patch-contract status, human decision
+  points, and claims-not-made without mutating repository state.
 
 ### Internal
 

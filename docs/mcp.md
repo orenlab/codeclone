@@ -103,7 +103,7 @@ Run retention is bounded: default `4`, max `10` (`--history-limit`).
 If a tool request omits `processes`, MCP defers process-count policy to the
 core CodeClone runtime.
 
-Current CodeClone `2.1` MCP surface: `24` tools, `7` fixed resources, and `3`
+Current CodeClone `2.1` MCP surface: `25` tools, `7` fixed resources, and `3`
 run-scoped URI templates.
 
 ## Tool surface
@@ -116,6 +116,7 @@ run-scoped URI templates.
 | `get_production_triage`  | Production-first view: health, hotspots, suggestions, active thresholds; best first pass for noisy repos                          |
 | `get_blast_radius`       | Pre-change risk boundary: direct dependents, clone cohorts, coverage gaps, actionable do-not-touch paths, and review-only context |
 | `check_patch_contract`   | Pre-edit regression budget or post-edit before/after verification over stored runs, gates, intent scope, and baseline-abuse signals |
+| `create_review_receipt`  | Deterministic markdown or JSON audit artifact: provenance, scope, blast radius, reviewed findings, patch status, human decisions, and claims-not-made |
 | `help`                   | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope                                |
 | `compare_runs`           | Run-to-run delta: regressions, improvements, health change                                                                        |
 | `list_findings`          | Filtered, paginated findings; use after hotspots or `check_*`                                                                     |
@@ -149,6 +150,10 @@ run-scoped URI templates.
 - `check_patch_contract` does not run analysis. `mode="budget"` reads the
   selected stored run and optional intent; `mode="verify"` compares explicit
   before/after stored runs and returns `unverified` when either side is missing.
+- `create_review_receipt` does not run analysis or mutate state. It composes
+  stored report provenance, optional intent/blast-radius state, reviewed
+  findings, structural delta, patch-contract status, and explicit
+  claims-not-made into markdown or JSON.
 - Empty design `check_*` responses may also include a compact
   `threshold_context` (`metric`, `threshold`, `measured_units`,
   `highest_below_threshold`) to show whether the run is genuinely quiet or

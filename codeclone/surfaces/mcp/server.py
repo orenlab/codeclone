@@ -407,6 +407,33 @@ def build_mcp_server(
         )
 
     @tool(
+        title="Create Review Receipt",
+        description=(
+            "Generate a deterministic, auditable review receipt from stored "
+            "MCP state: report provenance, intent scope, blast radius, "
+            "reviewed findings, patch contract status, human decision points, "
+            "and claims-not-made. Output markdown or JSON without mutating "
+            "repository state."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def create_review_receipt(
+        run_id: str | None = None,
+        intent_id: str | None = None,
+        format: str = "markdown",
+        include_blast_radius: bool = True,
+        include_patch_contract: bool = True,
+    ) -> dict[str, object]:
+        return service.create_review_receipt(
+            run_id=run_id,
+            intent_id=intent_id,
+            format=format,
+            include_blast_radius=include_blast_radius,
+            include_patch_contract=include_patch_contract,
+        )
+
+    @tool(
         title="Help",
         description=(
             "Explain a supported CodeClone workflow or contract topic and "

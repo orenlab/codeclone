@@ -70,6 +70,12 @@ class _QueryServiceMixin:
     ) -> dict[str, object]:
         return self._run_dict("check_patch_contract", **params)
 
+    def create_review_receipt(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("create_review_receipt", **params)
+
     def generate_pr_summary(
         self: _RunDictService,
         **params: object,
@@ -238,6 +244,13 @@ def _apply_public_method_signatures() -> None:
             _kwonly("strictness", "str", "ci"),
             _kwonly("diff_ref", "str | None", None),
             _kwonly("changed_files", "Sequence[str] | None", None),
+        ),
+        "create_review_receipt": (
+            _kwonly("run_id", "str | None", None),
+            _kwonly("intent_id", "str | None", None),
+            _kwonly("format", "str", "markdown"),
+            _kwonly("include_blast_radius", "bool", True),
+            _kwonly("include_patch_contract", "bool", True),
         ),
         "manage_change_intent": (
             _kwonly("action", "str"),

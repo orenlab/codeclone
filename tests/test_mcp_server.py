@@ -126,6 +126,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "get_production_triage",
         "get_blast_radius",
         "check_patch_contract",
+        "create_review_receipt",
         "evaluate_gates",
         "get_report_section",
         "list_findings",
@@ -159,6 +160,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "get_production_triage",
                 "get_blast_radius",
                 "check_patch_contract",
+                "create_review_receipt",
                 "evaluate_gates",
                 "help",
                 "get_report_section",
@@ -202,6 +204,8 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "structural risk boundary" in str(tools["get_blast_radius"].description)
     assert "review-only context" in str(tools["get_blast_radius"].description)
     assert "mode='budget'" in str(tools["check_patch_contract"].description)
+    assert "auditable review receipt" in str(tools["create_review_receipt"].description)
+    assert "claims-not-made" in str(tools["create_review_receipt"].description)
     assert "Intent is session-local" in str(tools["manage_change_intent"].description)
     assert "bounded guidance, not a full manual" in str(tools["help"].description)
     assert "workflow, analysis_profile, suppressions, baseline" in str(
@@ -608,6 +612,18 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             )
         )
     )
+    receipt = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "create_review_receipt",
+                {
+                    "run_id": run_id,
+                    "intent_id": intent_id,
+                    "format": "markdown",
+                },
+            )
+        )
+    )
     assert complexity["check"] == "complexity"
     assert cast(int, clones["total"]) >= 1
     assert coupling["check"] == "coupling"
@@ -622,6 +638,18 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert reviewed_finding["priority"] == summary_finding["priority"]
     assert reviewed_finding["locations"] == summary_finding["locations"]
     assert "## CodeClone Summary" in str(pr_summary["content"])
+    assert receipt["format"] == "markdown"
+    assert "## CodeClone Agent Review Receipt" in str(receipt["content"])
+    receipt_payload = cast("dict[str, object]", receipt["receipt"])
+    assert cast("dict[str, object]", receipt_payload["scope"])["intent_id"] == (
+        intent_id
+    )
+    assert (
+        cast("dict[str, object]", receipt_payload["reviewed_evidence"])[
+            "reviewed_count"
+        ]
+        == 1
+    )
 
     run_summary_resource = list(
         asyncio.run(server.read_resource(f"codeclone://runs/{run_id}/summary"))

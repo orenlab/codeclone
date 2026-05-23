@@ -1008,6 +1008,54 @@
     }
   },
   {
+    "name": "create_review_receipt",
+    "input_schema": {
+      "properties": {
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "intent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Intent Id"
+        },
+        "format": {
+          "default": "markdown",
+          "title": "Format",
+          "type": "string"
+        },
+        "include_blast_radius": {
+          "default": true,
+          "title": "Include Blast Radius",
+          "type": "boolean"
+        },
+        "include_patch_contract": {
+          "default": true,
+          "title": "Include Patch Contract",
+          "type": "boolean"
+        }
+      },
+      "title": "create_review_receiptArguments",
+      "type": "object"
+    }
+  },
+  {
     "name": "evaluate_gates",
     "input_schema": {
       "properties": {

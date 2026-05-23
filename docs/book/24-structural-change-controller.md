@@ -6,19 +6,19 @@ over stored MCP runs and the canonical report contract.
 
 ## Status
 
-The v2.1 alpha currently includes intent, blast-radius, and patch-contract
-checks:
+The v2.1 alpha currently includes intent, blast-radius, patch-contract checks,
+and review receipts:
 
 | Phase | Status | MCP surface |
 |-------|--------|-------------|
 | Intent declaration | Live in `2.1.0a1` | `manage_change_intent` |
 | Blast radius | Live in `2.1.0a1` | `get_blast_radius` |
 | Patch contract | Live in `2.1.0a1` | `check_patch_contract` |
-| Review receipt | Planned | `create_review_receipt` |
+| Review receipt | Live in `2.1.0a1` | `create_review_receipt` |
 | Claim guard | Planned | `validate_review_claims` |
 
-Receipt and claim guard are roadmap items until implemented and tested. Public
-clients must not assume they exist in the current MCP tool list.
+Claim guard is a roadmap item until implemented and tested. Public clients
+must not assume it exists in the current MCP tool list.
 
 ## Contract
 
@@ -41,6 +41,8 @@ clients must not assume they exist in the current MCP tool list.
    `changed_files` or `diff_ref`.
 7. Run analysis again, then call `check_patch_contract(mode="verify")` with
    explicit `before_run_id` and `after_run_id`.
+8. Call `create_review_receipt` to collect provenance, scope, blast radius,
+   reviewed findings, patch status, human decision points, and claims-not-made.
 
 `manage_change_intent` can return `clean`, `expanded`, `violated`, or
 `expired`. Expiry means the report digest changed since declaration.
@@ -63,3 +65,28 @@ abuse signals. Missing before or after runs return `status="unverified"` with
 
 Long context sections are bounded and include summaries with `total`, `shown`,
 and `truncated`.
+
+## Review Receipt Payload
+
+`create_review_receipt` returns `format="markdown"` by default and can return a
+structured JSON receipt with `format="json"`. The receipt is a composition of
+stored MCP state; it does not run analysis and does not mutate source files,
+baselines, cache, reports, or repository state.
+
+The receipt includes:
+
+- report provenance: digest, schema version, baseline trust state, run id, root
+- scope: optional change intent, declared files, changed files, unexpected files
+- blast radius summary: level, direct dependent count, clone cohort count,
+  do-not-touch count
+- reviewed evidence: session-local reviewed finding markers and notes
+- patch contract: accepted, violated, or not checked from stored gate,
+  structural delta, intent, and baseline-abuse signals
+- human decision points: bounded list of clone divergence, scope expansion, and
+  known-baseline-debt prompts
+- claims not made: explicit reminders that Security Surfaces are boundary
+  inventory, report-only signals are not gates, and known baseline debt is not a
+  new regression
+
+Receipt verdicts are `clean`, `incomplete`, or `needs_attention`. They summarize
+receipt completeness only; they are not CI gates.

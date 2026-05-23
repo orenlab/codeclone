@@ -3,7 +3,7 @@
 Structural change controller for Python — local MCP bundle wrapper for
 `codeclone-mcp`. Installs as a `.mcpb` package instead of manual JSON editing.
 
-Same canonical 24-tool MCP surface used by CLI, VS Code, Codex, and Claude Code.
+Same canonical 25-tool MCP surface used by CLI, VS Code, Codex, and Claude Code.
 Read-only, baseline-aware, local stdio only.
 As the local `codeclone-mcp` server gains new canonical surfaces, the bundle
 exposes them without adding a second client-side interpretation layer.
@@ -68,6 +68,9 @@ Show the blast radius for codeclone/core/parser.py.
 
 # 4. After editing — verify the patch
 Check my change intent against the current diff.
+
+# 5. Generate the audit artifact
+Create a review receipt for the verified change.
 ```
 
 ### Analysis and review

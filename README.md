@@ -31,8 +31,8 @@ combines clone detection, code-quality metrics, and baseline-aware CI gating wit
 governance for AI coding agents.
 
 In the current v2.1 alpha, CodeClone records the declared intent before the first edit, maps the
-structural blast radius, and verifies explicit before/after runs against the patch contract.
-Receipt and claim-guard tools are planned next.
+structural blast radius, verifies explicit before/after runs against the patch contract, and
+generates auditable review receipts. The claim-guard tool is planned next.
 
 **One canonical analysis, many surfaces.** CLI, HTML reports, IDE, and MCP all read the same
 deterministic facts — for both human reviewers and AI agents.
@@ -56,15 +56,15 @@ When an AI agent edits code, CodeClone governs the structural boundary across fi
 | 1. Declare intent       | `manage_change_intent` | Agent states what it plans to change, which files, and why                   |
 | 2. Map blast radius     | `get_blast_radius`     | Reverse imports, clone cohorts, dependency cycles, do-not-touch signals      |
 | 3. Check patch contract | `check_patch_contract` | Pre-edit regression budget with headroom; post-edit boundary verification    |
-| 4. Generate receipt     | _planned_              | Auditable artifact linking intent, scope, patch status, and structural delta |
+| 4. Generate receipt     | `create_review_receipt` | Auditable artifact linking intent, scope, patch status, and structural delta |
 | 5. Validate claims      | _planned_              | Cross-check the agent's review text against the canonical report             |
 
 Every step is deterministic — structural facts from the canonical report, no LLM inference.
 
-The v2.1 alpha ships steps 1–3 as live MCP tools (`manage_change_intent`, `get_blast_radius`,
-`check_patch_contract`) composed over the existing read-only analysis surface. Steps 4–5 are
-planned follow-ups in the same controller line. Controller state is session-local and
-in-memory — no files created, no repo state mutated.
+The v2.1 alpha ships steps 1–4 as live MCP tools (`manage_change_intent`, `get_blast_radius`,
+`check_patch_contract`, `create_review_receipt`) composed over the existing read-only analysis
+surface. Step 5 is a planned follow-up in the same controller line. Controller state is
+session-local and in-memory — no files created, no repo state mutated.
 
 Change controller docs: [Structural Change Controller](https://orenlab.github.io/codeclone/book/24-structural-change-controller/)
 
@@ -75,7 +75,7 @@ Change controller docs: [Structural Change Controller](https://orenlab.github.io
 - **Intent declaration** — agent states what it plans to change; CodeClone tracks scope, expiry, and status
 - **Blast radius** — structural risk projection: reverse imports, clone cohorts, dependency cycles, do-not-touch signals
 - **Patch contract** — pre-edit regression budget and post-edit boundary verification over explicit before/after runs
-- **Review receipt** _(planned)_ — auditable artifact linking intent, scope, patch verification, and structural delta
+- **Review receipt** — auditable artifact linking intent, scope, patch verification, and structural delta
 - **Claim guard** _(planned)_ — citation-based validation of review text against the canonical report
 
 **Baseline governance**
@@ -96,7 +96,7 @@ Change controller docs: [Structural Change Controller](https://orenlab.github.io
 
 **Surfaces & integrations**
 
-- **MCP control surface** — 24-tool agent and IDE interface over the same canonical pipeline; read-only by contract
+- **MCP control surface** — 25-tool agent and IDE interface over the same canonical pipeline; read-only by contract
 - **IDE & agent clients** — VS Code extension, Claude Desktop bundle, and Codex plugin over the same MCP contract
 
 **Performance**
@@ -252,7 +252,7 @@ repos:
 
 ## MCP Control Surface
 
-A 24-tool MCP server for AI agents and IDE clients, built on the same canonical pipeline as the CLI.
+A 25-tool MCP server for AI agents and IDE clients, built on the same canonical pipeline as the CLI.
 Read-only by contract — never mutates source, baselines, or repo state.
 
 ```bash
@@ -263,10 +263,10 @@ codeclone-mcp --transport stdio
 codeclone-mcp --transport streamable-http
 ```
 
-Of the 24 tools, 21 expose the canonical read-only analysis and triage surface. The remaining
-three — `manage_change_intent`, `get_blast_radius`, and `check_patch_contract` — are the change
-controller, composed over that surface to govern the structural boundary of AI-assisted edits.
-Review receipt and claim guard tools are planned v2.1 follow-ups.
+Of the 25 tools, 21 expose the canonical read-only analysis and triage surface. The remaining
+four — `manage_change_intent`, `get_blast_radius`, `check_patch_contract`, and
+`create_review_receipt` — are the change controller, composed over that surface to govern the
+structural boundary of AI-assisted edits. The claim guard tool is a planned v2.1 follow-up.
 
 > [!WARNING]
 > Analysis tools require an absolute repository root. Relative roots such as `.` are rejected.

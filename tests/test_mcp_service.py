@@ -21,6 +21,7 @@ import pytest
 
 import codeclone.surfaces.mcp._blast_radius as mcp_blast_radius_mod
 import codeclone.surfaces.mcp._patch_contract as mcp_patch_contract_mod
+import codeclone.surfaces.mcp._review_receipt as mcp_review_receipt_mod
 import codeclone.surfaces.mcp._session_baseline as mcp_baseline_mod
 import codeclone.surfaces.mcp._session_finding_mixin as mcp_finding_mod
 import codeclone.surfaces.mcp._session_helpers as mcp_helpers_mod
@@ -324,7 +325,13 @@ def _patch_contract_report_document(
     baseline_status: str = "ok",
 ) -> dict[str, object]:
     report_document = copy.deepcopy(_blast_radius_report_document(digest))
-    report_document["meta"] = {"baseline": {"status": baseline_status}}
+    report_document["meta"] = {
+        "baseline": {
+            "loaded": bool(baseline_status),
+            "status": baseline_status,
+        },
+        "runtime": {"report_generated_at_utc": "2026-05-23T12:00:00Z"},
+    }
     findings = cast("dict[str, object]", report_document["findings"])
     groups = cast("dict[str, object]", findings["groups"])
     clones = cast("dict[str, object]", groups["clones"])
@@ -372,6 +379,56 @@ def _patch_contract_run_record(
         block_clones_count=0,
         new_func=new_func,
     )
+
+
+def _patch_contract_before_after_records(
+    root: Path,
+    *,
+    before_health: int,
+) -> tuple[MCPRunRecord, MCPRunRecord]:
+    before = _patch_contract_run_record(
+        root,
+        run_id="before1234567890",
+        digest="before-digest",
+        include_regression=False,
+        complexity=6,
+        health=before_health,
+    )
+    after = _patch_contract_run_record(
+        root,
+        run_id="after1234567890",
+        digest="after-digest",
+        include_regression=True,
+        complexity=14,
+        health=70,
+        baseline_status="updated",
+        new_func=frozenset({"clone:function:g2"}),
+    )
+    return before, after
+
+
+def _declare_pkg_a_intent(service: CodeCloneMCPService) -> dict[str, object]:
+    return service.manage_change_intent(
+        action="declare",
+        run_id="before12",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="adjust pkg.a behavior",
+        expected_effects=["no new clone group"],
+    )
+
+
+def _seed_patch_contract_intent(
+    service: CodeCloneMCPService,
+    root: Path,
+    *,
+    before_health: int,
+) -> tuple[MCPRunRecord, dict[str, object]]:
+    before, after = _patch_contract_before_after_records(
+        root,
+        before_health=before_health,
+    )
+    service._runs.register(before)
+    return after, _declare_pkg_a_intent(service)
 
 
 def _payload_dicts(
@@ -2552,31 +2609,10 @@ def test_mcp_service_check_patch_contract_verify_composes_existing_primitives(
     tmp_path: Path,
 ) -> None:
     service = CodeCloneMCPService(history_limit=4)
-    before = _patch_contract_run_record(
+    after, declared = _seed_patch_contract_intent(
+        service,
         tmp_path,
-        run_id="before1234567890",
-        digest="before-digest",
-        include_regression=False,
-        complexity=6,
-        health=85,
-    )
-    after = _patch_contract_run_record(
-        tmp_path,
-        run_id="after1234567890",
-        digest="after-digest",
-        include_regression=True,
-        complexity=14,
-        health=70,
-        baseline_status="updated",
-        new_func=frozenset({"clone:function:g2"}),
-    )
-    service._runs.register(before)
-    declared = service.manage_change_intent(
-        action="declare",
-        run_id="before12",
-        scope={"allowed_files": ["pkg/a.py"]},
-        intent="adjust pkg.a behavior",
-        expected_effects=["no new clone group"],
+        before_health=85,
     )
     service._runs.register(after)
 
@@ -2649,14 +2685,276 @@ def test_mcp_service_check_patch_contract_verify_composes_existing_primitives(
         before_run_id="before12",
         after_run_id="missing",
     )
-    assert no_before["status"] == "unverified"
-    assert no_before["reason"] == "no_before_run"
-    assert no_after["status"] == "unverified"
-    assert no_after["reason"] == "no_after_run"
-    assert unknown_before["status"] == "unverified"
-    assert unknown_before["reason"] == "no_before_run"
-    assert unknown_after["status"] == "unverified"
-    assert unknown_after["reason"] == "no_after_run"
+    unverified_cases = [
+        (no_before, "no_before_run"),
+        (no_after, "no_after_run"),
+        (unknown_before, "no_before_run"),
+        (unknown_after, "no_after_run"),
+    ]
+    for payload, reason in unverified_cases:
+        assert payload["status"] == "unverified"
+        assert payload["reason"] == reason
+
+
+def test_mcp_review_receipt_helpers_are_bounded_and_contract_aware() -> None:
+    assert (
+        mcp_review_receipt_mod.derive_baseline_status(
+            {"meta": {"baseline": {"loaded": True, "status": "ok"}}}
+        )
+        == "trusted"
+    )
+    assert (
+        mcp_review_receipt_mod.derive_baseline_status(
+            {"meta": {"baseline": {"loaded": True, "status": "integrity_failed"}}}
+        )
+        == "untrusted"
+    )
+    assert mcp_review_receipt_mod.derive_baseline_status({"meta": {}}) == "not_loaded"
+
+    assert (
+        mcp_review_receipt_mod.derive_patch_status(
+            gate_result={"would_fail": False},
+            intent_check_status="clean",
+            regressions=0,
+            has_structural_delta=True,
+        )
+        == "accepted"
+    )
+    assert (
+        mcp_review_receipt_mod.derive_patch_status(
+            gate_result=None,
+            intent_check_status="violated",
+            regressions=0,
+            has_structural_delta=False,
+        )
+        == "violated"
+    )
+    assert (
+        mcp_review_receipt_mod.derive_patch_status(
+            gate_result={"would_fail": True},
+            intent_check_status="clean",
+            regressions=0,
+            has_structural_delta=False,
+        )
+        == "violated"
+    )
+    assert (
+        mcp_review_receipt_mod.derive_patch_status(
+            gate_result=None,
+            intent_check_status=None,
+            regressions=1,
+            has_structural_delta=True,
+        )
+        == "violated"
+    )
+    assert (
+        mcp_review_receipt_mod.derive_patch_status(
+            gate_result=None,
+            intent_check_status=None,
+            regressions=0,
+            has_structural_delta=False,
+        )
+        == "not_checked"
+    )
+
+    decisions = mcp_review_receipt_mod.derive_human_decision_points(
+        changed_findings=[
+            {
+                "id": f"clone:function:{index}",
+                "family": "clone",
+                "novelty": "known",
+            }
+            for index in range(12)
+        ],
+        intent_status="expanded",
+    )
+    assert len(decisions) == mcp_review_receipt_mod.MAX_HUMAN_DECISION_POINTS
+    assert decisions[0] == {
+        "id": "D-1",
+        "finding_id": "clone:function:0",
+        "reason": (
+            "Clone cohort member was in changed scope; "
+            "confirm divergence is intentional."
+        ),
+        "category": "clone_divergence",
+    }
+
+    claims = mcp_review_receipt_mod.derive_claims_not_made(
+        _blast_radius_report_document()
+    )
+    assert [claim["claim_type"] for claim in claims] == [
+        "security_vulnerability",
+        "baseline_regression",
+        "report_only_ci_failure",
+        "suppressed_clone_regression",
+    ]
+    assert (
+        mcp_review_receipt_mod.receipt_verdict(
+            reviewed_count=1,
+            gate_relevant_count=1,
+            patch_status="accepted",
+            human_decision_count=0,
+        )
+        == "clean"
+    )
+    assert (
+        mcp_review_receipt_mod.receipt_verdict(
+            reviewed_count=0,
+            gate_relevant_count=1,
+            patch_status="accepted",
+            human_decision_count=0,
+        )
+        == "incomplete"
+    )
+    assert (
+        mcp_review_receipt_mod.receipt_verdict(
+            reviewed_count=1,
+            gate_relevant_count=1,
+            patch_status="violated",
+            human_decision_count=0,
+        )
+        == "needs_attention"
+    )
+
+
+def test_mcp_service_create_review_receipt_minimal_and_deterministic(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    record = _patch_contract_run_record(
+        tmp_path,
+        run_id="receipt1234567890",
+        digest="receipt-digest",
+        include_regression=False,
+        complexity=6,
+        health=92,
+    )
+    service._runs.register(record)
+
+    first = service.create_review_receipt(run_id="receipt12", format="json")
+    second = service.create_review_receipt(run_id="receipt12", format="json")
+
+    assert first == second
+    assert first["receipt_version"] == mcp_review_receipt_mod.RECEIPT_VERSION
+    assert first["generated_at_utc"] == "2026-05-23T12:00:00Z"
+    provenance = cast("dict[str, object]", first["provenance"])
+    assert provenance["report_digest"] == "sha256:receipt-digest"
+    assert provenance["baseline_status"] == "trusted"
+    assert first["scope"] is None
+    assert first["blast_radius"] is None
+    assert cast("dict[str, object]", first["patch_contract"])["status"] == (
+        "not_checked"
+    )
+    assert cast("dict[str, object]", first["structural_delta"])["available"] is False
+    assert cast("dict[str, object]", first["reviewed_evidence"]) == {
+        "total_gate_relevant": 1,
+        "reviewed_count": 0,
+        "items": [],
+    }
+    assert first["verdict"] == "incomplete"
+    assert copy.deepcopy(record.report_document) == record.report_document
+
+    compact = service.create_review_receipt(
+        run_id="receipt12",
+        format="json",
+        include_blast_radius=False,
+        include_patch_contract=False,
+    )
+    assert compact["blast_radius"] is None
+    assert compact["patch_contract"] is None
+    assert compact["verdict"] == "incomplete"
+
+    markdown = service.create_review_receipt(run_id="receipt12")
+    assert markdown["run_id"] == "receipt1"
+    assert markdown["format"] == "markdown"
+    assert "## CodeClone Agent Review Receipt" in str(markdown["content"])
+    assert "No intent declared." in str(markdown["content"])
+
+    with pytest.raises(MCPServiceContractError, match="Invalid value for format"):
+        service.create_review_receipt(run_id="receipt12", format="yaml")
+
+
+def test_mcp_service_create_review_receipt_full_post_edit_workflow(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    after, declared = _seed_patch_contract_intent(
+        service,
+        tmp_path,
+        before_health=88,
+    )
+    intent_id = str(declared["intent_id"])
+    intent_check = service.manage_change_intent(
+        action="check",
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+    )
+    service._runs.register(after)
+    reviewed = service.mark_finding_reviewed(
+        run_id="after12",
+        finding_id="clone:function:g1",
+        note="reviewed clone split",
+    )
+
+    receipt = service.create_review_receipt(
+        run_id="after12",
+        intent_id=intent_id,
+        format="json",
+    )
+    provenance, scope, blast, reviewed_evidence, patch, delta, health = _payload_dicts(
+        receipt,
+        (
+            "provenance",
+            "scope",
+            "blast_radius",
+            "reviewed_evidence",
+            "patch_contract",
+            "structural_delta",
+            "health",
+        ),
+    )
+    decisions = cast("list[dict[str, object]]", receipt["human_decision_points"])
+    claims = cast("list[dict[str, object]]", receipt["claims_not_made"])
+
+    assert intent_check["status"] == "clean"
+    assert reviewed["reviewed"] is True
+    assert provenance["report_digest"] == "sha256:after-digest"
+    assert provenance["baseline_status"] == "untrusted"
+    assert scope["intent_id"] == intent_id
+    assert scope["intent_status"] == "clean"
+    assert scope["declared_files"] == ["pkg/a.py"]
+    assert scope["changed_files"] == ["pkg/a.py"]
+    assert blast["radius_level"] == "medium"
+    assert blast["direct_dependents_count"] == 1
+    assert reviewed_evidence["reviewed_count"] == 1
+    assert cast("list[dict[str, object]]", reviewed_evidence["items"])[0] == {
+        "finding_id": "fn:g1",
+        "kind": "function_clone",
+        "severity": "info",
+        "note": "reviewed clone split",
+    }
+    assert delta["available"] is True
+    assert delta["regressions"] == 1
+    assert patch["status"] == "violated"
+    assert patch["regressions"] == 1
+    assert patch["contract_violations"] == [
+        "structural_regressions",
+        "baseline_abuse",
+    ]
+    assert patch["baseline_abuse_detected"] is True
+    assert decisions[0]["category"] == "clone_divergence"
+    assert claims[0]["claim_type"] == "security_vulnerability"
+    assert health == {"score": 70, "grade": "B", "delta": 0}
+    assert receipt["verdict"] == "needs_attention"
+
+    markdown = service.create_review_receipt(
+        run_id="after12",
+        intent_id=intent_id,
+        format="markdown",
+    )
+    content = str(markdown["content"])
+    assert "**Status:** violated" in content
+    assert "reviewed clone split" in content
 
 
 def test_mcp_service_branch_helpers_on_real_runs(

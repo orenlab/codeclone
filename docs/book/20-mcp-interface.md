@@ -51,7 +51,7 @@ Current server characteristics:
 
 ## Tools
 
-Current tool set: `24` tools.
+Current tool set: `25` tools.
 
 The MCP surface is intentionally triage-first: analyze first, summarize/triage
 second, then drill into one finding or one hotspot family.
@@ -64,6 +64,12 @@ security boundary inventory and overloaded-module candidates are returned as
 `review_context`, not as edit prohibitions. Long context sections include
 `total`, `shown`, and `truncated` summaries.
 
+`create_review_receipt` is a read-only audit artifact. It composes stored
+report provenance, optional intent/blast-radius state, reviewed findings,
+structural delta, patch-contract status, human decision points, and
+claims-not-made into markdown or JSON. It does not enter report integrity and
+does not persist outside the MCP session.
+
 ### Analysis and run-level tools
 
 | Tool                    | Key parameters                                                                                                               | Purpose                                                                                                                                                  |
@@ -74,6 +80,7 @@ security boundary inventory and overloaded-module candidates are returned as
 | `get_production_triage` | `run_id`, `max_hotspots`, `max_suggestions`                                                                                  | Production-first first-pass view over one stored run.                                                                                                    |
 | `get_blast_radius`      | `run_id`, `files`, `depth`, `include`                                                                                        | Derived pre-change risk boundary: direct dependents, clone cohorts, coverage gaps, risk signals, actionable do-not-touch paths, and review-only context. |
 | `check_patch_contract`  | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref`                  | Pre-edit regression budget or post-edit verification over stored runs, gate evaluation, change intent scope, and baseline-abuse signals.                 |
+| `create_review_receipt` | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                                             | Deterministic audit artifact over stored run/session state; returns markdown or JSON without mutating artifacts.                                         |
 | `help`                  | `topic`, `detail`                                                                                                            | Bounded workflow/contract guidance for supported MCP topics.                                                                                             |
 | `compare_runs`          | `run_id_before`, `run_id_after`, `focus`                                                                                     | Run-to-run delta view over findings and health; returns `incomparable` when roots/settings differ.                                                       |
 | `evaluate_gates`        | `run_id`, gate flags, threshold overrides, `coverage_min`                                                                    | Evaluate CI/gating decisions against a stored run without mutating process or repo state.                                                                |
