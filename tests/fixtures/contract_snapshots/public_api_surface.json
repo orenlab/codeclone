@@ -112,6 +112,10 @@
       "signature": "(self, uri: 'str') -> 'str'"
     },
     {
+      "name": "shutdown_cleanup",
+      "signature": "(self) -> 'None'"
+    },
+    {
       "name": "validate_review_claims",
       "signature": "(self, *, text: 'str', run_id: 'str | None' = None, require_citations: 'bool' = True) -> 'dict[str, object]'"
     }

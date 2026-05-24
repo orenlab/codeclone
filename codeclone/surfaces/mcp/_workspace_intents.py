@@ -497,6 +497,73 @@ def _unlink(path: Path) -> bool:
     return True
 
 
+def _is_safe_intent_path(expected: Path, registry: Path) -> bool:
+    """Return True only if *expected* is safe to delete.
+
+    Checks (all must pass):
+    1. *expected* is an absolute path.
+    2. *expected* resolves to itself — no symlink indirection.
+    3. Resolved path is strictly inside *registry* directory.
+    4. Filename matches the ``{pid}-{start_epoch}-{intent_id}.json`` pattern.
+    5. Target is a regular file (not a directory, device, or pipe).
+    """
+    try:
+        if not expected.is_absolute():
+            return False
+        resolved = expected.resolve(strict=False)
+        resolved_registry = registry.resolve(strict=False)
+        if resolved != expected:
+            return False
+        if not resolved.is_relative_to(resolved_registry):
+            return False
+        name = expected.name
+        if not name.endswith(".json") or name.count("-") < 2:
+            return False
+        if expected.exists() and not expected.is_file():
+            return False
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def safe_remove_own_intent(
+    *,
+    root: Path,
+    pid: int,
+    start_epoch: int,
+    intent_id: str,
+) -> bool:
+    """Remove a workspace intent file ONLY if it belongs to the caller.
+
+    Safety checks (all must pass):
+    1. *root* is an absolute path.
+    2. Constructed path resolves inside ``registry_dir(root)``.
+    3. No symlink indirection (resolved == constructed).
+    4. Target is a regular file.
+    5. Filename matches expected pattern.
+
+    Returns True if the file was removed or is already absent.
+    Returns False if any safety check fails (file is NOT removed).
+    Never raises.
+    """
+    try:
+        if not root.is_absolute():
+            return False
+        registry = registry_dir(root)
+        expected = intent_path(
+            root=root,
+            pid=pid,
+            start_epoch=start_epoch,
+            intent_id=intent_id,
+        )
+        if not _is_safe_intent_path(expected, registry):
+            return False
+        expected.unlink(missing_ok=True)
+    except Exception:
+        return False
+    return True
+
+
 def _record_sort_key(record: WorkspaceIntentRecord) -> tuple[str, int, str]:
     return (record.declared_at_utc, record.agent_pid, record.intent_id)
 
@@ -629,6 +696,7 @@ __all__ = [
     "remove_workspace_intent",
     "remove_workspace_record",
     "resolved_ttl_seconds",
+    "safe_remove_own_intent",
     "stale_reason",
     "update_workspace_intent_status",
     "utc_now",

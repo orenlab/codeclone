@@ -9,7 +9,8 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import sys
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal, TypeVar
 
 from ... import __version__
@@ -147,9 +148,16 @@ def build_mcp_server(
 
     runtime_fastmcp, read_only_tool, analysis_tool, session_tool = _load_mcp_runtime()
     service = CodeCloneMCPService(history_limit=_validated_history_limit(history_limit))
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastMCP) -> AsyncIterator[dict[str, object]]:
+        yield {}
+        service.shutdown_cleanup()
+
     mcp = runtime_fastmcp(
         name="CodeClone",
         instructions=_SERVER_INSTRUCTIONS,
+        lifespan=_lifespan,
         website_url=DOCS_URL,
         host=host,
         port=port,
@@ -1142,7 +1150,30 @@ def _host_is_loopback(host: str) -> bool:
         return False
 
 
+def _install_sigterm_handler() -> None:
+    """Convert SIGTERM to SystemExit so async teardown runs.
+
+    Python's default SIGTERM handler (SIG_DFL) terminates the process
+    immediately — no ``finally`` blocks, no ``atexit``, no async
+    context manager teardown.  By raising :class:`SystemExit`, the
+    event loop unwinds normally and the FastMCP lifespan teardown
+    (which cleans workspace intent files) gets a chance to execute.
+
+    Only installed on platforms that support SIGTERM (not Windows).
+    """
+    import signal as _signal
+
+    if not hasattr(_signal, "SIGTERM"):
+        return  # pragma: no cover
+
+    def _handler(_signum: int, _frame: object) -> None:
+        raise SystemExit(0)
+
+    _signal.signal(_signal.SIGTERM, _handler)
+
+
 def main() -> None:
+    _install_sigterm_handler()
     args = build_parser().parse_args()
     if (
         args.transport == "streamable-http"

@@ -8,10 +8,12 @@ from __future__ import annotations
 import inspect
 from typing import Protocol
 
+from ._workspace_intents import safe_remove_own_intent
 from .session import (
     DEFAULT_MCP_HISTORY_LIMIT,
     MCPAnalysisRequest,
     MCPGateRequest,
+    MCPServiceContractError,
     MCPSession,
 )
 from .tools._base import run_kw
@@ -151,6 +153,31 @@ class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
 
     def read_resource(self, uri: str) -> str:
         return self._session_cls.read_resource(self, uri)
+
+    def shutdown_cleanup(self) -> None:
+        """Best-effort cleanup of workspace intent files owned by this process.
+
+        Called from FastMCP lifespan teardown at process exit.  Removes
+        only files that THIS process created — identified by matching
+        PID + start_epoch + intent_id.  Never raises.  Does not write to
+        stdout/stderr (the pipe may already be closed).
+        """
+        try:
+            with self._state_lock:
+                snapshot = dict(self._active_intents)
+            for intent_id, intent in snapshot.items():
+                try:
+                    run = self._runs.get(intent.run_id)
+                except (MCPServiceContractError, Exception):
+                    continue
+                safe_remove_own_intent(
+                    root=run.root,
+                    pid=self._agent_pid,
+                    start_epoch=self._agent_start_epoch,
+                    intent_id=intent_id,
+                )
+        except Exception:
+            pass
 
 
 _EMPTY = inspect.Signature.empty
