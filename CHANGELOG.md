@@ -23,6 +23,11 @@
   artifacts that compose report provenance, intent scope, blast radius,
   reviewed findings, structural delta, patch-contract status, human decision
   points, and claims-not-made without mutating repository state.
+- Add MCP `validate_review_claims` as a deterministic, citation-based claim
+  guard for review text. It flags overclaims such as Security Surfaces called
+  vulnerabilities, report-only families called CI failures, known findings
+  called new regressions, dead-code certainty despite runtime reachability
+  evidence, and fixes claimed before post-patch verification.
 
 ### Internal
 

@@ -47,10 +47,11 @@ _SERVER_INSTRUCTIONS = (
     "absolute repository root to analysis tools. For file edits, call "
     "manage_change_intent(action='list_workspace', root=...) before analysis, "
     "then analyze, declare intent, inspect blast radius and patch budget, edit "
-    "within scope, re-analyze, verify, and clear intent. If concurrent intents "
-    "overlap, narrow scope or coordinate. This server never updates baselines "
-    "and never mutates source files, analysis cache, or reports; it may write "
-    "ephemeral workspace coordination state under .cache/codeclone/intents/."
+    "within scope, re-analyze, verify, validate review claims, and clear intent. "
+    "If concurrent intents overlap, narrow scope or coordinate. This server never "
+    "updates baselines and never mutates source files, analysis cache, or reports; "
+    "it may write ephemeral workspace coordination state under "
+    ".cache/codeclone/intents/."
 )
 _MCP_INSTALL_HINT = (
     "CodeClone MCP support requires the optional 'mcp' extra. "
@@ -436,6 +437,31 @@ def build_mcp_server(
             format=format,
             include_blast_radius=include_blast_radius,
             include_patch_contract=include_patch_contract,
+        )
+
+    @tool(
+        title="Validate Review Claims",
+        description=(
+            "Validate cited review text against canonical report semantics. "
+            "Detects deterministic mischaracterizations: Security Surfaces "
+            "called vulnerabilities, report-only signals called CI failures, "
+            "known baseline debt called new regressions, dead code claimed "
+            "where runtime reachability evidence exists, and fixes claimed "
+            "without post-patch verification. Structural citation matching; "
+            "not NLP."
+        ),
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def validate_review_claims(
+        text: str,
+        run_id: str | None = None,
+        require_citations: bool = True,
+    ) -> dict[str, object]:
+        return service.validate_review_claims(
+            text=text,
+            run_id=run_id,
+            require_citations=require_citations,
         )
 
     @tool(

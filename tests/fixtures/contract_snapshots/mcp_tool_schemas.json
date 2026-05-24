@@ -1863,5 +1863,38 @@
       "title": "mark_finding_reviewedArguments",
       "type": "object"
     }
+  },
+  {
+    "name": "validate_review_claims",
+    "input_schema": {
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "require_citations": {
+          "default": true,
+          "title": "Require Citations",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "validate_review_claimsArguments",
+      "type": "object"
+    }
   }
 ]

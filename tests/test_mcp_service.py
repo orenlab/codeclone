@@ -20,6 +20,7 @@ from typing import Any, cast
 import pytest
 
 import codeclone.surfaces.mcp._blast_radius as mcp_blast_radius_mod
+import codeclone.surfaces.mcp._claim_guard as mcp_claim_guard_mod
 import codeclone.surfaces.mcp._patch_contract as mcp_patch_contract_mod
 import codeclone.surfaces.mcp._review_receipt as mcp_review_receipt_mod
 import codeclone.surfaces.mcp._session_baseline as mcp_baseline_mod
@@ -315,6 +316,58 @@ def _blast_radius_run_record(
     return replace(
         _dummy_run_record(root, run_id),
         report_document=_blast_radius_report_document(digest),
+    )
+
+
+def _claim_guard_context(
+    *, has_comparison_run: bool = False
+) -> mcp_claim_guard_mod.ReportContext:
+    findings: dict[str, dict[str, object]] = {
+        "clone:function:g1": {
+            "id": "clone:function:g1",
+            "family": "clone",
+            "category": "function",
+            "novelty": "new",
+        },
+        "clone:function:g2": {
+            "id": "clone:function:g2",
+            "family": "clone",
+            "category": "function",
+            "novelty": "known",
+        },
+        "dead_code:pkg.routes:handler": {
+            "id": "dead_code:pkg.routes:handler",
+            "family": "dead_code",
+            "category": "dead_code",
+            "novelty": "new",
+            "items": [{"qualname": "pkg.routes:handler"}],
+        },
+    }
+    return mcp_claim_guard_mod.ReportContext(
+        findings=findings,
+        short_to_canonical={
+            "F-1": "clone:function:g1",
+            "F-2": "clone:function:g2",
+            "F-3": "dead_code:pkg.routes:handler",
+        },
+        reachable_qualnames=frozenset({"pkg.routes:handler"}),
+        report_only_families=frozenset({"overloaded_modules", "security_surfaces"}),
+        has_comparison_run=has_comparison_run,
+        metric_families=frozenset(
+            {
+                "api_surface",
+                "cohesion",
+                "complexity",
+                "coupling",
+                "coverage_adoption",
+                "coverage_join",
+                "dead_code",
+                "dependencies",
+                "health",
+                "overloaded_modules",
+                "security_surfaces",
+            }
+        ),
     )
 
 
@@ -2825,6 +2878,142 @@ def test_mcp_service_check_patch_contract_verify_composes_existing_primitives(
     for payload, reason in unverified_cases:
         assert payload["status"] == "unverified"
         assert payload["reason"] == reason
+
+
+def test_claim_guard_detects_deterministic_overclaims() -> None:
+    payload = mcp_claim_guard_mod.validate_claims(
+        text=(
+            "security_surfaces found vulnerabilities. "
+            "overloaded_modules will fail CI. "
+            "F-2 is a new regression. "
+            "F-3 is dead and safe to remove. "
+            "F-1 fixed the issue."
+        ),
+        report_context=_claim_guard_context(),
+    )
+
+    violations = cast("list[dict[str, object]]", payload["violations"])
+    validated = cast("list[dict[str, object]]", payload["validated_citations"])
+    assert payload["valid"] is False
+    assert {str(item["pattern"]) for item in violations} == {
+        "P-1",
+        "P-2",
+        "P-3",
+        "P-4",
+        "P-5",
+    }
+    assert payload["citations_found"] == 5
+    assert all(not item["valid"] for item in validated)
+
+
+def test_claim_guard_keeps_report_only_and_gate_eligible_semantics_separate() -> None:
+    payload = mcp_claim_guard_mod.validate_claims(
+        text=(
+            "security_surfaces is boundary inventory. "
+            "coverage_join can fail the coverage hotspot gate. "
+            "F-2 remains known baseline debt."
+        ),
+        report_context=_claim_guard_context(has_comparison_run=True),
+    )
+
+    assert payload["valid"] is True
+    assert payload["violations"] == []
+    assert payload["warnings"] == []
+    assert payload["citations_found"] == 3
+
+
+def test_claim_guard_no_citations_warning_and_unknown_short_id() -> None:
+    warning_payload = mcp_claim_guard_mod.validate_claims(
+        text="General review text without CodeClone citations.",
+        report_context=_claim_guard_context(),
+    )
+    relaxed_payload = mcp_claim_guard_mod.validate_claims(
+        text="General review text without CodeClone citations.",
+        report_context=_claim_guard_context(),
+        require_citations=False,
+    )
+    unknown_payload = mcp_claim_guard_mod.validate_claims(
+        text="F-999 looks new.",
+        report_context=_claim_guard_context(),
+    )
+
+    assert warning_payload["valid"] is True
+    assert cast("list[dict[str, str]]", warning_payload["warnings"])[0]["type"] == (
+        "no_citations"
+    )
+    assert relaxed_payload["warnings"] == []
+    unknown_warnings = cast("list[dict[str, str]]", unknown_payload["warnings"])
+    assert [item["type"] for item in unknown_warnings] == [
+        "no_citations",
+        "unknown_finding",
+    ]
+
+
+def test_mcp_service_validate_review_claims_contract(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    record = _blast_radius_run_record(tmp_path, run_id="claimguard1234567890")
+    service._runs.register(record)
+    before_state_keys = set(service.__dict__)
+    before_report = copy.deepcopy(record.report_document)
+
+    text = (
+        "clone:function:g2 is a new regression. "
+        "security_surfaces found vulnerabilities. "
+        "overloaded_modules will fail CI."
+    )
+    first = service.validate_review_claims(run_id="claimguard", text=text)
+    second = service.validate_review_claims(run_id="claimguard", text=text)
+
+    assert first == second
+    assert first["run_id"] == "claimgua"
+    assert first["valid"] is False
+    violations = cast("list[dict[str, object]]", first["violations"])
+    assert {str(item["pattern"]) for item in violations} == {"P-1", "P-2", "P-3"}
+    assert record.report_document == before_report
+    assert set(service.__dict__) == before_state_keys
+
+
+def test_mcp_service_validate_review_claims_fix_verification_and_inputs(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(
+        _blast_radius_run_record(tmp_path, run_id="claimbefore123456")
+    )
+
+    unverified = service.validate_review_claims(
+        run_id="claimbefore",
+        text="clone:function:g1 fixed the issue.",
+    )
+    service._runs.register(
+        _blast_radius_run_record(tmp_path, run_id="claimafter123456")
+    )
+    verified = service.validate_review_claims(
+        run_id="claimafter",
+        text="clone:function:g1 fixed the issue.",
+    )
+
+    unverified_violations = cast(
+        "list[dict[str, object]]",
+        unverified["violations"],
+    )
+    assert [item["pattern"] for item in unverified_violations] == ["P-5"]
+    assert verified["violations"] == []
+    assert verified["valid"] is True
+    assert (
+        service.validate_review_claims(
+            run_id="claimafter",
+            text='{"summary":"security_surfaces is boundary inventory"}',
+            require_citations=False,
+        )["valid"]
+        is True
+    )
+    with pytest.raises(MCPServiceContractError, match="must not be empty"):
+        service.validate_review_claims(text="   ")
+    with pytest.raises(MCPServiceContractError, match="maximum supported length"):
+        service.validate_review_claims(text="x" * 50_001)
+    with pytest.raises(MCPRunNotFoundError):
+        service.validate_review_claims(run_id="missing", text="security_surfaces")
 
 
 def test_mcp_review_receipt_helpers_are_bounded_and_contract_aware() -> None:

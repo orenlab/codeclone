@@ -119,6 +119,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         server.instructions
     )
     assert ".cache/codeclone/intents/" in str(server.instructions)
+    assert "validate review claims" in str(server.instructions)
 
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert set(tools) == {
@@ -131,6 +132,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "get_blast_radius",
         "check_patch_contract",
         "create_review_receipt",
+        "validate_review_claims",
         "evaluate_gates",
         "get_report_section",
         "list_findings",
@@ -165,6 +167,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "get_blast_radius",
                 "check_patch_contract",
                 "create_review_receipt",
+                "validate_review_claims",
                 "evaluate_gates",
                 "help",
                 "get_report_section",
@@ -210,6 +213,10 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "mode='budget'" in str(tools["check_patch_contract"].description)
     assert "auditable review receipt" in str(tools["create_review_receipt"].description)
     assert "claims-not-made" in str(tools["create_review_receipt"].description)
+    assert "Structural citation matching" in str(
+        tools["validate_review_claims"].description
+    )
+    assert "not NLP" in str(tools["validate_review_claims"].description)
     assert "list_workspace" in str(tools["manage_change_intent"].description)
     assert ".cache/codeclone/intents/" in str(tools["manage_change_intent"].description)
     assert "bounded guidance, not a full manual" in str(tools["help"].description)
@@ -630,6 +637,17 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             )
         )
     )
+    claim_guard = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "validate_review_claims",
+                {
+                    "run_id": run_id,
+                    "text": "security_surfaces is boundary inventory.",
+                },
+            )
+        )
+    )
     assert complexity["check"] == "complexity"
     assert cast(int, clones["total"]) >= 1
     assert coupling["check"] == "coupling"
@@ -645,6 +663,8 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert reviewed_finding["locations"] == summary_finding["locations"]
     assert "## CodeClone Summary" in str(pr_summary["content"])
     assert receipt["format"] == "markdown"
+    assert claim_guard["valid"] is True
+    assert claim_guard["citations_found"] == 1
     assert "## CodeClone Agent Review Receipt" in str(receipt["content"])
     receipt_payload = cast("dict[str, object]", receipt["receipt"])
     assert cast("dict[str, object]", receipt_payload["scope"])["intent_id"] == (

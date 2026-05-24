@@ -7,7 +7,7 @@ report contract.
 ## Status
 
 The v2.1 alpha currently includes intent, blast-radius, patch-contract checks,
-review receipts, and workspace intent visibility:
+review receipts, workspace intent visibility, and claim guard:
 
 | Phase | Status | MCP surface |
 |-------|--------|-------------|
@@ -16,10 +16,7 @@ review receipts, and workspace intent visibility:
 | Patch contract | Live in `2.1.0a1` | `check_patch_contract` |
 | Review receipt | Live in `2.1.0a1` | `create_review_receipt` |
 | Workspace intent registry | Live in `2.1.0a1` | `manage_change_intent` |
-| Claim guard | Planned | `validate_review_claims` |
-
-Claim guard is a roadmap item until implemented and tested. Public clients
-must not assume it exists in the current MCP tool list.
+| Claim guard | Live in `2.1.0a1` | `validate_review_claims` |
 
 ## Contract
 
@@ -48,9 +45,10 @@ must not assume it exists in the current MCP tool list.
    `changed_files` or `diff_ref`.
 9. Run analysis again, then call `check_patch_contract(mode="verify")` with
    explicit `before_run_id` and `after_run_id`.
-10. Call `create_review_receipt` to collect provenance, scope, blast radius,
+10. Call `validate_review_claims` before publishing a review summary.
+11. Call `create_review_receipt` to collect provenance, scope, blast radius,
    reviewed findings, patch status, human decision points, and claims-not-made.
-11. Call `manage_change_intent(action="clear")` when the edit is complete.
+12. Call `manage_change_intent(action="clear")` when the edit is complete.
 
 `manage_change_intent` can return `clean`, `expanded`, `violated`, or
 `expired`. Expiry means the report digest changed since declaration.
@@ -119,3 +117,20 @@ The receipt includes:
 
 Receipt verdicts are `clean`, `incomplete`, or `needs_attention`. They summarize
 receipt completeness only; they are not CI gates.
+
+## Claim Guard
+
+`validate_review_claims` validates review text against stored run semantics. It
+uses citation matching around known finding ids and metric family names. It does
+not read source files, run analysis, call an LLM, or persist state.
+
+The guard checks for deterministic overclaims:
+
+- Security Surfaces described as vulnerabilities or exploitability.
+- Report-only metric families described as CI failures or blocking gates.
+- known baseline findings described as new regressions.
+- dead-code certainty where runtime reachability evidence exists.
+- fixed/resolved claims before a post-patch run is available.
+
+Warnings, such as missing or unknown citations, do not make the response
+invalid. Violations make `valid=false`.

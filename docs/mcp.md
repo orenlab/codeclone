@@ -103,7 +103,7 @@ Run retention is bounded: default `4`, max `10` (`--history-limit`).
 If a tool request omits `processes`, MCP defers process-count policy to the
 core CodeClone runtime.
 
-Current CodeClone `2.1` MCP surface: `25` tools, `7` fixed resources, and `3`
+Current CodeClone `2.1` MCP surface: `26` tools, `7` fixed resources, and `3`
 run-scoped URI templates.
 
 ## Tool surface
@@ -117,6 +117,7 @@ run-scoped URI templates.
 | `get_blast_radius`       | Pre-change risk boundary: direct dependents, clone cohorts, coverage gaps, actionable do-not-touch paths, and review-only context |
 | `check_patch_contract`   | Pre-edit regression budget or post-edit before/after verification over stored runs, gates, intent scope, and baseline-abuse signals |
 | `create_review_receipt`  | Deterministic markdown or JSON audit artifact: provenance, scope, blast radius, reviewed findings, patch status, human decisions, and claims-not-made |
+| `validate_review_claims` | Citation-based validator for review text against stored run semantics; not NLP or a CI gate                                      |
 | `help`                   | Semantic guide for workflow, change control, analysis profile, baseline, suppressions, review state, changed-scope                |
 | `compare_runs`           | Run-to-run delta: regressions, improvements, health change                                                                        |
 | `list_findings`          | Filtered, paginated findings; use after hotspots or `check_*`                                                                     |
@@ -159,6 +160,11 @@ run-scoped URI templates.
   stored report provenance, optional intent/blast-radius state, reviewed
   findings, structural delta, patch-contract status, and explicit
   claims-not-made into markdown or JSON.
+- `validate_review_claims` does not run analysis or mutate state. It detects
+  deterministic overclaims in cited review text: Security Surfaces called
+  vulnerabilities, report-only families called gates, known findings called new
+  regressions, reachable dead-code candidates called definitely dead, or fixes
+  claimed before a post-patch run exists.
 - Empty design `check_*` responses may also include a compact
   `threshold_context` (`metric`, `threshold`, `measured_units`,
   `highest_below_threshold`) to show whether the run is genuinely quiet or
@@ -259,6 +265,7 @@ manage_change_intent(action="list_workspace", root="/abs/repo")
 → analyze_repository
 → manage_change_intent(action="check", changed_files=[...])
 → check_patch_contract(mode="verify", before_run_id=..., after_run_id=...)
+→ validate_review_claims(text="...")
 → create_review_receipt
 → manage_change_intent(action="clear")
 ```

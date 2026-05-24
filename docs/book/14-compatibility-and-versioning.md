@@ -49,7 +49,11 @@ Operational compatibility rules:
 - runtime writes standalone metrics-baseline schema `1.2`
 - runtime accepts standalone metrics-baseline `1.1` and `1.2`
 - runtime writes cache schema `2.8`
-- MCP does not define a separate schema constant; tool/resource semantics are package-versioned public surface
+- MCP does not define a separate schema constant; tool/resource semantics are
+  package-versioned public surface
+- adding or changing an MCP tool is a package-versioned interface change and
+  requires tests, docs, changelog, and tool-schema snapshot updates; it does not
+  bump the canonical report schema unless report JSON changes
 
 Baseline regeneration is required when:
 

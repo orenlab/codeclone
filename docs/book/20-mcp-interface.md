@@ -51,7 +51,7 @@ Current server characteristics:
 
 ## Tools
 
-Current tool set: `25` tools.
+Current tool set: `26` tools.
 
 The MCP surface is intentionally triage-first: analyze first, summarize/triage
 second, then drill into one finding or one hotspot family.
@@ -74,6 +74,11 @@ structural delta, patch-contract status, human decision points, and
 claims-not-made into markdown or JSON. It does not enter report integrity and
 does not persist outside the MCP session.
 
+`validate_review_claims` is a read-only claim guard over stored run semantics.
+It validates cited review text using deterministic string matching around
+finding ids and metric family names. It is not an NLP fact checker and it is not
+a CI gate.
+
 ### Analysis and run-level tools
 
 | Tool                    | Key parameters                                                                                                               | Purpose                                                                                                                                                  |
@@ -85,6 +90,7 @@ does not persist outside the MCP session.
 | `get_blast_radius`      | `run_id`, `files`, `depth`, `include`                                                                                        | Derived pre-change risk boundary: direct dependents, clone cohorts, coverage gaps, risk signals, actionable do-not-touch paths, and review-only context. |
 | `check_patch_contract`  | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref`                  | Pre-edit regression budget or post-edit verification over stored runs, gate evaluation, change intent scope, and baseline-abuse signals.                 |
 | `create_review_receipt` | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                                             | Deterministic audit artifact over stored run/session state; returns markdown or JSON without mutating artifacts.                                         |
+| `validate_review_claims` | `text`, `run_id`, `require_citations`                                                                                        | Citation-based validator for review text; flags deterministic mischaracterizations of report-only signals, known debt, reachability, or unverified fixes. |
 | `help`                  | `topic`, `detail`                                                                                                            | Bounded workflow/contract guidance for supported MCP topics.                                                                                             |
 | `compare_runs`          | `run_id_before`, `run_id_after`, `focus`                                                                                     | Run-to-run delta view over findings and health; returns `incomparable` when roots/settings differ.                                                       |
 | `evaluate_gates`        | `run_id`, gate flags, threshold overrides, `coverage_min`                                                                    | Evaluate CI/gating decisions against a stored run without mutating process or repo state.                                                                |
@@ -158,6 +164,10 @@ Resources are deterministic read-only projections over stored runs.
 - `metrics_detail(family="security_surfaces")` exposes a compact, report-only
   inventory of exact security-relevant capability surfaces. It does not claim
   vulnerabilities or exploitability.
+- `validate_review_claims` detects overclaims such as Security Surfaces called
+  vulnerabilities, report-only families called CI failures, known baseline debt
+  called new regressions, dead-code certainty where runtime reachability
+  evidence exists, and fixes claimed before a post-patch run exists.
 
 ## Security model
 
@@ -186,4 +196,5 @@ Resources are deterministic read-only projections over stored runs.
 - [09-cli.md](09-cli.md)
 - [08-report.md](08-report.md)
 - [14-compatibility-and-versioning.md](14-compatibility-and-versioning.md)
+- [28-claim-guard.md](28-claim-guard.md)
 - [../mcp.md](../mcp.md)

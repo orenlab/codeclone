@@ -761,7 +761,8 @@ _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             ),
             (
                 "After editing, re-run analysis, check intent scope, verify "
-                "the patch contract, and clear the intent."
+                "the patch contract, validate review claims, and clear the "
+                "intent."
             ),
             (
                 "Use reset_workspace for interrupted own, expired, or orphaned "
@@ -773,6 +774,7 @@ _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             "analyze_repository",
             "get_blast_radius",
             "check_patch_contract",
+            "validate_review_claims",
             "create_review_receipt",
         ),
         doc_links=(_CHANGE_CONTROL_DOC_LINK, _MCP_INTERFACE_DOC_LINK),

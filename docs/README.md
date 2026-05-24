@@ -6,8 +6,9 @@
 CodeClone is a structural change controller for Python. It starts before the
 first edit — when an agent declares what it intends to change — maps the
 structural blast radius, verifies that the patch stayed inside its declared
-boundary, and leaves an auditable receipt. The same deterministic facts power
-CI gates, human reviews, and AI-assisted workflows.
+boundary, leaves an auditable receipt, and validates cited review claims against
+canonical report semantics. The same deterministic facts power CI gates, human
+reviews, and AI-assisted workflows.
 
 This documentation site has two complementary layers:
 

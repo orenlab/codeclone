@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Document the current module boundaries and ownership in CodeClone `2.0.x`.
+Document the current module boundaries and ownership in CodeClone `2.1.x`.
 
 ## Public surface
 
@@ -16,7 +16,7 @@ Main ownership layers:
 - Baseline/cache persistence contracts
 - Canonical report document and deterministic projections
 - HTML render-only surface
-- Read-only MCP surface
+- Read-only MCP surface with structural change control and claim validation
 - IDE/client surfaces over MCP
 
 ## Data model
@@ -35,7 +35,7 @@ Main ownership layers:
 | Canonical report        | `codeclone/report/document/*`, `codeclone/report/gates/*`, `codeclone/report/*.py`              | Canonical report payload, derived projections, explainability, suggestions, gate reasons              |
 | Deterministic renderers | `codeclone/report/renderers/*`                                                                  | Text/Markdown/SARIF/JSON projections over the canonical report                                        |
 | HTML render layer       | `codeclone/report/html/*`                                                                       | Render-only HTML view over canonical report/meta facts                                                |
-| MCP surface             | `codeclone/surfaces/mcp/*`                                                                      | Read-only MCP tools/resources over the same pipeline/report contracts                                 |
+| MCP surface             | `codeclone/surfaces/mcp/*`                                                                      | Read-only MCP tools/resources, change-control projections, and claim validation over stored runs      |
 | Client surfaces         | `extensions/vscode-codeclone/*`, `extensions/claude-desktop-codeclone/*`, `plugins/codeclone/*` | Native clients/install surfaces over `codeclone-mcp`                                                  |
 
 Refs:
@@ -54,7 +54,9 @@ Refs:
 - HTML, Markdown, SARIF, text, and MCP are projections over the same canonical report semantics.
 - Baseline and cache are persistence contracts, not analysis truth.
 - Cache is optimization-only and fail-open.
-- MCP is read-only and must not create a second analysis truth path.
+- MCP is read-only and must not create a second analysis truth path. Change
+  control and claim guard are projections over stored run/report semantics, not
+  new analyzers.
 - VS Code, Claude Desktop, and Codex plugin surfaces are clients over MCP, not second analyzers.
 
 Refs:
@@ -119,7 +121,7 @@ Refs:
 
 ## Non-guarantees
 
-- Internal file splits may evolve in `2.0.x` if public contracts are preserved.
+- Internal file splits may evolve in `2.1.x` if public contracts are preserved.
 - Package markers and internal helper placement are not contract by themselves.
 
 ## Chapter map
@@ -132,7 +134,7 @@ Refs:
 | Clone baseline trust/compat/integrity | [06-baseline.md](06-baseline.md)                                                                                 |
 | Cache trust and fail-open behavior    | [07-cache.md](07-cache.md)                                                                                       |
 | Report schema and provenance          | [08-report.md](08-report.md), [10-html-render.md](10-html-render.md)                                             |
-| MCP agent surface                     | [20-mcp-interface.md](20-mcp-interface.md)                                                                       |
+| MCP agent surface                     | [20-mcp-interface.md](20-mcp-interface.md), [28-claim-guard.md](28-claim-guard.md)                               |
 | Health score model                    | [15-health-score.md](15-health-score.md)                                                                         |
 | Metrics gates and metrics baseline    | [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)                                               |
 | Dead-code liveness policy             | [16-dead-code-contract.md](16-dead-code-contract.md)                                                             |

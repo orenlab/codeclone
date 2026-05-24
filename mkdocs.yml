@@ -107,6 +107,7 @@ nav:
           - Claude Desktop Bundle: book/22-claude-desktop-bundle.md
           - Codex Plugin: book/23-codex-plugin.md
           - Structural Change Controller: book/24-structural-change-controller.md
+          - Claim Guard: book/28-claim-guard.md
           - HTML Render: book/10-html-render.md
 
       - System Properties:

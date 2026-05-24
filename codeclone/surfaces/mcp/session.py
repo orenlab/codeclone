@@ -19,7 +19,7 @@ from ._session_baseline import (
     resolve_clone_baseline_state,
     resolve_metrics_baseline_state,
 )
-from ._session_review_receipt_mixin import _MCPSessionReviewReceiptMixin
+from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
 from ._session_shared import (
     _REPORT_DUMMY_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -80,7 +80,7 @@ __all__ = [
 ]
 
 
-class MCPSession(_MCPSessionReviewReceiptMixin):
+class MCPSession(_MCPSessionClaimGuardMixin):
     def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
         self._runs = CodeCloneMCPRunStore(history_limit=history_limit)
         self._state_lock = RLock()

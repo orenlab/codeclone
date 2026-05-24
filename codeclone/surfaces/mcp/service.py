@@ -76,6 +76,12 @@ class _QueryServiceMixin:
     ) -> dict[str, object]:
         return self._run_dict("create_review_receipt", **params)
 
+    def validate_review_claims(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("validate_review_claims", **params)
+
     def generate_pr_summary(
         self: _RunDictService,
         **params: object,
@@ -251,6 +257,11 @@ def _apply_public_method_signatures() -> None:
             _kwonly("format", "str", "markdown"),
             _kwonly("include_blast_radius", "bool", True),
             _kwonly("include_patch_contract", "bool", True),
+        ),
+        "validate_review_claims": (
+            _kwonly("text", "str"),
+            _kwonly("run_id", "str | None", None),
+            _kwonly("require_citations", "bool", True),
         ),
         "manage_change_intent": (
             _kwonly("action", "str"),

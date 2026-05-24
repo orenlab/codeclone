@@ -36,6 +36,10 @@
       "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, path: 'str | None' = None, min_severity: 'str | None' = None, max_results: 'int' = 10, detail_level: 'DetailLevel' = 'summary') -> 'dict[str, object]'"
     },
     {
+      "name": "check_patch_contract",
+      "signature": "(self, *, mode: 'str', run_id: 'str | None' = None, before_run_id: 'str | None' = None, after_run_id: 'str | None' = None, intent_id: 'str | None' = None, strictness: 'str' = 'ci', diff_ref: 'str | None' = None, changed_files: 'Sequence[str] | None' = None) -> 'dict[str, object]'"
+    },
+    {
       "name": "clear_session_runs",
       "signature": "(self) -> 'dict[str, object]'"
     },
@@ -44,12 +48,20 @@
       "signature": "(self, *, run_id_before: 'str', run_id_after: 'str | None' = None, focus: 'ComparisonFocus' = 'all') -> 'dict[str, object]'"
     },
     {
+      "name": "create_review_receipt",
+      "signature": "(self, *, run_id: 'str | None' = None, intent_id: 'str | None' = None, format: 'str' = 'markdown', include_blast_radius: 'bool' = True, include_patch_contract: 'bool' = True) -> 'dict[str, object]'"
+    },
+    {
       "name": "evaluate_gates",
       "signature": "(self, request: 'MCPGateRequest') -> 'dict[str, object]'"
     },
     {
       "name": "generate_pr_summary",
       "signature": "(self, *, run_id: 'str | None' = None, changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, format: 'PRSummaryFormat' = 'markdown') -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_blast_radius",
+      "signature": "(self, *, files: 'Sequence[str]', run_id: 'str | None' = None, depth: 'str' = 'direct', include: 'Sequence[str] | None' = None) -> 'dict[str, object]'"
     },
     {
       "name": "get_finding",
@@ -88,12 +100,20 @@
       "signature": "(self, *, run_id: 'str | None' = None) -> 'dict[str, object]'"
     },
     {
+      "name": "manage_change_intent",
+      "signature": "(self, *, action: 'str', run_id: 'str | None' = None, intent_id: 'str | None' = None, scope: 'dict[str, object] | None' = None, intent: 'str | None' = None, expected_effects: 'Sequence[str] | None' = None, diff_ref: 'str | None' = None, changed_files: 'Sequence[str] | None' = None, root: 'str | None' = None, ttl_seconds: 'int | None' = None) -> 'dict[str, object]'"
+    },
+    {
       "name": "mark_finding_reviewed",
       "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, note: 'str | None' = None) -> 'dict[str, object]'"
     },
     {
       "name": "read_resource",
       "signature": "(self, uri: 'str') -> 'str'"
+    },
+    {
+      "name": "validate_review_claims",
+      "signature": "(self, *, text: 'str', run_id: 'str | None' = None, require_citations: 'bool' = True) -> 'dict[str, object]'"
     }
   ]
 }
