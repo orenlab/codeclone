@@ -76,6 +76,8 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
         intent = self._optional_intent(record=record, intent_id=intent_id)
+        if intent is not None:
+            self._renew_lease_if_active(record=record, intent=intent)
         budgets = self._budgets_for_record(record=record, strictness=strictness)
         current_state = self._current_state(record)
         gate_preview = self._gate_preview(record=record, budgets=budgets)
@@ -139,6 +141,8 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
                 structural_delta=self._structural_delta(compare_payload),
             )
         intent = self._optional_intent(record=before, intent_id=intent_id)
+        if intent is not None:
+            self._renew_lease_if_active(record=before, intent=intent)
         if intent is not None and self._is_intent_expired(record=before, intent=intent):
             return self._expired_patch_contract(
                 before=before, after=after, intent=intent

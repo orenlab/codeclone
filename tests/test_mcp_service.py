@@ -13,6 +13,7 @@ import subprocess
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -2500,11 +2501,12 @@ def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
         service.manage_change_intent(action="get", run_id="abcdef12")
 
 
-def test_mcp_service_workspace_intent_registry_detects_concurrent_agents(
+def _paired_blast_services(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(mcp_workspace_intents_mod, "_is_pid_alive", lambda pid: True)
+    *,
+    first_digest: str = "digest-a",
+    second_digest: str | None = None,
+) -> tuple[CodeCloneMCPService, CodeCloneMCPService]:
     first = CodeCloneMCPService(history_limit=2)
     second = CodeCloneMCPService(history_limit=2)
     first._agent_pid, first._agent_start_epoch, first._agent_label = (
@@ -2517,9 +2519,76 @@ def test_mcp_service_workspace_intent_registry_detects_concurrent_agents(
         200,
         "agent-b",
     )
-    record = _blast_radius_run_record(tmp_path)
-    first._runs.register(record)
-    second._runs.register(record)
+    first._runs.register(_blast_radius_run_record(tmp_path, digest=first_digest))
+    second._runs.register(
+        _blast_radius_run_record(tmp_path, digest=second_digest or first_digest)
+    )
+    return first, second
+
+
+def _stale_workspace_intent(
+    tmp_path: Path,
+    *,
+    intent_id: str,
+) -> mcp_workspace_intents_mod.WorkspaceIntentRecord:
+    found = mcp_workspace_intents_mod.find_workspace_intent(
+        root=tmp_path,
+        intent_id=intent_id,
+    )
+    assert found is not None
+    _, workspace_record = found
+    stale_record = replace(
+        workspace_record,
+        lease_renewed_at_utc=mcp_workspace_intents_mod.format_utc(
+            mcp_workspace_intents_mod.utc_now() - timedelta(minutes=10)
+        ),
+        lease_seconds=mcp_workspace_intents_mod.MIN_LEASE_SECONDS,
+    )
+    assert mcp_workspace_intents_mod.write_workspace_intent(
+        root=tmp_path,
+        record=stale_record,
+    )
+    return stale_record
+
+
+def _single_service_with_stale_intent(
+    tmp_path: Path,
+) -> tuple[CodeCloneMCPService, str, mcp_workspace_intents_mod.WorkspaceIntentRecord]:
+    service = CodeCloneMCPService(history_limit=2)
+    service._agent_pid, service._agent_start_epoch = 11111, 100
+    service._runs.register(_blast_radius_run_record(tmp_path))
+    declared = service.manage_change_intent(
+        action="declare",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="change pkg.a",
+    )
+    intent_id = str(declared["intent_id"])
+    return (
+        service,
+        intent_id,
+        _stale_workspace_intent(
+            tmp_path,
+            intent_id=intent_id,
+        ),
+    )
+
+
+def _lease_expires_at(
+    record: mcp_workspace_intents_mod.WorkspaceIntentRecord,
+) -> str:
+    renewed_at = mcp_workspace_intents_mod._parse_utc(record.lease_renewed_at_utc)
+    assert renewed_at is not None
+    return mcp_workspace_intents_mod.format_utc(
+        renewed_at + timedelta(seconds=record.lease_seconds)
+    )
+
+
+def test_mcp_service_workspace_intent_registry_detects_concurrent_agents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_workspace_intents_mod, "_is_pid_alive", lambda pid: True)
+    first, second = _paired_blast_services(tmp_path)
 
     declared_first = first.manage_change_intent(
         action="declare",
@@ -2542,6 +2611,8 @@ def test_mcp_service_workspace_intent_registry_detects_concurrent_agents(
     assert workspace["total_agents"] == 1
     assert workspace_intents[0]["agent_label"] == "agent-a"
     assert workspace_intents[0]["is_own"] is False
+    assert workspace_intents[0]["ownership"] == "foreign_active"
+    assert "Do NOT kill" in str(workspace_intents[0]["escalation_hint"])
 
     hard_conflict = second.manage_change_intent(
         action="declare",
@@ -2570,13 +2641,170 @@ def test_mcp_service_workspace_intent_registry_detects_concurrent_agents(
         intent_id=first_intent_id,
     )
     assert rejected["action_taken"] == "rejected"
-    assert rejected["reason"] == "foreign_live_intent"
+    assert rejected["reason"] == "foreign_active"
+    assert "Do NOT kill" in str(rejected["escalation_hint"])
 
     cleared = first.manage_change_intent(
         action="clear",
         intent_id=first_intent_id,
     )
     assert cleared["workspace_cleared"] is True
+
+
+def test_mcp_service_workspace_intent_recovery_after_lease_expiry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_workspace_intents_mod, "_is_pid_alive", lambda pid: True)
+    first, second = _paired_blast_services(tmp_path)
+
+    declared = first.manage_change_intent(
+        action="declare",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="first agent edits pkg.a",
+    )
+    intent_id = str(declared["intent_id"])
+
+    rejected = second.manage_change_intent(
+        action="recover",
+        root=str(tmp_path),
+        run_id="abcdef12",
+        intent_id=intent_id,
+    )
+    assert rejected["action_taken"] == "recovery_rejected"
+    assert rejected["reason"] == "not_recoverable"
+    assert cast("dict[str, object]", rejected["details"])["ownership"] == (
+        "foreign_active"
+    )
+
+    found = mcp_workspace_intents_mod.find_workspace_intent(
+        root=tmp_path,
+        intent_id=intent_id,
+    )
+    assert found is not None
+    _, workspace_record = found
+    stale_record = replace(
+        workspace_record,
+        lease_renewed_at_utc=mcp_workspace_intents_mod.format_utc(
+            mcp_workspace_intents_mod.utc_now() - timedelta(minutes=10)
+        ),
+        lease_seconds=mcp_workspace_intents_mod.MIN_LEASE_SECONDS,
+    )
+    assert mcp_workspace_intents_mod.write_workspace_intent(
+        root=tmp_path,
+        record=stale_record,
+    )
+
+    workspace = second.manage_change_intent(
+        action="list_workspace",
+        root=str(tmp_path),
+    )
+    workspace_intents = cast(
+        "list[dict[str, object]]",
+        workspace["workspace_intents"],
+    )
+    assert workspace_intents[0]["ownership"] == "recoverable"
+    assert cast("list[dict[str, object]]", workspace["recovery_available"]) == [
+        {
+            "intent_id": intent_id,
+            "run_id": "abcdef12",
+            "scope_digest": stale_record.scope_digest,
+            "previous_agent_label": "agent-a",
+            "lease_expired_at_utc": _lease_expires_at(stale_record),
+            "hint": "Use action='recover' with matching run_id to reclaim.",
+        }
+    ]
+
+    recovered = second.manage_change_intent(
+        action="recover",
+        root=str(tmp_path),
+        run_id="abcdef12",
+        intent_id=intent_id,
+    )
+    assert recovered["action_taken"] == "recovered"
+    assert recovered["previous_owner"] == {
+        "agent_pid": 11111,
+        "agent_start_epoch": 100,
+        "agent_label": "agent-a",
+        "lease_renewed_at_utc": stale_record.lease_renewed_at_utc,
+    }
+    assert recovered["new_owner"] == {
+        "agent_pid": 22222,
+        "agent_start_epoch": 200,
+        "agent_label": "agent-b",
+    }
+    assert (
+        second.manage_change_intent(action="get", intent_id=intent_id)["status"]
+        == "active"
+    )
+
+    latest = mcp_workspace_intents_mod.find_workspace_intent(
+        root=tmp_path,
+        intent_id=intent_id,
+    )
+    assert latest is not None
+    _, latest_record = latest
+    assert latest_record.agent_pid == 22222
+    assert latest_record.agent_start_epoch == 200
+    assert latest_record.status == "active"
+
+
+def test_mcp_service_workspace_intent_recovery_rejects_digest_mismatch(
+    tmp_path: Path,
+) -> None:
+    first, second = _paired_blast_services(
+        tmp_path,
+        first_digest="digest-a",
+        second_digest="digest-b",
+    )
+
+    declared = first.manage_change_intent(
+        action="declare",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="first agent edits pkg.a",
+    )
+    intent_id = str(declared["intent_id"])
+    _stale_workspace_intent(tmp_path, intent_id=intent_id)
+
+    rejected = second.manage_change_intent(
+        action="recover",
+        root=str(tmp_path),
+        run_id="abcdef12",
+        intent_id=intent_id,
+    )
+
+    assert rejected["action_taken"] == "recovery_rejected"
+    assert rejected["reason"] == "report_digest_mismatch"
+
+
+def test_mcp_service_workspace_intent_get_renews_lease(tmp_path: Path) -> None:
+    service, intent_id, stale_record = _single_service_with_stale_intent(tmp_path)
+
+    service.manage_change_intent(action="get", intent_id=intent_id)
+
+    latest = mcp_workspace_intents_mod.find_workspace_intent(
+        root=tmp_path,
+        intent_id=intent_id,
+    )
+    assert latest is not None
+    _, latest_record = latest
+    assert latest_record.lease_renewed_at_utc != stale_record.lease_renewed_at_utc
+
+
+def test_mcp_service_patch_contract_renews_workspace_intent_lease(
+    tmp_path: Path,
+) -> None:
+    service, intent_id, stale_record = _single_service_with_stale_intent(tmp_path)
+
+    service.check_patch_contract(mode="budget", intent_id=intent_id)
+
+    latest = mcp_workspace_intents_mod.find_workspace_intent(
+        root=tmp_path,
+        intent_id=intent_id,
+    )
+    assert latest is not None
+    _, latest_record = latest
+    assert latest_record.lease_renewed_at_utc != stale_record.lease_renewed_at_utc
 
 
 def test_mcp_service_manage_change_intent_validation_expiry_and_prune(

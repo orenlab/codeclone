@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
-from datetime import datetime, timezone
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatchcase
 from pathlib import Path
 
@@ -32,18 +32,21 @@ from ._session_shared import (
     MCPServiceContractError,
 )
 from ._workspace_intents import (
+    IntentOwnership,
     WorkspaceIntentRecord,
     WorkspaceIntentStatus,
+    classify_intent_ownership,
     compute_scope_digest,
     detect_conflicts,
     expires_at,
     find_workspace_intent,
     format_utc,
     gc_workspace,
-    is_orphaned,
     list_workspace_intents,
     remove_workspace_intent,
     remove_workspace_record,
+    renew_workspace_intent_lease,
+    resolved_lease_seconds,
     resolved_ttl_seconds,
     stale_reason,
     update_workspace_intent_status,
@@ -53,6 +56,19 @@ from ._workspace_intents import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _RecoveryTarget:
+    root_path: Path
+    workspace_record: WorkspaceIntentRecord
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class _RecoveryRun:
+    record: MCPRunRecord
+    report_digest: str
+
+
 class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
@@ -60,6 +76,24 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
     _agent_pid: int
     _agent_start_epoch: int
     _agent_label: str
+
+    def get_blast_radius(
+        self,
+        *,
+        files: Sequence[str],
+        run_id: str | None = None,
+        depth: str = "direct",
+        include: Sequence[str] | None = None,
+    ) -> dict[str, object]:
+        record = self._runs.get(run_id)
+        payload = super().get_blast_radius(
+            files=files,
+            run_id=record.run_id,
+            depth=depth,
+            include=include,
+        )
+        self._renew_lease_for_run(record=record)
+        return payload
 
     def manage_change_intent(
         self,
@@ -106,6 +140,12 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 return self._list_workspace_intents(root=root)
             case "gc_workspace":
                 return self._gc_workspace_intents(root=root)
+            case "recover":
+                return self._recover_change_intent(
+                    root=root,
+                    run_id=run_id,
+                    intent_id=intent_id,
+                )
             case "reset_workspace":
                 return self._reset_workspace_intent(
                     root=root,
@@ -116,7 +156,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 raise MCPServiceContractError(
                     "Invalid value for action: "
                     f"{action!r}. Expected one of: check, clear, declare, "
-                    "gc_workspace, get, list_workspace, reset_workspace."
+                    "gc_workspace, get, list_workspace, recover, reset_workspace."
                 )
 
     def _declare_change_intent(
@@ -199,6 +239,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             new_scope=normalized_scope.to_payload(),
             existing=workspace_existing,
             own_pid=self._agent_pid,
+            own_start_epoch=self._agent_start_epoch,
         )
         payload = record_payload.to_payload(
             short_run_id=_helpers._short_run_id(record.run_id)
@@ -228,6 +269,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             run_id=run_id,
             intent_id=intent_id,
         )
+        self._renew_lease_if_active(record=record, intent=active_intent)
         if self._is_intent_expired(record=record, intent=active_intent):
             expired = replace(active_intent, status=IntentStatus.EXPIRED)
             with self._state_lock:
@@ -329,6 +371,8 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             with self._state_lock:
                 self._active_intents[intent.intent_id] = intent
             self._sync_workspace_intent_status(record=record, intent=intent)
+        else:
+            self._renew_lease_if_active(record=record, intent=intent)
         return intent.to_payload(short_run_id=_helpers._short_run_id(record.run_id))
 
     def _is_intent_expired(
@@ -373,6 +417,11 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             scope=scope_payload,
             scope_digest=compute_scope_digest(scope_payload),
             blast_radius_summary=dict(intent.blast_radius_summary or {}),
+            lease_renewed_at_utc=format_utc(declared_at),
+            lease_seconds=resolved_lease_seconds(
+                env_value=os.environ.get("CODECLONE_INTENT_LEASE_SECONDS"),
+            ),
+            report_digest=intent.report_digest,
         )
 
     def _sync_workspace_intent_status(
@@ -389,18 +438,50 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             new_status=intent.status.value,
         )
 
+    def _renew_lease_if_active(
+        self,
+        *,
+        record: MCPRunRecord,
+        intent: IntentRecord,
+    ) -> None:
+        try:
+            renew_workspace_intent_lease(
+                root=record.root,
+                pid=self._agent_pid,
+                start_epoch=self._agent_start_epoch,
+                intent_id=intent.intent_id,
+            )
+        except Exception:
+            return
+
+    def _renew_lease_for_run(self, *, record: MCPRunRecord) -> None:
+        with self._state_lock:
+            intents = tuple(
+                intent
+                for intent in self._active_intents.values()
+                if intent.run_id == record.run_id
+            )
+        for intent in intents:
+            self._renew_lease_if_active(record=record, intent=intent)
+
     def _list_workspace_intents(self, *, root: str | None) -> dict[str, object]:
         root_path = self._resolve_workspace_root(root)
         counts = workspace_status_counts(root=root_path)
-        records = list_workspace_intents(root=root_path)
+        records = list_workspace_intents(root=root_path, exclude_stale=False)
+        now = utc_now()
         return {
             "workspace_intents": [
                 item.to_payload(
                     own_pid=self._agent_pid,
                     own_start_epoch=self._agent_start_epoch,
+                    now=now,
                 )
                 for item in records
             ],
+            "recovery_available": self._recovery_available_payload(
+                records=records,
+                now=now,
+            ),
             "stale_count": counts["stale_count"],
             "orphaned_count": counts["orphaned_count"],
             "total_agents": len({item.agent_pid for item in records}),
@@ -410,6 +491,276 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
 
     def _gc_workspace_intents(self, *, root: str | None) -> dict[str, object]:
         return gc_workspace(root=self._resolve_workspace_root(root))
+
+    def _recover_change_intent(
+        self,
+        *,
+        root: str | None,
+        run_id: str | None,
+        intent_id: str | None,
+    ) -> dict[str, object]:
+        request_error = self._recovery_required_fields_error(
+            root=root,
+            run_id=run_id,
+            intent_id=intent_id,
+        )
+        if request_error is not None:
+            return request_error
+        assert root is not None
+        assert run_id is not None
+        assert intent_id is not None
+        target = self._recovery_target(root=root, intent_id=intent_id)
+        if isinstance(target, dict):
+            return target
+        recovery_run = self._recovery_run(run_id=run_id, target=target)
+        if isinstance(recovery_run, dict):
+            return recovery_run
+        recovered = self._activate_recovered_intent(
+            target=target,
+            recovery_run=recovery_run,
+        )
+        if isinstance(recovered, dict):
+            return recovered
+        workspace_update = self._rewrite_recovered_workspace_record(
+            target=target,
+            recovery_run=recovery_run,
+            recovered=recovered,
+        )
+        if isinstance(workspace_update, dict):
+            return workspace_update
+        recovered_at, previous_removed = workspace_update
+        return self._recovered_payload(
+            target=target,
+            recovery_run=recovery_run,
+            recovered=recovered,
+            recovered_at=recovered_at,
+            previous_removed=previous_removed,
+        )
+
+    def _recovery_required_fields_error(
+        self,
+        *,
+        root: str | None,
+        run_id: str | None,
+        intent_id: str | None,
+    ) -> dict[str, object] | None:
+        if intent_id is None:
+            return self._recovery_rejected(
+                intent_id=None,
+                reason="missing_intent_id",
+                message="action='recover' requires intent_id.",
+            )
+        if run_id is None:
+            return self._recovery_rejected(
+                intent_id=intent_id,
+                reason="missing_run_id",
+                message="action='recover' requires run_id.",
+            )
+        if root is None:
+            return self._recovery_rejected(
+                intent_id=intent_id,
+                reason="missing_root",
+                message="action='recover' requires root.",
+            )
+        return None
+
+    def _recovery_target(
+        self,
+        *,
+        root: str,
+        intent_id: str,
+    ) -> _RecoveryTarget | dict[str, object]:
+        root_path = self._resolve_workspace_root(root)
+        found = find_workspace_intent(root=root_path, intent_id=intent_id)
+        if found is None:
+            return self._recovery_rejected(
+                intent_id=intent_id,
+                reason="not_found",
+                message=f"No workspace intent found for intent_id: {intent_id}.",
+            )
+        _, workspace_record = found
+        now = utc_now()
+        ownership = classify_intent_ownership(
+            workspace_record,
+            own_pid=self._agent_pid,
+            own_start_epoch=self._agent_start_epoch,
+            now=now,
+        )
+        if ownership not in {IntentOwnership.RECOVERABLE, IntentOwnership.OWN_STALE}:
+            return self._recovery_rejected(
+                intent_id=intent_id,
+                reason="not_recoverable",
+                message=self._recovery_rejection_message(ownership),
+                details={"ownership": ownership.value},
+            )
+        return _RecoveryTarget(
+            root_path=root_path,
+            workspace_record=workspace_record,
+            now=now,
+        )
+
+    def _recovery_run(
+        self,
+        *,
+        run_id: str,
+        target: _RecoveryTarget,
+    ) -> _RecoveryRun | dict[str, object]:
+        workspace_record = target.workspace_record
+        try:
+            record = self._runs.get(run_id)
+        except MCPRunNotFoundError:
+            return self._recovery_rejected(
+                intent_id=workspace_record.intent_id,
+                reason="run_not_available",
+                message=(
+                    f"Run {run_id} is not available in this session. "
+                    "Run analyze_repository first."
+                ),
+            )
+        report_digest = self._report_digest_value(record)
+        if report_digest != workspace_record.report_digest:
+            return self._recovery_rejected(
+                intent_id=workspace_record.intent_id,
+                reason="report_digest_mismatch",
+                message=(
+                    "Report digest does not match. The analysis run may have "
+                    "changed since the intent was declared."
+                ),
+                details={
+                    "expected": workspace_record.report_digest,
+                    "actual": report_digest,
+                },
+            )
+        if (
+            compute_scope_digest(workspace_record.scope)
+            != workspace_record.scope_digest
+        ):
+            return self._recovery_rejected(
+                intent_id=workspace_record.intent_id,
+                reason="scope_digest_mismatch",
+                message="Workspace intent scope digest does not match.",
+            )
+        return _RecoveryRun(record=record, report_digest=report_digest)
+
+    def _activate_recovered_intent(
+        self,
+        *,
+        target: _RecoveryTarget,
+        recovery_run: _RecoveryRun,
+    ) -> IntentRecord | dict[str, object]:
+        workspace_record = target.workspace_record
+        with self._state_lock:
+            if workspace_record.intent_id in self._active_intents:
+                return self._recovery_rejected(
+                    intent_id=workspace_record.intent_id,
+                    reason="already_active",
+                    message=(
+                        f"Intent {workspace_record.intent_id} is already active "
+                        "in this session."
+                    ),
+                )
+            try:
+                scope = normalize_intent_scope(workspace_record.scope)
+            except ValueError as exc:
+                return self._recovery_rejected(
+                    intent_id=workspace_record.intent_id,
+                    reason="invalid_scope",
+                    message=str(exc),
+                )
+            recovered = IntentRecord(
+                intent_id=workspace_record.intent_id,
+                run_id=recovery_run.record.run_id,
+                report_digest=recovery_run.report_digest,
+                status=IntentStatus.ACTIVE,
+                declared_at_utc=workspace_record.declared_at_utc,
+                scope=scope,
+                intent_description=workspace_record.intent,
+                expected_effects=(),
+                guards=DEFAULT_INTENT_GUARDS,
+                blast_radius_summary=dict(workspace_record.blast_radius_summary),
+            )
+            self._active_intents[workspace_record.intent_id] = recovered
+            self._runs.pin(recovery_run.record.run_id)
+        return recovered
+
+    def _rewrite_recovered_workspace_record(
+        self,
+        *,
+        target: _RecoveryTarget,
+        recovery_run: _RecoveryRun,
+        recovered: IntentRecord,
+    ) -> tuple[str, bool] | dict[str, object]:
+        workspace_record = target.workspace_record
+        recovered_at = format_utc(target.now)
+        updated_workspace_record = replace(
+            workspace_record,
+            agent_pid=self._agent_pid,
+            agent_start_epoch=self._agent_start_epoch,
+            agent_label=self._agent_label,
+            status=WorkspaceIntentStatus.ACTIVE.value,
+            lease_renewed_at_utc=recovered_at,
+            report_digest=recovery_run.report_digest,
+        )
+        if not write_workspace_intent(
+            root=target.root_path,
+            record=updated_workspace_record,
+        ):
+            self._rollback_recovered_intent(recovered)
+            return self._recovery_rejected(
+                intent_id=workspace_record.intent_id,
+                reason="workspace_rewrite_failed",
+                message="Failed to rewrite workspace intent owner.",
+            )
+        previous_removed = True
+        if (
+            workspace_record.agent_pid != self._agent_pid
+            or workspace_record.agent_start_epoch != self._agent_start_epoch
+        ):
+            previous_removed = remove_workspace_record(
+                root=target.root_path,
+                record=workspace_record,
+            )
+        return recovered_at, previous_removed
+
+    def _rollback_recovered_intent(self, recovered: IntentRecord) -> None:
+        with self._state_lock:
+            self._active_intents.pop(recovered.intent_id, None)
+            self._runs.unpin(recovered.run_id)
+
+    def _recovered_payload(
+        self,
+        *,
+        target: _RecoveryTarget,
+        recovery_run: _RecoveryRun,
+        recovered: IntentRecord,
+        recovered_at: str,
+        previous_removed: bool,
+    ) -> dict[str, object]:
+        workspace_record = target.workspace_record
+        return {
+            "intent_id": recovered.intent_id,
+            "action_taken": "recovered",
+            "run_id": _helpers._short_run_id(recovery_run.record.run_id),
+            "scope": recovered.scope.to_payload(),
+            "previous_owner": {
+                "agent_pid": workspace_record.agent_pid,
+                "agent_start_epoch": workspace_record.agent_start_epoch,
+                "agent_label": workspace_record.agent_label,
+                "lease_renewed_at_utc": workspace_record.lease_renewed_at_utc,
+            },
+            "new_owner": {
+                "agent_pid": self._agent_pid,
+                "agent_start_epoch": self._agent_start_epoch,
+                "agent_label": self._agent_label,
+            },
+            "recovered_at_utc": recovered_at,
+            "previous_workspace_record_removed": previous_removed,
+            "next_steps": [
+                "Run manage_change_intent(action='get') to inspect recovered state.",
+                "Run check_patch_contract(mode='budget') to verify patch budget.",
+                "Continue editing within declared scope.",
+            ],
+        }
 
     def _reset_workspace_intent(
         self,
@@ -427,29 +778,42 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         if found is None:
             raise MCPServiceContractError(f"Unknown workspace intent id: {intent_id}")
         _, workspace_record = found
-        reason = stale_reason(workspace_record)
-        is_own = (
-            workspace_record.agent_pid == self._agent_pid
-            and workspace_record.agent_start_epoch == self._agent_start_epoch
+        now = utc_now()
+        ownership = classify_intent_ownership(
+            workspace_record,
+            own_pid=self._agent_pid,
+            own_start_epoch=self._agent_start_epoch,
+            now=now,
         )
-        if reason in {"expired", "orphaned"}:
+        if ownership in {IntentOwnership.EXPIRED, IntentOwnership.RECOVERABLE}:
             removed = remove_workspace_record(root=root_path, record=workspace_record)
+            reason = (
+                "expired"
+                if ownership == IntentOwnership.EXPIRED
+                else stale_reason(workspace_record) or "recoverable"
+            )
             return {
                 "intent_id": workspace_record.intent_id,
                 "action_taken": "removed" if removed else "failed",
                 "reason": reason,
             }
-        if not is_own and not is_orphaned(workspace_record):
+        if ownership == IntentOwnership.FOREIGN_ACTIVE:
             return {
                 "intent_id": workspace_record.intent_id,
                 "action_taken": "rejected",
-                "reason": "foreign_live_intent",
+                "reason": "foreign_active",
+                "ownership": ownership.value,
                 "agent_pid": workspace_record.agent_pid,
                 "agent_start_epoch": workspace_record.agent_start_epoch,
                 "agent_label": workspace_record.agent_label,
+                "escalation_hint": (
+                    "This intent belongs to a live process with a valid lease. "
+                    "Do NOT kill the process. Ask the user to confirm whether "
+                    "this is an abandoned session or a parallel agent."
+                ),
                 "message": (
-                    "Intent belongs to a live agent. Coordinate with the owning "
-                    "agent or user before resetting it."
+                    "Intent has a valid lease from a live process. Coordinate "
+                    "with the owning agent or user before resetting it."
                 ),
             }
         ttl = resolved_ttl_seconds(
@@ -472,6 +836,77 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             "new_status": latest_record.status,
             "new_expires_at_utc": latest_record.expires_at_utc,
         }
+
+    def _recovery_available_payload(
+        self,
+        *,
+        records: Sequence[WorkspaceIntentRecord],
+        now: datetime,
+    ) -> list[dict[str, object]]:
+        available: list[dict[str, object]] = []
+        for record in records:
+            ownership = classify_intent_ownership(
+                record,
+                own_pid=self._agent_pid,
+                own_start_epoch=self._agent_start_epoch,
+                now=now,
+            )
+            if ownership != IntentOwnership.RECOVERABLE:
+                continue
+            if self._optional_run_record(record.run_id) is None:
+                continue
+            available.append(
+                {
+                    "intent_id": record.intent_id,
+                    "run_id": _helpers._short_run_id(record.run_id),
+                    "scope_digest": record.scope_digest,
+                    "previous_agent_label": record.agent_label,
+                    "lease_expired_at_utc": self._lease_expired_at_utc(record),
+                    "hint": ("Use action='recover' with matching run_id to reclaim."),
+                }
+            )
+        return sorted(
+            available,
+            key=lambda item: (
+                str(item["previous_agent_label"]),
+                str(item["intent_id"]),
+            ),
+        )
+
+    def _lease_expired_at_utc(self, record: WorkspaceIntentRecord) -> str | None:
+        renewed_at = _parse_utc(record.lease_renewed_at_utc)
+        if renewed_at is None:
+            return None
+        return format_utc(renewed_at + timedelta(seconds=record.lease_seconds))
+
+    def _recovery_rejected(
+        self,
+        *,
+        intent_id: str | None,
+        reason: str,
+        message: str,
+        details: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "intent_id": intent_id,
+            "action_taken": "recovery_rejected",
+            "reason": reason,
+            "message": message,
+            "details": dict(details or {}),
+        }
+
+    def _recovery_rejection_message(self, ownership: IntentOwnership) -> str:
+        if ownership == IntentOwnership.FOREIGN_ACTIVE:
+            return (
+                "Intent has a valid lease from a live process. Cannot recover. "
+                "Use action='list_workspace' to inspect, then coordinate with "
+                "the user."
+            )
+        if ownership == IntentOwnership.EXPIRED:
+            return "Intent has expired (TTL). Declare a new intent instead."
+        if ownership == IntentOwnership.OWN_ACTIVE:
+            return "Intent is already actively owned by this session."
+        return "Intent is not recoverable."
 
     def _resolve_workspace_root(self, root: str | None) -> Path:
         if root is not None:

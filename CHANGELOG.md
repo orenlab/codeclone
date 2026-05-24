@@ -31,6 +31,10 @@
 - Add CLI controller query modes: `--blast-radius FILE [FILE...]` for
   terminal pre-change boundary review and `--patch-verify` for trusted-baseline
   patch verification with `ci`, `strict`, and `relaxed` profiles.
+- Add lease-aware workspace intent recovery for MCP change control. Intent
+  records now carry renewable ownership leases, `list_workspace` distinguishes
+  own/recoverable/foreign-active records, and `manage_change_intent` can
+  explicitly recover stale intents without killing another MCP process.
 
 ### Internal
 
@@ -47,6 +51,9 @@
   controller features are under development.
 - Keep CLI controller query modes read-only by skipping baseline, report, and
   analysis-cache writes.
+- Keep workspace intent registry upgrades versioned and backward-readable:
+  registry v2 records add lease and report-digest fields, while v1 records are
+  accepted with conservative lease defaults until natural expiry.
 
 ## [2.0.2] - 2026-05-19
 

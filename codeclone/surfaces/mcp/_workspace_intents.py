@@ -19,11 +19,15 @@ from typing import Final
 from ...cache.integrity import canonical_json
 from ...utils.json_io import read_json_object, write_json_document_atomically
 
-REGISTRY_VERSION: Final = "1"
+LEGACY_REGISTRY_VERSION: Final = "1"
+REGISTRY_VERSION: Final = "2"
 REGISTRY_DIR_PARTS: Final = (".cache", "codeclone", "intents")
 DEFAULT_TTL_SECONDS: Final = 3600
 MIN_TTL_SECONDS: Final = 60
 MAX_TTL_SECONDS: Final = 86400
+DEFAULT_LEASE_SECONDS: Final = 300
+MIN_LEASE_SECONDS: Final = 60
+MAX_LEASE_SECONDS: Final = 3600
 _HEX_DIGEST_LENGTH: Final = 64
 
 
@@ -34,6 +38,14 @@ class WorkspaceIntentStatus(str, Enum):
     VIOLATED = "violated"
     EXPIRED = "expired"
     ORPHANED = "orphaned"
+
+
+class IntentOwnership(str, Enum):
+    OWN_ACTIVE = "own_active"
+    OWN_STALE = "own_stale"
+    RECOVERABLE = "recoverable"
+    FOREIGN_ACTIVE = "foreign_active"
+    EXPIRED = "expired"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +63,9 @@ class WorkspaceIntentRecord:
     scope: dict[str, object]
     scope_digest: str
     blast_radius_summary: dict[str, object]
+    lease_renewed_at_utc: str
+    lease_seconds: int
+    report_digest: str
 
     def unsigned_payload(self) -> dict[str, object]:
         return {
@@ -68,6 +83,9 @@ class WorkspaceIntentRecord:
             "scope": self.scope,
             "scope_digest": self.scope_digest,
             "blast_radius_summary": self.blast_radius_summary,
+            "lease_renewed_at_utc": self.lease_renewed_at_utc,
+            "lease_seconds": self.lease_seconds,
+            "report_digest": self.report_digest,
         }
 
     def signed_payload(self) -> dict[str, object]:
@@ -80,12 +98,77 @@ class WorkspaceIntentRecord:
         *,
         own_pid: int | None = None,
         own_start_epoch: int | None = None,
+        now: datetime | None = None,
     ) -> dict[str, object]:
-        payload = self.unsigned_payload()
-        payload["is_own"] = self.agent_pid == own_pid and (
-            own_start_epoch is None or self.agent_start_epoch == own_start_epoch
+        current_time = now or utc_now()
+        ownership = classify_intent_ownership(
+            self,
+            own_pid=own_pid or 0,
+            own_start_epoch=own_start_epoch or 0,
+            now=current_time,
         )
+        payload = self.unsigned_payload()
+        payload["ownership"] = ownership.value
+        payload["is_own"] = ownership in {
+            IntentOwnership.OWN_ACTIVE,
+            IntentOwnership.OWN_STALE,
+        }
+        lease_expiry = _lease_expiry(self)
+        if lease_expiry is not None:
+            remaining = int((lease_expiry - current_time).total_seconds())
+            payload["lease_expires_in_seconds"] = max(0, remaining)
+        if ownership == IntentOwnership.FOREIGN_ACTIVE:
+            payload["escalation_hint"] = (
+                "This intent belongs to a live process with a valid lease. "
+                "Do NOT kill the process. Ask the user to confirm whether "
+                "this is an abandoned session or a parallel agent."
+            )
         return payload
+
+
+def classify_intent_ownership(
+    record: WorkspaceIntentRecord,
+    *,
+    own_pid: int,
+    own_start_epoch: int,
+    now: datetime,
+) -> IntentOwnership:
+    expires = _parse_utc(record.expires_at_utc)
+    if expires is None or expires <= now:
+        return IntentOwnership.EXPIRED
+
+    is_own = record.agent_pid == own_pid and record.agent_start_epoch == own_start_epoch
+    lease_expiry = _lease_expiry(record)
+    lease_valid = lease_expiry is not None and lease_expiry > now
+    if is_own:
+        return IntentOwnership.OWN_ACTIVE if lease_valid else IntentOwnership.OWN_STALE
+    if not lease_valid:
+        return IntentOwnership.RECOVERABLE
+    if not _is_pid_alive(record.agent_pid):
+        return IntentOwnership.RECOVERABLE
+    return IntentOwnership.FOREIGN_ACTIVE
+
+
+def _lease_expiry(record: WorkspaceIntentRecord) -> datetime | None:
+    renewed_at = _parse_utc(record.lease_renewed_at_utc)
+    if renewed_at is None:
+        return None
+    return renewed_at + timedelta(seconds=record.lease_seconds)
+
+
+def _is_lease_expired(record: WorkspaceIntentRecord) -> bool:
+    lease_expiry = _lease_expiry(record)
+    return lease_expiry is None or lease_expiry <= utc_now()
+
+
+def resolved_lease_seconds(value: object = None, *, env_value: object = None) -> int:
+    return _resolved_seconds(
+        value=value,
+        env_value=env_value,
+        default=DEFAULT_LEASE_SECONDS,
+        minimum=MIN_LEASE_SECONDS,
+        maximum=MAX_LEASE_SECONDS,
+    )
 
 
 def registry_dir(root: Path) -> Path:
@@ -127,16 +210,33 @@ def format_utc(value: datetime) -> str:
 
 
 def resolved_ttl_seconds(value: object = None, *, env_value: object = None) -> int:
+    return _resolved_seconds(
+        value=value,
+        env_value=env_value,
+        default=DEFAULT_TTL_SECONDS,
+        minimum=MIN_TTL_SECONDS,
+        maximum=MAX_TTL_SECONDS,
+    )
+
+
+def _resolved_seconds(
+    *,
+    value: object,
+    env_value: object,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
     raw = value if value is not None else env_value
     if raw is None:
-        return DEFAULT_TTL_SECONDS
+        return default
     if isinstance(raw, bool):
-        return DEFAULT_TTL_SECONDS
+        return default
     try:
         parsed = int(str(raw).strip())
     except ValueError:
-        return DEFAULT_TTL_SECONDS
-    return min(MAX_TTL_SECONDS, max(MIN_TTL_SECONDS, parsed))
+        return default
+    return min(maximum, max(minimum, parsed))
 
 
 def expires_at(*, declared_at: datetime, ttl_seconds: int) -> str:
@@ -168,7 +268,8 @@ def validate_workspace_record(data: object) -> WorkspaceIntentRecord | None:
         return None
     if not verify_intent_integrity(data):
         return None
-    if data.get("registry_version") != REGISTRY_VERSION:
+    version = data.get("registry_version")
+    if version not in {REGISTRY_VERSION, LEGACY_REGISTRY_VERSION}:
         return None
     intent_id = _required_string(data.get("intent_id"))
     agent_pid = _positive_int(data.get("agent_pid"))
@@ -183,22 +284,45 @@ def validate_workspace_record(data: object) -> WorkspaceIntentRecord | None:
     scope = _valid_scope(data.get("scope"))
     scope_digest = data.get("scope_digest")
     blast_radius_summary = _dict_payload(data.get("blast_radius_summary"))
-    if (
-        intent_id is None
-        or agent_pid is None
-        or agent_start_epoch is None
-        or run_id is None
-        or declared_at_utc is None
-        or expires_at_utc is None
-        or ttl_seconds is None
-        or status not in _valid_status_values()
-        or intent is None
-        or scope is None
-        or not _is_hex_digest(scope_digest)
-        or blast_radius_summary is None
+    lease_fields = _lease_fields_for_version(
+        data=data,
+        version=str(version),
+        declared_at_utc=declared_at_utc,
+    )
+    if lease_fields is None:
+        return None
+    lease_renewed_at_utc, lease_seconds, report_digest = lease_fields
+    if _record_required_value_missing(
+        intent_id,
+        agent_pid,
+        agent_start_epoch,
+        run_id,
+        declared_at_utc,
+        expires_at_utc,
+        ttl_seconds,
+        intent,
+        blast_radius_summary,
     ):
         return None
-    if _parse_utc(declared_at_utc) is None or _parse_utc(expires_at_utc) is None:
+    assert intent_id is not None
+    assert agent_pid is not None
+    assert agent_start_epoch is not None
+    assert run_id is not None
+    assert declared_at_utc is not None
+    assert expires_at_utc is not None
+    assert ttl_seconds is not None
+    assert intent is not None
+    assert blast_radius_summary is not None
+    if status not in _valid_status_values() or scope is None:
+        return None
+    assert status is not None
+    if not _is_hex_digest(scope_digest):
+        return None
+    if not _valid_record_dates(
+        declared_at_utc,
+        expires_at_utc,
+        lease_renewed_at_utc,
+    ):
         return None
     if compute_scope_digest(scope) != str(scope_digest):
         return None
@@ -216,7 +340,37 @@ def validate_workspace_record(data: object) -> WorkspaceIntentRecord | None:
         scope=scope,
         scope_digest=str(scope_digest),
         blast_radius_summary=blast_radius_summary,
+        lease_renewed_at_utc=lease_renewed_at_utc,
+        lease_seconds=lease_seconds,
+        report_digest=report_digest,
     )
+
+
+def _lease_fields_for_version(
+    *,
+    data: Mapping[str, object],
+    version: str,
+    declared_at_utc: str | None,
+) -> tuple[str, int, str] | None:
+    if version == REGISTRY_VERSION:
+        lease_renewed_at_utc = _required_string(data.get("lease_renewed_at_utc"))
+        lease_seconds = _valid_lease_seconds(data.get("lease_seconds"))
+        report_digest = _required_string(data.get("report_digest"))
+    else:
+        lease_renewed_at_utc = declared_at_utc
+        lease_seconds = DEFAULT_LEASE_SECONDS
+        report_digest = _string_value(data.get("report_digest"))
+    if lease_renewed_at_utc is None or lease_seconds is None or report_digest is None:
+        return None
+    return lease_renewed_at_utc, lease_seconds, report_digest
+
+
+def _record_required_value_missing(*values: object) -> bool:
+    return any(value is None for value in values)
+
+
+def _valid_record_dates(*values: str) -> bool:
+    return all(_parse_utc(value) is not None for value in values)
 
 
 def write_workspace_intent(*, root: Path, record: WorkspaceIntentRecord) -> bool:
@@ -253,6 +407,36 @@ def update_workspace_intent_status(
     if record.agent_pid != pid or record.agent_start_epoch != start_epoch:
         return False
     updated = _updated_record(record, new_status=new_status, ttl_seconds=ttl_seconds)
+    try:
+        write_json_document_atomically(
+            path=path,
+            document=updated.signed_payload(),
+            sort_keys=True,
+            trailing_newline=True,
+        )
+    except OSError:
+        return False
+    return True
+
+
+def renew_workspace_intent_lease(
+    *,
+    root: Path,
+    pid: int,
+    start_epoch: int,
+    intent_id: str,
+) -> bool:
+    found = find_workspace_intent(root=root, intent_id=intent_id)
+    if found is None:
+        return False
+    path, record = found
+    if record.agent_pid != pid or record.agent_start_epoch != start_epoch:
+        return False
+    now = utc_now()
+    expires = _parse_utc(record.expires_at_utc)
+    if expires is None or expires <= now:
+        return False
+    updated = replace(record, lease_renewed_at_utc=format_utc(now))
     try:
         write_json_document_atomically(
             path=path,
@@ -337,11 +521,19 @@ def detect_conflicts(
     new_scope: Mapping[str, object],
     existing: Sequence[WorkspaceIntentRecord],
     own_pid: int,
+    own_start_epoch: int,
 ) -> list[dict[str, object]]:
     new_allowed, new_related = _scope_file_sets(new_scope)
     conflicts: list[dict[str, object]] = []
+    now = utc_now()
     for record in existing:
-        if record.agent_pid == own_pid or stale_reason(record) is not None:
+        ownership = classify_intent_ownership(
+            record,
+            own_pid=own_pid,
+            own_start_epoch=own_start_epoch,
+            now=now,
+        )
+        if ownership != IntentOwnership.FOREIGN_ACTIVE:
             continue
         existing_allowed, existing_related = _scope_file_sets(record.scope)
         hard_overlap = tuple(sorted(new_allowed.intersection(existing_allowed)))
@@ -392,7 +584,7 @@ def gc_workspace(*, root: Path) -> dict[str, object]:
             if _unlink(path):
                 corrupted_filenames.append(path.name)
             continue
-        reason = stale_reason(record)
+        reason = _gc_removal_reason(record)
         if reason is None:
             continue
         if _unlink(path):
@@ -409,6 +601,18 @@ def gc_workspace(*, root: Path) -> dict[str, object]:
     }
 
 
+def _gc_removal_reason(record: WorkspaceIntentRecord) -> str | None:
+    reason = stale_reason(record)
+    if reason == "lease_expired" and not _ttl_expired(record):
+        return None
+    return reason
+
+
+def _ttl_expired(record: WorkspaceIntentRecord) -> bool:
+    expires = _parse_utc(record.expires_at_utc)
+    return expires is None or expires <= utc_now()
+
+
 def is_stale(record: WorkspaceIntentRecord) -> bool:
     return stale_reason(record) is not None
 
@@ -423,6 +627,8 @@ def stale_reason(record: WorkspaceIntentRecord) -> str | None:
         return "expired"
     if is_orphaned(record):
         return "orphaned"
+    if _is_lease_expired(record):
+        return "lease_expired"
     return None
 
 
@@ -458,6 +664,7 @@ def _updated_record(
         declared_at_utc=format_utc(declared_at),
         expires_at_utc=expires_at(declared_at=declared_at, ttl_seconds=ttl_seconds),
         ttl_seconds=ttl_seconds,
+        lease_renewed_at_utc=format_utc(declared_at),
         status=new_status,
     )
 
@@ -597,6 +804,15 @@ def _positive_int(value: object) -> int | None:
     return value
 
 
+def _valid_lease_seconds(value: object) -> int | None:
+    parsed = _positive_int(value)
+    if parsed is None:
+        return None
+    if parsed < MIN_LEASE_SECONDS or parsed > MAX_LEASE_SECONDS:
+        return None
+    return parsed
+
+
 def _is_hex_digest(value: object) -> bool:
     if not isinstance(value, str) or len(value) != _HEX_DIGEST_LENGTH:
         return False
@@ -674,12 +890,18 @@ def _overlap_type(*, hard: bool, soft: bool) -> str:
 
 
 __all__ = [
+    "DEFAULT_LEASE_SECONDS",
     "DEFAULT_TTL_SECONDS",
+    "LEGACY_REGISTRY_VERSION",
+    "MAX_LEASE_SECONDS",
     "MAX_TTL_SECONDS",
+    "MIN_LEASE_SECONDS",
     "MIN_TTL_SECONDS",
     "REGISTRY_VERSION",
+    "IntentOwnership",
     "WorkspaceIntentRecord",
     "WorkspaceIntentStatus",
+    "classify_intent_ownership",
     "compute_intent_digest",
     "compute_scope_digest",
     "detect_conflicts",
@@ -695,6 +917,8 @@ __all__ = [
     "registry_dir",
     "remove_workspace_intent",
     "remove_workspace_record",
+    "renew_workspace_intent_lease",
+    "resolved_lease_seconds",
     "resolved_ttl_seconds",
     "safe_remove_own_intent",
     "stale_reason",

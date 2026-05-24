@@ -56,6 +56,9 @@ def _record(
         scope=scope_payload,
         scope_digest=workspace_intents.compute_scope_digest(scope_payload),
         blast_radius_summary={"radius_level": "low"},
+        lease_renewed_at_utc=workspace_intents.format_utc(declared_at),
+        lease_seconds=workspace_intents.DEFAULT_LEASE_SECONDS,
+        report_digest="digest-a",
     )
 
 

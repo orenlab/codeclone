@@ -218,6 +218,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     )
     assert "not NLP" in str(tools["validate_review_claims"].description)
     assert "list_workspace" in str(tools["manage_change_intent"].description)
+    assert "recover" in str(tools["manage_change_intent"].description)
     assert ".cache/codeclone/intents/" in str(tools["manage_change_intent"].description)
     assert "bounded guidance, not a full manual" in str(tools["help"].description)
     assert "workflow, analysis_profile, suppressions, baseline" in str(

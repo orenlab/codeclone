@@ -18,6 +18,7 @@ queries:
 | Patch contract | Live in `2.1.0a1` | MCP `check_patch_contract`, CLI `--patch-verify` |
 | Review receipt | Live in `2.1.0a1` | MCP `create_review_receipt` |
 | Workspace intent registry | Live in `2.1.0a1` | MCP `manage_change_intent` |
+| Lease and recovery | Live in `2.1.0a1` | MCP `manage_change_intent` |
 | Claim guard | Live in `2.1.0a1` | MCP `validate_review_claims` |
 
 ## Contract
@@ -57,6 +58,9 @@ report output flags and baseline update flags.
 
 1. Call `manage_change_intent(action="list_workspace", root="/abs/repo")` to
    see active intents from other agents before analysis.
+   If it returns `ownership="recoverable"` for a matching run, use
+   `manage_change_intent(action="recover")` instead of killing another MCP
+   process or redeclaring blindly.
 2. Run `analyze_repository` or `analyze_changed_paths`.
 3. Declare scope with `manage_change_intent(action="declare")`.
 4. If `concurrent_intents` is non-empty, narrow scope or coordinate before
@@ -108,14 +112,24 @@ coordination:
 - `list_workspace`: list active workspace intent records from all agents for a
   repository root.
 - `gc_workspace`: remove expired, orphaned, or corrupted registry records.
-- `reset_workspace`: recover an own, expired, or orphaned intent. Foreign live
-  intents are rejected and require coordination.
+- `recover`: explicitly reclaim a stale leased intent when the caller has the
+  matching run and report digest in the current MCP session.
+- `reset_workspace`: reset an own intent or remove expired/recoverable
+  registry records. Foreign active intents are rejected and require
+  coordination.
 
 Registry files live under `.cache/codeclone/intents/` and are protected with a
 SHA-256 integrity digest over canonical JSON. This detects accidental
 corruption, not malicious tampering by a user with write access. Conflicts are
 advisory: hard overlap means two agents claimed the same primary file; soft
 overlap means primary files overlap related context.
+
+Each registry record has a TTL and a shorter renewable lease. TTL is the hard
+maximum lifetime of the record. The lease is the ownership freshness signal:
+active MCP interactions renew it, while detached processes stop renewing and
+become recoverable after the lease window. A foreign active record has a live
+lease and should be coordinated with the user; CodeClone does not ask agents to
+kill the owning process.
 
 ## Review Receipt Payload
 

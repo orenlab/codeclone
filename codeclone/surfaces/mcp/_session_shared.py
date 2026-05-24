@@ -748,6 +748,11 @@ _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "root=...) before analysis so active agents are visible early."
             ),
             (
+                "Recover ownership only when list_workspace marks an intent "
+                "recoverable and the matching run is available; do not kill "
+                "foreign active MCP processes."
+            ),
+            (
                 "Run analyze_repository, then declare intent with allowed_files, "
                 "allowed_related, and forbidden paths before editing."
             ),
@@ -765,8 +770,9 @@ _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "intent."
             ),
             (
-                "Use reset_workspace for interrupted own, expired, or orphaned "
-                "intents; foreign live intents require coordination."
+                "Use reset_workspace for interrupted own, expired, or "
+                "recoverable registry records; foreign active intents require "
+                "coordination."
             ),
         ),
         recommended_tools=(
