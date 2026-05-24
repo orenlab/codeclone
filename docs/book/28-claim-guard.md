@@ -6,72 +6,136 @@ Define the `validate_review_claims` MCP tool in the CodeClone `2.1` release
 line.
 
 Claim guard keeps review text disciplined. It validates cited claims against
-semantic flags already present in stored MCP runs. It does not perform free-form
-NLP, source analysis, or fact checking.
+semantic flags already present in stored MCP runs. It does not perform
+free-form NLP, source analysis, or fact checking.
+
+---
 
 ## Public surface
 
-- MCP tool: `validate_review_claims`
-- service method: `CodeCloneMCPService.validate_review_claims`
-- session mixin: `codeclone/surfaces/mcp/_session_claim_guard_mixin.py`
-- pure validator: `codeclone/surfaces/mcp/_claim_guard.py`
+| Artifact       | Path                                                   |
+|----------------|--------------------------------------------------------|
+| MCP tool       | `validate_review_claims`                               |
+| Service method | `CodeCloneMCPService.validate_review_claims`           |
+| Session mixin  | `codeclone/surfaces/mcp/_session_claim_guard_mixin.py` |
+| Pure validator | `codeclone/surfaces/mcp/_claim_guard.py`               |
+
+---
+
+## Validation pipeline
+
+```mermaid
+graph LR
+    T["Review text"] --> E["Extract citations<br/><small>finding IDs, metric families</small>"]
+    E --> W["Text window<br/><small>±80 chars around citation</small>"]
+    W --> P["Pattern checks<br/><small>P-1 … P-5</small>"]
+    P --> V{"Violations?"}
+    V -->|"yes"| INV["valid: false"]
+    V -->|"no"| OK["valid: true"]
+
+    style INV fill:#fee2e2
+    style OK fill:#f0fdf4
+```
+
+The pipeline is fully deterministic:
+
+1. Resolve the stored run.
+2. Index canonical and short finding IDs from the canonical report.
+3. Read metric-family gate semantics from the metric registry.
+4. Extract citations from the supplied text.
+5. Check keyword patterns inside a bounded text window around each citation.
+
+---
 
 ## Parameters
 
-| Parameter | Type | Default | Meaning |
-|-----------|------|---------|---------|
-| `text` | `str` | required | Markdown, plain text, or JSON string to validate. |
-| `run_id` | `str \| None` | latest | Stored MCP run whose report semantics are used. |
-| `require_citations` | `bool` | `true` | Warn when no known finding ids or metric family names are cited. |
+| Parameter           | Type          | Default  | Meaning                                                         |
+|---------------------|---------------|----------|-----------------------------------------------------------------|
+| `text`              | `str`         | required | Markdown, plain text, or JSON string to validate                |
+| `run_id`            | `str \| None` | latest   | Stored MCP run whose report semantics are used                  |
+| `require_citations` | `bool`        | `true`   | Warn when no known finding IDs or metric family names are cited |
 
+!!! info "Text limits"
 Text must be non-empty and at most `50,000` characters.
+
+---
 
 ## Contract
 
-The tool is read-only. It does not mutate source files, baselines, reports,
-analysis cache, review markers, or change intents.
+The tool is **read-only**. It does not mutate source files, baselines,
+reports, analysis cache, review markers, or change intents.
 
-Validation is deterministic:
+### Response shape
 
-1. Resolve the stored run.
-2. Index canonical and short finding ids from the canonical report.
-3. Read metric-family gate semantics from CodeClone's metric registry.
-4. Extract citations from the supplied text.
-5. Check conservative keyword patterns inside a bounded sentence/window around
-   each citation.
+| Field                 | Type   | Meaning                              |
+|-----------------------|--------|--------------------------------------|
+| `valid`               | `bool` | `true` when no violations were found |
+| `citations_found`     | `int`  | Number of recognized citations       |
+| `violations`          | `list` | Deterministic overclaim records      |
+| `warnings`            | `list` | Missing or unknown citations         |
+| `validated_citations` | `list` | Per-citation validity summary        |
 
-The response contains:
+Warnings do not make the response invalid. Only violations set
+`valid=false`.
 
-- `valid`: `true` when no violations were found.
-- `citations_found`: number of recognized citations.
-- `violations`: deterministic overclaim records.
-- `warnings`: missing or unknown citations.
-- `validated_citations`: per-citation validity summary.
-
-Warnings do not make the response invalid.
+---
 
 ## Patterns
 
-| Pattern | Meaning |
-|---------|---------|
-| `P-1` | Security Surfaces were described as vulnerabilities or exploitability. |
-| `P-2` | A report-only metric family was described as a CI failure or blocking gate. |
-| `P-3` | A finding with `novelty="known"` was described as new or introduced. |
-| `P-4` | Dead-code certainty was claimed despite runtime reachability evidence. |
-| `P-5` | A finding was claimed fixed/resolved before a post-patch run was available. |
+Five deterministic overclaim patterns, each checking keyword proximity
+around cited finding IDs or metric family names:
+
+### P-1: Security surface overclaim
+
+Security Surfaces described as vulnerabilities or exploitability.
+Security Surfaces are a **report-only boundary inventory** — they show
+where security-relevant capabilities exist, not whether they are
+exploitable.
+
+### P-2: Gate overclaim
+
+A report-only metric family described as a CI failure or blocking gate.
+Not all metric families participate in gating; report-only families are
+informational.
+
+### P-3: Regression overclaim
+
+A finding with `novelty="known"` described as new or introduced. Known
+findings are accepted baseline debt, not new regressions.
+
+### P-4: Dead code certainty overclaim
+
+Dead-code certainty claimed despite runtime reachability evidence. When
+framework reachability patterns match a dead-code candidate, certainty
+claims are invalid.
+
+### P-5: Fix overclaim
+
+A finding claimed as fixed or resolved before a post-patch run is
+available. Without a comparison run, fix claims cannot be verified.
+
+---
 
 ## Non-goals
 
-Claim guard is not:
+!!! warning "What claim guard is not"
+- Not a vulnerability scanner
+- Not a CI gate
+- Not an LLM fact checker
+- Not proof that uncited text is correct
+- Not a replacement for `check_patch_contract`
 
-- a vulnerability scanner
-- a CI gate
-- an LLM fact checker
-- a proof that uncited text is correct
-- a replacement for `check_patch_contract`
+---
 
 ## Locked by tests
 
 - `tests/test_mcp_service.py`
 - `tests/test_mcp_server.py`
 - `tests/test_mcp_tool_schema_snapshot.py`
+
+---
+
+## See also
+
+- [20-mcp-interface.md](20-mcp-interface.md) — full MCP tool and resource contract
+- [MCP deep dive](../mcp.md) — architecture, workflows, prompt patterns
