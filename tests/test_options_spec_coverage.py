@@ -28,6 +28,8 @@ def _cli_sample(option: OptionSpec) -> tuple[tuple[str, ...], object]:
         return ((option.flags[0],), False)
     if option.value_type is int:
         return ((option.flags[0], "7"), 7)
+    if option.nargs == "+":
+        return ((option.flags[0], "sample-value"), ["sample-value"])
     return ((option.flags[0], "sample-value"), "sample-value")
 
 

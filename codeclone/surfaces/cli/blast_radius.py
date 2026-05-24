@@ -182,7 +182,6 @@ def render_blast_radius(
             console=console,
             message="Blast radius requires a canonical report document.",
         )
-        return int(ExitCode.CONTRACT_ERROR)
 
     origin_paths = _validated_origin_paths(
         report_document=report_document,
