@@ -32,6 +32,8 @@ before the first edit — when an agent declares what it intends to change —
 maps the structural blast radius, and verifies explicit before/after runs
 against the patch contract. It also generates auditable review receipts; the
 claim guard validates cited review claims against canonical report semantics.
+The CLI exposes `--blast-radius` and `--patch-verify` for the same highest-value
+controller checks in terminal workflows.
 
 The same analysis pipeline powers CLI reports, CI checks, the MCP server, and
 native IDE/agent clients — so humans and AI agents operate on identical,
@@ -64,6 +66,7 @@ Docs: <https://orenlab.github.io/codeclone/book/24-structural-change-controller/
 - **Patch contract** — pre-edit regression budget and post-edit boundary verification over explicit before/after runs
 - **Review receipt** — auditable artifact linking intent, scope, patch verification, and structural delta
 - **Claim guard** — citation-based validation of review text against canonical report semantics
+- **CLI controller queries** — blast radius before edits and patch verification before push
 
 **Baseline governance**
 - **Regression isolation** — separates accepted **legacy** debt from **new regressions**; CI fails only on what changed
@@ -95,6 +98,8 @@ codeclone . --html             # HTML report
 codeclone . --html --open-html-report
 codeclone . --json --md --sarif --text
 codeclone . --ci               # CI mode
+codeclone . --blast-radius codeclone/core/parser.py
+codeclone . --patch-verify --diff-against HEAD~1
 ```
 
 Run without installing:

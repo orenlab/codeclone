@@ -43,6 +43,8 @@ from . import startup as cli_startup
 from . import state as cli_state
 from . import summary as cli_summary
 from . import tips as cli_tips
+from .attrs import bool_attr
+from .patch_verify import VALID_STRICTNESS_PROFILES
 from .types import CLIArgsLike, StatusConsole, require_status_console
 
 __all__ = [
@@ -68,6 +70,7 @@ __all__ = [
     "_resolve_metrics_baseline_state",
     "_rich_progress_symbols",
     "_run_analysis_stages",
+    "_validate_controller_query_flags",
     "_validate_report_ui_flags",
     "_write_report_outputs",
     "analyze",
@@ -163,6 +166,89 @@ def _make_console(*, no_color: bool) -> object:
 console: object = _make_plain_console()
 _set_console(console)
 LEGACY_CACHE_PATH = cli_state.LEGACY_CACHE_PATH
+
+
+def _controller_query_mode(args: object) -> bool:
+    return bool_attr(args, "blast_radius") or bool_attr(args, "patch_verify")
+
+
+def _validate_controller_query_flags(
+    *,
+    args: object,
+    report_outputs_requested: bool = False,
+    strictness_explicit: bool = False,
+) -> None:
+    printer = _console()
+    blast_radius = bool_attr(args, "blast_radius")
+    patch_verify = bool_attr(args, "patch_verify")
+    strictness = str(getattr(args, "strictness", "ci") or "ci")
+    if strictness not in VALID_STRICTNESS_PROFILES:
+        expected = ", ".join(sorted(VALID_STRICTNESS_PROFILES))
+        printer.print(
+            ui.fmt_contract_error(
+                f"Invalid --strictness value: {strictness!r}. Expected {expected}."
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if strictness_explicit and not patch_verify:
+        printer.print(
+            ui.fmt_contract_error("--strictness is only valid with --patch-verify.")
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if blast_radius and patch_verify:
+        printer.print(
+            ui.fmt_contract_error("Use --blast-radius or --patch-verify, not both.")
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if not (blast_radius or patch_verify):
+        return
+    if bool_attr(args, "update_baseline") or bool_attr(args, "update_metrics_baseline"):
+        printer.print(
+            ui.fmt_contract_error("Controller query modes cannot update baselines.")
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if report_outputs_requested:
+        printer.print(
+            ui.fmt_contract_error(
+                "Controller query modes are terminal-only and cannot be combined "
+                "with report output flags."
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+
+
+def _run_controller_query(
+    *,
+    args: CLIArgsLike,
+    report_document: dict[str, object] | None,
+    root_path: Path,
+    analysis_result: AnalysisResult,
+    diff_context: cli_post_run.DiffContext,
+    baseline_state: cli_baseline_state.CloneBaselineState,
+) -> int | None:
+    if bool_attr(args, "blast_radius"):
+        from .blast_radius import render_blast_radius
+
+        return render_blast_radius(
+            console=_console(),
+            report_document=report_document,
+            files=tuple(getattr(args, "blast_radius", ()) or ()),
+            root_path=root_path,
+            quiet=args.quiet,
+        )
+    if not bool_attr(args, "patch_verify"):
+        return None
+    from .patch_verify import render_patch_verify
+
+    return render_patch_verify(
+        console=_console(),
+        args=args,
+        strictness=str(getattr(args, "strictness", "ci") or "ci"),
+        analysis=analysis_result,
+        diff_context=diff_context,
+        baseline_state=baseline_state,
+        quiet=args.quiet,
+    )
 
 
 def print_banner(*, root: Path | None = None) -> None:
@@ -273,6 +359,9 @@ def _main_impl() -> None:
     explicit_cli_dests = collect_explicit_cli_dests(ap, argv=raw_argv)
     report_path_origins = _report_path_origins(raw_argv)
     report_generated_at_utc = cli_meta_mod._current_report_timestamp_utc()
+    strictness_explicit = any(
+        arg == "--strictness" or arg.startswith("--strictness=") for arg in raw_argv
+    )
     cache_path_from_args = any(
         arg in {"--cache-dir", "--cache-path"}
         or arg.startswith(("--cache-dir=", "--cache-path="))
@@ -297,6 +386,10 @@ def _main_impl() -> None:
         args=args,
         config_values=pyproject_config,
         explicit_cli_dests=explicit_cli_dests,
+    )
+    _validate_controller_query_flags(
+        args=args,
+        strictness_explicit=strictness_explicit,
     )
     git_diff_ref = _validate_changed_scope_args(args=args)
     changed_paths = (
@@ -337,6 +430,19 @@ def _main_impl() -> None:
         report_generated_at_utc=report_generated_at_utc,
     )
     _validate_report_ui_flags(args=args, output_paths=output_paths)
+    _validate_controller_query_flags(
+        args=args,
+        report_outputs_requested=bool(
+            output_paths.html
+            or output_paths.json
+            or output_paths.md
+            or output_paths.sarif
+            or output_paths.text
+            or bool_attr(args, "open_html_report")
+            or bool_attr(args, "timestamped_report_paths")
+        ),
+        strictness_explicit=strictness_explicit,
+    )
     cache_path = _resolve_cache_path(
         root_path=root_path,
         args=args,
@@ -427,35 +533,36 @@ def _main_impl() -> None:
         discovery_result=discovery_result,
         processing_result=processing_result,
     )
-    _print_summary(
-        console=_console(),
-        quiet=args.quiet,
-        files_found=discovery_result.files_found,
-        files_analyzed=processing_result.files_analyzed,
-        cache_hits=discovery_result.cache_hits,
-        files_skipped=processing_result.files_skipped,
-        analyzed_lines=summary_counts["analyzed_lines"],
-        analyzed_functions=summary_counts["analyzed_functions"],
-        analyzed_methods=summary_counts["analyzed_methods"],
-        analyzed_classes=summary_counts["analyzed_classes"],
-        func_clones_count=analysis_result.func_clones_count,
-        block_clones_count=analysis_result.block_clones_count,
-        segment_clones_count=analysis_result.segment_clones_count,
-        suppressed_golden_fixture_groups=len(
-            getattr(analysis_result, "suppressed_clone_groups", ())
-        ),
-        suppressed_segment_groups=analysis_result.suppressed_segment_groups,
-        new_clones_count=diff_context.new_clones_count,
-    )
-    print_metrics_if_available(
-        args=args,
-        analysis=analysis_result,
-        metrics_diff=diff_context.metrics_diff,
-        api_surface_diff_available=diff_context.api_surface_diff_available,
-        console=_console(),
-        build_metrics_snapshot_fn=build_metrics_snapshot,
-        print_metrics_fn=_print_metrics,
-    )
+    if not _controller_query_mode(args):
+        _print_summary(
+            console=_console(),
+            quiet=args.quiet,
+            files_found=discovery_result.files_found,
+            files_analyzed=processing_result.files_analyzed,
+            cache_hits=discovery_result.cache_hits,
+            files_skipped=processing_result.files_skipped,
+            analyzed_lines=summary_counts["analyzed_lines"],
+            analyzed_functions=summary_counts["analyzed_functions"],
+            analyzed_methods=summary_counts["analyzed_methods"],
+            analyzed_classes=summary_counts["analyzed_classes"],
+            func_clones_count=analysis_result.func_clones_count,
+            block_clones_count=analysis_result.block_clones_count,
+            segment_clones_count=analysis_result.segment_clones_count,
+            suppressed_golden_fixture_groups=len(
+                getattr(analysis_result, "suppressed_clone_groups", ())
+            ),
+            suppressed_segment_groups=analysis_result.suppressed_segment_groups,
+            new_clones_count=diff_context.new_clones_count,
+        )
+        print_metrics_if_available(
+            args=args,
+            analysis=analysis_result,
+            metrics_diff=diff_context.metrics_diff,
+            api_surface_diff_available=diff_context.api_surface_diff_available,
+            console=_console(),
+            build_metrics_snapshot_fn=build_metrics_snapshot,
+            print_metrics_fn=_print_metrics,
+        )
 
     report_artifacts = report(
         boot=boot,
@@ -469,8 +576,18 @@ def _main_impl() -> None:
         metrics_diff=diff_context.metrics_diff,
         coverage_adoption_diff_available=diff_context.coverage_adoption_diff_available,
         api_surface_diff_available=diff_context.api_surface_diff_available,
-        include_report_document=bool(changed_paths),
+        include_report_document=bool(changed_paths) or _controller_query_mode(args),
     )
+    controller_exit_code = _run_controller_query(
+        args=args,
+        report_document=report_artifacts.report_document,
+        root_path=root_path,
+        analysis_result=analysis_result,
+        diff_context=diff_context,
+        baseline_state=baseline_state,
+    )
+    if controller_exit_code is not None:
+        sys.exit(controller_exit_code)
     changed_clone_gate = resolve_changed_clone_gate(
         args=args,
         report_document=report_artifacts.report_document,

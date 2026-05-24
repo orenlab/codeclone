@@ -1,22 +1,24 @@
 # Structural Change Controller
 
-CodeClone v2.1 adds an MCP control layer for AI-assisted edits. The controller
-is not a second analyzer. It composes over stored MCP runs and the canonical
-report contract.
+CodeClone v2.1 adds structural change control for AI-assisted edits. The MCP
+surface owns session-aware agent workflows; the CLI exposes the two
+human-facing query modes that are useful at a terminal. Neither path is a
+second analyzer: both compose over the canonical report contract.
 
 ## Status
 
 The v2.1 alpha currently includes intent, blast-radius, patch-contract checks,
-review receipts, workspace intent visibility, and claim guard:
+review receipts, workspace intent visibility, claim guard, and CLI controller
+queries:
 
-| Phase | Status | MCP surface |
-|-------|--------|-------------|
-| Intent declaration | Live in `2.1.0a1` | `manage_change_intent` |
-| Blast radius | Live in `2.1.0a1` | `get_blast_radius` |
-| Patch contract | Live in `2.1.0a1` | `check_patch_contract` |
-| Review receipt | Live in `2.1.0a1` | `create_review_receipt` |
-| Workspace intent registry | Live in `2.1.0a1` | `manage_change_intent` |
-| Claim guard | Live in `2.1.0a1` | `validate_review_claims` |
+| Phase | Status | Surface |
+|-------|--------|---------|
+| Intent declaration | Live in `2.1.0a1` | MCP `manage_change_intent` |
+| Blast radius | Live in `2.1.0a1` | MCP `get_blast_radius`, CLI `--blast-radius` |
+| Patch contract | Live in `2.1.0a1` | MCP `check_patch_contract`, CLI `--patch-verify` |
+| Review receipt | Live in `2.1.0a1` | MCP `create_review_receipt` |
+| Workspace intent registry | Live in `2.1.0a1` | MCP `manage_change_intent` |
+| Claim guard | Live in `2.1.0a1` | MCP `validate_review_claims` |
 
 ## Contract
 
@@ -28,6 +30,28 @@ review receipts, workspace intent visibility, and claim guard:
 - Tools derive responses from existing run/report facts rather than LLM
   inference.
 - Report-only context is review context, not an edit prohibition.
+
+## CLI Controller Queries
+
+The CLI exposes read-only terminal projections for humans:
+
+```bash
+codeclone . --blast-radius codeclone/core/parser.py
+codeclone . --patch-verify --diff-against HEAD~1
+codeclone . --patch-verify --strictness relaxed
+```
+
+`--blast-radius` runs normal analysis, builds the canonical report in memory,
+and renders the same dependent/context split as `get_blast_radius`.
+
+`--patch-verify` uses the trusted clone baseline as the accepted before-state
+and the current working tree as after-state. It checks new clone regressions and
+the selected gate profile. `ci` is the default; `strict` applies tighter
+controller budgets; `relaxed` reports violations but exits `0`.
+
+CLI controller queries are terminal-only and read-only with respect to source
+files, baselines, reports, and analysis cache data. They are incompatible with
+report output flags and baseline update flags.
 
 ## Pre-Change Workflow
 

@@ -68,6 +68,18 @@ HELP_PATHS_FROM_GIT_DIFF = (
     "Shorthand for --changed-only using `git diff --name-only <REF>`.\n"
     "Useful for PR and CI review flows."
 )
+HELP_BLAST_RADIUS = (
+    "Show structural blast radius for the given files.\n"
+    "Runs analysis first, then projects dependents, clone cohorts,\n"
+    "risk signals, and do-not-touch boundaries."
+)
+HELP_PATCH_VERIFY = (
+    "Verify the current patch against the trusted baseline budget.\n"
+    "Runs analysis, checks baseline regressions and gate status, then exits."
+)
+HELP_STRICTNESS = (
+    "Strictness profile for --patch-verify: ci, strict, or relaxed.\nDefault: ci."
+)
 HELP_CACHE_PATH = (
     "Path to the cache file.\n"
     "If FILE is omitted, uses <root>/.cache/codeclone/cache.json."
@@ -213,6 +225,8 @@ HELP_DEBUG = (
 SUMMARY_TITLE = "Summary"
 METRICS_TITLE = "Metrics"
 CHANGED_SCOPE_TITLE = "Changed Scope"
+BLAST_RADIUS_TITLE = "Blast Radius"
+PATCH_VERIFY_TITLE = "Patch Verify"
 
 CLI_LAYOUT_MAX_WIDTH = 80
 
@@ -252,6 +266,14 @@ SUMMARY_COMPACT_SECURITY_SURFACES = (
 )
 SUMMARY_COMPACT_CHANGED_SCOPE = (
     "Changed  paths={paths}  findings={findings}  new={new}  known={known}"
+)
+SUMMARY_COMPACT_BLAST_RADIUS = (
+    "blast-radius: {level} | dependents={dependents} cohorts={cohorts} "
+    "cycles={cycles} do-not-touch={do_not_touch}"
+)
+SUMMARY_COMPACT_PATCH_VERIFY = (
+    "patch-verify: {status} | health={health_before}->{health_after} "
+    "regressions={regressions} gates={gate_status}"
 )
 
 WARN_SUMMARY_ACCOUNTING_MISMATCH = (
@@ -937,6 +959,40 @@ def fmt_changed_scope_compact(
         findings=findings,
         new=new,
         known=known,
+    )
+
+
+def fmt_blast_radius_compact(
+    *,
+    level: str,
+    dependents: int,
+    cohorts: int,
+    cycles: int,
+    do_not_touch: int,
+) -> str:
+    return SUMMARY_COMPACT_BLAST_RADIUS.format(
+        level=level,
+        dependents=dependents,
+        cohorts=cohorts,
+        cycles=cycles,
+        do_not_touch=do_not_touch,
+    )
+
+
+def fmt_patch_verify_compact(
+    *,
+    status: str,
+    health_before: int,
+    health_after: int,
+    regressions: int,
+    gate_status: str,
+) -> str:
+    return SUMMARY_COMPACT_PATCH_VERIFY.format(
+        status=status,
+        health_before=health_before,
+        health_after=health_after,
+        regressions=regressions,
+        gate_status=gate_status,
     )
 
 

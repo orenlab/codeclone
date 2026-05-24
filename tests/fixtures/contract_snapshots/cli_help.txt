@@ -1,9 +1,10 @@
 usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--processes PROCESSES] [--changed-only | --no-changed-only]
                  [--diff-against GIT_REF] [--paths-from-git-diff GIT_REF]
-                 [--cache-path [FILE]] [--cache-dir [FILE]]
-                 [--max-cache-size-mb MB] [--baseline [FILE]]
-                 [--max-baseline-size-mb MB]
+                 [--blast-radius FILE [FILE ...]] [--patch-verify]
+                 [--strictness LEVEL] [--cache-path [FILE]]
+                 [--cache-dir [FILE]] [--max-cache-size-mb MB]
+                 [--baseline [FILE]] [--max-baseline-size-mb MB]
                  [--update-baseline | --no-update-baseline]
                  [--metrics-baseline [FILE]]
                  [--update-metrics-baseline | --no-update-metrics-baseline]
@@ -56,6 +57,14 @@ Analysis:
   --paths-from-git-diff GIT_REF
                         Shorthand for --changed-only using `git diff --name-only <REF>`.
                         Useful for PR and CI review flows.
+  --blast-radius FILE [FILE ...]
+                        Show structural blast radius for the given files.
+                        Runs analysis first, then projects dependents, clone cohorts,
+                        risk signals, and do-not-touch boundaries.
+  --patch-verify        Verify the current patch against the trusted baseline budget.
+                        Runs analysis, checks baseline regressions and gate status, then exits.
+  --strictness LEVEL    Strictness profile for --patch-verify: ci, strict, or relaxed.
+                        Default: ci.
   --cache-path [FILE]   Path to the cache file.
                         If FILE is omitted, uses <root>/.cache/codeclone/cache.json.
   --cache-dir [FILE]    Legacy alias for --cache-path.

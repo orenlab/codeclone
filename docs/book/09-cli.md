@@ -27,6 +27,7 @@ CLI modes:
 - normal mode
 - gating mode (`--ci`, `--fail-on-new`, explicit metric gates)
 - baseline update mode (`--update-baseline`, `--update-metrics-baseline`)
+- controller query mode (`--blast-radius`, `--patch-verify`)
 
 Summary metrics include:
 
@@ -66,6 +67,15 @@ Refs:
     - `--changed-only`
     - `--diff-against`
     - `--paths-from-git-diff`
+- Controller query mode is terminal-only:
+    - `--blast-radius FILE [FILE...]` builds the canonical report in memory and
+      renders the same blast-radius projection used by MCP.
+    - `--patch-verify` compares the current run against the trusted clone
+      baseline, previews gate status, and exits `3` for blocking violations in
+      `ci` or `strict` mode.
+    - `--strictness {ci,strict,relaxed}` is valid only with `--patch-verify`.
+    - controller query mode does not write reports, baselines, or analysis
+      cache data.
 - Contract errors use `CONTRACT ERROR:`.
 - Gating failures use `GATING FAILURE:`.
 - Internal errors use `fmt_internal_error` and include traceback only in debug mode.
@@ -83,6 +93,10 @@ Refs:
 - `--open-html-report` requires `--html`.
 - `--timestamped-report-paths` requires at least one requested report output.
 - `--changed-only` requires a diff source.
+- `--blast-radius` and `--patch-verify` are mutually exclusive.
+- Controller query mode is incompatible with report output flags and baseline
+  update flags.
+- `--patch-verify` requires a trusted clone baseline.
 - Browser-open failure after successful HTML write is warning-only.
 - In gating mode, unreadable source files are contract errors with higher priority than clone/metric gate failures.
 
@@ -104,10 +118,13 @@ Refs:
 | Invalid CLI flag                                                  | contract             | `2`  |
 | Invalid output extension/path                                     | contract             | `2`  |
 | Invalid changed-scope flag combination                            | contract             | `2`  |
+| Invalid controller query flag combination                         | contract             | `2`  |
+| `--patch-verify` without trusted baseline                         | contract             | `2`  |
 | Baseline untrusted in CI/gating                                   | contract             | `2`  |
 | Coverage/API regression gate without required baseline capability | contract             | `2`  |
 | Unreadable source in CI/gating                                    | contract             | `2`  |
 | New clones with `--fail-on-new`                                   | gating               | `3`  |
+| Blocking `--patch-verify` contract violation                      | gating               | `3`  |
 | Threshold or metrics gate exceeded                                | gating               | `3`  |
 | Unexpected exception                                              | internal             | `5`  |
 

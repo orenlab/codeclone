@@ -35,6 +35,22 @@ from .console import PlainConsole
 from .types import require_status_console
 
 
+def _save_cache_after_analysis(
+    *,
+    cache: Cache,
+    analysis_result: AnalysisResult,
+    cache_update_segment_projection_fn: Callable[[Cache, AnalysisResult], None],
+    printer: object,
+) -> None:
+    cache_update_segment_projection_fn(cache, analysis_result)
+    try:
+        cache.save()
+    except CacheError as exc:
+        require_status_console(printer).print(
+            ui.fmt_cli_runtime_warning(ui.fmt_cache_save_failed(exc))
+        )
+
+
 def run_analysis_stages(
     *,
     args: object,
@@ -65,6 +81,9 @@ def run_analysis_stages(
 
     printer = require_status_console(cli_state.get_console())
     use_status = not bool_attr(args, "quiet") and not bool_attr(args, "no_progress")
+    write_cache = not (
+        bool_attr(args, "blast_radius") or bool_attr(args, "patch_verify")
+    )
 
     try:
         if use_status:
@@ -154,22 +173,26 @@ def run_analysis_stages(
                 discovery=discovery_result,
                 processing=processing_result,
             )
-            cache_update_segment_projection_fn(cache, analysis_result)
-            try:
-                cache.save()
-            except CacheError as exc:
-                printer.print(ui.fmt_cli_runtime_warning(ui.fmt_cache_save_failed(exc)))
+            if write_cache:
+                _save_cache_after_analysis(
+                    cache=cache,
+                    analysis_result=analysis_result,
+                    cache_update_segment_projection_fn=cache_update_segment_projection_fn,
+                    printer=printer,
+                )
     else:
         analysis_result = analyze_fn(
             boot=boot,
             discovery=discovery_result,
             processing=processing_result,
         )
-        cache_update_segment_projection_fn(cache, analysis_result)
-        try:
-            cache.save()
-        except CacheError as exc:
-            printer.print(ui.fmt_cli_runtime_warning(ui.fmt_cache_save_failed(exc)))
+        if write_cache:
+            _save_cache_after_analysis(
+                cache=cache,
+                analysis_result=analysis_result,
+                cache_update_segment_projection_fn=cache_update_segment_projection_fn,
+                printer=printer,
+            )
 
     coverage_join = getattr(analysis_result, "coverage_join", None)
     if (

@@ -28,6 +28,9 @@
   vulnerabilities, report-only families called CI failures, known findings
   called new regressions, dead-code certainty despite runtime reachability
   evidence, and fixes claimed before post-patch verification.
+- Add CLI controller query modes: `--blast-radius FILE [FILE...]` for
+  terminal pre-change boundary review and `--patch-verify` for trusted-baseline
+  patch verification with `ci`, `strict`, and `relaxed` profiles.
 
 ### Internal
 
@@ -42,6 +45,8 @@
   pruning cannot drop the declared before-run before verification.
 - Mark the package as `2.1.0a1` with the PyPI alpha classifier while v2.1
   controller features are under development.
+- Keep CLI controller query modes read-only by skipping baseline, report, and
+  analysis-cache writes.
 
 ## [2.0.2] - 2026-05-19
 

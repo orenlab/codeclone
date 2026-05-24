@@ -78,6 +78,9 @@ class CLIArgsLike(Protocol):
     changed_only: bool
     diff_against: str | None
     paths_from_git_diff: str | None
+    blast_radius: tuple[str, ...] | list[str] | None
+    patch_verify: bool
+    strictness: str
     skip_metrics: bool
     skip_dead_code: bool
     skip_dependencies: bool

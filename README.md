@@ -31,7 +31,7 @@ combines clone detection, code-quality metrics, and baseline-aware CI gating wit
 governance for AI coding agents.
 
 In the current v2.1 alpha, CodeClone records the declared intent before the first edit, maps the
-structural blast radius, verifies explicit before/after runs against the patch contract, and
+structural blast radius, verifies patches against the patch contract, and
 generates auditable review receipts. It also exposes an advisory workspace intent registry so
 parallel agents can see overlapping edit scopes before they start, and validates cited review
 claims against the canonical report so agents do not overstate report-only signals or known debt.
@@ -82,6 +82,7 @@ Change controller docs: [Structural Change Controller](https://orenlab.github.io
 - **Patch contract** — pre-edit regression budget and post-edit boundary verification over explicit before/after runs
 - **Review receipt** — auditable artifact linking intent, scope, patch verification, and structural delta
 - **Claim guard** — citation-based validation of review text against canonical report semantics
+- **CLI controller queries** — `--blast-radius` before edits and `--patch-verify` before push
 
 **Baseline governance**
 
@@ -172,6 +173,10 @@ codeclone . --changed-only --diff-against main
 
 # shorthand: diff source for changed-scope review
 codeclone . --paths-from-git-diff HEAD~1
+
+# structural change controller queries
+codeclone . --blast-radius codeclone/core/parser.py
+codeclone . --patch-verify --diff-against HEAD~1
 ```
 
 </details>
