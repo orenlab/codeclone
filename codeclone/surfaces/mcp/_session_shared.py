@@ -129,6 +129,7 @@ HelpTopic = Literal[
     "latest_runs",
     "review_state",
     "changed_scope",
+    "change_control",
 ]
 HelpDetail = Literal["compact", "normal"]
 MetricsDetailFamily = Literal[
@@ -236,6 +237,7 @@ _VALID_HELP_TOPICS = frozenset(
         "latest_runs",
         "review_state",
         "changed_scope",
+        "change_control",
     }
 )
 _VALID_HELP_DETAILS = frozenset({"compact", "normal"})
@@ -373,6 +375,10 @@ _SUPPRESSIONS_DOC_LINK: Final[tuple[str, str]] = (
     f"{_MCP_BOOK_URL}19-inline-suppressions/",
 )
 _MCP_GUIDE_DOC_LINK: Final[tuple[str, str]] = ("MCP usage guide", _MCP_GUIDE_URL)
+_CHANGE_CONTROL_DOC_LINK: Final[tuple[str, str]] = (
+    "Structural change controller",
+    f"{_MCP_BOOK_URL}24-structural-change-controller/",
+)
 _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
     "workflow": MCPHelpTopicSpec(
         summary=(
@@ -730,6 +736,65 @@ _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             ),
         ),
     ),
+    "change_control": MCPHelpTopicSpec(
+        summary=(
+            "Change control is the edit-time MCP workflow: inspect concurrent "
+            "workspace intents, declare scope, read blast radius and patch "
+            "budget, then verify the finished patch."
+        ),
+        key_points=(
+            (
+                "Start with manage_change_intent(action='list_workspace', "
+                "root=...) before analysis so active agents are visible early."
+            ),
+            (
+                "Run analyze_repository, then declare intent with allowed_files, "
+                "allowed_related, and forbidden paths before editing."
+            ),
+            (
+                "Use get_blast_radius and check_patch_contract(mode='budget') "
+                "as the pre-edit boundary."
+            ),
+            (
+                "Hard overlaps mean two agents claimed the same primary file; "
+                "soft overlaps mean primary files overlap related context."
+            ),
+            (
+                "After editing, re-run analysis, check intent scope, verify "
+                "the patch contract, and clear the intent."
+            ),
+            (
+                "Use reset_workspace for interrupted own, expired, or orphaned "
+                "intents; foreign live intents require coordination."
+            ),
+        ),
+        recommended_tools=(
+            "manage_change_intent",
+            "analyze_repository",
+            "get_blast_radius",
+            "check_patch_contract",
+            "create_review_receipt",
+        ),
+        doc_links=(_CHANGE_CONTROL_DOC_LINK, _MCP_INTERFACE_DOC_LINK),
+        warnings=(
+            (
+                "The workspace registry is advisory coordination state under "
+                ".cache/codeclone/intents/, not analysis truth."
+            ),
+            (
+                "Do not treat review_context as a ban or concurrent_intents as "
+                "an automatic blocker without human or orchestrator policy."
+            ),
+        ),
+        anti_patterns=(
+            "Editing files before declaring intent.",
+            "Silently expanding scope after a hard overlap or scope violation.",
+            (
+                "Resetting a foreign live intent instead of coordinating with "
+                "the owning agent or user."
+            ),
+        ),
+    ),
 }
 
 
@@ -1022,6 +1087,7 @@ class CodeCloneMCPRunStore:
         self._lock = RLock()
         self._records: OrderedDict[str, MCPRunRecord] = OrderedDict()
         self._latest_run_id: str | None = None
+        self._pinned_run_ids: set[str] = set()
 
     def register(self, record: MCPRunRecord) -> MCPRunRecord:
         with self._lock:
@@ -1029,8 +1095,7 @@ class CodeCloneMCPRunStore:
             self._records[record.run_id] = record
             self._records.move_to_end(record.run_id)
             self._latest_run_id = record.run_id
-            while len(self._records) > self._history_limit:
-                self._records.popitem(last=False)
+            self._prune_unpinned_locked()
         return record
 
     def get(self, run_id: str | None = None) -> MCPRunRecord:
@@ -1060,12 +1125,43 @@ class CodeCloneMCPRunStore:
         with self._lock:
             return tuple(self._records.values())
 
+    def pin(self, run_id: str) -> str:
+        with self._lock:
+            resolved_run_id = self._resolve_run_id(run_id)
+            if resolved_run_id is None:
+                raise MCPRunNotFoundError("No matching MCP analysis run is available.")
+            self._pinned_run_ids.add(resolved_run_id)
+            return resolved_run_id
+
+    def unpin(self, run_id: str) -> None:
+        with self._lock:
+            resolved_run_id = self._resolve_run_id(run_id) or run_id
+            self._pinned_run_ids.discard(resolved_run_id)
+            self._prune_unpinned_locked()
+
     def clear(self) -> tuple[str, ...]:
         with self._lock:
             removed_run_ids = tuple(self._records.keys())
             self._records.clear()
+            self._pinned_run_ids.clear()
             self._latest_run_id = None
             return removed_run_ids
+
+    def _prune_unpinned_locked(self) -> None:
+        while self._unpinned_count_locked() > self._history_limit:
+            for run_id in tuple(self._records):
+                if run_id in self._pinned_run_ids:
+                    continue
+                self._records.pop(run_id, None)
+                if self._latest_run_id == run_id:
+                    self._latest_run_id = next(reversed(self._records), None)
+                break
+            else:
+                break
+        self._pinned_run_ids.intersection_update(self._records)
+
+    def _unpinned_count_locked(self) -> int:
+        return sum(1 for run_id in self._records if run_id not in self._pinned_run_ids)
 
 
 __all__ = [

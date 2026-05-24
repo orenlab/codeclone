@@ -44,8 +44,13 @@ _SERVER_INSTRUCTIONS = (
     "bounded metrics drill-down, and prefer generate_pr_summary(format='markdown') "
     "unless machine JSON is required. Coverage join accepts external Cobertura "
     "XML as a current-run signal and does not become baseline truth. Pass an "
-    "absolute repository root to analysis tools. This server never updates "
-    "baselines and never mutates source files."
+    "absolute repository root to analysis tools. For file edits, call "
+    "manage_change_intent(action='list_workspace', root=...) before analysis, "
+    "then analyze, declare intent, inspect blast radius and patch budget, edit "
+    "within scope, re-analyze, verify, and clear intent. If concurrent intents "
+    "overlap, narrow scope or coordinate. This server never updates baselines "
+    "and never mutates source files, analysis cache, or reports; it may write "
+    "ephemeral workspace coordination state under .cache/codeclone/intents/."
 )
 _MCP_INSTALL_HINT = (
     "CodeClone MCP support requires the optional 'mcp' extra. "
@@ -441,7 +446,8 @@ def build_mcp_server(
             "canonical doc links. Use this when workflow or contract meaning "
             "is unclear. This is bounded guidance, not a full manual. "
             "Supported topics: workflow, analysis_profile, suppressions, "
-            "baseline, coverage, latest_runs, review_state, changed_scope."
+            "baseline, coverage, latest_runs, review_state, changed_scope, "
+            "change_control."
         ),
         annotations=read_only_tool,
         structured_output=True,
@@ -871,10 +877,14 @@ def build_mcp_server(
         title="Manage Change Intent",
         description=(
             "Manage the agent change intent lifecycle for the current MCP "
-            "session. Actions: 'declare' to declare intended scope before "
-            "editing, 'get' to retrieve active intent, 'check' to verify "
-            "actual diff against declared scope, and 'clear' to remove intent. "
-            "Intent is session-local and in-memory."
+            "session and optional workspace registry. Actions: 'list_workspace' "
+            "to inspect concurrent workspace intents, 'declare' to declare "
+            "intended scope before editing, 'get' to retrieve active intent, "
+            "'check' to verify actual diff against declared scope, 'clear' to "
+            "remove intent, 'gc_workspace' to clean stale registry files, and "
+            "'reset_workspace' for interrupted-session recovery. In-memory "
+            "intent state remains session-local; workspace coordination state "
+            "is ephemeral under .cache/codeclone/intents/."
         ),
         annotations=session_tool,
         structured_output=True,
@@ -888,6 +898,8 @@ def build_mcp_server(
         expected_effects: list[str] | None = None,
         diff_ref: str | None = None,
         changed_files: list[str] | None = None,
+        root: str | None = None,
+        ttl_seconds: int | None = None,
     ) -> dict[str, object]:
         return service.manage_change_intent(
             action=action,
@@ -898,6 +910,8 @@ def build_mcp_server(
             expected_effects=expected_effects,
             diff_ref=diff_ref,
             changed_files=changed_files,
+            root=root,
+            ttl_seconds=ttl_seconds,
         )
 
     @tool(

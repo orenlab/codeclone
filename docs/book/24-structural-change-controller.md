@@ -1,13 +1,13 @@
 # Structural Change Controller
 
-CodeClone v2.1 adds a session-local MCP control layer for AI-assisted edits.
-The controller is not a second analyzer and does not persist state. It composes
-over stored MCP runs and the canonical report contract.
+CodeClone v2.1 adds an MCP control layer for AI-assisted edits. The controller
+is not a second analyzer. It composes over stored MCP runs and the canonical
+report contract.
 
 ## Status
 
 The v2.1 alpha currently includes intent, blast-radius, patch-contract checks,
-and review receipts:
+review receipts, and workspace intent visibility:
 
 | Phase | Status | MCP surface |
 |-------|--------|-------------|
@@ -15,6 +15,7 @@ and review receipts:
 | Blast radius | Live in `2.1.0a1` | `get_blast_radius` |
 | Patch contract | Live in `2.1.0a1` | `check_patch_contract` |
 | Review receipt | Live in `2.1.0a1` | `create_review_receipt` |
+| Workspace intent registry | Live in `2.1.0a1` | `manage_change_intent` |
 | Claim guard | Planned | `validate_review_claims` |
 
 Claim guard is a roadmap item until implemented and tested. Public clients
@@ -23,26 +24,33 @@ must not assume it exists in the current MCP tool list.
 ## Contract
 
 - The canonical report remains the source of truth.
-- Controller state is session-local and in-memory.
-- MCP must not mutate source files, baselines, cache, reports, or repo state.
+- Intent truth is session-local and in-memory.
+- MCP may write ephemeral workspace coordination records under
+  `.cache/codeclone/intents/`.
+- MCP must not mutate source files, baselines, reports, or analysis cache data.
 - Tools derive responses from existing run/report facts rather than LLM
   inference.
 - Report-only context is review context, not an edit prohibition.
 
 ## Pre-Change Workflow
 
-1. Run `analyze_repository` or `analyze_changed_paths`.
-2. Declare scope with `manage_change_intent(action="declare")`.
-3. Inspect the returned `blast_radius_summary`.
-4. Optionally call `get_blast_radius` for full dependent/context detail.
-5. Call `check_patch_contract(mode="budget")` to inspect the active regression
+1. Call `manage_change_intent(action="list_workspace", root="/abs/repo")` to
+   see active intents from other agents before analysis.
+2. Run `analyze_repository` or `analyze_changed_paths`.
+3. Declare scope with `manage_change_intent(action="declare")`.
+4. If `concurrent_intents` is non-empty, narrow scope or coordinate before
+   editing.
+5. Inspect the returned `blast_radius_summary`.
+6. Optionally call `get_blast_radius` for full dependent/context detail.
+7. Call `check_patch_contract(mode="budget")` to inspect the active regression
    budget and metric headroom before editing.
-6. After editing, call `manage_change_intent(action="check")` with
+8. After editing, call `manage_change_intent(action="check")` with
    `changed_files` or `diff_ref`.
-7. Run analysis again, then call `check_patch_contract(mode="verify")` with
+9. Run analysis again, then call `check_patch_contract(mode="verify")` with
    explicit `before_run_id` and `after_run_id`.
-8. Call `create_review_receipt` to collect provenance, scope, blast radius,
+10. Call `create_review_receipt` to collect provenance, scope, blast radius,
    reviewed findings, patch status, human decision points, and claims-not-made.
+11. Call `manage_change_intent(action="clear")` when the edit is complete.
 
 `manage_change_intent` can return `clean`, `expanded`, `violated`, or
 `expired`. Expiry means the report digest changed since declaration.
@@ -53,18 +61,39 @@ previews gates, validates scope when intent is available, and reports baseline
 abuse signals. Missing before or after runs return `status="unverified"` with
 `reason="no_before_run"` or `reason="no_after_run"`.
 
+Budget payloads use `null` for disabled numeric thresholds rather than sentinel
+values. Boolean policy gates are named `forbid_*`, for example
+`forbid_dead_code_regression`.
+
 ## Blast Radius Payload
 
 `get_blast_radius` separates hard edit guardrails from review context:
 
 - `do_not_touch`: actionable negative context such as baseline/cache state,
-  explicit forbidden paths, or affected files outside declared scope.
+  generated CodeClone state, or explicit forbidden paths.
 - `review_context`: report-only facts such as security boundary inventory,
   overloaded-module candidates, known baseline debt, and golden fixture
   surfaces.
 
 Long context sections are bounded and include summaries with `total`, `shown`,
 and `truncated`.
+
+## Workspace Intent Registry
+
+`manage_change_intent` also supports workspace actions for multi-agent
+coordination:
+
+- `list_workspace`: list active workspace intent records from all agents for a
+  repository root.
+- `gc_workspace`: remove expired, orphaned, or corrupted registry records.
+- `reset_workspace`: recover an own, expired, or orphaned intent. Foreign live
+  intents are rejected and require coordination.
+
+Registry files live under `.cache/codeclone/intents/` and are protected with a
+SHA-256 integrity digest over canonical JSON. This detects accidental
+corruption, not malicious tampering by a user with write access. Conflicts are
+advisory: hard overlap means two agents claimed the same primary file; soft
+overlap means primary files overlap related context.
 
 ## Review Receipt Payload
 

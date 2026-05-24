@@ -66,8 +66,10 @@ Key artifacts:
   `codeclone-mcp`
 - `plugins/codeclone/` + `.agents/plugins/marketplace.json` — stable Codex plugin as a native local discovery layer
   over `codeclone-mcp`, with a bundled CodeClone review skill
-- MCP runs are in-memory only; review markers and change intents are
-  session-local and must never leak into baseline/cache/report artifacts
+- MCP runs are in-memory only. Review markers are session-local. Change intent
+  truth is session-local, with optional ephemeral workspace coordination records
+  under `.cache/codeclone/intents/`; none of this may leak into
+  baseline/cache/report artifacts.
 - `docs/`, `mkdocs.yml`, `.github/workflows/docs.yml` — published documentation site and docs build pipeline
 
 ---
@@ -232,8 +234,9 @@ Reports come in:
 
 MCP is a separate optional interface, not a report format. It must remain a
 read-only agent layer over the same canonical report/baseline/cache contracts.
-Session review markers and change intents are allowed only as ephemeral MCP
-process state.
+Session review markers and change intent truth are ephemeral MCP process state.
+Workspace intent registry files under `.cache/codeclone/intents/` are advisory
+coordination state only, not analysis cache or report truth.
 
 ### Report invariants
 
@@ -359,7 +362,7 @@ Before cutting a release:
 - Don’t embed suppressions into baseline unless explicitly designed as a versioned contract.
 - Don’t introduce nondeterministic ordering (dict iteration, set ordering, filesystem traversal without sort).
 - Don’t make the base `codeclone` install depend on optional MCP runtime packages.
-- Don’t let MCP mutate baselines, source files, or repo state.
+- Don’t let MCP mutate baselines, source files, reports, or analysis cache data.
 - Don’t let MCP re-synthesize design findings from raw metrics; read canonical `findings.groups.design` only.
 
 ---
@@ -451,7 +454,8 @@ Use this map to route changes to the right owner module.
 - `codeclone/report/*.py` (other modules) — deterministic report support slices such as explainability, suggestions,
   merge, overview, findings helpers, and source-kind routing.
 - `codeclone/surfaces/mcp/service.py` — typed, in-process MCP service over the current pipeline/report contracts;
-  keep it deterministic and read-only except for session-local in-memory markers.
+  keep it deterministic and read-only except for session-local state and
+  ephemeral workspace intent records under `.cache/codeclone/intents/`.
 - `codeclone/surfaces/mcp/server.py` — optional MCP launcher/server wiring, transport config, and MCP tool/resource
   registration; keep dependency loading lazy so base installs/CI do not require MCP runtime packages.
 - `tests/test_mcp_service.py`, `tests/test_mcp_server.py` — MCP contract and integration tests; run these when

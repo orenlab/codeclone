@@ -25,6 +25,7 @@ DEFAULT_INTENT_GUARDS: Final[tuple[str, ...]] = (
     "out_of_scope_production_change_requires_human",
     "new_structural_regression_forbidden",
     "report_only_claims_forbidden",
+    "concurrent_workspace_intent_conflict_requires_review",
 )
 
 

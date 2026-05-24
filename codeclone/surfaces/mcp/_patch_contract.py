@@ -45,19 +45,32 @@ class PatchBudgets:
     coverage_min: int = DEFAULT_COVERAGE_MIN
 
     def to_payload(self) -> dict[str, object]:
+        disabled = tuple(
+            name
+            for name, value in (
+                ("clone_regression", self.clone_regression),
+                ("complexity_delta", self.complexity_delta),
+                ("coupling_delta", self.coupling_delta),
+                ("cohesion_delta", self.cohesion_delta),
+                ("health_floor", self.health_floor),
+                ("coverage_min", self.coverage_min),
+            )
+            if value < 0
+        )
         return {
-            "clone_regression": self.clone_regression,
-            "dead_code_regression": self.dead_code_regression,
-            "dependency_cycle": self.dependency_cycle,
-            "coverage_hotspot": self.coverage_hotspot,
-            "complexity_delta": self.complexity_delta,
-            "coupling_delta": self.coupling_delta,
-            "cohesion_delta": self.cohesion_delta,
-            "health_floor": self.health_floor,
-            "typing_regression": self.typing_regression,
-            "docstring_regression": self.docstring_regression,
-            "api_break": self.api_break,
-            "coverage_min": self.coverage_min,
+            "clone_regression": _none_if_unlimited(self.clone_regression),
+            "forbid_dead_code_regression": self.dead_code_regression,
+            "forbid_dependency_cycle": self.dependency_cycle,
+            "forbid_coverage_hotspot": self.coverage_hotspot,
+            "complexity_delta": _none_if_unlimited(self.complexity_delta),
+            "coupling_delta": _none_if_unlimited(self.coupling_delta),
+            "cohesion_delta": _none_if_unlimited(self.cohesion_delta),
+            "health_floor": _none_if_unlimited(self.health_floor),
+            "forbid_typing_regression": self.typing_regression,
+            "forbid_docstring_regression": self.docstring_regression,
+            "forbid_api_break": self.api_break,
+            "coverage_min": _none_if_unlimited(self.coverage_min),
+            "disabled": list(disabled),
         }
 
 
@@ -161,6 +174,10 @@ def baseline_status(report_document: Mapping[str, object]) -> str:
 
 def _none_to_unlimited(value: int | None) -> int:
     return value if value is not None else -1
+
+
+def _none_if_unlimited(value: int) -> int | None:
+    return value if value >= 0 else None
 
 
 def _as_mapping(value: object) -> Mapping[str, object]:

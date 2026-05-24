@@ -13,6 +13,9 @@
 - Add MCP `manage_change_intent` for session-local change intent lifecycle:
   declare intended scope, inspect active intent, check actual changed files
   against scope, and clear intent state.
+- Add a workspace intent registry under `.cache/codeclone/intents/` so separate
+  MCP stdio processes can see advisory multi-agent edit intents before
+  declaring overlapping scope.
 - Add MCP `check_patch_contract` with read-only `budget` and `verify` modes:
   pre-edit gate budget/headroom, post-edit before/after comparison, gate
   preview, intent-scope validation, and baseline-abuse signals.
@@ -25,7 +28,13 @@
 
 - Keep intent and blast-radius cache state in MCP process memory only; they do
   not mutate source files, baselines, cache artifacts, reports, or canonical
-  report integrity.
+  report integrity. Workspace intent files are ephemeral coordination state,
+  not analysis cache or report truth.
+- Keep patch-contract budget payloads explicit: disabled numeric thresholds are
+  `null` in MCP payloads, and boolean enforcement policies use `forbid_*`
+  names.
+- Pin MCP runs referenced by active change intents so bounded run-history
+  pruning cannot drop the declared before-run before verification.
 - Mark the package as `2.1.0a1` with the PyPI alpha classifier while v2.1
   controller features are under development.
 

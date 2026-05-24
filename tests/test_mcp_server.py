@@ -115,6 +115,10 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "default or pyproject-resolved thresholds for the first pass" in str(
         server.instructions
     )
+    assert "manage_change_intent(action='list_workspace', root=...)" in str(
+        server.instructions
+    )
+    assert ".cache/codeclone/intents/" in str(server.instructions)
 
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert set(tools) == {
@@ -206,11 +210,13 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "mode='budget'" in str(tools["check_patch_contract"].description)
     assert "auditable review receipt" in str(tools["create_review_receipt"].description)
     assert "claims-not-made" in str(tools["create_review_receipt"].description)
-    assert "Intent is session-local" in str(tools["manage_change_intent"].description)
+    assert "list_workspace" in str(tools["manage_change_intent"].description)
+    assert ".cache/codeclone/intents/" in str(tools["manage_change_intent"].description)
     assert "bounded guidance, not a full manual" in str(tools["help"].description)
     assert "workflow, analysis_profile, suppressions, baseline" in str(
         tools["help"].description
     )
+    assert "change_control" in str(tools["help"].description)
     assert init_options.server_version == CODECLONE_VERSION
     assert "Prefer list_hotspots or focused check_* tools" in str(
         tools["list_findings"].description

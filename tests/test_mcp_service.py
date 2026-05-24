@@ -28,6 +28,7 @@ import codeclone.surfaces.mcp._session_helpers as mcp_helpers_mod
 import codeclone.surfaces.mcp._session_runtime as mcp_runtime_mod
 import codeclone.surfaces.mcp._session_shared as mcp_shared_mod
 import codeclone.surfaces.mcp._session_state_mixin as mcp_state_mod
+import codeclone.surfaces.mcp._workspace_intents as mcp_workspace_intents_mod
 import codeclone.surfaces.mcp.session as mcp_session_mod
 from codeclone.baseline import Baseline, current_python_tag
 from codeclone.baseline.metrics_baseline import MetricsBaseline
@@ -853,6 +854,13 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
         f"v{BASELINE_SCHEMA_VERSION}" in point
         for point in cast("list[str]", baseline_help["key_points"])
     )
+    change_control = service.get_help(topic="change_control", detail="normal")
+    assert "list_workspace" in str(change_control["key_points"])
+    assert "manage_change_intent" in cast(
+        "list[str]",
+        change_control["recommended_tools"],
+    )
+    assert "foreign live intent" in str(change_control["anti_patterns"])
 
     with pytest.raises(MCPServiceContractError, match="Invalid value for topic"):
         service.get_help(topic="gates")
@@ -2197,6 +2205,17 @@ def test_mcp_service_low_level_runtime_helpers_and_run_store(
     assert tuple(record.run_id for record in store.records()) == ("second",)
     with pytest.raises(MCPRunNotFoundError):
         store.get("first")
+
+    pinned_store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=1)
+    pinned_store.register(first)
+    pinned_store.pin("first")
+    pinned_store.register(second)
+    assert tuple(record.run_id for record in pinned_store.records()) == (
+        "first",
+        "second",
+    )
+    pinned_store.unpin("first")
+    assert tuple(record.run_id for record in pinned_store.records()) == ("second",)
     with pytest.raises(ValueError):
         mcp_shared_mod.CodeCloneMCPRunStore(history_limit=11)
 
@@ -2365,13 +2384,13 @@ def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
     )
     assert (
         cast(dict[str, object], declared["blast_radius_summary"])["do_not_touch_count"]
-        == 5
+        == 3
     )
     assert (
         cast(dict[str, object], declared["blast_radius_summary"])[
             "review_context_count"
         ]
-        == 1
+        == 2
     )
     assert [
         item["category"]
@@ -2379,18 +2398,24 @@ def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
     ] == [
         "baseline_or_generated_state",
         "baseline_or_generated_state",
-        "affected_but_not_allowed",
         "explicit_forbidden",
-        "affected_but_not_allowed",
     ]
     assert cast("list[dict[str, str]]", declared["review_context"]) == [
+        {
+            "path": "pkg/b.py",
+            "reason": "report-only design signal",
+            "category": "report_only_context",
+            "severity": "context",
+        },
         {
             "path": "tests/test_a.py",
             "reason": "golden fixture clone suppression surface",
             "category": "golden_fixture_surface",
             "severity": "context",
-        }
+        },
     ]
+    assert declared["workspace_registered"] is True
+    assert declared["concurrent_intents"] == []
 
     fetched = service.manage_change_intent(action="get", intent_id=intent_id)
     assert fetched["intent_id"] == intent_id
@@ -2413,9 +2438,92 @@ def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
     assert violated["unexpected_files"] == ["pkg/unplanned.py"]
 
     cleared = service.manage_change_intent(action="clear", intent_id=intent_id)
-    assert cleared == {"cleared": 1, "cleared_intent_ids": [intent_id]}
+    assert cleared == {
+        "cleared": 1,
+        "cleared_intent_ids": [intent_id],
+        "workspace_cleared": True,
+    }
     with pytest.raises(MCPServiceContractError, match="No active change intent"):
         service.manage_change_intent(action="get", run_id="abcdef12")
+
+
+def test_mcp_service_workspace_intent_registry_detects_concurrent_agents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_workspace_intents_mod, "_is_pid_alive", lambda pid: True)
+    first = CodeCloneMCPService(history_limit=2)
+    second = CodeCloneMCPService(history_limit=2)
+    first._agent_pid, first._agent_start_epoch, first._agent_label = (
+        11111,
+        100,
+        "agent-a",
+    )
+    second._agent_pid, second._agent_start_epoch, second._agent_label = (
+        22222,
+        200,
+        "agent-b",
+    )
+    record = _blast_radius_run_record(tmp_path)
+    first._runs.register(record)
+    second._runs.register(record)
+
+    declared_first = first.manage_change_intent(
+        action="declare",
+        scope={
+            "allowed_files": ["pkg/a.py"],
+            "allowed_related": ["tests/test_a.py"],
+        },
+        intent="first agent edits pkg.a",
+    )
+    first_intent_id = str(declared_first["intent_id"])
+
+    workspace = second.manage_change_intent(
+        action="list_workspace",
+        root=str(tmp_path),
+    )
+    workspace_intents = cast(
+        "list[dict[str, object]]",
+        workspace["workspace_intents"],
+    )
+    assert workspace["total_agents"] == 1
+    assert workspace_intents[0]["agent_label"] == "agent-a"
+    assert workspace_intents[0]["is_own"] is False
+
+    hard_conflict = second.manage_change_intent(
+        action="declare",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="second agent also edits pkg.a",
+    )
+    assert cast("list[dict[str, object]]", hard_conflict["concurrent_intents"])[0][
+        "hard_overlap"
+    ] == ["pkg/a.py"]
+
+    soft_conflict = second.manage_change_intent(
+        action="declare",
+        scope={"allowed_files": ["tests/test_a.py"]},
+        intent="second agent edits related tests",
+    )
+    assert (
+        cast("list[dict[str, object]]", soft_conflict["concurrent_intents"])[0][
+            "overlap_type"
+        ]
+        == "soft"
+    )
+
+    rejected = second.manage_change_intent(
+        action="reset_workspace",
+        root=str(tmp_path),
+        intent_id=first_intent_id,
+    )
+    assert rejected["action_taken"] == "rejected"
+    assert rejected["reason"] == "foreign_live_intent"
+
+    cleared = first.manage_change_intent(
+        action="clear",
+        intent_id=first_intent_id,
+    )
+    assert cleared["workspace_cleared"] is True
 
 
 def test_mcp_service_manage_change_intent_validation_expiry_and_prune(
@@ -2443,6 +2551,9 @@ def test_mcp_service_manage_change_intent_validation_expiry_and_prune(
     with pytest.raises(MCPServiceContractError, match="requires diff_ref"):
         service.manage_change_intent(action="check", intent_id=intent_id)
 
+    service._runs.register(_blast_radius_run_record(tmp_path))
+    assert service._runs.get("abcdef12").run_id == "abcdef1234567890"
+
     service._runs.register(_blast_radius_run_record(tmp_path, digest="digest-b"))
     expired = service.manage_change_intent(action="get", intent_id=intent_id)
     assert expired["status"] == "expired"
@@ -2451,7 +2562,13 @@ def test_mcp_service_manage_change_intent_validation_expiry_and_prune(
         _blast_radius_run_record(tmp_path, run_id="fedcba9876543210")
     )
     service._prune_session_state()
-    assert service._active_intents == {}
+    assert intent_id in service._active_intents
+    assert service._runs.get("abcdef12").run_id == "abcdef1234567890"
+
+    service.manage_change_intent(action="clear", intent_id=intent_id)
+    service._prune_session_state()
+    with pytest.raises(MCPRunNotFoundError):
+        service._runs.get("abcdef12")
 
 
 def test_mcp_patch_contract_profiles_and_baseline_abuse() -> None:
@@ -2575,16 +2692,28 @@ def test_mcp_service_check_patch_contract_budget_uses_intent_and_gate_preview(
         cast("dict[str, object]", payload["blast_radius_summary"])["radius_level"]
         == "medium"
     )
+    assert (
+        cast("dict[str, object]", payload["blast_radius_summary"])["do_not_touch_count"]
+        == 2
+    )
+    assert (
+        cast("dict[str, object]", payload["blast_radius_summary"])[
+            "review_context_count"
+        ]
+        == 1
+    )
     assert {
         "clone_regression": budgets["clone_regression"],
         "complexity_delta": budgets["complexity_delta"],
         "coverage_min": budgets["coverage_min"],
+        "forbid_dead_code_regression": budgets["forbid_dead_code_regression"],
         "complexity_max": current_state["complexity_max"],
         "clone_groups": current_state["clone_groups"],
     } == {
         "clone_regression": 0,
         "complexity_delta": 10,
         "coverage_min": 80,
+        "forbid_dead_code_regression": False,
         "complexity_max": 6,
         "clone_groups": 1,
     }
@@ -2596,7 +2725,9 @@ def test_mcp_service_check_patch_contract_budget_uses_intent_and_gate_preview(
         run_id="abcdef12",
         strictness="relaxed",
     )
-    assert cast("dict[str, object]", relaxed["budgets"])["clone_regression"] == -1
+    relaxed_budgets = cast("dict[str, object]", relaxed["budgets"])
+    assert relaxed_budgets["clone_regression"] is None
+    assert "clone_regression" in cast("list[str]", relaxed_budgets["disabled"])
     assert cast("dict[str, object]", relaxed["gate_preview"])["would_fail"] is False
     assert "advisory" in str(relaxed["message"])
     with pytest.raises(MCPServiceContractError, match="Invalid value for strictness"):
@@ -4020,6 +4151,7 @@ def test_mcp_service_clear_session_runs_clears_in_memory_state(tmp_path: Path) -
             "cleared_gate_results",
             "cleared_blast_radius_entries",
             "cleared_intents",
+            "workspace_cleared",
         )
     } == {
         "cleared_runs": 1,
@@ -4027,6 +4159,7 @@ def test_mcp_service_clear_session_runs_clears_in_memory_state(tmp_path: Path) -
         "cleared_gate_results": 1,
         "cleared_blast_radius_entries": 1,
         "cleared_intents": 1,
+        "workspace_cleared": True,
     }
     with pytest.raises(MCPRunNotFoundError):
         service.get_run_summary()

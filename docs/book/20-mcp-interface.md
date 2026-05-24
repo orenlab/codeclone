@@ -58,11 +58,15 @@ second, then drill into one finding or one hotspot family.
 
 `get_blast_radius` keeps hard guardrails separate from review context.
 `do_not_touch` is limited to actionable negative context such as baselines,
-generated CodeClone state, explicit forbidden paths, or files affected by the
-blast radius but outside the declared edit scope. Report-only signals such as
-security boundary inventory and overloaded-module candidates are returned as
-`review_context`, not as edit prohibitions. Long context sections include
-`total`, `shown`, and `truncated` summaries.
+generated CodeClone state, and explicit forbidden paths. Report-only signals
+such as security boundary inventory and overloaded-module candidates are
+returned as `review_context`, not as edit prohibitions. Long context sections
+include `total`, `shown`, and `truncated` summaries.
+
+`manage_change_intent` is session-local for intent truth, but v2.1 also writes
+best-effort workspace coordination records under `.cache/codeclone/intents/`.
+Those records are advisory multi-agent visibility only; MCP still never updates
+source files, baselines, reports, or analysis cache data.
 
 `create_review_receipt` is a read-only audit artifact. It composes stored
 report provenance, optional intent/blast-radius state, reviewed findings,
@@ -112,7 +116,7 @@ does not persist outside the MCP session.
 |--------------------------|-------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
 | `mark_finding_reviewed`  | `finding_id`, `run_id`, `note`                                          | Mark a finding as reviewed in the current in-memory MCP session.                    |
 | `list_reviewed_findings` | `run_id`                                                                | Return reviewed markers currently held in process memory.                           |
-| `manage_change_intent`   | `action`, `run_id`, `intent_id`, `scope`, `changed_files` or `diff_ref` | Declare, inspect, check, or clear session-local change intent for governed edits.   |
+| `manage_change_intent`   | `action`, `root`, `run_id`, `intent_id`, `scope`, `ttl_seconds`, `changed_files` or `diff_ref` | Declare/check/clear session-local intent and list/gc/reset workspace coordination records. |
 | `clear_session_runs`     | none                                                                    | Clear in-memory run history and session-local review state for this server process. |
 
 ## Resources
@@ -134,8 +138,8 @@ Resources are deterministic read-only projections over stored runs.
 
 ## Contract rules
 
-- MCP is read-only with respect to source files, baselines, cache artifacts,
-  and report artifacts.
+- MCP is read-only with respect to source files, baselines, analysis cache
+  artifacts such as `cache.json`, and report artifacts.
 - MCP reuses the same canonical report document as CLI/JSON/HTML/SARIF.
 - Finding ids, ordering, and summary data are deterministic projections over
   the stored run.

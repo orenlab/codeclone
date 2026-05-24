@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import os
+import time
+
 from ...cache.store import resolve_cache_status
 from ...report.meta import build_report_meta as _build_report_meta
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
@@ -90,6 +93,9 @@ class MCPSession(_MCPSessionReviewReceiptMixin):
         ] = {}
         self._active_intents: dict[str, IntentRecord] = {}
         self._intent_sequence = 0
+        self._agent_pid = os.getpid()
+        self._agent_start_epoch = int(time.time())
+        self._agent_label = os.environ.get("CODECLONE_AGENT_LABEL", "")
 
     def analyze_repository(self, request: MCPAnalysisRequest) -> dict[str, object]:
         self._validate_analysis_request(request)

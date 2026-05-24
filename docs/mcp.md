@@ -117,7 +117,7 @@ run-scoped URI templates.
 | `get_blast_radius`       | Pre-change risk boundary: direct dependents, clone cohorts, coverage gaps, actionable do-not-touch paths, and review-only context |
 | `check_patch_contract`   | Pre-edit regression budget or post-edit before/after verification over stored runs, gates, intent scope, and baseline-abuse signals |
 | `create_review_receipt`  | Deterministic markdown or JSON audit artifact: provenance, scope, blast radius, reviewed findings, patch status, human decisions, and claims-not-made |
-| `help`                   | Semantic guide for workflow, analysis profile, baseline, suppressions, review state, changed-scope                                |
+| `help`                   | Semantic guide for workflow, change control, analysis profile, baseline, suppressions, review state, changed-scope                |
 | `compare_runs`           | Run-to-run delta: regressions, improvements, health change                                                                        |
 | `list_findings`          | Filtered, paginated findings; use after hotspots or `check_*`                                                                     |
 | `get_finding`            | Single finding detail by id; defaults to `normal` detail level                                                                    |
@@ -133,7 +133,7 @@ run-scoped URI templates.
 | `generate_pr_summary`    | PR-friendly markdown or JSON summary                                                                                              |
 | `mark_finding_reviewed`  | Session-local review marker (in-memory)                                                                                           |
 | `list_reviewed_findings` | List reviewed findings for a run                                                                                                  |
-| `manage_change_intent`   | Declare, inspect, check, or clear session-local edit scope intent                                                                 |
+| `manage_change_intent`   | Declare/check/clear edit intent; list/gc/reset ephemeral workspace intent records for multi-agent coordination                    |
 | `clear_session_runs`     | Reset in-memory runs and session state                                                                                            |
 
 > `check_*` tools query stored runs only. Call `analyze_repository` or
@@ -144,12 +144,17 @@ run-scoped URI templates.
 - `check_*` responses include only the relevant health dimension.
 - `get_blast_radius` separates edit prohibitions from context:
   `do_not_touch` contains actionable negative context such as baselines,
-  generated CodeClone state, explicit forbidden paths, and affected files
-  outside declared scope. Report-only signals are returned as `review_context`.
-  Long context sections include `total`, `shown`, and `truncated` summaries.
+  generated CodeClone state, and explicit forbidden paths. Report-only signals
+  are returned as `review_context`. Long context sections include `total`,
+  `shown`, and `truncated` summaries.
 - `check_patch_contract` does not run analysis. `mode="budget"` reads the
   selected stored run and optional intent; `mode="verify"` compares explicit
   before/after stored runs and returns `unverified` when either side is missing.
+  Disabled numeric thresholds are `null`; boolean policy gates use `forbid_*`
+  names.
+- `manage_change_intent(action="list_workspace", root=...)` reads
+  `.cache/codeclone/intents/` to show active intents from other agents. The
+  registry is advisory coordination state, not analysis truth.
 - `create_review_receipt` does not run analysis or mutate state. It composes
   stored report provenance, optional intent/blast-radius state, reviewed
   findings, structural delta, patch-contract status, and explicit
@@ -222,9 +227,10 @@ trigger analysis.
 `codeclone://latest/*` always resolves to the most recent run registered in the
 current MCP server session. A later `analyze_repository` or
 `analyze_changed_paths` call moves that pointer.
-`mark_finding_reviewed`, `manage_change_intent`, and `clear_session_runs`
-mutate only in-memory session state. They never touch source files, baselines,
-cache, or report artifacts.
+`mark_finding_reviewed` and most `manage_change_intent` state are in-memory.
+Workspace intent records are the exception: they are ephemeral coordination
+files under `.cache/codeclone/intents/`. MCP still never touches source files,
+baselines, report artifacts, or analysis cache data.
 
 ## Recommended workflows
 
@@ -238,7 +244,23 @@ analyze_repository → get_run_summary or get_production_triage
 ### Semantic uncertainty recovery
 
 ```
-help(topic="workflow" | "analysis_profile" | "baseline" | "coverage" | "suppressions" | "latest_runs" | "review_state" | "changed_scope")
+help(topic="workflow" | "change_control" | "analysis_profile" | "baseline" | "coverage" | "suppressions" | "latest_runs" | "review_state" | "changed_scope")
+```
+
+### Change-control edit workflow
+
+```
+manage_change_intent(action="list_workspace", root="/abs/repo")
+→ analyze_repository
+→ manage_change_intent(action="declare", scope={...})
+→ get_blast_radius
+→ check_patch_contract(mode="budget")
+→ edit within scope
+→ analyze_repository
+→ manage_change_intent(action="check", changed_files=[...])
+→ check_patch_contract(mode="verify", before_run_id=..., after_run_id=...)
+→ create_review_receipt
+→ manage_change_intent(action="clear")
 ```
 
 ### Full repository review
@@ -354,9 +376,10 @@ If `codeclone-mcp` is not on `PATH`, use an absolute path to the launcher.
 
 ## Security
 
-- Read-only by design: no source mutation, no baseline/cache writes.
-- Run history, review markers, and change intents are in-memory only — lost on
-  process stop.
+- Read-only with respect to source, baselines, reports, and analysis cache data.
+- Run history and review markers are in-memory only. Change intents are
+  in-memory for session truth, with optional ephemeral coordination records
+  under `.cache/codeclone/intents/`.
 - Repository access is limited to what the server process can read locally.
 - `streamable-http` binds to loopback by default; `--allow-remote` is explicit opt-in.
 

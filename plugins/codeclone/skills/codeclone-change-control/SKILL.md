@@ -15,9 +15,10 @@ patch.
 ## Activation contract
 
 Use this workflow whenever this skill is selected for a repository edit. Start
-with a pre-edit MCP run and keep the returned `run_id` and `intent_id` for
-verification. If a required MCP tool is unavailable in the connected server,
-continue with the available steps and state which step was skipped.
+with a workspace intent check, then run pre-edit analysis and keep the returned
+`run_id` and `intent_id` for verification. If a required MCP tool is unavailable
+in the connected server, continue with the available steps and state which step
+was skipped.
 
 Do not downgrade the task to an ordinary edit after this skill has been
 selected. The only valid reasons to skip the workflow are: no repository files
@@ -27,10 +28,14 @@ analysis only.
 ## Rules
 
 - Use MCP tools only when invoked through the CodeClone plugin.
-- If no latest MCP run exists, call `analyze_repository` yourself before
-  declaring intent.
+- Call `manage_change_intent(action="list_workspace", root=...)` before
+  analysis when the connected server supports it.
+- If no latest MCP run exists after the workspace check, call
+  `analyze_repository` yourself before declaring intent.
 - Declare intent before editing.
 - Do not silently expand scope.
+- If concurrent workspace intents overlap your files, narrow scope or
+  coordinate before editing.
 - Treat blast-radius dependents and clone cohorts as review context, not
   permission to modify.
 - Treat `do_not_touch` as a boundary unless the user explicitly expands scope.
@@ -42,6 +47,43 @@ analysis only.
 - Never auto-suppress findings or mutate CodeClone baseline state.
 
 ## Workflow
+
+```
+manage_change_intent(action="list_workspace", root=...)
+→ analyze_repository
+→ manage_change_intent(action="declare")
+→ get_blast_radius
+→ check_patch_contract(mode="budget")
+→ edit code
+→ analyze_repository
+→ manage_change_intent(action="check")
+→ check_patch_contract(mode="verify")
+→ validate_review_claims
+→ create_review_receipt
+→ manage_change_intent(action="clear")
+```
+
+Older MCP servers may not support `list_workspace`, `validate_review_claims`,
+or `create_review_receipt`. Skip only unavailable steps and say so explicitly.
+Keep the pre-edit `run_id` as `before_run_id`; verify against the explicit
+after-run produced after the edit.
+
+## Workspace check
+
+Before analysis, call:
+
+```
+manage_change_intent(action="list_workspace", root="/absolute/repo")
+```
+
+If it returns active intents from other agents, compare their `scope` to your
+planned files. A hard overlap means another agent claimed the same primary file.
+A soft overlap means your primary file is in another agent's related context, or
+the reverse. In either case, narrow scope or coordinate before editing.
+
+## Legacy workflow
+
+Use this only when `list_workspace` is unavailable in the connected MCP server:
 
 ```
 analyze_repository
@@ -56,10 +98,7 @@ analyze_repository
 → create_review_receipt
 ```
 
-Use the full path for normal code changes. Skip only steps that are unavailable
-in the connected CodeClone MCP server.
-Keep the pre-edit `run_id` as `before_run_id`; verify against the explicit
-after-run produced after the edit.
+Still clear any declared intent when the server supports `clear`.
 
 ## Intent first
 

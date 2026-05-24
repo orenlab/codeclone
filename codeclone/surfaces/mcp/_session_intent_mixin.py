@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from fnmatch import fnmatchcase
+from pathlib import Path
 
 from . import _session_helpers as _helpers
 from ._intent import (
@@ -25,8 +27,29 @@ from ._intent import (
 from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
+    MCPRunNotFoundError,
     MCPRunRecord,
     MCPServiceContractError,
+)
+from ._workspace_intents import (
+    WorkspaceIntentRecord,
+    WorkspaceIntentStatus,
+    compute_scope_digest,
+    detect_conflicts,
+    expires_at,
+    find_workspace_intent,
+    format_utc,
+    gc_workspace,
+    is_orphaned,
+    list_workspace_intents,
+    remove_workspace_intent,
+    remove_workspace_record,
+    resolved_ttl_seconds,
+    stale_reason,
+    update_workspace_intent_status,
+    utc_now,
+    workspace_status_counts,
+    write_workspace_intent,
 )
 
 
@@ -34,6 +57,9 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
     _intent_sequence: int
+    _agent_pid: int
+    _agent_start_epoch: int
+    _agent_label: str
 
     def manage_change_intent(
         self,
@@ -46,6 +72,8 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         expected_effects: Sequence[str] | None = None,
         diff_ref: str | None = None,
         changed_files: Sequence[str] | None = None,
+        root: str | None = None,
+        ttl_seconds: int | None = None,
     ) -> dict[str, object]:
         match action:
             case "declare":
@@ -54,6 +82,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                     scope=scope,
                     intent=intent,
                     expected_effects=expected_effects,
+                    ttl_seconds=ttl_seconds,
                 )
             case "get":
                 record, active_intent = self._resolve_intent(
@@ -73,10 +102,21 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 )
             case "clear":
                 return self._clear_change_intent(intent_id=intent_id)
+            case "list_workspace":
+                return self._list_workspace_intents(root=root)
+            case "gc_workspace":
+                return self._gc_workspace_intents(root=root)
+            case "reset_workspace":
+                return self._reset_workspace_intent(
+                    root=root,
+                    intent_id=intent_id,
+                    ttl_seconds=ttl_seconds,
+                )
             case _:
                 raise MCPServiceContractError(
                     "Invalid value for action: "
-                    f"{action!r}. Expected one of: check, clear, declare, get."
+                    f"{action!r}. Expected one of: check, clear, declare, "
+                    "gc_workspace, get, list_workspace, reset_workspace."
                 )
 
     def _declare_change_intent(
@@ -86,6 +126,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         scope: dict[str, object] | None,
         intent: str | None,
         expected_effects: Sequence[str] | None,
+        ttl_seconds: int | None,
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
         try:
@@ -101,28 +142,34 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             files=normalized_scope.allowed_paths,
             depth="direct",
             forbidden_patterns=normalized_scope.forbidden,
-            allowed_scope=normalized_scope.allowed_paths,
         )
         blast_payload = blast.to_payload()
         blast_summary = self._blast_radius_summary(
             blast_payload=blast_payload,
             scope=normalized_scope,
         )
+        ttl = resolved_ttl_seconds(
+            ttl_seconds,
+            env_value=os.environ.get("CODECLONE_INTENT_TTL_SECONDS"),
+        )
+        replaced_intents: list[IntentRecord] = []
         with self._state_lock:
             for existing_id, existing in tuple(self._active_intents.items()):
                 if existing.run_id == record.run_id:
                     self._active_intents.pop(existing_id, None)
+                    replaced_intents.append(existing)
             self._intent_sequence += 1
             intent_id = (
                 f"intent-{_helpers._short_run_id(record.run_id)}-"
                 f"{self._intent_sequence:03d}"
             )
+            declared_at = _utc_now()
             record_payload = IntentRecord(
                 intent_id=intent_id,
                 run_id=record.run_id,
                 report_digest=self._report_digest_value(record),
                 status=IntentStatus.ACTIVE,
-                declared_at_utc=_utc_now(),
+                declared_at_utc=declared_at,
                 scope=normalized_scope,
                 intent_description=description,
                 expected_effects=normalized_expected_effects,
@@ -130,6 +177,29 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 blast_radius_summary=blast_summary,
             )
             self._active_intents[intent_id] = record_payload
+            self._runs.pin(record.run_id)
+        workspace_record = self._workspace_record_from_intent(
+            record=record,
+            intent=record_payload,
+            ttl_seconds=ttl,
+        )
+        for replaced_intent in replaced_intents:
+            remove_workspace_intent(
+                root=record.root,
+                pid=self._agent_pid,
+                start_epoch=self._agent_start_epoch,
+                intent_id=replaced_intent.intent_id,
+            )
+        workspace_existing = list_workspace_intents(root=record.root)
+        workspace_registered = write_workspace_intent(
+            root=record.root,
+            record=workspace_record,
+        )
+        concurrent_intents = detect_conflicts(
+            new_scope=normalized_scope.to_payload(),
+            existing=workspace_existing,
+            own_pid=self._agent_pid,
+        )
         payload = record_payload.to_payload(
             short_run_id=_helpers._short_run_id(record.run_id)
         )
@@ -137,6 +207,9 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         payload["do_not_touch_summary"] = blast_payload["do_not_touch_summary"]
         payload["review_context"] = blast_payload["review_context"]
         payload["review_context_summary"] = blast_payload["review_context_summary"]
+        payload["workspace_registered"] = workspace_registered
+        payload["concurrent_intents"] = concurrent_intents
+        payload["ttl_seconds"] = ttl
         return payload
 
     def _check_change_intent(
@@ -157,6 +230,9 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         )
         if self._is_intent_expired(record=record, intent=active_intent):
             expired = replace(active_intent, status=IntentStatus.EXPIRED)
+            with self._state_lock:
+                self._active_intents[expired.intent_id] = expired
+            self._sync_workspace_intent_status(record=record, intent=expired)
             return expired.to_payload(
                 short_run_id=_helpers._short_run_id(record.run_id)
             )
@@ -173,6 +249,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         )
         with self._state_lock:
             self._active_intents[updated.intent_id] = updated
+        self._sync_workspace_intent_status(record=record, intent=updated)
         payload = check_result.to_payload()
         payload["intent_id"] = updated.intent_id
         return payload
@@ -180,19 +257,42 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
     def _clear_change_intent(self, *, intent_id: str | None) -> dict[str, object]:
         with self._state_lock:
             removed_ids: tuple[str, ...]
+            removed_intents: tuple[IntentRecord, ...]
             if intent_id is not None:
                 if intent_id not in self._active_intents:
                     raise MCPServiceContractError(
                         f"Unknown change intent id: {intent_id}"
                     )
                 removed_ids = (intent_id,)
-                self._active_intents.pop(intent_id, None)
+                removed = self._active_intents.pop(intent_id)
+                removed_intents = (removed,)
             else:
                 removed_ids = tuple(self._active_intents)
+                removed_intents = tuple(self._active_intents.values())
                 self._active_intents.clear()
+            workspace_targets: tuple[tuple[Path, str], ...] = tuple(
+                (record.root, removed_intent.intent_id)
+                for removed_intent in removed_intents
+                for record in (self._optional_run_record(removed_intent.run_id),)
+                if record is not None
+            )
+            for removed_intent in removed_intents:
+                self._runs.unpin(removed_intent.run_id)
+        workspace_cleared = True
+        for root_path, removed_intent_id in workspace_targets:
+            workspace_cleared = (
+                remove_workspace_intent(
+                    root=root_path,
+                    pid=self._agent_pid,
+                    start_epoch=self._agent_start_epoch,
+                    intent_id=removed_intent_id,
+                )
+                and workspace_cleared
+            )
         return {
             "cleared": len(removed_ids),
             "cleared_intent_ids": list(removed_ids),
+            "workspace_cleared": workspace_cleared,
         }
 
     def _resolve_intent(
@@ -226,6 +326,9 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
     ) -> dict[str, object]:
         if self._is_intent_expired(record=record, intent=intent):
             intent = replace(intent, status=IntentStatus.EXPIRED)
+            with self._state_lock:
+                self._active_intents[intent.intent_id] = intent
+            self._sync_workspace_intent_status(record=record, intent=intent)
         return intent.to_payload(short_run_id=_helpers._short_run_id(record.run_id))
 
     def _is_intent_expired(
@@ -243,6 +346,148 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         if value:
             return value
         return record.run_id
+
+    def _workspace_record_from_intent(
+        self,
+        *,
+        record: MCPRunRecord,
+        intent: IntentRecord,
+        ttl_seconds: int,
+    ) -> WorkspaceIntentRecord:
+        scope_payload = intent.scope.to_payload()
+        declared_at = _parse_utc(intent.declared_at_utc) or utc_now()
+        return WorkspaceIntentRecord(
+            intent_id=intent.intent_id,
+            agent_pid=self._agent_pid,
+            agent_start_epoch=self._agent_start_epoch,
+            agent_label=self._agent_label,
+            run_id=record.run_id,
+            declared_at_utc=format_utc(declared_at),
+            expires_at_utc=expires_at(
+                declared_at=declared_at,
+                ttl_seconds=ttl_seconds,
+            ),
+            ttl_seconds=ttl_seconds,
+            status=intent.status.value,
+            intent=intent.intent_description,
+            scope=scope_payload,
+            scope_digest=compute_scope_digest(scope_payload),
+            blast_radius_summary=dict(intent.blast_radius_summary or {}),
+        )
+
+    def _sync_workspace_intent_status(
+        self,
+        *,
+        record: MCPRunRecord,
+        intent: IntentRecord,
+    ) -> None:
+        update_workspace_intent_status(
+            root=record.root,
+            pid=self._agent_pid,
+            start_epoch=self._agent_start_epoch,
+            intent_id=intent.intent_id,
+            new_status=intent.status.value,
+        )
+
+    def _list_workspace_intents(self, *, root: str | None) -> dict[str, object]:
+        root_path = self._resolve_workspace_root(root)
+        counts = workspace_status_counts(root=root_path)
+        records = list_workspace_intents(root=root_path)
+        return {
+            "workspace_intents": [
+                item.to_payload(
+                    own_pid=self._agent_pid,
+                    own_start_epoch=self._agent_start_epoch,
+                )
+                for item in records
+            ],
+            "stale_count": counts["stale_count"],
+            "orphaned_count": counts["orphaned_count"],
+            "total_agents": len({item.agent_pid for item in records}),
+            "own_pid": self._agent_pid,
+            "own_start_epoch": self._agent_start_epoch,
+        }
+
+    def _gc_workspace_intents(self, *, root: str | None) -> dict[str, object]:
+        return gc_workspace(root=self._resolve_workspace_root(root))
+
+    def _reset_workspace_intent(
+        self,
+        *,
+        root: str | None,
+        intent_id: str | None,
+        ttl_seconds: int | None,
+    ) -> dict[str, object]:
+        if intent_id is None:
+            raise MCPServiceContractError(
+                "action='reset_workspace' requires intent_id."
+            )
+        root_path = self._resolve_workspace_root(root)
+        found = find_workspace_intent(root=root_path, intent_id=intent_id)
+        if found is None:
+            raise MCPServiceContractError(f"Unknown workspace intent id: {intent_id}")
+        _, workspace_record = found
+        reason = stale_reason(workspace_record)
+        is_own = (
+            workspace_record.agent_pid == self._agent_pid
+            and workspace_record.agent_start_epoch == self._agent_start_epoch
+        )
+        if reason in {"expired", "orphaned"}:
+            removed = remove_workspace_record(root=root_path, record=workspace_record)
+            return {
+                "intent_id": workspace_record.intent_id,
+                "action_taken": "removed" if removed else "failed",
+                "reason": reason,
+            }
+        if not is_own and not is_orphaned(workspace_record):
+            return {
+                "intent_id": workspace_record.intent_id,
+                "action_taken": "rejected",
+                "reason": "foreign_live_intent",
+                "agent_pid": workspace_record.agent_pid,
+                "agent_start_epoch": workspace_record.agent_start_epoch,
+                "agent_label": workspace_record.agent_label,
+                "message": (
+                    "Intent belongs to a live agent. Coordinate with the owning "
+                    "agent or user before resetting it."
+                ),
+            }
+        ttl = resolved_ttl_seconds(
+            ttl_seconds,
+            env_value=os.environ.get("CODECLONE_INTENT_TTL_SECONDS"),
+        )
+        updated = update_workspace_intent_status(
+            root=root_path,
+            pid=workspace_record.agent_pid,
+            start_epoch=workspace_record.agent_start_epoch,
+            intent_id=workspace_record.intent_id,
+            new_status=WorkspaceIntentStatus.ACTIVE.value,
+            ttl_seconds=ttl,
+        )
+        latest = find_workspace_intent(root=root_path, intent_id=intent_id)
+        latest_record = latest[1] if latest is not None else workspace_record
+        return {
+            "intent_id": workspace_record.intent_id,
+            "action_taken": "reset" if updated else "failed",
+            "new_status": latest_record.status,
+            "new_expires_at_utc": latest_record.expires_at_utc,
+        }
+
+    def _resolve_workspace_root(self, root: str | None) -> Path:
+        if root is not None:
+            return _helpers._resolve_root(root)
+        try:
+            return self._runs.get(None).root
+        except MCPRunNotFoundError as exc:
+            raise MCPServiceContractError(
+                "Workspace intent actions require root or a latest MCP run."
+            ) from exc
+
+    def _optional_run_record(self, run_id: str) -> MCPRunRecord | None:
+        try:
+            return self._runs.get(run_id)
+        except MCPRunNotFoundError:
+            return None
 
     def _blast_radius_summary(
         self,
@@ -356,6 +601,16 @@ def _utc_now() -> str:
         .isoformat()
         .replace("+00:00", "Z")
     )
+
+
+def _parse_utc(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
 
 
 __all__ = ["_MCPSessionIntentMixin"]

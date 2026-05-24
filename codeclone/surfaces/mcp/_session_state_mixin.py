@@ -73,6 +73,7 @@ from ._session_shared import (
     load_pyproject_config,
     paginate,
 )
+from ._workspace_intents import remove_workspace_intent
 
 
 class _MCPSessionChangedProjectionMixin(_MCPSessionFindingMixin):
@@ -81,6 +82,9 @@ class _MCPSessionChangedProjectionMixin(_MCPSessionFindingMixin):
     _review_state: dict[str, OrderedDict[str, str | None]]
     _last_gate_results: dict[str, dict[str, object]]
     _spread_max_cache: dict[str, int]
+    _active_intents: dict[str, IntentRecord]
+    _agent_pid: int
+    _agent_start_epoch: int
 
     def _build_changed_projection(
         self,
@@ -1114,6 +1118,13 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         }
 
     def clear_session_runs(self) -> dict[str, object]:
+        workspace_targets: list[tuple[Path, str]] = []
+        for intent in self._active_intents.values():
+            try:
+                record = self._runs.get(intent.run_id)
+            except MCPServiceContractError:
+                continue
+            workspace_targets.append((record.root, intent.intent_id))
         removed_run_ids = self._runs.clear()
         with self._state_lock:
             cleared_review_entries = sum(
@@ -1129,6 +1140,17 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             self._blast_radius_cache.clear()
             self._active_intents.clear()
             self._intent_sequence = 0
+        workspace_cleared = True
+        for root_path, intent_id in workspace_targets:
+            workspace_cleared = (
+                remove_workspace_intent(
+                    root=root_path,
+                    pid=self._agent_pid,
+                    start_epoch=self._agent_start_epoch,
+                    intent_id=intent_id,
+                )
+                and workspace_cleared
+            )
         return {
             "cleared_runs": len(removed_run_ids),
             "cleared_run_ids": [
@@ -1139,6 +1161,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             "cleared_spread_cache_entries": cleared_spread_cache_entries,
             "cleared_blast_radius_entries": cleared_blast_radius_entries,
             "cleared_intents": cleared_intents,
+            "workspace_cleared": workspace_cleared,
         }
 
     def read_resource(self, uri: str) -> str:

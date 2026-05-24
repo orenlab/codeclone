@@ -261,6 +261,8 @@ def _apply_public_method_signatures() -> None:
             _kwonly("expected_effects", "Sequence[str] | None", None),
             _kwonly("diff_ref", "str | None", None),
             _kwonly("changed_files", "Sequence[str] | None", None),
+            _kwonly("root", "str | None", None),
+            _kwonly("ttl_seconds", "int | None", None),
         ),
         "get_remediation": (
             _kwonly("finding_id", "str"),
