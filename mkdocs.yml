@@ -87,6 +87,7 @@ markdown_extensions:
 
 nav:
   - Home: README.md
+  - Getting Started: getting-started.md
 
   - Contracts Book:
       - Overview: book/README.md

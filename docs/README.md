@@ -1,85 +1,67 @@
 # CodeClone Docs
 
-> Structural change controller for Python codebases.
-> One canonical analysis across CI, HTML reports, IDEs, and AI agents.
+> Structural change controller for Python —
+> deterministic, baseline-aware, built for CI and AI agents.
 
-CodeClone is a structural change controller for Python. It starts before the
-first edit — when an agent declares what it intends to change — maps the
-structural blast radius, verifies that the patch stayed inside its declared
-boundary, leaves an auditable receipt, and validates cited review claims against
-canonical report semantics. The same deterministic facts power CI gates, human
-reviews, and AI-assisted workflows.
+CodeClone runs one deterministic analysis pipeline and emits a canonical JSON
+report. Every surface — CLI, HTML, MCP, IDE — is a projection of that report.
+Humans and AI agents operate on the same structural facts.
 
-This documentation site has two complementary layers:
-
-- **Contracts Book** — canonical behavioral contracts derived from code and locked tests
-- **Deep Dives** — architecture, CFG semantics, integrations, and operational rationale
+The v2.1 change controller starts before the first edit: an agent declares what
+it intends to change, CodeClone maps the structural blast radius, verifies the
+patch against the declared boundary, and generates an auditable review receipt.
 
 !!! note "Licensing"
-    CodeClone source code is licensed under MPL-2.0.
-
-    Documentation content under `docs/` and the published docs site are
-    licensed under MIT.
+    Source code: MPL-2.0. Documentation and docs-site content: MIT.
 
 ---
 
-## Start Here
+## Getting Started
 
-### New to CodeClone?
+| Goal | Start here |
+|------|-----------|
+| First install and run | [Getting started](getting-started.md) |
+| Understand the model | [Contracts and guarantees](book/00-intro.md) |
+| Terminology lookup | [Terminology](book/02-terminology.md) |
 
-Understand the deterministic change control model and governance philosophy.
+## CI and Gating
 
-- [Contracts and guarantees](book/00-intro.md)
-- [Architecture map (components + ownership)](book/01-architecture-map.md)
-- [Terminology](book/02-terminology.md)
+| Goal | Start here |
+|------|-----------|
+| Baseline-aware CI | [Getting started: CI setup](getting-started.md#ci-setup) |
+| Exit codes and failure policy | [Exit codes](book/03-contracts-exit-codes.md) |
+| Quality gates and metrics | [Metrics and gates](book/15-metrics-and-quality-gates.md) |
+| Baseline contract | [Baseline](book/06-baseline.md) |
 
-### Governing AI-assisted changes?
+## AI Agent Governance
 
-Understand the structural change controller: intent, blast radius, patch contract,
-review receipt, and claim guard.
+| Goal | Start here |
+|------|-----------|
+| Change controller workflow | [Structural Change Controller](book/24-structural-change-controller.md) |
+| MCP interface contract | [MCP interface](book/20-mcp-interface.md) |
+| MCP usage guide | [MCP guide](mcp.md) |
 
-- [Structural Change Controller](book/24-structural-change-controller.md)
-- [MCP interface contract](book/20-mcp-interface.md)
+## IDE and Agent Clients
 
-### Integrating into CI?
+| Surface | Usage guide | Contract |
+|---------|------------|----------|
+| VS Code extension | [Guide](vscode-extension.md) | [Contract](book/21-vscode-extension.md) |
+| Claude Desktop bundle | [Guide](claude-desktop-bundle.md) | [Contract](book/22-claude-desktop-bundle.md) |
+| Codex plugin | [Guide](codex-plugin.md) | [Contract](book/23-codex-plugin.md) |
 
-Set up baseline-aware gating and deterministic review flows.
+## Reports
 
-- [Exit codes and failure policy](book/03-contracts-exit-codes.md)
-- [Metrics mode and quality gates](book/15-metrics-and-quality-gates.md)
-- [Baseline contract](book/06-baseline.md)
-
-### Using IDEs or AI agents?
-
-Understand the canonical review surfaces and MCP contract.
-
-- [MCP interface contract](book/20-mcp-interface.md)
-- [VS Code extension](book/21-vscode-extension.md)
-- [Codex plugin](book/23-codex-plugin.md)
-
-### Reviewing reports?
-
-Explore the canonical report model and rendered review surfaces.
-
-- [Report contract](book/08-report.md)
-- [HTML report rendering](book/10-html-render.md)
-- [Live sample report](examples/report.md)
+| Goal | Start here |
+|------|-----------|
+| Report model and schema | [Report contract](book/08-report.md) |
+| HTML rendering | [HTML render](book/10-html-render.md) |
+| Live sample | [Sample report](examples/report.md) |
 
 ---
 
 ## Contracts Book
 
 Contract-first documentation derived from code and locked tests.
-
-The Contracts Book defines:
-
-- schemas and typed contracts
-- baseline and cache semantics
-- exit codes and CI behavior
-- determinism guarantees
-- trust and compatibility rules
-- review surface contracts
-- change controller workflow and tool contracts
 
 ### Core Contracts
 
@@ -123,17 +105,15 @@ The Contracts Book defines:
 
 ## Deep Dives
 
-Narrative documentation covering architecture, integrations, and operational usage.
-
 - [Architecture narrative](architecture.md)
 - [CFG design and semantics](cfg.md)
-- [MCP integration for AI agents and clients](mcp.md)
-- [VS Code extension usage guide](vscode-extension.md)
-- [Claude Desktop bundle usage guide](claude-desktop-bundle.md)
-- [Codex plugin usage guide](codex-plugin.md)
-- [SARIF integration for IDE/code-scanning use](sarif.md)
+- [MCP integration guide](mcp.md)
+- [VS Code extension usage](vscode-extension.md)
+- [Claude Desktop bundle usage](claude-desktop-bundle.md)
+- [Codex plugin usage](codex-plugin.md)
+- [SARIF integration](sarif.md)
 
-### Operational and legal
+### Operational
 
 - [Privacy Policy](privacy-policy.md)
 - [Terms of Use](terms-of-use.md)
@@ -151,23 +131,15 @@ Narrative documentation covering architecture, integrations, and operational usa
 
 ## Local Preview
 
-=== "Build the site"
+```bash
+# Build the site
+uv run --with mkdocs --with mkdocs-material mkdocs build --strict
 
-    ```bash title="Validate the docs site"
-    uv run --with mkdocs --with mkdocs-material mkdocs build --strict
-    ```
-
-=== "Build the site and sample report"
-
-    ```bash title="Generate the live sample report into the built site"
-    uv run --with mkdocs --with mkdocs-material mkdocs build --strict
-    uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
-    ```
+# Build with live sample report
+uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
+```
 
 !!! note "Generated output"
-    `site/` is generated output used for local preview and GitHub Pages
-    publishing. It is not committed to git.
-
-GitHub Pages publishing is handled by
-[`docs.yml`](https://github.com/orenlab/codeclone/blob/main/.github/workflows/docs.yml)
-via a custom Actions workflow.
+    `site/` is generated output used for local preview and GitHub Pages publishing.
+    It is not committed to git.
