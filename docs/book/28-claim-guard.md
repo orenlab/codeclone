@@ -56,7 +56,7 @@ The pipeline is fully deterministic:
 | `require_citations` | `bool`        | `true`   | Warn when no known finding IDs or metric family names are cited |
 
 !!! info "Text limits"
-Text must be non-empty and at most `50,000` characters.
+    Text must be non-empty and at most `50,000` characters.
 
 ---
 
@@ -119,11 +119,11 @@ available. Without a comparison run, fix claims cannot be verified.
 ## Non-goals
 
 !!! warning "What claim guard is not"
-- Not a vulnerability scanner
-- Not a CI gate
-- Not an LLM fact checker
-- Not proof that uncited text is correct
-- Not a replacement for `check_patch_contract`
+    - Not a vulnerability scanner
+    - Not a CI gate
+    - Not an LLM fact checker
+    - Not proof that uncited text is correct
+    - Not a replacement for `check_patch_contract`
 
 ---
 

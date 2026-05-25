@@ -192,9 +192,9 @@ codeclone-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 ```
 
 !!! warning "Remote exposure is opt-in"
-Non-loopback hosts require `--allow-remote`. The built-in HTTP server
-has no authentication. Use it only on trusted networks or behind an
-authenticated reverse proxy.
+    Non-loopback hosts require `--allow-remote`. The built-in HTTP server
+    has no authentication. Use it only on trusted networks or behind an
+    authenticated reverse proxy.
 
 ### Run retention
 
@@ -236,8 +236,8 @@ stored runs.
 | `compare_runs`          | Run-to-run delta: regressions, improvements, health change |
 
 !!! tip "Start here"
-After analysis, call `get_run_summary` or `get_production_triage` first.
-Prefer `list_hotspots` or `check_*` before broad `list_findings` calls.
+    After analysis, call `get_run_summary` or `get_production_triage` first.
+    Prefer `list_hotspots` or `check_*` before broad `list_findings` calls.
 
 ### Phase 3: Drill down
 
@@ -298,7 +298,7 @@ sequenceDiagram
     M-->>A: after_run_id registered
 
     A->>M: check(intent_id, changed_files or diff_ref)
-    Note right of M: intent stays on before-run; changed scope is explicit
+    Note right of M: intent stays on before-run, changed scope is explicit
     M-->>A: clean / expanded / violated
 
     A->>M: check_patch_contract(mode=verify, before_run_id, after_run_id, intent_id)
@@ -323,16 +323,16 @@ sequenceDiagram
 | `validate_review_claims` | Citation-based overclaim detection against stored run semantics                             |
 
 ??? info "Blast radius: do_not_touch vs review_context"
-`do_not_touch` contains actionable edit prohibitions: baselines, generated
-state, forbidden paths. `review_context` contains report-only signals:
-security boundary inventory, overloaded-module candidates, known baseline
-debt. Review context is information, not an edit ban.
+    `do_not_touch` contains actionable edit prohibitions: baselines, generated
+    state, forbidden paths. `review_context` contains report-only signals:
+    security boundary inventory, overloaded-module candidates, known baseline
+    debt. Review context is information, not an edit ban.
 
 ??? info "Patch contract modes"
-**Budget** reads one stored run and optional intent. Shows regression
-headroom per quality dimension before editing. **Verify** compares explicit
-before/after stored runs, previews gates, validates scope, and reports
-baseline-abuse signals. Missing runs return `status=unverified`.
+    **Budget** reads one stored run and optional intent. Shows regression
+    headroom per quality dimension before editing. **Verify** compares explicit
+    before/after stored runs, previews gates, validates scope, and reports
+    baseline-abuse signals. Missing runs return `status=unverified`.
 
 ### Phase 6: Session management
 
@@ -454,15 +454,15 @@ Separate accepted baseline debt from new regressions.
 ```
 
 !!! tip "Best practices"
-- Use `analyze_changed_paths` for PRs, not full analysis.
-- Prefer `get_run_summary` or `get_production_triage` as the first pass.
-- Prefer `list_hotspots` or narrow `check_*` tools before broad `list_findings`.
-- Use `get_finding` / `get_remediation` for one finding instead of raising
-`detail_level` on larger lists.
-- Pass an absolute `root` — MCP rejects relative roots like `.`.
-- Use `coverage_xml` only with `analysis_mode="full"`.
-- Use `source_kind="production-only"` to cut test/fixture noise.
-- Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
+    - Use `analyze_changed_paths` for PRs, not full analysis.
+    - Prefer `get_run_summary` or `get_production_triage` as the first pass.
+    - Prefer `list_hotspots` or narrow `check_*` tools before broad `list_findings`.
+    - Use `get_finding` / `get_remediation` for one finding instead of raising
+      `detail_level` on larger lists.
+    - Pass an absolute `root` — MCP rejects relative roots like `.`.
+    - Use `coverage_xml` only with `analysis_mode="full"`.
+    - Use `source_kind="production-only"` to cut test/fixture noise.
+    - Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
 
 ---
 

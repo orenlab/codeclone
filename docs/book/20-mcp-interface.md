@@ -9,9 +9,9 @@ pipeline/report contracts as the CLI. It does not create a second analysis
 engine or a second persistence model.
 
 !!! note "Integration surface, not a second analyzer"
-MCP composes over the canonical report and run state shared by CLI, HTML,
-and SARIF. It never mutates source files, baselines, analysis cache, or
-report artifacts.
+    MCP composes over the canonical report and run state shared by CLI, HTML,
+    and SARIF. It never mutates source files, baselines, analysis cache, or
+    report artifacts.
 
 ---
 
@@ -58,9 +58,9 @@ Current server characteristics:
   MCP service contract.
 
 !!! warning "Absolute roots and remote exposure"
-Analysis tools require an absolute repository root. HTTP exposure beyond
-loopback requires explicit `--allow-remote` and has no built-in
-authentication.
+    Analysis tools require an absolute repository root. HTTP exposure beyond
+    loopback requires explicit `--allow-remote` and has no built-in
+    authentication.
 
 ---
 
@@ -129,18 +129,18 @@ drill into one finding or one hotspot family.
 | `validate_review_claims` | `text`, `run_id`, `require_citations`                                                                       | Citation-based overclaim detection against stored run semantics                             |
 
 ??? info "Blast radius: do_not_touch vs review_context"
-`do_not_touch` is limited to actionable negative context: baselines,
-generated CodeClone state, explicit forbidden paths. Report-only signals
-such as security boundary inventory and overloaded-module candidates are
-returned as `review_context` — information, not edit prohibitions. Long
-context sections include `total`, `shown`, and `truncated` summaries.
+    `do_not_touch` is limited to actionable negative context: baselines,
+    generated CodeClone state, explicit forbidden paths. Report-only signals
+    such as security boundary inventory and overloaded-module candidates are
+    returned as `review_context` — information, not edit prohibitions. Long
+    context sections include `total`, `shown`, and `truncated` summaries.
 
 ??? info "Patch contract modes"
-**Budget** reads one stored run and optional intent. Shows regression
-headroom per quality dimension before editing. **Verify** compares
-explicit before/after stored runs, previews gates, validates scope, and
-reports baseline-abuse signals. Missing runs return
-`status="unverified"`.
+    **Budget** reads one stored run and optional intent. Shows regression
+    headroom per quality dimension before editing. **Verify** compares
+    explicit before/after stored runs, previews gates, validates scope, and
+    reports baseline-abuse signals. Missing runs return
+    `status="unverified"`.
 
 ### Session-local tools
 
