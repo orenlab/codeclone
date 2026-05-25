@@ -145,7 +145,9 @@ def _normalize_optional_paths(value: object, *, field_name: str) -> tuple[str, .
 
 def normalize_intent_scope(scope: object) -> IntentScope:
     if not isinstance(scope, Mapping):
-        raise ValueError("scope must be an object with allowed_files.")
+        raise ValueError(
+            'scope must be an object, e.g. {"allowed_files": ["path/to/file.py"]}.'
+        )
     allowed_files = _normalize_required_paths(
         scope.get("allowed_files"),
         field_name="allowed_files",

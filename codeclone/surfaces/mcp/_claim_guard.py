@@ -178,20 +178,17 @@ def extract_citations(
             for match in _find_literal_matches(text, finding_id)
         )
     for family_name in sorted(report_context.metric_families):
-        pattern = re.compile(
-            rf"\b{re.escape(family_name)}\b",
-            flags=re.IGNORECASE,
-        )
-        citations.extend(
-            Citation(
-                cited_id=family_name,
-                kind="metric_family",
-                text_window=text_window(text, match.start(), match.end()),
-                start_offset=match.start(),
-                end_offset=match.end(),
+        for variant in _metric_family_patterns(family_name):
+            citations.extend(
+                Citation(
+                    cited_id=family_name,
+                    kind="metric_family",
+                    text_window=text_window(text, match.start(), match.end()),
+                    start_offset=match.start(),
+                    end_offset=match.end(),
+                )
+                for match in variant.finditer(text)
             )
-            for match in pattern.finditer(text)
-        )
     return tuple(
         sorted(
             _dedupe_citations(citations),
@@ -435,6 +432,15 @@ def _warnings_for_text(
                 }
             )
     return warnings
+
+
+def _metric_family_patterns(family_name: str) -> tuple[re.Pattern[str], ...]:
+    canonical = re.compile(rf"\b{re.escape(family_name)}\b", flags=re.IGNORECASE)
+    if "_" not in family_name:
+        return (canonical,)
+    spaced_escaped = re.escape(family_name).replace("_", r"\s+")
+    spaced = re.compile(rf"\b{spaced_escaped}\b", flags=re.IGNORECASE)
+    return (canonical, spaced)
 
 
 def _find_literal_matches(text: str, literal: str) -> tuple[re.Match[str], ...]:

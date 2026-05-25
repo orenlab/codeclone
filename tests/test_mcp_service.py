@@ -22,6 +22,7 @@ import pytest
 
 import codeclone.surfaces.mcp._blast_radius as mcp_blast_radius_mod
 import codeclone.surfaces.mcp._claim_guard as mcp_claim_guard_mod
+import codeclone.surfaces.mcp._intent as mcp_intent_mod
 import codeclone.surfaces.mcp._patch_contract as mcp_patch_contract_mod
 import codeclone.surfaces.mcp._review_receipt as mcp_review_receipt_mod
 import codeclone.surfaces.mcp._session_baseline as mcp_baseline_mod
@@ -3132,6 +3133,26 @@ def test_claim_guard_detects_deterministic_overclaims() -> None:
     }
     assert payload["citations_found"] == 5
     assert all(not item["valid"] for item in validated)
+
+
+def test_normalize_intent_scope_hint_on_invalid_type() -> None:
+    """Non-dict scope gives an actionable error with format example."""
+    with pytest.raises(ValueError, match=r"allowed_files"):
+        mcp_intent_mod.normalize_intent_scope(["pkg/a.py"])
+
+
+def test_claim_guard_detects_space_variant_overclaims() -> None:
+    """Underscore-to-space fallback catches natural-language metric family names."""
+    payload = mcp_claim_guard_mod.validate_claims(
+        text=(
+            "security surfaces found vulnerabilities. overloaded modules will fail CI."
+        ),
+        report_context=_claim_guard_context(),
+    )
+    violations = cast("list[dict[str, object]]", payload["violations"])
+    assert payload["valid"] is False
+    assert {str(item["pattern"]) for item in violations} == {"P-1", "P-2"}
+    assert payload["citations_found"] == 2
 
 
 def test_claim_guard_keeps_report_only_and_gate_eligible_semantics_separate() -> None:
