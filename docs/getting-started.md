@@ -180,9 +180,13 @@ codeclone-mcp --transport streamable-http   # remote / HTTP clients
 
 === "Codex"
 
-    The plugin is in
-    [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone).
-    Codex discovers it from `.agents/plugins/marketplace.json`.
+    ```bash
+    marketplace add orenlab/codeclone-codex
+    ```
+
+    The source plugin lives in
+    [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone);
+    the marketplace distribution is `orenlab/codeclone-codex`.
 
     See [Codex plugin guide](codex-plugin.md).
 

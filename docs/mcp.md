@@ -123,10 +123,16 @@ All clients use the same server. Only the registration format differs.
 === "Codex"
 
     ```bash
+    marketplace add orenlab/codeclone-codex
+    ```
+
+    The native plugin includes the MCP definition and CodeClone skills.
+    Manual MCP registration without the plugin is also valid:
+
+    ```bash
     codex mcp add codeclone -- codeclone-mcp --transport stdio
     ```
 
-    A native plugin also ships in `plugins/codeclone/`.
     See [Codex plugin guide](codex-plugin.md).
 
 === "Cursor"

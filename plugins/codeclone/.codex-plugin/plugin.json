@@ -25,7 +25,7 @@
   "interface": {
     "displayName": "CodeClone",
     "shortDescription": "Structural code quality analysis for Python.",
-    "longDescription": "CodeClone for Codex — clone detection, quality metrics, and baseline-aware governance over the canonical codeclone-mcp server. Ships a review skill and a hotspot discovery skill for conservative-first, triage-first structural review.",
+    "longDescription": "CodeClone for Codex — clone detection, quality metrics, and baseline-aware governance over the canonical codeclone-mcp server. Ships review, hotspot discovery, and change-control skills for conservative-first structural review and intent-first repository edits.",
     "developerName": "OrenLab",
     "category": "Developer Tools",
     "capabilities": [
@@ -39,7 +39,8 @@
     "defaultPrompt": [
       "Use CodeClone to analyze this repo and show the top production hotspots.",
       "Run a changed-files CodeClone review for my current diff.",
-      "Check CodeClone health and explain what to fix first."
+      "Check CodeClone health and explain what to fix first.",
+      "Use CodeClone change control for this repository edit."
     ],
     "brandColor": "#6366f1",
     "composerIcon": "./assets/icon.png",

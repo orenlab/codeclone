@@ -1,7 +1,7 @@
 # Codex Plugin
 
-CodeClone ships a native Codex plugin in `plugins/codeclone/`.
-Repo-local discovery via `.agents/plugins/marketplace.json`.
+CodeClone ships a native Codex plugin. Source lives in `plugins/codeclone/`;
+public installs use the distribution repo `orenlab/codeclone-codex`.
 
 ## What ships in the plugin
 
@@ -16,6 +16,15 @@ Repo-local discovery via `.agents/plugins/marketplace.json`.
 | `assets/` | Plugin branding |
 
 ## Install
+
+Install the plugin from the Codex marketplace:
+
+```bash
+marketplace add orenlab/codeclone-codex
+```
+
+The plugin expects a local `codeclone-mcp` command. Install CodeClone with the
+MCP extra in the workspace or globally:
 
 ```bash
 uv venv
@@ -58,11 +67,15 @@ skill — use it whenever the task requires changing files.
 
 ## Runtime model
 
-Additive — Codex discovers the plugin from `.agents/plugins/marketplace.json`,
-gets a local MCP definition and three skills. New canonical MCP surfaces from the
-local `codeclone-mcp` version flow through directly, including Coverage Join
-facts and the optional `coverage` help topic when supported. The plugin does
-not mutate `~/.codex/config.toml` or install a second server binary.
+Additive — the marketplace install provides a local MCP definition and three
+skills. New canonical MCP surfaces from the local `codeclone-mcp` version flow
+through directly, including Coverage Join facts and the optional `coverage`
+help topic when supported. The plugin does not mutate `~/.codex/config.toml` or
+install a second server binary.
+
+`.agents/plugins/marketplace.json` is the monorepo-local source entry used for
+development and packaging into `orenlab/codeclone-codex`; it is not the public
+install path.
 
 ## Current limits
 

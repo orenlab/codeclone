@@ -9,28 +9,29 @@ directly, including `Coverage Join` facts and the optional `coverage` help topic
 
 ## What ships here
 
-| File                         | Purpose                                            |
-|------------------------------|----------------------------------------------------|
-| `.codex-plugin/plugin.json`  | Plugin metadata and prompts                        |
-| `.mcp.json`                  | Local stdio MCP definition                         |
-| `scripts/launch_mcp`         | Shell-free workspace-first launcher bootstrap      |
-| `skills/codeclone-review/`   | Conservative-first full review skill               |
-| `skills/codeclone-hotspots/` | Quick hotspot discovery skill                      |
-| `assets/`                    | Plugin branding                                    |
+| File                                  | Purpose                                       |
+|---------------------------------------|-----------------------------------------------|
+| `.codex-plugin/plugin.json`           | Plugin metadata, prompts, and instructions    |
+| `.mcp.json`                           | Local stdio MCP definition                    |
+| `scripts/launch_mcp`                  | Shell-free workspace-first launcher bootstrap |
+| `skills/codeclone-review/`            | Conservative-first full review skill          |
+| `skills/codeclone-hotspots/`          | Quick hotspot discovery skill                 |
+| `skills/codeclone-change-control/`    | Intent-first change workflow skill            |
+| `assets/`                             | Plugin branding                               |
 
 `plugin.json` keeps the machine identifier as lowercase `codeclone`; the
 user-facing label stays in `interface.displayName` as `CodeClone`.
 
 ## Install
 
-The plugin prefers a workspace launcher first:
+Install the distribution package from the Codex marketplace:
 
-1. `./.venv/bin/codeclone-mcp`
-2. the current Poetry environment launcher
-3. `codeclone-mcp` from `PATH`
+```bash
+marketplace add orenlab/codeclone-codex
+```
 
-The bundled Codex launcher is a small repo-local Python wrapper, not a shell
-snippet. It keeps the same workspace-first order without relying on `sh -lc`.
+This plugin does not install the MCP server binary. Install CodeClone with the
+MCP extra in the workspace or globally.
 
 Recommended workspace-local setup:
 
@@ -49,8 +50,15 @@ uv tool install "codeclone[mcp]"
 codeclone-mcp --help
 ```
 
-Codex discovers the plugin from `.agents/plugins/marketplace.json`.
-It does not rewrite `~/.codex/config.toml`.
+The bundled Codex launcher is a small repo-local Python wrapper, not a shell
+snippet. It prefers a workspace `.venv`, then the current Poetry environment,
+then `codeclone-mcp` from `PATH`, without relying on `sh -lc`.
+
+`.agents/plugins/marketplace.json` is the monorepo-local source entry used for
+development and distribution packaging. Public installs should use
+`marketplace add orenlab/codeclone-codex`.
+
+The plugin does not rewrite `~/.codex/config.toml`.
 
 If you prefer manual MCP registration instead:
 
@@ -66,6 +74,10 @@ current-run metrics surfaces.
 
 **codeclone-hotspots** — quick quality snapshot: health check, top risks,
 single-metric queries, pre-merge sanity checks, coverage/adoption/API snapshots.
+
+**codeclone-change-control** — intent-first workflow for repository edits:
+workspace intent check, blast radius, patch contract verification, claim guard,
+and review receipt.
 
 ## Links
 

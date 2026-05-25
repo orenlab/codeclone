@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Document the current contract and behavior of the Codex plugin shipped in
-`plugins/codeclone/`.
+Document the current contract and behavior of the Codex plugin sourced from
+`plugins/codeclone/` and distributed through `orenlab/codeclone-codex`.
 
-This chapter describes the plugin as a local Codex discovery and guidance layer
-over existing CodeClone MCP contracts.
+This chapter describes the plugin as a Codex discovery and guidance layer over
+existing CodeClone MCP contracts.
 
 !!! note "Guidance layer only"
     The plugin contributes discovery metadata, a local MCP definition, and
@@ -17,8 +17,10 @@ over existing CodeClone MCP contracts.
 
 The Codex plugin is:
 
-- a repo-local Codex plugin under `plugins/`
-- backed by `.agents/plugins/marketplace.json`
+- sourced from `plugins/codeclone/` in this monorepo
+- distributed as `orenlab/codeclone-codex`
+- backed by `.agents/plugins/marketplace.json` for local development and
+  packaging
 - read-only with respect to repository state
 - a composition of local MCP server metadata plus Codex skill guidance
 - a native Codex setup surface, not a second extension model
@@ -26,7 +28,7 @@ The Codex plugin is:
 ## Source of truth
 
 The plugin delegates analysis to the existing `codeclone-mcp` launcher and
-guides usage through a plugin-bundled skill.
+guides usage through bundled skills.
 
 New canonical MCP surfaces flow through from the resolved local server version.
 That includes current-run metric families such as `Coverage Join` and the
@@ -47,9 +49,10 @@ The plugin currently provides:
 - `.mcp.json`
 - `scripts/launch_mcp`
 - `README.md`
-- two bundled skills:
+- three bundled skills:
     - `codeclone-review`
     - `codeclone-hotspots`
+    - `codeclone-change-control`
 - a repo-local marketplace entry in `.agents/plugins/marketplace.json`
 
 ## Runtime model
@@ -65,18 +68,20 @@ The plugin surface is additive:
   plugin
 
 The plugin does not rewrite user config or install CodeClone automatically.
+Public users install the distribution package with
+`marketplace add orenlab/codeclone-codex`.
 
 ## Design rules
 
-- **Codex-native packaging**: use `plugins/` plus `.agents/plugins/marketplace.json`
-  for discovery.
+- **Codex-native packaging**: keep source under `plugins/` and publish the
+  marketplace distribution through `orenlab/codeclone-codex`.
 - **Canonical MCP first**: all analysis still flows through `codeclone-mcp`.
 - **Skill guidance, not analysis logic**: the skill teaches conservative-first
   CodeClone review but does not create new findings.
 - **No hidden installation side effects**: the plugin does not patch
   `~/.codex/config.toml`.
-- **Repo-local clarity**: the plugin is meant to travel with the repository as
-  a native Codex surface.
+- **Source clarity**: the monorepo copy is the source; the public install
+  surface is the `orenlab/codeclone-codex` distribution.
 - **Launcher honesty**: the plugin assumes `codeclone-mcp` is already
   installable in the current workspace or reachable on `PATH`, and prefers the
   workspace environment when one is present.
