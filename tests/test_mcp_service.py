@@ -3141,6 +3141,66 @@ def test_normalize_intent_scope_hint_on_invalid_type() -> None:
         mcp_intent_mod.normalize_intent_scope(["pkg/a.py"])
 
 
+def test_normalize_intent_scope_edge_cases() -> None:
+    """Path normalization: traversal, absolute, leading ./ prefix."""
+    # leading ./ stripped
+    scope = mcp_intent_mod.normalize_intent_scope({"allowed_files": ["./pkg/a.py"]})
+    assert scope.allowed_files == ("pkg/a.py",)
+
+    # absolute path rejected
+    with pytest.raises(ValueError, match="relative"):
+        mcp_intent_mod.normalize_intent_scope({"allowed_files": ["/abs/path.py"]})
+
+    # traversal rejected
+    with pytest.raises(ValueError, match="traversal"):
+        mcp_intent_mod.normalize_intent_scope({"allowed_files": ["../escape.py"]})
+
+    # string instead of list rejected for allowed_files
+    with pytest.raises(ValueError, match="list of relative paths"):
+        mcp_intent_mod.normalize_intent_scope({"allowed_files": "pkg/a.py"})
+
+    # optional paths: string instead of list rejected
+    with pytest.raises(ValueError, match="list of relative paths"):
+        mcp_intent_mod.normalize_intent_scope(
+            {"allowed_files": ["pkg/a.py"], "allowed_related": "pkg/b.py"}
+        )
+
+
+def test_normalize_expected_effects_rejects_string() -> None:
+    """expected_effects must be a list, not a bare string."""
+    with pytest.raises(ValueError, match="list of strings"):
+        mcp_intent_mod.normalize_expected_effects("single effect")
+
+
+def test_intent_record_payload_includes_check_result() -> None:
+    """IntentRecord.to_payload includes check_result when present."""
+    check = mcp_intent_mod.IntentCheckResult(
+        status=mcp_intent_mod.IntentStatus.CLEAN,
+        declared_scope=("pkg/a.py",),
+        actual_changed_files=("pkg/a.py",),
+        unexpected_files=(),
+        forbidden_touched=(),
+        required_action=None,
+        message="clean",
+    )
+    record = mcp_intent_mod.IntentRecord(
+        intent_id="test-001",
+        run_id="run1234",
+        report_digest="abc123",
+        status=mcp_intent_mod.IntentStatus.CLEAN,
+        declared_at_utc="2026-01-01T00:00:00Z",
+        scope=mcp_intent_mod.IntentScope(allowed_files=("pkg/a.py",)),
+        intent_description="test",
+        expected_effects=(),
+        guards=(),
+        check_result=check,
+    )
+    payload = record.to_payload()
+    assert "check_result" in payload
+    check_payload = cast("Mapping[str, object]", payload["check_result"])
+    assert check_payload["status"] == "clean"
+
+
 def test_claim_guard_detects_space_variant_overclaims() -> None:
     """Underscore-to-space fallback catches natural-language metric family names."""
     payload = mcp_claim_guard_mod.validate_claims(

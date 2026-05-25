@@ -91,17 +91,188 @@ def test_blast_radius_rejects_absolute_paths(tmp_path: Path) -> None:
     assert "absolute paths are not accepted" in printer.text
 
 
-def test_blast_radius_requires_at_least_one_inventory_file(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("files", "expected_message"),
+    [
+        (("pkg/missing.py",), "--blast-radius requires at least one file"),
+        (("",), "empty path"),
+        (("../escape.py",), "paths must stay inside the scan root"),
+    ],
+)
+def test_blast_radius_rejects_invalid_input(
+    tmp_path: Path,
+    files: tuple[str, ...],
+    expected_message: str,
+) -> None:
     printer = _RecordingPrinter()
 
     with pytest.raises(SystemExit) as exc:
         render_blast_radius(
             console=printer,
             report_document=_report_document(),
-            files=("pkg/missing.py",),
+            files=files,
             root_path=tmp_path,
             quiet=True,
         )
 
     assert exc.value.code == int(ExitCode.CONTRACT_ERROR)
-    assert "--blast-radius requires at least one file" in printer.text
+    assert expected_message in printer.text
+
+
+def test_blast_radius_warns_on_skipped_files(tmp_path: Path) -> None:
+    printer = _RecordingPrinter()
+
+    exit_code = render_blast_radius(
+        console=printer,
+        report_document=_report_document(),
+        files=("pkg/a.py", "pkg/not_here.py"),
+        root_path=tmp_path,
+        quiet=False,
+    )
+
+    assert exit_code == int(ExitCode.SUCCESS)
+    assert "skipped files outside analysis inventory" in printer.text
+
+
+def test_blast_radius_none_report_returns_contract_error(tmp_path: Path) -> None:
+    printer = _RecordingPrinter()
+
+    exit_code = render_blast_radius(
+        console=printer,
+        report_document=None,
+        files=("pkg/a.py",),
+        root_path=tmp_path,
+        quiet=True,
+    )
+
+    assert exit_code == int(ExitCode.CONTRACT_ERROR)
+    assert "Blast radius requires a canonical report" in printer.text
+
+
+def test_blast_radius_verbose_output_renders_all_sections(tmp_path: Path) -> None:
+    printer = _RecordingPrinter()
+
+    exit_code = render_blast_radius(
+        console=printer,
+        report_document=_report_document(),
+        files=("pkg/a.py",),
+        root_path=tmp_path,
+        quiet=False,
+    )
+
+    assert exit_code == int(ExitCode.SUCCESS)
+    text = printer.text
+    expected_sections = (
+        "Blast Radius",
+        "pkg/a.py",
+        "Risk level:",
+        "Direct dependents",
+        "Clone cohort members",
+        "Dependency cycles",
+        "Do not touch",
+        "Review context",
+    )
+    for section in expected_sections:
+        assert section in text, f"Missing section: {section}"
+
+
+def test_blast_radius_verbose_with_guardrails(tmp_path: Path) -> None:
+    """Verbose mode also renders guardrails when present."""
+    printer = _RecordingPrinter()
+
+    exit_code = render_blast_radius(
+        console=printer,
+        report_document=_report_document(),
+        files=("pkg/a.py",),
+        root_path=tmp_path,
+        quiet=False,
+    )
+
+    assert exit_code == int(ExitCode.SUCCESS)
+    assert "Guardrails:" in printer.text
+
+
+def _report_document_many_files() -> dict[str, object]:
+    """Report with >20 inventory files to exercise truncation rendering."""
+    files = [f"pkg/f{index:03d}.py" for index in range(25)]
+    deps = [
+        {"source": f"pkg.f{index:03d}", "target": "pkg.f000"} for index in range(1, 25)
+    ]
+    return {
+        "integrity": {"digest": {"value": "b" * 64}},
+        "inventory": {"file_registry": {"items": files}},
+        "metrics": {
+            "families": {
+                "dependencies": {"items": deps, "cycles": []},
+                "complexity": {"items": []},
+                "coupling": {"items": []},
+                "coverage_join": {"items": []},
+                "overloaded_modules": {"items": []},
+                "security_surfaces": {"items": []},
+            },
+        },
+        "findings": {
+            "groups": {
+                "clones": {
+                    "functions": [],
+                    "blocks": [],
+                    "segments": [],
+                    "suppressed": {},
+                },
+                "structural": {"groups": []},
+                "dead_code": {"groups": []},
+                "design": {"groups": []},
+            },
+        },
+    }
+
+
+def test_blast_radius_verbose_truncates_long_lists(tmp_path: Path) -> None:
+    """Items and entries exceeding _MAX_RENDERED_ITEMS are truncated."""
+    printer = _RecordingPrinter()
+
+    exit_code = render_blast_radius(
+        console=printer,
+        report_document=_report_document_many_files(),
+        files=("pkg/f000.py",),
+        root_path=tmp_path,
+        quiet=False,
+    )
+
+    assert exit_code == int(ExitCode.SUCCESS)
+    assert "... and" in printer.text
+
+
+def test_blast_radius_skipped_warning_truncated(tmp_path: Path) -> None:
+    """More than 5 skipped files triggers truncation in warning."""
+    extra_missing = [f"pkg/miss{i}.py" for i in range(7)]
+    printer = _RecordingPrinter()
+
+    exit_code = render_blast_radius(
+        console=printer,
+        report_document=_report_document(),
+        files=("pkg/a.py", *extra_missing),
+        root_path=tmp_path,
+        quiet=False,
+    )
+
+    assert exit_code == int(ExitCode.SUCCESS)
+    assert "... and" in printer.text
+
+
+def test_blast_radius_many_invalid_paths_truncated(tmp_path: Path) -> None:
+    """More than 10 invalid paths triggers truncation in error message."""
+    bad_paths = [f"/abs/path{i}.py" for i in range(12)]
+    printer = _RecordingPrinter()
+
+    with pytest.raises(SystemExit) as exc:
+        render_blast_radius(
+            console=printer,
+            report_document=_report_document(),
+            files=bad_paths,
+            root_path=tmp_path,
+            quiet=True,
+        )
+
+    assert exc.value.code == int(ExitCode.CONTRACT_ERROR)
+    assert "... and 2 more" in printer.text
