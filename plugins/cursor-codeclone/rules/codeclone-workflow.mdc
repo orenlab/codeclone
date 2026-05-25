@@ -1,0 +1,29 @@
+---
+description: "CodeClone MCP integration rules — how to use the structural analysis server correctly"
+alwaysApply: true
+---
+
+# CodeClone MCP Rules
+
+You have access to CodeClone through the local CodeClone MCP server.
+
+## General rules
+
+- Use MCP tools only. Do not fall back to CLI or local report files.
+- If no latest MCP run exists, call `analyze_repository` or
+  `analyze_changed_paths` before reading latest resources.
+- Start with the default analysis profile.
+- Prefer `get_production_triage` after analysis.
+- Use `analyze_changed_paths` for diffs.
+- Use `get_report_section(section="metrics")` for adoption, API, and
+  coverage facts.
+- Call `help(topic="coverage")` when external coverage semantics matter.
+- Never fall back to CLI, local report files, or repository mutation.
+- CodeClone is the source of truth — do not reinterpret findings.
+- Pass absolute `root` to analysis tools; MCP rejects relative roots.
+
+## Tool preferences
+
+- Prefer `list_hotspots` or `check_*` before broad `list_findings`.
+- Use `get_finding` or `get_remediation` for one finding.
+- Use `source_kind` filters to cut test noise.

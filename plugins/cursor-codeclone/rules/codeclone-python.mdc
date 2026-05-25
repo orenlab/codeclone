@@ -1,0 +1,16 @@
+---
+description: "CodeClone Python file analysis context — auto-triggers when Python files are in context"
+globs: "**/*.py"
+---
+
+# CodeClone Python Context
+
+When working with Python files in this project:
+
+- Run CodeClone analysis before making structural changes.
+- Check blast radius before editing files with dependents.
+- Use `check_complexity`, `check_coupling`, and `check_cohesion` for focused
+  metric checks on specific files.
+- Do not introduce new clone groups, dead code, or dependency cycles without
+  explicit approval.
+- Do not update baselines, cache, or generated reports.

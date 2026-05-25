@@ -1,0 +1,27 @@
+{
+  "name": "codeclone",
+  "version": "2.1.0a1",
+  "description": "Baseline-aware structural code quality analysis for Cursor through the local CodeClone MCP server.",
+  "author": {
+    "name": "Den Rozhnovskiy",
+    "email": "pytelemonbot@mail.ru",
+    "url": "https://github.com/orenlab"
+  },
+  "homepage": "https://orenlab.github.io/codeclone/cursor-plugin/",
+  "repository": "https://github.com/orenlab/codeclone",
+  "license": "MPL-2.0",
+  "keywords": [
+    "codeclone",
+    "cursor",
+    "mcp",
+    "structural-review",
+    "baseline-aware",
+    "code-quality",
+    "clone-detection",
+    "python"
+  ],
+  "rules": "rules/",
+  "skills": "skills/",
+  "mcpServers": "mcp.json",
+  "logo": "assets/logo.png"
+}
