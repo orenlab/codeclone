@@ -50,18 +50,25 @@ analysis only.
 
 ```
 manage_change_intent(action="list_workspace", root=...)
-→ analyze_repository
-→ manage_change_intent(action="declare")
+→ analyze_repository                                        # before-run
+→ manage_change_intent(action="declare")                    # intent bound to before-run
 → get_blast_radius
 → check_patch_contract(mode="budget")
 → edit code
-→ analyze_repository
-→ manage_change_intent(action="check")
-→ check_patch_contract(mode="verify")
+→ analyze_repository                                        # after-run
+→ manage_change_intent(action="check", intent_id=..., changed_files=[...])
+→ check_patch_contract(mode="verify", before_run_id=..., after_run_id=..., intent_id=...)
 → validate_review_claims
 → create_review_receipt
 → manage_change_intent(action="clear")
 ```
+
+The intent stays bound to the before-run. After re-analyze, pass `intent_id`
+explicitly to `check` and `verify`; without it, `_resolve_intent` resolves by
+latest run id and misses the intent. Do not redeclare on the after-run:
+`verify` compares the intent's `report_digest` against the before-run, and a
+redeclared intent would cause an `expired` mismatch. Use `diff_ref=...` instead
+of `changed_files=[...]` when the changed set should come from git.
 
 Older MCP servers may not support `list_workspace`, `validate_review_claims`,
 or `create_review_receipt`. Skip only unavailable steps and say so explicitly.
@@ -92,8 +99,8 @@ analyze_repository
 → check_patch_contract(mode="budget")
 → edit code
 → analyze_repository
-→ manage_change_intent(action="check")
-→ check_patch_contract(mode="verify")
+→ manage_change_intent(action="check", intent_id=..., changed_files=[...])
+→ check_patch_contract(mode="verify", before_run_id=..., after_run_id=..., intent_id=...)
 → validate_review_claims
 → create_review_receipt
 ```
@@ -165,12 +172,16 @@ allowed.
 
 ## Patch verification
 
-After editing, run analysis again, then call:
+After editing, run analysis again, then pass the original `intent_id`
+explicitly:
 
 ```
-manage_change_intent(action="check")
-check_patch_contract(mode="verify")
+manage_change_intent(action="check", intent_id=..., changed_files=[...])
+check_patch_contract(mode="verify", before_run_id=..., after_run_id=..., intent_id=...)
 ```
+
+Use `diff_ref=...` instead of `changed_files=[...]` when the changed set should
+come from git.
 
 If the result is `unverified`, report what is missing. Do not claim the patch is
 verified.

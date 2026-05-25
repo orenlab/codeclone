@@ -289,12 +289,13 @@ sequenceDiagram
     Note over A: Edit files within scope
 
     A->>M: analyze_repository(root)
-    M-->>A: after-run registered
+    M-->>A: after_run_id registered
 
-    A->>M: check(changed_files)
+    A->>M: check(intent_id, changed_files or diff_ref)
+    Note right of M: intent stays on before-run; changed scope is explicit
     M-->>A: clean / expanded / violated
 
-    A->>M: check_patch_contract(mode=verify)
+    A->>M: check_patch_contract(mode=verify, before_run_id, after_run_id, intent_id)
     M-->>A: accepted / violated
 
     A->>M: validate_review_claims(text)
@@ -396,9 +397,9 @@ manage_change_intent(action="list_workspace")
   -> get_blast_radius(files=[...])
   -> check_patch_contract(mode="budget")
   -> [edit within scope]
-  -> analyze_repository
-  -> manage_change_intent(action="check", changed_files=[...])
-  -> check_patch_contract(mode="verify", before_run_id=..., after_run_id=...)
+  -> analyze_repository                                                          # after-run
+  -> manage_change_intent(action="check", intent_id=..., changed_files=[...])
+  -> check_patch_contract(mode="verify", before_run_id=..., after_run_id=..., intent_id=...)
   -> validate_review_claims(text="...")
   -> create_review_receipt
   -> manage_change_intent(action="clear")

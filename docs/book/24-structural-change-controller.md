@@ -11,15 +11,15 @@ The v2.1 alpha currently includes intent, blast-radius, patch-contract checks,
 review receipts, workspace intent visibility, claim guard, and CLI controller
 queries:
 
-| Phase | Status | Surface |
-|-------|--------|---------|
-| Intent declaration | Live in `2.1.0a1` | MCP `manage_change_intent` |
-| Blast radius | Live in `2.1.0a1` | MCP `get_blast_radius`, CLI `--blast-radius` |
-| Patch contract | Live in `2.1.0a1` | MCP `check_patch_contract`, CLI `--patch-verify` |
-| Review receipt | Live in `2.1.0a1` | MCP `create_review_receipt` |
-| Workspace intent registry | Live in `2.1.0a1` | MCP `manage_change_intent` |
-| Lease and recovery | Live in `2.1.0a1` | MCP `manage_change_intent` |
-| Claim guard | Live in `2.1.0a1` | MCP `validate_review_claims` |
+| Phase                     | Status            | Surface                                          |
+|---------------------------|-------------------|--------------------------------------------------|
+| Intent declaration        | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
+| Blast radius              | Live in `2.1.0a1` | MCP `get_blast_radius`, CLI `--blast-radius`     |
+| Patch contract            | Live in `2.1.0a1` | MCP `check_patch_contract`, CLI `--patch-verify` |
+| Review receipt            | Live in `2.1.0a1` | MCP `create_review_receipt`                      |
+| Workspace intent registry | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
+| Lease and recovery        | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
+| Claim guard               | Live in `2.1.0a1` | MCP `validate_review_claims`                     |
 
 ## Contract
 
@@ -69,14 +69,19 @@ report output flags and baseline update flags.
 6. Optionally call `get_blast_radius` for full dependent/context detail.
 7. Call `check_patch_contract(mode="budget")` to inspect the active regression
    budget and metric headroom before editing.
-8. After editing, call `manage_change_intent(action="check")` with
-   `changed_files` or `diff_ref`.
-9. Run analysis again, then call `check_patch_contract(mode="verify")` with
-   explicit `before_run_id` and `after_run_id`.
-10. Call `validate_review_claims` before publishing a review summary.
-11. Call `create_review_receipt` to collect provenance, scope, blast radius,
-   reviewed findings, patch status, human decision points, and claims-not-made.
-12. Call `manage_change_intent(action="clear")` when the edit is complete.
+8. Run analysis again after editing (produces the after-run).
+9. Call `manage_change_intent(action="check", intent_id=..., changed_files=...)`
+   with the original `intent_id`. Use `diff_ref=...` instead of
+   `changed_files=...` when the changed set should come from git. The intent
+   stays bound to the before-run; `verify` compares its `report_digest` against
+   the before-run, so redeclaring on the after-run would cause an `expired`
+   mismatch.
+10. Call `check_patch_contract(mode="verify", before_run_id=...,
+    after_run_id=..., intent_id=...)`.
+11. Call `validate_review_claims` before publishing a review summary.
+12. Call `create_review_receipt` to collect provenance, scope, blast radius,
+    reviewed findings, patch status, human decision points, and claims-not-made.
+13. Call `manage_change_intent(action="clear")` when the edit is complete.
 
 `manage_change_intent` can return `clean`, `expanded`, `violated`, or
 `expired`. Expiry means the report digest changed since declaration.

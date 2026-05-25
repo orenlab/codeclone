@@ -16,6 +16,11 @@ When permitted to edit code, follow the change control workflow below.
 
 ## Change control workflow
 
+This workflow is mandatory protocol, not advisory text. Do not skip, replace,
+reorder, or approximate these steps. If a required MCP call fails or is
+unavailable, stop and report the blocker instead of continuing as a normal
+edit.
+
 Before editing any repository files:
 
 1. `manage_change_intent(action="list_workspace", root="<abs_path>")`
@@ -27,18 +32,35 @@ Before editing any repository files:
 5. `check_patch_contract(mode="budget")`
 6. Edit within declared scope only
 7. `analyze_repository(root="<abs_path>")` — re-run after edits
-8. `manage_change_intent(action="check", ...)` then
-   `check_patch_contract(mode="verify")`
-9. `manage_change_intent(action="clear")`
+8. `manage_change_intent(action="check", intent_id=..., changed_files=[...])`
+   — pass the original `intent_id` explicitly and provide either
+   `changed_files` or `diff_ref` (the intent is bound to the before-run;
+   without `intent_id`, `_resolve_intent` looks up the latest run and
+   misses it)
+9. `check_patch_contract(mode="verify", before_run_id=...,
+   after_run_id=..., intent_id=...)` — verify compares the intent's
+   `report_digest` against the before-run; redeclare on the after-run
+   would cause an `expired` mismatch
+10. `manage_change_intent(action="clear")`
 
 ### Rules
 
-- Never edit files without declaring intent first.
-- Never silently expand scope — redeclare with expanded scope.
+- MUST NOT edit files without declaring intent first.
+- MUST NOT silently expand scope — redeclare with expanded scope before
+  editing the extra file.
+- MUST NOT redeclare on the after-run. Re-declare only to expand scope before
+  editing or to start a separate change.
+- MUST NOT call the `check` action without exactly one changed-scope source:
+  `changed_files` or `diff_ref`.
+- After re-analyze, pass `intent_id` explicitly to
+  `check`/`get`/`verify` — otherwise `_resolve_intent` resolves by
+  latest run_id and misses intents bound to the before-run.
 - `do_not_touch` is a hard boundary. `review_context` is context, not a ban.
 - Do not update baselines, cache, or generated reports.
 - If `list_workspace` shows overlapping foreign intent, stop and coordinate.
 - CodeClone findings are the source of truth — do not reinterpret.
+- If `check_patch_contract(mode="verify")` returns `unverified` or `violated`,
+  do not claim the patch is verified.
 - Live foreign intent means **stop**, not kill. Never suggest killing
   a process without explicit user confirmation that the PID is abandoned.
 
