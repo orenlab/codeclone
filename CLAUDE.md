@@ -13,6 +13,8 @@ user explicitly permits it for a specific task. "Реализуй" / "Implement"
 is explicit permission. "Проверь" / "Validate" is not.
 
 When permitted to edit code, follow the change control workflow below.
+Creating or editing a spec is also a repository edit. "Spec only" is not a
+reason to skip change control.
 
 ## Change control workflow
 
@@ -41,7 +43,7 @@ Before editing any repository files:
    after_run_id=..., intent_id=...)` — verify compares the intent's
    `report_digest` against the before-run; redeclare on the after-run
    would cause an `expired` mismatch
-10. `manage_change_intent(action="clear")`
+10. `manage_change_intent(action="clear", intent_id=...)`
 
 ### Rules
 
@@ -52,6 +54,8 @@ Before editing any repository files:
   editing or to start a separate change.
 - MUST NOT call the `check` action without exactly one changed-scope source:
   `changed_files` or `diff_ref`.
+- MUST clear the original intent by explicit `intent_id` after successful
+  verification.
 - After re-analyze, pass `intent_id` explicitly to
   `check`/`get`/`verify` — otherwise `_resolve_intent` resolves by
   latest run_id and misses intents bound to the before-run.
@@ -61,8 +65,27 @@ Before editing any repository files:
 - CodeClone findings are the source of truth — do not reinterpret.
 - If `check_patch_contract(mode="verify")` returns `unverified` or `violated`,
   do not claim the patch is verified.
+- Leaving an active or recoverable own intent behind is a blocked cleanup, not
+  a completed task.
 - Live foreign intent means **stop**, not kill. Never suggest killing
   a process without explicit user confirmation that the PID is abandoned.
+
+### Completion gate
+
+Do not say "done", "implemented", "validated", "verified", "ready", or
+equivalent unless all of these are true:
+
+1. an after-run was created after the last edit;
+2. `manage_change_intent(action="check", intent_id=..., changed_files=...)`
+   or `diff_ref=...` returned `clean`;
+3. `check_patch_contract(mode="verify", before_run_id=...,
+   after_run_id=..., intent_id=...)` returned `accepted`;
+4. any final summary claims passed `validate_review_claims`;
+5. `manage_change_intent(action="clear", intent_id=...)` succeeded.
+
+If any item cannot be completed, report `BLOCKED` or `UNVERIFIED`, include the
+`intent_id`, and state the exact missing step. Do not present the work as
+finished.
 
 ### When to skip
 
