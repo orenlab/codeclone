@@ -169,7 +169,11 @@ LEGACY_CACHE_PATH = cli_state.LEGACY_CACHE_PATH
 
 
 def _controller_query_mode(args: object) -> bool:
-    return bool_attr(args, "blast_radius") or bool_attr(args, "patch_verify")
+    return (
+        bool_attr(args, "blast_radius")
+        or bool_attr(args, "patch_verify")
+        or bool_attr(args, "session_stats")
+    )
 
 
 def _validate_controller_query_flags(
@@ -195,12 +199,21 @@ def _validate_controller_query_flags(
             ui.fmt_contract_error("--strictness is only valid with --patch-verify.")
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
+    session_stats = bool_attr(args, "session_stats")
+    if session_stats and (blast_radius or patch_verify):
+        printer.print(
+            ui.fmt_contract_error(
+                "--session-stats cannot be combined with "
+                "--blast-radius or --patch-verify."
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
     if blast_radius and patch_verify:
         printer.print(
             ui.fmt_contract_error("Use --blast-radius or --patch-verify, not both.")
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
-    if not (blast_radius or patch_verify):
+    if not (blast_radius or patch_verify or session_stats):
         return
     if bool_attr(args, "update_baseline") or bool_attr(args, "update_metrics_baseline"):
         printer.print(
@@ -391,6 +404,16 @@ def _main_impl() -> None:
         args=args,
         strictness_explicit=strictness_explicit,
     )
+    if bool_attr(args, "session_stats"):
+        from .session_stats import render_session_stats
+
+        sys.exit(
+            render_session_stats(
+                console=_console(),
+                root_path=root_path,
+                quiet=args.quiet,
+            )
+        )
     git_diff_ref = _validate_changed_scope_args(args=args)
     changed_paths = (
         _git_diff_changed_paths(root_path=root_path, git_diff_ref=git_diff_ref)

@@ -95,7 +95,49 @@ class MCPSession(_MCPSessionClaimGuardMixin):
         self._intent_sequence = 0
         self._agent_pid = os.getpid()
         self._agent_start_epoch = int(time.time())
-        self._agent_label = os.environ.get("CODECLONE_AGENT_LABEL", "")
+        self._agent_label_cache: str | None = None
+        self._fastmcp: object | None = None
+
+    # ------------------------------------------------------------------
+    # Agent label: lazy-resolved from MCP clientInfo on first access
+    # ------------------------------------------------------------------
+
+    @property
+    def _agent_label(self) -> str:
+        if self._agent_label_cache is None:
+            self._agent_label_cache = self._resolve_agent_label()
+        return self._agent_label_cache
+
+    @_agent_label.setter
+    def _agent_label(self, value: str) -> None:
+        self._agent_label_cache = value
+
+    def _resolve_agent_label(self) -> str:
+        """Build a human-readable agent label from MCP client metadata.
+
+        Resolution order:
+        1. MCP ``clientInfo`` from the protocol ``initialize`` handshake
+           (available after the first tool call) → ``"name/version"``.
+        2. Fallback → ``"pid-<pid>"``.
+        """
+        try:
+            get_context = getattr(self._fastmcp, "get_context", None)
+            if not callable(get_context):
+                return f"pid-{self._agent_pid}"
+            ctx = get_context()
+            session = getattr(ctx, "session", None)
+            params = getattr(session, "client_params", None)
+            info = getattr(params, "clientInfo", None)
+            name = getattr(info, "name", None)
+            if not isinstance(name, str) or not name:
+                return f"pid-{self._agent_pid}"
+            version = getattr(info, "version", None)
+            if isinstance(version, str) and version:
+                return f"{name}/{version}"
+            return name
+        except Exception:
+            pass
+        return f"pid-{self._agent_pid}"
 
     def analyze_repository(self, request: MCPAnalysisRequest) -> dict[str, object]:
         self._validate_analysis_request(request)

@@ -101,7 +101,7 @@
     },
     {
       "name": "manage_change_intent",
-      "signature": "(self, *, action: 'str', run_id: 'str | None' = None, intent_id: 'str | None' = None, scope: 'dict[str, object] | None' = None, intent: 'str | None' = None, expected_effects: 'Sequence[str] | None' = None, diff_ref: 'str | None' = None, changed_files: 'Sequence[str] | None' = None, root: 'str | None' = None, ttl_seconds: 'int | None' = None) -> 'dict[str, object]'"
+      "signature": "(self, *, action: 'str', run_id: 'str | None' = None, intent_id: 'str | None' = None, scope: 'dict[str, object] | None' = None, intent: 'str | None' = None, expected_effects: 'Sequence[str] | None' = None, diff_ref: 'str | None' = None, changed_files: 'Sequence[str] | None' = None, root: 'str | None' = None, ttl_seconds: 'int | None' = None, lease_seconds: 'int | None' = None) -> 'dict[str, object]'"
     },
     {
       "name": "mark_finding_reviewed",

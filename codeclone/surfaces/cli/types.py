@@ -81,6 +81,7 @@ class CLIArgsLike(Protocol):
     blast_radius: tuple[str, ...] | list[str] | None
     patch_verify: bool
     strictness: str
+    session_stats: bool
     skip_metrics: bool
     skip_dead_code: bool
     skip_dependencies: bool

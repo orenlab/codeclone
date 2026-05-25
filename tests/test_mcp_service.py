@@ -28,16 +28,20 @@ import codeclone.surfaces.mcp._review_receipt as mcp_review_receipt_mod
 import codeclone.surfaces.mcp._session_baseline as mcp_baseline_mod
 import codeclone.surfaces.mcp._session_finding_mixin as mcp_finding_mod
 import codeclone.surfaces.mcp._session_helpers as mcp_helpers_mod
+import codeclone.surfaces.mcp._session_intent_mixin as mcp_session_intent_mod
 import codeclone.surfaces.mcp._session_runtime as mcp_runtime_mod
 import codeclone.surfaces.mcp._session_shared as mcp_shared_mod
 import codeclone.surfaces.mcp._session_state_mixin as mcp_state_mod
 import codeclone.surfaces.mcp._workspace_intents as mcp_workspace_intents_mod
+import codeclone.surfaces.mcp.server as mcp_server_mod
+import codeclone.surfaces.mcp.service as mcp_service_mod
 import codeclone.surfaces.mcp.session as mcp_session_mod
 from codeclone.baseline import Baseline, current_python_tag
-from codeclone.baseline.metrics_baseline import MetricsBaseline
+from codeclone.baseline.metrics_baseline import MetricsBaseline, MetricsBaselineStatus
 from codeclone.cache.store import Cache
 from codeclone.config.pyproject_loader import ConfigValidationError
 from codeclone.contracts import BASELINE_SCHEMA_VERSION, REPORT_SCHEMA_VERSION
+from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import MetricsDiff
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
@@ -1763,6 +1767,7 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
             respect_pyproject=True,
             analysis_mode="clones_only",
             metrics_baseline_path="metrics.json",
+            coverage_xml="coverage.xml",
         ),
     )
     assert args.min_loc == 12
@@ -1773,6 +1778,7 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
     assert str(args.baseline).endswith("conf-baseline.json")
     assert str(args.cache_path).endswith("conf-cache.json")
     assert str(args.metrics_baseline).endswith("metrics.json")
+    assert str(args.coverage_xml).endswith("coverage.xml")
 
     monkeypatch.setattr(
         mcp_state_mod,
@@ -2325,6 +2331,93 @@ def test_mcp_blast_radius_projection_is_deterministic() -> None:
     )
 
 
+def test_mcp_blast_radius_high_scope_boundary_and_helper_edges() -> None:
+    report_document = copy.deepcopy(_blast_radius_report_document())
+    registry = cast(
+        "dict[str, object]",
+        cast(dict[str, object], report_document["inventory"])["file_registry"],
+    )
+    items = cast("list[str]", registry["items"])
+    items.extend(f"pkg/dep_{index}.py" for index in range(6))
+    dependencies = cast(
+        "dict[str, object]",
+        cast(
+            dict[str, object],
+            cast(dict[str, object], report_document["metrics"])["families"],
+        )["dependencies"],
+    )
+    dependency_items = cast("list[dict[str, object]]", dependencies["items"])
+    dependency_items.extend(
+        {"source": f"pkg.dep_{index}", "target": "pkg.a"} for index in range(6)
+    )
+
+    result = mcp_blast_radius_mod.compute_blast_radius(
+        run_id="abcdef12",
+        report_document=report_document,
+        files=("./pkg/a.py",),
+        depth="direct",
+        allowed_scope=("pkg/a.py",),
+    )
+    risk_only = result.to_payload(include=("risk_signals",))
+
+    assert result.radius_level == "high"
+    assert (
+        "high blast radius requires explicit human scope approval" in result.guardrails
+    )
+    assert {item["category"] for item in result.do_not_touch} >= {
+        "baseline_or_generated_state",
+        "affected_but_not_allowed",
+    }
+    assert risk_only["do_not_touch"] == []
+    assert risk_only["review_context"] == []
+    assert "low_coverage_in_blast_zone" not in cast(
+        dict[str, object],
+        risk_only["structural_risk"],
+    )
+    assert mcp_blast_radius_mod._as_int(True) == 1
+    assert mcp_blast_radius_mod._as_int("bad", default=7) == 7
+    assert mcp_blast_radius_mod._path_to_module("__init__.py") == ""
+
+
+def test_mcp_blast_radius_private_edge_helpers() -> None:
+    assert mcp_blast_radius_mod._as_int(3) == 3
+    assert mcp_blast_radius_mod._as_int(2.9) == 2
+    assert mcp_blast_radius_mod._as_int(object(), default=4) == 4
+    assert mcp_blast_radius_mod._normalize_relative_path(".") == ""
+    assert mcp_blast_radius_mod._path_to_module("pkg/data.txt") == "pkg.data.txt"
+    assert mcp_blast_radius_mod._item_path({}) == ""
+    assert mcp_blast_radius_mod._compute_transitive_dependents(
+        origin_modules=("pkg.a",),
+        reverse_graph={"pkg.a": {"pkg.b"}, "pkg.b": {"pkg.a", "pkg.c"}},
+    ) == ("pkg.b", "pkg.c")
+    assert mcp_blast_radius_mod._guardrails(
+        radius_level="low",
+        do_not_touch=(),
+    ) == (
+        "review direct dependents before editing public behavior",
+        "treat clone cohort members as comparison context, not automatic edit targets",
+    )
+
+    boundary_entries: dict[str, dict[str, str]] = {}
+    mcp_blast_radius_mod._append_boundary_entry(
+        boundary_entries,
+        path="",
+        reason="ignored",
+        category="ignored",
+        severity="hard",
+    )
+    review_entries: dict[tuple[str, str, str], dict[str, str]] = {}
+    mcp_blast_radius_mod._append_review_entry(
+        review_entries,
+        path="",
+        reason="ignored",
+        category="ignored",
+    )
+
+    assert boundary_entries == {}
+    assert review_entries == {}
+
+
 def test_mcp_blast_radius_payload_bounds_context_sections() -> None:
     review_context = tuple(
         {
@@ -2502,6 +2595,105 @@ def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
         service.manage_change_intent(action="get", run_id="abcdef12")
 
 
+def test_mcp_service_wrapper_and_server_validation_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BadSession:
+        def not_a_dict(self) -> list[str]:
+            return []
+
+    service = CodeCloneMCPService(history_limit=2)
+    service._session_cls = BadSession  # type: ignore[assignment]
+    with pytest.raises(TypeError, match="must return a dict"):
+        service._run_dict("not_a_dict")
+
+    cleanup_service = CodeCloneMCPService(history_limit=2)
+    cleanup_service._active_intents["intent-missing-run"] = mcp_intent_mod.IntentRecord(
+        intent_id="intent-missing-run",
+        run_id="missing-run",
+        report_digest="digest",
+        status=mcp_intent_mod.IntentStatus.ACTIVE,
+        declared_at_utc="2026-01-01T00:00:00Z",
+        scope=mcp_intent_mod.IntentScope(allowed_files=("pkg/a.py",)),
+        intent_description="cleanup",
+        expected_effects=(),
+        guards=(),
+    )
+    cleanup_service.shutdown_cleanup()
+
+    record = _blast_radius_run_record(tmp_path)
+    cleanup_service._runs.register(record)
+    cleanup_service._active_intents["intent-cleanup"] = mcp_intent_mod.IntentRecord(
+        intent_id="intent-cleanup",
+        run_id=record.run_id,
+        report_digest="digest",
+        status=mcp_intent_mod.IntentStatus.ACTIVE,
+        declared_at_utc="2026-01-01T00:00:00Z",
+        scope=mcp_intent_mod.IntentScope(allowed_files=("pkg/a.py",)),
+        intent_description="cleanup",
+        expected_effects=(),
+        guards=(),
+    )
+    removed: list[str] = []
+
+    def fake_safe_remove_own_intent(**kwargs: object) -> bool:
+        removed.append(str(kwargs["intent_id"]))
+        return True
+
+    monkeypatch.setattr(
+        mcp_service_mod,
+        "safe_remove_own_intent",
+        fake_safe_remove_own_intent,
+    )
+    cleanup_service.shutdown_cleanup()
+    assert removed == ["intent-cleanup"]
+
+    class BrokenLock:
+        def __enter__(self) -> None:
+            raise RuntimeError("lock unavailable")
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    cleanup_service._state_lock = BrokenLock()
+    cleanup_service.shutdown_cleanup()
+
+    clear_service = CodeCloneMCPService(history_limit=2)
+    clear_service._active_intents["intent-missing-run"] = mcp_intent_mod.IntentRecord(
+        intent_id="intent-missing-run",
+        run_id="missing-run",
+        report_digest="digest",
+        status=mcp_intent_mod.IntentStatus.ACTIVE,
+        declared_at_utc="2026-01-01T00:00:00Z",
+        scope=mcp_intent_mod.IntentScope(allowed_files=("pkg/a.py",)),
+        intent_description="cleanup",
+        expected_effects=(),
+        guards=(),
+    )
+
+    def raise_contract_error(
+        _store: object,
+        run_id: str | None = None,
+    ) -> MCPRunRecord:
+        raise MCPServiceContractError("missing run")
+
+    monkeypatch.setattr(type(clear_service._runs), "get", raise_contract_error)
+    cleared = clear_service.clear_session_runs()
+    assert cleared["cleared_intents"] == 1
+
+    with pytest.raises(MCPServiceContractError, match="Invalid value for include"):
+        cleanup_service._validated_blast_radius_include(("bad",))
+
+    assert mcp_server_mod._validated_analysis_mode("clones_only") == "clones_only"
+    with pytest.raises(MCPServiceContractError, match="analysis_mode"):
+        mcp_server_mod._validated_analysis_mode("bad")
+    assert mcp_server_mod._validated_cache_policy("refresh") == "refresh"
+    assert mcp_server_mod._validated_cache_policy("off") == "off"
+    with pytest.raises(MCPServiceContractError, match="cache_policy"):
+        mcp_server_mod._validated_cache_policy("bad")
+
+
 def _paired_blast_services(
     tmp_path: Path,
     *,
@@ -2572,6 +2764,20 @@ def _single_service_with_stale_intent(
             intent_id=intent_id,
         ),
     )
+
+
+def _recoverable_workspace_service(
+    tmp_path: Path,
+) -> tuple[CodeCloneMCPService, str]:
+    first, second = _paired_blast_services(tmp_path)
+    declared = first.manage_change_intent(
+        action="declare",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="first agent edits pkg.a",
+    )
+    intent_id = str(declared["intent_id"])
+    _stale_workspace_intent(tmp_path, intent_id=intent_id)
+    return second, intent_id
 
 
 def _lease_expires_at(
@@ -2704,8 +2910,23 @@ def test_mcp_service_workspace_intent_recovery_after_lease_expiry(
         "list[dict[str, object]]",
         workspace["workspace_intents"],
     )
-    assert workspace_intents[0]["ownership"] == "recoverable"
-    assert cast("list[dict[str, object]]", workspace["recovery_available"]) == [
+    assert workspace_intents[0]["ownership"] == "foreign_stale"
+    assert "owner may still be working" in str(workspace_intents[0]["escalation_hint"])
+    assert cast("list[dict[str, object]]", workspace["recovery_available"]) == []
+
+    monkeypatch.setattr(mcp_workspace_intents_mod, "_is_pid_alive", lambda pid: False)
+    recoverable_workspace = second.manage_change_intent(
+        action="list_workspace",
+        root=str(tmp_path),
+    )
+    recoverable_intents = cast(
+        "list[dict[str, object]]",
+        recoverable_workspace["workspace_intents"],
+    )
+    assert recoverable_intents[0]["ownership"] == "recoverable"
+    assert cast(
+        "list[dict[str, object]]", recoverable_workspace["recovery_available"]
+    ) == [
         {
             "intent_id": intent_id,
             "run_id": "abcdef12",
@@ -2776,6 +2997,160 @@ def test_mcp_service_workspace_intent_recovery_rejects_digest_mismatch(
 
     assert rejected["action_taken"] == "recovery_rejected"
     assert rejected["reason"] == "report_digest_mismatch"
+
+
+def test_mcp_service_workspace_intent_recovery_request_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+
+    assert service.manage_change_intent(action="recover")["reason"] == (
+        "missing_intent_id"
+    )
+    assert (
+        service.manage_change_intent(
+            action="recover",
+            intent_id="intent-missing",
+        )["reason"]
+        == "missing_run_id"
+    )
+    assert (
+        service.manage_change_intent(
+            action="recover",
+            intent_id="intent-missing",
+            run_id="abcdef12",
+        )["reason"]
+        == "missing_root"
+    )
+    with pytest.raises(MCPServiceContractError, match="require root"):
+        service.manage_change_intent(action="list_workspace")
+
+    service._runs.register(_blast_radius_run_record(tmp_path))
+    rejected = service.manage_change_intent(
+        action="recover",
+        root=str(tmp_path),
+        run_id="abcdef12",
+        intent_id="intent-missing",
+    )
+    assert rejected["action_taken"] == "recovery_rejected"
+    assert rejected["reason"] == "not_found"
+
+    second, intent_id = _recoverable_workspace_service(tmp_path)
+
+    def reject_activation(**kwargs: object) -> dict[str, object]:
+        return {
+            "intent_id": intent_id,
+            "action_taken": "recovery_rejected",
+            "reason": "forced_activation_rejection",
+        }
+
+    monkeypatch.setattr(second, "_activate_recovered_intent", reject_activation)
+    forced = second.manage_change_intent(
+        action="recover",
+        root=str(tmp_path),
+        run_id="abcdef12",
+        intent_id=intent_id,
+    )
+    assert forced["reason"] == "forced_activation_rejection"
+
+
+def test_mcp_service_workspace_intent_recovery_rejects_unavailable_run(
+    tmp_path: Path,
+) -> None:
+    first = CodeCloneMCPService(history_limit=2)
+    second = CodeCloneMCPService(history_limit=2)
+    first._agent_pid, first._agent_start_epoch = 11111, 100
+    second._agent_pid, second._agent_start_epoch = 22222, 200
+    first._runs.register(_blast_radius_run_record(tmp_path))
+    declared = first.manage_change_intent(
+        action="declare",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="first agent edits pkg.a",
+    )
+    intent_id = str(declared["intent_id"])
+    _stale_workspace_intent(tmp_path, intent_id=intent_id)
+
+    rejected = second.manage_change_intent(
+        action="recover",
+        root=str(tmp_path),
+        run_id="abcdef12",
+        intent_id=intent_id,
+    )
+
+    assert rejected["action_taken"] == "recovery_rejected"
+    assert rejected["reason"] == "run_not_available"
+
+
+def test_mcp_service_workspace_intent_recovery_rolls_back_on_rewrite_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    second, intent_id = _recoverable_workspace_service(tmp_path)
+
+    def reject_workspace_write(*args: object, **kwargs: object) -> bool:
+        return False
+
+    monkeypatch.setattr(
+        mcp_session_intent_mod,
+        "write_workspace_intent",
+        reject_workspace_write,
+    )
+
+    rejected = second.manage_change_intent(
+        action="recover",
+        root=str(tmp_path),
+        run_id="abcdef12",
+        intent_id=intent_id,
+    )
+
+    assert rejected["action_taken"] == "recovery_rejected"
+    assert rejected["reason"] == "workspace_rewrite_failed"
+    with pytest.raises(MCPServiceContractError, match="Unknown change intent"):
+        second.manage_change_intent(action="get", intent_id=intent_id)
+
+
+def test_mcp_service_reset_workspace_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, intent_id, _ = _single_service_with_stale_intent(tmp_path)
+
+    with pytest.raises(MCPServiceContractError, match="requires intent_id"):
+        service.manage_change_intent(action="reset_workspace", root=str(tmp_path))
+    with pytest.raises(MCPServiceContractError, match="Unknown workspace intent"):
+        service.manage_change_intent(
+            action="reset_workspace",
+            root=str(tmp_path),
+            intent_id="intent-missing",
+        )
+
+    reset = service.manage_change_intent(
+        action="reset_workspace",
+        root=str(tmp_path),
+        intent_id=intent_id,
+        ttl_seconds=mcp_workspace_intents_mod.MIN_TTL_SECONDS,
+    )
+    assert reset["action_taken"] == "reset"
+    assert reset["new_status"] == "active"
+
+    second, recoverable_id = _recoverable_workspace_service(tmp_path)
+    monkeypatch.setattr(mcp_workspace_intents_mod, "_is_pid_alive", lambda pid: False)
+
+    removed = second.manage_change_intent(
+        action="reset_workspace",
+        root=str(tmp_path),
+        intent_id=recoverable_id,
+    )
+    assert removed["action_taken"] == "removed"
+    assert removed["reason"] == "orphaned"
+    assert (
+        mcp_workspace_intents_mod.find_workspace_intent(
+            root=tmp_path,
+            intent_id=recoverable_id,
+        )
+        is None
+    )
 
 
 def test_mcp_service_workspace_intent_get_renews_lease(tmp_path: Path) -> None:
@@ -2851,6 +3226,182 @@ def test_mcp_service_manage_change_intent_validation_expiry_and_prune(
     service._prune_session_state()
     with pytest.raises(MCPRunNotFoundError):
         service._runs.get("abcdef12")
+
+
+def test_mcp_service_manage_change_intent_additional_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    service._runs.register(_blast_radius_run_record(tmp_path, digest=""))
+
+    with pytest.raises(MCPServiceContractError, match="requires intent text"):
+        service.manage_change_intent(
+            action="declare",
+            scope={"allowed_files": ["pkg/a.py"]},
+            intent=" ",
+        )
+
+    first = service.manage_change_intent(
+        action="declare",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="first declaration",
+    )
+    first_id = str(first["intent_id"])
+    second = service.manage_change_intent(
+        action="declare",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="replacement declaration",
+    )
+    second_id = str(second["intent_id"])
+    assert first_id != second_id
+    with pytest.raises(MCPServiceContractError, match="Unknown change intent"):
+        service.manage_change_intent(action="clear", intent_id=first_id)
+
+    def raise_runtime_error(*args: object, **kwargs: object) -> bool:
+        raise RuntimeError("lease unavailable")
+
+    monkeypatch.setattr(
+        mcp_session_intent_mod,
+        "renew_workspace_intent_lease",
+        raise_runtime_error,
+    )
+    assert service.manage_change_intent(action="get", intent_id=second_id)[
+        "status"
+    ] == ("active")
+    service.get_blast_radius(files=("pkg/a.py",), run_id="abcdef12")
+
+    service._runs.register(_blast_radius_run_record(tmp_path, digest="changed"))
+    expired = service.manage_change_intent(
+        action="check",
+        intent_id=second_id,
+        changed_files=["pkg/a.py"],
+    )
+    assert expired["status"] == "expired"
+
+    cleared = service.manage_change_intent(action="clear")
+    assert cleared["cleared_intent_ids"] == [second_id]
+
+    assert (
+        service.manage_change_intent(
+            action="gc_workspace",
+            root=str(tmp_path),
+        )["remaining"]
+        == 0
+    )
+    assert mcp_session_intent_mod._as_sequence("not-a-sequence") == ()
+    assert mcp_session_intent_mod._parse_utc("not-a-date") is None
+    assert mcp_session_intent_mod._parse_utc("2026-01-01T00:00:00") is None
+    assert (
+        service._recovery_rejection_message(
+            mcp_workspace_intents_mod.IntentOwnership.EXPIRED
+        )
+        == "Intent has expired (TTL). Declare a new intent instead."
+    )
+    assert (
+        service._recovery_rejection_message(
+            mcp_workspace_intents_mod.IntentOwnership.OWN_ACTIVE
+        )
+        == "Intent is already actively owned by this session."
+    )
+    assert (
+        service._recovery_rejection_message(
+            mcp_workspace_intents_mod.IntentOwnership.OWN_STALE
+        )
+        == "Intent is not recoverable."
+    )
+
+
+def test_mcp_service_intent_recovery_internal_edges(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    record = _blast_radius_run_record(tmp_path)
+    service._runs.register(record)
+
+    with pytest.raises(MCPServiceContractError, match="No active change intent"):
+        service.manage_change_intent(action="get", run_id="abcdef12")
+    assert service._optional_run_record("missing") is None
+
+    declared = service.manage_change_intent(
+        action="declare",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="recover internals",
+    )
+    intent_id = str(declared["intent_id"])
+    resolved_record, resolved_intent = service._resolve_intent(
+        run_id="abcdef12",
+        intent_id=None,
+    )
+    assert resolved_record.run_id == record.run_id
+    assert resolved_intent.intent_id == intent_id
+    found = mcp_workspace_intents_mod.find_workspace_intent(
+        root=tmp_path,
+        intent_id=intent_id,
+    )
+    assert found is not None
+    _, workspace_record = found
+    now = mcp_workspace_intents_mod.utc_now()
+    recovery_run = mcp_session_intent_mod._RecoveryRun(
+        record=record,
+        report_digest=service._report_digest_value(record),
+    )
+    active_target = mcp_session_intent_mod._RecoveryTarget(
+        root_path=tmp_path,
+        workspace_record=workspace_record,
+        now=now,
+    )
+
+    already_active = service._activate_recovered_intent(
+        target=active_target,
+        recovery_run=recovery_run,
+    )
+    assert cast("dict[str, object]", already_active)["reason"] == "already_active"
+
+    invalid_scope_target = mcp_session_intent_mod._RecoveryTarget(
+        root_path=tmp_path,
+        workspace_record=replace(
+            workspace_record,
+            intent_id="intent-invalid-scope",
+            scope={"allowed_files": []},
+        ),
+        now=now,
+    )
+    invalid_scope = service._activate_recovered_intent(
+        target=invalid_scope_target,
+        recovery_run=recovery_run,
+    )
+    assert cast("dict[str, object]", invalid_scope)["reason"] == "invalid_scope"
+
+    digest_mismatch_target = mcp_session_intent_mod._RecoveryTarget(
+        root_path=tmp_path,
+        workspace_record=replace(workspace_record, scope_digest="0" * 64),
+        now=now,
+    )
+    digest_mismatch = service._recovery_run(
+        run_id="abcdef12",
+        target=digest_mismatch_target,
+    )
+    assert cast("dict[str, object]", digest_mismatch)["reason"] == (
+        "scope_digest_mismatch"
+    )
+
+    no_run_record = replace(
+        workspace_record,
+        intent_id="intent-no-run",
+        run_id="missing-run",
+        agent_pid=999999,
+        agent_start_epoch=999,
+        lease_renewed_at_utc=mcp_workspace_intents_mod.format_utc(
+            now - timedelta(minutes=10)
+        ),
+        lease_seconds=mcp_workspace_intents_mod.MIN_LEASE_SECONDS,
+    )
+    assert service._recovery_available_payload(records=(no_run_record,), now=now) == []
+    assert (
+        service._lease_expired_at_utc(
+            replace(workspace_record, lease_renewed_at_utc="not-a-date")
+        )
+        is None
+    )
 
 
 def test_mcp_patch_contract_profiles_and_baseline_abuse() -> None:
@@ -3109,6 +3660,194 @@ def test_mcp_service_check_patch_contract_verify_composes_existing_primitives(
         assert payload["reason"] == reason
 
 
+def test_mcp_patch_contract_helper_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    record = _patch_contract_run_record(
+        tmp_path,
+        run_id="abcdef1234567890",
+        digest="helper-digest",
+        include_regression=False,
+        complexity=6,
+        health=90,
+    )
+    service._runs.register(record)
+
+    assert service._validated_strictness("strict") == "strict"
+    assert (
+        service._budgets_for_record(record=record, strictness="strict").health_floor
+        == 70
+    )
+    assert service._patch_changed_files(
+        after=record,
+        diff_ref=None,
+        changed_files=None,
+    ) == tuple(record.changed_paths)
+
+    def fake_git_diff_paths(*, root_path: Path, git_diff_ref: str) -> tuple[str, ...]:
+        return (f"{root_path.name}:{git_diff_ref}",)
+
+    monkeypatch.setattr(service, "_git_diff_paths", fake_git_diff_paths)
+    assert service._patch_changed_files(
+        after=record,
+        diff_ref="HEAD~1",
+        changed_files=None,
+    ) == (f"{tmp_path.name}:HEAD~1",)
+    assert service._contract_violations(
+        structural_delta={"regressions": [{"id": "r1"}]},
+        gate_preview={"would_fail": True},
+        scope_check={"status": "violated"},
+        baseline_abuse={"triggers": ["baseline_updated_without_intent"]},
+    ) == (
+        "structural_regressions",
+        "gate_failures",
+        "scope_violation",
+        "baseline_abuse:baseline_updated_without_intent",
+    )
+    assert service._first_int({"value": "5"}, keys=("missing", "value")) == 5
+    assert service._first_int({}, keys=("value",)) == 0
+    assert service._item_path({"file": "pkg\\a.py"}) == "pkg/a.py"
+    assert service._item_path({}) == ""
+    assert service._item_symbol({"class_name": "Widget"}) == "Widget"
+    assert (
+        service._metric_item_index(
+            {"metrics": {"families": {"complexity": {"items": [{"value": 10}]}}}},
+            family="complexity",
+            value_keys=("value",),
+        )
+        == {}
+    )
+    assert service._threshold_headroom(budget=-1, current=10) is None
+    assert service._verify_message(status="violated", violations=("x", "y")) == (
+        "Patch contract violated: x, y"
+    )
+    assert (
+        mcp_patch_contract_mod.detect_baseline_abuse(
+            before_gate_would_fail=False,
+            after_gate_would_fail=False,
+            after_baseline_status="ok",
+            regressions=0,
+            changed_files=0,
+            intent_available=True,
+        )["detected"]
+        is False
+    )
+    assert mcp_patch_contract_mod.detect_baseline_abuse(
+        before_gate_would_fail=False,
+        after_gate_would_fail=False,
+        after_baseline_status="updated",
+        regressions=0,
+        changed_files=1,
+        intent_available=True,
+    )["triggers"] == ["baseline_changed_with_functional_code"]
+
+    incomparable = service._unverified_patch_contract(
+        reason="incomparable_runs",
+        before=record,
+        after=record,
+        structural_delta={"verdict": "incomparable"},
+    )
+    assert incomparable["before"] == {"run_id": "abcdef12", "health": 90}
+    assert incomparable["after"] == {"run_id": "abcdef12", "health": 90}
+    assert incomparable["structural_delta"] == {"verdict": "incomparable"}
+
+    expired = service._expired_patch_contract(
+        before=record,
+        after=record,
+        intent=mcp_intent_mod.IntentRecord(
+            intent_id="intent-expired",
+            run_id=record.run_id,
+            report_digest="old",
+            status=mcp_intent_mod.IntentStatus.EXPIRED,
+            declared_at_utc="2026-01-01T00:00:00Z",
+            scope=mcp_intent_mod.IntentScope(allowed_files=("pkg/a.py",)),
+            intent_description="expired",
+            expected_effects=(),
+            guards=(),
+        ),
+    )
+    assert expired["status"] == "expired"
+    assert expired["contract_violations"] == ["intent_expired"]
+
+
+def test_mcp_patch_contract_verify_incomparable_and_expired_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    before = _patch_contract_run_record(
+        tmp_path,
+        run_id="beforeedge123456",
+        digest="before-edge",
+        include_regression=False,
+        complexity=6,
+        health=90,
+    )
+    after = _patch_contract_run_record(
+        tmp_path,
+        run_id="afteredge123456",
+        digest="after-edge",
+        include_regression=False,
+        complexity=6,
+        health=90,
+    )
+    service._runs.register(before)
+    service._runs.register(after)
+
+    def incomparable_compare(
+        *,
+        run_id_before: str,
+        run_id_after: str | None = None,
+        focus: str = "all",
+    ) -> dict[str, object]:
+        return {
+            "comparable": False,
+            "regressions": [],
+            "improvements": [],
+            "health_delta": None,
+            "verdict": f"{run_id_before}:{run_id_after}:{focus}",
+        }
+
+    monkeypatch.setattr(service, "compare_runs", incomparable_compare)
+    incomparable = service.check_patch_contract(
+        mode="verify",
+        before_run_id="beforeedge",
+        after_run_id="afteredge",
+    )
+    assert incomparable["status"] == "unverified"
+    assert incomparable["reason"] == "incomparable_runs"
+
+    def stable_compare(**kwargs: object) -> dict[str, object]:
+        return {
+            "comparable": True,
+            "regressions": [],
+            "improvements": [],
+            "health_delta": 0,
+            "verdict": "stable",
+        }
+
+    def always_expired(**kwargs: object) -> bool:
+        return True
+
+    monkeypatch.setattr(service, "compare_runs", stable_compare)
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id="beforeedge",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="expire verify",
+    )
+    monkeypatch.setattr(service, "_is_intent_expired", always_expired)
+    expired = service.check_patch_contract(
+        mode="verify",
+        before_run_id="beforeedge",
+        after_run_id="afteredge",
+        intent_id=str(declared["intent_id"]),
+    )
+    assert expired["status"] == "expired"
+
+
 def test_claim_guard_detects_deterministic_overclaims() -> None:
     payload = mcp_claim_guard_mod.validate_claims(
         text=(
@@ -3135,6 +3874,173 @@ def test_claim_guard_detects_deterministic_overclaims() -> None:
     assert all(not item["valid"] for item in validated)
 
 
+def test_claim_guard_input_warning_and_dedupe_edges() -> None:
+    with pytest.raises(ValueError, match="string"):
+        mcp_claim_guard_mod.validate_text_input(42)
+    with pytest.raises(ValueError, match="empty"):
+        mcp_claim_guard_mod.validate_text_input("   ")
+    with pytest.raises(ValueError, match="maximum"):
+        mcp_claim_guard_mod.validate_text_input(
+            "x" * (mcp_claim_guard_mod.MAX_REVIEW_CLAIM_TEXT_CHARS + 1)
+        )
+
+    base_context = _claim_guard_context(has_comparison_run=True)
+    context = mcp_claim_guard_mod.ReportContext(
+        findings=base_context.findings,
+        short_to_canonical={**base_context.short_to_canonical, "F-9": "missing:id"},
+        reachable_qualnames=base_context.reachable_qualnames,
+        report_only_families=base_context.report_only_families,
+        has_comparison_run=True,
+        metric_families=base_context.metric_families,
+    )
+
+    payload = mcp_claim_guard_mod.validate_claims(
+        text="F-1 fixed. F-1 fixed again. F-9 is mapped away. F-99 is unknown.",
+        report_context=context,
+        require_citations=True,
+    )
+    warnings = cast("list[dict[str, str]]", payload["warnings"])
+
+    assert payload["valid"] is True
+    assert payload["citations_found"] == 2
+    assert warnings == [
+        {
+            "type": "unknown_finding",
+            "message": "Finding citation 'F-99' is not present in this run.",
+        }
+    ]
+    assert mcp_claim_guard_mod._as_sequence("abc") == ()
+    assert mcp_claim_guard_mod._extract_qualnames_from_finding(
+        "dead_code:pkg.mod:func",
+        {"items": [{"target_qualname": "pkg.mod:func"}]},
+    ) == frozenset({"pkg.mod:func"})
+
+    no_reachability_context = mcp_claim_guard_mod.ReportContext(
+        findings=base_context.findings,
+        short_to_canonical=base_context.short_to_canonical,
+        reachable_qualnames=frozenset(),
+        report_only_families=base_context.report_only_families,
+        has_comparison_run=False,
+        metric_families=base_context.metric_families,
+    )
+    no_reachability = mcp_claim_guard_mod.validate_claims(
+        text="F-3 is dead.",
+        report_context=no_reachability_context,
+        require_citations=False,
+    )
+    assert no_reachability["valid"] is True
+    no_dead_keyword = mcp_claim_guard_mod.validate_claims(
+        text="F-3 is mentioned as a route handler.",
+        report_context=base_context,
+        require_citations=False,
+    )
+    assert no_dead_keyword["valid"] is True
+
+    duplicate_citation = mcp_claim_guard_mod.Citation(
+        cited_id="clone:function:g1",
+        kind="finding",
+        text_window="F-1 fixed",
+        start_offset=0,
+        end_offset=3,
+    )
+    assert mcp_claim_guard_mod._dedupe_citations(
+        (duplicate_citation, duplicate_citation)
+    ) == (duplicate_citation,)
+
+    duplicate_violation = mcp_claim_guard_mod.Violation(
+        pattern="P-X",
+        claim="claim",
+        cited_id="clone:function:g1",
+        reason="reason",
+        source_flag="source",
+    )
+    assert mcp_claim_guard_mod._dedupe_violations(
+        (duplicate_violation, duplicate_violation)
+    ) == (duplicate_violation,)
+
+
+def test_mcp_session_helper_private_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(MCPServiceContractError, match="Invalid value"):
+        mcp_helpers_mod._validate_choice("kind", "bad", ("good",))
+    assert mcp_helpers_mod._validate_optional_choice("kind", None, ("good",)) is None
+    assert [
+        mcp_helpers_mod._metrics_detail_family(value)
+        for value in (
+            "complexity",
+            "coupling",
+            "cohesion",
+            "coverage_adoption",
+            "coverage_join",
+            "dependencies",
+            "dead_code",
+            "api_surface",
+            "security_surfaces",
+            "god_modules",
+            "health",
+            "unknown",
+        )
+    ] == [
+        "complexity",
+        "coupling",
+        "cohesion",
+        "coverage_adoption",
+        "coverage_join",
+        "dependencies",
+        "dead_code",
+        "api_surface",
+        "security_surfaces",
+        "overloaded_modules",
+        "health",
+        None,
+    ]
+    assert mcp_helpers_mod._dict_rows("not-rows") == []
+    assert mcp_helpers_mod._string_rows("not-rows") == []
+    assert mcp_helpers_mod._summary_location_string({}) == ""
+    assert mcp_helpers_mod._normal_location_payload({}) == {}
+    record = replace(
+        _dummy_run_record(tmp_path, "helper1234567890"),
+        report_document={
+            "metrics": {
+                "families": {
+                    "coverage_join": {
+                        "summary": {
+                            "status": "ok",
+                            "source": " coverage.xml ",
+                            "invalid_reason": " ",
+                        }
+                    }
+                }
+            }
+        },
+    )
+    assert mcp_helpers_mod._summary_coverage_join_payload(record)["source"] == (
+        "coverage.xml"
+    )
+
+    def raise_baseline_validation_error(*args: object, **kwargs: object) -> None:
+        raise BaselineValidationError(
+            "invalid metrics baseline",
+            status="invalid_json",
+        )
+
+    monkeypatch.setattr(
+        MetricsBaseline,
+        "load",
+        raise_baseline_validation_error,
+    )
+    baseline_state = mcp_baseline_mod.resolve_metrics_baseline_state(
+        metrics_baseline_path=tmp_path / "metrics-baseline.json",
+        metrics_baseline_exists=True,
+        max_baseline_size_mb=1,
+        skip_metrics=False,
+    )
+    assert baseline_state.loaded is False
+    assert baseline_state.status == MetricsBaselineStatus.INVALID_JSON
+
+
 def test_normalize_intent_scope_hint_on_invalid_type() -> None:
     """Non-dict scope gives an actionable error with format example."""
     with pytest.raises(ValueError, match=r"allowed_files"):
@@ -3143,6 +4049,8 @@ def test_normalize_intent_scope_hint_on_invalid_type() -> None:
 
 def test_normalize_intent_scope_edge_cases() -> None:
     """Path normalization: traversal, absolute, leading ./ prefix."""
+    assert mcp_intent_mod._normalize_path(".") == ""
+
     # leading ./ stripped
     scope = mcp_intent_mod.normalize_intent_scope({"allowed_files": ["./pkg/a.py"]})
     assert scope.allowed_files == ("pkg/a.py",)
@@ -3584,6 +4492,88 @@ def test_mcp_service_create_review_receipt_full_post_edit_workflow(
     content = str(markdown["content"])
     assert "**Status:** violated" in content
     assert "reviewed clone split" in content
+
+
+def test_mcp_service_review_receipt_edge_helpers(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    record = _patch_contract_run_record(
+        tmp_path,
+        run_id="receiptedge123456",
+        digest="receipt-edge",
+        include_regression=False,
+        complexity=6,
+        health=90,
+    )
+    service._runs.register(record)
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id="receiptedge",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="edge receipt",
+    )
+    intent_id = str(declared["intent_id"])
+    receipt = service.create_review_receipt(
+        run_id="receiptedge",
+        intent_id=intent_id,
+        format="json",
+    )
+    scope = cast("dict[str, object]", receipt["scope"])
+    assert scope["intent_status"] == "active"
+    assert scope["changed_files"] == []
+
+    service._review_state[record.run_id] = OrderedDict([("missing:finding", None)])
+    assert service._reviewed_evidence(record)["items"] == []
+    assert service._finding_by_id(record=record, canonical_id="missing:finding") is None
+    assert service._receipt_contract_violations(
+        gate_result={"would_fail": True},
+        intent_check_status="violated",
+        regressions=1,
+        baseline_abuse=True,
+    ) == [
+        "structural_regressions",
+        "gate_failures",
+        "scope_violation",
+        "baseline_abuse",
+    ]
+
+    top_generated = replace(
+        record,
+        report_document={"meta": {"report_generated_at_utc": "2026-top"}},
+    )
+    fallback_generated = replace(
+        record,
+        report_document={},
+        summary={**record.summary, "analysis_started_at_utc": "2026-fallback"},
+    )
+    assert service._receipt_generated_at(top_generated) == "2026-top"
+    assert service._receipt_generated_at(fallback_generated) == "2026-fallback"
+    assert (
+        mcp_review_receipt_mod.receipt_verdict(
+            reviewed_count=0,
+            gate_relevant_count=0,
+            patch_status=mcp_review_receipt_mod.ReceiptPatchStatus.ACCEPTED.value,
+            human_decision_count=1,
+        )
+        == mcp_review_receipt_mod.ReceiptVerdict.NEEDS_ATTENTION.value
+    )
+    markdown_without_patch = mcp_review_receipt_mod.render_receipt_markdown(
+        {
+            "provenance": {"report_digest": "digest"},
+            "reviewed_evidence": {},
+            "structural_delta": {},
+            "health": {},
+            "human_decision_points": [],
+            "claims_not_made": [],
+        }
+    )
+    assert "### Patch Contract\nNot available." in markdown_without_patch
+
+    other_root = tmp_path / "other-root"
+    service._runs.register(
+        _blast_radius_run_record(other_root, run_id="otherroot123456789")
+    )
+    with pytest.raises(MCPServiceContractError, match="same root"):
+        service.create_review_receipt(run_id="otherroot", intent_id=intent_id)
 
 
 def test_mcp_service_branch_helpers_on_real_runs(

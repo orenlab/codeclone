@@ -80,6 +80,10 @@ HELP_PATCH_VERIFY = (
 HELP_STRICTNESS = (
     "Strictness profile for --patch-verify: ci, strict, or relaxed.\nDefault: ci."
 )
+HELP_SESSION_STATS = (
+    "Show workspace session status: active agents, intents, lease health.\n"
+    "Read-only, does not run analysis."
+)
 HELP_CACHE_PATH = (
     "Path to the cache file.\n"
     "If FILE is omitted, uses <root>/.cache/codeclone/cache.json."

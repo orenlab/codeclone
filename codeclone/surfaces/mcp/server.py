@@ -48,7 +48,8 @@ _SERVER_INSTRUCTIONS = (
     "absolute repository root to analysis tools. For file edits, call "
     "manage_change_intent(action='list_workspace', root=...) before analysis, "
     "then analyze, declare intent, inspect blast radius and patch budget, edit "
-    "within scope, re-analyze, verify, validate review claims, and clear intent. "
+    "within scope, renew intent lease before long blind windows, re-analyze, "
+    "verify, validate review claims, and clear intent. "
     "If concurrent intents overlap, narrow scope or coordinate. This server never "
     "updates baselines and never mutates source files, analysis cache, or reports; "
     "it may write ephemeral workspace coordination state under "
@@ -169,6 +170,9 @@ def build_mcp_server(
     )
     # FastMCP otherwise reports the `mcp` package version in initialize/serverInfo.
     mcp._mcp_server.version = __version__
+    # Inject FastMCP reference so the service can lazily resolve the MCP
+    # clientInfo (name/version) for workspace intent agent_label fields.
+    service._fastmcp = mcp
 
     def tool(*args: object, **kwargs: object) -> Callable[[MCPCallable], MCPCallable]:
         decorator = mcp.tool(*args, **kwargs)  # type: ignore[arg-type]
@@ -915,8 +919,9 @@ def build_mcp_server(
             "to inspect concurrent workspace intents, 'declare' to declare "
             "intended scope before editing, 'get' to retrieve active intent, "
             "'check' to verify actual diff against declared scope, 'clear' to "
-            "remove intent, 'gc_workspace' to clean stale registry files, "
-            "'recover' to explicitly reclaim a stale leased intent, and "
+            "remove intent, 'renew' to refresh the active lease before long "
+            "edits or test runs, 'gc_workspace' to clean stale registry files, "
+            "'recover' to explicitly reclaim a recoverable intent, and "
             "'reset_workspace' for interrupted-session recovery. In-memory "
             "intent state remains session-local; workspace coordination state "
             "is ephemeral under .cache/codeclone/intents/."
@@ -935,6 +940,7 @@ def build_mcp_server(
         changed_files: list[str] | None = None,
         root: str | None = None,
         ttl_seconds: int | None = None,
+        lease_seconds: int | None = None,
     ) -> dict[str, object]:
         return service.manage_change_intent(
             action=action,
@@ -947,6 +953,7 @@ def build_mcp_server(
             changed_files=changed_files,
             root=root,
             ttl_seconds=ttl_seconds,
+            lease_seconds=lease_seconds,
         )
 
     @tool(

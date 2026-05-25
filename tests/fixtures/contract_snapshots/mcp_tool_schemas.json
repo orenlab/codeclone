@@ -1815,6 +1815,18 @@
           ],
           "default": null,
           "title": "Ttl Seconds"
+        },
+        "lease_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lease Seconds"
         }
       },
       "required": [

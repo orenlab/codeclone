@@ -749,8 +749,8 @@ _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             ),
             (
                 "Recover ownership only when list_workspace marks an intent "
-                "recoverable and the matching run is available; do not kill "
-                "foreign active MCP processes."
+                "recoverable and the matching run is available; live foreign "
+                "active or stale intents require coordination."
             ),
             (
                 "Run analyze_repository, then declare intent with allowed_files, "
@@ -759,6 +759,10 @@ _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             (
                 "Use get_blast_radius and check_patch_contract(mode='budget') "
                 "as the pre-edit boundary."
+            ),
+            (
+                "Use manage_change_intent(action='renew') before long edits, "
+                "test runs, or other blind windows between MCP calls."
             ),
             (
                 "Hard overlaps mean two agents claimed the same primary file; "
@@ -771,7 +775,7 @@ _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             ),
             (
                 "Use reset_workspace for interrupted own, expired, or "
-                "recoverable registry records; foreign active intents require "
+                "recoverable registry records; foreign live intents require "
                 "coordination."
             ),
         ),

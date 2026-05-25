@@ -259,6 +259,14 @@ OPTIONS: Final[tuple[OptionSpec, ...]] = (
         help_text=ui.HELP_STRICTNESS,
     ),
     _option(
+        dest="session_stats",
+        group="Analysis",
+        cli_kind="store_true",
+        flags=("--session-stats",),
+        default=False,
+        help_text=ui.HELP_SESSION_STATS,
+    ),
+    _option(
         dest="cache_path",
         group="Analysis",
         cli_kind="optional_path",

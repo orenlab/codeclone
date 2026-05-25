@@ -27,7 +27,7 @@ MIN_TTL_SECONDS: Final = 60
 MAX_TTL_SECONDS: Final = 86400
 DEFAULT_LEASE_SECONDS: Final = 300
 MIN_LEASE_SECONDS: Final = 60
-MAX_LEASE_SECONDS: Final = 3600
+MAX_LEASE_SECONDS: Final = 600
 _HEX_DIGEST_LENGTH: Final = 64
 
 
@@ -43,8 +43,9 @@ class WorkspaceIntentStatus(str, Enum):
 class IntentOwnership(str, Enum):
     OWN_ACTIVE = "own_active"
     OWN_STALE = "own_stale"
-    RECOVERABLE = "recoverable"
     FOREIGN_ACTIVE = "foreign_active"
+    FOREIGN_STALE = "foreign_stale"
+    RECOVERABLE = "recoverable"
     EXPIRED = "expired"
 
 
@@ -123,6 +124,12 @@ class WorkspaceIntentRecord:
                 "Do NOT kill the process. Ask the user to confirm whether "
                 "this is an abandoned session or a parallel agent."
             )
+        elif ownership == IntentOwnership.FOREIGN_STALE:
+            payload["escalation_hint"] = (
+                "This intent belongs to a live process whose lease has expired. "
+                "The owner may still be working (context overflow, long edit, "
+                "test run). Coordinate with the user before proceeding."
+            )
         return payload
 
 
@@ -142,11 +149,13 @@ def classify_intent_ownership(
     lease_valid = lease_expiry is not None and lease_expiry > now
     if is_own:
         return IntentOwnership.OWN_ACTIVE if lease_valid else IntentOwnership.OWN_STALE
-    if not lease_valid:
-        return IntentOwnership.RECOVERABLE
-    if not _is_pid_alive(record.agent_pid):
-        return IntentOwnership.RECOVERABLE
-    return IntentOwnership.FOREIGN_ACTIVE
+    if _is_pid_alive(record.agent_pid):
+        return (
+            IntentOwnership.FOREIGN_ACTIVE
+            if lease_valid
+            else IntentOwnership.FOREIGN_STALE
+        )
+    return IntentOwnership.RECOVERABLE
 
 
 def _lease_expiry(record: WorkspaceIntentRecord) -> datetime | None:
@@ -425,6 +434,7 @@ def renew_workspace_intent_lease(
     pid: int,
     start_epoch: int,
     intent_id: str,
+    lease_seconds: int | None = None,
 ) -> bool:
     found = find_workspace_intent(root=root, intent_id=intent_id)
     if found is None:
@@ -436,7 +446,14 @@ def renew_workspace_intent_lease(
     expires = _parse_utc(record.expires_at_utc)
     if expires is None or expires <= now:
         return False
-    updated = replace(record, lease_renewed_at_utc=format_utc(now))
+    new_lease = (
+        resolved_lease_seconds(lease_seconds)
+        if lease_seconds is not None
+        else record.lease_seconds
+    )
+    updated = replace(
+        record, lease_renewed_at_utc=format_utc(now), lease_seconds=new_lease
+    )
     try:
         write_json_document_atomically(
             path=path,
@@ -516,6 +533,24 @@ def workspace_status_counts(*, root: Path) -> dict[str, int]:
     }
 
 
+_CONFLICT_OWNERSHIP: frozenset[IntentOwnership] = frozenset(
+    {
+        IntentOwnership.FOREIGN_ACTIVE,
+        IntentOwnership.FOREIGN_STALE,
+    }
+)
+
+_CONFLICT_SEVERITY: dict[IntentOwnership, str] = {
+    IntentOwnership.FOREIGN_ACTIVE: "active",
+    IntentOwnership.FOREIGN_STALE: "stale",
+}
+
+_CONFLICT_ACTION: dict[IntentOwnership, str] = {
+    IntentOwnership.FOREIGN_ACTIVE: "stop_and_coordinate",
+    IntentOwnership.FOREIGN_STALE: "coordinate_or_recover",
+}
+
+
 def detect_conflicts(
     *,
     new_scope: Mapping[str, object],
@@ -533,7 +568,7 @@ def detect_conflicts(
             own_start_epoch=own_start_epoch,
             now=now,
         )
-        if ownership != IntentOwnership.FOREIGN_ACTIVE:
+        if ownership not in _CONFLICT_OWNERSHIP:
             continue
         existing_allowed, existing_related = _scope_file_sets(record.scope)
         hard_overlap = tuple(sorted(new_allowed.intersection(existing_allowed)))
@@ -552,6 +587,9 @@ def detect_conflicts(
                     "agent_start_epoch": record.agent_start_epoch,
                     "agent_label": record.agent_label,
                     "intent": record.intent,
+                    "ownership": ownership.value,
+                    "severity": _CONFLICT_SEVERITY[ownership],
+                    "recommended_action": _CONFLICT_ACTION[ownership],
                     "overlap_type": _overlap_type(
                         hard=bool(hard_overlap),
                         soft=bool(soft_overlap),
@@ -565,6 +603,7 @@ def detect_conflicts(
     return sorted(
         conflicts,
         key=lambda item: (
+            str(item["severity"]),
             str(item["overlap_type"]),
             str(item["agent_label"]),
             _sort_agent_pid(item.get("agent_pid")),

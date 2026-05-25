@@ -1,0 +1,438 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
+from __future__ import annotations
+
+import json
+import os
+import time
+from collections import defaultdict
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from ...contracts import ExitCode
+from .types import PrinterLike
+
+if TYPE_CHECKING:
+    from ..mcp._workspace_intents import WorkspaceIntentRecord
+
+_REPORT_PATH_PARTS = (".cache", "codeclone", "report.json")
+_MAX_ALLOWED_FILES_SHOWN = 5
+
+
+@dataclass(frozen=True, slots=True)
+class _IntentSnapshot:
+    intent_id: str
+    status: str
+    ownership: str
+    scope_file_count: int
+    allowed_files: tuple[str, ...]
+    declared_at_utc: str
+    lease_remaining_seconds: int
+
+
+@dataclass(frozen=True, slots=True)
+class _AgentSnapshot:
+    pid: int
+    start_epoch: int
+    label: str
+    alive: bool
+    intents: tuple[_IntentSnapshot, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _SessionSnapshot:
+    root: Path
+    agents: tuple[_AgentSnapshot, ...]
+    stale_count: int
+    expired_count: int
+    recoverable_count: int
+    latest_run_id: str | None
+    latest_run_health: int | None
+    latest_run_findings: int | None
+    latest_run_files: int | None
+    latest_run_age_seconds: int | None
+    cache_present: bool
+    workspace_health: str
+
+
+def render_session_stats(
+    *,
+    console: PrinterLike,
+    root_path: Path,
+    quiet: bool,
+) -> int:
+    """Render workspace session status. Returns ExitCode int."""
+    try:
+        snapshot = _collect_session_snapshot(root_path)
+    except Exception as exc:
+        console.print(f"CONTRACT ERROR: failed to read session state: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
+    if quiet:
+        return _render_quiet(console, snapshot)
+    return _render_verbose(console, snapshot)
+
+
+def _collect_session_snapshot(root_path: Path) -> _SessionSnapshot:
+    from ...surfaces.mcp._workspace_intents import (
+        IntentOwnership,
+        classify_intent_ownership,
+        list_workspace_intents,
+        utc_now,
+    )
+
+    now = utc_now()
+    own_pid = os.getpid()
+    own_start_epoch = _process_start_epoch()
+
+    try:
+        records = list_workspace_intents(root=root_path, exclude_stale=False)
+    except Exception:
+        records = ()
+
+    stale_count = 0
+    expired_count = 0
+    recoverable_count = 0
+    agent_intents: dict[tuple[int, int], list[_IntentSnapshot]] = defaultdict(list)
+    agent_labels: dict[tuple[int, int], str] = {}
+    agent_alive: dict[tuple[int, int], bool] = {}
+
+    for record in records:
+        ownership = classify_intent_ownership(
+            record,
+            own_pid=own_pid,
+            own_start_epoch=own_start_epoch,
+            now=now,
+        )
+
+        if ownership == IntentOwnership.EXPIRED:
+            expired_count += 1
+            continue
+        if ownership == IntentOwnership.OWN_STALE:
+            stale_count += 1
+        if ownership == IntentOwnership.RECOVERABLE:
+            recoverable_count += 1
+
+        lease_remaining = _lease_remaining_seconds(record, now)
+        scope = record.scope
+        allowed_files: list[str] = []
+        if isinstance(scope, dict):
+            raw_files = scope.get("allowed_files")
+            if isinstance(raw_files, list):
+                allowed_files = [str(f) for f in raw_files]
+
+        agent_key = (record.agent_pid, record.agent_start_epoch)
+        agent_labels[agent_key] = record.agent_label
+        if agent_key not in agent_alive:
+            agent_alive[agent_key] = _is_pid_alive(record.agent_pid)
+
+        agent_intents[agent_key].append(
+            _IntentSnapshot(
+                intent_id=record.intent_id,
+                status=record.status,
+                ownership=ownership.value,
+                scope_file_count=len(allowed_files),
+                allowed_files=tuple(sorted(allowed_files)),
+                declared_at_utc=record.declared_at_utc,
+                lease_remaining_seconds=lease_remaining,
+            )
+        )
+
+    agents: list[_AgentSnapshot] = []
+    for agent_key in sorted(agent_intents):
+        pid, start_epoch = agent_key
+        agents.append(
+            _AgentSnapshot(
+                pid=pid,
+                start_epoch=start_epoch,
+                label=agent_labels.get(agent_key, ""),
+                alive=agent_alive.get(agent_key, False),
+                intents=tuple(agent_intents[agent_key]),
+            )
+        )
+
+    (
+        latest_run_id,
+        latest_run_health,
+        latest_run_findings,
+        latest_run_files,
+        latest_run_age_seconds,
+        cache_present,
+    ) = _read_cached_report(root_path)
+
+    workspace_health = _classify_workspace_health(
+        agents=agents,
+        stale_count=stale_count,
+        expired_count=expired_count,
+    )
+
+    return _SessionSnapshot(
+        root=root_path,
+        agents=tuple(agents),
+        stale_count=stale_count,
+        expired_count=expired_count,
+        recoverable_count=recoverable_count,
+        latest_run_id=latest_run_id,
+        latest_run_health=latest_run_health,
+        latest_run_findings=latest_run_findings,
+        latest_run_files=latest_run_files,
+        latest_run_age_seconds=latest_run_age_seconds,
+        cache_present=cache_present,
+        workspace_health=workspace_health,
+    )
+
+
+def _render_quiet(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
+    live_agents = [a for a in snapshot.agents if a.alive]
+    total_intents = sum(len(a.intents) for a in snapshot.agents)
+    parts = [
+        f"session-stats: {snapshot.workspace_health}",
+        "|",
+        f"agents={len(live_agents)}",
+        f"intents={total_intents}",
+        f"stale={snapshot.stale_count}",
+        f"latest_run={snapshot.latest_run_id or 'none'}",
+    ]
+    if snapshot.latest_run_health is not None:
+        parts.append(f"health={snapshot.latest_run_health}")
+    console.print(" ".join(parts))
+    return int(ExitCode.SUCCESS)
+
+
+def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
+    console.print("[bold]╍╍╍ Session Stats ╍╍╍[/bold]")
+    console.print()
+    console.print(f"  Workspace:       {snapshot.root}")
+
+    if snapshot.cache_present and snapshot.latest_run_id:
+        age_str = _format_age(snapshot.latest_run_age_seconds)
+        health_part = (
+            f", health={snapshot.latest_run_health}"
+            if snapshot.latest_run_health is not None
+            else ""
+        )
+        findings_part = (
+            f", findings={snapshot.latest_run_findings}"
+            if snapshot.latest_run_findings is not None
+            else ""
+        )
+        console.print(
+            f"  Latest run:      {snapshot.latest_run_id}"
+            f" ({age_str}{health_part}{findings_part})"
+        )
+        if snapshot.latest_run_files is not None:
+            console.print(
+                f"  Cache:           report.json present"
+                f" ({snapshot.latest_run_files} files)"
+            )
+    else:
+        console.print("  Latest run:      none")
+
+    console.print()
+    live_agents = [a for a in snapshot.agents if a.alive]
+    console.print(f"  Active agents:   {len(live_agents)}")
+
+    for agent in live_agents:
+        label = agent.label or "unknown"
+        started_ago = _format_age(int(time.time()) - agent.start_epoch)
+        console.print(f"    PID {agent.pid} ({label}) — started {started_ago}")
+        for intent in agent.intents:
+            file_count_label = f"{intent.scope_file_count} file" + (
+                "s" if intent.scope_file_count != 1 else ""
+            )
+            console.print(
+                f"      {intent.intent_id}  {intent.status}   scope: {file_count_label}"
+            )
+            shown_files = intent.allowed_files[:_MAX_ALLOWED_FILES_SHOWN]
+            if shown_files:
+                files_str = ", ".join(shown_files)
+                if len(intent.allowed_files) > _MAX_ALLOWED_FILES_SHOWN:
+                    remaining = len(intent.allowed_files) - _MAX_ALLOWED_FILES_SHOWN
+                    files_str += f" ... and {remaining} more"
+                console.print(f"        allowed: {files_str}")
+            lease_str = _format_duration(intent.lease_remaining_seconds)
+            console.print(f"        lease: {lease_str} remaining")
+
+    console.print()
+    console.print(f"  Stale intents:   {snapshot.stale_count}")
+    console.print(f"  Expired intents: {snapshot.expired_count}")
+    console.print(f"  Recoverable:     {snapshot.recoverable_count}")
+    console.print()
+    console.print(f"  Workspace health: {snapshot.workspace_health}")
+    return int(ExitCode.SUCCESS)
+
+
+def _classify_workspace_health(
+    *,
+    agents: list[_AgentSnapshot] | tuple[_AgentSnapshot, ...],
+    stale_count: int,
+    expired_count: int,
+) -> str:
+    live_agents = [a for a in agents if a.alive]
+    if not live_agents:
+        return "idle"
+
+    active_intent_agents = [
+        agent
+        for agent in live_agents
+        if any(intent.status == "active" for intent in agent.intents)
+    ]
+
+    if not active_intent_agents:
+        return "clean"
+
+    if len(active_intent_agents) >= 2 and _has_scope_overlap(active_intent_agents):
+        return "contested"
+
+    return "active"
+
+
+def _has_scope_overlap(agents: list[_AgentSnapshot]) -> bool:
+    all_files: list[set[str]] = []
+    for agent in agents:
+        agent_files: set[str] = set()
+        for intent in agent.intents:
+            if intent.status == "active":
+                agent_files.update(intent.allowed_files)
+        if agent_files:
+            all_files.append(agent_files)
+
+    for i in range(len(all_files)):
+        for j in range(i + 1, len(all_files)):
+            if all_files[i] & all_files[j]:
+                return True
+    return False
+
+
+def _read_cached_report(
+    root_path: Path,
+) -> tuple[str | None, int | None, int | None, int | None, int | None, bool]:
+    report_path = root_path.joinpath(*_REPORT_PATH_PARTS)
+    if not report_path.is_file():
+        return None, None, None, None, None, False
+    try:
+        with open(report_path, "rb") as fh:
+            data = json.load(fh)
+    except Exception:
+        return None, None, None, None, None, False
+
+    run_id: str | None = None
+    health: int | None = None
+    findings: int | None = None
+    files: int | None = None
+    age_seconds: int | None = None
+
+    data_mapping = data if isinstance(data, dict) else {}
+    digest_value = _string_field(
+        _mapping_at(data_mapping, ("integrity", "digest")), "value"
+    )
+    if digest_value is not None and len(digest_value) >= 8:
+        run_id = digest_value[:8]
+
+    files = _list_field_len(
+        _mapping_at(data_mapping, ("inventory", "file_registry")),
+        "items",
+    )
+    if _mapping_at(data_mapping, ("metrics", "families")) is not None:
+        health = _int_field(_mapping_at(data_mapping, ("health",)), "score")
+    findings = _int_field(_mapping_at(data_mapping, ("findings",)), "total")
+
+    try:
+        mtime = report_path.stat().st_mtime
+        age_seconds = max(0, int(time.time() - mtime))
+    except OSError:
+        pass
+
+    return run_id, health, findings, files, age_seconds, True
+
+
+def _mapping_at(
+    payload: Mapping[str, object],
+    keys: tuple[str, ...],
+) -> Mapping[str, object] | None:
+    current: object = payload
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current if isinstance(current, dict) else None
+
+
+def _string_field(payload: Mapping[str, object] | None, key: str) -> str | None:
+    if payload is None:
+        return None
+    value = payload.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _int_field(payload: Mapping[str, object] | None, key: str) -> int | None:
+    if payload is None:
+        return None
+    value = payload.get(key)
+    return value if isinstance(value, int) else None
+
+
+def _list_field_len(payload: Mapping[str, object] | None, key: str) -> int | None:
+    if payload is None:
+        return None
+    value = payload.get(key)
+    return len(value) if isinstance(value, list) else None
+
+
+def _lease_remaining_seconds(record: WorkspaceIntentRecord, now: datetime) -> int:
+    from ...surfaces.mcp._workspace_intents import _lease_expiry
+
+    expiry = _lease_expiry(record)
+    if expiry is None:
+        return 0
+    delta = (expiry - now).total_seconds()
+    return max(0, int(delta))
+
+
+def _is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _process_start_epoch() -> int:
+    return int(time.time())
+
+
+def _format_age(seconds: int | None) -> str:
+    if seconds is None or seconds < 0:
+        return "unknown"
+    if seconds < 60:
+        return f"{seconds}s ago"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    remaining_minutes = minutes % 60
+    if remaining_minutes:
+        return f"{hours}h{remaining_minutes}m ago"
+    return f"{hours}h ago"
+
+
+def _format_duration(seconds: int) -> str:
+    if seconds <= 0:
+        return "expired"
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes = seconds // 60
+    remaining_seconds = seconds % 60
+    if remaining_seconds:
+        return f"{minutes}m{remaining_seconds}s"
+    return f"{minutes}m"

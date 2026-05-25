@@ -32,6 +32,9 @@ from ._session_shared import (
     MCPServiceContractError,
 )
 from ._workspace_intents import (
+    DEFAULT_LEASE_SECONDS,
+    MAX_LEASE_SECONDS,
+    MIN_LEASE_SECONDS,
     IntentOwnership,
     WorkspaceIntentRecord,
     WorkspaceIntentStatus,
@@ -108,6 +111,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         changed_files: Sequence[str] | None = None,
         root: str | None = None,
         ttl_seconds: int | None = None,
+        lease_seconds: int | None = None,
     ) -> dict[str, object]:
         match action:
             case "declare":
@@ -136,6 +140,11 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 )
             case "clear":
                 return self._clear_change_intent(intent_id=intent_id)
+            case "renew":
+                return self._renew_change_intent(
+                    intent_id=intent_id,
+                    lease_seconds=lease_seconds,
+                )
             case "list_workspace":
                 return self._list_workspace_intents(root=root)
             case "gc_workspace":
@@ -156,7 +165,8 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 raise MCPServiceContractError(
                     "Invalid value for action: "
                     f"{action!r}. Expected one of: check, clear, declare, "
-                    "gc_workspace, get, list_workspace, recover, reset_workspace."
+                    "gc_workspace, get, list_workspace, recover, renew, "
+                    "reset_workspace."
                 )
 
     def _declare_change_intent(
@@ -463,6 +473,60 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             )
         for intent in intents:
             self._renew_lease_if_active(record=record, intent=intent)
+
+    def _renew_change_intent(
+        self,
+        *,
+        intent_id: str | None,
+        lease_seconds: int | None,
+    ) -> dict[str, object]:
+        if intent_id is None:
+            with self._state_lock:
+                all_intents = list(self._active_intents.values())
+            if not all_intents:
+                raise MCPServiceContractError(
+                    "action='renew' requires intent_id or an active intent."
+                )
+            active_intent = all_intents[-1]
+            intent_id = active_intent.intent_id
+        record, active_intent = self._resolve_intent(
+            run_id=None,
+            intent_id=intent_id,
+        )
+        renewed = renew_workspace_intent_lease(
+            root=record.root,
+            pid=self._agent_pid,
+            start_epoch=self._agent_start_epoch,
+            intent_id=active_intent.intent_id,
+            lease_seconds=lease_seconds,
+        )
+        latest = (
+            find_workspace_intent(root=record.root, intent_id=active_intent.intent_id)
+            if renewed
+            else None
+        )
+        latest_record = latest[1] if latest is not None else None
+        effective_lease = (
+            latest_record.lease_seconds
+            if latest_record is not None
+            else resolved_lease_seconds(lease_seconds)
+        )
+        return {
+            "intent_id": active_intent.intent_id,
+            "status": active_intent.status.value,
+            "lease_renewed": renewed,
+            "lease_seconds": effective_lease,
+            "lease_expires_at_utc": (
+                self._lease_expired_at_utc(latest_record)
+                if latest_record is not None
+                else None
+            ),
+            "lease_policy": {
+                "min_seconds": MIN_LEASE_SECONDS,
+                "default_seconds": DEFAULT_LEASE_SECONDS,
+                "max_seconds": MAX_LEASE_SECONDS,
+            },
+        }
 
     def _list_workspace_intents(self, *, root: str | None) -> dict[str, object]:
         root_path = self._resolve_workspace_root(root)
@@ -797,22 +861,31 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 "action_taken": "removed" if removed else "failed",
                 "reason": reason,
             }
-        if ownership == IntentOwnership.FOREIGN_ACTIVE:
+        if ownership in {IntentOwnership.FOREIGN_ACTIVE, IntentOwnership.FOREIGN_STALE}:
+            hint = (
+                (
+                    "This intent belongs to a live process with a valid lease. "
+                    "Do NOT kill the process. Ask the user to confirm whether "
+                    "this is an abandoned session or a parallel agent."
+                )
+                if ownership == IntentOwnership.FOREIGN_ACTIVE
+                else (
+                    "This intent belongs to a live process whose lease has expired. "
+                    "The owner may still be working. Coordinate with the user "
+                    "before resetting."
+                )
+            )
             return {
                 "intent_id": workspace_record.intent_id,
                 "action_taken": "rejected",
-                "reason": "foreign_active",
+                "reason": ownership.value,
                 "ownership": ownership.value,
                 "agent_pid": workspace_record.agent_pid,
                 "agent_start_epoch": workspace_record.agent_start_epoch,
                 "agent_label": workspace_record.agent_label,
-                "escalation_hint": (
-                    "This intent belongs to a live process with a valid lease. "
-                    "Do NOT kill the process. Ask the user to confirm whether "
-                    "this is an abandoned session or a parallel agent."
-                ),
+                "escalation_hint": hint,
                 "message": (
-                    "Intent has a valid lease from a live process. Coordinate "
+                    "Intent belongs to a live process. Coordinate "
                     "with the owning agent or user before resetting it."
                 ),
             }
@@ -901,6 +974,12 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 "Intent has a valid lease from a live process. Cannot recover. "
                 "Use action='list_workspace' to inspect, then coordinate with "
                 "the user."
+            )
+        if ownership == IntentOwnership.FOREIGN_STALE:
+            return (
+                "Intent belongs to a live process with an expired lease. "
+                "The owner may still be working. Coordinate with the user "
+                "before recovering."
             )
         if ownership == IntentOwnership.EXPIRED:
             return "Intent has expired (TTL). Declare a new intent instead."

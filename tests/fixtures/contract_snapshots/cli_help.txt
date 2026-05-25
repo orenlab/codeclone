@@ -2,7 +2,7 @@ usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--processes PROCESSES] [--changed-only | --no-changed-only]
                  [--diff-against GIT_REF] [--paths-from-git-diff GIT_REF]
                  [--blast-radius FILE [FILE ...]] [--patch-verify]
-                 [--strictness LEVEL] [--cache-path [FILE]]
+                 [--strictness LEVEL] [--session-stats] [--cache-path [FILE]]
                  [--cache-dir [FILE]] [--max-cache-size-mb MB]
                  [--baseline [FILE]] [--max-baseline-size-mb MB]
                  [--update-baseline | --no-update-baseline]
@@ -65,6 +65,8 @@ Analysis:
                         Runs analysis, checks baseline regressions and gate status, then exits.
   --strictness LEVEL    Strictness profile for --patch-verify: ci, strict, or relaxed.
                         Default: ci.
+  --session-stats       Show workspace session status: active agents, intents, lease health.
+                        Read-only, does not run analysis.
   --cache-path [FILE]   Path to the cache file.
                         If FILE is omitted, uses <root>/.cache/codeclone/cache.json.
   --cache-dir [FILE]    Legacy alias for --cache-path.
