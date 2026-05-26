@@ -22,7 +22,7 @@ queries:
 | Claim guard                 | Live in `2.1.0a1` | MCP `validate_review_claims`                     |
 | Scope-aware verification    | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
 | Workspace relations         | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| MCP payload token budget    | Planned           | Audit trail, CLI `--audit`, `--session-stats`    |
+| MCP payload token budget    | Live in `2.1.0a1` | Audit trail, CLI `--audit`, `--session-stats`    |
 
 ## Contract
 

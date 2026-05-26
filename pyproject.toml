@@ -68,7 +68,7 @@ mcp = [
     "httpx>=0.27.1,<1",
 ]
 token-bench = [
-    "tiktoken>=0.8",
+    "tiktoken>=0.13.0",
 ]
 dev = [
     "pytest>=9.0.3",
@@ -145,7 +145,7 @@ golden_fixture_paths = ["tests/fixtures/golden_*"]
 min_typing_coverage = 99
 audit_enabled = true
 audit_path = ".cache/codeclone/audit.sqlite3"
-audit_payloads = "compact"    # "off" | "compact" | "full"
+audit_payloads = "full"    # "off" | "compact" | "full"
 audit_retention_days = 30
 
 

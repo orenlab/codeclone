@@ -61,6 +61,9 @@ class EventRow:
     agent_pid: int
     status: str | None
     payload_json: str
+    estimated_tokens: int | None = None
+    token_encoding: str | None = None
+    payload_characters: int | None = None
 
     def as_tuple(self) -> tuple[object, ...]:
         return (
@@ -76,6 +79,9 @@ class EventRow:
             self.agent_pid,
             self.status,
             self.payload_json,
+            self.estimated_tokens,
+            self.token_encoding,
+            self.payload_characters,
         )
 
 

@@ -24,6 +24,9 @@ class AuditRecord:
     intent_id: str | None
     status: str | None
     agent_label: str
+    estimated_tokens: int | None = None
+    token_encoding: str | None = None
+    payload_characters: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +42,9 @@ class AuditSummary:
     oldest_event_utc: str | None
     latest_event_utc: str | None
     events: tuple[AuditRecord, ...]
+    total_estimated_tokens: int | None = None
+    token_encoding: str | None = None
+    token_event_count: int = 0
 
 
 def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
@@ -78,18 +84,33 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
         )
         oldest = _text_scalar(conn, "SELECT MIN(created_at_utc) FROM controller_events")
         latest = _text_scalar(conn, "SELECT MAX(created_at_utc) FROM controller_events")
-        rows = conn.execute(
-            "SELECT event_id, event_type, severity, created_at_utc, run_id, "
-            "intent_id, status, agent_label "
-            "FROM controller_events "
-            "ORDER BY created_at_utc DESC, id DESC "
-            "LIMIT ?",
-            (max(1, int(limit)),),
-        ).fetchall()
+        token_cols = _has_token_columns(conn)
+        if token_cols:
+            rows = conn.execute(
+                "SELECT event_id, event_type, severity, created_at_utc, run_id, "
+                "intent_id, status, agent_label, "
+                "estimated_tokens, token_encoding, payload_characters "
+                "FROM controller_events "
+                "ORDER BY created_at_utc DESC, id DESC "
+                "LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+            token_summary = _token_summary(conn)
+        else:
+            rows = conn.execute(
+                "SELECT event_id, event_type, severity, created_at_utc, run_id, "
+                "intent_id, status, agent_label "
+                "FROM controller_events "
+                "ORDER BY created_at_utc DESC, id DESC "
+                "LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+            token_summary = (None, None, 0)
     except (sqlite3.Error, AuditSchemaError) as exc:
         raise AuditReadError(f"cannot read audit database: {exc}") from exc
     finally:
         conn.close()
+    total_tokens, token_enc, token_event_cnt = token_summary
     return AuditSummary(
         db_path=db_path,
         db_size_bytes=_db_size(db_path),
@@ -102,6 +123,9 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
         oldest_event_utc=oldest,
         latest_event_utc=latest,
         events=tuple(_record_from_row(row) for row in rows),
+        total_estimated_tokens=total_tokens,
+        token_encoding=token_enc,
+        token_event_count=token_event_cnt,
     )
 
 
@@ -115,7 +139,39 @@ def _record_from_row(row: tuple[object, ...]) -> AuditRecord:
         intent_id=_str_or_none(row[5]),
         status=_str_or_none(row[6]),
         agent_label=_str_or_empty(row[7]),
+        estimated_tokens=_int_or_none(row[8]) if len(row) > 8 else None,
+        token_encoding=_str_or_none(row[9]) if len(row) > 9 else None,
+        payload_characters=_int_or_none(row[10]) if len(row) > 10 else None,
     )
+
+
+def _has_token_columns(conn: sqlite3.Connection) -> bool:
+    """Check whether the controller_events table has token columns."""
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(controller_events)").fetchall()
+    }
+    return "estimated_tokens" in columns
+
+
+def _token_summary(
+    conn: sqlite3.Connection,
+) -> tuple[int | None, str | None, int]:
+    """Aggregate token estimation data across all events."""
+    row = conn.execute(
+        "SELECT SUM(estimated_tokens), COUNT(estimated_tokens) "
+        "FROM controller_events WHERE estimated_tokens IS NOT NULL"
+    ).fetchone()
+    if row is None or row[1] == 0:
+        return None, None, 0
+    total_tokens = row[0] if isinstance(row[0], int) else None
+    event_count = row[1] if isinstance(row[1], int) else 0
+    enc_row = conn.execute(
+        "SELECT token_encoding FROM controller_events "
+        "WHERE token_encoding IS NOT NULL LIMIT 1"
+    ).fetchone()
+    encoding = _str_or_none(enc_row[0]) if enc_row else None
+    return total_tokens, encoding, event_count
 
 
 def _count(conn: sqlite3.Connection, sql: str) -> int:
@@ -156,6 +212,10 @@ def _str_or_empty(value: object) -> str:
 
 def _str_or_none(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _int_or_none(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 __all__ = ["AuditRecord", "AuditSummary", "read_audit_summary"]

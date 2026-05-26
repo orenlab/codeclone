@@ -60,6 +60,9 @@ class _SessionSnapshot:
     latest_run_age_seconds: int | None
     cache_present: bool
     workspace_health: str
+    mcp_token_footprint: int | None = None
+    mcp_token_encoding: str | None = None
+    mcp_token_event_count: int = 0
 
 
 def render_session_stats(
@@ -172,6 +175,8 @@ def _collect_session_snapshot(root_path: Path) -> _SessionSnapshot:
         expired_count=expired_count,
     )
 
+    mcp_tokens, mcp_enc, mcp_count = _read_audit_token_footprint(root_path)
+
     return _SessionSnapshot(
         root=root_path,
         agents=tuple(agents),
@@ -185,6 +190,9 @@ def _collect_session_snapshot(root_path: Path) -> _SessionSnapshot:
         latest_run_age_seconds=latest_run_age_seconds,
         cache_present=cache_present,
         workspace_health=workspace_health,
+        mcp_token_footprint=mcp_tokens,
+        mcp_token_encoding=mcp_enc,
+        mcp_token_event_count=mcp_count,
     )
 
 
@@ -265,6 +273,13 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
     console.print(f"  Stale intents:   {snapshot.stale_count}")
     console.print(f"  Expired intents: {snapshot.expired_count}")
     console.print(f"  Recoverable:     {snapshot.recoverable_count}")
+    if snapshot.mcp_token_footprint is not None and snapshot.mcp_token_event_count > 0:
+        enc = snapshot.mcp_token_encoding or "unknown"
+        console.print(
+            f"  MCP payload footprint: "
+            f"~{snapshot.mcp_token_footprint:,} tokens "
+            f"({enc}, {snapshot.mcp_token_event_count} tool calls)"
+        )
     console.print()
     console.print(f"  Workspace health: {snapshot.workspace_health}")
     return int(ExitCode.SUCCESS)
@@ -293,6 +308,13 @@ def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> in
     summary.add_row("Stale intents", str(snapshot.stale_count))
     summary.add_row("Expired intents", str(snapshot.expired_count))
     summary.add_row("Recoverable", str(snapshot.recoverable_count))
+    if snapshot.mcp_token_footprint is not None and snapshot.mcp_token_event_count > 0:
+        enc = snapshot.mcp_token_encoding or "unknown"
+        summary.add_row(
+            "MCP payload footprint",
+            f"~{snapshot.mcp_token_footprint:,} tokens "
+            f"({enc}, {snapshot.mcp_token_event_count} tool calls)",
+        )
     health_text = text_cls(
         snapshot.workspace_health,
         style=_health_style(snapshot.workspace_health),
@@ -544,6 +566,30 @@ def _is_pid_alive(pid: int) -> bool:
 
 def _process_start_epoch() -> int:
     return int(time.time())
+
+
+def _read_audit_token_footprint(
+    root_path: Path,
+) -> tuple[int | None, str | None, int]:
+    """Read aggregate token estimation from audit trail, if available."""
+    try:
+        from ...audit.reader import read_audit_summary
+        from ...audit.validation import resolve_audit_path
+
+        db_path = resolve_audit_path(
+            root_path=root_path,
+            value=".cache/codeclone/audit.sqlite3",
+        )
+        if not db_path.is_file():
+            return None, None, 0
+        summary = read_audit_summary(db_path=db_path, limit=1)
+        return (
+            summary.total_estimated_tokens,
+            summary.token_encoding,
+            summary.token_event_count,
+        )
+    except Exception:
+        return None, None, 0
 
 
 def _format_age(seconds: int | None) -> str:

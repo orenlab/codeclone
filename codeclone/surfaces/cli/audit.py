@@ -122,27 +122,48 @@ def _render_verbose_rich(*, console: PrinterLike, summary: AuditSummary) -> int:
             style="red" if summary.violation_events else "green",
         ),
     )
+    if summary.total_estimated_tokens is not None and summary.token_event_count > 0:
+        enc_label = summary.token_encoding or "unknown"
+        meta.add_row(
+            "MCP token footprint",
+            f"~{summary.total_estimated_tokens:,} tokens "
+            f"({enc_label}, {summary.token_event_count} tool calls)",
+        )
     console.print(Panel(meta, border_style="cyan"))
 
-    table = Table(box=box.SIMPLE_HEAVY, expand=True)
+    table = Table(box=box.SIMPLE_HEAVY)
+    table.add_column("Tokens", justify="right", no_wrap=True)
     table.add_column("Time", no_wrap=True)
     table.add_column("Type", no_wrap=True)
     table.add_column("Severity", no_wrap=True)
-    table.add_column("Intent", overflow="fold")
+    table.add_column("Intent", no_wrap=True)
     table.add_column("Status", no_wrap=True)
     table.add_column("Run", no_wrap=True)
-    table.add_column("Agent", overflow="fold")
+    table.add_column("Agent", no_wrap=True)
     for event in summary.events:
         table.add_row(
+            _format_tokens(event.estimated_tokens),
             _short_time(event.created_at_utc),
             _short_type(event.event_type),
             Text(event.severity, style=_severity_style(event.severity)),
-            event.intent_id or "-",
+            _short_intent(event.intent_id),
             event.status or "-",
             _short_run(event.run_id),
-            event.agent_label or "-",
+            _short_agent(event.agent_label),
         )
     console.print(table)
+
+    if summary.total_estimated_tokens is not None and summary.token_event_count > 0:
+        enc_label = summary.token_encoding or "unknown"
+        console.print(
+            Text(
+                f"Session MCP token footprint: "
+                f"~{summary.total_estimated_tokens:,} tokens "
+                f"({enc_label}, {summary.token_event_count} tool calls)",
+                style="dim",
+            )
+        )
+
     return int(ExitCode.SUCCESS)
 
 
@@ -171,6 +192,18 @@ def _short_type(event_type: str) -> str:
         "workspace.gc_completed": "gc",
     }
     return aliases.get(event_type, event_type.rsplit(".", maxsplit=1)[-1])
+
+
+def _short_intent(intent_id: str | None) -> str:
+    if not intent_id:
+        return "-"
+    return intent_id.removeprefix("intent-")
+
+
+def _short_agent(agent_label: str | None) -> str:
+    if not agent_label:
+        return "-"
+    return agent_label.replace("claude-code/", "cc/")
 
 
 def _short_run(run_id: str | None) -> str:
@@ -212,6 +245,12 @@ def _parse_utc(value: str) -> datetime | None:
         )
     except ValueError:
         return None
+
+
+def _format_tokens(value: int | None) -> str:
+    if value is None:
+        return "—"
+    return f"{value:,}"
 
 
 def _format_bytes(value: int) -> str:

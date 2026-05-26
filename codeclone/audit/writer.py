@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ..report.meta import current_report_timestamp_utc
 from .events import (
@@ -21,6 +22,9 @@ from .events import (
 )
 from .schema import open_audit_db
 from .validation import EventRow, validate_event_row
+
+if TYPE_CHECKING:
+    from ..budget.estimator import TokenEstimate
 
 _INSERT_SQL = """
 INSERT INTO controller_events(
@@ -35,8 +39,11 @@ INSERT INTO controller_events(
     agent_label,
     agent_pid,
     status,
-    payload_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    payload_json,
+    estimated_tokens,
+    token_encoding,
+    payload_characters
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -115,6 +122,7 @@ class SqliteAuditWriter:
 
 def event_to_row(*, event: AuditEvent, payloads: AuditPayloadMode) -> EventRow:
     payload_json = _payload_json(event=event, payloads=payloads)
+    token_estimate = _estimate_payload_tokens(event.payload)
     return EventRow(
         event_id=generate_event_id(),
         event_type=event.event_type,
@@ -128,7 +136,29 @@ def event_to_row(*, event: AuditEvent, payloads: AuditPayloadMode) -> EventRow:
         agent_pid=event.agent_pid,
         status=event.status,
         payload_json=payload_json,
+        estimated_tokens=token_estimate.tokens if token_estimate else None,
+        token_encoding=token_estimate.encoding if token_estimate else None,
+        payload_characters=token_estimate.characters if token_estimate else None,
     )
+
+
+def _estimate_payload_tokens(
+    payload: Mapping[str, object] | None,
+) -> TokenEstimate | None:
+    """Estimate token count for the full original payload.
+
+    Lazy import of ``codeclone.budget.estimator``.  Any failure
+    (ImportError, encoding error, etc.) returns None — the audit writer
+    never fails because of token estimation.
+    """
+    if payload is None:
+        return None
+    try:
+        from ..budget.estimator import estimate_payload
+
+        return estimate_payload(payload)
+    except Exception:
+        return None
 
 
 def _payload_json(*, event: AuditEvent, payloads: AuditPayloadMode) -> str:

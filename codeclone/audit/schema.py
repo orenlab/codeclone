@@ -29,7 +29,11 @@ CREATE TABLE IF NOT EXISTS controller_events (
     agent_pid       INTEGER NOT NULL,
 
     status          TEXT,
-    payload_json    TEXT    NOT NULL DEFAULT '{}'
+    payload_json    TEXT    NOT NULL DEFAULT '{}',
+
+    estimated_tokens    INTEGER,
+    token_encoding      TEXT,
+    payload_characters  INTEGER
 )
 """
 
@@ -70,9 +74,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     if current is None:
         create_schema_v1(conn)
         return
-    if current == AUDIT_SCHEMA_VERSION:
-        return
-    raise AuditSchemaError(f"Unsupported audit schema version: {current}")
+    if current != AUDIT_SCHEMA_VERSION:
+        raise AuditSchemaError(f"Unsupported audit schema version: {current}")
+    _migrate_v1_add_token_columns(conn)
 
 
 def create_schema_v1(conn: sqlite3.Connection) -> None:
@@ -91,6 +95,25 @@ def create_schema_v1(conn: sqlite3.Connection) -> None:
         "INSERT OR IGNORE INTO audit_meta(key, value) VALUES (?, ?)",
         sorted(seed_meta.items()),
     )
+    conn.commit()
+
+
+def _migrate_v1_add_token_columns(conn: sqlite3.Connection) -> None:
+    """Add nullable token estimation columns to an existing v1 schema.
+
+    Idempotent: checks which columns already exist before altering.
+    """
+    existing = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(controller_events)").fetchall()
+    }
+    for col, col_type in (
+        ("estimated_tokens", "INTEGER"),
+        ("token_encoding", "TEXT"),
+        ("payload_characters", "INTEGER"),
+    ):
+        if col not in existing:
+            conn.execute(f"ALTER TABLE controller_events ADD COLUMN {col} {col_type}")
     conn.commit()
 
 
