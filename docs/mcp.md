@@ -293,6 +293,11 @@ sequenceDiagram
     M-->>A: regression budget, headroom
 
     Note over A: Edit files within scope
+    opt Long edit or test run
+        A->>M: renew(intent_id, lease_seconds)
+        M->>D: update lease timestamp
+        M-->>A: lease_renewed
+    end
 
     A->>M: analyze_repository(root)
     M-->>A: after_run_id registered
@@ -316,7 +321,7 @@ sequenceDiagram
 
 | Tool                     | Purpose                                                                                     |
 |--------------------------|---------------------------------------------------------------------------------------------|
-| `manage_change_intent`   | Intent lifecycle: declare, get, check, clear, list_workspace, gc_workspace, reset_workspace |
+| `manage_change_intent`   | Intent lifecycle: declare, get, check, clear, renew, list_workspace, gc_workspace, recover, reset_workspace |
 | `get_blast_radius`       | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context           |
 | `check_patch_contract`   | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                      |
 | `create_review_receipt`  | Deterministic audit artifact: provenance, scope, reviewed findings, patch status            |
@@ -403,6 +408,7 @@ manage_change_intent(action="list_workspace")
   -> get_blast_radius(files=[...])
   -> check_patch_contract(mode="budget")
   -> [edit within scope]
+  -> manage_change_intent(action="renew", intent_id=...)                         # optional: long edits
   -> analyze_repository                                                          # after-run
   -> manage_change_intent(action="check", intent_id=..., changed_files=[...])
   -> check_patch_contract(mode="verify", before_run_id=..., after_run_id=..., intent_id=...)

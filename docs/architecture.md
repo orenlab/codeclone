@@ -221,7 +221,7 @@ Security boundaries:
 
 - Read-only by design — no tool mutates source files, baselines, or repo state.
 - `--allow-remote` guard required for non-local transports; default is `stdio`.
-- `cache_policy=refresh` rejected to preserve read-only semantics.
+- Cache policies `reuse`, `refresh`, and `off` are accepted by MCP.
 - Review markers are session-local in-memory state, never persisted.
 - Run history bounded by `--history-limit` to prevent unbounded memory growth.
 - `git_diff_ref` validated as a safe single revision expression before any

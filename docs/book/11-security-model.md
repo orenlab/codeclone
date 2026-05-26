@@ -32,7 +32,7 @@ Security-relevant input classes:
 - MCP is read-only by design:
   no tool mutates source files, baselines, cache, or report artifacts.
 - `--allow-remote` is required for non-local transports.
-- `cache_policy=refresh` is rejected by MCP.
+- Cache policies `reuse`, `refresh`, and `off` are accepted by MCP.
 - Review markers are session-local in-memory state only.
 - `git_diff_ref` is validated as a safe single revision expression before any `git diff` subprocess call.
 
@@ -65,7 +65,7 @@ Refs:
 | Oversized cache                          | Cache ignored      |
 | HTML-injected payload in metadata/source | Escaped output     |
 | `--allow-remote` not passed for HTTP     | Transport rejected |
-| `cache_policy=refresh` requested in MCP  | Policy rejected    |
+| Invalid `cache_policy` requested in MCP  | Policy rejected    |
 | `git_diff_ref` fails validation          | Parameter rejected |
 
 ## Determinism / canonicalization

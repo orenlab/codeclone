@@ -9,6 +9,7 @@ Centralize machine-readable status sets used across baseline/cache/report/CLI co
 - Baseline statuses: `codeclone/baseline/trust.py:BaselineStatus`
 - Cache statuses: `codeclone/cache/versioning.py:CacheStatus`
 - Exit categories: `codeclone/contracts/__init__.py:ExitCode`
+- Intent ownership: `codeclone/surfaces/mcp/_workspace_intents.py:IntentOwnership`
 
 ## Data model
 
@@ -51,6 +52,18 @@ Defined by `BASELINE_UNTRUSTED_STATUSES`.
 - `2` contract error
 - `3` gating failure
 - `5` internal error
+
+### IntentOwnership
+
+- `own_active`
+- `own_stale`
+- `foreign_active`
+- `foreign_stale`
+- `recoverable`
+- `expired`
+
+Semantics are defined in
+[Structural Change Controller § Workspace Intent Registry](../24-structural-change-controller.md#workspace-intent-registry).
 
 ## Contracts
 

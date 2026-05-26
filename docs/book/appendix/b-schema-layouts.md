@@ -3,7 +3,7 @@
 ## Purpose
 
 Compact structural layouts for baseline/cache/report contracts in the current
-2.0 release line.
+`2.1` release line.
 
 ## Baseline schema (`2.1`)
 

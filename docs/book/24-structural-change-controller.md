@@ -40,6 +40,7 @@ The CLI exposes read-only terminal projections for humans:
 codeclone . --blast-radius codeclone/core/parser.py
 codeclone . --patch-verify --diff-against HEAD~1
 codeclone . --patch-verify --strictness relaxed
+codeclone . --session-stats
 ```
 
 `--blast-radius` runs normal analysis, builds the canonical report in memory,
@@ -49,6 +50,9 @@ and renders the same dependent/context split as `get_blast_radius`.
 and the current working tree as after-state. It checks new clone regressions and
 the selected gate profile. `ci` is the default; `strict` applies tighter
 controller budgets; `relaxed` reports violations but exits `0`.
+
+`--session-stats` shows workspace session status: active agents, intents, and
+lease health. Read-only, does not run analysis.
 
 CLI controller queries are terminal-only and read-only with respect to source
 files, baselines, reports, and analysis cache data. They are incompatible with
@@ -116,12 +120,13 @@ coordination:
 
 - `list_workspace`: list active workspace intent records from all agents for a
   repository root.
+- `renew`: refresh the active lease before long edits or test runs.
 - `gc_workspace`: remove expired, orphaned, or corrupted registry records.
-- `recover`: explicitly reclaim a stale leased intent when the caller has the
+- `recover`: explicitly reclaim a recoverable intent when the caller has the
   matching run and report digest in the current MCP session.
 - `reset_workspace`: reset an own intent or remove expired/recoverable
-  registry records. Foreign active intents are rejected and require
-  coordination.
+  registry records. Foreign active and foreign stale intents are rejected
+  and require coordination.
 
 Registry files live under `.cache/codeclone/intents/` and are protected with a
 SHA-256 integrity digest over canonical JSON. This detects accidental
@@ -130,11 +135,26 @@ advisory: hard overlap means two agents claimed the same primary file; soft
 overlap means primary files overlap related context.
 
 Each registry record has a TTL and a shorter renewable lease. TTL is the hard
-maximum lifetime of the record. The lease is the ownership freshness signal:
-active MCP interactions renew it, while detached processes stop renewing and
-become recoverable after the lease window. A foreign active record has a live
-lease and should be coordinated with the user; CodeClone does not ask agents to
-kill the owning process.
+maximum lifetime of the record (default 3600s). The lease is the ownership
+freshness signal (default 300s, max 600s): active MCP interactions auto-renew
+it, while detached processes stop renewing and transition through ownership
+states.
+
+??? info "Ownership classification"
+
+    | State            | PID alive | Lease valid | Meaning                                              |
+    |------------------|-----------|-------------|------------------------------------------------------|
+    | `own_active`     | own       | yes         | This session's active intent                         |
+    | `own_stale`      | own       | no          | This session's intent with expired lease             |
+    | `foreign_active` | foreign   | yes         | Another live process, active lease — coordinate      |
+    | `foreign_stale`  | foreign   | no          | Another live process, expired lease — coordinate     |
+    | `recoverable`    | dead      | —           | Owning process is dead; safe to reclaim              |
+    | `expired`        | —         | —           | TTL exceeded; eligible for garbage collection        |
+
+    A foreign active or foreign stale record should be coordinated with the
+    user; CodeClone does not ask agents to kill the owning process. Only
+    `recoverable` intents (dead PID) can be reclaimed without user
+    coordination.
 
 ## Review Receipt Payload
 

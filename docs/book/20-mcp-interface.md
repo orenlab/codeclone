@@ -54,8 +54,7 @@ Current server characteristics:
 - **Roots** — analysis tools require an absolute repository root. Relative
   roots such as `.` are rejected.
 - **Analysis modes** — `full`, `clones_only`.
-- **Cache policies** — `reuse`, `off`. `refresh` is rejected by the read-only
-  MCP service contract.
+- **Cache policies** — `reuse` (default), `refresh`, `off`.
 
 !!! warning "Absolute roots and remote exposure"
     Analysis tools require an absolute repository root. HTTP exposure beyond
@@ -122,7 +121,7 @@ drill into one finding or one hotspot family.
 
 | Tool                     | Key parameters                                                                                              | Purpose                                                                                     |
 |--------------------------|-------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
-| `manage_change_intent`   | `action`, `root`, `run_id`, `intent_id`, `scope`, `ttl_seconds`, `changed_files` or `diff_ref`              | Intent lifecycle: declare, get, check, clear, list_workspace, gc_workspace, reset_workspace |
+| `manage_change_intent`   | `action`, `root`, `run_id`, `intent_id`, `scope`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, list_workspace, gc_workspace, recover, reset_workspace |
 | `get_blast_radius`       | `run_id`, `files`, `depth`, `include`                                                                       | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context           |
 | `check_patch_contract`   | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref` | Budget query or post-edit verification                                                      |
 | `create_review_receipt`  | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                           | Deterministic audit artifact: provenance, scope, reviewed findings, patch status            |

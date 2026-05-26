@@ -83,6 +83,7 @@ Contract-first documentation derived from code and locked tests.
 - [VS Code extension contract](book/21-vscode-extension.md)
 - [Claude Desktop bundle contract](book/22-claude-desktop-bundle.md)
 - [Codex plugin contract](book/23-codex-plugin.md)
+- [Claim Guard](book/28-claim-guard.md)
 - [HTML report rendering contract](book/10-html-render.md)
 
 ### System Properties

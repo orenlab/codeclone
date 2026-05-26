@@ -28,6 +28,7 @@ CLI modes:
 - gating mode (`--ci`, `--fail-on-new`, explicit metric gates)
 - baseline update mode (`--update-baseline`, `--update-metrics-baseline`)
 - controller query mode (`--blast-radius`, `--patch-verify`)
+- session query mode (`--session-stats`)
 
 Summary metrics include:
 
@@ -76,6 +77,9 @@ Refs:
     - `--strictness {ci,strict,relaxed}` is valid only with `--patch-verify`.
     - controller query mode does not write reports, baselines, or analysis
       cache data.
+- Session query mode is terminal-only:
+    - `--session-stats` shows workspace session status: active agents, intents,
+      and lease health. Read-only, does not run analysis.
 - Contract errors use `CONTRACT ERROR:`.
 - Gating failures use `GATING FAILURE:`.
 - Internal errors use `fmt_internal_error` and include traceback only in debug mode.
