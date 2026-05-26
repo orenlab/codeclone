@@ -128,6 +128,39 @@ def _render_session_stats_text(root: Path, *, quiet: bool) -> str:
     return printer.text
 
 
+def _snapshot(
+    *,
+    agents: tuple[_AgentSnapshot, ...] = (),
+    workspace_health: str = "idle",
+    latest_run_id: str | None = None,
+    latest_run_health: int | None = None,
+    latest_run_findings: int | None = None,
+    latest_run_files: int | None = None,
+    latest_run_age_seconds: int | None = None,
+    cache_present: bool = False,
+    mcp_token_footprint: int | None = None,
+    mcp_token_encoding: str | None = None,
+    mcp_token_event_count: int = 0,
+) -> session_stats_mod._SessionSnapshot:
+    return session_stats_mod._SessionSnapshot(
+        root=Path("/tmp/test"),
+        agents=agents,
+        stale_count=0,
+        expired_count=0,
+        recoverable_count=0,
+        latest_run_id=latest_run_id,
+        latest_run_health=latest_run_health,
+        latest_run_findings=latest_run_findings,
+        latest_run_files=latest_run_files,
+        latest_run_age_seconds=latest_run_age_seconds,
+        cache_present=cache_present,
+        workspace_health=workspace_health,
+        mcp_token_footprint=mcp_token_footprint,
+        mcp_token_encoding=mcp_token_encoding,
+        mcp_token_event_count=mcp_token_event_count,
+    )
+
+
 # ── Quiet mode tests ──
 
 
@@ -879,3 +912,205 @@ def test_is_pid_alive_edges(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _is_pid_alive(123) is False
     monkeypatch.setattr(os, "kill", raise_permission)
     assert _is_pid_alive(123) is True
+
+
+# ── Token footprint in verbose plain mode ──
+
+
+def test_session_stats_verbose_plain_with_token_footprint() -> None:
+    """Exercise plain verbose path with mcp_token_footprint (lines 277-278)."""
+    printer = _RecordingPrinter()
+    snapshot = _snapshot(
+        mcp_token_footprint=5000,
+        mcp_token_encoding="o200k_base",
+        mcp_token_event_count=10,
+    )
+
+    exit_code = session_stats_mod._render_verbose(printer, snapshot)
+
+    assert exit_code == int(ExitCode.SUCCESS)
+    assert "MCP payload footprint" in printer.text
+    assert "5,000" in printer.text
+    assert "o200k_base" in printer.text
+
+
+# ── Rich verbose with cached report + file count ──
+
+
+def test_session_stats_rich_with_cached_report_and_files(tmp_path: Path) -> None:
+    """Exercise Rich path with latest_run_files (lines 298-301)."""
+    _write_report(tmp_path, health=92, files=100)
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+
+    exit_code = render_session_stats(
+        console=cast(PrinterLike, console),
+        root_path=tmp_path,
+        quiet=False,
+    )
+
+    assert exit_code == int(ExitCode.SUCCESS)
+    text = output.getvalue()
+    assert "report.json present" in text
+    assert "100 files" in text
+
+
+# ── Rich verbose with token footprint ──
+
+
+def test_session_stats_rich_with_token_footprint() -> None:
+    """Exercise Rich path with mcp_token_footprint (lines 312-313)."""
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    snapshot = _snapshot(
+        mcp_token_footprint=3000,
+        mcp_token_encoding="o200k_base",
+        mcp_token_event_count=7,
+    )
+
+    exit_code = session_stats_mod._render_verbose_rich(
+        cast(PrinterLike, console), snapshot
+    )
+
+    assert exit_code == int(ExitCode.SUCCESS)
+    text = output.getvalue()
+    assert "MCP payload footprint" in text
+    assert "3,000" in text
+
+
+# ── Rich verbose with no live agents ──
+
+
+def test_session_stats_rich_no_live_agents() -> None:
+    """Exercise Rich path with dead agent only (lines 329-330)."""
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    snapshot = _snapshot(
+        agents=(
+            _AgentSnapshot(
+                pid=999999,
+                start_epoch=int(time.time()),
+                label="dead-agent",
+                alive=False,
+                intents=(),
+            ),
+        ),
+    )
+
+    exit_code = session_stats_mod._render_verbose_rich(
+        cast(PrinterLike, console), snapshot
+    )
+
+    assert exit_code == int(ExitCode.SUCCESS)
+    text = output.getvalue()
+    assert "No live workspace agents found" in text
+
+
+# ── _latest_run_text with health and findings ──
+
+
+def test_latest_run_text_with_health_and_findings() -> None:
+    """Exercise _latest_run_text branches (lines 377-384)."""
+    snapshot = _snapshot(
+        latest_run_id="abc12345",
+        latest_run_health=90,
+        latest_run_findings=5,
+        latest_run_files=100,
+        latest_run_age_seconds=120,
+        cache_present=True,
+        workspace_health="clean",
+    )
+
+    result = session_stats_mod._latest_run_text(snapshot)
+
+    assert "abc12345" in result
+    assert "health=90" in result
+    assert "findings=5" in result
+
+
+# ── _allowed_files_label ──
+
+
+def test_allowed_files_label_empty() -> None:
+    """Exercise _allowed_files_label with empty tuple (line 389)."""
+    assert session_stats_mod._allowed_files_label(()) == "-"
+
+
+def test_allowed_files_label_many() -> None:
+    """Exercise _allowed_files_label truncation (line 393)."""
+    files = tuple(f"src/{i}.py" for i in range(7))
+    result = session_stats_mod._allowed_files_label(files)
+    assert "and 2 more" in result
+
+
+# ── _ownership_style ──
+
+
+def test_ownership_style_branches() -> None:
+    """Exercise all _ownership_style branches (lines 409-415)."""
+    assert session_stats_mod._ownership_style("own_active") == "green"
+    assert session_stats_mod._ownership_style("own_stale") == "green"
+    assert session_stats_mod._ownership_style("foreign_stale") == "yellow"
+    assert session_stats_mod._ownership_style("foreign_active") == "cyan"
+    assert session_stats_mod._ownership_style("recoverable") == "magenta"
+    assert session_stats_mod._ownership_style("unknown") == "dim"
+
+
+# ── _resolve_mcp_tokens ──
+
+
+def test_resolve_mcp_tokens_with_audit_data(tmp_path: Path) -> None:
+    """Exercise _resolve_mcp_tokens with existing audit DB (lines 585-592)."""
+    from codeclone.audit.events import (
+        EVENT_PATCH_VERIFIED,
+        AuditEvent,
+        repo_root_digest,
+    )
+    from codeclone.audit.writer import SqliteAuditWriter
+
+    db_path = tmp_path / ".cache" / "codeclone" / "audit.sqlite3"
+    writer = SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30)
+    try:
+        writer.emit(
+            AuditEvent(
+                event_type=EVENT_PATCH_VERIFIED,
+                severity="info",
+                repo_root_digest=repo_root_digest(tmp_path),
+                agent_pid=123,
+                agent_label="agent",
+                run_id="run123",
+                status="accepted",
+                payload={"data": "value"},
+            )
+        )
+    finally:
+        writer.close()
+
+    tokens, encoding, count = session_stats_mod._read_audit_token_footprint(tmp_path)
+
+    assert tokens is not None
+    assert tokens > 0
+    assert encoding is not None
+    assert count == 1
+
+
+def test_resolve_mcp_tokens_no_db(tmp_path: Path) -> None:
+    """_read_audit_token_footprint returns (None, None, 0) when no DB exists."""
+    tokens, encoding, count = session_stats_mod._read_audit_token_footprint(tmp_path)
+
+    assert tokens is None
+    assert encoding is None
+    assert count == 0
+
+
+def test_resolve_mcp_tokens_corrupt_db(tmp_path: Path) -> None:
+    """_read_audit_token_footprint tolerates corrupt audit storage."""
+    db_path = tmp_path / ".cache" / "codeclone" / "audit.sqlite3"
+    db_path.parent.mkdir(parents=True)
+    db_path.write_text("NOT A DATABASE")
+
+    tokens, encoding, count = session_stats_mod._read_audit_token_footprint(tmp_path)
+
+    assert tokens is None
+    assert encoding is None
+    assert count == 0
