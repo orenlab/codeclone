@@ -292,16 +292,28 @@ def _run_pre_analysis_controller_query(
     if bool_attr(args, "session_stats"):
         from .session_stats import render_session_stats
 
+        stats_console = require_status_console(
+            _make_rich_console(
+                no_color=args.no_color,
+                width=ui.CLI_AUDIT_MAX_WIDTH,
+            )
+        )
         return render_session_stats(
-            console=_console(),
+            console=stats_console,
             root_path=root_path,
             quiet=args.quiet,
         )
     if bool_attr(args, "audit"):
         from .audit import render_audit
 
+        audit_console = require_status_console(
+            _make_rich_console(
+                no_color=args.no_color,
+                width=ui.CLI_AUDIT_MAX_WIDTH,
+            )
+        )
         return render_audit(
-            console=_console(),
+            console=audit_console,
             root_path=root_path,
             audit_enabled=bool(getattr(args, "audit_enabled", False)),
             audit_path=str(getattr(args, "audit_path", "")),
@@ -450,6 +462,8 @@ def _main_impl() -> None:
         args=args,
         strictness_explicit=strictness_explicit,
     )
+    _configure_runtime_flags(args)
+    _configure_runtime_console(args)
     pre_analysis_query_exit = _run_pre_analysis_controller_query(
         args=args,
         root_path=root_path,
@@ -462,8 +476,6 @@ def _main_impl() -> None:
         if git_diff_ref is not None
         else ()
     )
-    _configure_runtime_flags(args)
-    _configure_runtime_console(args)
     _validate_numeric_args_or_exit(
         args=args,
         validate_numeric_args_fn=_validate_numeric_args,
