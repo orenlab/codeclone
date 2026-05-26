@@ -174,6 +174,7 @@ def _controller_query_mode(args: object) -> bool:
         or bool_attr(args, "patch_verify")
         or bool_attr(args, "session_stats")
         or bool_attr(args, "audit")
+        or bool_attr(args, "audit_json")
     )
 
 
@@ -303,7 +304,8 @@ def _run_pre_analysis_controller_query(
             root_path=root_path,
             quiet=args.quiet,
         )
-    if bool_attr(args, "audit"):
+    audit_json = bool_attr(args, "audit_json")
+    if bool_attr(args, "audit") or audit_json:
         from .audit import render_audit
 
         audit_console = require_status_console(
@@ -318,6 +320,7 @@ def _run_pre_analysis_controller_query(
             audit_enabled=bool(getattr(args, "audit_enabled", False)),
             audit_path=str(getattr(args, "audit_path", "")),
             quiet=args.quiet,
+            json_summary=audit_json,
         )
     return None
 

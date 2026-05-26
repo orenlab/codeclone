@@ -30,6 +30,40 @@ class AuditRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class TypeTokenProfile:
+    """Token stats for one event type."""
+
+    event_type: str
+    call_count: int
+    total_tokens: int
+    max_tokens: int
+
+
+@dataclass(frozen=True, slots=True)
+class TopPayload:
+    """A single expensive audit payload."""
+
+    event_type: str
+    event_id: str
+    estimated_tokens: int
+    created_at_utc: str
+
+
+@dataclass(frozen=True, slots=True)
+class PayloadFootprint:
+    """Aggregate payload cost analytics."""
+
+    encoding: str
+    tool_calls: int
+    total_tokens: int
+    avg_tokens: int
+    p95_tokens: int
+    max_tokens: int
+    by_type: tuple[TypeTokenProfile, ...]
+    top_payloads: tuple[TopPayload, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class AuditSummary:
     db_path: Path
     db_size_bytes: int
@@ -45,6 +79,7 @@ class AuditSummary:
     total_estimated_tokens: int | None = None
     token_encoding: str | None = None
     token_event_count: int = 0
+    payload_footprint: PayloadFootprint | None = None
 
 
 def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
@@ -106,6 +141,7 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
                 (max(1, int(limit)),),
             ).fetchall()
             token_summary = (None, None, 0)
+        footprint = _read_payload_footprint(conn) if token_cols else None
     except (sqlite3.Error, AuditSchemaError) as exc:
         raise AuditReadError(f"cannot read audit database: {exc}") from exc
     finally:
@@ -126,6 +162,7 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
         total_estimated_tokens=total_tokens,
         token_encoding=token_enc,
         token_event_count=token_event_cnt,
+        payload_footprint=footprint,
     )
 
 
@@ -174,6 +211,109 @@ def _token_summary(
     return total_tokens, encoding, event_count
 
 
+def payload_footprint_to_dict(fp: PayloadFootprint) -> dict[str, object]:
+    """Serialize PayloadFootprint to a JSON-safe dict."""
+    return {
+        "encoding": fp.encoding,
+        "tool_calls": fp.tool_calls,
+        "total_tokens": fp.total_tokens,
+        "avg_tokens": fp.avg_tokens,
+        "p95_tokens": fp.p95_tokens,
+        "max_tokens": fp.max_tokens,
+        "by_type": {
+            tp.event_type: {
+                "count": tp.call_count,
+                "tokens": tp.total_tokens,
+                "max": tp.max_tokens,
+            }
+            for tp in fp.by_type
+        },
+        "top_payloads": [
+            {
+                "event_type": tp.event_type,
+                "tokens": tp.estimated_tokens,
+                "created_at_utc": tp.created_at_utc,
+            }
+            for tp in fp.top_payloads
+        ],
+    }
+
+
+def _read_payload_footprint(conn: sqlite3.Connection) -> PayloadFootprint | None:
+    """Build aggregate payload analytics from token columns."""
+    agg = conn.execute(
+        "SELECT COUNT(*), SUM(estimated_tokens), MAX(estimated_tokens) "
+        "FROM controller_events WHERE estimated_tokens IS NOT NULL"
+    ).fetchone()
+    if agg is None or agg[0] == 0:
+        return None
+    tool_calls = agg[0] if isinstance(agg[0], int) else 0
+    total_tokens = agg[1] if isinstance(agg[1], int) else 0
+    max_tokens = agg[2] if isinstance(agg[2], int) else 0
+    avg_tokens = total_tokens // tool_calls if tool_calls else 0
+
+    # p95: skip top 5% rows, take the next one
+    p95_offset = max(0, tool_calls * 5 // 100)
+    p95_row = conn.execute(
+        "SELECT estimated_tokens FROM controller_events "
+        "WHERE estimated_tokens IS NOT NULL "
+        "ORDER BY estimated_tokens DESC "
+        "LIMIT 1 OFFSET ?",
+        (p95_offset,),
+    ).fetchone()
+    p95_tokens = p95_row[0] if p95_row and isinstance(p95_row[0], int) else max_tokens
+
+    # Breakdown by event_type
+    type_rows = conn.execute(
+        "SELECT event_type, COUNT(*), SUM(estimated_tokens), MAX(estimated_tokens) "
+        "FROM controller_events WHERE estimated_tokens IS NOT NULL "
+        "GROUP BY event_type ORDER BY SUM(estimated_tokens) DESC"
+    ).fetchall()
+    by_type = tuple(
+        TypeTokenProfile(
+            event_type=_str_or_empty(r[0]),
+            call_count=r[1] if isinstance(r[1], int) else 0,
+            total_tokens=r[2] if isinstance(r[2], int) else 0,
+            max_tokens=r[3] if isinstance(r[3], int) else 0,
+        )
+        for r in type_rows
+    )
+
+    # Top 5 most expensive payloads
+    top_rows = conn.execute(
+        "SELECT event_type, event_id, estimated_tokens, created_at_utc "
+        "FROM controller_events WHERE estimated_tokens IS NOT NULL "
+        "ORDER BY estimated_tokens DESC LIMIT 5"
+    ).fetchall()
+    top_payloads = tuple(
+        TopPayload(
+            event_type=_str_or_empty(r[0]),
+            event_id=_str_or_empty(r[1]),
+            estimated_tokens=r[2] if isinstance(r[2], int) else 0,
+            created_at_utc=_str_or_empty(r[3]),
+        )
+        for r in top_rows
+    )
+
+    # Encoding (single value for the session)
+    enc_row = conn.execute(
+        "SELECT token_encoding FROM controller_events "
+        "WHERE token_encoding IS NOT NULL LIMIT 1"
+    ).fetchone()
+    encoding = _str_or_none(enc_row[0]) if enc_row else "unknown"
+
+    return PayloadFootprint(
+        encoding=encoding or "unknown",
+        tool_calls=tool_calls,
+        total_tokens=total_tokens,
+        avg_tokens=avg_tokens,
+        p95_tokens=p95_tokens,
+        max_tokens=max_tokens,
+        by_type=by_type,
+        top_payloads=top_payloads,
+    )
+
+
 def _count(conn: sqlite3.Connection, sql: str) -> int:
     value = conn.execute(sql).fetchone()
     if value is None:
@@ -218,4 +358,12 @@ def _int_or_none(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-__all__ = ["AuditRecord", "AuditSummary", "read_audit_summary"]
+__all__ = [
+    "AuditRecord",
+    "AuditSummary",
+    "PayloadFootprint",
+    "TopPayload",
+    "TypeTokenProfile",
+    "payload_footprint_to_dict",
+    "read_audit_summary",
+]

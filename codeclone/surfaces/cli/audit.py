@@ -10,7 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ... import ui_messages as ui
-from ...audit.reader import AuditSummary, read_audit_summary
+from ...audit.reader import (
+    AuditSummary,
+    PayloadFootprint,
+    payload_footprint_to_dict,
+    read_audit_summary,
+)
 from ...audit.validation import AuditConfigError, AuditReadError, resolve_audit_path
 from ...contracts import ExitCode
 from .types import PrinterLike
@@ -23,6 +28,7 @@ def render_audit(
     audit_enabled: bool,
     audit_path: str,
     quiet: bool,
+    json_summary: bool = False,
 ) -> int:
     if not audit_enabled:
         console.print(ui.fmt_contract_error("audit is not enabled."))
@@ -36,6 +42,8 @@ def render_audit(
     except Exception as exc:
         console.print(ui.fmt_internal_error(exc))
         return int(ExitCode.INTERNAL_ERROR)
+    if json_summary:
+        return _render_json_summary(console=console, summary=summary)
     if quiet:
         return _render_quiet(console=console, summary=summary)
     return _render_verbose(console=console, summary=summary)
@@ -51,6 +59,22 @@ def _render_quiet(*, console: PrinterLike, summary: AuditSummary) -> int:
         f"violations={summary.violation_events} "
         f"last={_relative_time(summary.latest_event_utc)}"
     )
+    return int(ExitCode.SUCCESS)
+
+
+def _render_json_summary(*, console: PrinterLike, summary: AuditSummary) -> int:
+    import json
+
+    fp = summary.payload_footprint
+    data = {
+        "mcp_payload_footprint": payload_footprint_to_dict(fp) if fp else None,
+        "total_events": summary.total_events,
+        "intents": summary.intent_events,
+        "contracts": summary.contract_events,
+        "receipts": summary.receipt_events,
+        "violations": summary.violation_events,
+    }
+    console.print(json.dumps(data, indent=2), markup=False)
     return int(ExitCode.SUCCESS)
 
 
@@ -122,12 +146,11 @@ def _render_verbose_rich(*, console: PrinterLike, summary: AuditSummary) -> int:
             style="red" if summary.violation_events else "green",
         ),
     )
-    if summary.total_estimated_tokens is not None and summary.token_event_count > 0:
-        enc_label = summary.token_encoding or "unknown"
+    fp = summary.payload_footprint
+    if fp is not None:
         meta.add_row(
-            "MCP token footprint",
-            f"~{summary.total_estimated_tokens:,} tokens "
-            f"({enc_label}, {summary.token_event_count} tool calls)",
+            "MCP payload footprint",
+            f"~{fp.total_tokens:,} tokens ({fp.encoding}, {fp.tool_calls} tool calls)",
         )
     console.print(Panel(meta, border_style="cyan"))
 
@@ -153,18 +176,111 @@ def _render_verbose_rich(*, console: PrinterLike, summary: AuditSummary) -> int:
         )
     console.print(table)
 
-    if summary.total_estimated_tokens is not None and summary.token_event_count > 0:
-        enc_label = summary.token_encoding or "unknown"
-        console.print(
-            Text(
-                f"Session MCP token footprint: "
-                f"~{summary.total_estimated_tokens:,} tokens "
-                f"({enc_label}, {summary.token_event_count} tool calls)",
-                style="dim",
-            )
-        )
+    if fp is not None:
+        _render_payload_analytics(console=console, fp=fp)
 
     return int(ExitCode.SUCCESS)
+
+
+# Payload budget thresholds (tokens)
+_SINGLE_PAYLOAD_OK = 500
+_SINGLE_PAYLOAD_WATCH = 1500
+_WORKFLOW_OK = 5000
+_WORKFLOW_WATCH = 15000
+
+
+def _render_payload_analytics(
+    *,
+    console: PrinterLike,
+    fp: PayloadFootprint,
+) -> None:
+    from rich import box
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+
+    # ── Aggregate stats ──
+    stats = Table.grid(padding=(0, 2))
+    stats.add_column(style="dim", no_wrap=True)
+    stats.add_column(justify="right", no_wrap=True)
+    stats.add_row("Total tokens", f"~{fp.total_tokens:,}")
+    stats.add_row("Tool calls", str(fp.tool_calls))
+    stats.add_row("Avg tokens/call", str(fp.avg_tokens))
+    stats.add_row("p95 tokens", str(fp.p95_tokens))
+    stats.add_row("Max tokens", str(fp.max_tokens))
+    stats.add_row("Encoding", fp.encoding)
+
+    # ── Breakdown by type ──
+    breakdown = Table(box=box.SIMPLE, show_edge=False)
+    breakdown.add_column("Type", no_wrap=True)
+    breakdown.add_column("Calls", justify="right", no_wrap=True)
+    breakdown.add_column("Total", justify="right", no_wrap=True)
+    breakdown.add_column("Max", justify="right", no_wrap=True)
+    for tp in fp.by_type:
+        breakdown.add_row(
+            _short_type(tp.event_type),
+            str(tp.call_count),
+            f"{tp.total_tokens:,}",
+            str(tp.max_tokens),
+        )
+
+    # ── Top payloads ──
+    top = Table(box=box.SIMPLE, show_edge=False)
+    top.add_column("#", justify="right", no_wrap=True, style="dim")
+    top.add_column("Type", no_wrap=True)
+    top.add_column("Tokens", justify="right", no_wrap=True)
+    top.add_column("Time", no_wrap=True)
+    for i, payload in enumerate(fp.top_payloads, 1):
+        style = (
+            "bold red"
+            if payload.estimated_tokens > _SINGLE_PAYLOAD_WATCH
+            else "yellow"
+            if payload.estimated_tokens > _SINGLE_PAYLOAD_OK
+            else ""
+        )
+        top.add_row(
+            str(i),
+            _short_type(payload.event_type),
+            Text(f"{payload.estimated_tokens:,}", style=style),
+            _short_time(payload.created_at_utc),
+        )
+
+    # ── Budget warnings ──
+    warnings: list[str] = []
+    if fp.total_tokens > _WORKFLOW_WATCH:
+        warnings.append(
+            f"Workflow total {fp.total_tokens:,} tokens exceeds "
+            f"{_WORKFLOW_WATCH:,} threshold (heavy)"
+        )
+    elif fp.total_tokens > _WORKFLOW_OK:
+        warnings.append(
+            f"Workflow total {fp.total_tokens:,} tokens exceeds "
+            f"{_WORKFLOW_OK:,} threshold (watch)"
+        )
+    warnings.extend(
+        f"{_short_type(payload.event_type)} payload "
+        f"{payload.estimated_tokens:,} tokens (heavy)"
+        for payload in fp.top_payloads
+        if payload.estimated_tokens > _SINGLE_PAYLOAD_WATCH
+    )
+
+    # ── Render ──
+    console.print()
+    console.print(Panel(stats, title="MCP Payload Footprint", border_style="cyan"))
+    console.print(Panel(breakdown, title="Tokens by Type", border_style="dim"))
+    if fp.top_payloads:
+        console.print(Panel(top, title="Top Payloads", border_style="dim"))
+    if warnings:
+        warning_text = Text()
+        for w in warnings:
+            warning_text.append(f"  ⚠ {w}\n", style="yellow")
+        console.print(
+            Panel(
+                warning_text,
+                title="Payload Budget Warnings",
+                border_style="yellow",
+            )
+        )
 
 
 def _supports_rich(console: PrinterLike) -> bool:

@@ -280,6 +280,14 @@ OPTIONS: Final[tuple[OptionSpec, ...]] = (
         help_text=ui.HELP_AUDIT,
     ),
     _option(
+        dest="audit_json",
+        group="Analysis",
+        cli_kind="store_true",
+        flags=("--audit-json",),
+        default=False,
+        help_text=ui.HELP_AUDIT_JSON,
+    ),
+    _option(
         dest="audit_enabled",
         group=None,
         default=False,

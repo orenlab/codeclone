@@ -88,6 +88,10 @@ HELP_AUDIT = (
     "Show local Controller audit trail from the configured audit database.\n"
     "Read-only, does not run analysis."
 )
+HELP_AUDIT_JSON = (
+    "Output audit payload footprint as JSON.\n"
+    "Implies --audit. Useful for cross-repository comparison."
+)
 HELP_CACHE_PATH = (
     "Path to the cache file.\n"
     "If FILE is omitted, uses <root>/.cache/codeclone/cache.json."

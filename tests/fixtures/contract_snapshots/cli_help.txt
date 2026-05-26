@@ -3,7 +3,7 @@ usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--diff-against GIT_REF] [--paths-from-git-diff GIT_REF]
                  [--blast-radius FILE [FILE ...]] [--patch-verify]
                  [--strictness LEVEL] [--session-stats] [--audit]
-                 [--cache-path [FILE]] [--cache-dir [FILE]]
+                 [--audit-json] [--cache-path [FILE]] [--cache-dir [FILE]]
                  [--max-cache-size-mb MB] [--baseline [FILE]]
                  [--max-baseline-size-mb MB]
                  [--update-baseline | --no-update-baseline]
@@ -70,6 +70,8 @@ Analysis:
                         Read-only, does not run analysis.
   --audit               Show local Controller audit trail from the configured audit database.
                         Read-only, does not run analysis.
+  --audit-json          Output audit payload footprint as JSON.
+                        Implies --audit. Useful for cross-repository comparison.
   --cache-path [FILE]   Path to the cache file.
                         If FILE is omitted, uses <root>/.cache/codeclone/cache.json.
   --cache-dir [FILE]    Legacy alias for --cache-path.
