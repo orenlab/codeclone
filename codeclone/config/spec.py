@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 from .. import ui_messages as ui
+from ..audit.validation import (
+    DEFAULT_AUDIT_PATH,
+    DEFAULT_AUDIT_PAYLOADS,
+    DEFAULT_AUDIT_RETENTION_DAYS,
+)
 from ..contracts import (
     DEFAULT_BASELINE_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -265,6 +270,38 @@ OPTIONS: Final[tuple[OptionSpec, ...]] = (
         flags=("--session-stats",),
         default=False,
         help_text=ui.HELP_SESSION_STATS,
+    ),
+    _option(
+        dest="audit",
+        group="Analysis",
+        cli_kind="store_true",
+        flags=("--audit",),
+        default=False,
+        help_text=ui.HELP_AUDIT,
+    ),
+    _option(
+        dest="audit_enabled",
+        group=None,
+        default=False,
+        pyproject_type=bool,
+    ),
+    _option(
+        dest="audit_path",
+        group=None,
+        default=DEFAULT_AUDIT_PATH,
+        pyproject_type=str,
+    ),
+    _option(
+        dest="audit_payloads",
+        group=None,
+        default=DEFAULT_AUDIT_PAYLOADS,
+        pyproject_type=str,
+    ),
+    _option(
+        dest="audit_retention_days",
+        group=None,
+        default=DEFAULT_AUDIT_RETENTION_DAYS,
+        pyproject_type=int,
     ),
     _option(
         dest="cache_path",

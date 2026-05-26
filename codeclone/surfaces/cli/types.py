@@ -82,6 +82,11 @@ class CLIArgsLike(Protocol):
     patch_verify: bool
     strictness: str
     session_stats: bool
+    audit: bool
+    audit_enabled: bool
+    audit_path: str
+    audit_payloads: str
+    audit_retention_days: int
     skip_metrics: bool
     skip_dead_code: bool
     skip_dependencies: bool

@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...contracts import ExitCode
 from .types import PrinterLike
@@ -206,6 +206,8 @@ def _render_quiet(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
 
 
 def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
+    if _supports_rich(console):
+        return _render_verbose_rich(console, snapshot)
     console.print("[bold]╍╍╍ Session Stats ╍╍╍[/bold]")
     console.print()
     console.print(f"  Workspace:       {snapshot.root}")
@@ -266,6 +268,139 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
     console.print()
     console.print(f"  Workspace health: {snapshot.workspace_health}")
     return int(ExitCode.SUCCESS)
+
+
+def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
+    box, panel_cls, rule_cls, table_cls, text_cls = _rich_session_symbols()
+
+    console.print(rule_cls("Session Stats", style="dim", characters="─"))
+
+    summary = table_cls.grid(padding=(0, 2))
+    summary.add_column(style="dim", no_wrap=True)
+    summary.add_column()
+    summary.add_row("Workspace", str(snapshot.root))
+    if snapshot.cache_present and snapshot.latest_run_id:
+        run_text = _latest_run_text(snapshot)
+        summary.add_row("Latest run", run_text)
+        if snapshot.latest_run_files is not None:
+            summary.add_row(
+                "Cache",
+                f"report.json present ({snapshot.latest_run_files} files)",
+            )
+    else:
+        summary.add_row("Latest run", "none")
+    summary.add_row("Active agents", str(len([a for a in snapshot.agents if a.alive])))
+    summary.add_row("Stale intents", str(snapshot.stale_count))
+    summary.add_row("Expired intents", str(snapshot.expired_count))
+    summary.add_row("Recoverable", str(snapshot.recoverable_count))
+    health_text = text_cls(
+        snapshot.workspace_health,
+        style=_health_style(snapshot.workspace_health),
+    )
+    summary.add_row("Workspace health", health_text)
+    console.print(
+        panel_cls(summary, border_style=_health_style(snapshot.workspace_health))
+    )
+
+    live_agents = [agent for agent in snapshot.agents if agent.alive]
+    if not live_agents:
+        console.print("[dim]No live workspace agents found.[/dim]")
+        return int(ExitCode.SUCCESS)
+
+    table = table_cls(
+        title="Workspace intents",
+        box=box.SIMPLE_HEAVY,
+        show_lines=False,
+        expand=True,
+    )
+    table.add_column("PID", no_wrap=True, style="dim")
+    table.add_column("Agent", overflow="fold")
+    table.add_column("Ownership", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Scope", justify="right", no_wrap=True)
+    table.add_column("Lease", no_wrap=True)
+    table.add_column("Files", overflow="fold")
+
+    for agent in live_agents:
+        label = agent.label or "unknown"
+        for intent in agent.intents:
+            table.add_row(
+                str(agent.pid),
+                label,
+                text_cls(intent.ownership, style=_ownership_style(intent.ownership)),
+                text_cls(intent.status, style=_intent_status_style(intent.status)),
+                str(intent.scope_file_count),
+                _format_duration(intent.lease_remaining_seconds),
+                _allowed_files_label(intent.allowed_files),
+            )
+    console.print(table)
+    return int(ExitCode.SUCCESS)
+
+
+def _rich_session_symbols() -> tuple[Any, Any, Any, Any, Any]:
+    from rich import box
+    from rich.panel import Panel
+    from rich.rule import Rule
+    from rich.table import Table
+    from rich.text import Text
+
+    return box, Panel, Rule, Table, Text
+
+
+def _supports_rich(console: PrinterLike) -> bool:
+    return console.__class__.__module__.startswith("rich.")
+
+
+def _latest_run_text(snapshot: _SessionSnapshot) -> str:
+    age_str = _format_age(snapshot.latest_run_age_seconds)
+    parts = [f"{snapshot.latest_run_id} ({age_str}"]
+    if snapshot.latest_run_health is not None:
+        parts.append(f", health={snapshot.latest_run_health}")
+    if snapshot.latest_run_findings is not None:
+        parts.append(f", findings={snapshot.latest_run_findings}")
+    parts.append(")")
+    return "".join(parts)
+
+
+def _allowed_files_label(files: tuple[str, ...]) -> str:
+    if not files:
+        return "-"
+    shown = files[:_MAX_ALLOWED_FILES_SHOWN]
+    label = ", ".join(shown)
+    if len(files) > _MAX_ALLOWED_FILES_SHOWN:
+        label += f" ... and {len(files) - _MAX_ALLOWED_FILES_SHOWN} more"
+    return label
+
+
+def _health_style(value: str) -> str:
+    return {
+        "idle": "dim",
+        "clean": "green",
+        "active": "cyan",
+        "contested": "yellow",
+    }.get(value, "cyan")
+
+
+def _ownership_style(value: str) -> str:
+    if value.startswith("own"):
+        return "green"
+    if value == "foreign_stale":
+        return "yellow"
+    if value == "foreign_active":
+        return "cyan"
+    if value == "recoverable":
+        return "magenta"
+    return "dim"
+
+
+def _intent_status_style(value: str) -> str:
+    return {
+        "active": "cyan",
+        "clean": "green",
+        "expanded": "yellow",
+        "violated": "red",
+        "expired": "dim",
+    }.get(value, "white")
 
 
 def _classify_workspace_health(

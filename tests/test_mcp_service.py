@@ -36,6 +36,7 @@ import codeclone.surfaces.mcp._workspace_intents as mcp_workspace_intents_mod
 import codeclone.surfaces.mcp.server as mcp_server_mod
 import codeclone.surfaces.mcp.service as mcp_service_mod
 import codeclone.surfaces.mcp.session as mcp_session_mod
+from codeclone.audit.events import AuditEvent
 from codeclone.baseline import Baseline, current_python_tag
 from codeclone.baseline.metrics_baseline import MetricsBaseline, MetricsBaselineStatus
 from codeclone.cache.store import Cache
@@ -477,6 +478,17 @@ def _declare_pkg_a_intent(service: CodeCloneMCPService) -> dict[str, object]:
     )
 
 
+class _RecordingAuditWriter:
+    def __init__(self) -> None:
+        self.events: list[AuditEvent] = []
+
+    def emit(self, event: AuditEvent) -> None:
+        self.events.append(event)
+
+    def close(self) -> None:
+        return None
+
+
 def _seed_patch_contract_intent(
     service: CodeCloneMCPService,
     root: Path,
@@ -748,6 +760,49 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
             latest["findings"],
         )["new_by_source_kind"]
     )
+
+
+def test_mcp_session_emits_audit_events_for_controller_flow(tmp_path: Path) -> None:
+    audit = _RecordingAuditWriter()
+    service = mcp_session_mod.MCPSession(history_limit=4, audit_writer=audit)
+    record = _blast_radius_run_record(tmp_path, run_id="audit1234567890")
+    service._runs.register(record)
+
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id=record.run_id,
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="audit controller flow",
+        expected_effects=["no new clone group"],
+    )
+    service.get_blast_radius(files=["pkg/a.py"], run_id=record.run_id)
+    service.check_patch_contract(
+        mode="budget",
+        run_id=record.run_id,
+        intent_id=str(declared["intent_id"]),
+    )
+    service.manage_change_intent(
+        action="check",
+        intent_id=str(declared["intent_id"]),
+        changed_files=["pkg/a.py"],
+    )
+    service.manage_change_intent(
+        action="clear",
+        intent_id=str(declared["intent_id"]),
+    )
+
+    event_types = [event.event_type for event in audit.events]
+    assert event_types == [
+        "intent.declared",
+        "blast_radius.computed",
+        "patch_budget.computed",
+        "intent.checked",
+        "intent.cleared",
+    ]
+    assert {event.intent_id for event in audit.events if event.intent_id} == {
+        declared["intent_id"]
+    }
+    assert all(str(tmp_path) not in event.repo_root_digest for event in audit.events)
 
 
 def test_mcp_service_summary_explains_untrusted_baseline_python_tag_mismatch(

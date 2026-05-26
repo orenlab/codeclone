@@ -13,6 +13,18 @@ from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatchcase
 from pathlib import Path
 
+from ...audit import (
+    EVENT_BLAST_RADIUS,
+    EVENT_INTENT_CHECKED,
+    EVENT_INTENT_CLEARED,
+    EVENT_INTENT_DECLARED,
+    EVENT_INTENT_EXPANDED,
+    EVENT_INTENT_EXPIRED,
+    EVENT_INTENT_RENEWED,
+    EVENT_INTENT_VIOLATED,
+    EVENT_WORKSPACE_CONFLICT,
+    EVENT_WORKSPACE_GC,
+)
 from . import _session_helpers as _helpers
 from ._intent import (
     DEFAULT_INTENT_GUARDS,
@@ -80,6 +92,20 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
     _agent_start_epoch: int
     _agent_label: str
 
+    def _audit_emit(
+        self,
+        *,
+        root: Path,
+        event_type: str,
+        severity: str,
+        run_id: str | None = None,
+        intent_id: str | None = None,
+        report_digest: str | None = None,
+        status: str | None = None,
+        payload: Mapping[str, object] | None = None,
+    ) -> None:
+        raise NotImplementedError
+
     def get_blast_radius(
         self,
         *,
@@ -96,6 +122,15 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             include=include,
         )
         self._renew_lease_for_run(record=record)
+        self._audit_emit(
+            root=record.root,
+            event_type=EVENT_BLAST_RADIUS,
+            severity="info",
+            run_id=_helpers._short_run_id(record.run_id),
+            report_digest=self._report_digest_value(record),
+            status=str(payload.get("radius_level", "")),
+            payload=payload,
+        )
         return payload
 
     def manage_change_intent(
@@ -261,6 +296,27 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         payload["workspace_registered"] = workspace_registered
         payload["concurrent_intents"] = concurrent_intents
         payload["ttl_seconds"] = ttl
+        self._audit_emit(
+            root=record.root,
+            event_type=EVENT_INTENT_DECLARED,
+            severity="warn" if concurrent_intents else "info",
+            run_id=_helpers._short_run_id(record.run_id),
+            intent_id=record_payload.intent_id,
+            report_digest=record_payload.report_digest,
+            status=record_payload.status.value,
+            payload=payload,
+        )
+        if concurrent_intents:
+            self._audit_emit(
+                root=record.root,
+                event_type=EVENT_WORKSPACE_CONFLICT,
+                severity="warn",
+                run_id=_helpers._short_run_id(record.run_id),
+                intent_id=record_payload.intent_id,
+                report_digest=record_payload.report_digest,
+                status="conflict",
+                payload={"concurrent_intents": concurrent_intents},
+            )
         return payload
 
     def _check_change_intent(
@@ -285,9 +341,20 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             with self._state_lock:
                 self._active_intents[expired.intent_id] = expired
             self._sync_workspace_intent_status(record=record, intent=expired)
-            return expired.to_payload(
+            payload = expired.to_payload(
                 short_run_id=_helpers._short_run_id(record.run_id)
             )
+            self._audit_emit(
+                root=record.root,
+                event_type=EVENT_INTENT_EXPIRED,
+                severity="warn",
+                run_id=_helpers._short_run_id(record.run_id),
+                intent_id=expired.intent_id,
+                report_digest=expired.report_digest,
+                status=expired.status.value,
+                payload=payload,
+            )
+            return payload
         actual = (
             self._normalize_changed_paths(root_path=record.root, paths=changed_files)
             if changed_files
@@ -304,6 +371,20 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         self._sync_workspace_intent_status(record=record, intent=updated)
         payload = check_result.to_payload()
         payload["intent_id"] = updated.intent_id
+        event_type = {
+            IntentStatus.EXPANDED: EVENT_INTENT_EXPANDED,
+            IntentStatus.VIOLATED: EVENT_INTENT_VIOLATED,
+        }.get(check_result.status, EVENT_INTENT_CHECKED)
+        self._audit_emit(
+            root=record.root,
+            event_type=event_type,
+            severity="warn" if check_result.status != IntentStatus.CLEAN else "info",
+            run_id=_helpers._short_run_id(record.run_id),
+            intent_id=updated.intent_id,
+            report_digest=updated.report_digest,
+            status=check_result.status.value,
+            payload=payload,
+        )
         return payload
 
     def _clear_change_intent(self, *, intent_id: str | None) -> dict[str, object]:
@@ -322,8 +403,8 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 removed_ids = tuple(self._active_intents)
                 removed_intents = tuple(self._active_intents.values())
                 self._active_intents.clear()
-            workspace_targets: tuple[tuple[Path, str], ...] = tuple(
-                (record.root, removed_intent.intent_id)
+            workspace_targets: tuple[tuple[Path, IntentRecord, str], ...] = tuple(
+                (record.root, removed_intent, self._report_digest_value(record))
                 for removed_intent in removed_intents
                 for record in (self._optional_run_record(removed_intent.run_id),)
                 if record is not None
@@ -331,21 +412,33 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             for removed_intent in removed_intents:
                 self._runs.unpin(removed_intent.run_id)
         workspace_cleared = True
-        for root_path, removed_intent_id in workspace_targets:
+        for root_path, removed_intent, _report_digest in workspace_targets:
             workspace_cleared = (
                 remove_workspace_intent(
                     root=root_path,
                     pid=self._agent_pid,
                     start_epoch=self._agent_start_epoch,
-                    intent_id=removed_intent_id,
+                    intent_id=removed_intent.intent_id,
                 )
                 and workspace_cleared
             )
-        return {
+        payload = {
             "cleared": len(removed_ids),
             "cleared_intent_ids": list(removed_ids),
             "workspace_cleared": workspace_cleared,
         }
+        for root_path, removed_intent, report_digest in workspace_targets:
+            self._audit_emit(
+                root=root_path,
+                event_type=EVENT_INTENT_CLEARED,
+                severity="info",
+                run_id=_helpers._short_run_id(removed_intent.run_id),
+                intent_id=removed_intent.intent_id,
+                report_digest=report_digest,
+                status="cleared",
+                payload=payload,
+            )
+        return payload
 
     def _resolve_intent(
         self,
@@ -511,7 +604,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             if latest_record is not None
             else resolved_lease_seconds(lease_seconds)
         )
-        return {
+        payload: dict[str, object] = {
             "intent_id": active_intent.intent_id,
             "status": active_intent.status.value,
             "lease_renewed": renewed,
@@ -527,6 +620,17 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 "max_seconds": MAX_LEASE_SECONDS,
             },
         }
+        self._audit_emit(
+            root=record.root,
+            event_type=EVENT_INTENT_RENEWED,
+            severity="info" if renewed else "warn",
+            run_id=_helpers._short_run_id(record.run_id),
+            intent_id=active_intent.intent_id,
+            report_digest=active_intent.report_digest,
+            status=active_intent.status.value,
+            payload=payload,
+        )
+        return payload
 
     def _list_workspace_intents(self, *, root: str | None) -> dict[str, object]:
         root_path = self._resolve_workspace_root(root)
@@ -554,7 +658,16 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         }
 
     def _gc_workspace_intents(self, *, root: str | None) -> dict[str, object]:
-        return gc_workspace(root=self._resolve_workspace_root(root))
+        root_path = self._resolve_workspace_root(root)
+        payload = gc_workspace(root=root_path)
+        self._audit_emit(
+            root=root_path,
+            event_type=EVENT_WORKSPACE_GC,
+            severity="info",
+            status="completed",
+            payload=payload,
+        )
+        return payload
 
     def _recover_change_intent(
         self,

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import pytest
+from rich.console import Console
 
 import codeclone.surfaces.cli.session_stats as session_stats_mod
 from codeclone.contracts import ExitCode
@@ -22,6 +25,7 @@ from codeclone.surfaces.cli.session_stats import (
     _read_cached_report,
     render_session_stats,
 )
+from codeclone.surfaces.cli.types import PrinterLike
 from codeclone.surfaces.mcp._workspace_intents import (
     MIN_LEASE_SECONDS,
     WorkspaceIntentRecord,
@@ -262,6 +266,31 @@ def test_session_stats_verbose_with_report(tmp_path: Path) -> None:
     assert "abcdef01" in text
     assert "health=92" in text
     assert "100 files" in text
+
+
+def test_session_stats_verbose_uses_rich_table(tmp_path: Path) -> None:
+    intents_dir = tmp_path / ".cache" / "codeclone" / "intents"
+    intents_dir.mkdir(parents=True)
+    _write_intent_file(
+        intents_dir,
+        pid=os.getpid(),
+        start_epoch=int(time.time()),
+        allowed_files=["src/a.py"],
+    )
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=True, color_system=None, width=100)
+
+    exit_code = render_session_stats(
+        console=cast(PrinterLike, console),
+        root_path=tmp_path,
+        quiet=False,
+    )
+
+    assert exit_code == int(ExitCode.SUCCESS)
+    text = output.getvalue()
+    assert "Session Stats" in text
+    assert "Workspace intents" in text
+    assert "src/a.py" in text
 
 
 def test_session_stats_verbose_with_report_without_file_count(

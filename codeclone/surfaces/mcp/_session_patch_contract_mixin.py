@@ -8,6 +8,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from ...audit import (
+    EVENT_BASELINE_ABUSE,
+    EVENT_PATCH_BUDGET,
+    EVENT_PATCH_EXPIRED,
+    EVENT_PATCH_VERIFIED,
+    EVENT_PATCH_VIOLATED,
+)
 from ...utils.coerce import as_int as _coerce_int
 from . import _session_helpers as _helpers
 from ._intent import IntentRecord, IntentStatus
@@ -81,7 +88,7 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         budgets = self._budgets_for_record(record=record, strictness=strictness)
         current_state = self._current_state(record)
         gate_preview = self._gate_preview(record=record, budgets=budgets)
-        return {
+        payload: dict[str, object] = {
             "mode": "budget",
             "run_id": _helpers._short_run_id(record.run_id),
             "strictness": strictness,
@@ -102,6 +109,17 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
                 gate_preview=gate_preview,
             ),
         }
+        self._audit_emit(
+            root=record.root,
+            event_type=EVENT_PATCH_BUDGET,
+            severity="warn" if bool(gate_preview.get("would_fail")) else "info",
+            run_id=_helpers._short_run_id(record.run_id),
+            intent_id=intent.intent_id if intent is not None else None,
+            report_digest=self._report_digest_value(record),
+            status="budget",
+            payload=payload,
+        )
+        return payload
 
     def _patch_contract_verify(
         self,
@@ -182,7 +200,7 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             if blocking_violations
             else PatchContractStatus.ACCEPTED.value
         )
-        return {
+        payload: dict[str, object] = {
             "mode": "verify",
             "status": status,
             "reason": None,
@@ -199,6 +217,33 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             "blocking_violations": list(blocking_violations),
             "message": self._verify_message(status=status, violations=violations),
         }
+        event_type = (
+            EVENT_PATCH_VIOLATED
+            if status == PatchContractStatus.VIOLATED.value
+            else EVENT_PATCH_VERIFIED
+        )
+        self._audit_emit(
+            root=after.root,
+            event_type=event_type,
+            severity="warn" if blocking_violations else "info",
+            run_id=_helpers._short_run_id(after.run_id),
+            intent_id=intent.intent_id if intent is not None else None,
+            report_digest=self._report_digest_value(after),
+            status=status,
+            payload=payload,
+        )
+        if bool(baseline_abuse.get("detected")):
+            self._audit_emit(
+                root=after.root,
+                event_type=EVENT_BASELINE_ABUSE,
+                severity="error",
+                run_id=_helpers._short_run_id(after.run_id),
+                intent_id=intent.intent_id if intent is not None else None,
+                report_digest=self._report_digest_value(after),
+                status="detected",
+                payload=payload,
+            )
+        return payload
 
     def _validated_patch_contract_mode(self, mode: str) -> PatchContractMode:
         if mode not in VALID_PATCH_CONTRACT_MODES:
@@ -560,7 +605,7 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         after: MCPRunRecord,
         intent: IntentRecord,
     ) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "mode": "verify",
             "status": PatchContractStatus.EXPIRED.value,
             "reason": "report_digest_mismatch",
@@ -572,6 +617,17 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
                 "Patch contract expired: intent was declared for another report digest."
             ),
         }
+        self._audit_emit(
+            root=after.root,
+            event_type=EVENT_PATCH_EXPIRED,
+            severity="warn",
+            run_id=_helpers._short_run_id(after.run_id),
+            intent_id=intent.intent_id,
+            report_digest=self._report_digest_value(after),
+            status=PatchContractStatus.EXPIRED.value,
+            payload=payload,
+        )
+        return payload
 
     def _budget_message(
         self,

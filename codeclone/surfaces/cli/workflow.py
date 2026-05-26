@@ -173,6 +173,7 @@ def _controller_query_mode(args: object) -> bool:
         bool_attr(args, "blast_radius")
         or bool_attr(args, "patch_verify")
         or bool_attr(args, "session_stats")
+        or bool_attr(args, "audit")
     )
 
 
@@ -200,11 +201,19 @@ def _validate_controller_query_flags(
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
     session_stats = bool_attr(args, "session_stats")
-    if session_stats and (blast_radius or patch_verify):
+    audit = bool_attr(args, "audit")
+    if session_stats and (blast_radius or patch_verify or audit):
         printer.print(
             ui.fmt_contract_error(
                 "--session-stats cannot be combined with "
-                "--blast-radius or --patch-verify."
+                "--audit, --blast-radius, or --patch-verify."
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if audit and (blast_radius or patch_verify):
+        printer.print(
+            ui.fmt_contract_error(
+                "--audit cannot be combined with --blast-radius or --patch-verify."
             )
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
@@ -213,11 +222,22 @@ def _validate_controller_query_flags(
             ui.fmt_contract_error("Use --blast-radius or --patch-verify, not both.")
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
-    if not (blast_radius or patch_verify or session_stats):
+    if not (blast_radius or patch_verify or session_stats or audit):
         return
     if bool_attr(args, "update_baseline") or bool_attr(args, "update_metrics_baseline"):
         printer.print(
             ui.fmt_contract_error("Controller query modes cannot update baselines.")
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if (
+        bool_attr(args, "changed_only")
+        or getattr(args, "diff_against", None)
+        or getattr(args, "paths_from_git_diff", None)
+    ):
+        printer.print(
+            ui.fmt_contract_error(
+                "Controller query modes cannot be combined with changed-scope flags."
+            )
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
     if report_outputs_requested:
@@ -262,6 +282,32 @@ def _run_controller_query(
         baseline_state=baseline_state,
         quiet=args.quiet,
     )
+
+
+def _run_pre_analysis_controller_query(
+    *,
+    args: CLIArgsLike,
+    root_path: Path,
+) -> int | None:
+    if bool_attr(args, "session_stats"):
+        from .session_stats import render_session_stats
+
+        return render_session_stats(
+            console=_console(),
+            root_path=root_path,
+            quiet=args.quiet,
+        )
+    if bool_attr(args, "audit"):
+        from .audit import render_audit
+
+        return render_audit(
+            console=_console(),
+            root_path=root_path,
+            audit_enabled=bool(getattr(args, "audit_enabled", False)),
+            audit_path=str(getattr(args, "audit_path", "")),
+            quiet=args.quiet,
+        )
+    return None
 
 
 def print_banner(*, root: Path | None = None) -> None:
@@ -404,16 +450,12 @@ def _main_impl() -> None:
         args=args,
         strictness_explicit=strictness_explicit,
     )
-    if bool_attr(args, "session_stats"):
-        from .session_stats import render_session_stats
-
-        sys.exit(
-            render_session_stats(
-                console=_console(),
-                root_path=root_path,
-                quiet=args.quiet,
-            )
-        )
+    pre_analysis_query_exit = _run_pre_analysis_controller_query(
+        args=args,
+        root_path=root_path,
+    )
+    if pre_analysis_query_exit is not None:
+        sys.exit(pre_analysis_query_exit)
     git_diff_ref = _validate_changed_scope_args(args=args)
     changed_paths = (
         _git_diff_changed_paths(root_path=root_path, git_diff_ref=git_diff_ref)

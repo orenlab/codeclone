@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from collections.abc import Mapping
 
+from ...audit import EVENT_RECEIPT_CREATED
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...utils.coerce import as_int as _coerce_int
 from . import _session_helpers as _helpers
@@ -99,13 +100,34 @@ class _MCPSessionReviewReceiptMixin(_MCPSessionPatchContractMixin):
             ),
         }
         if output_format == "json":
+            self._audit_emit(
+                root=record.root,
+                event_type=EVENT_RECEIPT_CREATED,
+                severity="info",
+                run_id=_helpers._short_run_id(record.run_id),
+                intent_id=intent.intent_id if intent is not None else None,
+                report_digest=self._receipt_digest(record),
+                status=str(receipt.get("verdict", "")),
+                payload={"receipt": receipt, "format": output_format},
+            )
             return receipt
-        return {
+        payload: dict[str, object] = {
             "run_id": _helpers._short_run_id(record.run_id),
             "format": output_format,
             "content": render_receipt_markdown(receipt),
             "receipt": receipt,
         }
+        self._audit_emit(
+            root=record.root,
+            event_type=EVENT_RECEIPT_CREATED,
+            severity="info",
+            run_id=_helpers._short_run_id(record.run_id),
+            intent_id=intent.intent_id if intent is not None else None,
+            report_digest=self._receipt_digest(record),
+            status=str(receipt.get("verdict", "")),
+            payload=payload,
+        )
+        return payload
 
     def _validated_receipt_format(self, value: str) -> str:
         if value not in VALID_RECEIPT_FORMATS:

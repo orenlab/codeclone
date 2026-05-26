@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from ...audit import EVENT_CLAIM_COMPLETED, EVENT_CLAIM_VIOLATED
 from ...metrics.registry import METRIC_FAMILIES
 from . import _session_helpers as _helpers
 from ._claim_guard import (
@@ -36,7 +37,18 @@ class _MCPSessionClaimGuardMixin(_MCPSessionReviewReceiptMixin):
             report_context=context,
             require_citations=bool(require_citations),
         )
-        return {"run_id": _helpers._short_run_id(record.run_id), **payload}
+        result = {"run_id": _helpers._short_run_id(record.run_id), **payload}
+        valid = bool(result.get("valid"))
+        self._audit_emit(
+            root=record.root,
+            event_type=EVENT_CLAIM_COMPLETED if valid else EVENT_CLAIM_VIOLATED,
+            severity="info" if valid else "warn",
+            run_id=_helpers._short_run_id(record.run_id),
+            report_digest=self._report_digest_value(record),
+            status="valid" if valid else "violated",
+            payload=result,
+        )
+        return result
 
     def _claim_guard_context(self, record: MCPRunRecord) -> ReportContext:
         _canonical_to_short, short_to_canonical = self._finding_id_maps(record)

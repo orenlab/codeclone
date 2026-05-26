@@ -84,6 +84,10 @@ HELP_SESSION_STATS = (
     "Show workspace session status: active agents, intents, lease health.\n"
     "Read-only, does not run analysis."
 )
+HELP_AUDIT = (
+    "Show local Controller audit trail from the configured audit database.\n"
+    "Read-only, does not run analysis."
+)
 HELP_CACHE_PATH = (
     "Path to the cache file.\n"
     "If FILE is omitted, uses <root>/.cache/codeclone/cache.json."

@@ -134,6 +134,15 @@ Report outputs and local UX:
 | `verbose`     | `bool`        | `false` | Enable more verbose CLI output | `-`                                    |
 | `debug`       | `bool`        | `false` | Enable debug diagnostics       | Also enabled by `CODECLONE_DEBUG=1`    |
 
+Controller audit trail:
+
+| Key                    | Type   | Default                              | Meaning                                                   | Requires / Implies                  |
+|------------------------|--------|--------------------------------------|-----------------------------------------------------------|-------------------------------------|
+| `audit_enabled`        | `bool` | `false`                              | Enable the optional local controller audit trail          | Required for `--audit` output       |
+| `audit_path`           | `str`  | `.cache/codeclone/audit.sqlite3`     | SQLite audit database path, relative to the analysis root | Used only when `audit_enabled=true` |
+| `audit_payloads`       | `str`  | `compact`                            | Audit payload mode: `off`, `compact`, or `full`           | Used only when `audit_enabled=true` |
+| `audit_retention_days` | `int`  | `30`                                 | Retention window for audit rows                           | Used only when `audit_enabled=true` |
+
 This is the exact accepted `[tool.codeclone]` key set from
 `codeclone/config/spec.py` and `codeclone/config/pyproject_loader.py`; unknown
 keys are contract errors.

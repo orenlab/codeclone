@@ -8,8 +8,24 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Mapping
+from pathlib import Path
 
+from ...audit import (
+    DEFAULT_AUDIT_PATH,
+    DEFAULT_AUDIT_PAYLOADS,
+    DEFAULT_AUDIT_RETENTION_DAYS,
+    AuditEvent,
+    AuditWriter,
+    NullAuditWriter,
+    SqliteAuditWriter,
+    repo_root_digest,
+    resolve_audit_path,
+    validate_payload_mode,
+    validate_retention_days,
+)
 from ...cache.store import resolve_cache_status
+from ...config.pyproject_loader import ConfigValidationError, load_pyproject_config
 from ...report.meta import build_report_meta as _build_report_meta
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
 from . import _session_helpers as _helpers
@@ -81,7 +97,12 @@ __all__ = [
 
 
 class MCPSession(_MCPSessionClaimGuardMixin):
-    def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
+    def __init__(
+        self,
+        *,
+        history_limit: int = DEFAULT_MCP_HISTORY_LIMIT,
+        audit_writer: AuditWriter | None = None,
+    ) -> None:
         self._runs = CodeCloneMCPRunStore(history_limit=history_limit)
         self._state_lock = RLock()
         self._review_state: dict[str, OrderedDict[str, str | None]] = {}
@@ -97,6 +118,8 @@ class MCPSession(_MCPSessionClaimGuardMixin):
         self._agent_start_epoch = int(time.time())
         self._agent_label_cache: str | None = None
         self._fastmcp: object | None = None
+        self._audit_writer_override = audit_writer
+        self._audit_writers: dict[Path, AuditWriter] = {}
 
     # ------------------------------------------------------------------
     # Agent label: lazy-resolved from MCP clientInfo on first access
@@ -138,6 +161,80 @@ class MCPSession(_MCPSessionClaimGuardMixin):
         except Exception:
             pass
         return f"pid-{self._agent_pid}"
+
+    # ------------------------------------------------------------------
+    # Audit trail: best-effort observer, never controller truth
+    # ------------------------------------------------------------------
+
+    def _audit_emit(
+        self,
+        *,
+        root: Path,
+        event_type: str,
+        severity: str,
+        run_id: str | None = None,
+        intent_id: str | None = None,
+        report_digest: str | None = None,
+        status: str | None = None,
+        payload: Mapping[str, object] | None = None,
+    ) -> None:
+        try:
+            writer = self._audit_writer_for_root(root)
+            writer.emit(
+                AuditEvent(
+                    event_type=event_type,
+                    severity="error"
+                    if severity == "error"
+                    else ("warn" if severity == "warn" else "info"),
+                    repo_root_digest=repo_root_digest(root),
+                    agent_pid=self._agent_pid,
+                    agent_label=self._agent_label,
+                    run_id=run_id,
+                    intent_id=intent_id,
+                    report_digest=report_digest,
+                    status=status,
+                    payload=payload,
+                )
+            )
+        except Exception:
+            return None
+
+    def _audit_writer_for_root(self, root: Path) -> AuditWriter:
+        if self._audit_writer_override is not None:
+            return self._audit_writer_override
+        root_path = root.resolve()
+        cached = self._audit_writers.get(root_path)
+        if cached is not None:
+            return cached
+        writer = self._build_audit_writer(root_path)
+        self._audit_writers[root_path] = writer
+        return writer
+
+    def _build_audit_writer(self, root: Path) -> AuditWriter:
+        try:
+            config = load_pyproject_config(root)
+        except (ConfigValidationError, OSError):
+            return NullAuditWriter()
+        if not bool(config.get("audit_enabled", False)):
+            return NullAuditWriter()
+        try:
+            db_path = resolve_audit_path(
+                root_path=root,
+                value=config.get("audit_path", DEFAULT_AUDIT_PATH),
+            )
+            payloads = validate_payload_mode(
+                config.get("audit_payloads", DEFAULT_AUDIT_PAYLOADS)
+            )
+            retention_days = validate_retention_days(
+                config.get("audit_retention_days", DEFAULT_AUDIT_RETENTION_DAYS)
+            )
+            return SqliteAuditWriter(
+                db_path=db_path,
+                payloads=payloads,
+                retention_days=retention_days,
+            )
+        except Exception:
+            return NullAuditWriter()
 
     def analyze_repository(self, request: MCPAnalysisRequest) -> dict[str, object]:
         self._validate_analysis_request(request)
