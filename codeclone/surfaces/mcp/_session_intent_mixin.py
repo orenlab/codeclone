@@ -53,6 +53,7 @@ from ._workspace_intents import (
     classify_intent_ownership,
     compute_scope_digest,
     detect_conflicts,
+    detect_workspace_relations,
     expires_at,
     find_workspace_intent,
     format_utc,
@@ -286,6 +287,12 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             own_pid=self._agent_pid,
             own_start_epoch=self._agent_start_epoch,
         )
+        workspace_relations = detect_workspace_relations(
+            new_scope=normalized_scope.to_payload(),
+            existing=workspace_existing,
+            own_pid=self._agent_pid,
+            own_start_epoch=self._agent_start_epoch,
+        )
         payload = record_payload.to_payload(
             short_run_id=_helpers._short_run_id(record.run_id)
         )
@@ -295,6 +302,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         payload["review_context_summary"] = blast_payload["review_context_summary"]
         payload["workspace_registered"] = workspace_registered
         payload["concurrent_intents"] = concurrent_intents
+        payload["workspace_relations"] = workspace_relations
         payload["ttl_seconds"] = ttl
         self._audit_emit(
             root=record.root,

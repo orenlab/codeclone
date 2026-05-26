@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Final
 
@@ -558,8 +559,41 @@ def detect_conflicts(
     own_pid: int,
     own_start_epoch: int,
 ) -> list[dict[str, object]]:
-    new_allowed, new_related = _scope_file_sets(new_scope)
+    conflicts, _relations = _detect_scope_state(
+        new_scope=new_scope,
+        existing=existing,
+        own_pid=own_pid,
+        own_start_epoch=own_start_epoch,
+    )
+    return conflicts
+
+
+def detect_workspace_relations(
+    *,
+    new_scope: Mapping[str, object],
+    existing: Sequence[WorkspaceIntentRecord],
+    own_pid: int,
+    own_start_epoch: int,
+) -> list[dict[str, object]]:
+    _conflicts, relations = _detect_scope_state(
+        new_scope=new_scope,
+        existing=existing,
+        own_pid=own_pid,
+        own_start_epoch=own_start_epoch,
+    )
+    return relations
+
+
+def _detect_scope_state(
+    *,
+    new_scope: Mapping[str, object],
+    existing: Sequence[WorkspaceIntentRecord],
+    own_pid: int,
+    own_start_epoch: int,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    new_allowed, new_related, new_forbidden = _scope_all_sets(new_scope)
     conflicts: list[dict[str, object]] = []
+    relations: list[dict[str, object]] = []
     now = utc_now()
     for record in existing:
         ownership = classify_intent_ownership(
@@ -570,7 +604,9 @@ def detect_conflicts(
         )
         if ownership not in _CONFLICT_OWNERSHIP:
             continue
-        existing_allowed, existing_related = _scope_file_sets(record.scope)
+        existing_allowed, existing_related, existing_forbidden = _scope_all_sets(
+            record.scope
+        )
         hard_overlap = tuple(sorted(new_allowed.intersection(existing_allowed)))
         soft_overlap = tuple(
             sorted(
@@ -580,35 +616,138 @@ def detect_conflicts(
             )
         )
         if hard_overlap or soft_overlap:
-            conflicts.append(
+            conflict = _edit_overlap_payload(
+                record=record,
+                ownership=ownership,
+                hard_overlap=hard_overlap,
+                soft_overlap=soft_overlap,
+            )
+            conflicts.append(conflict)
+            relations.append(
                 {
-                    "intent_id": record.intent_id,
-                    "agent_pid": record.agent_pid,
-                    "agent_start_epoch": record.agent_start_epoch,
-                    "agent_label": record.agent_label,
-                    "intent": record.intent,
-                    "ownership": ownership.value,
-                    "severity": _CONFLICT_SEVERITY[ownership],
-                    "recommended_action": _CONFLICT_ACTION[ownership],
-                    "overlap_type": _overlap_type(
-                        hard=bool(hard_overlap),
-                        soft=bool(soft_overlap),
-                    ),
-                    "hard_overlap": list(hard_overlap),
-                    "soft_overlap": list(soft_overlap),
-                    "declared_at_utc": record.declared_at_utc,
-                    "expires_at_utc": record.expires_at_utc,
+                    **conflict,
+                    "relation": "edit_overlap",
+                    "message": "Foreign agent has overlapping editable scope.",
                 }
             )
-    return sorted(
-        conflicts,
-        key=lambda item: (
-            str(item["severity"]),
-            str(item["overlap_type"]),
-            str(item["agent_label"]),
-            _sort_agent_pid(item.get("agent_pid")),
-            str(item["intent_id"]),
+            continue
+        foreign_excludes = _forbidden_matches(
+            files=new_allowed,
+            patterns=existing_forbidden,
+        )
+        if foreign_excludes:
+            relations.append(
+                _forbidden_relation_payload(
+                    record=record,
+                    ownership=ownership,
+                    relation="foreign_excludes_target",
+                    matching_patterns=foreign_excludes,
+                    message=(
+                        "Foreign agent explicitly excludes files in current scope."
+                    ),
+                )
+            )
+            continue
+        target_excludes = _forbidden_matches(
+            files=existing_allowed,
+            patterns=new_forbidden,
+        )
+        if target_excludes:
+            relations.append(
+                _forbidden_relation_payload(
+                    record=record,
+                    ownership=ownership,
+                    relation="target_excludes_foreign",
+                    matching_patterns=target_excludes,
+                    message=(
+                        "Current scope explicitly excludes files in foreign scope."
+                    ),
+                )
+            )
+    return (
+        sorted(conflicts, key=_scope_state_sort_key),
+        sorted(relations, key=_scope_state_sort_key),
+    )
+
+
+def _edit_overlap_payload(
+    *,
+    record: WorkspaceIntentRecord,
+    ownership: IntentOwnership,
+    hard_overlap: Sequence[str],
+    soft_overlap: Sequence[str],
+) -> dict[str, object]:
+    return {
+        "intent_id": record.intent_id,
+        "agent_pid": record.agent_pid,
+        "agent_start_epoch": record.agent_start_epoch,
+        "agent_label": record.agent_label,
+        "intent": record.intent,
+        "ownership": ownership.value,
+        "severity": _CONFLICT_SEVERITY[ownership],
+        "recommended_action": _CONFLICT_ACTION[ownership],
+        "overlap_type": _overlap_type(
+            hard=bool(hard_overlap),
+            soft=bool(soft_overlap),
         ),
+        "hard_overlap": list(hard_overlap),
+        "soft_overlap": list(soft_overlap),
+        "declared_at_utc": record.declared_at_utc,
+        "expires_at_utc": record.expires_at_utc,
+    }
+
+
+def _forbidden_relation_payload(
+    *,
+    record: WorkspaceIntentRecord,
+    ownership: IntentOwnership,
+    relation: str,
+    matching_patterns: Sequence[str],
+    message: str,
+) -> dict[str, object]:
+    return {
+        "intent_id": record.intent_id,
+        "agent_pid": record.agent_pid,
+        "agent_start_epoch": record.agent_start_epoch,
+        "agent_label": record.agent_label,
+        "intent": record.intent,
+        "ownership": ownership.value,
+        "relation": relation,
+        "severity": "info",
+        "matching_patterns": list(matching_patterns),
+        "message": message,
+        "declared_at_utc": record.declared_at_utc,
+        "expires_at_utc": record.expires_at_utc,
+    }
+
+
+def _scope_state_sort_key(
+    item: Mapping[str, object],
+) -> tuple[str, str, str, str, int, str]:
+    return (
+        str(item.get("severity", "")),
+        str(item.get("relation", "")),
+        str(item.get("overlap_type", "")),
+        str(item.get("agent_label", "")),
+        _sort_agent_pid(item.get("agent_pid")),
+        str(item.get("intent_id", "")),
+    )
+
+
+def _forbidden_matches(
+    *,
+    files: set[str],
+    patterns: tuple[str, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                pattern
+                for pattern in patterns
+                for path in files
+                if fnmatchcase(path, pattern)
+            }
+        )
     )
 
 
@@ -900,12 +1039,17 @@ def _valid_path_list(value: object, *, required: bool) -> list[str] | None:
     return deduped
 
 
-def _scope_file_sets(scope: Mapping[str, object]) -> tuple[set[str], set[str]]:
+def _scope_all_sets(
+    scope: Mapping[str, object],
+) -> tuple[set[str], set[str], tuple[str, ...]]:
     allowed = set(_valid_path_list(scope.get("allowed_files"), required=False) or [])
     related = set(
         _valid_path_list(scope.get("allowed_related", ()), required=False) or []
     )
-    return allowed, related
+    forbidden = tuple(
+        _valid_path_list(scope.get("forbidden", ()), required=False) or []
+    )
+    return allowed, related, forbidden
 
 
 def _parse_utc(value: str) -> datetime | None:
@@ -944,6 +1088,7 @@ __all__ = [
     "compute_intent_digest",
     "compute_scope_digest",
     "detect_conflicts",
+    "detect_workspace_relations",
     "expires_at",
     "find_workspace_intent",
     "format_utc",

@@ -11,15 +11,18 @@ The v2.1 alpha currently includes intent, blast-radius, patch-contract checks,
 review receipts, workspace intent visibility, claim guard, and CLI controller
 queries:
 
-| Phase                     | Status            | Surface                                          |
-|---------------------------|-------------------|--------------------------------------------------|
-| Intent declaration        | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Blast radius              | Live in `2.1.0a1` | MCP `get_blast_radius`, CLI `--blast-radius`     |
-| Patch contract            | Live in `2.1.0a1` | MCP `check_patch_contract`, CLI `--patch-verify` |
-| Review receipt            | Live in `2.1.0a1` | MCP `create_review_receipt`                      |
-| Workspace intent registry | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Lease and recovery        | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Claim guard               | Live in `2.1.0a1` | MCP `validate_review_claims`                     |
+| Phase                       | Status            | Surface                                          |
+|-----------------------------|-------------------|--------------------------------------------------|
+| Intent declaration          | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
+| Blast radius                | Live in `2.1.0a1` | MCP `get_blast_radius`, CLI `--blast-radius`     |
+| Patch contract              | Live in `2.1.0a1` | MCP `check_patch_contract`, CLI `--patch-verify` |
+| Review receipt              | Live in `2.1.0a1` | MCP `create_review_receipt`                      |
+| Workspace intent registry   | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
+| Lease and recovery          | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
+| Claim guard                 | Live in `2.1.0a1` | MCP `validate_review_claims`                     |
+| Scope-aware verification    | Planned           | MCP `check_patch_contract`                       |
+| Workspace relations         | Planned           | MCP `manage_change_intent`                       |
+| MCP payload token budget    | Planned           | Audit trail, CLI `--audit`, `--session-stats`    |
 
 ## Contract
 
@@ -197,3 +200,165 @@ The guard checks for deterministic overclaims:
 
 Warnings, such as missing or unknown citations, do not make the response
 invalid. Violations make `valid=false`.
+
+## Scope-Aware Patch Contract Verification
+
+When a change intent is active, `check_patch_contract(mode="verify")` attributes
+regressions and gate changes to the declared scope rather than treating the
+entire workspace as one undifferentiated surface.
+
+### Regression attribution
+
+Regressions from `compare_runs` are partitioned into two sets:
+
+- `intent_regressions` — findings whose file paths fall inside the declared
+  `allowed_files` or `allowed_related`.
+- `external_regressions` — findings whose file paths are entirely outside
+  the declared scope.
+
+Only `intent_regressions` produce `structural_regressions` contract violations.
+External regressions are reported as informational context without failing the
+contract.
+
+Findings with no extractable file paths are conservatively classified as
+intent-scope to avoid false-negative accepts.
+
+Without an active intent, all regressions are treated as intent-scope and
+behavior is unchanged from the base contract.
+
+### Gate-delta logic
+
+Gate evaluation uses a two-layer attribution model:
+
+1. **Gate delta** — only gate *changes* between before-run and after-run are
+   contract-relevant. A gate that was already failing before the edit is
+   pre-existing, not a new violation. `gate_worsened` is true only when
+   `before_gate.would_fail` is false and `after_gate.would_fail` is true.
+
+2. **Gate attribution** — when `gate_worsened` is true and an intent is active,
+   the contract checks whether the gate-triggering signals come from intent
+   scope: intent-scope regressions or intent-scope worsened metric symbols. If
+   neither exists, the gate failure is external and does not produce a contract
+   violation.
+
+### Status values
+
+| Status                          | Meaning                                                |
+|---------------------------------|--------------------------------------------------------|
+| `accepted`                      | No intent-scope regressions, no gate worsening         |
+| `accepted_with_external_changes`| Intent scope is clean but external signals exist       |
+| `violated`                      | Intent-scope regressions, intent-caused gate failure, or scope violation |
+| `unverified`                    | Missing before or after run                            |
+| `expired`                       | Report digest mismatch since declaration               |
+
+The `accepted_with_external_changes` status signals that another agent or
+concurrent edit introduced regressions outside the current intent scope. The
+verify response includes `intent_regressions`, `external_regressions`,
+`intent_worsened`, `external_worsened`, `gate_worsened`, and `before_gate`
+fields for full attribution visibility.
+
+??? info "Decision table"
+
+    | Intent | Intent regressions | External regressions | Gate worsened | Intent caused gate | Scope check | Status                           |
+    |--------|--------------------|-----------------------|---------------|--------------------|-------------|----------------------------------|
+    | no     | any                | —                     | any           | any                | —           | current logic unchanged          |
+    | yes    | > 0                | any                   | any           | any                | any         | `violated`                       |
+    | yes    | 0                  | any                   | yes           | yes                | clean       | `violated`                       |
+    | yes    | 0                  | any                   | yes           | no                 | clean       | `accepted_with_external_changes` |
+    | yes    | 0                  | > 0                   | no            | —                  | clean       | `accepted_with_external_changes` |
+    | yes    | 0                  | 0                     | no            | —                  | clean       | `accepted`                       |
+    | yes    | 0                  | any                   | any           | any                | violated    | `violated` (scope violation)     |
+
+### Baseline abuse
+
+`detect_baseline_abuse` stays workspace-global. Baseline hygiene is a
+repository-level signal: if the baseline was updated while any regressions exist
+(even external), that is suspicious regardless of whose regressions they are.
+
+## Workspace Relations
+
+`detect_conflicts` classifies the relationship between a new intent and existing
+workspace intents. Beyond edit-overlap detection (hard and soft conflicts),
+the classifier distinguishes forbidden-scope relationships:
+
+| Relation                  | Meaning                                               |
+|---------------------------|-------------------------------------------------------|
+| `edit_overlap`            | Both agents claim the same files (hard or soft)       |
+| `foreign_excludes_target` | Foreign `forbidden` matches current `allowed_files`   |
+| `target_excludes_foreign` | Current `forbidden` matches foreign `allowed_files`   |
+
+Absence of a relation entry means disjoint scope.
+
+The `declare` response includes a `workspace_relations` field alongside the
+existing `concurrent_intents`. `concurrent_intents` continues to contain only
+edit overlaps for backward compatibility; `workspace_relations` provides the
+full classification including forbidden-scope signals.
+
+This allows agents to distinguish three cases that were previously
+indistinguishable:
+
+1. No overlap at all (disjoint).
+2. No edit overlap, but the foreign agent explicitly excludes the current
+   agent's target files (`foreign_excludes_target`) — a positive coordination
+   signal.
+3. No edit overlap, but the current agent explicitly excludes the foreign
+   agent's target files (`target_excludes_foreign`).
+
+## MCP Payload Token Budget
+
+The optional controller audit trail can estimate the token footprint of MCP
+payloads returned to the agent. This is a deterministic estimate of how much
+context window each tool response consumes, not actual model billing tokens.
+
+### Setup
+
+Token estimation requires two conditions:
+
+1. Audit trail enabled (`audit_enabled = true` in `pyproject.toml`).
+2. The `codeclone[token-bench]` optional extra installed (provides `tiktoken`).
+
+Without `tiktoken`, the estimator falls back to a character-based approximation
+(`ceil(characters / 4)`). Without audit enabled, no estimation runs.
+
+### How it works
+
+The estimation runs inside the audit writer's `event_to_row`, not in the MCP
+tool call path. The MCP session has zero overhead when audit is disabled or
+when `tiktoken` is not installed.
+
+Each audit event row includes three optional fields:
+
+- `estimated_tokens` — BPE token count (or character-based approximation).
+- `token_encoding` — encoding name (`o200k_base` or `chars_approx`).
+- `payload_characters` — character count of the canonical JSON payload.
+
+The estimation input is the full original payload (what the MCP client
+receives), not the compact audit storage form.
+
+### CLI visibility
+
+The `--audit` Rich TUI renderer shows token columns when data is available:
+
+```
+Tokens  Encoding      Event
+  412   o200k_base    intent.declared
+  890   o200k_base    blast_radius.computed
+ 1204   o200k_base    patch_contract.verified
+```
+
+The `--session-stats` command appends a summary line when audit token data
+exists:
+
+```
+MCP payload footprint: ~3,816 tokens (o200k_base, 7 tool calls)
+```
+
+### Invariants
+
+- Token estimation never affects controller decisions, gate results, report
+  digests, or baseline trust.
+- Any exception in the estimation path results in `NULL` values, not a failed
+  audit event write.
+- The `codeclone/budget/` module never imports from `codeclone/surfaces/` or
+  `codeclone/audit/`. Dependency direction: `audit -> budget`, never reverse.
+- Base `codeclone` never depends on `tiktoken`. The import is lazy and guarded.

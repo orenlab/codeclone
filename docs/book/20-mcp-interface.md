@@ -121,7 +121,7 @@ drill into one finding or one hotspot family.
 
 | Tool                     | Key parameters                                                                                              | Purpose                                                                                     |
 |--------------------------|-------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
-| `manage_change_intent`   | `action`, `root`, `run_id`, `intent_id`, `scope`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, list_workspace, gc_workspace, recover, reset_workspace |
+| `manage_change_intent`   | `action`, `root`, `run_id`, `intent_id`, `scope`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, list_workspace, gc_workspace, recover, reset_workspace. Declare returns `workspace_relations` with forbidden-scope signals |
 | `get_blast_radius`       | `run_id`, `files`, `depth`, `include`                                                                       | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context           |
 | `check_patch_contract`   | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref` | Budget query or post-edit verification                                                      |
 | `create_review_receipt`  | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                           | Deterministic audit artifact: provenance, scope, reviewed findings, patch status            |
@@ -140,6 +140,12 @@ drill into one finding or one hotspot family.
     explicit before/after stored runs, previews gates, validates scope, and
     reports baseline-abuse signals. Missing runs return
     `status="unverified"`.
+
+    When a change intent is active, verify mode attributes regressions and
+    gate changes to the declared scope. Intent-scope regressions produce
+    contract violations; external regressions are reported as informational
+    context. See
+    [Scope-Aware Patch Contract Verification](24-structural-change-controller.md#scope-aware-patch-contract-verification).
 
 ### Session-local tools
 

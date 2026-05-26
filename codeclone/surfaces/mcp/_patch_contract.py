@@ -24,6 +24,7 @@ VALID_STRICTNESS_PROFILES: Final[frozenset[str]] = frozenset(
 
 class PatchContractStatus(str, Enum):
     ACCEPTED = "accepted"
+    ACCEPTED_EXTERNAL = "accepted_with_external_changes"
     VIOLATED = "violated"
     UNVERIFIED = "unverified"
     EXPIRED = "expired"

@@ -502,9 +502,10 @@ def test_workspace_intent_private_edge_helpers(
     assert workspace_intents._valid_path_list(["pkg/a.py/"], required=True) == [
         "pkg/a.py"
     ]
-    assert workspace_intents._scope_file_sets({"allowed_files": "pkg/a.py"}) == (
+    assert workspace_intents._scope_all_sets({"allowed_files": "pkg/a.py"}) == (
         set(),
         set(),
+        (),
     )
     assert workspace_intents._parse_utc("2026-01-01T00:00:00") is None
     assert workspace_intents._sort_agent_pid(True) == 0
@@ -916,6 +917,142 @@ def test_workspace_intent_conflict_detection() -> None:
         own_start_epoch=999,
     )
     assert both[0]["overlap_type"] == "both"
+
+
+def test_workspace_intent_workspace_relations_forbidden_patterns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(workspace_intents, "_is_pid_alive", lambda pid: True)
+    foreign = _record(
+        intent_id="intent-foreign-docs",
+        pid=111,
+        start_epoch=100,
+        scope={
+            "allowed_files": ["pkg/a.py"],
+            "allowed_related": [],
+            "forbidden": ["docs/**"],
+        },
+    )
+
+    relations = workspace_intents.detect_workspace_relations(
+        new_scope={
+            "allowed_files": ["docs/readme.md"],
+            "allowed_related": [],
+            "forbidden": [],
+        },
+        existing=(foreign,),
+        own_pid=222,
+        own_start_epoch=200,
+    )
+
+    assert (
+        workspace_intents.detect_conflicts(
+            new_scope={
+                "allowed_files": ["docs/readme.md"],
+                "allowed_related": [],
+                "forbidden": [],
+            },
+            existing=(foreign,),
+            own_pid=222,
+            own_start_epoch=200,
+        )
+        == []
+    )
+    assert relations == [
+        {
+            "intent_id": "intent-foreign-docs",
+            "agent_pid": 111,
+            "agent_start_epoch": 100,
+            "agent_label": "agent-a",
+            "intent": "edit pkg.a",
+            "ownership": "foreign_active",
+            "relation": "foreign_excludes_target",
+            "severity": "info",
+            "matching_patterns": ["docs/**"],
+            "message": "Foreign agent explicitly excludes files in current scope.",
+            "declared_at_utc": foreign.declared_at_utc,
+            "expires_at_utc": foreign.expires_at_utc,
+        }
+    ]
+
+
+def test_workspace_intent_workspace_relations_target_excludes_foreign(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(workspace_intents, "_is_pid_alive", lambda pid: True)
+    foreign = _record(
+        intent_id="intent-foreign-docs",
+        pid=111,
+        start_epoch=100,
+        scope={
+            "allowed_files": ["docs/readme.md"],
+            "allowed_related": [],
+            "forbidden": [],
+        },
+    )
+
+    relations = workspace_intents.detect_workspace_relations(
+        new_scope={
+            "allowed_files": ["pkg/a.py"],
+            "allowed_related": [],
+            "forbidden": ["docs/**"],
+        },
+        existing=(foreign,),
+        own_pid=222,
+        own_start_epoch=200,
+    )
+
+    assert (
+        workspace_intents.detect_conflicts(
+            new_scope={
+                "allowed_files": ["pkg/a.py"],
+                "allowed_related": [],
+                "forbidden": ["docs/**"],
+            },
+            existing=(foreign,),
+            own_pid=222,
+            own_start_epoch=200,
+        )
+        == []
+    )
+    assert relations[0]["relation"] == "target_excludes_foreign"
+    assert relations[0]["matching_patterns"] == ["docs/**"]
+
+
+def test_workspace_intent_workspace_relations_include_edit_overlap() -> None:
+    existing = _record()
+
+    relations = workspace_intents.detect_workspace_relations(
+        new_scope={
+            "allowed_files": ["pkg/a.py"],
+            "allowed_related": [],
+            "forbidden": [],
+        },
+        existing=(existing,),
+        own_pid=123456,
+        own_start_epoch=999,
+    )
+
+    assert relations[0]["relation"] == "edit_overlap"
+    assert relations[0]["hard_overlap"] == ["pkg/a.py"]
+
+
+def test_workspace_intent_workspace_relations_omit_disjoint_scope() -> None:
+    existing = _record()
+
+    assert (
+        workspace_intents.detect_workspace_relations(
+            new_scope={
+                "allowed_files": ["pkg/other.py"],
+                "allowed_related": [],
+                "forbidden": [],
+            },
+            existing=(existing,),
+            own_pid=123456,
+            own_start_epoch=999,
+        )
+        == []
+    )
 
 
 def test_workspace_intent_regression_stale_lease_silent_overlap(

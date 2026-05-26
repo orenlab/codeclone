@@ -10,6 +10,7 @@ Centralize machine-readable status sets used across baseline/cache/report/CLI co
 - Cache statuses: `codeclone/cache/versioning.py:CacheStatus`
 - Exit categories: `codeclone/contracts/__init__.py:ExitCode`
 - Intent ownership: `codeclone/surfaces/mcp/_workspace_intents.py:IntentOwnership`
+- Patch contract: `codeclone/surfaces/mcp/_patch_contract.py:PatchContractStatus`
 
 ## Data model
 
@@ -64,6 +65,17 @@ Defined by `BASELINE_UNTRUSTED_STATUSES`.
 
 Semantics are defined in
 [Structural Change Controller § Workspace Intent Registry](../24-structural-change-controller.md#workspace-intent-registry).
+
+### PatchContractStatus
+
+- `accepted`
+- `accepted_with_external_changes`
+- `violated`
+- `unverified`
+- `expired`
+
+Semantics are defined in
+[Structural Change Controller § Scope-Aware Patch Contract Verification](../24-structural-change-controller.md#scope-aware-patch-contract-verification).
 
 ## Contracts
 

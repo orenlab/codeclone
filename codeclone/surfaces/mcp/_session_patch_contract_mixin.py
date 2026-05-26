@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from fnmatch import fnmatchcase
 
 from ...audit import (
     EVENT_BASELINE_ABUSE,
@@ -17,7 +18,7 @@ from ...audit import (
 )
 from ...utils.coerce import as_int as _coerce_int
 from . import _session_helpers as _helpers
-from ._intent import IntentRecord, IntentStatus
+from ._intent import IntentRecord, IntentScope, IntentStatus
 from ._patch_contract import (
     VALID_PATCH_CONTRACT_MODES,
     VALID_STRICTNESS_PROFILES,
@@ -180,26 +181,54 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         after_gate = self._gate_preview(record=after, budgets=budgets)
         structural_delta = self._structural_delta(compare_payload)
         regressions = _as_sequence(structural_delta.get("regressions"))
+        intent_regressions, external_regressions = self._partition_regressions(
+            after=after,
+            regressions=regressions,
+            intent=intent,
+        )
+        worsened = self._worsened_symbols(before=before, after=after)
+        intent_worsened, external_worsened = self._partition_worsened(
+            worsened=worsened,
+            intent=intent,
+        )
+        before_gate_fails = bool(before_gate["would_fail"])
+        after_gate_fails = bool(after_gate["would_fail"])
+        gate_worsened = not before_gate_fails and after_gate_fails
+        intent_caused_gate_failure = (
+            after_gate_fails
+            if intent is None
+            else bool(intent_regressions or intent_worsened)
+        )
+        gate_contract_failure = (
+            after_gate_fails
+            if intent is None
+            else gate_worsened and intent_caused_gate_failure
+        )
+        external_gate_failure = (
+            intent is not None and gate_worsened and not intent_caused_gate_failure
+        )
         baseline_abuse = detect_baseline_abuse(
-            before_gate_would_fail=bool(before_gate["would_fail"]),
-            after_gate_would_fail=bool(after_gate["would_fail"]),
+            before_gate_would_fail=before_gate_fails,
+            after_gate_would_fail=after_gate_fails,
             after_baseline_status=baseline_status(after.report_document),
             regressions=len(regressions),
             changed_files=len(actual_changed_files),
             intent_available=intent is not None,
         )
         violations = self._contract_violations(
-            structural_delta=structural_delta,
-            gate_preview=after_gate,
+            intent_regressions=intent_regressions,
+            gate_contract_failure=gate_contract_failure,
             scope_check=scope_check,
             baseline_abuse=baseline_abuse,
         )
         blocking_violations = () if strictness == "relaxed" else violations
-        status = (
-            PatchContractStatus.VIOLATED.value
-            if blocking_violations
-            else PatchContractStatus.ACCEPTED.value
-        )
+        external_context = bool(external_regressions or external_gate_failure)
+        if blocking_violations:
+            status = PatchContractStatus.VIOLATED.value
+        elif external_context:
+            status = PatchContractStatus.ACCEPTED_EXTERNAL.value
+        else:
+            status = PatchContractStatus.ACCEPTED.value
         payload: dict[str, object] = {
             "mode": "verify",
             "status": status,
@@ -209,9 +238,16 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             "intent_id": intent.intent_id if intent is not None else None,
             "strictness": strictness,
             "structural_delta": structural_delta,
-            "worsened": self._worsened_symbols(before=before, after=after),
+            "intent_regressions": intent_regressions,
+            "external_regressions": external_regressions,
+            "worsened": worsened,
+            "intent_worsened": intent_worsened,
+            "external_worsened": external_worsened,
             "scope_check": scope_check,
+            "before_gate": before_gate,
             "gate_preview": after_gate,
+            "gate_worsened": gate_worsened,
+            "intent_caused_gate_failure": intent_caused_gate_failure,
             "baseline_abuse": baseline_abuse,
             "contract_violations": list(violations),
             "blocking_violations": list(blocking_violations),
@@ -412,18 +448,129 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         check_result = self._intent_check_result(intent=intent, actual=actual)
         return check_result.to_payload()
 
+    def _partition_regressions(
+        self,
+        *,
+        after: MCPRunRecord,
+        regressions: Sequence[object],
+        intent: IntentRecord | None,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        if intent is None:
+            return (
+                [
+                    self._regression_card_with_paths(regression, paths=frozenset())
+                    for regression in regressions
+                ],
+                [],
+            )
+        path_index = self._finding_path_index(after)
+        intent_regressions: list[dict[str, object]] = []
+        external_regressions: list[dict[str, object]] = []
+        for regression in regressions:
+            regression_map = _as_mapping(regression)
+            regression_id = str(regression_map.get("id", "")).strip()
+            paths = path_index.get(regression_id, frozenset())
+            card = self._regression_card_with_paths(regression_map, paths=paths)
+            if self._paths_in_intent_scope(paths=paths, scope=intent.scope):
+                intent_regressions.append(card)
+            else:
+                external_regressions.append(card)
+        return intent_regressions, external_regressions
+
+    def _finding_path_index(
+        self,
+        record: MCPRunRecord,
+    ) -> dict[str, frozenset[str]]:
+        index: dict[str, frozenset[str]] = {}
+        for finding in self._base_findings(record):
+            finding_id = str(finding.get("id", "")).strip()
+            if not finding_id:
+                continue
+            paths = self._finding_paths(finding)
+            index[finding_id] = paths
+            index[self._short_finding_id(record, finding_id)] = paths
+        return index
+
+    def _finding_paths(self, finding: Mapping[str, object]) -> frozenset[str]:
+        paths: set[str] = set()
+        for key in ("locations", "items"):
+            for item in _as_sequence(finding.get(key)):
+                item_map = _as_mapping(item)
+                for path_key in ("file", "relative_path", "path", "filepath"):
+                    path = self._normalized_report_path(item_map.get(path_key))
+                    if path:
+                        paths.add(path)
+        for path_key in ("file", "relative_path", "path", "filepath"):
+            path = self._normalized_report_path(finding.get(path_key))
+            if path:
+                paths.add(path)
+        return frozenset(sorted(paths))
+
+    def _regression_card_with_paths(
+        self,
+        regression: object,
+        *,
+        paths: frozenset[str],
+    ) -> dict[str, object]:
+        card = dict(_as_mapping(regression))
+        card["paths"] = sorted(paths)
+        return card
+
+    def _partition_worsened(
+        self,
+        *,
+        worsened: Sequence[Mapping[str, object]],
+        intent: IntentRecord | None,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        if intent is None:
+            return ([dict(item) for item in worsened], [])
+        intent_worsened: list[dict[str, object]] = []
+        external_worsened: list[dict[str, object]] = []
+        for item in worsened:
+            item_copy = dict(item)
+            path = self._normalized_report_path(item.get("path"))
+            if not path or self._path_in_scope(path=path, scope=intent.scope):
+                intent_worsened.append(item_copy)
+            else:
+                external_worsened.append(item_copy)
+        return intent_worsened, external_worsened
+
+    def _paths_in_intent_scope(
+        self,
+        *,
+        paths: frozenset[str],
+        scope: IntentScope,
+    ) -> bool:
+        if not paths:
+            return True
+        return any(self._path_in_scope(path=path, scope=scope) for path in paths)
+
+    def _path_in_scope(self, *, path: str, scope: IntentScope) -> bool:
+        patterns = (*scope.allowed_files, *scope.allowed_related)
+        return any(
+            path == pattern or fnmatchcase(path, pattern) for pattern in patterns
+        )
+
+    def _normalized_report_path(self, value: object) -> str:
+        path = str(value or "").replace("\\", "/").strip()
+        if path == ".":
+            return ""
+        if path.startswith("./"):
+            path = path[2:]
+        return path.rstrip("/")
+
     def _contract_violations(
         self,
         *,
-        structural_delta: Mapping[str, object],
-        gate_preview: Mapping[str, object],
+        intent_regressions: Sequence[object],
+        gate_contract_failure: bool,
         scope_check: Mapping[str, object] | None,
         baseline_abuse: Mapping[str, object],
     ) -> tuple[str, ...]:
         violations: list[str] = []
-        if _as_sequence(structural_delta.get("regressions")):
+        if intent_regressions:
             violations.append("structural_regressions")
-        if bool(gate_preview.get("would_fail")):
+        if gate_contract_failure:
             violations.append("gate_failures")
         if (
             scope_check is not None
@@ -644,6 +791,8 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
     def _verify_message(self, *, status: str, violations: Sequence[str]) -> str:
         if status == PatchContractStatus.ACCEPTED.value:
             return "Patch contract accepted."
+        if status == PatchContractStatus.ACCEPTED_EXTERNAL.value:
+            return "Patch contract accepted; external workspace changes detected."
         return "Patch contract violated: " + ", ".join(violations)
 
 

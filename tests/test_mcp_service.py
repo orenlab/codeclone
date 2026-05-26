@@ -384,6 +384,8 @@ def _patch_contract_report_document(
     include_regression: bool,
     complexity: int,
     baseline_status: str = "ok",
+    regression_path: str = "pkg/a.py",
+    complexity_path: str = "pkg/b.py",
 ) -> dict[str, object]:
     report_document = copy.deepcopy(_blast_radius_report_document(digest))
     report_document["meta"] = {
@@ -402,6 +404,8 @@ def _patch_contract_report_document(
     )
     if not include_regression:
         del functions[1:]
+    else:
+        functions[1]["items"] = [{"relative_path": regression_path}]
     metrics = cast("dict[str, object]", report_document["metrics"])
     families = cast("dict[str, object]", metrics["families"])
     complexity_family = cast("dict[str, object]", families["complexity"])
@@ -409,6 +413,8 @@ def _patch_contract_report_document(
         "list[dict[str, object]]",
         complexity_family["items"],
     )
+    complexity_family["summary"] = {"max": complexity}
+    complexity_items[0]["relative_path"] = complexity_path
     complexity_items[0]["qualname"] = "pkg.b.handle"
     complexity_items[0]["cyclomatic_complexity"] = complexity
     return report_document
@@ -425,6 +431,8 @@ def _patch_contract_run_record(
     baseline_status: str = "ok",
     request: MCPAnalysisRequest | None = None,
     new_func: frozenset[str] = frozenset(),
+    regression_path: str = "pkg/a.py",
+    complexity_path: str = "pkg/b.py",
 ) -> MCPRunRecord:
     return replace(
         _dummy_run_record(root, run_id),
@@ -434,6 +442,8 @@ def _patch_contract_run_record(
             include_regression=include_regression,
             complexity=complexity,
             baseline_status=baseline_status,
+            regression_path=regression_path,
+            complexity_path=complexity_path,
         ),
         summary={"run_id": run_id, "health": {"score": health, "grade": "B"}},
         func_clones_count=2 if include_regression else 1,
@@ -446,6 +456,7 @@ def _patch_contract_before_after_records(
     root: Path,
     *,
     before_health: int,
+    regression_path: str = "pkg/a.py",
 ) -> tuple[MCPRunRecord, MCPRunRecord]:
     before = _patch_contract_run_record(
         root,
@@ -454,6 +465,7 @@ def _patch_contract_before_after_records(
         include_regression=False,
         complexity=6,
         health=before_health,
+        regression_path=regression_path,
     )
     after = _patch_contract_run_record(
         root,
@@ -464,6 +476,7 @@ def _patch_contract_before_after_records(
         health=70,
         baseline_status="updated",
         new_func=frozenset({"clone:function:g2"}),
+        regression_path=regression_path,
     )
     return before, after
 
@@ -501,6 +514,62 @@ def _seed_patch_contract_intent(
     )
     service._runs.register(before)
     return after, _declare_pkg_a_intent(service)
+
+
+def _verify_scope_contract_case(
+    root: Path,
+    *,
+    before_run_id: str,
+    after_run_id: str,
+    include_regression: bool,
+    regression_path: str = "pkg/a.py",
+    before_complexity: int = 6,
+    after_complexity: int = 6,
+    complexity_path: str = "pkg/b.py",
+    new_func: frozenset[str] = frozenset(),
+    request: MCPAnalysisRequest | None = None,
+    declare_intent: bool = True,
+) -> dict[str, object]:
+    service = CodeCloneMCPService(history_limit=4)
+    before = _patch_contract_run_record(
+        root,
+        run_id=before_run_id,
+        digest=f"{before_run_id}-digest",
+        include_regression=False,
+        complexity=before_complexity,
+        health=90,
+        request=request,
+    )
+    after = _patch_contract_run_record(
+        root,
+        run_id=after_run_id,
+        digest=f"{after_run_id}-digest",
+        include_regression=include_regression,
+        complexity=after_complexity,
+        health=90,
+        request=request,
+        new_func=new_func,
+        regression_path=regression_path,
+        complexity_path=complexity_path,
+    )
+    service._runs.register(before)
+    service._runs.register(after)
+    intent_id: str | None = None
+    if declare_intent:
+        declared = service.manage_change_intent(
+            action="declare",
+            run_id=before_run_id[:8],
+            scope={"allowed_files": ["pkg/a.py"]},
+            intent="edit pkg.a",
+        )
+        intent_id = str(declared["intent_id"])
+    return service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run_id[:8],
+        after_run_id=after_run_id[:8],
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"] if declare_intent else None,
+    )
 
 
 def _payload_dicts(
@@ -3557,6 +3626,7 @@ def test_mcp_service_check_patch_contract_budget_uses_intent_and_gate_preview(
         scope={"allowed_files": ["pkg/a.py"]},
         intent="adjust pkg.a behavior",
     )
+    assert declared["workspace_relations"] == []
 
     payload = service.check_patch_contract(
         mode="budget",
@@ -3715,6 +3785,119 @@ def test_mcp_service_check_patch_contract_verify_composes_existing_primitives(
         assert payload["reason"] == reason
 
 
+def test_mcp_service_verify_external_regression_is_context(
+    tmp_path: Path,
+) -> None:
+    verified = _verify_scope_contract_case(
+        tmp_path,
+        before_run_id="beforeext123456",
+        after_run_id="afterext1234567",
+        include_regression=True,
+        regression_path="pkg/b.py",
+    )
+
+    assert verified["status"] == "accepted_with_external_changes"
+    assert verified["contract_violations"] == []
+    assert verified["blocking_violations"] == []
+    assert verified["intent_regressions"] == []
+    external = cast("list[dict[str, object]]", verified["external_regressions"])
+    assert external == [
+        {
+            "id": "fn:g2",
+            "kind": "function_clone",
+            "severity": "",
+            "paths": ["pkg/b.py"],
+        }
+    ]
+    assert cast("dict[str, object]", verified["structural_delta"])["regressions"] == [
+        {"id": "fn:g2", "kind": "function_clone", "severity": ""}
+    ]
+
+
+def test_mcp_service_verify_intent_regression_still_violates(
+    tmp_path: Path,
+) -> None:
+    verified = _verify_scope_contract_case(
+        tmp_path,
+        before_run_id="beforeint123456",
+        after_run_id="afterint1234567",
+        include_regression=True,
+        regression_path="pkg/a.py",
+    )
+
+    assert verified["status"] == "violated"
+    assert verified["contract_violations"] == ["structural_regressions"]
+    assert verified["external_regressions"] == []
+    intent_regressions = cast("list[dict[str, object]]", verified["intent_regressions"])
+    assert intent_regressions[0]["paths"] == ["pkg/a.py"]
+
+
+def test_mcp_service_verify_external_gate_worsening_is_context(
+    tmp_path: Path,
+) -> None:
+    verified = _verify_scope_contract_case(
+        tmp_path,
+        before_run_id="beforegate12345",
+        after_run_id="aftergate123456",
+        include_regression=True,
+        regression_path="pkg/b.py",
+        new_func=frozenset({"clone:function:g2"}),
+    )
+
+    assert verified["status"] == "accepted_with_external_changes"
+    assert verified["gate_worsened"] is True
+    assert verified["intent_caused_gate_failure"] is False
+    assert verified["contract_violations"] == []
+
+
+def test_mcp_service_verify_external_worsened_symbol_is_context(
+    tmp_path: Path,
+) -> None:
+    request = MCPAnalysisRequest(
+        root=str(tmp_path),
+        respect_pyproject=False,
+        complexity_threshold=10,
+    )
+    verified = _verify_scope_contract_case(
+        tmp_path,
+        before_run_id="beforemetric123",
+        after_run_id="aftermetric1234",
+        include_regression=False,
+        before_complexity=6,
+        after_complexity=25,
+        request=request,
+        complexity_path="pkg/b.py",
+    )
+
+    assert verified["status"] == "accepted_with_external_changes"
+    assert verified["gate_worsened"] is True
+    assert verified["intent_caused_gate_failure"] is False
+    assert verified["intent_worsened"] == []
+    external_worsened = cast("list[dict[str, object]]", verified["external_worsened"])
+    assert external_worsened[0]["path"] == "pkg/b.py"
+    assert verified["contract_violations"] == []
+
+
+def test_mcp_service_verify_without_intent_keeps_workspace_global_gate_behavior(
+    tmp_path: Path,
+) -> None:
+    verified = _verify_scope_contract_case(
+        tmp_path,
+        before_run_id="beforenointent1",
+        after_run_id="afternointent12",
+        include_regression=True,
+        regression_path="pkg/b.py",
+        new_func=frozenset({"clone:function:g2"}),
+        declare_intent=False,
+    )
+
+    assert verified["status"] == "violated"
+    assert verified["contract_violations"] == [
+        "structural_regressions",
+        "gate_failures",
+    ]
+
+
 def test_mcp_patch_contract_helper_edges(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3751,8 +3934,8 @@ def test_mcp_patch_contract_helper_edges(
         changed_files=None,
     ) == (f"{tmp_path.name}:HEAD~1",)
     assert service._contract_violations(
-        structural_delta={"regressions": [{"id": "r1"}]},
-        gate_preview={"would_fail": True},
+        intent_regressions=[{"id": "r1"}],
+        gate_contract_failure=True,
         scope_check={"status": "violated"},
         baseline_abuse={"triggers": ["baseline_updated_without_intent"]},
     ) == (
