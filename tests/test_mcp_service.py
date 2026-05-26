@@ -37,6 +37,7 @@ import codeclone.surfaces.mcp.server as mcp_server_mod
 import codeclone.surfaces.mcp.service as mcp_service_mod
 import codeclone.surfaces.mcp.session as mcp_session_mod
 from codeclone.audit.events import AuditEvent
+from codeclone.audit.writer import NullAuditWriter, SqliteAuditWriter
 from codeclone.baseline import Baseline, current_python_tag
 from codeclone.baseline.metrics_baseline import MetricsBaseline, MetricsBaselineStatus
 from codeclone.cache.store import Cache
@@ -502,6 +503,18 @@ class _RecordingAuditWriter:
         return None
 
 
+def _mcp_session_with_registered_run(
+    root: Path,
+    *,
+    run_id: str,
+) -> tuple[mcp_session_mod.MCPSession, _RecordingAuditWriter, MCPRunRecord]:
+    audit = _RecordingAuditWriter()
+    service = mcp_session_mod.MCPSession(history_limit=4, audit_writer=audit)
+    record = _blast_radius_run_record(root, run_id=run_id)
+    service._runs.register(record)
+    return service, audit, record
+
+
 def _seed_patch_contract_intent(
     service: CodeCloneMCPService,
     root: Path,
@@ -832,11 +845,10 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
 
 
 def test_mcp_session_emits_audit_events_for_controller_flow(tmp_path: Path) -> None:
-    audit = _RecordingAuditWriter()
-    service = mcp_session_mod.MCPSession(history_limit=4, audit_writer=audit)
-    record = _blast_radius_run_record(tmp_path, run_id="audit1234567890")
-    service._runs.register(record)
-
+    service, audit, record = _mcp_session_with_registered_run(
+        tmp_path,
+        run_id="audit1234567890",
+    )
     declared = service.manage_change_intent(
         action="declare",
         run_id=record.run_id,
@@ -872,6 +884,149 @@ def test_mcp_session_emits_audit_events_for_controller_flow(tmp_path: Path) -> N
         declared["intent_id"]
     }
     assert all(str(tmp_path) not in event.repo_root_digest for event in audit.events)
+
+
+def test_mcp_session_resolves_agent_label_from_client_info() -> None:
+    service = mcp_session_mod.MCPSession(history_limit=4)
+    service._fastmcp = SimpleNamespace(
+        get_context=lambda: SimpleNamespace(
+            session=SimpleNamespace(
+                client_params=SimpleNamespace(
+                    clientInfo=SimpleNamespace(name="codex", version="2.1")
+                )
+            )
+        )
+    )
+    assert service._resolve_agent_label() == "codex/2.1"
+
+    service._fastmcp = SimpleNamespace(
+        get_context=lambda: SimpleNamespace(
+            session=SimpleNamespace(
+                client_params=SimpleNamespace(
+                    clientInfo=SimpleNamespace(name="codex", version="")
+                )
+            )
+        )
+    )
+    assert service._resolve_agent_label() == "codex"
+
+    service._fastmcp = SimpleNamespace(
+        get_context=lambda: SimpleNamespace(
+            session=SimpleNamespace(
+                client_params=SimpleNamespace(clientInfo=SimpleNamespace(name=""))
+            )
+        )
+    )
+    assert service._resolve_agent_label() == f"pid-{service._agent_pid}"
+
+
+def test_mcp_session_audit_writer_config_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = mcp_session_mod.MCPSession(history_limit=4)
+    configs: list[dict[str, object] | Exception] = [
+        ConfigValidationError("bad config"),
+        {"audit_enabled": False},
+        {"audit_enabled": True, "audit_path": "../bad.sqlite3"},
+        {
+            "audit_enabled": True,
+            "audit_path": "audit.sqlite3",
+            "audit_payloads": "full",
+            "audit_retention_days": 1,
+        },
+    ]
+
+    def load_config(_root: Path) -> dict[str, object]:
+        value = configs.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    monkeypatch.setattr(mcp_session_mod, "load_pyproject_config", load_config)
+    writer_types: list[type[object]] = []
+    for _ in range(4):
+        writer = service._build_audit_writer(tmp_path)
+        writer_types.append(type(writer))
+        writer.close()
+
+    assert writer_types == [
+        NullAuditWriter,
+        NullAuditWriter,
+        NullAuditWriter,
+        SqliteAuditWriter,
+    ]
+
+
+def test_mcp_session_audit_writer_for_root_caches_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = mcp_session_mod.MCPSession(history_limit=4)
+    monkeypatch.setattr(
+        mcp_session_mod,
+        "load_pyproject_config",
+        lambda _root: {
+            "audit_enabled": True,
+            "audit_path": "audit.sqlite3",
+            "audit_payloads": "compact",
+            "audit_retention_days": 1,
+        },
+    )
+
+    first = service._audit_writer_for_root(tmp_path)
+    second = service._audit_writer_for_root(tmp_path)
+
+    assert first is second
+    first.close()
+
+
+def test_mcp_session_audit_emit_swallows_writer_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = mcp_session_mod.MCPSession(history_limit=4)
+
+    def raise_writer(_root: Path) -> _RecordingAuditWriter:
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(service, "_audit_writer_for_root", raise_writer)
+
+    service._audit_emit(
+        root=tmp_path,
+        event_type="intent.declared",
+        severity="warn",
+        payload={"status": "active"},
+    )
+
+
+def test_mcp_session_renews_latest_active_intent(tmp_path: Path) -> None:
+    service, audit, record = _mcp_session_with_registered_run(
+        tmp_path,
+        run_id="renew1234567890",
+    )
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id=record.run_id,
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="renew before long work",
+        expected_effects=["no new clone group"],
+    )
+
+    renewed = service.manage_change_intent(action="renew", lease_seconds=120)
+
+    assert renewed["intent_id"] == declared["intent_id"]
+    assert renewed["lease_renewed"] is True
+    assert renewed["lease_seconds"] == 120
+    assert renewed["lease_expires_at_utc"] is not None
+    assert audit.events[-1].event_type == "intent.renewed"
+
+
+def test_mcp_session_renew_requires_active_intent() -> None:
+    service = mcp_session_mod.MCPSession(history_limit=4)
+
+    with pytest.raises(MCPServiceContractError, match="requires intent_id"):
+        service.manage_change_intent(action="renew")
 
 
 def test_mcp_service_summary_explains_untrusted_baseline_python_tag_mismatch(
