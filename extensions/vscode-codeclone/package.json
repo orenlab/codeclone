@@ -2,7 +2,7 @@
   "name": "codeclone",
   "displayName": "CodeClone",
   "description": "Baseline-aware, triage-first structural review for Python, powered by CodeClone MCP.",
-  "version": "0.2.7",
+  "version": "0.3.0",
   "publisher": "orenlab",
   "license": "MPL-2.0",
   "repository": {
@@ -360,6 +360,18 @@
         "category": "CodeClone"
       },
       {
+        "command": "codeclone.showBlastRadius",
+        "title": "Show Blast Radius",
+        "category": "CodeClone",
+        "icon": "$(target)"
+      },
+      {
+        "command": "codeclone.copyBlastRadiusBrief",
+        "title": "Copy Blast Radius Brief",
+        "category": "CodeClone",
+        "icon": "$(copy)"
+      },
+      {
         "command": "codeclone.clearSessionState",
         "title": "Clear Session",
         "category": "CodeClone",
@@ -446,6 +458,10 @@
         },
         {
           "command": "codeclone.reviewSecuritySurface",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.copyBlastRadiusBrief",
           "when": "false"
         }
       ],
@@ -683,6 +699,16 @@
           "command": "codeclone.copySecuritySurfaceBrief",
           "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsSecuritySurface",
           "group": "secondary@4"
+        },
+        {
+          "command": "codeclone.showBlastRadius",
+          "when": "editorTextFocus && codeclone.hasRun && isWorkspaceTrusted",
+          "group": "secondary@6"
+        },
+        {
+          "command": "codeclone.copyBlastRadiusBrief",
+          "when": "editorTextFocus && codeclone.hasRun && isWorkspaceTrusted",
+          "group": "secondary@7"
         }
       ]
     },
@@ -832,10 +858,10 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^25.5.2",
+    "@types/node": "^25.9.1",
     "@types/vscode": "1.100.0",
-    "@vscode/vsce": "2.25.0",
+    "@vscode/vsce": "3.9.1",
     "esbuild": "^0.28.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.3"
   }
 }

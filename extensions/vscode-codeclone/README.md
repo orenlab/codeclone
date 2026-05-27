@@ -18,6 +18,8 @@ and driven by the same canonical report as the CLI and HTML output.
   at a glance; report-only Security Surfaces and Overloaded Modules kept visually separate
 - **Baseline-aware** — distinguishes known debt from new regressions against the stored baseline
 - **Changed-files review** — `Review Changes` scopes analysis to the current diff via a configurable git ref
+- **Blast Radius** — `Show Blast Radius` renders a concentric SVG diagram of structural
+  impact for the active file; `Copy Blast Radius Brief` puts a Markdown summary on the clipboard
 - **Coverage Join** — integrates `coverage.xml` to surface untested hotspots when available
 - **Source-first navigation** — `Reveal Source` opens the exact location; `Next / Previous Hotspot`
   steps through active targets in the editor
@@ -97,6 +99,23 @@ Focus mode is explicit and persisted per workspace; `Recommended` is the default
 
 Bounded MCP session state: server availability, current run identity, reviewed findings,
 and help topics. Reviewed markers are session-local and do not mutate the repository or report.
+
+### Blast Radius
+
+Visual structural impact analysis for the active file.
+
+- **Show Blast Radius** — opens a WebviewPanel with a concentric SVG diagram
+  showing origin, direct dependents, transitive dependents, and clone cohort.
+  Risk signals (complexity, coverage, overloaded modules) are overlaid as
+  colored dots. Do-not-touch boundaries and guardrails are listed below the
+  diagram.
+- **Copy Blast Radius Brief** — copies a structured Markdown summary of the
+  same data to the clipboard for use in PR descriptions or review notes.
+
+Both commands are available from the editor title context menu and the command
+palette when a run is active and the workspace is trusted. The webview uses
+`enableScripts: false` and a nonce-scoped Content Security Policy with no
+external resource access.
 
 ---
 

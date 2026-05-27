@@ -23,6 +23,8 @@ const {
     formatBaselineTags,
 } = require("../src/formatters");
 const {
+    renderBlastRadiusMarkdown,
+    renderBlastRadiusSvgHtml,
     renderCoverageJoinMarkdown,
     renderSecuritySurfaceMarkdown,
     renderOverloadedModuleMarkdown,
@@ -157,4 +159,111 @@ test("renderCoverageJoinMarkdown explains joined coverage review context", () =>
     assert.match(markdown, /Review signal: low coverage/);
     assert.match(markdown, /Coverage: 42%/);
     assert.match(markdown, /joined coverage review context/);
+});
+
+test("renderBlastRadiusMarkdown produces a structured blast radius brief", () => {
+    const markdown = renderBlastRadiusMarkdown(
+        {
+            run_id: "abc123",
+            origin: ["src/core.py", "src/utils.py"],
+            depth: "transitive",
+            radius_level: "medium",
+            direct_dependents: ["src/cli.py", "src/api.py"],
+            transitive_dependents: ["tests/test_cli.py"],
+            clone_cohort_members: ["src/compat.py"],
+            in_dependency_cycle: [],
+            structural_risk: {
+                high_complexity_in_blast_zone: ["src/cli.py"],
+                high_coupling_in_blast_zone: [],
+                low_coverage_in_blast_zone: [],
+                overloaded_modules_in_blast_zone: [],
+            },
+            do_not_touch: [
+                {
+                    path: "codeclone.baseline.json",
+                    reason: "baseline state requires separate changes",
+                    category: "baseline_or_generated_state",
+                    severity: "hard",
+                },
+            ],
+            review_context: [],
+            guardrails: [
+                "review direct dependents before editing public behavior",
+            ],
+        },
+        "demo-repo"
+    );
+
+    assert.match(markdown, /# Blast Radius/);
+    assert.match(markdown, /Run: `abc123`/);
+    assert.match(markdown, /Workspace: `demo-repo`/);
+    assert.match(markdown, /Radius level: \*\*Medium\*\*/);
+    assert.match(markdown, /Origin: 2 files/);
+    assert.match(markdown, /Direct dependents: 2/);
+    assert.match(markdown, /Transitive dependents: 1/);
+    assert.match(markdown, /Clone cohort: 1/);
+    assert.match(markdown, /`src\/core.py`/);
+    assert.match(markdown, /`src\/cli.py`/);
+    assert.match(markdown, /`src\/compat.py`/);
+    assert.match(markdown, /High complexity in blast zone/);
+    assert.match(markdown, /codeclone\.baseline\.json/);
+    assert.match(markdown, /review direct dependents/);
+});
+
+test("renderBlastRadiusSvgHtml produces valid HTML with SVG and CSP", () => {
+    const html = renderBlastRadiusSvgHtml(
+        {
+            run_id: "def456",
+            origin: ["src/engine.py"],
+            depth: "direct",
+            radius_level: "low",
+            direct_dependents: ["src/runner.py"],
+            transitive_dependents: [],
+            clone_cohort_members: [],
+            in_dependency_cycle: [],
+            structural_risk: {},
+            do_not_touch: [],
+            review_context: [],
+            guardrails: [],
+        },
+        "test-workspace",
+        "abc123nonce"
+    );
+
+    assert.match(html, /<!DOCTYPE html>/);
+    assert.match(html, /nonce-abc123nonce/);
+    assert.match(html, /Blast Radius/);
+    assert.match(html, /badge-low/);
+    assert.match(html, /<svg/);
+    assert.match(html, /Origin/);
+    assert.match(html, /1 file\b/);
+    assert.match(html, /Direct \(1\)/);
+    assert.match(html, /src\/engine\.py/);
+    assert.match(html, /src\/runner\.py/);
+    assert.doesNotMatch(html, /Transitive/);
+    assert.doesNotMatch(html, /Clone cohort/);
+});
+
+test("renderBlastRadiusSvgHtml escapes HTML in file paths", () => {
+    const html = renderBlastRadiusSvgHtml(
+        {
+            run_id: "esc1",
+            origin: ['src/<script>alert("xss")</script>.py'],
+            depth: "direct",
+            radius_level: "high",
+            direct_dependents: [],
+            transitive_dependents: [],
+            clone_cohort_members: [],
+            in_dependency_cycle: [],
+            structural_risk: {},
+            do_not_touch: [],
+            review_context: [],
+            guardrails: [],
+        },
+        "xss-test",
+        "safenonce"
+    );
+
+    assert.doesNotMatch(html, /<script>alert/);
+    assert.match(html, /&lt;script&gt;/);
 });

@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 /** @type {any} */
@@ -67,6 +68,8 @@ const {
 const {CodeCloneMcpClient, MCPClientError} = require("./mcpClient");
 const {
     markdownBulletList,
+    renderBlastRadiusMarkdown,
+    renderBlastRadiusSvgHtml,
     renderCoverageJoinMarkdown,
     renderFindingMarkdown,
     renderOverloadedModuleMarkdown,
@@ -376,6 +379,12 @@ class CodeCloneController {
             ),
             vscode.commands.registerCommand("codeclone.reviewSecuritySurface", (node) =>
                 this.reviewSecuritySurface(node)
+            ),
+            vscode.commands.registerCommand("codeclone.showBlastRadius", () =>
+                this.showBlastRadius()
+            ),
+            vscode.commands.registerCommand("codeclone.copyBlastRadiusBrief", () =>
+                this.copyBlastRadiusBrief()
             ),
         ];
         this.context.subscriptions.push(...subscriptions);
@@ -2784,6 +2793,122 @@ class CodeCloneController {
         await vscode.window.showInformationMessage(
             `Copied security review brief for ${formatSecuritySurfaceLocation(item)}.`
         );
+    }
+
+    async showBlastRadius() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        const state = this.getWorkspaceState(folder);
+        if (!state.currentRunId) {
+            const choice = await vscode.window.showInformationMessage(
+                "No CodeClone run is available. Analyze the workspace first.",
+                "Analyze Workspace"
+            );
+            if (choice === "Analyze Workspace") {
+                await this.analyzeWorkspace();
+            }
+            return;
+        }
+        const files = this.resolveBlastRadiusFiles(folder);
+        if (files.length === 0) {
+            const input = await vscode.window.showInputBox({
+                title: "Blast Radius",
+                prompt: "Enter a workspace-relative file path",
+                placeHolder: "src/module.py",
+            });
+            if (!input || !input.trim()) {
+                return;
+            }
+            files.push(input.trim());
+        }
+        try {
+            await this.ensureConnected(folder);
+            const payload = await this.client.callTool("get_blast_radius", {
+                files,
+                run_id: state.currentRunId,
+                depth: "transitive",
+            });
+            const nonce = crypto.randomBytes(16).toString("hex");
+            const panel = vscode.window.createWebviewPanel(
+                "codeclone.blastRadius",
+                `Blast Radius: ${files.map((f) => path.basename(f)).join(", ")}`,
+                vscode.ViewColumn.Beside,
+                {
+                    enableScripts: false,
+                    localResourceRoots: [],
+                }
+            );
+            panel.iconPath = new vscode.ThemeIcon("target");
+            panel.webview.html = renderBlastRadiusSvgHtml(
+                payload,
+                folder.name,
+                nonce
+            );
+        } catch (error) {
+            this.handleError(error, "Could not compute blast radius.");
+        }
+    }
+
+    async copyBlastRadiusBrief() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        const state = this.getWorkspaceState(folder);
+        if (!state.currentRunId) {
+            await vscode.window.showInformationMessage(
+                "No CodeClone run is available. Analyze the workspace first."
+            );
+            return;
+        }
+        const files = this.resolveBlastRadiusFiles(folder);
+        if (files.length === 0) {
+            const input = await vscode.window.showInputBox({
+                title: "Blast Radius Brief",
+                prompt: "Enter a workspace-relative file path",
+                placeHolder: "src/module.py",
+            });
+            if (!input || !input.trim()) {
+                return;
+            }
+            files.push(input.trim());
+        }
+        try {
+            await this.ensureConnected(folder);
+            const payload = await this.client.callTool("get_blast_radius", {
+                files,
+                run_id: state.currentRunId,
+                depth: "transitive",
+            });
+            const brief = renderBlastRadiusMarkdown(payload, folder.name);
+            await vscode.env.clipboard.writeText(brief);
+            await vscode.window.showInformationMessage(
+                `Copied blast radius brief for ${files.join(", ")}.`
+            );
+        } catch (error) {
+            this.handleError(error, "Could not compute blast radius for brief.");
+        }
+    }
+
+    /**
+     * @param {any} folder
+     * @returns {string[]}
+     */
+    resolveBlastRadiusFiles(folder) {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            return [];
+        }
+        const relativePath = workspaceRelativePath(folder, editor.document.uri.fsPath);
+        if (relativePath && !relativePath.startsWith("..")) {
+            return [relativePath];
+        }
+        return [];
     }
 
     async clearSessionState() {

@@ -1,5 +1,21 @@
 # Change Log
 
+## 0.3.0
+
+- add **Show Blast Radius** command — concentric SVG diagram of structural
+  impact for the active file, rendered in a secure WebviewPanel with no scripts
+  and nonce-scoped CSP
+- add **Copy Blast Radius Brief** command — structured Markdown summary of
+  origin, dependents, clone cohort, risk signals, and guardrails copied to
+  clipboard
+- both commands available from the editor title menu when a run is active and
+  the workspace is trusted
+- bump minimum version to reflect the new MCP `get_blast_radius` dependency
+- upgrade `@vscode/vsce` from `2.25.0` to `3.9.1`, resolving the transitive
+  `tmp` path-traversal (GHSA-ph9p-34f9-6g65) and `qs` DoS
+  (GHSA-q8mj-m7cp-5q26) vulnerabilities
+- upgrade `@types/node` to `25.9.1` and `typescript` to `6.0.3`
+
 ## 0.2.7
 
 - surface Coverage Join review items in Hotspots when coverage data is available
