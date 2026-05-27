@@ -1127,3 +1127,78 @@ def test_workspace_intent_max_lease_seconds_ceiling() -> None:
     assert workspace_intents.MAX_LEASE_SECONDS == 600
     assert workspace_intents.resolved_lease_seconds(9999) == 600
     assert workspace_intents.resolved_lease_seconds(60) == 60
+
+
+# ── intent_id format validation (path traversal hardening) ──
+
+
+class TestSafeIntentId:
+    """_is_safe_intent_id rejects path traversal and control characters."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "intent-abcdef12-001",
+            "intent-run12345-003",
+            "simple",
+            "a",
+            "with.dot",
+            "with_underscore",
+            "A123-B456",
+        ],
+    )
+    def test_accepts_safe_ids(self, value: str) -> None:
+        assert workspace_intents._is_safe_intent_id(value) is True
+
+    @pytest.mark.parametrize(
+        ("value", "reason"),
+        [
+            ("../../etc/passwd", "path traversal with ../"),
+            ("../target", "single-level traversal"),
+            ("foo/bar", "forward slash"),
+            ("foo\\bar", "backslash"),
+            ("", "empty string"),
+            ("-starts-with-dash", "leading dash"),
+            (".starts-with-dot", "leading dot"),
+            ("has\x00null", "NUL byte"),
+            ("has\nnewline", "newline"),
+            ("has space", "space"),
+            (None, "None value"),
+            (42, "integer"),
+            ("x" * 129, "too long (129 chars)"),
+        ],
+    )
+    def test_rejects_unsafe_ids(self, value: object, reason: str) -> None:
+        assert workspace_intents._is_safe_intent_id(value) is False, reason
+
+    def test_max_length_boundary(self) -> None:
+        assert workspace_intents._is_safe_intent_id("a" * 128) is True
+        assert workspace_intents._is_safe_intent_id("a" * 129) is False
+
+
+def test_validate_workspace_record_rejects_traversal_intent_id() -> None:
+    """validate_workspace_record rejects intent_id with path separators."""
+    malicious = _record(intent_id="../../etc/passwd")
+    payload = malicious.signed_payload()
+    assert workspace_intents.validate_workspace_record(payload) is None
+
+
+def test_remove_workspace_intent_rejects_traversal(tmp_path: Path) -> None:
+    """remove_workspace_intent returns False for traversal intent_id.
+
+    The function delegates to safe_remove_own_intent which validates
+    path containment.  A crafted intent_id must not cause deletion
+    outside the registry directory.
+    """
+    # Create a sentinel file that a traversal would target
+    sentinel = tmp_path / "do_not_delete.json"
+    sentinel.write_text("{}")
+
+    result = workspace_intents.remove_workspace_intent(
+        root=tmp_path,
+        pid=1,
+        start_epoch=100,
+        intent_id="../../do_not_delete",
+    )
+    assert result is False
+    assert sentinel.exists(), "sentinel file must survive traversal attempt"

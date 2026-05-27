@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -30,6 +31,7 @@ DEFAULT_LEASE_SECONDS: Final = 300
 MIN_LEASE_SECONDS: Final = 60
 MAX_LEASE_SECONDS: Final = 600
 _HEX_DIGEST_LENGTH: Final = 64
+_SAFE_INTENT_ID_RE: Final = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
 
 
 class WorkspaceIntentStatus(str, Enum):
@@ -282,6 +284,8 @@ def validate_workspace_record(data: object) -> WorkspaceIntentRecord | None:
     if version not in {REGISTRY_VERSION, LEGACY_REGISTRY_VERSION}:
         return None
     intent_id = _required_string(data.get("intent_id"))
+    if not _is_safe_intent_id(intent_id):
+        return None
     agent_pid = _positive_int(data.get("agent_pid"))
     agent_start_epoch = _positive_int(data.get("agent_start_epoch"))
     agent_label = _string_value(data.get("agent_label"))
@@ -474,17 +478,18 @@ def remove_workspace_intent(
     start_epoch: int,
     intent_id: str,
 ) -> bool:
-    path = intent_path(
+    """Remove a workspace intent file with path-containment safety.
+
+    Delegates to :func:`safe_remove_own_intent` which validates that the
+    constructed path resolves inside the registry directory, rejects
+    symlink indirection, and checks filename structure before unlinking.
+    """
+    return safe_remove_own_intent(
         root=root,
         pid=pid,
         start_epoch=start_epoch,
         intent_id=intent_id,
     )
-    try:
-        path.unlink(missing_ok=True)
-    except OSError:
-        return False
-    return True
 
 
 def remove_workspace_record(*, root: Path, record: WorkspaceIntentRecord) -> bool:
@@ -989,6 +994,16 @@ def _valid_lease_seconds(value: object) -> int | None:
     if parsed < MIN_LEASE_SECONDS or parsed > MAX_LEASE_SECONDS:
         return None
     return parsed
+
+
+def _is_safe_intent_id(value: object) -> bool:
+    """Return True if *value* is a safe intent identifier.
+
+    Rejects path separators, traversal components, control characters,
+    and empty strings.  Accepts only ``[a-zA-Z0-9._-]`` with an
+    alphanumeric first character, max 128 chars.
+    """
+    return isinstance(value, str) and _SAFE_INTENT_ID_RE.match(value) is not None
 
 
 def _is_hex_digest(value: object) -> bool:
