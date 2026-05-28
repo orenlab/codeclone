@@ -285,43 +285,49 @@ def _run_controller_query(
     )
 
 
+def _controller_query_console(args: CLIArgsLike) -> StatusConsole:
+    """Shared console for pre-analysis controller query screens."""
+    return require_status_console(
+        _make_rich_console(
+            no_color=args.no_color,
+            width=ui.CLI_AUDIT_MAX_WIDTH,
+        )
+    )
+
+
+def _dispatch_session_stats(args: CLIArgsLike, root_path: Path) -> int:
+    from .session_stats import render_session_stats
+
+    return render_session_stats(
+        console=_controller_query_console(args),
+        root_path=root_path,
+        quiet=args.quiet,
+    )
+
+
+def _dispatch_audit(args: CLIArgsLike, root_path: Path) -> int:
+    from .audit import render_audit
+
+    audit_json = bool_attr(args, "audit_json")
+    return render_audit(
+        console=_controller_query_console(args),
+        root_path=root_path,
+        audit_enabled=bool(getattr(args, "audit_enabled", False)),
+        audit_path=str(getattr(args, "audit_path", "")),
+        quiet=args.quiet,
+        json_summary=audit_json,
+    )
+
+
 def _run_pre_analysis_controller_query(
     *,
     args: CLIArgsLike,
     root_path: Path,
 ) -> int | None:
     if bool_attr(args, "session_stats"):
-        from .session_stats import render_session_stats
-
-        stats_console = require_status_console(
-            _make_rich_console(
-                no_color=args.no_color,
-                width=ui.CLI_AUDIT_MAX_WIDTH,
-            )
-        )
-        return render_session_stats(
-            console=stats_console,
-            root_path=root_path,
-            quiet=args.quiet,
-        )
-    audit_json = bool_attr(args, "audit_json")
-    if bool_attr(args, "audit") or audit_json:
-        from .audit import render_audit
-
-        audit_console = require_status_console(
-            _make_rich_console(
-                no_color=args.no_color,
-                width=ui.CLI_AUDIT_MAX_WIDTH,
-            )
-        )
-        return render_audit(
-            console=audit_console,
-            root_path=root_path,
-            audit_enabled=bool(getattr(args, "audit_enabled", False)),
-            audit_path=str(getattr(args, "audit_path", "")),
-            quiet=args.quiet,
-            json_summary=audit_json,
-        )
+        return _dispatch_session_stats(args, root_path)
+    if bool_attr(args, "audit") or bool_attr(args, "audit_json"):
+        return _dispatch_audit(args, root_path)
     return None
 
 
