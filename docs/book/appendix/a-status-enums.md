@@ -11,6 +11,7 @@ Centralize machine-readable status sets used across baseline/cache/report/CLI co
 - Exit categories: `codeclone/contracts/__init__.py:ExitCode`
 - Intent ownership: `codeclone/surfaces/mcp/_workspace_intents.py:IntentOwnership`
 - Patch contract: `codeclone/surfaces/mcp/_patch_contract.py:PatchContractStatus`
+- Verification profile: `codeclone/surfaces/mcp/_verification_profile.py:VerificationProfile`
 
 ## Data model
 

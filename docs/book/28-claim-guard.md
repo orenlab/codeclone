@@ -83,7 +83,8 @@ Warnings do not make the response invalid. Only violations set
 ## Patterns
 
 Five deterministic overclaim patterns, each checking keyword proximity
-around cited finding IDs or metric family names:
+around cited finding IDs or metric family names. An additional
+profile-aware warning detects structural claims on non-structural profiles.
 
 ### P-1: Security surface overclaim
 
@@ -113,6 +114,14 @@ claims are invalid.
 
 A finding claimed as fixed or resolved before a post-patch run is
 available. Without a comparison run, fix claims cannot be verified.
+
+### Structural scope warning
+
+When the verification profile is not `python_structural`, the guard emits a
+`structural_checks_not_applicable` warning if the review text contains keywords
+suggesting structural checks were performed (e.g. "no regressions",
+"all checks passed", "structural verification"). This is a warning, not a
+violation — it does not set `valid=false`.
 
 ---
 

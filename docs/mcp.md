@@ -23,8 +23,7 @@ graph LR
     C --> E[HTML]
     C --> F[MCP]
     C --> G[SARIF]
-
-    style F stroke:#6366f1,stroke-width:2px
+    style F stroke: #6366f1, stroke-width: 2px
 ```
 
 ### Session architecture
@@ -46,16 +45,15 @@ graph TD
         WIR[".cache/codeclone/intents/<br/>Workspace Intent Registry"]
     end
 
-    MCPSession -->|"writes coordination records"| Disk
-    MCPSession -->|"never writes"| BL[Baselines]
-    MCPSession -->|"never writes"| CA[Cache]
-    MCPSession -->|"never writes"| RP[Reports]
-    MCPSession -->|"never writes"| SC[Source Files]
-
-    style BL fill:#fee2e2
-    style CA fill:#fee2e2
-    style RP fill:#fee2e2
-    style SC fill:#fee2e2
+    MCPSession -->|" writes coordination records "| Disk
+    MCPSession -->|" never writes "| BL[Baselines]
+    MCPSession -->|" never writes "| CA[Cache]
+    MCPSession -->|" never writes "| RP[Reports]
+    MCPSession -->|" never writes "| SC[Source Files]
+    style BL fill: #fee2e2
+    style CA fill: #fee2e2
+    style RP fill: #fee2e2
+    style SC fill: #fee2e2
 ```
 
 ### Mixin chain
@@ -79,15 +77,13 @@ graph BT
     RR["_MCPSessionReviewReceiptMixin<br/><small>audit receipt composition</small>"]
     CG["_MCPSessionClaimGuardMixin<br/><small>citation-based validation</small>"]
     S["MCPSession"]
-
     F --> CP --> AA --> RSB --> SM --> RPM --> STM --> BR --> IM --> PC --> RR --> CG --> S
-
-    style S stroke:#6366f1,stroke-width:2px
-    style CG fill:#f0fdf4
-    style RR fill:#f0fdf4
-    style PC fill:#f0fdf4
-    style IM fill:#f0fdf4
-    style BR fill:#f0fdf4
+    style S stroke: #6366f1, stroke-width: 2px
+    style CG fill: #f0fdf4
+    style RR fill: #f0fdf4
+    style PC fill: #f0fdf4
+    style IM fill: #f0fdf4
+    style BR fill: #f0fdf4
 ```
 
 ---
@@ -192,9 +188,9 @@ codeclone-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 ```
 
 !!! warning "Remote exposure is opt-in"
-    Non-loopback hosts require `--allow-remote`. The built-in HTTP server
-    has no authentication. Use it only on trusted networks or behind an
-    authenticated reverse proxy.
+Non-loopback hosts require `--allow-remote`. The built-in HTTP server
+has no authentication. Use it only on trusted networks or behind an
+authenticated reverse proxy.
 
 ### Run retention
 
@@ -236,8 +232,8 @@ stored runs.
 | `compare_runs`          | Run-to-run delta: regressions, improvements, health change |
 
 !!! tip "Start here"
-    After analysis, call `get_run_summary` or `get_production_triage` first.
-    Prefer `list_hotspots` or `check_*` before broad `list_findings` calls.
+After analysis, call `get_run_summary` or `get_production_triage` first.
+Prefer `list_hotspots` or `check_*` before broad `list_findings` calls.
 
 ### Phase 3: Drill down
 
@@ -273,71 +269,63 @@ sequenceDiagram
     participant A as Agent
     participant M as MCP Server
     participant D as Disk Registry
-
-    A->>M: list_workspace(root)
-    M->>D: read .cache/codeclone/intents/
-    D-->>M: active intents
-    M-->>A: workspace state
-
-    A->>M: analyze_repository(root)
-    M-->>A: run registered
-
-    A->>M: declare(scope, intent)
-    M->>D: write intent record
-    M-->>A: intent_id, blast_radius, concurrent_intents
-
-    A->>M: get_blast_radius(files)
-    M-->>A: do_not_touch, review_context
-
-    A->>M: check_patch_contract(mode=budget)
-    M-->>A: regression budget, headroom
-
+    A ->> M: list_workspace(root)
+    M ->> D: read .cache/codeclone/intents/
+    D -->> M: active intents
+    M -->> A: workspace state
+    A ->> M: analyze_repository(root)
+    M -->> A: run registered
+    A ->> M: declare(scope, intent)
+    M ->> D: write intent record
+    M -->> A: intent_id, blast_radius, concurrent_intents
+    A ->> M: get_blast_radius(files)
+    M -->> A: do_not_touch, review_context
+    A ->> M: check_patch_contract(mode=budget)
+    M -->> A: regression budget, headroom
     Note over A: Edit files within scope
     opt Long edit or test run
-        A->>M: renew(intent_id, lease_seconds)
-        M->>D: update lease timestamp
-        M-->>A: lease_renewed
+        A ->> M: renew(intent_id, lease_seconds)
+        M ->> D: update lease timestamp
+        M -->> A: lease_renewed
     end
 
-    A->>M: analyze_repository(root)
-    M-->>A: after_run_id registered
-
-    A->>M: check(intent_id, changed_files or diff_ref)
+    A ->> M: analyze_repository(root)
+    M -->> A: after_run_id registered
+    A ->> M: check(intent_id, changed_files or diff_ref)
     Note right of M: intent stays on before-run, changed scope is explicit
-    M-->>A: clean / expanded / violated
-
-    A->>M: check_patch_contract(mode=verify, before_run_id, after_run_id, intent_id)
-    M-->>A: accepted / violated
-
-    A->>M: validate_review_claims(text)
-    M-->>A: valid / violations
-
-    A->>M: create_review_receipt
-    M-->>A: audit artifact
-
-    A->>M: clear
-    M->>D: remove intent record
+    M -->> A: clean / expanded / violated
+    A ->> M: check_patch_contract(mode=verify, before_run_id, after_run_id, intent_id)
+    M -->> A: accepted / violated
+    A ->> M: validate_review_claims(text)
+    M -->> A: valid / violations
+    A ->> M: create_review_receipt
+    M -->> A: audit artifact
+    A ->> M: clear
+    M ->> D: remove intent record
 ```
 
-| Tool                     | Purpose                                                                                     |
-|--------------------------|---------------------------------------------------------------------------------------------|
+| Tool                     | Purpose                                                                                                     |
+|--------------------------|-------------------------------------------------------------------------------------------------------------|
 | `manage_change_intent`   | Intent lifecycle: declare, get, check, clear, renew, list_workspace, gc_workspace, recover, reset_workspace |
-| `get_blast_radius`       | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context           |
-| `check_patch_contract`   | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                      |
-| `create_review_receipt`  | Deterministic audit artifact: provenance, scope, reviewed findings, patch status            |
-| `validate_review_claims` | Citation-based overclaim detection against stored run semantics                             |
+| `get_blast_radius`       | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                           |
+| `check_patch_contract`   | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                      |
+| `create_review_receipt`  | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile      |
+| `validate_review_claims` | Citation-based overclaim detection against stored run semantics                                             |
 
 ??? info "Blast radius: do_not_touch vs review_context"
-    `do_not_touch` contains actionable edit prohibitions: baselines, generated
-    state, forbidden paths. `review_context` contains report-only signals:
-    security boundary inventory, overloaded-module candidates, known baseline
-    debt. Review context is information, not an edit ban.
+`do_not_touch` contains actionable edit prohibitions: baselines, generated
+state, forbidden paths. `review_context` contains report-only signals:
+security boundary inventory, overloaded-module candidates, known baseline
+debt. Review context is information, not an edit ban.
 
 ??? info "Patch contract modes"
-    **Budget** reads one stored run and optional intent. Shows regression
-    headroom per quality dimension before editing. **Verify** compares explicit
-    before/after stored runs, previews gates, validates scope, and reports
-    baseline-abuse signals. Missing runs return `status=unverified`.
+**Budget** reads one stored run and optional intent. Shows regression
+headroom per quality dimension before editing. **Verify** compares explicit
+before/after stored runs, previews gates, validates scope, and reports
+baseline-abuse signals. Verify derives a **verification profile** from
+changed files — docs-only and non-Python patches skip structural checks;
+Python source changes require a full after-run. Missing runs return
+`status=unverified`.
 
 ### Phase 6: Session management
 
@@ -460,15 +448,15 @@ Separate accepted baseline debt from new regressions.
 ```
 
 !!! tip "Best practices"
-    - Use `analyze_changed_paths` for PRs, not full analysis.
-    - Prefer `get_run_summary` or `get_production_triage` as the first pass.
-    - Prefer `list_hotspots` or narrow `check_*` tools before broad `list_findings`.
-    - Use `get_finding` / `get_remediation` for one finding instead of raising
-      `detail_level` on larger lists.
-    - Pass an absolute `root` — MCP rejects relative roots like `.`.
-    - Use `coverage_xml` only with `analysis_mode="full"`.
-    - Use `source_kind="production-only"` to cut test/fixture noise.
-    - Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
+- Use `analyze_changed_paths` for PRs, not full analysis.
+- Prefer `get_run_summary` or `get_production_triage` as the first pass.
+- Prefer `list_hotspots` or narrow `check_*` tools before broad `list_findings`.
+- Use `get_finding` / `get_remediation` for one finding instead of raising
+`detail_level` on larger lists.
+- Pass an absolute `root` — MCP rejects relative roots like `.`.
+- Use `coverage_xml` only with `analysis_mode="full"`.
+- Use `source_kind="production-only"` to cut test/fixture noise.
+- Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
 
 ---
 

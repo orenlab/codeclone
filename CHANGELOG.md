@@ -28,6 +28,14 @@
   vulnerabilities, report-only families called CI failures, known findings
   called new regressions, dead-code certainty despite runtime reachability
   evidence, and fixes claimed before post-patch verification.
+- Add verification profile classifier for MCP patch contract. The controller
+  derives verification depth from actual changed files: `python_structural`,
+  `documentation_only`, `governance_config`, `non_python_patch`, and
+  `state_artifact_change`. Documentation-only and non-Python patches verify
+  without `after_run_id` when diff evidence is provided. Review receipts
+  include the profile section with "not applicable" for skipped structural
+  checks. Claim guard warns when review text references structural
+  verification on a non-structural profile.
 - Add CLI controller query modes: `--blast-radius FILE [FILE...]` for
   terminal pre-change boundary review and `--patch-verify` for trusted-baseline
   patch verification with `ci`, `strict`, and `relaxed` profiles.
