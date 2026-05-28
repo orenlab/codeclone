@@ -11,6 +11,11 @@ from enum import Enum
 from typing import Final, Literal
 
 from ...contracts import REPORT_SCHEMA_VERSION
+from ._verification_profile import (
+    check_matrix,
+    classify_patch,
+    profile_limitations,
+)
 
 RECEIPT_VERSION: Final = "1"
 ReceiptFormat = Literal["json", "markdown"]
@@ -159,8 +164,33 @@ def receipt_verdict(
     return ReceiptVerdict.CLEAN.value
 
 
+def derive_verification_profile_section(
+    changed_files: Sequence[str],
+) -> dict[str, object]:
+    """Build the ``verification_profile`` section for a receipt.
+
+    Pure function — delegates to :func:`classify_patch` and enriches the
+    payload with human-readable limitations.
+    """
+    result = classify_patch(list(changed_files))
+    matrix = check_matrix(result.profile)
+    return {
+        "profile": result.profile.value,
+        "reason": result.reason,
+        "python_source_touched": result.python_source_touched,
+        "state_artifact_touched": result.state_artifact_touched,
+        "governance_config_touched": result.governance_config_touched,
+        "after_run_required": matrix.after_run_required,
+        "structural_checks_applicable": matrix.structural_checks_applicable,
+        "checks_performed": list(matrix.checks_performed),
+        "checks_not_applicable": list(matrix.checks_not_applicable),
+        "limitations": list(profile_limitations(result.profile)),
+    }
+
+
 def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
     provenance = _as_mapping(receipt.get("provenance"))
+    vp_section = _optional_mapping(receipt.get("verification_profile"))
     scope = _optional_mapping(receipt.get("scope"))
     blast_radius = _optional_mapping(receipt.get("blast_radius"))
     reviewed = _as_mapping(receipt.get("reviewed_evidence"))
@@ -182,9 +212,14 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
         "**Review contract:** v1",
         "",
         "---",
-        "",
-        "### Scope",
     ]
+    lines.extend(_render_verification_profile(vp_section))
+    lines.extend(
+        [
+            "",
+            "### Scope",
+        ]
+    )
     if scope is None:
         lines.append("No intent declared.")
     else:
@@ -277,6 +312,36 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
     return "\n".join(lines)
 
 
+def _render_verification_profile(
+    vp_section: Mapping[str, object] | None,
+) -> list[str]:
+    lines = ["", "### Verification Profile"]
+    if vp_section is None:
+        lines.append("Not available.")
+        return lines
+    profile = str(vp_section.get("profile", "unknown"))
+    reason = str(vp_section.get("reason", ""))
+    structural = bool(vp_section.get("structural_checks_applicable", False))
+    structural_label = "applicable" if structural else "not applicable"
+    lines.extend(
+        [
+            f"**Profile:** {profile}",
+            f"**Reason:** {reason}",
+            f"**Structural checks:** {structural_label}",
+            f"**After-run required:** {vp_section.get('after_run_required', False)}",
+        ]
+    )
+    not_applicable = [
+        str(c) for c in _as_sequence(vp_section.get("checks_not_applicable"))
+    ]
+    if not_applicable:
+        lines.append(f"**Not applicable:** {', '.join(not_applicable)}")
+    limitations = [str(lim) for lim in _as_sequence(vp_section.get("limitations"))]
+    if limitations:
+        lines.extend(f"- {lim}" for lim in limitations)
+    return lines
+
+
 def _decision_point(
     *,
     category: str,
@@ -359,6 +424,7 @@ __all__ = [
     "derive_claims_not_made",
     "derive_human_decision_points",
     "derive_patch_status",
+    "derive_verification_profile_section",
     "receipt_verdict",
     "render_receipt_markdown",
 ]

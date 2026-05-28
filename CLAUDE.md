@@ -87,6 +87,31 @@ If any item cannot be completed, report `BLOCKED` or `UNVERIFIED`, include the
 `intent_id`, and state the exact missing step. Do not present the work as
 finished.
 
+### Verification profiles
+
+The controller derives a **verification profile** from actual changed files.
+The profile determines which structural checks apply. The agent does not choose
+the profile — it is computed by `check_patch_contract(mode="verify")`.
+
+| Profile | When | `after_run` required | Structural checks |
+|---|---|---|---|
+| `python_structural` | any `.py` / `.pyi` touched | yes | all |
+| `governance_config` | config files only (pyproject.toml, CI, Dockerfile…) | yes | not applicable |
+| `documentation_only` | only docs files (`.md`, `.rst`, LICENSE…) | no | not applicable |
+| `non_python_patch` | other files, no Python / docs | no | not applicable |
+| `state_artifact_change` | baseline or cache touched | no (violated) | not applicable |
+
+Key rules:
+
+- If **any** Python source, governance configuration, baseline, cache, or
+  generated state files were touched, the lightweight path is not accepted.
+- Documentation-only and non-Python patches can verify without `after_run_id`
+  when `changed_files` or `diff_ref` evidence is provided.
+- The agent MUST NOT claim which profile applies — CodeClone decides.
+- Receipts use "not applicable" for skipped structural checks, never "passed".
+- Claim Guard warns when a review references structural verification but the
+  profile says structural checks were not applicable.
+
 ### When to skip
 
 - Read-only tasks (analysis, validation, research)

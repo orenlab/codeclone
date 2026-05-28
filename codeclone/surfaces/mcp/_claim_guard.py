@@ -65,6 +65,17 @@ FIX_OVERCLAIM_KEYWORDS: Final = (
     "refactored away",
     "no longer",
 )
+STRUCTURAL_SCOPE_KEYWORDS: Final = (
+    "no structural regression",
+    "no regressions",
+    "regression-free",
+    "structural verification",
+    "structurally verified",
+    "all checks passed",
+    "code quality verified",
+)
+
+_STRUCTURAL_PROFILES: Final[frozenset[str]] = frozenset({"python_structural"})
 
 _UNKNOWN_SHORT_FINDING_RE: Final = re.compile(r"\bF-\d+\b", re.IGNORECASE)
 _LITERAL_BOUNDARY_CHARS: Final = r"A-Za-z0-9_:"
@@ -97,6 +108,7 @@ class ReportContext:
     report_only_families: frozenset[str]
     has_comparison_run: bool
     metric_families: frozenset[str]
+    verification_profile: str | None = None
 
 
 def validate_claims(
@@ -431,6 +443,22 @@ def _warnings_for_text(
                     ),
                 }
             )
+    profile = report_context.verification_profile
+    if (
+        profile is not None
+        and profile not in _STRUCTURAL_PROFILES
+        and _contains_keyword(text, STRUCTURAL_SCOPE_KEYWORDS)
+    ):
+        warnings.append(
+            {
+                "type": "structural_checks_not_applicable",
+                "message": (
+                    f"Review references structural verification, but the "
+                    f"verification profile is '{profile}' — structural "
+                    f"checks were not applicable for this patch."
+                ),
+            }
+        )
     return warnings
 
 

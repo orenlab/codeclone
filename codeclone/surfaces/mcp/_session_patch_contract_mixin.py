@@ -38,6 +38,14 @@ from ._session_shared import (
     MCPRunRecord,
     MCPServiceContractError,
 )
+from ._verification_profile import (
+    ClassificationResult,
+    VerificationProfile,
+    classify_patch,
+    profile_accepted_message,
+    profile_limitations,
+    profile_unverified_message,
+)
 
 MAX_WORSENED_ITEMS = 20
 
@@ -132,154 +140,99 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         diff_ref: str | None,
         changed_files: Sequence[str] | None,
     ) -> dict[str, object]:
+        # ── 1. Resolve before-run (required for intent binding) ─────
         if before_run_id is None:
             return self._unverified_patch_contract(reason="no_before_run")
         try:
             before = self._runs.get(before_run_id)
         except MCPRunNotFoundError:
             return self._unverified_patch_contract(reason="no_before_run")
+
+        # ── 2. Resolve intent ───────────────────────────────────────
+        intent = self._optional_intent(record=before, intent_id=intent_id)
+        if intent is not None:
+            self._renew_lease_if_active(record=before, intent=intent)
+
+        # ── 3. Compute actual changed files ─────────────────────────
+        actual_changed_files = self._patch_changed_files_flexible(
+            before=before,
+            after_run_id=after_run_id,
+            diff_ref=diff_ref,
+            changed_files=changed_files,
+        )
+
+        # ── 4. Classify verification profile ────────────────────────
+        classification = classify_patch(actual_changed_files)
+
+        # ── 5. Scope/forbidden checks (always run) ──────────────────
+        scope_check = (
+            self._scope_check_payload(intent=intent, actual=actual_changed_files)
+            if intent is not None
+            else None
+        )
+
+        # ── 6. State artifact → violated early ──────────────────────
+        if classification.profile == VerificationProfile.STATE_ARTIFACT_CHANGE:
+            return self._state_artifact_violated(
+                before=before,
+                intent=intent,
+                classification=classification,
+                scope_check=scope_check,
+            )
+
+        # ── 7. Intent expiry check ──────────────────────────────────
+        if intent is not None and self._is_intent_expired(record=before, intent=intent):
+            after = self._optional_after_run(after_run_id)
+            return self._expired_patch_contract(
+                before=before,
+                after=after or before,
+                intent=intent,
+            )
+
+        # ── 8. Scope violation early exit ───────────────────────────
+        scope_violated = (
+            scope_check is not None
+            and scope_check.get("status") == IntentStatus.VIOLATED.value
+        )
+
+        # ── 9. Profile-based fast path (no after_run needed) ────────
+        #   Fast path requires explicit changed files evidence.  When
+        #   neither changed_files nor diff_ref was provided, the caller
+        #   has no diff evidence and must provide after_run_id.
         if after_run_id is None:
-            return self._unverified_patch_contract(reason="no_after_run")
+            has_diff_evidence = changed_files is not None or diff_ref is not None
+            if not has_diff_evidence:
+                return self._unverified_patch_contract(
+                    reason="no_after_run",
+                    before=before,
+                )
+            return self._profile_fast_path(
+                before=before,
+                intent=intent,
+                strictness=strictness,
+                classification=classification,
+                scope_check=scope_check,
+                scope_violated=scope_violated,
+            )
+
+        # ── 10. Full structural path (after_run available) ──────────
         try:
             after = self._runs.get(after_run_id)
         except MCPRunNotFoundError:
             return self._unverified_patch_contract(
                 reason="no_after_run",
                 before=before,
+                classification=classification,
             )
-        compare_payload = self.compare_runs(
-            run_id_before=before.run_id,
-            run_id_after=after.run_id,
-            focus="all",
-        )
-        if not bool(compare_payload.get("comparable")):
-            return self._unverified_patch_contract(
-                reason="incomparable_runs",
-                before=before,
-                after=after,
-                structural_delta=self._structural_delta(compare_payload),
-            )
-        intent = self._optional_intent(record=before, intent_id=intent_id)
-        if intent is not None:
-            self._renew_lease_if_active(record=before, intent=intent)
-        if intent is not None and self._is_intent_expired(record=before, intent=intent):
-            return self._expired_patch_contract(
-                before=before, after=after, intent=intent
-            )
-        actual_changed_files = self._patch_changed_files(
+        return self._full_structural_verify(
+            before=before,
             after=after,
-            diff_ref=diff_ref,
-            changed_files=changed_files,
-        )
-        scope_check = (
-            self._scope_check_payload(intent=intent, actual=actual_changed_files)
-            if intent is not None
-            else None
-        )
-        budgets = self._budgets_for_record(record=after, strictness=strictness)
-        before_gate = self._gate_preview(record=before, budgets=budgets)
-        after_gate = self._gate_preview(record=after, budgets=budgets)
-        structural_delta = self._structural_delta(compare_payload)
-        regressions = _as_sequence(structural_delta.get("regressions"))
-        intent_regressions, external_regressions = self._partition_regressions(
-            after=after,
-            regressions=regressions,
             intent=intent,
-        )
-        worsened = self._worsened_symbols(before=before, after=after)
-        intent_worsened, external_worsened = self._partition_worsened(
-            worsened=worsened,
-            intent=intent,
-        )
-        before_gate_fails = bool(before_gate["would_fail"])
-        after_gate_fails = bool(after_gate["would_fail"])
-        gate_worsened = not before_gate_fails and after_gate_fails
-        intent_caused_gate_failure = (
-            after_gate_fails
-            if intent is None
-            else bool(intent_regressions or intent_worsened)
-        )
-        gate_contract_failure = (
-            after_gate_fails
-            if intent is None
-            else gate_worsened and intent_caused_gate_failure
-        )
-        external_gate_failure = (
-            intent is not None and gate_worsened and not intent_caused_gate_failure
-        )
-        baseline_abuse = detect_baseline_abuse(
-            before_gate_would_fail=before_gate_fails,
-            after_gate_would_fail=after_gate_fails,
-            after_baseline_status=baseline_status(after.report_document),
-            regressions=len(regressions),
-            changed_files=len(actual_changed_files),
-            intent_available=intent is not None,
-        )
-        violations = self._contract_violations(
-            intent_regressions=intent_regressions,
-            gate_contract_failure=gate_contract_failure,
+            strictness=strictness,
+            classification=classification,
             scope_check=scope_check,
-            baseline_abuse=baseline_abuse,
+            actual_changed_files=actual_changed_files,
         )
-        blocking_violations = () if strictness == "relaxed" else violations
-        external_context = bool(external_regressions or external_gate_failure)
-        if blocking_violations:
-            status = PatchContractStatus.VIOLATED.value
-        elif external_context:
-            status = PatchContractStatus.ACCEPTED_EXTERNAL.value
-        else:
-            status = PatchContractStatus.ACCEPTED.value
-        payload: dict[str, object] = {
-            "mode": "verify",
-            "status": status,
-            "reason": None,
-            "before": self._run_ref_payload(before),
-            "after": self._run_ref_payload(after),
-            "intent_id": intent.intent_id if intent is not None else None,
-            "strictness": strictness,
-            "structural_delta": structural_delta,
-            "intent_regressions": intent_regressions,
-            "external_regressions": external_regressions,
-            "worsened": worsened,
-            "intent_worsened": intent_worsened,
-            "external_worsened": external_worsened,
-            "scope_check": scope_check,
-            "before_gate": before_gate,
-            "gate_preview": after_gate,
-            "gate_worsened": gate_worsened,
-            "intent_caused_gate_failure": intent_caused_gate_failure,
-            "baseline_abuse": baseline_abuse,
-            "contract_violations": list(violations),
-            "blocking_violations": list(blocking_violations),
-            "message": self._verify_message(status=status, violations=violations),
-        }
-        event_type = (
-            EVENT_PATCH_VIOLATED
-            if status == PatchContractStatus.VIOLATED.value
-            else EVENT_PATCH_VERIFIED
-        )
-        self._audit_emit(
-            root=after.root,
-            event_type=event_type,
-            severity="warn" if blocking_violations else "info",
-            run_id=_helpers._short_run_id(after.run_id),
-            intent_id=intent.intent_id if intent is not None else None,
-            report_digest=self._report_digest_value(after),
-            status=status,
-            payload=payload,
-        )
-        if bool(baseline_abuse.get("detected")):
-            self._audit_emit(
-                root=after.root,
-                event_type=EVENT_BASELINE_ABUSE,
-                severity="error",
-                run_id=_helpers._short_run_id(after.run_id),
-                intent_id=intent.intent_id if intent is not None else None,
-                report_digest=self._report_digest_value(after),
-                status="detected",
-                payload=payload,
-            )
-        return payload
 
     def _validated_patch_contract_mode(self, mode: str) -> PatchContractMode:
         if mode not in VALID_PATCH_CONTRACT_MODES:
@@ -438,6 +391,326 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         if diff_ref is not None:
             return self._git_diff_paths(root_path=after.root, git_diff_ref=diff_ref)
         return tuple(after.changed_paths)
+
+    def _patch_changed_files_flexible(
+        self,
+        *,
+        before: MCPRunRecord,
+        after_run_id: str | None,
+        diff_ref: str | None,
+        changed_files: Sequence[str] | None,
+    ) -> tuple[str, ...]:
+        """Resolve changed files without requiring an after-run record.
+
+        When *after_run_id* is available, delegates to
+        ``_patch_changed_files``.  Otherwise falls back to explicit
+        *changed_files* or *diff_ref* resolved against the before-run root.
+        """
+        if after_run_id is not None:
+            try:
+                after = self._runs.get(after_run_id)
+                return self._patch_changed_files(
+                    after=after,
+                    diff_ref=diff_ref,
+                    changed_files=changed_files,
+                )
+            except MCPRunNotFoundError:
+                pass
+        if changed_files:
+            return self._normalize_changed_paths(
+                root_path=before.root, paths=changed_files
+            )
+        if diff_ref is not None:
+            return self._git_diff_paths(root_path=before.root, git_diff_ref=diff_ref)
+        return ()
+
+    def _optional_after_run(self, after_run_id: str | None) -> MCPRunRecord | None:
+        if after_run_id is None:
+            return None
+        try:
+            return self._runs.get(after_run_id)
+        except MCPRunNotFoundError:
+            return None
+
+    # ── profile-aware verify paths ──────────────────────────────────
+
+    def _state_artifact_violated(
+        self,
+        *,
+        before: MCPRunRecord,
+        intent: IntentRecord | None,
+        classification: ClassificationResult,
+        scope_check: dict[str, object] | None,
+    ) -> dict[str, object]:
+        """Return violated status for state artifact mutations."""
+        profile_payload = classification.to_payload()
+        violations = ["state_artifact_mutation"]
+        if (
+            scope_check is not None
+            and scope_check.get("status") == IntentStatus.VIOLATED.value
+        ):
+            violations.append("scope_violation")
+        payload: dict[str, object] = {
+            "mode": "verify",
+            "status": PatchContractStatus.VIOLATED.value,
+            "reason": "state_artifact_mutation",
+            "before": self._run_ref_payload(before),
+            "after": None,
+            "intent_id": intent.intent_id if intent is not None else None,
+            "scope_check": scope_check,
+            "contract_violations": violations,
+            "blocking_violations": violations,
+            **profile_payload,
+            "message": (
+                "Patch touched CodeClone generated state. "
+                "This requires a separate explicit workflow."
+            ),
+        }
+        self._audit_emit(
+            root=before.root,
+            event_type=EVENT_PATCH_VIOLATED,
+            severity="warn",
+            run_id=_helpers._short_run_id(before.run_id),
+            intent_id=intent.intent_id if intent is not None else None,
+            report_digest=self._report_digest_value(before),
+            status=PatchContractStatus.VIOLATED.value,
+            payload=payload,
+        )
+        return payload
+
+    def _profile_fast_path(
+        self,
+        *,
+        before: MCPRunRecord,
+        intent: IntentRecord | None,
+        strictness: StrictnessProfile,
+        classification: ClassificationResult,
+        scope_check: dict[str, object] | None,
+        scope_violated: bool,
+    ) -> dict[str, object]:
+        """Handle verify when after_run_id is not provided.
+
+        Returns accepted for documentation-only and non-python patches
+        (with limitations), unverified for profiles that require an
+        after-run.
+        """
+        profile = classification.profile
+        profile_payload = classification.to_payload()
+
+        # Scope violation is always blocking, regardless of profile.
+        if scope_violated and strictness != "relaxed":
+            violations = ["scope_violation"]
+            payload: dict[str, object] = {
+                "mode": "verify",
+                "status": PatchContractStatus.VIOLATED.value,
+                "reason": "scope_violation",
+                "before": self._run_ref_payload(before),
+                "after": None,
+                "intent_id": (intent.intent_id if intent is not None else None),
+                "scope_check": scope_check,
+                "contract_violations": violations,
+                "blocking_violations": violations,
+                **profile_payload,
+                "message": self._verify_message(
+                    status=PatchContractStatus.VIOLATED.value,
+                    violations=tuple(violations),
+                ),
+            }
+            self._audit_emit(
+                root=before.root,
+                event_type=EVENT_PATCH_VIOLATED,
+                severity="warn",
+                run_id=_helpers._short_run_id(before.run_id),
+                intent_id=(intent.intent_id if intent is not None else None),
+                report_digest=self._report_digest_value(before),
+                status=PatchContractStatus.VIOLATED.value,
+                payload=payload,
+            )
+            return payload
+
+        # Profiles that require after_run return unverified.
+        matrix = classification.to_payload()
+        if matrix["after_run_required"]:
+            reason = (
+                "after_run_required_for_governance"
+                if profile == VerificationProfile.GOVERNANCE_CONFIG
+                else "no_after_run"
+            )
+            return self._unverified_patch_contract(
+                reason=reason,
+                before=before,
+                classification=classification,
+                scope_check=scope_check,
+            )
+
+        # Documentation-only and non-python: accepted without after_run.
+        limitations = list(profile_limitations(profile))
+        status = PatchContractStatus.ACCEPTED.value
+        payload = {
+            "mode": "verify",
+            "status": status,
+            "reason": None,
+            "before": self._run_ref_payload(before),
+            "after": None,
+            "intent_id": (intent.intent_id if intent is not None else None),
+            "strictness": strictness,
+            "scope_check": scope_check,
+            "structural_delta": {
+                "verdict": "not_applicable",
+                "reason": "no_python_source_files_touched",
+                "regressions": [],
+                "improvements": [],
+                "health_delta": None,
+            },
+            "contract_violations": [],
+            "blocking_violations": [],
+            **profile_payload,
+            "limitations": limitations,
+            "message": profile_accepted_message(profile),
+        }
+        self._audit_emit(
+            root=before.root,
+            event_type=EVENT_PATCH_VERIFIED,
+            severity="info",
+            run_id=_helpers._short_run_id(before.run_id),
+            intent_id=(intent.intent_id if intent is not None else None),
+            report_digest=self._report_digest_value(before),
+            status=status,
+            payload=payload,
+        )
+        return payload
+
+    def _full_structural_verify(
+        self,
+        *,
+        before: MCPRunRecord,
+        after: MCPRunRecord,
+        intent: IntentRecord | None,
+        strictness: StrictnessProfile,
+        classification: ClassificationResult,
+        scope_check: dict[str, object] | None,
+        actual_changed_files: tuple[str, ...],
+    ) -> dict[str, object]:
+        """Full structural verification path (before + after runs)."""
+        compare_payload = self.compare_runs(
+            run_id_before=before.run_id,
+            run_id_after=after.run_id,
+            focus="all",
+        )
+        if not bool(compare_payload.get("comparable")):
+            return self._unverified_patch_contract(
+                reason="incomparable_runs",
+                before=before,
+                after=after,
+                structural_delta=self._structural_delta(compare_payload),
+                classification=classification,
+            )
+        budgets = self._budgets_for_record(record=after, strictness=strictness)
+        before_gate = self._gate_preview(record=before, budgets=budgets)
+        after_gate = self._gate_preview(record=after, budgets=budgets)
+        structural_delta = self._structural_delta(compare_payload)
+        regressions = _as_sequence(structural_delta.get("regressions"))
+        intent_regressions, external_regressions = self._partition_regressions(
+            after=after,
+            regressions=regressions,
+            intent=intent,
+        )
+        worsened = self._worsened_symbols(before=before, after=after)
+        intent_worsened, external_worsened = self._partition_worsened(
+            worsened=worsened,
+            intent=intent,
+        )
+        before_gate_fails = bool(before_gate["would_fail"])
+        after_gate_fails = bool(after_gate["would_fail"])
+        gate_worsened = not before_gate_fails and after_gate_fails
+        intent_caused_gate_failure = (
+            after_gate_fails
+            if intent is None
+            else bool(intent_regressions or intent_worsened)
+        )
+        gate_contract_failure = (
+            after_gate_fails
+            if intent is None
+            else gate_worsened and intent_caused_gate_failure
+        )
+        external_gate_failure = (
+            intent is not None and gate_worsened and not intent_caused_gate_failure
+        )
+        baseline_abuse = detect_baseline_abuse(
+            before_gate_would_fail=before_gate_fails,
+            after_gate_would_fail=after_gate_fails,
+            after_baseline_status=baseline_status(after.report_document),
+            regressions=len(regressions),
+            changed_files=len(actual_changed_files),
+            intent_available=intent is not None,
+        )
+        violations = self._contract_violations(
+            intent_regressions=intent_regressions,
+            gate_contract_failure=gate_contract_failure,
+            scope_check=scope_check,
+            baseline_abuse=baseline_abuse,
+        )
+        blocking_violations = () if strictness == "relaxed" else violations
+        external_context = bool(external_regressions or external_gate_failure)
+        if blocking_violations:
+            status = PatchContractStatus.VIOLATED.value
+        elif external_context:
+            status = PatchContractStatus.ACCEPTED_EXTERNAL.value
+        else:
+            status = PatchContractStatus.ACCEPTED.value
+        profile_payload = classification.to_payload()
+        payload: dict[str, object] = {
+            "mode": "verify",
+            "status": status,
+            "reason": None,
+            "before": self._run_ref_payload(before),
+            "after": self._run_ref_payload(after),
+            "intent_id": (intent.intent_id if intent is not None else None),
+            "strictness": strictness,
+            "structural_delta": structural_delta,
+            "intent_regressions": intent_regressions,
+            "external_regressions": external_regressions,
+            "worsened": worsened,
+            "intent_worsened": intent_worsened,
+            "external_worsened": external_worsened,
+            "scope_check": scope_check,
+            "before_gate": before_gate,
+            "gate_preview": after_gate,
+            "gate_worsened": gate_worsened,
+            "intent_caused_gate_failure": intent_caused_gate_failure,
+            "baseline_abuse": baseline_abuse,
+            "contract_violations": list(violations),
+            "blocking_violations": list(blocking_violations),
+            **profile_payload,
+            "message": self._verify_message(status=status, violations=violations),
+        }
+        event_type = (
+            EVENT_PATCH_VIOLATED
+            if status == PatchContractStatus.VIOLATED.value
+            else EVENT_PATCH_VERIFIED
+        )
+        self._audit_emit(
+            root=after.root,
+            event_type=event_type,
+            severity="warn" if blocking_violations else "info",
+            run_id=_helpers._short_run_id(after.run_id),
+            intent_id=(intent.intent_id if intent is not None else None),
+            report_digest=self._report_digest_value(after),
+            status=status,
+            payload=payload,
+        )
+        if bool(baseline_abuse.get("detected")):
+            self._audit_emit(
+                root=after.root,
+                event_type=EVENT_BASELINE_ABUSE,
+                severity="error",
+                run_id=_helpers._short_run_id(after.run_id),
+                intent_id=(intent.intent_id if intent is not None else None),
+                report_digest=self._report_digest_value(after),
+                status="detected",
+                payload=payload,
+            )
+        return payload
 
     def _scope_check_payload(
         self,
@@ -733,16 +1006,28 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         before: MCPRunRecord | None = None,
         after: MCPRunRecord | None = None,
         structural_delta: Mapping[str, object] | None = None,
+        classification: ClassificationResult | None = None,
+        scope_check: dict[str, object] | None = None,
     ) -> dict[str, object]:
+        profile_fields: dict[str, object] = (
+            classification.to_payload() if classification is not None else {}
+        )
+        message = (
+            profile_unverified_message(classification.profile)
+            if classification is not None
+            else f"Patch contract unverified: {reason}."
+        )
         return {
             "mode": "verify",
             "status": PatchContractStatus.UNVERIFIED.value,
             "reason": reason,
-            "before": self._run_ref_payload(before) if before is not None else None,
-            "after": self._run_ref_payload(after) if after is not None else None,
+            "before": (self._run_ref_payload(before) if before is not None else None),
+            "after": (self._run_ref_payload(after) if after is not None else None),
             "structural_delta": dict(structural_delta or {}),
+            "scope_check": scope_check,
             "contract_violations": [],
-            "message": f"Patch contract unverified: {reason}.",
+            **profile_fields,
+            "message": message,
         }
 
     def _expired_patch_contract(

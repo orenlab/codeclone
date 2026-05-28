@@ -16,6 +16,7 @@ from ._claim_guard import (
 )
 from ._session_review_receipt_mixin import _MCPSessionReviewReceiptMixin
 from ._session_shared import MCPRunRecord, MCPServiceContractError
+from ._verification_profile import classify_patch
 
 
 class _MCPSessionClaimGuardMixin(_MCPSessionReviewReceiptMixin):
@@ -57,6 +58,10 @@ class _MCPSessionClaimGuardMixin(_MCPSessionReviewReceiptMixin):
             for finding in self._base_findings(record)
             if (canonical_id := str(finding.get("id", "")).strip())
         }
+        changed_paths = list(record.changed_paths)
+        profile_value = (
+            classify_patch(changed_paths).profile.value if changed_paths else None
+        )
         return ReportContext(
             findings=findings,
             short_to_canonical=short_to_canonical,
@@ -70,6 +75,7 @@ class _MCPSessionClaimGuardMixin(_MCPSessionReviewReceiptMixin):
             ),
             has_comparison_run=self._previous_run_for_root(record) is not None,
             metric_families=frozenset(sorted(METRIC_FAMILIES)),
+            verification_profile=profile_value,
         )
 
     def _reachable_qualnames(self, record: MCPRunRecord) -> frozenset[str]:

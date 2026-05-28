@@ -189,6 +189,31 @@ verified.
 If the result is `violated`, stop and explain the violation instead of continuing
 to broaden the patch.
 
+## Verification profiles
+
+The controller derives a **verification profile** from actual changed files
+during `check_patch_contract(mode="verify")`. The profile determines which
+structural checks apply. The agent does not choose the profile.
+
+| Profile | When | `after_run` required | Structural checks |
+|---|---|---|---|
+| `python_structural` | any `.py` / `.pyi` touched | yes | all |
+| `governance_config` | config files only | yes | not applicable |
+| `documentation_only` | only docs files | no | not applicable |
+| `non_python_patch` | other files, no Python / docs | no | not applicable |
+| `state_artifact_change` | baseline or cache touched | no (violated) | not applicable |
+
+Rules:
+
+- If any Python source, governance config, baseline, cache, or generated state
+  was touched, the lightweight path is not accepted.
+- Documentation-only and non-Python patches can verify without `after_run_id`
+  when `changed_files` or `diff_ref` evidence is provided.
+- Do not claim which profile applies — CodeClone decides.
+- Receipts use "not applicable" for skipped structural checks, never "passed".
+- When writing review summaries for non-structural profiles, do not claim
+  structural verification was performed.
+
 ## Claim discipline
 
 When writing a summary, call:

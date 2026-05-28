@@ -21,6 +21,7 @@ from ._review_receipt import (
     derive_claims_not_made,
     derive_human_decision_points,
     derive_patch_status,
+    derive_verification_profile_section,
     receipt_verdict,
     render_receipt_markdown,
 )
@@ -55,7 +56,13 @@ class _MCPSessionReviewReceiptMixin(_MCPSessionPatchContractMixin):
             record=record,
             changed_paths=changed_paths,
         )
-        structural_delta = self._receipt_structural_delta(record)
+        verification_profile = derive_verification_profile_section(changed_paths)
+        structural_delta = self._receipt_structural_delta(
+            record,
+            structural_checks_applicable=bool(
+                verification_profile.get("structural_checks_applicable", True)
+            ),
+        )
         reviewed_evidence = self._reviewed_evidence(record)
         patch_contract = (
             self._receipt_patch_contract(
@@ -80,6 +87,7 @@ class _MCPSessionReviewReceiptMixin(_MCPSessionPatchContractMixin):
             "receipt_version": RECEIPT_VERSION,
             "generated_at_utc": self._receipt_generated_at(record),
             "provenance": self._receipt_provenance(record),
+            "verification_profile": verification_profile,
             "scope": self._receipt_scope(intent),
             "blast_radius": (
                 self._receipt_blast_radius(intent) if include_blast_radius else None
@@ -296,7 +304,20 @@ class _MCPSessionReviewReceiptMixin(_MCPSessionPatchContractMixin):
                 return finding
         return None
 
-    def _receipt_structural_delta(self, record: MCPRunRecord) -> dict[str, object]:
+    def _receipt_structural_delta(
+        self,
+        record: MCPRunRecord,
+        *,
+        structural_checks_applicable: bool = True,
+    ) -> dict[str, object]:
+        if not structural_checks_applicable:
+            return {
+                "available": False,
+                "regressions": 0,
+                "improvements": 0,
+                "health_delta": None,
+                "verdict": "not_applicable",
+            }
         previous = self._previous_run_for_root(record)
         if previous is None:
             return {
