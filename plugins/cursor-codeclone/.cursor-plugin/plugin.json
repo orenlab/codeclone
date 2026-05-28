@@ -1,15 +1,17 @@
 {
   "name": "codeclone",
-  "version": "2.1.0a1",
-  "description": "Baseline-aware structural code quality analysis for Cursor through the local CodeClone MCP server.",
+  "displayName": "CodeClone",
+  "version": "0.1.0",
+  "description": "Structural Change Controller for AI-assisted Python development. Deterministic structural review, baseline-aware CI gates, and explicit change boundaries for coding agents — powered by codeclone-mcp.",
   "author": {
     "name": "Den Rozhnovskiy",
-    "email": "pytelemonbot@mail.ru",
-    "url": "https://github.com/orenlab"
+    "email": "roghnovskiy@gmail.com"
   },
-  "homepage": "https://orenlab.github.io/codeclone/cursor-plugin/",
+  "publisher": "orenlab",
+  "homepage": "https://orenlab.github.io/codeclone/",
   "repository": "https://github.com/orenlab/codeclone",
   "license": "MPL-2.0",
+  "logo": "assets/logo.png",
   "keywords": [
     "codeclone",
     "cursor",
@@ -18,10 +20,20 @@
     "baseline-aware",
     "code-quality",
     "clone-detection",
+    "blast-radius",
     "python"
   ],
-  "rules": "rules/",
+  "category": "developer-tools",
+  "tags": [
+    "python",
+    "analysis",
+    "review",
+    "refactoring",
+    "mcp"
+  ],
   "skills": "skills/",
-  "mcpServers": "mcp.json",
-  "logo": "assets/logo.png"
+  "agents": "agents/",
+  "rules": "rules/",
+  "hooks": "hooks/hooks.json",
+  "mcpServers": "mcp.json"
 }

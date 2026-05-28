@@ -28,6 +28,7 @@ site/
 # IDE
 .idea/
 .vscode/
+.cursor/
 
 # OS
 .DS_Store

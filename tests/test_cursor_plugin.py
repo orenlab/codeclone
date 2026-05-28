@@ -26,7 +26,7 @@ def test_cursor_plugin_json_is_valid() -> None:
 
     assert isinstance(manifest, dict)
     assert manifest["name"] == "codeclone"
-    assert manifest["version"] == "2.1.0a1"
+    assert manifest["version"] == "0.1.0"
     assert manifest["license"] == "MPL-2.0"
     assert manifest["rules"] == "rules/"
     assert manifest["skills"] == "skills/"
@@ -86,13 +86,15 @@ def test_cursor_skills_match_codex_skills() -> None:
         assert _frontmatter(cursor_text) == _frontmatter(codex_text)
 
 
-def test_cursor_plugin_version_matches_pyproject() -> None:
+def test_cursor_plugin_version_is_semver() -> None:
+    """Plugin has its own version lifecycle, independent of pyproject."""
     root = Path(__file__).resolve().parents[1]
     manifest = _load_json(
         root / "plugins" / "cursor-codeclone" / ".cursor-plugin" / "plugin.json"
     )
-    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
-    match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
-    assert match is not None
     assert isinstance(manifest, dict)
-    assert manifest["version"] == match.group(1)
+    version = manifest["version"]
+    assert isinstance(version, str)
+    assert re.fullmatch(r"\d+\.\d+\.\d+", version), (
+        f"Plugin version must be semver (X.Y.Z), got: {version}"
+    )

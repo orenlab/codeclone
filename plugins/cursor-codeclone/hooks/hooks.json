@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": "python3 ${CURSOR_PLUGIN_ROOT}/hooks/post-edit-reminder.py || python ${CURSOR_PLUGIN_ROOT}/hooks/post-edit-reminder.py",
+        "type": "command",
+        "timeout": 5
+      }
+    ],
+    "stop": [
+      {
+        "command": "python3 ${CURSOR_PLUGIN_ROOT}/hooks/session-cleanup-check.py || python ${CURSOR_PLUGIN_ROOT}/hooks/session-cleanup-check.py",
+        "type": "command",
+        "timeout": 5
+      }
+    ]
+  }
+}

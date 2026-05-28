@@ -48,6 +48,7 @@ patch against the declared boundary, and generates an auditable review receipt.
 | VS Code extension | [Guide](vscode-extension.md) | [Contract](book/21-vscode-extension.md) |
 | Claude Desktop bundle | [Guide](claude-desktop-bundle.md) | [Contract](book/22-claude-desktop-bundle.md) |
 | Codex plugin | [Guide](codex-plugin.md) | [Contract](book/23-codex-plugin.md) |
+| Cursor plugin | [Guide](cursor-plugin.md) | [Contract](book/25-cursor-plugin.md) |
 
 ## Reports
 
@@ -83,6 +84,7 @@ Contract-first documentation derived from code and locked tests.
 - [VS Code extension contract](book/21-vscode-extension.md)
 - [Claude Desktop bundle contract](book/22-claude-desktop-bundle.md)
 - [Codex plugin contract](book/23-codex-plugin.md)
+- [Cursor plugin contract](book/25-cursor-plugin.md)
 - [Claim Guard](book/28-claim-guard.md)
 - [HTML report rendering contract](book/10-html-render.md)
 
@@ -112,6 +114,7 @@ Contract-first documentation derived from code and locked tests.
 - [VS Code extension usage](vscode-extension.md)
 - [Claude Desktop bundle usage](claude-desktop-bundle.md)
 - [Codex plugin usage](codex-plugin.md)
+- [Cursor plugin usage](cursor-plugin.md)
 - [SARIF integration](sarif.md)
 
 ### Operational
