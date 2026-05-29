@@ -18,6 +18,9 @@ AuditSeverity = Literal["info", "warn", "error"]
 AuditPayloadMode = Literal["off", "compact", "full"]
 
 EVENT_INTENT_DECLARED = "intent.declared"
+EVENT_INTENT_QUEUED = "intent.queued"
+EVENT_INTENT_PROMOTED = "intent.promoted"
+EVENT_INTENT_QUEUE_BLOCKED = "intent.queue_blocked"
 EVENT_INTENT_CHECKED = "intent.checked"
 EVENT_INTENT_EXPANDED = "intent.expanded"
 EVENT_INTENT_VIOLATED = "intent.violated"
@@ -39,6 +42,9 @@ EVENT_BASELINE_ABUSE = "baseline_abuse.detected"
 KNOWN_EVENT_TYPES = frozenset(
     {
         EVENT_INTENT_DECLARED,
+        EVENT_INTENT_QUEUED,
+        EVENT_INTENT_PROMOTED,
+        EVENT_INTENT_QUEUE_BLOCKED,
         EVENT_INTENT_CHECKED,
         EVENT_INTENT_EXPANDED,
         EVENT_INTENT_VIOLATED,
@@ -94,10 +100,17 @@ def compact_payload_for_event(
         return {}
     if event_type in {
         EVENT_INTENT_DECLARED,
+        EVENT_INTENT_QUEUED,
+        EVENT_INTENT_PROMOTED,
         EVENT_INTENT_RENEWED,
         EVENT_INTENT_EXPIRED,
     }:
         return _compact_intent_payload(payload)
+    if event_type == EVENT_INTENT_QUEUE_BLOCKED:
+        return {
+            "intent_id": str(payload.get("intent_id", "")),
+            "blocking_count": _int_value(payload.get("blocking_count")),
+        }
     if event_type in {
         EVENT_INTENT_CHECKED,
         EVENT_INTENT_EXPANDED,
@@ -248,6 +261,9 @@ __all__ = [
     "EVENT_INTENT_DECLARED",
     "EVENT_INTENT_EXPANDED",
     "EVENT_INTENT_EXPIRED",
+    "EVENT_INTENT_PROMOTED",
+    "EVENT_INTENT_QUEUED",
+    "EVENT_INTENT_QUEUE_BLOCKED",
     "EVENT_INTENT_RENEWED",
     "EVENT_INTENT_VIOLATED",
     "EVENT_PATCH_BUDGET",

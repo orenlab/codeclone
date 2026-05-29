@@ -31,6 +31,7 @@ DEFAULT_INTENT_GUARDS: Final[tuple[str, ...]] = (
 
 class IntentStatus(str, Enum):
     ACTIVE = "active"
+    QUEUED = "queued"
     CLEAN = "clean"
     EXPANDED = "expanded"
     VIOLATED = "violated"

@@ -97,6 +97,15 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         budgets = self._budgets_for_record(record=record, strictness=strictness)
         current_state = self._current_state(record)
         gate_preview = self._gate_preview(record=record, budgets=budgets)
+        is_queued = intent is not None and intent.status == IntentStatus.QUEUED
+        budget_message = (
+            "Budget computed for queued intent. Do not edit until promoted."
+            if is_queued
+            else self._budget_message(
+                strictness=strictness,
+                gate_preview=gate_preview,
+            )
+        )
         payload: dict[str, object] = {
             "mode": "budget",
             "run_id": _helpers._short_run_id(record.run_id),
@@ -113,11 +122,11 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             "current_state": current_state,
             "headroom": self._headroom(budgets=budgets, current_state=current_state),
             "gate_preview": gate_preview,
-            "message": self._budget_message(
-                strictness=strictness,
-                gate_preview=gate_preview,
-            ),
+            "message": budget_message,
         }
+        if is_queued:
+            payload["intent_status"] = "queued"
+            payload["edit_allowed"] = False
         self._audit_emit(
             root=record.root,
             event_type=EVENT_PATCH_BUDGET,
@@ -158,6 +167,13 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         intent = self._optional_intent(record=before, intent_id=intent_id)
         if intent is not None:
             self._renew_lease_if_active(record=before, intent=intent)
+
+        # ── 2b. Queued intents cannot be verified ──────────────────
+        if intent is not None and intent.status == IntentStatus.QUEUED:
+            return self._unverified_patch_contract(
+                reason="intent_not_active",
+                before=before,
+            )
 
         # ── 3. Compute actual changed files ─────────────────────────
         actual_changed_files = self._patch_changed_files_flexible(
@@ -288,6 +304,11 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             "incomparable_runs": (
                 "Before and after runs are not comparable."
                 " Re-run analyze_repository with the same settings."
+            ),
+            "intent_not_active": (
+                "Queued intent must be promoted before editing or"
+                " verification. Call"
+                " manage_change_intent(action='promote')."
             ),
             "report_digest_mismatch": (
                 "Intent was declared against a different report."

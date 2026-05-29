@@ -941,6 +941,7 @@ def build_mcp_server(
         root: str | None = None,
         ttl_seconds: int | None = None,
         lease_seconds: int | None = None,
+        on_conflict: str | None = None,
     ) -> dict[str, object]:
         return service.manage_change_intent(
             action=action,
@@ -954,6 +955,7 @@ def build_mcp_server(
             root=root,
             ttl_seconds=ttl_seconds,
             lease_seconds=lease_seconds,
+            on_conflict=on_conflict,
         )
 
     @tool(

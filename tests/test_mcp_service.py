@@ -4347,6 +4347,211 @@ def test_mcp_verify_returns_claim_validation_recommended(
     assert no_before["claim_validation_recommended"] is True
 
 
+def _two_agent_service(
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[CodeCloneMCPService, str]:
+    """Service with one run and a *foreign* active intent on pkg/a.py.
+
+    Writes a workspace intent file with a different PID to simulate
+    agent A owning scope that agent B (this service) wants.
+    """
+    from codeclone.surfaces.mcp import _workspace_intents as _ws_mod
+    from codeclone.surfaces.mcp._workspace_intents import (
+        WorkspaceIntentRecord,
+        compute_scope_digest,
+        format_utc,
+        utc_now,
+        write_workspace_intent,
+    )
+    from codeclone.surfaces.mcp._workspace_intents import (
+        expires_at as _expires_at,
+    )
+
+    monkeypatch.setattr(_ws_mod, "_is_pid_alive", lambda pid: True)
+    service = CodeCloneMCPService(history_limit=4)
+    before = _patch_contract_run_record(
+        root,
+        run_id="queuetest12345678",
+        digest="queue-test-digest",
+        include_regression=False,
+        complexity=6,
+        health=90,
+    )
+    service._runs.register(before)
+    # Write a foreign workspace intent file (different PID).
+    now = utc_now()
+    foreign_scope: dict[str, object] = {
+        "allowed_files": ["pkg/a.py"],
+        "allowed_related": [],
+        "forbidden": [],
+    }
+    foreign_record = WorkspaceIntentRecord(
+        intent_id="intent-foreign-001",
+        agent_pid=99999,
+        agent_start_epoch=1000000,
+        agent_label="agent-a",
+        run_id="queuetest12345678",
+        declared_at_utc=format_utc(now),
+        expires_at_utc=_expires_at(declared_at=now, ttl_seconds=3600),
+        ttl_seconds=3600,
+        status="active",
+        intent="agent A edits pkg/a",
+        scope=foreign_scope,
+        scope_digest=compute_scope_digest(foreign_scope),
+        blast_radius_summary={},
+        lease_renewed_at_utc=format_utc(now),
+        lease_seconds=300,
+        report_digest="queue-test-digest",
+    )
+    write_workspace_intent(root=root, record=foreign_record)
+    return service, "intent-foreign-001"
+
+
+def test_mcp_declare_queued_on_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """on_conflict='queue' with overlap creates a queued intent."""
+    service, _agent_a_id = _two_agent_service(tmp_path, monkeypatch)
+
+    # Same-session overlap with on_conflict="queue" → queued.
+    queued = service.manage_change_intent(
+        action="declare",
+        run_id="queuetest",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="agent B wants pkg/a too",
+        on_conflict="queue",
+    )
+    assert queued["status"] == "queued"
+    assert queued["before_run_pinned"] is False
+    assert isinstance(queued["blocked_by"], list)
+    assert len(queued["blocked_by"]) >= 1
+    assert cast("int", queued["queue_position"]) >= 1
+
+
+def test_mcp_declare_queue_no_conflict_creates_active(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """on_conflict='queue' without overlap creates active, not queued."""
+    service, _agent_a_id = _two_agent_service(tmp_path, monkeypatch)
+
+    # No overlap → active even with on_conflict="queue".
+    result = service.manage_change_intent(
+        action="declare",
+        run_id="queuetest",
+        scope={"allowed_files": ["pkg/b.py"]},
+        intent="agent B edits non-overlapping file",
+        on_conflict="queue",
+    )
+    assert result["status"] == "active"
+
+
+def _declare_queued_pkg_a(
+    service: CodeCloneMCPService,
+    intent_text: str = "queued pkg/a intent",
+) -> str:
+    """Declare a queued intent on pkg/a.py and return its ID."""
+    queued = service.manage_change_intent(
+        action="declare",
+        run_id="queuetest",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent=intent_text,
+        on_conflict="queue",
+    )
+    assert queued["status"] == "queued"
+    return str(queued["intent_id"])
+
+
+def test_mcp_promote_queued_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Promote transitions queued → active after blocker is cleared."""
+    service, agent_a_id = _two_agent_service(tmp_path, monkeypatch)
+    queued_id = _declare_queued_pkg_a(service, "agent B queued")
+
+    # Promote while blocker active → still queued.
+    still_blocked = service.manage_change_intent(
+        action="promote",
+        intent_id=queued_id,
+    )
+    assert still_blocked["status"] == "queued"
+    assert cast("int", still_blocked["blocking_count"]) >= 1
+
+    # Clear blocker by removing foreign workspace file.
+    from codeclone.surfaces.mcp._workspace_intents import (
+        remove_workspace_intent as _remove_ws,
+    )
+
+    _remove_ws(
+        root=tmp_path,
+        pid=99999,
+        start_epoch=1000000,
+        intent_id=agent_a_id,
+    )
+
+    # Now promote succeeds.
+    promoted = service.manage_change_intent(
+        action="promote",
+        intent_id=queued_id,
+    )
+    assert promoted["status"] == "active"
+    assert promoted["previous_status"] == "queued"
+
+
+def test_mcp_verify_rejects_queued_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """check_patch_contract(mode='verify') rejects queued intents."""
+    service, _agent_a_id = _two_agent_service(tmp_path, monkeypatch)
+    queued_id = _declare_queued_pkg_a(service)
+
+    result = service.check_patch_contract(
+        mode="verify",
+        before_run_id="queuetest",
+        intent_id=queued_id,
+    )
+    assert result["status"] == "unverified"
+    assert result["reason"] == "intent_not_active"
+    assert "promote" in str(result.get("next_step", ""))
+
+
+def test_mcp_budget_queued_intent_edit_not_allowed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Budget for queued intent includes edit_allowed=False."""
+    service, _agent_a_id = _two_agent_service(tmp_path, monkeypatch)
+    queued_id = _declare_queued_pkg_a(service, "queued budget test")
+
+    budget = service.check_patch_contract(
+        mode="budget",
+        run_id="queuetest",
+        intent_id=queued_id,
+    )
+    assert budget["intent_status"] == "queued"
+    assert budget["edit_allowed"] is False
+
+
+def test_mcp_clear_queued_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clear removes queued intents the same as active ones."""
+    service, _agent_a_id = _two_agent_service(tmp_path, monkeypatch)
+    queued_id = _declare_queued_pkg_a(service, "will be cleared")
+
+    cleared = service.manage_change_intent(
+        action="clear",
+        intent_id=queued_id,
+    )
+    assert cleared["cleared"] == 1
+    assert queued_id in cast("list[str]", cleared["cleared_intent_ids"])
+
+
 def test_claim_guard_detects_deterministic_overclaims() -> None:
     payload = mcp_claim_guard_mod.validate_claims(
         text=(

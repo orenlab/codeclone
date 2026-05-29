@@ -20,6 +20,9 @@ from ...audit import (
     EVENT_INTENT_DECLARED,
     EVENT_INTENT_EXPANDED,
     EVENT_INTENT_EXPIRED,
+    EVENT_INTENT_PROMOTED,
+    EVENT_INTENT_QUEUE_BLOCKED,
+    EVENT_INTENT_QUEUED,
     EVENT_INTENT_RENEWED,
     EVENT_INTENT_VIOLATED,
     EVENT_WORKSPACE_CONFLICT,
@@ -148,6 +151,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         root: str | None = None,
         ttl_seconds: int | None = None,
         lease_seconds: int | None = None,
+        on_conflict: str | None = None,
     ) -> dict[str, object]:
         match action:
             case "declare":
@@ -157,7 +161,10 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                     intent=intent,
                     expected_effects=expected_effects,
                     ttl_seconds=ttl_seconds,
+                    on_conflict=on_conflict,
                 )
+            case "promote":
+                return self._promote_queued_intent(intent_id=intent_id)
             case "get":
                 record, active_intent = self._resolve_intent(
                     run_id=run_id,
@@ -201,8 +208,8 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 raise MCPServiceContractError(
                     "Invalid value for action: "
                     f"{action!r}. Expected one of: check, clear, declare, "
-                    "gc_workspace, get, list_workspace, recover, renew, "
-                    "reset_workspace."
+                    "gc_workspace, get, list_workspace, promote, recover, "
+                    "renew, reset_workspace."
                 )
 
     def _declare_change_intent(
@@ -213,6 +220,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         intent: str | None,
         expected_effects: Sequence[str] | None,
         ttl_seconds: int | None,
+        on_conflict: str | None = None,
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
         try:
@@ -293,16 +301,32 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             own_pid=self._agent_pid,
             own_start_epoch=self._agent_start_epoch,
         )
+        # ── Queue branch: downgrade to queued if conflicts block ───
+        if on_conflict == "queue" and concurrent_intents:
+            return self._downgrade_to_queued(
+                record=record,
+                intent=record_payload,
+                workspace_record=workspace_record,
+                workspace_registered=workspace_registered,
+                concurrent_intents=concurrent_intents,
+                workspace_existing=workspace_existing,
+                blast_payload=blast_payload,
+                ttl=ttl,
+            )
+        # ── Queued context: advisory info about waiting agents ─────
+        queued_context = self._queued_context_from_workspace(
+            scope=normalized_scope,
+            workspace_existing=workspace_existing,
+        )
         payload = record_payload.to_payload(
             short_run_id=_helpers._short_run_id(record.run_id)
         )
-        payload["do_not_touch"] = blast_payload["do_not_touch"]
-        payload["do_not_touch_summary"] = blast_payload["do_not_touch_summary"]
-        payload["review_context"] = blast_payload["review_context"]
-        payload["review_context_summary"] = blast_payload["review_context_summary"]
+        _apply_blast_context(payload, blast_payload)
         payload["workspace_registered"] = workspace_registered
         payload["concurrent_intents"] = concurrent_intents
         payload["workspace_relations"] = workspace_relations
+        if queued_context:
+            payload["queued_context"] = queued_context
         payload["ttl_seconds"] = ttl
         self._audit_emit(
             root=record.root,
@@ -326,6 +350,240 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 payload={"concurrent_intents": concurrent_intents},
             )
         return payload
+
+    def _downgrade_to_queued(
+        self,
+        *,
+        record: MCPRunRecord,
+        intent: IntentRecord,
+        workspace_record: WorkspaceIntentRecord,
+        workspace_registered: bool,
+        concurrent_intents: list[dict[str, object]],
+        workspace_existing: tuple[WorkspaceIntentRecord, ...],
+        blast_payload: dict[str, object],
+        ttl: int,
+    ) -> dict[str, object]:
+        """Downgrade an already-registered active intent to queued."""
+        queued_intent = replace(intent, status=IntentStatus.QUEUED)
+        with self._state_lock:
+            self._active_intents[intent.intent_id] = queued_intent
+            self._runs.unpin(record.run_id)
+        update_workspace_intent_status(
+            root=record.root,
+            pid=self._agent_pid,
+            start_epoch=self._agent_start_epoch,
+            intent_id=intent.intent_id,
+            new_status=IntentStatus.QUEUED.value,
+        )
+        blocked_by = [
+            {
+                "intent_id": conflict.get("intent_id"),
+                "agent_pid": conflict.get("agent_pid"),
+                "agent_label": conflict.get("agent_label"),
+                "ownership": conflict.get("ownership"),
+                "overlapping_files": sorted(
+                    {
+                        *_as_str_sequence(conflict.get("hard_overlap")),
+                        *_as_str_sequence(conflict.get("soft_overlap")),
+                    }
+                ),
+            }
+            for conflict in concurrent_intents
+        ]
+        queue_position = self._compute_queue_position(
+            intent_id=intent.intent_id,
+            workspace_records=workspace_existing,
+        )
+        payload = queued_intent.to_payload(
+            short_run_id=_helpers._short_run_id(record.run_id)
+        )
+        _apply_blast_context(payload, blast_payload)
+        payload["workspace_registered"] = workspace_registered
+        payload["before_run_pinned"] = False
+        payload["blocked_by"] = blocked_by
+        payload["queue_position"] = queue_position
+        payload["ttl_seconds"] = ttl
+        payload["message"] = (
+            "Intent queued behind active workspace intent. "
+            "Do not edit until promoted. Queued intents do not pin "
+            "the before-run; long waits may require re-analysis "
+            "before promotion."
+        )
+        self._audit_emit(
+            root=record.root,
+            event_type=EVENT_INTENT_QUEUED,
+            severity="info",
+            run_id=_helpers._short_run_id(record.run_id),
+            intent_id=intent.intent_id,
+            report_digest=intent.report_digest,
+            status="queued",
+            payload=payload,
+        )
+        return payload
+
+    def _promote_queued_intent(
+        self,
+        *,
+        intent_id: str | None,
+    ) -> dict[str, object]:
+        """Promote a queued intent to active after re-checking conflicts."""
+        if intent_id is None:
+            raise MCPServiceContractError("action='promote' requires intent_id.")
+        with self._state_lock:
+            queued_intent = self._active_intents.get(intent_id)
+        if queued_intent is None:
+            raise MCPServiceContractError(f"Unknown change intent id: {intent_id}")
+        if queued_intent.status != IntentStatus.QUEUED:
+            raise MCPServiceContractError(
+                f"Intent {intent_id} has status "
+                f"{queued_intent.status.value!r}, not 'queued'. "
+                "Only queued intents can be promoted."
+            )
+        # Resolve the before-run — may have been evicted (not pinned).
+        try:
+            record = self._runs.get(queued_intent.run_id)
+        except MCPRunNotFoundError:
+            return {
+                "intent_id": intent_id,
+                "status": "unverified",
+                "reason": "before_run_evicted",
+                "next_step": (
+                    "Run analyze_repository to create a fresh"
+                    " before-run, then redeclare the intent."
+                ),
+                "message": (
+                    "Before-run was evicted from bounded history. "
+                    "Re-analyze and redeclare the intent."
+                ),
+            }
+        # Re-check workspace conflicts.
+        workspace_existing = list_workspace_intents(root=record.root)
+        conflicts = detect_conflicts(
+            new_scope=queued_intent.scope.to_payload(),
+            existing=workspace_existing,
+            own_pid=self._agent_pid,
+            own_start_epoch=self._agent_start_epoch,
+        )
+        if conflicts:
+            blocked_by = [
+                {
+                    "intent_id": conflict.get("intent_id"),
+                    "ownership": conflict.get("ownership"),
+                    "overlapping_files": sorted(
+                        {
+                            *_as_str_sequence(conflict.get("hard_overlap")),
+                            *_as_str_sequence(conflict.get("soft_overlap")),
+                        }
+                    ),
+                }
+                for conflict in conflicts
+            ]
+            payload: dict[str, object] = {
+                "intent_id": intent_id,
+                "status": "queued",
+                "blocked_by": blocked_by,
+                "blocking_count": len(blocked_by),
+                "message": ("Intent is still blocked by active workspace intents."),
+            }
+            self._audit_emit(
+                root=record.root,
+                event_type=EVENT_INTENT_QUEUE_BLOCKED,
+                severity="warn",
+                run_id=_helpers._short_run_id(record.run_id),
+                intent_id=intent_id,
+                report_digest=queued_intent.report_digest,
+                status="queued",
+                payload=payload,
+            )
+            return payload
+        # Promote: active status, pin run, renew lease.
+        promoted = replace(queued_intent, status=IntentStatus.ACTIVE)
+        with self._state_lock:
+            self._active_intents[intent_id] = promoted
+            self._runs.pin(record.run_id)
+        update_workspace_intent_status(
+            root=record.root,
+            pid=self._agent_pid,
+            start_epoch=self._agent_start_epoch,
+            intent_id=intent_id,
+            new_status=IntentStatus.ACTIVE.value,
+        )
+        renew_workspace_intent_lease(
+            root=record.root,
+            pid=self._agent_pid,
+            start_epoch=self._agent_start_epoch,
+            intent_id=intent_id,
+        )
+        promoted_payload: dict[str, object] = {
+            "intent_id": intent_id,
+            "previous_status": "queued",
+            "status": "active",
+            "run_id": _helpers._short_run_id(record.run_id),
+            "message": (
+                "Queued intent promoted. Re-check blast radius "
+                "and patch budget before editing."
+            ),
+        }
+        self._audit_emit(
+            root=record.root,
+            event_type=EVENT_INTENT_PROMOTED,
+            severity="info",
+            run_id=_helpers._short_run_id(record.run_id),
+            intent_id=intent_id,
+            report_digest=promoted.report_digest,
+            status="active",
+            payload=promoted_payload,
+        )
+        return promoted_payload
+
+    def _queued_context_from_workspace(
+        self,
+        *,
+        scope: IntentScope,
+        workspace_existing: tuple[WorkspaceIntentRecord, ...],
+    ) -> list[dict[str, object]]:
+        """Return advisory info about queued intents with overlapping scope."""
+        new_allowed = set(scope.allowed_files)
+        if not new_allowed:
+            return []
+        context: list[dict[str, object]] = []
+        for record in workspace_existing:
+            if record.status != IntentStatus.QUEUED.value:
+                continue
+            if record.agent_pid == self._agent_pid and (
+                record.agent_start_epoch == self._agent_start_epoch
+            ):
+                continue
+            raw_existing = record.scope.get("allowed_files")
+            existing_allowed = (
+                set(raw_existing) if isinstance(raw_existing, list) else set()
+            )
+            overlap = sorted(new_allowed & existing_allowed)
+            if overlap:
+                context.append(
+                    {
+                        "intent_id": record.intent_id,
+                        "overlapping_files": overlap,
+                        "message": ("Another agent is waiting for this scope."),
+                    }
+                )
+        return context
+
+    @staticmethod
+    def _compute_queue_position(
+        *,
+        intent_id: str,
+        workspace_records: tuple[WorkspaceIntentRecord, ...],
+    ) -> int:
+        """Compute advisory queue position among all queued records."""
+        queued = sorted(
+            (r for r in workspace_records if r.status == IntentStatus.QUEUED.value),
+            key=lambda r: (r.declared_at_utc, r.intent_id),
+        )
+        for i, record in enumerate(queued, start=1):
+            if record.intent_id == intent_id:
+                return i
+        return 1
 
     def _check_change_intent(
         self,
@@ -1219,6 +1477,20 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         )
 
 
+def _apply_blast_context(
+    payload: dict[str, object],
+    blast_payload: Mapping[str, object],
+) -> None:
+    """Copy blast radius context fields into an intent payload."""
+    for key in (
+        "do_not_touch",
+        "do_not_touch_summary",
+        "review_context",
+        "review_context_summary",
+    ):
+        payload[key] = blast_payload[key]
+
+
 def _as_mapping(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
@@ -1227,6 +1499,10 @@ def _as_sequence(value: object) -> Sequence[object]:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return value
     return ()
+
+
+def _as_str_sequence(value: object) -> tuple[str, ...]:
+    return tuple(str(item) for item in _as_sequence(value))
 
 
 def _utc_now() -> str:

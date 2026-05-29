@@ -1827,6 +1827,18 @@
           ],
           "default": null,
           "title": "Lease Seconds"
+        },
+        "on_conflict": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Conflict"
         }
       },
       "required": [

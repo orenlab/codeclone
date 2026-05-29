@@ -36,6 +36,7 @@ _SAFE_INTENT_ID_RE: Final = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
 
 class WorkspaceIntentStatus(str, Enum):
     ACTIVE = "active"
+    QUEUED = "queued"
     CLEAN = "clean"
     EXPANDED = "expanded"
     VIOLATED = "violated"
@@ -601,6 +602,8 @@ def _detect_scope_state(
     relations: list[dict[str, object]] = []
     now = utc_now()
     for record in existing:
+        if record.status == WorkspaceIntentStatus.QUEUED.value:
+            continue
         ownership = classify_intent_ownership(
             record,
             own_pid=own_pid,
