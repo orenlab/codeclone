@@ -165,6 +165,7 @@ files = ["codeclone", "tests"]
 exclude = [
     "^build/",
     "^site/",
+    "^plugins/cursor-codeclone/scripts/launch_mcp\\.py$",
 ]
 
 [tool.ruff]
