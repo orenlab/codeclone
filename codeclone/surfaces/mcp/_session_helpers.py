@@ -798,6 +798,7 @@ def _summary_security_surfaces_payload(record: MCPRunRecord) -> dict[str, object
         "production": _as_int(summary.get("production", 0), 0),
         "tests": _as_int(summary.get("tests", 0), 0),
         "report_only": bool(summary.get("report_only", True)),
+        "note": "report_only inventory; not a vulnerability scan",
     }
 
 

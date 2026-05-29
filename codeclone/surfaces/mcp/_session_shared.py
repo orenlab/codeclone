@@ -105,7 +105,7 @@ from ...utils.git_diff import validate_git_diff_ref
 from .payloads import paginate, resolve_finding_id, short_id
 
 AnalysisMode = Literal["full", "clones_only"]
-CachePolicy = Literal["reuse", "refresh", "off"]
+CachePolicy = Literal["reuse", "off"]
 FreshnessKind = Literal["fresh", "mixed", "reused"]
 HotlistKind = Literal[
     "most_actionable",
@@ -165,6 +165,11 @@ _HEALTH_SCOPE_REPOSITORY: Final[HealthScope] = "repository"
 _FOCUS_REPOSITORY: Final[SummaryFocus] = "repository"
 _FOCUS_PRODUCTION: Final[SummaryFocus] = "production"
 _FOCUS_CHANGED_PATHS: Final[SummaryFocus] = "changed_paths"
+_MCP_GOVERNANCE_CONFIG_KEYS = frozenset(
+    {
+        "golden_fixture_paths",
+    }
+)
 _MCP_CONFIG_KEYS = frozenset(
     {
         "min_loc",
@@ -218,7 +223,7 @@ _CONFIDENCE_WEIGHT: Final[dict[str, float]] = {
 # Canonical report groups use FAMILY_CLONES ("clones"), while individual finding
 # payloads use FAMILY_CLONE ("clone").
 _VALID_ANALYSIS_MODES = frozenset({"full", "clones_only"})
-_VALID_CACHE_POLICIES = frozenset({"reuse", "refresh", "off"})
+_VALID_CACHE_POLICIES = frozenset({"reuse", "off"})
 _VALID_FINDING_FAMILIES = frozenset(
     {"all", "clone", "structural", "dead_code", "design"}
 )
@@ -238,6 +243,7 @@ _VALID_HELP_TOPICS = frozenset(
         "review_state",
         "changed_scope",
         "change_control",
+        "trust_boundaries",
     }
 )
 _VALID_HELP_DETAILS = frozenset({"compact", "normal"})
@@ -807,6 +813,45 @@ _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             ),
         ),
     ),
+    "trust_boundaries": MCPHelpTopicSpec(
+        summary=(
+            "Documented MCP trust limits: read-only analysis, advisory "
+            "workspace intents, optional absolute artifact paths, and "
+            "non-authenticated remote transport."
+        ),
+        key_points=(
+            "MCP never mutates source, baseline, cache.json, or canonical reports.",
+            (
+                "Optional paths (baseline_path, cache_path, coverage_xml) may "
+                "resolve outside the scan root by design."
+            ),
+            (
+                "Workspace intents under .cache/codeclone/intents/ are "
+                "advisory same-UID coordination, not signed proof."
+            ),
+            (
+                "Cache signatures and baseline payload_sha256 detect "
+                "corruption, not hostile same-UID writers."
+            ),
+            (
+                "--allow-remote removes loopback guard only; add external "
+                "auth/network controls for HTTP MCP."
+            ),
+            (
+                "security_surfaces in responses is report-only inventory, "
+                "not a vulnerability scan."
+            ),
+        ),
+        recommended_tools=("help", "analyze_repository", "start_controlled_change"),
+        doc_links=(_MCP_INTERFACE_DOC_LINK,),
+        warnings=(
+            "Do not treat advisory intent files as cryptographic agent identity.",
+        ),
+        anti_patterns=(
+            "Calling Security Surfaces a vulnerability audit.",
+            "Assuming MCP sandboxes optional absolute artifact paths.",
+        ),
+    ),
 }
 
 
@@ -1227,6 +1272,7 @@ __all__ = [
     "_HELP_TOPIC_SPECS",
     "_HOTLIST_REPORT_KEYS",
     "_MCP_CONFIG_KEYS",
+    "_MCP_GOVERNANCE_CONFIG_KEYS",
     "_METRICS_DETAIL_FAMILY_ALIASES",
     "_NOVELTY_WEIGHT",
     "_REPORT_DUMMY_PATH",

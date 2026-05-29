@@ -235,7 +235,7 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
                 "claims": None,
                 "receipt": None,
                 "intent_cleared": False,
-                "user_action_required": False,
+                "user_action_required": True,
                 "next_step": (
                     "Intent was declared against a different report. "
                     "Do not redeclare on the after-run — use the "
@@ -455,8 +455,8 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
                 "Intent not cleared for retry."
             )
         if intent_cleared:
-            return "Change verified and completed. Intent cleared."
-        return f"Change verified (status: {verify_status}). Intent active."
+            return "Done. Intent cleared."
+        return f"Verified ({verify_status}). Intent still active."
 
 
 def _validated_blast_radius_depth(value: str) -> str:

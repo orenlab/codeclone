@@ -49,6 +49,7 @@ from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import MetricsDiff
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
+    CachePolicy,
     DetailLevel,
     MCPAnalysisRequest,
     MCPFindingNotFoundError,
@@ -1122,6 +1123,14 @@ def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
                 "url": "https://orenlab.github.io/codeclone/mcp/",
             },
         ],
+        "anti_patterns": [
+            "Starting exploration with list_findings on a noisy repository.",
+            "Using get_report_section(section='all') as the default first step.",
+            (
+                "Escalating detail on larger lists instead of opening one "
+                "finding with get_finding."
+            ),
+        ],
     }
     assert normal["topic"] == "workflow"
     assert normal["detail"] == "normal"
@@ -2082,6 +2091,27 @@ def test_mcp_service_build_args_handles_pyproject_and_invalid_settings(
         )
 
 
+def test_mcp_service_build_args_loads_governance_config_without_pyproject_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    monkeypatch.setattr(
+        mcp_state_mod,
+        "load_pyproject_config",
+        lambda _root: {
+            "min_loc": 12,
+            "golden_fixture_paths": ("tests/fixtures/golden_*",),
+        },
+    )
+    args = service._build_args(
+        root_path=tmp_path,
+        request=MCPAnalysisRequest(respect_pyproject=False),
+    )
+    assert args.min_loc == 10
+    assert args.golden_fixture_paths == ("tests/fixtures/golden_*",)
+
+
 def test_mcp_service_root_and_helper_contract_errors(
     tmp_path: Path,
 ) -> None:
@@ -2302,12 +2332,12 @@ def test_mcp_service_rejects_refresh_cache_policy_in_read_only_mode(
     _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
 
-    with pytest.raises(MCPServiceContractError, match="read-only"):
+    with pytest.raises(MCPServiceContractError, match="cache_policy"):
         service.analyze_repository(
             MCPAnalysisRequest(
                 root=str(tmp_path),
                 respect_pyproject=False,
-                cache_policy="refresh",
+                cache_policy=cast("CachePolicy", "refresh"),
             )
         )
 
@@ -3012,7 +3042,9 @@ def test_mcp_service_wrapper_and_server_validation_edges(
     assert mcp_server_mod._validated_analysis_mode("clones_only") == "clones_only"
     with pytest.raises(MCPServiceContractError, match="analysis_mode"):
         mcp_server_mod._validated_analysis_mode("bad")
-    assert mcp_server_mod._validated_cache_policy("refresh") == "refresh"
+    assert mcp_server_mod._validated_cache_policy("reuse") == "reuse"
+    with pytest.raises(MCPServiceContractError, match="CLI-only"):
+        mcp_server_mod._validated_cache_policy("refresh")
     assert mcp_server_mod._validated_cache_policy("off") == "off"
     with pytest.raises(MCPServiceContractError, match="cache_policy"):
         mcp_server_mod._validated_cache_policy("bad")
@@ -7046,6 +7078,7 @@ def test_mcp_service_summary_payload_includes_security_surfaces(
         "production": 4,
         "tests": 1,
         "report_only": True,
+        "note": "report_only inventory; not a vulnerability scan",
     }
     empty_report_record = replace(
         record,

@@ -20,49 +20,41 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _hook_io import read_bounded_stdin
+from _hook_io import emit_hook_payload, read_bounded_stdin
+
+_FOLLOWUP = {
+    "followup_message": (
+        "A Python file was edited. Consider re-running "
+        "`analyze_repository` to check for structural "
+        "regressions before finishing. If you have an active "
+        "change intent, run `finish_controlled_change` with "
+        "the declared `intent_id`."
+    )
+}
 
 
-def main() -> None:
-    raw = read_bounded_stdin()
-    if not raw:
-        print("{}")
-        return
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, OSError):
-        print("{}")
-        return
-
-    file_path: str = data.get("path", "")
-
-    # --- Input validation (defense-in-depth) ---
-    # Reject empty paths, null bytes, and directory traversal sequences.
-    if (
+def _invalid_path(file_path: str) -> bool:
+    return (
         not file_path
         or "\0" in file_path
         or ".." in file_path.split("/")
         or ".." in file_path.split("\\")
-    ):
-        print("{}")
-        return
+    )
 
-    if file_path.endswith(".py"):
-        print(
-            json.dumps(
-                {
-                    "followup_message": (
-                        "A Python file was edited. Consider re-running "
-                        "`analyze_repository` to check for structural "
-                        "regressions before finishing. If you have an active "
-                        "change intent, run `finish_controlled_change` with "
-                        "the declared `intent_id`."
-                    )
-                }
-            )
-        )
-    else:
-        print("{}")
+
+def main() -> None:
+    followup: dict[str, object] | None = None
+    raw = read_bounded_stdin()
+    if raw:
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, OSError):
+            data = None
+        if isinstance(data, dict):
+            file_path = str(data.get("path", ""))
+            if not _invalid_path(file_path) and file_path.endswith(".py"):
+                followup = _FOLLOWUP
+    emit_hook_payload(followup)
 
 
 if __name__ == "__main__":

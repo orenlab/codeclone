@@ -22,21 +22,17 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _hook_io import read_bounded_stdin
+from _hook_io import emit_hook_payload, read_bounded_stdin
 
-_EMPTY = "{}"
-
-_WARNING = json.dumps(
-    {
-        "followup_message": (
-            "Warning: this session declared change intent(s) that "
-            "may not have been cleared. Run "
-            '`manage_change_intent(action="list_workspace")` in '
-            "the next session to check for stale intents, or use "
-            "`gc_workspace` to clean them."
-        )
-    }
-)
+_WARNING = {
+    "followup_message": (
+        "Warning: this session declared change intent(s) that "
+        "may not have been cleared. Run "
+        '`manage_change_intent(action="list_workspace")` in '
+        "the next session to check for stale intents, or use "
+        "`gc_workspace` to clean them."
+    )
+}
 
 
 def _read_validated_transcript(stdin_payload: str) -> str | None:
@@ -80,20 +76,17 @@ def _read_validated_transcript(stdin_payload: str) -> str | None:
 
 
 def main() -> None:
+    payload: dict[str, object] | None = None
     raw = read_bounded_stdin()
-    if not raw:
-        print(_EMPTY)
-        return
-    content = _read_validated_transcript(raw)
-    if content is None:
-        print(_EMPTY)
-        return
-
-    lines = content.splitlines()
-    declares = sum(1 for ln in lines if "action" in ln and "declare" in ln)
-    clears = sum(1 for ln in lines if "action" in ln and "clear" in ln)
-
-    print(_WARNING if declares > clears else _EMPTY)
+    if raw:
+        content = _read_validated_transcript(raw)
+        if content is not None:
+            lines = content.splitlines()
+            declares = sum(1 for ln in lines if "action" in ln and "declare" in ln)
+            clears = sum(1 for ln in lines if "action" in ln and "clear" in ln)
+            if declares > clears:
+                payload = _WARNING
+    emit_hook_payload(payload)
 
 
 if __name__ == "__main__":

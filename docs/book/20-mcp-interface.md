@@ -54,7 +54,8 @@ Current server characteristics:
 - **Roots** — analysis tools require an absolute repository root. Relative
   roots such as `.` are rejected.
 - **Analysis modes** — `full`, `clones_only`.
-- **Cache policies** — `reuse` (default), `refresh`, `off`.
+- **Cache policies** — `reuse` (default) and `off` only; `refresh` is CLI-only
+  and rejected by MCP.
 
 !!! warning "Absolute roots and remote exposure"
     Analysis tools require an absolute repository root. HTTP exposure beyond

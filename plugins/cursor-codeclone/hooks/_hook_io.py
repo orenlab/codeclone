@@ -7,9 +7,12 @@
 
 from __future__ import annotations
 
+import json
 import sys
+from collections.abc import Mapping
 
 MAX_STDIN_BYTES = 65536
+_EMPTY_JSON = "{}"
 
 
 def read_bounded_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
@@ -17,3 +20,10 @@ def read_bounded_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
     if len(payload) > max_bytes:
         return ""
     return payload.decode("utf-8", errors="replace")
+
+
+def emit_hook_payload(payload: Mapping[str, object] | None = None) -> None:
+    if payload:
+        print(json.dumps(dict(payload)))
+    else:
+        print(_EMPTY_JSON)

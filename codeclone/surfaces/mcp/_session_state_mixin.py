@@ -22,6 +22,7 @@ from ._session_shared import (
     _HEALTH_SCOPE_REPOSITORY,
     _HELP_TOPIC_SPECS,
     _MCP_CONFIG_KEYS,
+    _MCP_GOVERNANCE_CONFIG_KEYS,
     _METRICS_DETAIL_FAMILY_ALIASES,
     _VALID_COMPARISON_FOCUS,
     _VALID_HELP_DETAILS,
@@ -236,13 +237,16 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
             open_html_report=False,
             timestamped_report_paths=False,
         )
+        try:
+            config_values = load_pyproject_config(root_path)
+        except ConfigValidationError as exc:
+            raise MCPServiceContractError(str(exc)) from exc
         if request.respect_pyproject:
-            try:
-                config_values = load_pyproject_config(root_path)
-            except ConfigValidationError as exc:
-                raise MCPServiceContractError(str(exc)) from exc
-            for key in sorted(_MCP_CONFIG_KEYS.intersection(config_values)):
-                setattr(args, key, config_values[key])
+            config_keys = _MCP_CONFIG_KEYS
+        else:
+            config_keys = _MCP_GOVERNANCE_CONFIG_KEYS
+        for key in sorted(config_keys.intersection(config_values)):
+            setattr(args, key, config_values[key])
 
         self._apply_request_overrides(args=args, root_path=root_path, request=request)
 
@@ -392,6 +396,7 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
             "resolved_findings": 0,
             "changed_findings": [],
             "coverage_join": _helpers._summary_coverage_join_payload(record),
+            "next_tool": "get_report_section",
         }
 
     def _build_run_summary_payload(
@@ -542,6 +547,7 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
             security_surfaces = _helpers._summary_security_surfaces_payload(record)
             if security_surfaces:
                 payload["security_surfaces"] = security_surfaces
+        payload["next_tool"] = "get_production_triage"
         return payload
 
     def _summary_baseline_payload(
@@ -1045,11 +1051,10 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 {"title": title, "url": url} for title, url in spec.doc_links
             ],
         }
-        if validated_detail == "normal":
-            if spec.warnings:
-                payload["warnings"] = list(spec.warnings)
-            if spec.anti_patterns:
-                payload["anti_patterns"] = list(spec.anti_patterns)
+        if spec.anti_patterns:
+            payload["anti_patterns"] = list(spec.anti_patterns)
+        if validated_detail == "normal" and spec.warnings:
+            payload["warnings"] = list(spec.warnings)
         return payload
 
     def generate_pr_summary(

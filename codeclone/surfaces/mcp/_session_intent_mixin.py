@@ -403,12 +403,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         payload["blocked_by"] = blocked_by
         payload["queue_position"] = queue_position
         payload["ttl_seconds"] = ttl
-        payload["message"] = (
-            "Intent queued behind active workspace intent. "
-            "Do not edit until promoted. Queued intents do not pin "
-            "the before-run; long waits may require re-analysis "
-            "before promotion."
-        )
+        payload["message"] = "Queued. Promote before editing."
         self._audit_emit(
             root=record.root,
             event_type=EVENT_INTENT_QUEUED,
@@ -548,10 +543,9 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             return []
         context: list[dict[str, object]] = []
         for record in workspace_existing:
-            if record.status != IntentStatus.QUEUED.value:
-                continue
-            if record.agent_pid == self._agent_pid and (
-                record.agent_start_epoch == self._agent_start_epoch
+            if record.status != IntentStatus.QUEUED.value or (
+                record.agent_pid == self._agent_pid
+                and record.agent_start_epoch == self._agent_start_epoch
             ):
                 continue
             raw_existing = record.scope.get("allowed_files")

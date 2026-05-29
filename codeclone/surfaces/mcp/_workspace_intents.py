@@ -602,15 +602,16 @@ def _detect_scope_state(
     relations: list[dict[str, object]] = []
     now = utc_now()
     for record in existing:
-        if record.status == WorkspaceIntentStatus.QUEUED.value:
-            continue
         ownership = classify_intent_ownership(
             record,
             own_pid=own_pid,
             own_start_epoch=own_start_epoch,
             now=now,
         )
-        if ownership not in _CONFLICT_OWNERSHIP:
+        if (
+            record.status == WorkspaceIntentStatus.QUEUED.value
+            or ownership not in _CONFLICT_OWNERSHIP
+        ):
             continue
         existing_allowed, existing_related, existing_forbidden = _scope_all_sets(
             record.scope

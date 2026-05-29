@@ -89,11 +89,6 @@ class _MCPSessionFindingMixin:
             request.cache_policy,
             _VALID_CACHE_POLICIES,
         )
-        if request.cache_policy == "refresh":
-            raise MCPServiceContractError(
-                "cache_policy='refresh' is not supported by the read-only "
-                "CodeClone MCP server. Use 'reuse' or 'off'."
-            )
         if request.analysis_mode == "clones_only" and request.coverage_xml is not None:
             raise MCPServiceContractError(
                 "coverage_xml requires analysis_mode='full' because coverage join "

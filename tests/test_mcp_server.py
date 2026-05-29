@@ -97,7 +97,8 @@ def _write_quality_fixture(root: Path) -> None:
 
 def test_mcp_server_validated_cache_policy_accepts_known_values() -> None:
     assert mcp_server._validated_cache_policy("reuse") == "reuse"
-    assert mcp_server._validated_cache_policy("refresh") == "refresh"
+    with pytest.raises(MCPServiceContractError, match="CLI-only"):
+        mcp_server._validated_cache_policy("refresh")
     assert mcp_server._validated_cache_policy("off") == "off"
     with pytest.raises(MCPServiceContractError, match="cache_policy"):
         mcp_server._validated_cache_policy("broken")
@@ -191,20 +192,12 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
             }
         )
         assert tool.annotations.idempotentHint is True
-    assert "cache_policy='off'" in str(tools["analyze_repository"].description)
-    assert "cache_policy='off'" in str(tools["analyze_changed_paths"].description)
+    assert "reuse or off" in str(tools["analyze_repository"].description)
+    assert "reuse or off" in str(tools["analyze_changed_paths"].description)
     assert "absolute repository root" in str(tools["analyze_repository"].description)
-    assert "absolute repository root" in str(tools["analyze_changed_paths"].description)
-    assert "get_run_summary or get_production_triage" in str(
-        tools["analyze_repository"].description
-    )
-    assert "conservative first pass" in str(tools["analyze_repository"].description)
-    assert "get_report_section(section='changed')" in str(
-        tools["analyze_changed_paths"].description
-    )
-    assert "conservative profile first" in str(
-        tools["analyze_changed_paths"].description
-    )
+    assert "Absolute root required" in str(tools["analyze_changed_paths"].description)
+    assert "get_production_triage" in str(tools["analyze_repository"].description)
+    assert "next_tool hint" in str(tools["analyze_changed_paths"].description)
     assert "Use analyze_repository first" in str(tools["check_complexity"].description)
     assert "Use analyze_repository first" in str(tools["check_clones"].description)
     assert "default first-pass review" in str(
@@ -222,11 +215,10 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "list_workspace" in str(tools["manage_change_intent"].description)
     assert "recover" in str(tools["manage_change_intent"].description)
     assert ".cache/codeclone/intents/" in str(tools["manage_change_intent"].description)
-    assert "bounded guidance, not a full manual" in str(tools["help"].description)
-    assert "workflow, analysis_profile, suppressions, baseline" in str(
+    assert "compact includes anti_patterns" in str(tools["help"].description)
+    assert "workflow, change_control, trust_boundaries" in str(
         tools["help"].description
     )
-    assert "change_control" in str(tools["help"].description)
     assert init_options.server_version == CODECLONE_VERSION
     assert "Prefer list_hotspots or focused check_* tools" in str(
         tools["list_findings"].description
@@ -236,9 +228,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         tools["list_hotspots"].description
     )
     assert "Prefer format='markdown'" in str(tools["generate_pr_summary"].description)
-    assert "Prefer specific sections instead of 'all'" in str(
-        tools["get_report_section"].description
-    )
+    assert "over all unless necessary" in str(tools["get_report_section"].description)
     analyze_repository_schema = cast(
         "dict[str, object]",
         tools["analyze_repository"].inputSchema,

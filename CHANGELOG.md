@@ -32,8 +32,17 @@ review receipts, and workflow consolidation tools.
   own/recoverable/foreign-active classification, explicit recovery.
 - CLI controller query modes: `--blast-radius` and `--patch-verify`.
 - Audit trail events for intent lifecycle and token budget tracking.
+- MCP tool JSON schemas now include concise per-parameter descriptions.
+- `help(detail="compact")` includes `anti_patterns`; `trust_boundaries` help topic.
+- Analyze responses include a single `next_tool` hint; summary adds
+  `security_surfaces.note` for report-only inventory semantics.
 
-### Internal
+### Changed
+
+- MCP rejects `cache_policy=refresh` at the server boundary (CLI-only).
+- `finish_controlled_change` sets `user_action_required` on digest mismatch.
+- Workflow messages shortened (`Done. Intent cleared.`; queued declare hint).
+
 
 - MCP session state (intents, blast-radius cache, review markers) is
   process-local only; workspace intent files are ephemeral coordination

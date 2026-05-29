@@ -7,6 +7,7 @@
 import os
 import tempfile
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -21,7 +22,11 @@ from codeclone.report.renderers.markdown import render_markdown_report_document
 from codeclone.report.renderers.sarif import render_sarif_report_document
 from codeclone.scanner import iter_py_files, resolved_path_under_root
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
-from codeclone.surfaces.mcp.session import MCPAnalysisRequest, MCPServiceContractError
+from codeclone.surfaces.mcp.session import (
+    CachePolicy,
+    MCPAnalysisRequest,
+    MCPServiceContractError,
+)
 
 
 def test_scanner_path_traversal() -> None:
@@ -210,12 +215,12 @@ def test_mcp_service_rejects_refresh_cache_policy(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     service = CodeCloneMCPService(history_limit=2)
-    with pytest.raises(MCPServiceContractError, match="read-only"):
+    with pytest.raises(MCPServiceContractError, match="cache_policy"):
         service.analyze_repository(
             MCPAnalysisRequest(
                 root=str(tmp_path.resolve()),
                 respect_pyproject=False,
-                cache_policy="refresh",
+                cache_policy=cast("CachePolicy", "refresh"),
             )
         )
 
