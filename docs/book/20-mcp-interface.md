@@ -65,7 +65,7 @@ Current server characteristics:
 
 ## Tools
 
-Current tool set: **26 tools** organized by workflow phase.
+Current tool set: **28 tools** organized by workflow phase.
 
 ```mermaid
 graph LR

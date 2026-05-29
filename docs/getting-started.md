@@ -148,7 +148,7 @@ See [Exit codes](book/03-contracts-exit-codes.md).
 
 ## MCP Setup
 
-The MCP server exposes 26 read-only tools over the same canonical pipeline.
+The MCP server exposes 28 tools over the same canonical pipeline.
 
 ### Start the server
 

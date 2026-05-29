@@ -93,7 +93,7 @@ Refs:
 Refs:
 
 - `codeclone/report/document/builder.py:build_report_document`
-- `codeclone/report/derived.py:_health_snapshot`
+- `codeclone/report/document/derived.py:_health_snapshot`
 - `codeclone/report/overview.py:materialize_report_overview`
 - `codeclone/report/suggestions.py:generate_suggestions`
 

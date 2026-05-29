@@ -3,7 +3,9 @@
 ## Purpose
 
 Compact structural layouts for baseline/cache/report contracts in the current
-`2.1` release line.
+`2.1` release line. Generator/package version in JSON examples is illustrative;
+the actual version is defined in `codeclone/contracts/__init__.py` and
+`pyproject.toml`.
 
 ## Baseline schema (`2.1`)
 

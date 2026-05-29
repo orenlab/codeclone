@@ -52,9 +52,14 @@ Before editing any repository files:
    `finish` can verify from changed-file evidence
 5. `finish_controlled_change(intent_id=..., changed_files=[...], after_run_id=...)`
    — returns scope check, verification, receipt, and clears intent
-   — if `user_action_required: true`, stop and follow `next_step`
-   — if `status: "unverified"`, follow `next_step` hint
-   — `auto_clear=true` by default; intent cleared on accepted
+   — if `status: "unverified"`, the intent stays active; follow `next_step`
+     (e.g., run `analyze_repository`), then call `finish` again on the
+     **same `intent_id`** with the missing evidence
+   — if `status: "violated"` (scope), the intent stays active; either
+     remove out-of-scope changes and retry `finish`, or expand scope via
+     `start_controlled_change` with a wider scope
+   — if `user_action_required: true`, stop and escalate to the user
+   — `auto_clear=true` by default; intent cleared only on accepted
 
 Workflow profiles determine which steps are needed:
 

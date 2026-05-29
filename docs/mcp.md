@@ -76,9 +76,11 @@ graph BT
     PC["_MCPSessionPatchContractMixin<br/><small>budget and verify</small>"]
     RR["_MCPSessionReviewReceiptMixin<br/><small>audit receipt composition</small>"]
     CG["_MCPSessionClaimGuardMixin<br/><small>citation-based validation</small>"]
+    WF["_MCPSessionWorkflowMixin<br/><small>start/finish orchestration</small>"]
     S["MCPSession"]
-    F --> CP --> AA --> RSB --> SM --> RPM --> STM --> BR --> IM --> PC --> RR --> CG --> S
+    F --> CP --> AA --> RSB --> SM --> RPM --> STM --> BR --> IM --> PC --> RR --> CG --> WF --> S
     style S stroke: #6366f1, stroke-width: 2px
+    style WF fill: #eff6ff
     style CG fill: #f0fdf4
     style RR fill: #f0fdf4
     style PC fill: #f0fdf4
@@ -207,7 +209,7 @@ the client workspace.
 
 ## Tool surface
 
-Current surface: **26 tools**, **7 fixed resources**, **3 URI templates**.
+Current surface: **28 tools**, **7 fixed resources**, **3 URI templates**.
 
 The surface is organized by workflow phase. Start at the top, drill down
 as needed.

@@ -13,7 +13,7 @@ policy for future scoring-model expansion.
 - Canonical report surface:
   `codeclone/report/document/builder.py:build_report_document`
 - Health snapshot projections:
-  `codeclone/report/derived.py:_health_snapshot`,
+  `codeclone/report/document/derived.py:_health_snapshot`,
   `codeclone/report/overview.py:_health_snapshot`
 - CLI / HTML / MCP consumers:
   `codeclone/surfaces/cli/summary.py`,

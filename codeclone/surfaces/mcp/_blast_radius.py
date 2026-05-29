@@ -546,8 +546,8 @@ def _compute_change_boundaries(
             do_not_touch_entries,
             path=pattern,
             reason=(
-                "baseline, cache, and generated CodeClone state require explicit "
-                "separate changes"
+                "baseline, CodeClone state/cache, and generated artifacts "
+                "require explicit separate changes"
             ),
             category="baseline_or_generated_state",
             severity="hard",

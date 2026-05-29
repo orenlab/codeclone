@@ -1,105 +1,46 @@
 # Changelog
 
-## [2.1.0a2] - Unreleased
+## [2.1.0a1] - Unreleased
+
+`2.1.0a1` opens the v2.1 alpha line with the structural change controller:
+intent-first edit workflow, blast radius, patch verification, claim guard,
+review receipts, and workflow consolidation tools.
 
 ### Added
 
-- Add `start_controlled_change` MCP tool — aggregates workspace check,
-  intent declaration, blast radius computation (direct + bounded transitive
-  for high-radius changes), and patch budget into a single pre-edit call.
-- Add `finish_controlled_change` MCP tool — aggregates scope check, patch
-  verification, claim validation, review receipt, and intent cleanup into
-  a single post-edit call.
-
-### Changed
-
-- Agent workflow reduced from 7–11 MCP calls to 3–4 per edit cycle.
-  CLAUDE.md and plugin skills updated to prefer workflow tools.
-- Atomic change control tools remain available for advanced/diagnostic
-  use and backward compatibility.
-
-## [2.1.0a1] - 2026-05-22
-
-`2.1.0a1` opens the v2.1 alpha line for structural change control.
-
-### Added
-
-- Add intent queue for multi-agent scope coordination. When scope overlaps a
-  foreign active intent, `manage_change_intent(action="declare",
-  on_conflict="queue")` creates a queued intent instead of reporting a conflict.
-  Queued intents are visible in workspace listings but do not own scope, do not
-  pin the before-run, and cannot pass patch verification. A separate
-  `manage_change_intent(action="promote")` transitions queued → active after
-  re-checking workspace conflicts, pinning the run, and renewing the lease. If
-  conflicts persist, promote returns `blocking_count` without state change.
-- Add verify ergonomics: `check_patch_contract(mode="verify")` auto-resolves
-  `before_run_id` from the intent record when `intent_id` is provided but
-  `before_run_id` is omitted. Non-accepted verify responses include `next_step`
-  with an actionable hint for each failure reason and
-  `claim_validation_recommended` to advise whether `validate_review_claims` is
-  meaningful for the verification profile.
-- Add `intent.queued`, `intent.promoted`, and `intent.queue_blocked` audit trail
-  events with compact payload handlers for MCP payload token budget tracking.
-- Add MCP `get_blast_radius` as a deterministic pre-change projection over the
-  canonical report: direct dependents, clone cohorts, dependency-cycle
-  membership, coverage/risk signals, actionable do-not-touch paths, and
-  bounded review-only context.
-- Add MCP `manage_change_intent` for session-local change intent lifecycle:
-  declare intended scope, inspect active intent, check actual changed files
-  against scope, and clear intent state.
-- Add a workspace intent registry under `.cache/codeclone/intents/` so separate
-  MCP stdio processes can see advisory multi-agent edit intents before
-  declaring overlapping scope.
-- Add MCP `check_patch_contract` with read-only `budget` and `verify` modes:
-  pre-edit gate budget/headroom, post-edit before/after comparison, gate
-  preview, intent-scope validation, and baseline-abuse signals.
-- Add MCP `create_review_receipt` for deterministic markdown/JSON audit
-  artifacts that compose report provenance, intent scope, blast radius,
-  reviewed findings, structural delta, patch-contract status, human decision
-  points, and claims-not-made without mutating repository state.
-- Add MCP `validate_review_claims` as a deterministic, citation-based claim
-  guard for review text. It flags overclaims such as Security Surfaces called
-  vulnerabilities, report-only families called CI failures, known findings
-  called new regressions, dead-code certainty despite runtime reachability
-  evidence, and fixes claimed before post-patch verification.
-- Add verification profile classifier for MCP patch contract. The controller
-  derives verification depth from actual changed files: `python_structural`,
-  `documentation_only`, `governance_config`, `non_python_patch`, and
-  `state_artifact_change`. Documentation-only and non-Python patches verify
-  without `after_run_id` when diff evidence is provided. Review receipts
-  include the profile section with "not applicable" for skipped structural
-  checks. Claim guard warns when review text references structural
-  verification on a non-structural profile.
-- Add CLI controller query modes: `--blast-radius FILE [FILE...]` for
-  terminal pre-change boundary review and `--patch-verify` for trusted-baseline
-  patch verification with `ci`, `strict`, and `relaxed` profiles.
-- Add lease-aware workspace intent recovery for MCP change control. Intent
-  records now carry renewable ownership leases, `list_workspace` distinguishes
-  own/recoverable/foreign-active records, and `manage_change_intent` can
-  explicitly recover stale intents without killing another MCP process.
+- Structural change controller for MCP: 28 tools total, including
+  `start_controlled_change` and `finish_controlled_change` workflow tools
+  that reduce the edit cycle from 7–11 MCP calls to 3–4.
+- Change intent lifecycle (`manage_change_intent`): declare scope, check
+  changed files, clear intent, queue behind foreign agents with
+  `on_conflict="queue"`, promote queued intents, recover stale intents.
+- Workspace intent registry under `.cache/codeclone/intents/` for
+  multi-agent coordination across separate MCP stdio processes.
+- Blast radius projection (`get_blast_radius`): direct/transitive
+  dependents, clone cohorts, structural risk, do-not-touch boundaries.
+- Patch contract (`check_patch_contract`): pre-edit budget and post-edit
+  verification with profile-aware depth (python_structural,
+  documentation_only, governance_config, non_python_patch,
+  state_artifact_change).
+- Claim guard (`validate_review_claims`): citation-based overclaim
+  detection against canonical report semantics.
+- Review receipts (`create_review_receipt`): deterministic audit
+  artifacts with provenance, scope, patch status, and claims-not-made.
+- Verify ergonomics: auto-resolve `before_run_id` from intent, `next_step`
+  hints, `claim_validation_recommended` flag.
+- Lease-aware intent recovery: renewable ownership leases,
+  own/recoverable/foreign-active classification, explicit recovery.
+- CLI controller query modes: `--blast-radius` and `--patch-verify`.
+- Audit trail events for intent lifecycle and token budget tracking.
 
 ### Internal
 
-- Keep queued intents unpinned: active intents call `_runs.pin()` to prevent
-  eviction from bounded history, queued intents do not — pinning happens at
-  promotion. Conflict detection in `_detect_scope_state` skips records with
-  `status == "queued"` so queued records do not block active declares.
-- Keep intent and blast-radius cache state in MCP process memory only; they do
-  not mutate source files, baselines, cache artifacts, reports, or canonical
-  report integrity. Workspace intent files are ephemeral coordination state,
-  not analysis cache or report truth.
-- Keep patch-contract budget payloads explicit: disabled numeric thresholds are
-  `null` in MCP payloads, and boolean enforcement policies use `forbid_*`
-  names.
-- Pin MCP runs referenced by active change intents so bounded run-history
-  pruning cannot drop the declared before-run before verification.
-- Mark the package as `2.1.0a1` with the PyPI alpha classifier while v2.1
-  controller features are under development.
-- Keep CLI controller query modes read-only by skipping baseline, report, and
-  analysis-cache writes.
-- Keep workspace intent registry upgrades versioned and backward-readable:
-  registry v2 records add lease and report-digest fields, while v1 records are
-  accepted with conservative lease defaults until natural expiry.
+- MCP session state (intents, blast-radius cache, review markers) is
+  process-local only; workspace intent files are ephemeral coordination
+  state, not analysis cache or report truth.
+- Queued intents do not pin runs; pinning happens at promotion.
+- Workspace intent registry v2 with lease and report-digest fields;
+  v1 records accepted with conservative defaults until expiry.
 
 ## [2.0.2] - 2026-05-19
 

@@ -220,11 +220,17 @@ finish_controlled_change(
 The tool handles: scope check, patch contract verification, claim
 validation, review receipt generation, and intent cleanup.
 
-If the result is `user_action_required: true`, read the `next_step`
-hint and follow it. Do not claim the patch is verified.
+Intent stays active on non-accepted results — retry `finish` on the
+**same `intent_id`** after resolving the issue:
 
-If the result is `status: "unverified"`, the `next_step` hint tells
-you what is missing (usually `after_run_id` for Python changes).
+- `status: "unverified"` — follow `next_step` (e.g., run
+  `analyze_repository`, then call `finish` again with `after_run_id`)
+- `status: "violated"` (scope) — either remove out-of-scope changes and
+  retry `finish`, or expand scope via `start_controlled_change`
+- `user_action_required: true` — stop and escalate to the user
+
+Do not start a new cycle unless the intent is expired or scope must
+change. Do not claim the patch is verified on non-accepted status.
 
 ## Verification profiles
 

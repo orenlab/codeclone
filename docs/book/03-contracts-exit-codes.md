@@ -37,7 +37,7 @@ Refs:
 - `codeclone/ui_messages/__init__.py:MARKER_CONTRACT_ERROR`
 - `codeclone/ui_messages/__init__.py:MARKER_INTERNAL_ERROR`
 - `codeclone/ui_messages/__init__.py:fmt_contract_error`
-- `codeclone/ui_messages/__init__.py:fmt_gating_failure`
+- `codeclone/report/gates/reasons.py:print_gating_failure_block`
 - `codeclone/ui_messages/__init__.py:fmt_internal_error`
 
 ## Invariants (MUST)

@@ -94,7 +94,7 @@ CLI behavior: cache failures do not change exit code; analysis continues without
 Refs:
 
 - `codeclone/cache/versioning.py:CacheStatus`
-- `codeclone/surfaces/cli/runtime.py:resolve_cache_status`
+- `codeclone/cache/store.py:resolve_cache_status`
 
 ## Determinism / canonicalization
 

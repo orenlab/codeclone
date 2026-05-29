@@ -111,6 +111,7 @@ nav:
           - VS Code Extension: book/21-vscode-extension.md
           - Claude Desktop Bundle: book/22-claude-desktop-bundle.md
           - Codex Plugin: book/23-codex-plugin.md
+          - Cursor Plugin: book/25-cursor-plugin.md
           - Structural Change Controller: book/24-structural-change-controller.md
           - Claim Guard: book/28-claim-guard.md
           - HTML Render: book/10-html-render.md
@@ -141,6 +142,7 @@ nav:
       - VS Code Extension: vscode-extension.md
       - Claude Desktop Bundle: claude-desktop-bundle.md
       - Codex Plugin: codex-plugin.md
+      - Cursor Plugin: cursor-plugin.md
       - Privacy Policy: privacy-policy.md
       - Terms of Use: terms-of-use.md
       - SARIF for IDEs: sarif.md
