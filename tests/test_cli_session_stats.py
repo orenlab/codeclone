@@ -1073,7 +1073,7 @@ def test_resolve_mcp_tokens_with_audit_data(tmp_path: Path) -> None:
     )
     from codeclone.audit.writer import SqliteAuditWriter
 
-    db_path = tmp_path / ".cache" / "codeclone" / "audit.sqlite3"
+    db_path = tmp_path / ".cache" / "codeclone" / "db" / "audit.sqlite3"
     writer = SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30)
     try:
         writer.emit(
@@ -1110,7 +1110,7 @@ def test_resolve_mcp_tokens_no_db(tmp_path: Path) -> None:
 
 def test_resolve_mcp_tokens_corrupt_db(tmp_path: Path) -> None:
     """_read_audit_token_footprint tolerates corrupt audit storage."""
-    db_path = tmp_path / ".cache" / "codeclone" / "audit.sqlite3"
+    db_path = tmp_path / ".cache" / "codeclone" / "db" / "audit.sqlite3"
     db_path.parent.mkdir(parents=True)
     db_path.write_text("NOT A DATABASE")
 

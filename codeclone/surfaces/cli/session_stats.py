@@ -574,11 +574,11 @@ def _read_audit_token_footprint(
     """Read aggregate token estimation from audit trail, if available."""
     try:
         from ...audit.reader import read_audit_summary
-        from ...audit.validation import resolve_audit_path
+        from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 
         db_path = resolve_audit_path(
             root_path=root_path,
-            value=".cache/codeclone/audit.sqlite3",
+            value=DEFAULT_AUDIT_PATH,
         )
         if not db_path.is_file():
             return None, None, 0

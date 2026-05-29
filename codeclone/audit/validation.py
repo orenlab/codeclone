@@ -12,7 +12,7 @@ from pathlib import Path
 from .events import KNOWN_EVENT_TYPES, PAYLOAD_MODES, AuditPayloadMode, AuditSeverity
 
 AUDIT_SCHEMA_VERSION = "1"
-DEFAULT_AUDIT_PATH = ".cache/codeclone/audit.sqlite3"
+DEFAULT_AUDIT_PATH = ".cache/codeclone/db/audit.sqlite3"
 DEFAULT_AUDIT_PAYLOADS: AuditPayloadMode = "compact"
 DEFAULT_AUDIT_RETENTION_DAYS = 30
 MIN_AUDIT_RETENTION_DAYS = 1
