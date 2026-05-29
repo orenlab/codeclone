@@ -103,7 +103,7 @@ Such changes often require design-level discussion and may be staged across vers
 
 ### Baseline contract (v2)
 
-- The baseline schema is versioned (`meta.schema_version`, currently `2.0`).
+- The baseline schema is versioned (`meta.schema_version`, currently `2.1`).
 - Compatibility/trust gates include `schema_version`, `fingerprint_version`, `python_tag`,
   and `meta.generator.name`.
 - Integrity is tamper-evident via `meta.payload_sha256` over canonical payload.
