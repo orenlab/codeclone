@@ -190,6 +190,17 @@ codeclone-mcp --transport streamable-http   # remote / HTTP clients
 
     See [Codex plugin guide](codex-plugin.md).
 
+=== "Cursor"
+
+    Install from the monorepo path
+    [`plugins/cursor-codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/cursor-codeclone)
+    (symlink into `.cursor/` or use Cursor local plugin discovery).
+
+    The Cursor plugin is **not** listed in `.agents/plugins/marketplace.json`;
+    that file is Codex-only for local monorepo development.
+
+    See [Cursor plugin guide](cursor-plugin.md).
+
 === "Manual registration"
 
     ```bash

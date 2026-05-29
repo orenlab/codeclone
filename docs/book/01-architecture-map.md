@@ -36,7 +36,7 @@ Main ownership layers:
 | Deterministic renderers | `codeclone/report/renderers/*`                                                                  | Text/Markdown/SARIF/JSON projections over the canonical report                                        |
 | HTML render layer       | `codeclone/report/html/*`                                                                       | Render-only HTML view over canonical report/meta facts                                                |
 | MCP surface             | `codeclone/surfaces/mcp/*`                                                                      | Read-only MCP tools/resources, change-control projections, and claim validation over stored runs      |
-| Client surfaces         | `extensions/vscode-codeclone/*`, `extensions/claude-desktop-codeclone/*`, `plugins/codeclone/*` | Native clients/install surfaces over `codeclone-mcp`                                                  |
+| Client surfaces         | `extensions/vscode-codeclone/*`, `extensions/claude-desktop-codeclone/*`, `plugins/codeclone/*`, `plugins/cursor-codeclone/*` | Native clients/install surfaces over `codeclone-mcp`                                                  |
 
 Refs:
 

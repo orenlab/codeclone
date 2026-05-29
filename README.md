@@ -257,7 +257,7 @@ CodeClone ships an MCP control surface for AI agents and IDE clients, built on t
 Canonical analysis is **read-only by contract**: MCP tools never mutate source, baselines, generated reports, or
 analysis cache. Controller state is session-local or ephemeral workspace coordination state.
 
-- **26 tools across 6 workflow phases** — *analyze → triage → drill down → focused checks → change control → session*.
+- **28 tools across 6 workflow phases** — *analyze → triage → drill down → focused checks → change control → session*.
   Triage-first design avoids dumping the full report into agent context.
 - **Stable read-only resources** — `codeclone://latest/*` and `codeclone://runs/{run_id}/*` URIs return deterministic
   projections (summary, report, health, gates, changed, triage, schema) without re-triggering analysis.

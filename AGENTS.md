@@ -71,6 +71,8 @@ Key artifacts:
 - `plugins/codeclone/` + `.agents/plugins/marketplace.json` — stable Codex plugin as a native local discovery layer
   over `codeclone-mcp`, with bundled CodeClone skills under `plugins/codeclone/skills/` (`codeclone-review`,
   `codeclone-hotspots`, `codeclone-change-control`)
+- `plugins/cursor-codeclone/` — stable Cursor plugin as a native local discovery layer over `codeclone-mcp`, with
+  bundled skills, rules, hooks, and an agent definition
 - MCP runs are in-memory only. Review markers are session-local. Change intent
   truth is session-local, with optional ephemeral workspace coordination records
   under `.cache/codeclone/intents/`; none of this may leak into
@@ -441,6 +443,8 @@ Architecture is layered, but grounded in current code (not aspirational diagrams
   Claude Desktop that launches the same local `codeclone-mcp` server via local `stdio`.
 - **Codex plugin surface** (`plugins/codeclone/*`, `.agents/plugins/marketplace.json`) is a native local Codex plugin
   over `codeclone-mcp`, with repo-local discovery metadata and bundled skills under `plugins/codeclone/skills/`.
+- **Cursor plugin surface** (`plugins/cursor-codeclone/*`) is a native local Cursor plugin over `codeclone-mcp` with
+  bundled skills, rules, hooks, and an agent definition.
 - **Tests-as-spec** (`tests/`) lock behavior, contracts, determinism, and architecture boundaries.
 
 Non-negotiable interpretation:
@@ -453,7 +457,9 @@ Non-negotiable interpretation:
 - The Claude Desktop bundle is a local setup surface over `codeclone-mcp` and must not introduce a second server or
   truth path.
 - The Codex plugin is a local discovery and guidance surface over `codeclone-mcp` and must not introduce a second
-  analyzer, MCP server, or truth path.
+ analyzer, MCP server, or truth path.
+- The Cursor plugin is a local discovery and guidance surface over `codeclone-mcp` and must not introduce a second
+ analyzer, MCP server, or truth path.
 
 ## 13) Module map
 
@@ -518,7 +524,9 @@ Use this map to route changes to the right owner module.
 - `extensions/claude-desktop-codeclone/*` — stable Claude Desktop bundle surface; keep it local-stdio-only,
   launcher-focused, and faithful to `codeclone-mcp` rather than re-implementing MCP semantics in the bundle layer.
 - `plugins/codeclone/*`, `.agents/plugins/marketplace.json` — stable Codex plugin surface; keep it Codex-native,
-  conservative-first, skills-guided, and faithful to `codeclone-mcp` rather than inventing plugin-only analysis logic.
+ conservative-first, skills-guided, and faithful to `codeclone-mcp` rather than inventing plugin-only analysis logic.
+- `plugins/cursor-codeclone/*` — stable Cursor plugin surface; keep it Cursor-native, skills/rules/hooks-guided, and
+ faithful to `codeclone-mcp` rather than inventing plugin-only analysis logic.
 - `tests/` — executable specification: architecture rules, contracts, goldens, invariants, regressions.
 
 ## 14) Dependency direction
@@ -580,6 +588,7 @@ If you change a contract-sensitive zone, route docs/tests/approval deliberately.
 | VS Code extension surface (`extensions/vscode-codeclone/*`)                                                                         | `README.md`, `docs/book/21-vscode-extension.md`, `docs/vscode-extension.md`, `docs/book/01-architecture-map.md`, `docs/README.md`, `CHANGELOG.md`                   | `node --check extensions/vscode-codeclone/src/support.js`, `node --check extensions/vscode-codeclone/src/mcpClient.js`, `node --check extensions/vscode-codeclone/src/extension.js`, `node --test extensions/vscode-codeclone/test/*.test.js`, plus local extension-host smoke and package smoke when surface/manifest/assets change | command/view UX, trust/runtime model, source-first review flow, or packaging metadata change          | documented commands/views/setup/trust behavior, packaged assets, or publish metadata change                |
 | Claude Desktop bundle surface (`extensions/claude-desktop-codeclone/*`)                                                             | `docs/book/22-claude-desktop-bundle.md`, `docs/claude-desktop-bundle.md`, `docs/mcp.md`, `docs/book/01-architecture-map.md`, `docs/README.md`, `CHANGELOG.md`       | `node --check extensions/claude-desktop-codeclone/server/index.js`, `node --check extensions/claude-desktop-codeclone/src/launcher.js`, `node --check extensions/claude-desktop-codeclone/scripts/build-mcpb.mjs`, `node --test extensions/claude-desktop-codeclone/test/*.test.js`, plus `.mcpb` build smoke                        | bundle install/runtime model, launcher UX, local-stdio constraints, or bundle metadata change         | documented Claude Desktop install/setup/runtime behavior or packaged bundle semantics change               |
 | Codex plugin surface (`plugins/codeclone/*`, `.agents/plugins/marketplace.json`)                                                    | `docs/book/23-codex-plugin.md`, `docs/codex-plugin.md`, `docs/mcp.md`, `docs/book/01-architecture-map.md`, `docs/README.md`, `CHANGELOG.md`                         | `python3 -m json.tool plugins/codeclone/.codex-plugin/plugin.json`, `python3 -m json.tool plugins/codeclone/.mcp.json`, `python3 -m json.tool .agents/plugins/marketplace.json`, `tests/test_codex_plugin.py`                                                                                                                        | plugin discovery/runtime model, bundled MCP config, bundled skill behavior, or plugin metadata change | documented Codex plugin install/discovery/runtime behavior or plugin manifest/marketplace semantics change |
+| Cursor plugin surface (`plugins/cursor-codeclone/*`)                                                                                | `docs/book/25-cursor-plugin.md`, `docs/cursor-plugin.md`, `docs/mcp.md`, `docs/book/01-architecture-map.md`, `docs/README.md`, `CHANGELOG.md`                        | `tests/test_cursor_plugin.py`, `tests/test_cursor_plugin_hooks.py`                                                                                                                                                                                                                                                                    | plugin discovery/runtime model, bundled MCP config, bundled skill/rule/hook behavior, or plugin metadata change | documented Cursor plugin install/discovery/runtime behavior or plugin manifest semantics change            |
 | Docs site / sample report publication (`docs/`, `mkdocs.yml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py`) | `docs/README.md`, `docs/publishing.md`, `docs/examples/report.md`, and any contract pages surfaced by the change, `CHANGELOG.md` when user-visible behavior changes | `mkdocs build --strict`, sample-report generation smoke path, and relevant report/html tests if generated examples or embeds change                                                                                                                                                                                                  | published docs navigation, sample-report generation, or Pages workflow semantics change               | published documentation behavior or sample-report generation contract changes                              |
 
 Golden rule: do not “fix” failures by snapshot refresh unless the underlying contract change is intentional, documented,
