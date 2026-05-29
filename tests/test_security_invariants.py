@@ -221,6 +221,16 @@ def test_resolved_path_under_root_rejects_outside_targets(tmp_path: Path) -> Non
     assert resolved_path_under_root(str(link), str(workspace)) is None
 
 
+def test_resolved_path_under_root_returns_none_on_resolve_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _broken_resolve(self: Path, *args: object, **kwargs: object) -> Path:
+        raise OSError("broken resolve")
+
+    monkeypatch.setattr(Path, "resolve", _broken_resolve)
+    assert resolved_path_under_root("/workspace/mod.py", "/workspace") is None
+
+
 @pytest.mark.parametrize(
     "root",
     ["/etc", "/proc", "/var"],

@@ -2440,6 +2440,10 @@ def test_mcp_service_caps_process_count_from_request_and_config(
     assert args_with_hard_cap.processes == 64
 
 
+def test_cap_mcp_process_count_leaves_unset_value_untouched() -> None:
+    assert mcp_helpers_mod._cap_mcp_process_count(None) is None
+
+
 def test_mcp_service_invalid_path_resolution_contract_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
