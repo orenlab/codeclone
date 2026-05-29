@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import importlib
 import json
+import os
 import subprocess
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -2398,6 +2399,45 @@ def test_mcp_service_build_args_defers_process_count_to_runtime(
         request=MCPAnalysisRequest(respect_pyproject=False, processes=2),
     )
     assert args_from_request.processes == 2
+
+
+def test_mcp_service_caps_process_count_from_request_and_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    monkeypatch.setattr(os, "cpu_count", lambda: 8)
+
+    args = service._build_args(
+        root_path=tmp_path,
+        request=MCPAnalysisRequest(respect_pyproject=False, processes=999),
+    )
+    assert args.processes == 8
+
+    monkeypatch.setattr(
+        mcp_state_mod,
+        "load_pyproject_config",
+        lambda _root: {"processes": 999},
+    )
+    args_from_config = service._build_args(
+        root_path=tmp_path,
+        request=MCPAnalysisRequest(respect_pyproject=True),
+    )
+    assert args_from_config.processes == 8
+
+    monkeypatch.setattr(os, "cpu_count", lambda: None)
+    args_without_cpu_count = service._build_args(
+        root_path=tmp_path,
+        request=MCPAnalysisRequest(respect_pyproject=False, processes=999),
+    )
+    assert args_without_cpu_count.processes == 4
+
+    monkeypatch.setattr(os, "cpu_count", lambda: 128)
+    args_with_hard_cap = service._build_args(
+        root_path=tmp_path,
+        request=MCPAnalysisRequest(respect_pyproject=False, processes=999),
+    )
+    assert args_with_hard_cap.processes == 64
 
 
 def test_mcp_service_invalid_path_resolution_contract_errors(

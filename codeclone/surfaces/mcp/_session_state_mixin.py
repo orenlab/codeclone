@@ -246,6 +246,9 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
 
         self._apply_request_overrides(args=args, root_path=root_path, request=request)
 
+        if isinstance(args.processes, int):
+            args.processes = _helpers._cap_mcp_process_count(args.processes)
+
         if request.analysis_mode == "clones_only":
             args.skip_metrics = True
             args.skip_dead_code = True

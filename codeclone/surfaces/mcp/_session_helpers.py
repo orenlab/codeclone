@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import os
+
 from ...cache.store import Cache
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...domain.findings import (
@@ -72,6 +74,16 @@ from ._session_shared import (
     _summarize_metrics_diff,
 )
 from .payloads import short_id
+
+_MCP_MAX_PROCESS_COUNT = 64
+
+
+def _cap_mcp_process_count(processes: int | None) -> int | None:
+    """Clamp MCP worker pool size without changing analysis semantics."""
+    if processes is None:
+        return None
+    host_limit = os.cpu_count() or 4
+    return min(processes, host_limit, _MCP_MAX_PROCESS_COUNT)
 
 
 def _summary_health_payload(summary: Mapping[str, object]) -> dict[str, object]:
