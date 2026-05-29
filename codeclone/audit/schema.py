@@ -11,7 +11,14 @@ from pathlib import Path
 
 from .. import __version__
 from ..report.meta import current_report_timestamp_utc
+from ..utils.sqlite_store import (
+    get_meta_value,
+    initialize_schema_v1,
+    open_sqlite_db,
+)
 from .validation import AUDIT_SCHEMA_VERSION, AuditSchemaError
+
+_AUDIT_META_TABLE = "audit_meta"
 
 _CREATE_EVENTS_SQL = """
 CREATE TABLE IF NOT EXISTS controller_events (
@@ -55,18 +62,7 @@ _INDEX_SQL = (
 
 
 def open_audit_db(path: Path) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), isolation_level="DEFERRED", timeout=5.0)
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA foreign_keys=OFF")
-        conn.execute("PRAGMA busy_timeout=5000")
-        ensure_schema(conn)
-    except Exception:
-        conn.close()
-        raise
-    return conn
+    return open_sqlite_db(path, ensure_schema=ensure_schema)
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -80,22 +76,18 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 
 
 def create_schema_v1(conn: sqlite3.Connection) -> None:
-    conn.execute(_CREATE_EVENTS_SQL)
-    conn.execute(_CREATE_META_SQL)
-    for statement in _INDEX_SQL:
-        conn.execute(statement)
-    now = current_report_timestamp_utc()
-    seed_meta = {
-        "schema_version": AUDIT_SCHEMA_VERSION,
-        "generator": "codeclone",
-        "codeclone_version": __version__,
-        "created_at_utc": now,
-    }
-    conn.executemany(
-        "INSERT OR IGNORE INTO audit_meta(key, value) VALUES (?, ?)",
-        sorted(seed_meta.items()),
+    initialize_schema_v1(
+        conn,
+        ddl_statements=(_CREATE_EVENTS_SQL, _CREATE_META_SQL),
+        index_statements=_INDEX_SQL,
+        meta_table=_AUDIT_META_TABLE,
+        seed_meta={
+            "schema_version": AUDIT_SCHEMA_VERSION,
+            "generator": "codeclone",
+            "codeclone_version": __version__,
+            "created_at_utc": current_report_timestamp_utc(),
+        },
     )
-    conn.commit()
 
 
 def _migrate_v1_add_token_columns(conn: sqlite3.Connection) -> None:
@@ -118,17 +110,7 @@ def _migrate_v1_add_token_columns(conn: sqlite3.Connection) -> None:
 
 
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
-    try:
-        row = conn.execute(
-            "SELECT value FROM audit_meta WHERE key = ?",
-            (key,),
-        ).fetchone()
-    except sqlite3.OperationalError:
-        return None
-    if row is None:
-        return None
-    value = row[0]
-    return value if isinstance(value, str) else None
+    return get_meta_value(conn, meta_table=_AUDIT_META_TABLE, key=key)
 
 
 __all__ = [

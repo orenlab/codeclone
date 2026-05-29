@@ -70,6 +70,7 @@ from ._workspace_intents import (
     stale_reason,
     update_workspace_intent_status,
     utc_now,
+    workspace_intent_to_payload,
     workspace_status_counts,
     write_workspace_intent,
 )
@@ -845,12 +846,13 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             intent_id=active_intent.intent_id,
             lease_seconds=lease_seconds,
         )
-        latest = (
-            find_workspace_intent(root=record.root, intent_id=active_intent.intent_id)
-            if renewed
-            else None
-        )
-        latest_record = latest[1] if latest is not None else None
+        if renewed:
+            latest_record = find_workspace_intent(
+                root=record.root,
+                intent_id=active_intent.intent_id,
+            )
+        else:
+            latest_record = None
         effective_lease = (
             latest_record.lease_seconds
             if latest_record is not None
@@ -885,13 +887,16 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         return payload
 
     def _list_workspace_intents(self, *, root: str | None) -> dict[str, object]:
+        from ...config.intent_registry import intent_registry_summary
+
         root_path = self._resolve_workspace_root(root)
         counts = workspace_status_counts(root=root_path)
         records = list_workspace_intents(root=root_path, exclude_stale=False)
         now = utc_now()
         return {
             "workspace_intents": [
-                item.to_payload(
+                workspace_intent_to_payload(
+                    item,
                     own_pid=self._agent_pid,
                     own_start_epoch=self._agent_start_epoch,
                     now=now,
@@ -907,6 +912,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             "total_agents": len({item.agent_pid for item in records}),
             "own_pid": self._agent_pid,
             "own_start_epoch": self._agent_start_epoch,
+            **intent_registry_summary(root_path),
         }
 
     def _gc_workspace_intents(self, *, root: str | None) -> dict[str, object]:
@@ -1007,7 +1013,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 reason="not_found",
                 message=f"No workspace intent found for intent_id: {intent_id}.",
             )
-        _, workspace_record = found
+        workspace_record = found
         now = utc_now()
         ownership = classify_intent_ownership(
             workspace_record,
@@ -1206,7 +1212,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         found = find_workspace_intent(root=root_path, intent_id=intent_id)
         if found is None:
             raise MCPServiceContractError(f"Unknown workspace intent id: {intent_id}")
-        _, workspace_record = found
+        workspace_record = found
         now = utc_now()
         ownership = classify_intent_ownership(
             workspace_record,
@@ -1264,7 +1270,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             ttl_seconds=ttl,
         )
         latest = find_workspace_intent(root=root_path, intent_id=intent_id)
-        latest_record = latest[1] if latest is not None else workspace_record
+        latest_record = latest if latest is not None else workspace_record
         return {
             "intent_id": workspace_record.intent_id,
             "action_taken": "reset" if updated else "failed",

@@ -160,6 +160,8 @@ def _snapshot(
         latest_run_age_seconds=latest_run_age_seconds,
         cache_present=cache_present,
         workspace_health=workspace_health,
+        intent_registry_backend="file",
+        intent_registry_storage=".cache/codeclone/intents",
         mcp_token_footprint=mcp_token_footprint,
         mcp_token_encoding=mcp_token_encoding,
         mcp_token_event_count=mcp_token_event_count,
@@ -407,6 +409,8 @@ def test_session_stats_verbose_handles_empty_allowed_files(tmp_path: Path) -> No
         latest_run_age_seconds=None,
         cache_present=False,
         workspace_health="active",
+        intent_registry_backend="file",
+        intent_registry_storage=".cache/codeclone/intents",
     )
 
     exit_code = session_stats_mod._render_verbose(printer, snapshot)
@@ -1074,6 +1078,10 @@ def test_resolve_mcp_tokens_with_audit_data(tmp_path: Path) -> None:
     from codeclone.audit.writer import SqliteAuditWriter
 
     db_path = tmp_path / ".cache" / "codeclone" / "db" / "audit.sqlite3"
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\naudit_enabled = true\n",
+        encoding="utf-8",
+    )
     writer = SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30)
     try:
         writer.emit(

@@ -45,6 +45,19 @@ review receipts, and workflow consolidation tools.
 - `help(detail="compact")` includes `anti_patterns`; `trust_boundaries` help topic.
 - Analyze responses include a single `next_tool` hint; summary adds
   `security_surfaces.note` for report-only inventory semantics.
+- Optional SQLite workspace intent registry backend (`intent_registry_backend =
+  "sqlite"` in `[tool.codeclone]`; default remains file-based JSON under
+  `.cache/codeclone/intents/`). Records keep the same integrity-protected JSON
+  payload contract; storage path defaults to
+  `.cache/codeclone/db/intents.sqlite3`. Closed intents (`clean`, `expired`,
+  `orphaned`) remain auditable in SQLite and are purged only after
+  `intent_registry_retention_days` (default `7`, maximum `14` on the open-source
+  edition; see [Plans and Retention](https://orenlab.github.io/codeclone/plans-and-retention/)).
+- Environment overrides: `CODECLONE_INTENT_REGISTRY_BACKEND`,
+  `CODECLONE_INTENT_REGISTRY_PATH`, `CODECLONE_INTENT_REGISTRY_RETENTION_DAYS`.
+- `list_workspace` and `--session-stats` report registry backend/storage;
+  audit footprint reads `audit_enabled` from pyproject instead of assuming the
+  default DB path.
 
 ### Changed
 

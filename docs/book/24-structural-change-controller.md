@@ -11,21 +11,21 @@ The v2.1 alpha currently includes intent, blast-radius, patch-contract checks,
 review receipts, workspace intent visibility, claim guard, and CLI controller
 queries:
 
-| Phase                       | Status            | Surface                                          |
-|-----------------------------|-------------------|--------------------------------------------------|
-| Intent declaration          | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Blast radius                | Live in `2.1.0a1` | MCP `get_blast_radius`, CLI `--blast-radius`     |
-| Patch contract              | Live in `2.1.0a1` | MCP `check_patch_contract`, CLI `--patch-verify` |
-| Review receipt              | Live in `2.1.0a1` | MCP `create_review_receipt`                      |
-| Workspace intent registry   | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Lease and recovery          | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Claim guard                 | Live in `2.1.0a1` | MCP `validate_review_claims`                     |
-| Scope-aware verification    | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
-| Workspace relations         | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Verification profiles       | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
-| Intent queue                | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Verify ergonomics           | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
-| MCP payload token budget    | Live in `2.1.0a1` | Audit trail, CLI `--audit`, `--session-stats`    |
+| Phase                     | Status            | Surface                                          |
+|---------------------------|-------------------|--------------------------------------------------|
+| Intent declaration        | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
+| Blast radius              | Live in `2.1.0a1` | MCP `get_blast_radius`, CLI `--blast-radius`     |
+| Patch contract            | Live in `2.1.0a1` | MCP `check_patch_contract`, CLI `--patch-verify` |
+| Review receipt            | Live in `2.1.0a1` | MCP `create_review_receipt`                      |
+| Workspace intent registry | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
+| Lease and recovery        | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
+| Claim guard               | Live in `2.1.0a1` | MCP `validate_review_claims`                     |
+| Scope-aware verification  | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
+| Workspace relations       | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
+| Verification profiles     | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
+| Intent queue              | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
+| Verify ergonomics         | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
+| MCP payload token budget  | Live in `2.1.0a1` | Audit trail, CLI `--audit`, `--session-stats`    |
 
 ## Contract
 
@@ -134,11 +134,30 @@ coordination:
   registry records. Foreign active and foreign stale intents are rejected
   and require coordination.
 
-Registry files live under `.cache/codeclone/intents/` and are protected with a
-SHA-256 integrity digest over canonical JSON. This detects accidental
-corruption, not malicious tampering by a user with write access. Conflicts are
-advisory: hard overlap means two agents claimed the same primary file; soft
-overlap means primary files overlap related context.
+Registry records live under `.cache/codeclone/intents/` by default (one JSON
+file per intent) and are protected with a SHA-256 integrity digest over
+canonical JSON. Repositories may opt into a SQLite backend instead:
+
+```toml
+[tool.codeclone]
+intent_registry_backend = "sqlite"
+intent_registry_path = ".cache/codeclone/db/intents.sqlite3"
+```
+
+Environment overrides: `CODECLONE_INTENT_REGISTRY_BACKEND`,
+`CODECLONE_INTENT_REGISTRY_PATH`, `CODECLONE_INTENT_REGISTRY_RETENTION_DAYS`.
+The SQLite backend stores the same signed JSON payloads in WAL mode; integrity
+and validation rules are unchanged. Unlike the file backend, SQLite keeps
+closed intents (`clean`, `expired`, `orphaned`) for audit and purges them only
+after `intent_registry_retention_days` (default `7`, maximum `14` in the
+open-source edition). Values above `14` are rejected with a contract error; see
+[Plans and Retention](../plans-and-retention.md) for Team (up to 30 days),
+Enterprise (up to 90 days with PostgreSQL backend), premium support, and contact
+details at [sudo@secuapp.ru](mailto:sudo@secuapp.ru).
+
+This detects accidental corruption, not malicious tampering by a user with write
+access. Conflicts are advisory: hard overlap means two agents claimed the same
+primary file; soft overlap means primary files overlap related context.
 
 Each registry record has a TTL and a shorter renewable lease. TTL is the hard
 maximum lifetime of the record (default 3600s). The lease is the ownership
@@ -216,13 +235,13 @@ applicable and whether `after_run_id` is required for verification.
 
 The classifier is a pure function with a deterministic priority chain:
 
-| Priority | Profile                | When                                    | `after_run` required | Structural checks |
-|----------|------------------------|-----------------------------------------|----------------------|-------------------|
-| 1        | `state_artifact_change`| Baseline or cache files touched         | no (violated)        | not applicable    |
-| 2        | `python_structural`    | Any `.py` / `.pyi` touched              | yes                  | all               |
-| 3        | `governance_config`    | Config files only (pyproject.toml, CI…) | yes                  | not applicable    |
-| 4        | `documentation_only`   | Only docs files (`.md`, `.rst`, …)      | no                   | not applicable    |
-| 5        | `non_python_patch`     | Other files, no Python or docs          | no                   | not applicable    |
+| Priority | Profile                 | When                                    | `after_run` required | Structural checks |
+|----------|-------------------------|-----------------------------------------|----------------------|-------------------|
+| 1        | `state_artifact_change` | Baseline or cache files touched         | no (violated)        | not applicable    |
+| 2        | `python_structural`     | Any `.py` / `.pyi` touched              | yes                  | all               |
+| 3        | `governance_config`     | Config files only (pyproject.toml, CI…) | yes                  | not applicable    |
+| 4        | `documentation_only`    | Only docs files (`.md`, `.rst`, …)      | no                   | not applicable    |
+| 5        | `non_python_patch`      | Other files, no Python or docs          | no                   | not applicable    |
 
 A single file from a higher-priority category overrides the entire patch.
 
@@ -243,12 +262,12 @@ evidence, verify returns `unverified` to preserve backward compatibility.
 
 ### Public surface
 
-| Artifact              | Path                                                              |
-|-----------------------|-------------------------------------------------------------------|
-| Classifier module     | `codeclone/surfaces/mcp/_verification_profile.py`                 |
-| Enum                  | `VerificationProfile`                                             |
-| Classifier            | `classify_patch(changed_files) → ClassificationResult`            |
-| Check matrix          | `check_matrix(profile) → CheckMatrix`                             |
+| Artifact          | Path                                                   |
+|-------------------|--------------------------------------------------------|
+| Classifier module | `codeclone/surfaces/mcp/_verification_profile.py`      |
+| Enum              | `VerificationProfile`                                  |
+| Classifier        | `classify_patch(changed_files) → ClassificationResult` |
+| Check matrix      | `check_matrix(profile) → CheckMatrix`                  |
 
 ### Locked by tests
 
@@ -297,13 +316,13 @@ Gate evaluation uses a two-layer attribution model:
 
 ### Status values
 
-| Status                          | Meaning                                                |
-|---------------------------------|--------------------------------------------------------|
-| `accepted`                      | No intent-scope regressions, no gate worsening         |
-| `accepted_with_external_changes`| Intent scope is clean but external signals exist       |
-| `violated`                      | Intent-scope regressions, intent-caused gate failure, or scope violation |
-| `unverified`                    | Missing before or after run                            |
-| `expired`                       | Report digest mismatch since declaration               |
+| Status                           | Meaning                                                                  |
+|----------------------------------|--------------------------------------------------------------------------|
+| `accepted`                       | No intent-scope regressions, no gate worsening                           |
+| `accepted_with_external_changes` | Intent scope is clean but external signals exist                         |
+| `violated`                       | Intent-scope regressions, intent-caused gate failure, or scope violation |
+| `unverified`                     | Missing before or after run                                              |
+| `expired`                        | Report digest mismatch since declaration                                 |
 
 The `accepted_with_external_changes` status signals that another agent or
 concurrent edit introduced regressions outside the current intent scope. The
@@ -335,11 +354,11 @@ repository-level signal: if the baseline was updated while any regressions exist
 workspace intents. Beyond edit-overlap detection (hard and soft conflicts),
 the classifier distinguishes forbidden-scope relationships:
 
-| Relation                  | Meaning                                               |
-|---------------------------|-------------------------------------------------------|
-| `edit_overlap`            | Both agents claim the same files (hard or soft)       |
-| `foreign_excludes_target` | Foreign `forbidden` matches current `allowed_files`   |
-| `target_excludes_foreign` | Current `forbidden` matches foreign `allowed_files`   |
+| Relation                  | Meaning                                             |
+|---------------------------|-----------------------------------------------------|
+| `edit_overlap`            | Both agents claim the same files (hard or soft)     |
+| `foreign_excludes_target` | Foreign `forbidden` matches current `allowed_files` |
+| `target_excludes_foreign` | Current `forbidden` matches foreign `allowed_files` |
 
 Absence of a relation entry means disjoint scope.
 
@@ -410,11 +429,11 @@ intent to active:
 
 ### Audit events
 
-| Event                  | When                           |
-|------------------------|--------------------------------|
-| `intent.queued`        | Declare downgrades to queued   |
-| `intent.promoted`      | Promote succeeds               |
-| `intent.queue_blocked` | Promote blocked by conflicts   |
+| Event                  | When                         |
+|------------------------|------------------------------|
+| `intent.queued`        | Declare downgrades to queued |
+| `intent.promoted`      | Promote succeeds             |
+| `intent.queue_blocked` | Promote blocked by conflicts |
 
 ## Verify Ergonomics
 
@@ -516,10 +535,10 @@ The atomic change control workflow requires 7–11 MCP tool calls per edit
 cycle. Two **workflow-level tools** aggregate these steps while preserving
 the same evidence, state updates, and boundary checks:
 
-| Tool | Replaces | Calls |
-|------|----------|-------|
-| `start_controlled_change` | workspace check + declare + blast radius + budget | 1 instead of 4 |
-| `finish_controlled_change` | scope check + verify + claims + receipt + clear | 1 instead of 4–6 |
+| Tool                       | Replaces                                          | Calls            |
+|----------------------------|---------------------------------------------------|------------------|
+| `start_controlled_change`  | workspace check + declare + blast radius + budget | 1 instead of 4   |
+| `finish_controlled_change` | scope check + verify + claims + receipt + clear   | 1 instead of 4–6 |
 
 Workflow tools are orchestration shortcuts. They call the same internal
 methods as the atomic tools and emit the same semantic audit events.

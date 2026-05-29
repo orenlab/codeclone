@@ -6,15 +6,30 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from codeclone.surfaces.mcp import _workspace_intent_paths as intent_paths
 from codeclone.surfaces.mcp import _workspace_intents as workspace_intents
+from codeclone.surfaces.mcp._workspace_intent_models import IntentScopeModel
 from codeclone.surfaces.mcp._workspace_intents import WorkspaceIntentRecord
 from codeclone.utils.json_io import read_json_object, write_json_document_atomically
+
+
+@pytest.fixture(autouse=True)
+def _clear_intent_store_cache() -> Generator[None, None, None]:
+    from codeclone.surfaces.mcp._workspace_intent_store import (
+        clear_workspace_intent_store_cache,
+    )
+
+    clear_workspace_intent_store_cache()
+    yield
+    clear_workspace_intent_store_cache()
 
 
 def _record(
@@ -88,18 +103,11 @@ def test_workspace_intent_write_validate_update_and_remove(tmp_path: Path) -> No
     assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
     records = workspace_intents.list_workspace_intents(root=tmp_path)
     assert records == (record,)
-    assert workspace_intents.find_workspace_intent(
+    found = workspace_intents.find_workspace_intent(
         root=tmp_path,
         intent_id=record.intent_id,
-    ) == (
-        workspace_intents.intent_path(
-            root=tmp_path,
-            pid=record.agent_pid,
-            start_epoch=record.agent_start_epoch,
-            intent_id=record.intent_id,
-        ),
-        record,
     )
+    assert found == record
 
     assert workspace_intents.update_workspace_intent_status(
         root=tmp_path,
@@ -110,7 +118,9 @@ def test_workspace_intent_write_validate_update_and_remove(tmp_path: Path) -> No
     )
     updated = workspace_intents.list_workspace_intents(root=tmp_path)[0]
     assert updated.status == "clean"
-    assert workspace_intents.verify_intent_integrity(updated.signed_payload())
+    assert workspace_intents.verify_intent_integrity(
+        workspace_intents.signed_payload(updated)
+    )
 
     assert workspace_intents.remove_workspace_intent(
         root=tmp_path,
@@ -190,7 +200,7 @@ def test_workspace_intent_validation_rejects_tampered_and_invalid_paths(
         "forbidden": [],
     }
     invalid = _record(scope=invalid_scope)
-    signed = invalid.signed_payload()
+    signed = workspace_intents.signed_payload(invalid)
     assert workspace_intents.validate_workspace_record(signed) is None
 
     traversal_scope: dict[str, object] = {
@@ -200,7 +210,10 @@ def test_workspace_intent_validation_rejects_tampered_and_invalid_paths(
     }
     traversal = _record(scope=traversal_scope)
     assert (
-        workspace_intents.validate_workspace_record(traversal.signed_payload()) is None
+        workspace_intents.validate_workspace_record(
+            workspace_intents.signed_payload(traversal)
+        )
+        is None
     )
 
 
@@ -327,14 +340,12 @@ def test_workspace_intent_io_failure_paths(
         is False
     )
 
-    def raise_oserror(*args: object, **kwargs: object) -> None:
-        raise OSError("boom")
+    def fail_write(_self: object, _record: WorkspaceIntentRecord) -> bool:
+        return False
 
-    monkeypatch.setattr(
-        workspace_intents,
-        "write_json_document_atomically",
-        raise_oserror,
-    )
+    from codeclone.surfaces.mcp._workspace_intent_store import FileWorkspaceIntentStore
+
+    monkeypatch.setattr(FileWorkspaceIntentStore, "write", fail_write)
     assert (
         workspace_intents.write_workspace_intent(root=tmp_path, record=_record())
         is False
@@ -359,6 +370,9 @@ def test_workspace_intent_io_failure_paths(
         is False
     )
 
+    def raise_oserror(*args: object, **kwargs: object) -> None:
+        raise OSError("boom")
+
     monkeypatch.setattr(Path, "unlink", raise_oserror)
     assert (
         workspace_intents.remove_workspace_intent(
@@ -375,7 +389,8 @@ def test_workspace_intent_payload_and_helper_edge_cases(tmp_path: Path) -> None:
     record = _record()
     now = workspace_intents.utc_now()
 
-    own_payload = record.to_payload(
+    own_payload = workspace_intents.workspace_intent_to_payload(
+        record,
         own_pid=record.agent_pid,
         own_start_epoch=record.agent_start_epoch,
         now=now,
@@ -385,7 +400,8 @@ def test_workspace_intent_payload_and_helper_edge_cases(tmp_path: Path) -> None:
     assert isinstance(own_payload["lease_expires_in_seconds"], int)
 
     invalid_lease = replace(record, lease_renewed_at_utc="not-a-date")
-    invalid_payload = invalid_lease.to_payload(
+    invalid_payload = workspace_intents.workspace_intent_to_payload(
+        invalid_lease,
         own_pid=record.agent_pid,
         own_start_epoch=record.agent_start_epoch,
         now=now,
@@ -455,51 +471,31 @@ def test_workspace_intent_private_edge_helpers(
     assert workspace_intents.stale_reason(expired_status) == "expired"
     assert workspace_intents.stale_reason(orphaned_status) == "orphaned"
     assert workspace_intents._is_pid_alive(0) is False
-    assert workspace_intents._dict_payload({1: "bad"}) is None
     assert workspace_intents._valid_path_list(
         ["", "pkg/a.py"],
         required=True,
     ) == ["pkg/a.py"]
-    assert workspace_intents._string_value(123) == ""
-    assert workspace_intents._required_string("  ") is None
-    assert workspace_intents._required_string("value") == "value"
-    assert workspace_intents._positive_int(True) is None
-    assert workspace_intents._positive_int(0) is None
-    assert workspace_intents._positive_int(5) == 5
-    assert (
-        workspace_intents._valid_lease_seconds(workspace_intents.MIN_LEASE_SECONDS - 1)
-        is None
-    )
-    assert (
-        workspace_intents._valid_lease_seconds(workspace_intents.MAX_LEASE_SECONDS + 1)
-        is None
-    )
-    assert (
-        workspace_intents._valid_lease_seconds(workspace_intents.MIN_LEASE_SECONDS)
-        == workspace_intents.MIN_LEASE_SECONDS
-    )
-    assert workspace_intents._is_hex_digest(123) is False
-    assert workspace_intents._is_hex_digest("0" * 63) is False
-    assert workspace_intents._is_hex_digest("g" * 64) is False
-    assert workspace_intents._is_hex_digest("A" * 64) is True
-    assert workspace_intents._valid_status_values() == frozenset(
-        status.value for status in workspace_intents.WorkspaceIntentStatus
-    )
-    assert workspace_intents._valid_scope([]) is None
-    assert workspace_intents._valid_scope({1: ["pkg/a.py"]}) is None
-    assert workspace_intents._valid_scope({"allowed_files": []}) is None
-    assert (
-        workspace_intents._valid_scope(
-            {"allowed_files": ["pkg/a.py"], "allowed_related": "tests/a.py"}
+    with pytest.raises(ValidationError):
+        IntentScopeModel.model_validate(
+            {"allowed_files": [], "allowed_related": [], "forbidden": []}
         )
-        is None
-    )
-    assert (
-        workspace_intents._valid_scope(
-            {"allowed_files": ["pkg/a.py"], "forbidden": [1]}
+    with pytest.raises(ValidationError):
+        IntentScopeModel.model_validate(
+            {
+                "allowed_files": ["pkg/a.py"],
+                "allowed_related": "tests/a.py",
+                "forbidden": [],
+            }
         )
-        is None
-    )
+    with pytest.raises(ValidationError):
+        IntentScopeModel.model_validate(
+            {"allowed_files": ["pkg/a.py"], "allowed_related": [], "forbidden": [1]}
+        )
+    tampered = workspace_intents.signed_payload(_record())
+    tampered["integrity"] = {"payload_sha256": "not-a-valid-digest"}
+    assert workspace_intents.verify_intent_integrity(tampered) is False
+    tampered["integrity"] = {"payload_sha256": "0" * 64}
+    assert workspace_intents.verify_intent_integrity(tampered) is False
     assert workspace_intents._valid_path_list("pkg/a.py", required=True) is None
     assert workspace_intents._valid_path_list([1], required=True) is None
     assert workspace_intents._valid_path_list(["/abs.py"], required=True) is None
@@ -602,13 +598,13 @@ def test_workspace_intent_registry_defensive_failure_edges(
     cleanup = workspace_intents.gc_workspace(root=tmp_path)
     assert cleanup["corrupted_filenames"] == ["123-456-intent-bad.json"]
 
-    monkeypatch.setattr(workspace_intents, "_unlink", lambda item: False)
+    monkeypatch.setattr(intent_paths, "unlink", lambda item: False)
     assert workspace_intents.gc_workspace(root=tmp_path)["removed"] == 0
 
     def raise_read_error(item: Path) -> dict[str, object]:
         raise ValueError("bad json")
 
-    monkeypatch.setattr(workspace_intents, "read_json_object", raise_read_error)
+    monkeypatch.setattr(intent_paths, "read_json_object", raise_read_error)
     assert workspace_intents._read_payload(path) is None
 
     def raise_glob_error(self: Path, pattern: str) -> tuple[Path, ...]:
@@ -616,12 +612,15 @@ def test_workspace_intent_registry_defensive_failure_edges(
 
     monkeypatch.setattr(Path, "glob", raise_glob_error)
     assert workspace_intents.list_workspace_intents(root=tmp_path) == ()
-    assert workspace_intents._valid_scope({1: ["pkg/a.py"]}) is None
+    with pytest.raises(ValidationError):
+        IntentScopeModel.model_validate(
+            {"allowed_files": ["../outside.py"], "allowed_related": [], "forbidden": []}
+        )
 
     def raise_safety_error(expected: Path, registry: Path) -> bool:
         raise RuntimeError("safety check failed")
 
-    monkeypatch.setattr(workspace_intents, "_is_safe_intent_path", raise_safety_error)
+    monkeypatch.setattr(intent_paths, "is_safe_intent_path", raise_safety_error)
     assert (
         workspace_intents.safe_remove_own_intent(
             root=tmp_path,
@@ -654,14 +653,16 @@ def test_workspace_intent_foreign_stale_conflict_and_counts(
     counts = workspace_intents.workspace_status_counts(root=tmp_path)
     assert counts == {"stale_count": 2, "orphaned_count": 1, "total_agents": 3}
 
-    payload = foreign_stale.to_payload(
+    payload = workspace_intents.workspace_intent_to_payload(
+        foreign_stale,
         own_pid=111,
         own_start_epoch=100,
         now=workspace_intents.utc_now(),
     )
     assert payload["ownership"] == workspace_intents.IntentOwnership.FOREIGN_STALE.value
     assert "owner may still be working" in str(payload["escalation_hint"])
-    assert workspace_intents._gc_removal_reason(foreign_stale) is None
+    assert workspace_intents.stale_reason(foreign_stale) == "lease_expired"
+    assert workspace_intents._ttl_expired(foreign_stale) is False
 
     conflicts = workspace_intents.detect_conflicts(
         new_scope={
@@ -800,7 +801,9 @@ def test_workspace_intent_renew_lease_updates_timestamp(tmp_path: Path) -> None:
     )
     updated = workspace_intents.list_workspace_intents(root=tmp_path)[0]
     assert updated.lease_renewed_at_utc != record.lease_renewed_at_utc
-    assert workspace_intents.verify_intent_integrity(updated.signed_payload())
+    assert workspace_intents.verify_intent_integrity(
+        workspace_intents.signed_payload(updated)
+    )
 
 
 def test_workspace_intent_update_status_can_extend_ttl(tmp_path: Path) -> None:
@@ -1184,7 +1187,7 @@ class TestSafeIntentId:
 def test_validate_workspace_record_rejects_traversal_intent_id() -> None:
     """validate_workspace_record rejects intent_id with path separators."""
     malicious = _record(intent_id="../../etc/passwd")
-    payload = malicious.signed_payload()
+    payload = workspace_intents.signed_payload(malicious)
     assert workspace_intents.validate_workspace_record(payload) is None
 
 

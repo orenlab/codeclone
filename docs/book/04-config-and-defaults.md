@@ -136,51 +136,63 @@ Report outputs and local UX:
 
 Controller audit trail:
 
-| Key                    | Type   | Default                              | Meaning                                                   | Requires / Implies                  |
-|------------------------|--------|--------------------------------------|-----------------------------------------------------------|-------------------------------------|
-| `audit_enabled`        | `bool` | `false`                              | Enable the optional local controller audit trail          | Required for `--audit` output       |
-| `audit_path`           | `str`  | `.cache/codeclone/db/audit.sqlite3`  | SQLite audit database path, relative to the analysis root; stored under `db/` to separate controller state from report/cache artifacts | Used only when `audit_enabled=true` |
-| `audit_payloads`       | `str`  | `compact`                            | Audit payload mode: `off`, `compact`, or `full`           | Used only when `audit_enabled=true` |
-| `audit_retention_days` | `int`  | `30`                                 | Retention window for audit rows                           | Used only when `audit_enabled=true` |
+| Key                    | Type   | Default                             | Meaning                                                                                                                                | Requires / Implies                  |
+|------------------------|--------|-------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------|
+| `audit_enabled`        | `bool` | `false`                             | Enable the optional local controller audit trail                                                                                       | Required for `--audit` output       |
+| `audit_path`           | `str`  | `.cache/codeclone/db/audit.sqlite3` | SQLite audit database path, relative to the analysis root; stored under `db/` to separate controller state from report/cache artifacts | Used only when `audit_enabled=true` |
+| `audit_payloads`       | `str`  | `compact`                           | Audit payload mode: `off`, `compact`, or `full`                                                                                        | Used only when `audit_enabled=true` |
+| `audit_retention_days` | `int`  | `30`                                | Retention window for audit rows                                                                                                        | Used only when `audit_enabled=true` |
+
+Workspace intent registry:
+
+| Key                       | Type  | Default                               | Meaning                                                      | Requires / Implies                              |
+|---------------------------|-------|---------------------------------------|--------------------------------------------------------------|-------------------------------------------------|
+| `intent_registry_backend` | `str` | `file`                                | Workspace intent storage backend: `file` or `sqlite`         | MCP workspace coordination                      |
+| `intent_registry_path`    | `str` | `.cache/codeclone/db/intents.sqlite3` | SQLite registry database path, relative to the analysis root | Used only when `intent_registry_backend=sqlite` |
+| `intent_registry_retention_days` | `int` | `7`                          | Retention window for closed SQLite intent rows (max `14` in open source) | Used only when `intent_registry_backend=sqlite` |
+
+Values above `14` are contract errors in the open-source edition. See
+[Plans and Retention](../plans-and-retention.md) for Team (up to 30 days) and
+Enterprise (up to 90 days, PostgreSQL backend) options.
 
 This is the exact accepted `[tool.codeclone]` key set from
 `codeclone/config/spec.py` and `codeclone/config/pyproject_loader.py`; unknown
 keys are contract errors.
 
 !!! note "Pyproject keys vs CLI flags"
-    The tables above list `[tool.codeclone]` keys, not CLI flag spellings.
-    CLI flags may map to the same internal destination under a different name.
-    Example: `coverage_xml` in `pyproject.toml` corresponds to CLI
-    `--coverage FILE`. The same pattern applies to report outputs such as
-    `html_out` ↔ `--html` and `json_out` ↔ `--json`.
+The tables above list `[tool.codeclone]` keys, not CLI flag spellings.
+CLI flags may map to the same internal destination under a different name.
+Example: `coverage_xml` in `pyproject.toml` corresponds to CLI
+`--coverage FILE`. The same pattern applies to report outputs such as
+`html_out` ↔ `--html` and `json_out` ↔ `--json`.
 
 CLI-only flags (no `[tool.codeclone]` key; authoritative spelling in
 `tests/fixtures/contract_snapshots/cli_help.txt`):
 
-| CLI flag | Group | Meaning |
-|----------|-------|---------|
-| `--changed-only` | Analysis | Limit clone gating/summaries to git-selected files |
-| `--diff-against GIT_REF` | Analysis | Resolve changed files from `git diff --name-only <REF>`; requires `--changed-only` |
-| `--paths-from-git-diff GIT_REF` | Analysis | Shorthand for `--changed-only` + git diff selection |
-| `--blast-radius FILE [FILE ...]` | Analysis | Render structural blast radius for given files after analysis |
-| `--patch-verify` | Analysis | Verify current patch against trusted clone baseline budget |
-| `--strictness LEVEL` | Analysis | `ci`, `strict`, or `relaxed`; valid only with `--patch-verify` (default: `ci`) |
-| `--session-stats` | Analysis | Show workspace session status; read-only |
-| `--audit` | Analysis | Show local Controller audit trail; requires `audit_enabled=true` |
-| `--audit-json` | Analysis | JSON audit footprint; implies `--audit` |
-| `--cache-dir [FILE]` | Analysis | Legacy alias for `--cache-path` |
-| `--timestamped-report-paths` | Reporting | Append UTC timestamp to default report filenames |
-| `--open-html-report` | Output and UI | Open generated HTML in browser; requires `--html` |
-| `--progress` | Output and UI | Force-enable progress output |
-| `--color` | Output and UI | Force-enable ANSI colors |
+| CLI flag                         | Group         | Meaning                                                                            |
+|----------------------------------|---------------|------------------------------------------------------------------------------------|
+| `--changed-only`                 | Analysis      | Limit clone gating/summaries to git-selected files                                 |
+| `--diff-against GIT_REF`         | Analysis      | Resolve changed files from `git diff --name-only <REF>`; requires `--changed-only` |
+| `--paths-from-git-diff GIT_REF`  | Analysis      | Shorthand for `--changed-only` + git diff selection                                |
+| `--blast-radius FILE [FILE ...]` | Analysis      | Render structural blast radius for given files after analysis                      |
+| `--patch-verify`                 | Analysis      | Verify current patch against trusted clone baseline budget                         |
+| `--strictness LEVEL`             | Analysis      | `ci`, `strict`, or `relaxed`; valid only with `--patch-verify` (default: `ci`)     |
+| `--session-stats`                | Analysis      | Show workspace session status; read-only                                           |
+| `--audit`                        | Analysis      | Show local Controller audit trail; requires `audit_enabled=true`                   |
+| `--audit-json`                   | Analysis      | JSON audit footprint; implies `--audit`                                            |
+| `--cache-dir [FILE]`             | Analysis      | Legacy alias for `--cache-path`                                                    |
+| `--timestamped-report-paths`     | Reporting     | Append UTC timestamp to default report filenames                                   |
+| `--open-html-report`             | Output and UI | Open generated HTML in browser; requires `--html`                                  |
+| `--progress`                     | Output and UI | Force-enable progress output                                                       |
+| `--color`                        | Output and UI | Force-enable ANSI colors                                                           |
 
 Canonical help text, defaults, and exit-code epilog are locked by
 `tests/test_cli_help_snapshot.py` and `tests/test_cli_unit.py::test_cli_help_text_consistency`.
 
 !!! warning "Metrics-mode conflicts are enforced"
-    Metrics update/gating flags are runtime contracts, not hints. Combinations
-    such as `skip_metrics=true` together with metrics gating or metrics
-    baseline update flags are contract errors.
+Metrics update/gating flags are runtime contracts, not hints. Combinations
+such as `skip_metrics=true` together with metrics gating or metrics
+baseline update flags are contract errors.
 
 Notes:
 

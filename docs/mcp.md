@@ -41,8 +41,8 @@ graph TD
         GR[Gate Results]
     end
 
-    subgraph Disk["Disk (ephemeral)"]
-        WIR[".cache/codeclone/intents/<br/>Workspace Intent Registry"]
+    subgraph Disk["Disk (coordination + audit)"]
+        WIR["Workspace Intent Registry<br/>file: .cache/codeclone/intents/<br/>sqlite: .cache/codeclone/db/intents.sqlite3"]
     end
 
     MCPSession -->|" writes coordination records "| Disk
@@ -270,9 +270,9 @@ runs and session state without running analysis or mutating the repository.
 sequenceDiagram
     participant A as Agent
     participant M as MCP Server
-    participant D as Disk Registry
+    participant D as Intent Registry
     A ->> M: list_workspace(root)
-    M ->> D: read .cache/codeclone/intents/
+    M ->> D: read active intents (file or sqlite backend)
     D -->> M: active intents
     M -->> A: workspace state
     A ->> M: analyze_repository(root)
@@ -312,7 +312,7 @@ sequenceDiagram
     A ->> M: create_review_receipt
     M -->> A: audit artifact
     A ->> M: clear
-    M ->> D: remove intent record
+    M ->> D: close intent (file: delete row; sqlite: status=clean)
 ```
 
 | Tool                     | Purpose                                                                                                     |
@@ -554,8 +554,8 @@ include `total`, `shown`, and `truncated` summaries.
 | Lazy loading      | Base `codeclone` install does not require MCP packages     |
 | Repository access | Limited to what the server process can read locally        |
 | Session state     | In-memory runs and review markers; do not survive restart  |
-| Workspace intents | Ephemeral coordination under `.cache/codeclone/intents/`   |
-| Audit trail       | Optional SQLite under `.cache/codeclone/db/` when enabled  |
+| Workspace intents | File backend: ephemeral JSON under `.cache/codeclone/intents/`; SQLite backend: auditable rows under `.cache/codeclone/db/intents.sqlite3` with retention purge (default 7 days, max 14 in open source — see [Plans and Retention](plans-and-retention.md)) |
+| Audit trail       | Optional SQLite under `.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true` |
 
 ---
 

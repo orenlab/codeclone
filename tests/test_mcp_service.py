@@ -3085,7 +3085,7 @@ def _stale_workspace_intent(
         intent_id=intent_id,
     )
     assert found is not None
-    _, workspace_record = found
+    workspace_record = found
     stale_record = replace(
         workspace_record,
         lease_renewed_at_utc=mcp_workspace_intents_mod.format_utc(
@@ -3245,7 +3245,7 @@ def test_mcp_service_workspace_intent_recovery_after_lease_expiry(
         intent_id=intent_id,
     )
     assert found is not None
-    _, workspace_record = found
+    workspace_record = found
     stale_record = replace(
         workspace_record,
         lease_renewed_at_utc=mcp_workspace_intents_mod.format_utc(
@@ -3321,7 +3321,7 @@ def test_mcp_service_workspace_intent_recovery_after_lease_expiry(
         intent_id=intent_id,
     )
     assert latest is not None
-    _, latest_record = latest
+    latest_record = latest
     assert latest_record.agent_pid == 22222
     assert latest_record.agent_start_epoch == 200
     assert latest_record.status == "active"
@@ -3519,7 +3519,7 @@ def test_mcp_service_workspace_intent_get_renews_lease(tmp_path: Path) -> None:
         intent_id=intent_id,
     )
     assert latest is not None
-    _, latest_record = latest
+    latest_record = latest
     assert latest_record.lease_renewed_at_utc != stale_record.lease_renewed_at_utc
 
 
@@ -3535,7 +3535,7 @@ def test_mcp_service_patch_contract_renews_workspace_intent_lease(
         intent_id=intent_id,
     )
     assert latest is not None
-    _, latest_record = latest
+    latest_record = latest
     assert latest_record.lease_renewed_at_utc != stale_record.lease_renewed_at_utc
 
 
@@ -3694,7 +3694,7 @@ def test_mcp_service_intent_recovery_internal_edges(tmp_path: Path) -> None:
         intent_id=intent_id,
     )
     assert found is not None
-    _, workspace_record = found
+    workspace_record = found
     now = mcp_workspace_intents_mod.utc_now()
     recovery_run = mcp_session_intent_mod._RecoveryRun(
         record=record,

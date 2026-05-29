@@ -37,6 +37,11 @@ from ..contracts import (
     DEFAULT_SEGMENT_MIN_STMT,
     DEFAULT_TEXT_REPORT_PATH,
 )
+from .intent_registry_defaults import (
+    DEFAULT_INTENT_REGISTRY_BACKEND,
+    DEFAULT_INTENT_REGISTRY_DB_PATH,
+    DEFAULT_INTENT_REGISTRY_RETENTION_DAYS,
+)
 
 CliKind = Literal[
     "positional",
@@ -314,6 +319,24 @@ OPTIONS: Final[tuple[OptionSpec, ...]] = (
         dest="audit_retention_days",
         group=None,
         default=DEFAULT_AUDIT_RETENTION_DAYS,
+        pyproject_type=int,
+    ),
+    _option(
+        dest="intent_registry_backend",
+        group=None,
+        default=DEFAULT_INTENT_REGISTRY_BACKEND,
+        pyproject_type=str,
+    ),
+    _option(
+        dest="intent_registry_path",
+        group=None,
+        default=DEFAULT_INTENT_REGISTRY_DB_PATH,
+        pyproject_type=str,
+    ),
+    _option(
+        dest="intent_registry_retention_days",
+        group=None,
+        default=DEFAULT_INTENT_REGISTRY_RETENTION_DAYS,
         pyproject_type=int,
     ),
     _option(

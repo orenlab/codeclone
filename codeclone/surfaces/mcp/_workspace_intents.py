@@ -6,42 +6,71 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import os
-import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING
 
-from ...cache.integrity import canonical_json
-from ...utils.json_io import read_json_object, write_json_document_atomically
+if TYPE_CHECKING:
+    from ._workspace_intent_store import WorkspaceIntentStore
 
-LEGACY_REGISTRY_VERSION: Final = "1"
-REGISTRY_VERSION: Final = "2"
-REGISTRY_DIR_PARTS: Final = (".cache", "codeclone", "intents")
-DEFAULT_TTL_SECONDS: Final = 3600
-MIN_TTL_SECONDS: Final = 60
-MAX_TTL_SECONDS: Final = 86400
-DEFAULT_LEASE_SECONDS: Final = 300
-MIN_LEASE_SECONDS: Final = 60
-MAX_LEASE_SECONDS: Final = 600
-_HEX_DIGEST_LENGTH: Final = 64
-_SAFE_INTENT_ID_RE: Final = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
-
-
-class WorkspaceIntentStatus(str, Enum):
-    ACTIVE = "active"
-    QUEUED = "queued"
-    CLEAN = "clean"
-    EXPANDED = "expanded"
-    VIOLATED = "violated"
-    EXPIRED = "expired"
-    ORPHANED = "orphaned"
+from ._workspace_intent_contract import (
+    DEFAULT_LEASE_SECONDS,
+    DEFAULT_TTL_SECONDS,
+    LEGACY_REGISTRY_VERSION,
+    MAX_LEASE_SECONDS,
+    MAX_TTL_SECONDS,
+    MIN_LEASE_SECONDS,
+    MIN_TTL_SECONDS,
+    REGISTRY_VERSION,
+    WorkspaceIntentRecord,
+    compute_intent_digest,
+    compute_scope_digest,
+    verify_intent_integrity,
+)
+from ._workspace_intent_lifecycle import (
+    WorkspaceIntentStatus,
+    utc_now,
+)
+from ._workspace_intent_lifecycle import (
+    is_lease_expired as _is_lease_expired,
+)
+from ._workspace_intent_lifecycle import (
+    is_pid_alive as _is_pid_alive,
+)
+from ._workspace_intent_lifecycle import (
+    lease_expiry as _lease_expiry,
+)
+from ._workspace_intent_lifecycle import (
+    parse_utc as _parse_utc,
+)
+from ._workspace_intent_lifecycle import (
+    ttl_expired as _ttl_expired,
+)
+from ._workspace_intent_paths import (
+    intent_filename,
+    intent_path,
+    registry_dir,
+    safe_remove_own_intent,
+)
+from ._workspace_intent_paths import (
+    is_safe_intent_id as _is_safe_intent_id,
+)
+from ._workspace_intent_paths import (
+    is_safe_intent_path as _is_safe_intent_path,
+)
+from ._workspace_intent_paths import (
+    read_payload as _read_payload,
+)
+from ._workspace_intent_paths import (
+    record_sort_key as _record_sort_key,
+)
+from ._workspace_intent_paths import (
+    unlink as _unlink,
+)
 
 
 class IntentOwnership(str, Enum):
@@ -53,88 +82,72 @@ class IntentOwnership(str, Enum):
     EXPIRED = "expired"
 
 
-@dataclass(frozen=True, slots=True)
-class WorkspaceIntentRecord:
-    intent_id: str
-    agent_pid: int
-    agent_start_epoch: int
-    agent_label: str
-    run_id: str
-    declared_at_utc: str
-    expires_at_utc: str
-    ttl_seconds: int
-    status: str
-    intent: str
-    scope: dict[str, object]
-    scope_digest: str
-    blast_radius_summary: dict[str, object]
-    lease_renewed_at_utc: str
-    lease_seconds: int
-    report_digest: str
+def is_orphaned(record: WorkspaceIntentRecord) -> bool:
+    return not _is_pid_alive(record.agent_pid)
 
-    def unsigned_payload(self) -> dict[str, object]:
-        return {
-            "registry_version": REGISTRY_VERSION,
-            "intent_id": self.intent_id,
-            "agent_pid": self.agent_pid,
-            "agent_start_epoch": self.agent_start_epoch,
-            "agent_label": self.agent_label,
-            "run_id": self.run_id,
-            "declared_at_utc": self.declared_at_utc,
-            "expires_at_utc": self.expires_at_utc,
-            "ttl_seconds": self.ttl_seconds,
-            "status": self.status,
-            "intent": self.intent,
-            "scope": self.scope,
-            "scope_digest": self.scope_digest,
-            "blast_radius_summary": self.blast_radius_summary,
-            "lease_renewed_at_utc": self.lease_renewed_at_utc,
-            "lease_seconds": self.lease_seconds,
-            "report_digest": self.report_digest,
-        }
 
-    def signed_payload(self) -> dict[str, object]:
-        payload = self.unsigned_payload()
-        payload["integrity"] = {"payload_sha256": compute_intent_digest(payload)}
-        return payload
+def stale_reason(record: WorkspaceIntentRecord) -> str | None:
+    if record.status == WorkspaceIntentStatus.EXPIRED.value:
+        return "expired"
+    if record.status == WorkspaceIntentStatus.ORPHANED.value:
+        return "orphaned"
+    expires = _parse_utc(record.expires_at_utc)
+    if expires is None or expires <= utc_now():
+        return "expired"
+    if is_orphaned(record):
+        return "orphaned"
+    if _is_lease_expired(record):
+        return "lease_expired"
+    return None
 
-    def to_payload(
-        self,
-        *,
-        own_pid: int | None = None,
-        own_start_epoch: int | None = None,
-        now: datetime | None = None,
-    ) -> dict[str, object]:
-        current_time = now or utc_now()
-        ownership = classify_intent_ownership(
-            self,
-            own_pid=own_pid or 0,
-            own_start_epoch=own_start_epoch or 0,
-            now=current_time,
+
+def is_stale(record: WorkspaceIntentRecord) -> bool:
+    return stale_reason(record) is not None
+
+
+def signed_payload(record: WorkspaceIntentRecord) -> dict[str, object]:
+    from ._workspace_intent_models import signed_payload_dict_from_record
+
+    return signed_payload_dict_from_record(record)
+
+
+def workspace_intent_to_payload(
+    record: WorkspaceIntentRecord,
+    *,
+    own_pid: int | None = None,
+    own_start_epoch: int | None = None,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    current_time = now or utc_now()
+    ownership = classify_intent_ownership(
+        record,
+        own_pid=own_pid or 0,
+        own_start_epoch=own_start_epoch or 0,
+        now=current_time,
+    )
+    payload = record.unsigned_payload()
+    payload["ownership"] = ownership.value
+    payload["is_own"] = ownership in {
+        IntentOwnership.OWN_ACTIVE,
+        IntentOwnership.OWN_STALE,
+    }
+    lease_expiry = _lease_expiry(record)
+    if lease_expiry is not None:
+        remaining = int((lease_expiry - current_time).total_seconds())
+        payload["lease_expires_in_seconds"] = max(0, remaining)
+    if ownership == IntentOwnership.FOREIGN_ACTIVE:
+        payload["escalation_hint"] = (
+            "This intent belongs to a live process with a valid lease. "
+            "Do NOT kill the process. Ask the user to confirm whether "
+            "this is an abandoned session or a parallel agent."
         )
-        payload = self.unsigned_payload()
-        payload["ownership"] = ownership.value
-        payload["is_own"] = ownership in {
-            IntentOwnership.OWN_ACTIVE,
-            IntentOwnership.OWN_STALE,
-        }
-        lease_expiry = _lease_expiry(self)
-        if lease_expiry is not None:
-            remaining = int((lease_expiry - current_time).total_seconds())
-            payload["lease_expires_in_seconds"] = max(0, remaining)
-        if ownership == IntentOwnership.FOREIGN_ACTIVE:
-            payload["escalation_hint"] = (
-                "This intent belongs to a live process with a valid lease. "
-                "Do NOT kill the process. Ask the user to confirm whether "
-                "this is an abandoned session or a parallel agent."
-            )
-        elif ownership == IntentOwnership.FOREIGN_STALE:
-            payload["escalation_hint"] = (
-                "This intent belongs to a live process whose lease has expired. "
-                "The owner may still be working (context overflow, long edit, "
-                "test run). Coordinate with the user before proceeding."
-            )
-        return payload
+    elif ownership == IntentOwnership.FOREIGN_STALE:
+        payload["escalation_hint"] = (
+            "This intent belongs to a live process whose lease has expired. "
+            "The owner may still be working (context overflow, long edit, "
+            "test run). Coordinate with the user before proceeding."
+        )
+    return payload
 
 
 def classify_intent_ownership(
@@ -162,18 +175,6 @@ def classify_intent_ownership(
     return IntentOwnership.RECOVERABLE
 
 
-def _lease_expiry(record: WorkspaceIntentRecord) -> datetime | None:
-    renewed_at = _parse_utc(record.lease_renewed_at_utc)
-    if renewed_at is None:
-        return None
-    return renewed_at + timedelta(seconds=record.lease_seconds)
-
-
-def _is_lease_expired(record: WorkspaceIntentRecord) -> bool:
-    lease_expiry = _lease_expiry(record)
-    return lease_expiry is None or lease_expiry <= utc_now()
-
-
 def resolved_lease_seconds(value: object = None, *, env_value: object = None) -> int:
     return _resolved_seconds(
         value=value,
@@ -182,32 +183,6 @@ def resolved_lease_seconds(value: object = None, *, env_value: object = None) ->
         minimum=MIN_LEASE_SECONDS,
         maximum=MAX_LEASE_SECONDS,
     )
-
-
-def registry_dir(root: Path) -> Path:
-    return root.joinpath(*REGISTRY_DIR_PARTS)
-
-
-def intent_filename(*, pid: int, start_epoch: int, intent_id: str) -> str:
-    return f"{pid}-{start_epoch}-{intent_id}.json"
-
-
-def intent_path(
-    *,
-    root: Path,
-    pid: int,
-    start_epoch: int,
-    intent_id: str,
-) -> Path:
-    return registry_dir(root) / intent_filename(
-        pid=pid,
-        start_epoch=start_epoch,
-        intent_id=intent_id,
-    )
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc).replace(microsecond=0)
 
 
 def format_utc(value: datetime) -> str:
@@ -256,154 +231,17 @@ def expires_at(*, declared_at: datetime, ttl_seconds: int) -> str:
     return format_utc(declared_at + timedelta(seconds=ttl_seconds))
 
 
-def compute_scope_digest(scope: Mapping[str, object]) -> str:
-    return hashlib.sha256(canonical_json(dict(scope)).encode("utf-8")).hexdigest()
-
-
-def compute_intent_digest(data: Mapping[str, object]) -> str:
-    digestable = {key: value for key, value in data.items() if key != "integrity"}
-    return hashlib.sha256(canonical_json(digestable).encode("utf-8")).hexdigest()
-
-
-def verify_intent_integrity(data: Mapping[str, object]) -> bool:
-    integrity = _as_mapping(data.get("integrity"))
-    stored = integrity.get("payload_sha256")
-    if not _is_hex_digest(stored):
-        return False
-    expected = compute_intent_digest(data)
-    return hmac.compare_digest(str(stored), expected)
-
-
 def validate_workspace_record(data: object) -> WorkspaceIntentRecord | None:
-    if not isinstance(data, Mapping):
-        return None
-    if not all(isinstance(key, str) for key in data):
-        return None
-    if not verify_intent_integrity(data):
-        return None
-    version = data.get("registry_version")
-    if version not in {REGISTRY_VERSION, LEGACY_REGISTRY_VERSION}:
-        return None
-    intent_id = _required_string(data.get("intent_id"))
-    if not _is_safe_intent_id(intent_id):
-        return None
-    agent_pid = _positive_int(data.get("agent_pid"))
-    agent_start_epoch = _positive_int(data.get("agent_start_epoch"))
-    agent_label = _string_value(data.get("agent_label"))
-    run_id = _required_string(data.get("run_id"))
-    declared_at_utc = _required_string(data.get("declared_at_utc"))
-    expires_at_utc = _required_string(data.get("expires_at_utc"))
-    ttl_seconds = _positive_int(data.get("ttl_seconds"))
-    status = _required_string(data.get("status"))
-    intent = _required_string(data.get("intent"))
-    scope = _valid_scope(data.get("scope"))
-    scope_digest = data.get("scope_digest")
-    blast_radius_summary = _dict_payload(data.get("blast_radius_summary"))
-    lease_fields = _lease_fields_for_version(
-        data=data,
-        version=str(version),
-        declared_at_utc=declared_at_utc,
-    )
-    if lease_fields is None:
-        return None
-    lease_renewed_at_utc, lease_seconds, report_digest = lease_fields
-    if _record_required_value_missing(
-        intent_id,
-        agent_pid,
-        agent_start_epoch,
-        run_id,
-        declared_at_utc,
-        expires_at_utc,
-        ttl_seconds,
-        intent,
-        blast_radius_summary,
-    ):
-        return None
-    assert intent_id is not None
-    assert agent_pid is not None
-    assert agent_start_epoch is not None
-    assert run_id is not None
-    assert declared_at_utc is not None
-    assert expires_at_utc is not None
-    assert ttl_seconds is not None
-    assert intent is not None
-    assert blast_radius_summary is not None
-    if status not in _valid_status_values() or scope is None:
-        return None
-    assert status is not None
-    if not _is_hex_digest(scope_digest):
-        return None
-    if not _valid_record_dates(
-        declared_at_utc,
-        expires_at_utc,
-        lease_renewed_at_utc,
-    ):
-        return None
-    if compute_scope_digest(scope) != str(scope_digest):
-        return None
-    return WorkspaceIntentRecord(
-        intent_id=intent_id,
-        agent_pid=agent_pid,
-        agent_start_epoch=agent_start_epoch,
-        agent_label=agent_label,
-        run_id=run_id,
-        declared_at_utc=declared_at_utc,
-        expires_at_utc=expires_at_utc,
-        ttl_seconds=ttl_seconds,
-        status=status,
-        intent=intent,
-        scope=scope,
-        scope_digest=str(scope_digest),
-        blast_radius_summary=blast_radius_summary,
-        lease_renewed_at_utc=lease_renewed_at_utc,
-        lease_seconds=lease_seconds,
-        report_digest=report_digest,
-    )
+    from ._workspace_intent_models import parse_workspace_document, record_from_document
 
-
-def _lease_fields_for_version(
-    *,
-    data: Mapping[str, object],
-    version: str,
-    declared_at_utc: str | None,
-) -> tuple[str, int, str] | None:
-    if version == REGISTRY_VERSION:
-        lease_renewed_at_utc = _required_string(data.get("lease_renewed_at_utc"))
-        lease_seconds = _valid_lease_seconds(data.get("lease_seconds"))
-        report_digest = _required_string(data.get("report_digest"))
-    else:
-        lease_renewed_at_utc = declared_at_utc
-        lease_seconds = DEFAULT_LEASE_SECONDS
-        report_digest = _string_value(data.get("report_digest"))
-    if lease_renewed_at_utc is None or lease_seconds is None or report_digest is None:
+    document = parse_workspace_document(data)
+    if document is None:
         return None
-    return lease_renewed_at_utc, lease_seconds, report_digest
-
-
-def _record_required_value_missing(*values: object) -> bool:
-    return any(value is None for value in values)
-
-
-def _valid_record_dates(*values: str) -> bool:
-    return all(_parse_utc(value) is not None for value in values)
+    return record_from_document(document)
 
 
 def write_workspace_intent(*, root: Path, record: WorkspaceIntentRecord) -> bool:
-    try:
-        write_json_document_atomically(
-            path=intent_path(
-                root=root,
-                pid=record.agent_pid,
-                start_epoch=record.agent_start_epoch,
-                intent_id=record.intent_id,
-            ),
-            document=record.signed_payload(),
-            sort_keys=True,
-            trailing_newline=True,
-        )
-    except OSError:
-        return False
-    return True
+    return bool(_intent_store(root).write(record))
 
 
 def update_workspace_intent_status(
@@ -415,23 +253,13 @@ def update_workspace_intent_status(
     new_status: str,
     ttl_seconds: int | None = None,
 ) -> bool:
-    found = find_workspace_intent(root=root, intent_id=intent_id)
-    if found is None:
+    record = find_workspace_intent(root=root, intent_id=intent_id)
+    if record is None:
         return False
-    path, record = found
     if record.agent_pid != pid or record.agent_start_epoch != start_epoch:
         return False
     updated = _updated_record(record, new_status=new_status, ttl_seconds=ttl_seconds)
-    try:
-        write_json_document_atomically(
-            path=path,
-            document=updated.signed_payload(),
-            sort_keys=True,
-            trailing_newline=True,
-        )
-    except OSError:
-        return False
-    return True
+    return bool(_intent_store(root).write(updated))
 
 
 def renew_workspace_intent_lease(
@@ -442,10 +270,9 @@ def renew_workspace_intent_lease(
     intent_id: str,
     lease_seconds: int | None = None,
 ) -> bool:
-    found = find_workspace_intent(root=root, intent_id=intent_id)
-    if found is None:
+    record = find_workspace_intent(root=root, intent_id=intent_id)
+    if record is None:
         return False
-    path, record = found
     if record.agent_pid != pid or record.agent_start_epoch != start_epoch:
         return False
     now = utc_now()
@@ -460,16 +287,7 @@ def renew_workspace_intent_lease(
     updated = replace(
         record, lease_renewed_at_utc=format_utc(now), lease_seconds=new_lease
     )
-    try:
-        write_json_document_atomically(
-            path=path,
-            document=updated.signed_payload(),
-            sort_keys=True,
-            trailing_newline=True,
-        )
-    except OSError:
-        return False
-    return True
+    return bool(_intent_store(root).write(updated))
 
 
 def remove_workspace_intent(
@@ -485,11 +303,12 @@ def remove_workspace_intent(
     constructed path resolves inside the registry directory, rejects
     symlink indirection, and checks filename structure before unlinking.
     """
-    return safe_remove_own_intent(
-        root=root,
-        pid=pid,
-        start_epoch=start_epoch,
-        intent_id=intent_id,
+    return bool(
+        _intent_store(root).remove(
+            pid=pid,
+            start_epoch=start_epoch,
+            intent_id=intent_id,
+        )
     )
 
 
@@ -509,7 +328,7 @@ def list_workspace_intents(
 ) -> tuple[WorkspaceIntentRecord, ...]:
     records = [
         record
-        for _, record in _valid_registry_entries(root)
+        for record in _intent_store(root).list_records()
         if not exclude_stale or stale_reason(record) is None
     ]
     return tuple(sorted(records, key=_record_sort_key))
@@ -519,23 +338,18 @@ def find_workspace_intent(
     *,
     root: Path,
     intent_id: str,
-) -> tuple[Path, WorkspaceIntentRecord] | None:
-    matches = [
-        (path, record)
-        for path, record in _valid_registry_entries(root)
-        if record.intent_id == intent_id
-    ]
-    if not matches:
-        return None
-    return sorted(matches, key=lambda item: _record_sort_key(item[1]))[-1]
+) -> WorkspaceIntentRecord | None:
+    return _intent_store(root).find(intent_id)
 
 
 def workspace_status_counts(*, root: Path) -> dict[str, int]:
-    records = [record for _, record in _valid_registry_entries(root)]
+    records = list(_intent_store(root).list_records())
     stale_records = [record for record in records if stale_reason(record) is not None]
     return {
         "stale_count": len(stale_records),
-        "orphaned_count": sum(1 for record in records if is_orphaned(record)),
+        "orphaned_count": sum(
+            1 for record in records if not _is_pid_alive(record.agent_pid)
+        ),
         "total_agents": len({record.agent_pid for record in records}),
     }
 
@@ -761,80 +575,7 @@ def _forbidden_matches(
 
 
 def gc_workspace(*, root: Path) -> dict[str, object]:
-    removed_ids: list[str] = []
-    removed_reasons: dict[str, str] = {}
-    corrupted_filenames: list[str] = []
-    for path in _registry_files(root):
-        payload = _read_payload(path)
-        record = validate_workspace_record(payload) if payload is not None else None
-        if record is None:
-            if _unlink(path):
-                corrupted_filenames.append(path.name)
-            continue
-        reason = _gc_removal_reason(record)
-        if reason is None:
-            continue
-        if _unlink(path):
-            removed_ids.append(record.intent_id)
-            removed_reasons[record.intent_id] = reason
-    remaining = len(list_workspace_intents(root=root, exclude_stale=False))
-    return {
-        "removed": len(removed_ids),
-        "removed_intent_ids": removed_ids,
-        "removed_reasons": removed_reasons,
-        "corrupted_removed": len(corrupted_filenames),
-        "corrupted_filenames": corrupted_filenames,
-        "remaining": remaining,
-    }
-
-
-def _gc_removal_reason(record: WorkspaceIntentRecord) -> str | None:
-    reason = stale_reason(record)
-    if reason == "lease_expired" and not _ttl_expired(record):
-        return None
-    return reason
-
-
-def _ttl_expired(record: WorkspaceIntentRecord) -> bool:
-    expires = _parse_utc(record.expires_at_utc)
-    return expires is None or expires <= utc_now()
-
-
-def is_stale(record: WorkspaceIntentRecord) -> bool:
-    return stale_reason(record) is not None
-
-
-def stale_reason(record: WorkspaceIntentRecord) -> str | None:
-    if record.status == WorkspaceIntentStatus.EXPIRED.value:
-        return "expired"
-    if record.status == WorkspaceIntentStatus.ORPHANED.value:
-        return "orphaned"
-    expires = _parse_utc(record.expires_at_utc)
-    if expires is None or expires <= utc_now():
-        return "expired"
-    if is_orphaned(record):
-        return "orphaned"
-    if _is_lease_expired(record):
-        return "lease_expired"
-    return None
-
-
-def is_orphaned(record: WorkspaceIntentRecord) -> bool:
-    return not _is_pid_alive(record.agent_pid)
-
-
-def _is_pid_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return True
-    return True
+    return dict(_intent_store(root).gc())
 
 
 def _updated_record(
@@ -856,187 +597,10 @@ def _updated_record(
     )
 
 
-def _valid_registry_entries(
-    root: Path,
-) -> tuple[tuple[Path, WorkspaceIntentRecord], ...]:
-    entries: list[tuple[Path, WorkspaceIntentRecord]] = []
-    for path in _registry_files(root):
-        payload = _read_payload(path)
-        record = validate_workspace_record(payload) if payload is not None else None
-        if record is not None:
-            entries.append((path, record))
-    return tuple(entries)
+def _intent_store(root: Path) -> WorkspaceIntentStore:
+    from ._workspace_intent_store import get_workspace_intent_store
 
-
-def _registry_files(root: Path) -> tuple[Path, ...]:
-    directory = registry_dir(root)
-    try:
-        return tuple(sorted(directory.glob("*.json")))
-    except OSError:
-        return ()
-
-
-def _read_payload(path: Path) -> dict[str, object] | None:
-    try:
-        return read_json_object(path)
-    except (OSError, TypeError, ValueError):
-        return None
-
-
-def _unlink(path: Path) -> bool:
-    try:
-        path.unlink(missing_ok=True)
-    except OSError:
-        return False
-    return True
-
-
-def _is_safe_intent_path(expected: Path, registry: Path) -> bool:
-    """Return True only if *expected* is safe to delete.
-
-    Checks (all must pass):
-    1. *expected* is an absolute path.
-    2. *expected* resolves to itself — no symlink indirection.
-    3. Resolved path is strictly inside *registry* directory.
-    4. Filename matches the ``{pid}-{start_epoch}-{intent_id}.json`` pattern.
-    5. Target is a regular file (not a directory, device, or pipe).
-    """
-    try:
-        if not expected.is_absolute():
-            return False
-        resolved = expected.resolve(strict=False)
-        resolved_registry = registry.resolve(strict=False)
-        if resolved != expected:
-            return False
-        if not resolved.is_relative_to(resolved_registry):
-            return False
-        name = expected.name
-        if not name.endswith(".json") or name.count("-") < 2:
-            return False
-        if expected.exists() and not expected.is_file():
-            return False
-    except (OSError, ValueError):
-        return False
-    return True
-
-
-def safe_remove_own_intent(
-    *,
-    root: Path,
-    pid: int,
-    start_epoch: int,
-    intent_id: str,
-) -> bool:
-    """Remove a workspace intent file ONLY if it belongs to the caller.
-
-    Safety checks (all must pass):
-    1. *root* is an absolute path.
-    2. Constructed path resolves inside ``registry_dir(root)``.
-    3. No symlink indirection (resolved == constructed).
-    4. Target is a regular file.
-    5. Filename matches expected pattern.
-
-    Returns True if the file was removed or is already absent.
-    Returns False if any safety check fails (file is NOT removed).
-    Never raises.
-    """
-    try:
-        if not root.is_absolute():
-            return False
-        registry = registry_dir(root)
-        expected = intent_path(
-            root=root,
-            pid=pid,
-            start_epoch=start_epoch,
-            intent_id=intent_id,
-        )
-        if not _is_safe_intent_path(expected, registry):
-            return False
-        expected.unlink(missing_ok=True)
-    except Exception:
-        return False
-    return True
-
-
-def _record_sort_key(record: WorkspaceIntentRecord) -> tuple[str, int, str]:
-    return (record.declared_at_utc, record.agent_pid, record.intent_id)
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
-
-
-def _dict_payload(value: object) -> dict[str, object] | None:
-    if not isinstance(value, Mapping):
-        return None
-    if not all(isinstance(key, str) for key in value):
-        return None
-    return dict(value)
-
-
-def _string_value(value: object) -> str:
-    return value if isinstance(value, str) else ""
-
-
-def _required_string(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    return text or None
-
-
-def _positive_int(value: object) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        return None
-    return value
-
-
-def _valid_lease_seconds(value: object) -> int | None:
-    parsed = _positive_int(value)
-    if parsed is None:
-        return None
-    if parsed < MIN_LEASE_SECONDS or parsed > MAX_LEASE_SECONDS:
-        return None
-    return parsed
-
-
-def _is_safe_intent_id(value: object) -> bool:
-    """Return True if *value* is a safe intent identifier.
-
-    Rejects path separators, traversal components, control characters,
-    and empty strings.  Accepts only ``[a-zA-Z0-9._-]`` with an
-    alphanumeric first character, max 128 chars.
-    """
-    return isinstance(value, str) and _SAFE_INTENT_ID_RE.match(value) is not None
-
-
-def _is_hex_digest(value: object) -> bool:
-    if not isinstance(value, str) or len(value) != _HEX_DIGEST_LENGTH:
-        return False
-    return all(char in "0123456789abcdef" for char in value.lower())
-
-
-def _valid_status_values() -> frozenset[str]:
-    return frozenset(status.value for status in WorkspaceIntentStatus)
-
-
-def _valid_scope(value: object) -> dict[str, object] | None:
-    if not isinstance(value, Mapping):
-        return None
-    if not all(isinstance(key, str) for key in value):
-        return None
-    allowed = _valid_path_list(value.get("allowed_files"), required=True)
-    if allowed is None:
-        return None
-    related = _valid_path_list(value.get("allowed_related", ()), required=False)
-    forbidden = _valid_path_list(value.get("forbidden", ()), required=False)
-    if related is None or forbidden is None:
-        return None
-    return {
-        "allowed_files": allowed,
-        "allowed_related": related,
-        "forbidden": forbidden,
-    }
+    return get_workspace_intent_store(root)
 
 
 def _valid_path_list(value: object, *, required: bool) -> list[str] | None:
@@ -1071,16 +635,6 @@ def _scope_all_sets(
     return allowed, related, forbidden
 
 
-def _parse_utc(value: str) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return None
-    return parsed.astimezone(timezone.utc)
-
-
 def _sort_agent_pid(value: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
@@ -1103,6 +657,14 @@ __all__ = [
     "IntentOwnership",
     "WorkspaceIntentRecord",
     "WorkspaceIntentStatus",
+    "_is_pid_alive",
+    "_is_safe_intent_id",
+    "_is_safe_intent_path",
+    "_lease_expiry",
+    "_parse_utc",
+    "_read_payload",
+    "_ttl_expired",
+    "_unlink",
     "classify_intent_ownership",
     "compute_intent_digest",
     "compute_scope_digest",
@@ -1124,11 +686,13 @@ __all__ = [
     "resolved_lease_seconds",
     "resolved_ttl_seconds",
     "safe_remove_own_intent",
+    "signed_payload",
     "stale_reason",
     "update_workspace_intent_status",
     "utc_now",
     "validate_workspace_record",
     "verify_intent_integrity",
+    "workspace_intent_to_payload",
     "workspace_status_counts",
     "write_workspace_intent",
 ]

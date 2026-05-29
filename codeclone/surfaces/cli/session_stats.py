@@ -61,6 +61,10 @@ class _SessionSnapshot:
     latest_run_age_seconds: int | None
     cache_present: bool
     workspace_health: str
+    intent_registry_backend: str
+    intent_registry_storage: str
+    audit_enabled: bool = False
+    audit_storage: str | None = None
     mcp_token_footprint: int | None = None
     mcp_token_encoding: str | None = None
     mcp_token_event_count: int = 0
@@ -179,6 +183,10 @@ def _collect_session_snapshot(root_path: Path) -> _SessionSnapshot:
     )
 
     mcp_tokens, mcp_enc, mcp_count = _read_audit_token_footprint(root_path)
+    audit_enabled, audit_storage = _read_audit_config(root_path)
+    from ...config.intent_registry import intent_registry_summary
+
+    registry = intent_registry_summary(root_path)
 
     return _SessionSnapshot(
         root=root_path,
@@ -193,6 +201,10 @@ def _collect_session_snapshot(root_path: Path) -> _SessionSnapshot:
         latest_run_age_seconds=latest_run_age_seconds,
         cache_present=cache_present,
         workspace_health=workspace_health,
+        intent_registry_backend=registry["registry_backend"],
+        intent_registry_storage=registry["registry_storage"],
+        audit_enabled=audit_enabled,
+        audit_storage=audit_storage,
         mcp_token_footprint=mcp_tokens,
         mcp_token_encoding=mcp_enc,
         mcp_token_event_count=mcp_count,
@@ -224,6 +236,15 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
     console.print(f"[bold]╍╍╍ {ui.SESSION_STATS_TITLE} ╍╍╍[/bold]")
     console.print()
     console.print(f"  {ui.SESSION_STATS_WORKSPACE:<17}{snapshot.root}")
+    console.print(
+        f"  {ui.SESSION_STATS_INTENT_REGISTRY:<17}"
+        f"{snapshot.intent_registry_backend} ({snapshot.intent_registry_storage})"
+    )
+    if snapshot.audit_enabled and snapshot.audit_storage:
+        console.print(
+            f"  {ui.SESSION_STATS_AUDIT:<17}"
+            f"{ui.SESSION_STATS_AUDIT_ENABLED} ({snapshot.audit_storage})"
+        )
 
     if snapshot.cache_present and snapshot.latest_run_id:
         age_str = _format_age(snapshot.latest_run_age_seconds)
@@ -304,6 +325,15 @@ def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> in
     summary.add_column(style="dim", no_wrap=True)
     summary.add_column()
     summary.add_row(ui.SESSION_STATS_WORKSPACE.rstrip(":"), str(snapshot.root))
+    summary.add_row(
+        ui.SESSION_STATS_INTENT_REGISTRY.rstrip(":"),
+        f"{snapshot.intent_registry_backend} ({snapshot.intent_registry_storage})",
+    )
+    if snapshot.audit_enabled and snapshot.audit_storage:
+        summary.add_row(
+            ui.SESSION_STATS_AUDIT.rstrip(":"),
+            f"{ui.SESSION_STATS_AUDIT_ENABLED} ({snapshot.audit_storage})",
+        )
     if snapshot.cache_present and snapshot.latest_run_id:
         run_text = _latest_run_text(snapshot)
         summary.add_row(ui.SESSION_STATS_LATEST_RUN.rstrip(":"), run_text)
@@ -597,6 +627,33 @@ def _process_start_epoch() -> int:
     return int(time.time())
 
 
+def _read_audit_config(root_path: Path) -> tuple[bool, str | None]:
+    try:
+        from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
+        from ...config.pyproject_loader import (
+            ConfigValidationError,
+            load_pyproject_config,
+        )
+
+        config = load_pyproject_config(root_path)
+    except (ConfigValidationError, OSError):
+        return False, None
+    if not bool(config.get("audit_enabled", False)):
+        return False, None
+    try:
+        db_path = resolve_audit_path(
+            root_path=root_path,
+            value=config.get("audit_path", DEFAULT_AUDIT_PATH),
+        )
+    except Exception:
+        return True, None
+    try:
+        storage = str(db_path.relative_to(root_path.resolve()))
+    except ValueError:
+        storage = str(db_path)
+    return True, storage
+
+
 def _read_audit_token_footprint(
     root_path: Path,
 ) -> tuple[int | None, str | None, int]:
@@ -604,10 +661,16 @@ def _read_audit_token_footprint(
     try:
         from ...audit.reader import read_audit_summary
         from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
+        from ...config.pyproject_loader import (
+            load_pyproject_config,
+        )
 
+        config = load_pyproject_config(root_path)
+        if not bool(config.get("audit_enabled", False)):
+            return None, None, 0
         db_path = resolve_audit_path(
             root_path=root_path,
-            value=DEFAULT_AUDIT_PATH,
+            value=config.get("audit_path", DEFAULT_AUDIT_PATH),
         )
         if not db_path.is_file():
             return None, None, 0
