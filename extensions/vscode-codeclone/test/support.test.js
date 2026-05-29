@@ -123,6 +123,18 @@ test("normalizedLaunchSpec trims arguments and rejects empty command or cwd", ()
     );
 });
 
+test("normalizedLaunchSpec rejects blocked remote transport args", () => {
+    assert.throws(
+        () =>
+            normalizedLaunchSpec({
+                command: "codeclone-mcp",
+                args: ["--transport", "streamable-http"],
+                cwd: "/tmp/workspace",
+            }),
+        /--transport/
+    );
+});
+
 test("launchSpecOrigin makes launcher provenance explicit", () => {
     assert.equal(
         launchSpecOrigin({

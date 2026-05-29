@@ -91,6 +91,25 @@ function staleMessage(reason) {
     return "Review data may be stale because the workspace changed after this run.";
 }
 
+const BLOCKED_MCP_ARGS = new Set([
+    "--transport",
+    "--host",
+    "--port",
+    "--allow-remote",
+    "--json-response",
+    "--stateless-http",
+]);
+
+function assertSafeMcpArgs(args) {
+    for (const arg of args) {
+        if (BLOCKED_MCP_ARGS.has(arg)) {
+            throw new Error(
+                `CodeClone MCP argument ${arg} is not allowed in the VS Code extension.`
+            );
+        }
+    }
+}
+
 function normalizedLaunchSpec(spec) {
     const command = String(spec?.command || "").trim();
     if (!command) {
@@ -102,6 +121,7 @@ function normalizedLaunchSpec(spec) {
             .map((value) => value.trim())
             .filter(Boolean)
         : [];
+    assertSafeMcpArgs(args);
     const cwd = String(spec?.cwd || "").trim();
     if (!cwd) {
         throw new Error("CodeClone MCP launcher cwd must not be empty.");
