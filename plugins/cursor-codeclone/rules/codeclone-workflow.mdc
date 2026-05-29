@@ -27,3 +27,8 @@ You have access to CodeClone through the local CodeClone MCP server.
 - Prefer `list_hotspots` or `check_*` before broad `list_findings`.
 - Use `get_finding` or `get_remediation` for one finding.
 - Use `source_kind` filters to cut test noise.
+
+## Change control
+
+- For repository edits, use `start_controlled_change` → edit →
+  `finish_controlled_change` (see the change-control skill).

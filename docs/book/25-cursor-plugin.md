@@ -65,7 +65,8 @@ The plugin currently provides:
 
 The plugin surface is additive:
 
-- `mcp.json` contributes a local stdio MCP server definition
+- `mcp.json` contributes a local stdio MCP server definition via
+  `python3 ./scripts/launch_mcp.py` (workspace `.venv` → Poetry env → PATH)
 - the skills contribute workflow guidance and starter prompts
 - the rules enforce MCP-first discipline and Python-aware context
 - the hooks provide automated reminders for re-analysis and intent hygiene
@@ -74,6 +75,18 @@ The plugin surface is additive:
   the plugin
 
 The plugin does not rewrite user config or install CodeClone automatically.
+
+## Distribution
+
+- **Monorepo source:** `plugins/cursor-codeclone/`
+- **Marketplace:** not listed in `.agents/plugins/marketplace.json` (that file is
+  Codex-only for local development)
+- **Install path:** symlink skills/rules/MCP into `.cursor/` or register the
+  plugin directory through Cursor local plugin discovery
+- **Standalone releases:** ship a full copy of
+  `plugins/codeclone/scripts/launch_mcp.py` inside
+  `plugins/cursor-codeclone/scripts/`; the monorepo entrypoint delegates to the
+  Codex plugin launcher to avoid duplicate logic during development
 
 ## Skill contract
 

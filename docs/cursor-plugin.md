@@ -58,6 +58,16 @@ ln -sfn "$(pwd)/plugins/cursor-codeclone/agents/structural-reviewer.md" \
 
 Add `.cursor/` to `.gitignore` if it is not already there.
 
+!!! note "Marketplace"
+    The Cursor plugin is **not** listed in `.agents/plugins/marketplace.json`.
+    That file is Codex-only for local monorepo development. Install from
+    `plugins/cursor-codeclone/` via symlinks or Cursor local plugin discovery.
+
+The bundled `mcp.json` runs `python3 ./scripts/launch_mcp.py`, which resolves
+`.venv` → Poetry env → `PATH`. In the monorepo that entrypoint delegates to
+`plugins/codeclone/scripts/launch_mcp.py`; standalone plugin releases must ship
+the full launcher body.
+
 ### Personal (global) setup
 
 ```bash

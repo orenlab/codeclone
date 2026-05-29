@@ -76,11 +76,19 @@ deterministic findings with file paths and evidence, not opinions.
 
 ## MCP Server
 
-The plugin bundles a stdio-based `codeclone-mcp` server configuration. The
-server exposes 21+ tools for repository analysis, findings, blast radius,
+The plugin bundles a stdio-based `codeclone-mcp` server configuration via
+`python3 ./scripts/launch_mcp.py` (workspace `.venv` → Poetry env → `PATH`).
+The server exposes 28 tools for repository analysis, findings, blast radius,
 change control, and review workflows. See the
 [MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
 for the full tool list.
+
+## Distribution
+
+- **Monorepo source:** `plugins/cursor-codeclone/`
+- **Not in** `.agents/plugins/marketplace.json` (Codex-only local marketplace)
+- **Standalone releases:** embed the full launcher from
+  `plugins/codeclone/scripts/launch_mcp.py`; the monorepo uses a thin delegator
 
 ---
 

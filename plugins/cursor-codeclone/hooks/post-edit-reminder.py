@@ -47,8 +47,8 @@ def main() -> None:
                         "A Python file was edited. Consider re-running "
                         "`analyze_repository` to check for structural "
                         "regressions before finishing. If you have an active "
-                        "change intent, pass `intent_id` explicitly to "
-                        "`check` and `verify`."
+                        "change intent, run `finish_controlled_change` with "
+                        "the declared `intent_id`."
                     )
                 }
             )

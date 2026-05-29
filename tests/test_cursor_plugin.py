@@ -49,11 +49,10 @@ def test_cursor_mcp_json_is_valid() -> None:
     assert isinstance(mcp_config, dict)
     server = mcp_config["mcpServers"]["codeclone"]
     assert server == {
-        "type": "stdio",
-        "command": "codeclone-mcp",
-        "args": ["--transport", "stdio"],
-        "env": {},
+        "command": "python3",
+        "args": ["./scripts/launch_mcp.py"],
     }
+    assert (plugin_root / "scripts" / "launch_mcp.py").is_file()
 
 
 def test_cursor_rules_have_valid_frontmatter() -> None:
