@@ -93,7 +93,13 @@ SYNC_TARGETS: dict[str, SyncTarget] = {
     ),
     "cursor": SyncTarget(
         name="cursor",
-        copies=(("plugins/cursor-codeclone", "."),),
+        copies=(
+            ("plugins/cursor-codeclone", "."),
+            (
+                "plugins/codeclone/scripts/launch_mcp.py",
+                "scripts/launch_mcp.py",
+            ),
+        ),
         generated=(MANIFEST_NAME,),
     ),
 }

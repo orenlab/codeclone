@@ -59,7 +59,14 @@ def _make_source(tmp_path: Path) -> Path:
     )
     _write(source / "plugins" / "codeclone" / "README.md", "# Codex\n")
     _write(source / "plugins" / "codeclone" / "skills" / "review" / "SKILL.md")
-    _write(source / ".agents" / "plugins" / "marketplace.json", '{"plugins":[]}\n')
+    _write(
+        source / "plugins" / "codeclone" / "scripts" / "launch_mcp.py",
+        "def resolve_launch_target():\n    return None\n",
+    )
+    _write(
+        source / ".agents" / "plugins" / "marketplace.json",
+        '{"plugins":[]}\n',
+    )
     _write(
         source / "extensions" / "claude-desktop-codeclone" / "manifest.json",
         "{}\n",
@@ -71,6 +78,10 @@ def _make_source(tmp_path: Path) -> Path:
         "{}\n",
     )
     _write(source / "plugins" / "cursor-codeclone" / "rules" / "workflow.mdc")
+    _write(
+        source / "plugins" / "cursor-codeclone" / "scripts" / "launch_mcp.py",
+        "import runpy\n",
+    )
     _commit_all(source)
     return source
 
@@ -99,7 +110,7 @@ def test_sync_copies_files_and_writes_manifest(tmp_path: Path) -> None:
         dry_run=False,
     )
 
-    assert result.files_copied == 3
+    assert result.files_copied == 4
     assert result.files_deleted == 0
     assert (target / "plugins" / "codeclone" / "README.md").is_file()
     assert (target / ".agents" / "plugins" / "marketplace.json").is_file()
@@ -116,7 +127,7 @@ def test_sync_copies_files_and_writes_manifest(tmp_path: Path) -> None:
         "source_dirty": False,
         "codeclone_version": "9.8.7",
         "target": "codex",
-        "files_copied": 3,
+        "files_copied": 4,
         "files_deleted": 0,
     }
 
@@ -196,7 +207,7 @@ def test_sync_dry_run_does_not_write(tmp_path: Path) -> None:
     )
 
     assert result.dry_run is True
-    assert result.files_copied == 3
+    assert result.files_copied == 4
     assert not (target / "plugins").exists()
     assert not (target / "SYNC_MANIFEST.json").exists()
 
@@ -328,3 +339,30 @@ def test_nested_layout_preserves_structure(tmp_path: Path) -> None:
 
     assert (target / "plugins" / "codeclone" / "README.md").is_file()
     assert not (target / "README.md").exists()
+
+
+def test_sync_source_paths_exist() -> None:
+    root = Path(__file__).resolve().parents[1]
+    for target in SYNC_TARGETS.values():
+        for source_rel, _destination_rel in target.copies:
+            source_path = root / source_rel
+            assert source_path.exists(), (
+                f"missing sync source {source_rel} for target {target.name}"
+            )
+
+
+def test_cursor_sync_ships_standalone_launcher(tmp_path: Path) -> None:
+    source = _make_source(tmp_path)
+    target = _make_target(tmp_path, "cursor")
+
+    sync_target(
+        source_root=source,
+        target_root=target,
+        target=SYNC_TARGETS["cursor"],
+        allow_dirty=False,
+        dry_run=False,
+    )
+
+    launcher = (target / "scripts" / "launch_mcp.py").read_text(encoding="utf-8")
+    assert "resolve_launch_target" in launcher
+    assert "runpy" not in launcher
