@@ -30,79 +30,100 @@ patch type:
 - **Read-only / spec validation**: no edit workflow unless repository files
   change.
 
-Do not skip, replace, reorder, or approximate these steps. If a required MCP
-call fails or is unavailable, stop and report the blocker instead of
-continuing as a normal edit.
+Do not skip, replace, reorder, or approximate the required steps for the
+derived workflow profile. Steps explicitly marked as optional or
+profile-dependent may be skipped only under the stated conditions.
+If a required MCP call fails or is unavailable, stop and report the blocker
+instead of continuing as a normal edit.
 
 Before editing any repository files:
 
-1. `manage_change_intent(action="list_workspace", root="<abs_path>")`
-   — if `foreign_active` intents overlap, do not edit. Prefer
-   `on_conflict="queue"` in step 3 for follow-up work that can wait.
-   Ask the user only if you need to edit immediately, recover/reset
-   another agent's intent, or touch a `do_not_touch` path
-2. `analyze_repository(root="<abs_path>")`
-3. `manage_change_intent(action="declare", scope={...})`
-   — if `concurrent_intents` non-empty, narrow scope or ask.
-   Use `on_conflict="queue"` to create a queued intent behind foreign
-   active intents instead of failing. A queued intent does not own scope
-   and cannot be verified — promote it first (step 3b)
-   3b. *(only for queued intents)* When the foreign intent clears:
-   `manage_change_intent(action="promote", intent_id=...)`
-   — transitions queued → active, pins the run, renews the lease.
-   If the before-run was evicted, re-analyze and redeclare
-4. `get_blast_radius(files=[...])`
-5. `check_patch_contract(mode="budget")`
-6. Edit within declared scope only
-7. `analyze_repository(root="<abs_path>")` — re-run after edits for Python
-   structural and governance config changes. For documentation-only or
-   non-Python patches, this step may be skipped; the controller derives the
-   profile from actual changed files during verify. If unsure, re-run
-8. `manage_change_intent(action="check", intent_id=..., changed_files=[...])`
-   — pass the original `intent_id` explicitly and provide either
-   `changed_files` or `diff_ref` (the intent is bound to the before-run;
-   without `intent_id`, `_resolve_intent` looks up the latest run and
-   misses it)
-9. `check_patch_contract(mode="verify", after_run_id=..., intent_id=...)`
-   — `before_run_id` auto-resolves from intent when omitted.
-   `after_run_id` is required only when the derived verification profile
-   requires it (`python_structural`, `governance_config`). For
-   `documentation_only` and `non_python_patch`, pass `changed_files` or
-   `diff_ref` evidence and omit `after_run_id`.
-   Non-accepted responses include `next_step` hint — follow it.
-   Verify compares the intent's `report_digest` against the before-run;
-   redeclare on the after-run would cause an `expired` mismatch
-10. `manage_change_intent(action="clear", intent_id=...)`
+1. `analyze_repository(root="<abs_path>")`
+   — if a valid recent run for the same absolute root already exists, skip
+2. `start_controlled_change(root="<abs_path>", scope={...}, intent="...")`
+   — returns blast radius, budget, workspace state, intent_id
+   — if `status: "needs_analysis"`, run `analyze_repository` first
+   — if `status: "queued"`, do not edit; wait for promotion
+   — if `concurrent_intents` non-empty without queue, narrow scope or ask
+3. Edit within declared scope only
+4. `analyze_repository(root="<abs_path>")`
+   — after-run; required for Python structural and governance config changes.
+   May be skipped for documentation-only and other non-Python patches when
+   `finish` can verify from changed-file evidence
+5. `finish_controlled_change(intent_id=..., changed_files=[...], after_run_id=...)`
+   — returns scope check, verification, receipt, and clears intent
+   — if `user_action_required: true`, stop and follow `next_step`
+   — if `status: "unverified"`, follow `next_step` hint
+   — `auto_clear=true` by default; intent cleared on accepted
+
+Workflow profiles determine which steps are needed:
+
+- **Python structural / governance config**:
+  `analyze` → `start` → edit → `analyze` → `finish(after_run_id=...)`
+- **Documentation-only / non-Python**:
+  `analyze` → `start` → edit → `finish(changed_files=[...])`
+  For `non_python_patch`, report controller-stated limitations and do not
+  present the result as full structural verification.
+
+Queue/promote workflow (when `start` returns `status: "queued"`):
+
+1. `start_controlled_change(on_conflict="queue")` → `status: "queued"`
+2. Wait for foreign intent to clear
+3. `manage_change_intent(action="promote", intent_id=...)`
+   — edit only after promote returns `status: "active"`
+   — if `before_run_evicted`: re-analyze and re-start
+
+### Atomic workflow (fallback)
+
+Use the atomic workflow only when `start_controlled_change` or
+`finish_controlled_change` are unavailable (older MCP servers),
+for step-by-step debugging, or for recovery operations:
+
+```
+manage_change_intent(action="list_workspace", root=...)
+→ analyze_repository
+→ manage_change_intent(action="declare")
+→ get_blast_radius
+→ check_patch_contract(mode="budget")
+→ edit declared files
+→ analyze_repository
+→ manage_change_intent(action="check", intent_id=..., changed_files=[...])
+→ check_patch_contract(mode="verify", after_run_id=..., intent_id=...)
+→ validate_review_claims
+→ create_review_receipt
+→ manage_change_intent(action="clear")
+```
 
 ### Rules
 
+- Prefer `start_controlled_change` / `finish_controlled_change` over
+  the atomic workflow. Use atomic tools only for queue/promote/recover
+  or when the workflow tools are unavailable.
+- Do not mix workflow and atomic verification paths in the same edit
+  cycle. Queue/promote/recover operations via `manage_change_intent`
+  are allowed alongside workflow tools because workflow tools do not
+  expose those administrative transitions.
+- `start_controlled_change` does not run analysis. Ensure a valid run
+  exists before calling it.
+- `finish_controlled_change` does not run analysis. For Python
+  structural and governance config changes, run `analyze_repository`
+  after editing and pass `after_run_id`.
 - MUST NOT edit files without declaring intent first.
-- MUST NOT silently expand scope — redeclare with expanded scope before
-  editing the extra file.
-- MUST NOT redeclare on the after-run. Re-declare only to expand scope before
-  editing or to start a separate change.
-- MUST NOT call the `check` action without exactly one changed-scope source:
-  `changed_files` or `diff_ref`.
-- MUST clear the original intent by explicit `intent_id` after successful
-  verification.
-- After re-analyze, pass `intent_id` explicitly to
-  `check`/`get`/`verify` — otherwise `_resolve_intent` resolves by
-  latest run_id and misses intents bound to the before-run.
+- MUST NOT silently expand scope. If the fix requires files outside the
+  declared scope, stop before editing them. Expand scope only after user
+  approval unless the user already explicitly allowed expansion. Call
+  `start_controlled_change` again with the expanded scope to get a fresh
+  intent with updated blast radius and budget. Continue only when the
+  expanded intent is active. Do not edit extra files based on blast-radius
+  context alone.
+- MUST NOT edit while intent is `queued`. Promote first.
 - `do_not_touch` is a hard boundary. `review_context` is context, not a ban.
 - Do not update baselines, analysis cache, or generated reports.
-- If `list_workspace` shows overlapping foreign intent, stop and coordinate —
-  or use `on_conflict="queue"` to queue behind it.
-- MUST NOT edit while intent is `queued`. Promote first.
-- MUST NOT call verify on a queued intent — verify rejects with
-  `reason="intent_not_active"`.
-- MAY call budget on a queued intent for planning only. Budget responses
-  for queued intents include `edit_allowed=false` and are not edit
-  permission.
-- When verify returns a `next_step` hint, follow it — do not invent a
-  different recovery path.
+- When `finish` or verify returns a `next_step` hint, follow it — do not
+  invent a different recovery path.
 - CodeClone findings are the source of truth — do not reinterpret.
-- If `check_patch_contract(mode="verify")` returns `unverified` or `violated`,
-  do not claim the patch is verified.
+- If `finish_controlled_change` returns `status: "unverified"` or
+  `"violated"`, do not claim the patch is verified.
 - Leaving an active or recoverable own intent behind is a blocked cleanup, not
   a completed task.
 - Live foreign intent means **stop**, not kill. Never suggest killing
@@ -115,11 +136,14 @@ automatically when it can wait — do not ask before queueing.
 
 Ask the user only when:
 
-- scope expansion is required;
+- scope expansion is required and was not already explicitly allowed by
+  the user;
 - a `do_not_touch` path must be touched;
 - a live foreign intent overlaps and queue is not appropriate;
-- patch contract returned `violated` or `unverified`;
-- baseline, cache, or generated state would be modified;
+- patch contract returned `violated`, or returned `unverified` and the
+  agent cannot execute the deterministic `next_step`;
+- baseline, analysis cache, canonical reports, or generated state would
+  be modified;
 - recovery or reset of another agent's intent is needed.
 
 Routine controller work is automatic. Boundary decisions require the user.
@@ -129,20 +153,24 @@ Routine controller work is automatic. Boundary decisions require the user.
 Do not say "done", "implemented", "validated", "verified", "ready", or
 equivalent unless all of these are true:
 
-1. either:
-    - an after-run was created after the last edit (required for
-      `python_structural` and `governance_config` patches); or
-    - `check_patch_contract(mode="verify")` derived a profile that does not
-      require `after_run_id` (`documentation_only` or `non_python_patch`);
-2. `manage_change_intent(action="check", intent_id=..., changed_files=...)`
-   or `diff_ref=...` returned `clean`;
-3. `check_patch_contract(mode="verify", intent_id=..., after_run_id=...)`
-   returned `accepted`; `after_run_id` is required only when the derived
-   verification profile requires it;
-4. any final summary claims passed `validate_review_claims` — skip only
-   when `claim_validation_recommended` is explicitly `false` in the
-   controller response, not by agent judgment;
-5. `manage_change_intent(action="clear", intent_id=...)` succeeded.
+1. `finish_controlled_change` returned `status: "accepted"` (or
+   `"accepted_with_external_changes"`); OR, in the atomic fallback
+   workflow, `manage_change_intent(action="check")` returned `clean` or
+   `expanded`, `check_patch_contract(mode="verify")` returned `accepted`,
+   and `manage_change_intent(action="clear")` succeeded;
+2. `scope_check.status` is `"clean"` or `"expanded"`;
+3. `intent_cleared` is `true` in the finish response; OR
+   `manage_change_intent(action="clear")` succeeded;
+4. if `claims` is present in the finish response and `claims.valid` is
+   `false`, report the warnings — do not suppress;
+5. claim validation was handled by `finish_controlled_change` when
+   `review_text` was provided and `claim_validation_recommended` was
+   `true`; for atomic workflow, final summary claims passed
+   `validate_review_claims` unless `claim_validation_recommended` was
+   explicitly `false`.
+
+If status is `accepted_with_external_changes`, report the external-change
+advisory instead of presenting the patch as fully clean.
 
 If any item cannot be completed, report `BLOCKED` or `UNVERIFIED`, include the
 `intent_id`, and state the exact missing step. Do not present the work as
@@ -152,7 +180,9 @@ finished.
 
 The controller derives a **verification profile** from actual changed files.
 The profile determines which structural checks apply. The agent does not choose
-the profile — it is computed by `check_patch_contract(mode="verify")`.
+the profile — it is computed by `finish_controlled_change` (through
+`check_patch_contract(mode="verify")` internally), or directly by
+`check_patch_contract(mode="verify")` in the atomic workflow.
 
 | Profile                 | When                                                | `after_run` required | Structural checks |
 |-------------------------|-----------------------------------------------------|----------------------|-------------------|

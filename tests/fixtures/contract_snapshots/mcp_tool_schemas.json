@@ -1157,6 +1157,88 @@
     }
   },
   {
+    "name": "finish_controlled_change",
+    "input_schema": {
+      "properties": {
+        "intent_id": {
+          "title": "Intent Id",
+          "type": "string"
+        },
+        "changed_files": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changed Files"
+        },
+        "diff_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Diff Ref"
+        },
+        "after_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After Run Id"
+        },
+        "review_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Text"
+        },
+        "create_receipt": {
+          "default": true,
+          "title": "Create Receipt",
+          "type": "boolean"
+        },
+        "auto_clear": {
+          "default": true,
+          "title": "Auto Clear",
+          "type": "boolean"
+        },
+        "strictness": {
+          "default": "ci",
+          "title": "Strictness",
+          "type": "string"
+        }
+      },
+      "required": [
+        "intent_id"
+      ],
+      "title": "finish_controlled_changeArguments",
+      "type": "object"
+    }
+  },
+  {
     "name": "generate_pr_summary",
     "input_schema": {
       "properties": {
@@ -1885,6 +1967,82 @@
         "finding_id"
       ],
       "title": "mark_finding_reviewedArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "start_controlled_change",
+    "input_schema": {
+      "properties": {
+        "root": {
+          "title": "Root",
+          "type": "string"
+        },
+        "scope": {
+          "additionalProperties": true,
+          "title": "Scope",
+          "type": "object"
+        },
+        "intent": {
+          "title": "Intent",
+          "type": "string"
+        },
+        "expected_effects": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Effects"
+        },
+        "on_conflict": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Conflict"
+        },
+        "strictness": {
+          "default": "ci",
+          "title": "Strictness",
+          "type": "string"
+        },
+        "ttl_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ttl Seconds"
+        },
+        "blast_radius_depth": {
+          "default": "auto",
+          "title": "Blast Radius Depth",
+          "type": "string"
+        }
+      },
+      "required": [
+        "root",
+        "scope",
+        "intent"
+      ],
+      "title": "start_controlled_changeArguments",
       "type": "object"
     }
   },

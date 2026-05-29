@@ -509,3 +509,33 @@ MCP payload footprint: ~3,816 tokens (o200k_base, 7 tool calls)
 - The `codeclone/budget/` module never imports from `codeclone/surfaces/` or
   `codeclone/audit/`. Dependency direction: `audit -> budget`, never reverse.
 - Base `codeclone` never depends on `tiktoken`. The import is lazy and guarded.
+
+## Workflow consolidation
+
+The atomic change control workflow requires 7–11 MCP tool calls per edit
+cycle. Two **workflow-level tools** aggregate these steps while preserving
+the same evidence, state updates, and boundary checks:
+
+| Tool | Replaces | Calls |
+|------|----------|-------|
+| `start_controlled_change` | workspace check + declare + blast radius + budget | 1 instead of 4 |
+| `finish_controlled_change` | scope check + verify + claims + receipt + clear | 1 instead of 4–6 |
+
+Workflow tools are orchestration shortcuts. They call the same internal
+methods as the atomic tools and emit the same semantic audit events.
+`analyze_repository` remains a separate explicit call — workflow tools
+never run analysis implicitly.
+
+**Tool tiers:**
+
+- **Normal workflow:** `analyze_repository`, `start_controlled_change`,
+  `finish_controlled_change` — every edit cycle.
+- **Queue/recovery:** `manage_change_intent` (promote, recover, reset,
+  renew) — multi-agent coordination, crash recovery.
+- **Advanced/diagnostic:** `get_blast_radius`, `check_patch_contract`,
+  `validate_review_claims`, `create_review_receipt` — deep inspection,
+  step-by-step debugging.
+
+The same semantic audit events are preserved regardless of which
+approach the agent uses. Atomic tools remain available for backward
+compatibility and advanced use cases.

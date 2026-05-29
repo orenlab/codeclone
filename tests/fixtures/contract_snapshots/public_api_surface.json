@@ -1,11 +1,11 @@
 {
+  "codeclone_exports": [
+    "__version__"
+  ],
   "main_exports": [
     "main"
   ],
   "main_signature": "() -> 'None'",
-  "codeclone_exports": [
-    "__version__"
-  ],
   "mcp_service_public_methods": [
     {
       "name": "analyze_changed_paths",
@@ -54,6 +54,10 @@
     {
       "name": "evaluate_gates",
       "signature": "(self, request: 'MCPGateRequest') -> 'dict[str, object]'"
+    },
+    {
+      "name": "finish_controlled_change",
+      "signature": "(self, *, intent_id: 'str', changed_files: 'Sequence[str] | None' = None, diff_ref: 'str | None' = None, after_run_id: 'str | None' = None, review_text: 'str | None' = None, create_receipt: 'bool' = True, auto_clear: 'bool' = True, strictness: 'str' = 'ci') -> 'dict[str, object]'"
     },
     {
       "name": "generate_pr_summary",
@@ -114,6 +118,10 @@
     {
       "name": "shutdown_cleanup",
       "signature": "(self) -> 'None'"
+    },
+    {
+      "name": "start_controlled_change",
+      "signature": "(self, *, root: 'str', scope: 'dict[str, object]', intent: 'str', expected_effects: 'Sequence[str] | None' = None, on_conflict: 'str | None' = None, strictness: 'str' = 'ci', ttl_seconds: 'int | None' = None, blast_radius_depth: 'str' = 'auto') -> 'dict[str, object]'"
     },
     {
       "name": "validate_review_claims",

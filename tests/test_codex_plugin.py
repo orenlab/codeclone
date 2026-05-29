@@ -139,9 +139,9 @@ def test_codex_plugin_skill_exists() -> None:
         change_control_skill_text,
         (
             "name: codeclone-change-control",
-            "Declare intent before editing.",
-            'check_patch_contract(mode="budget")',
-            "create_review_receipt",
+            "Declare intent before editing",
+            "start_controlled_change",
+            "finish_controlled_change",
         ),
     )
 

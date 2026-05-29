@@ -115,11 +115,9 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "default or pyproject-resolved thresholds for the first pass" in str(
         server.instructions
     )
-    assert "manage_change_intent(action='list_workspace', root=...)" in str(
-        server.instructions
-    )
+    assert "start_controlled_change" in str(server.instructions)
+    assert "finish_controlled_change" in str(server.instructions)
     assert ".cache/codeclone/intents/" in str(server.instructions)
-    assert "validate review claims" in str(server.instructions)
 
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert set(tools) == {
@@ -149,6 +147,8 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "mark_finding_reviewed",
         "list_reviewed_findings",
         "manage_change_intent",
+        "start_controlled_change",
+        "finish_controlled_change",
     }
     for name, tool in tools.items():
         assert tool.annotations is not None
@@ -186,6 +186,8 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "mark_finding_reviewed",
                 "manage_change_intent",
                 "clear_session_runs",
+                "start_controlled_change",
+                "finish_controlled_change",
             }
         )
         assert tool.annotations.idempotentHint is True

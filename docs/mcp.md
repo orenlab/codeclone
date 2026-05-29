@@ -402,6 +402,37 @@ analyze_changed_paths(changed_paths=[...] or git_diff_ref="HEAD~1")
 
 ### Change control
 
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant MCP as CodeClone MCP
+
+    Note over Agent,MCP: Primary workflow (workflow tools)
+    Agent->>MCP: analyze_repository
+    MCP-->>Agent: run_id
+    Agent->>MCP: start_controlled_change(scope, intent)
+    MCP-->>Agent: intent_id, blast_radius, budget
+    Note over Agent: edit files
+    opt Python structural / governance config
+        Agent->>MCP: analyze_repository
+        MCP-->>Agent: after_run_id
+    end
+    Agent->>MCP: finish_controlled_change(intent_id, changed_files, after_run_id?)
+    MCP-->>Agent: status, receipt, intent_cleared
+```
+
+!!! info "Tool tiers"
+
+    | Tier | Tools | When to use |
+    |------|-------|-------------|
+    | Normal workflow | `analyze_repository`, `start_controlled_change`, `finish_controlled_change` | Every edit cycle |
+    | Queue/recovery | `manage_change_intent` (promote, recover, reset, renew) | Multi-agent coordination, crash recovery |
+    | Advanced/diagnostic | `get_blast_radius`, `check_patch_contract`, `validate_review_claims`, `create_review_receipt` | Deep inspection, step-by-step debugging |
+
+### Detailed atomic workflow
+
+For older MCP servers or step-by-step debugging:
+
 ```
 manage_change_intent(action="list_workspace")
   -> analyze_repository
@@ -409,10 +440,9 @@ manage_change_intent(action="list_workspace")
   -> get_blast_radius(files=[...])
   -> check_patch_contract(mode="budget")
   -> [edit within scope]
-  -> manage_change_intent(action="renew", intent_id=...)                         # optional: long edits
   -> analyze_repository                                                          # after-run
   -> manage_change_intent(action="check", intent_id=..., changed_files=[...])
-  -> check_patch_contract(mode="verify", after_run_id=..., intent_id=...)        # before_run_id auto-resolved
+  -> check_patch_contract(mode="verify", after_run_id=..., intent_id=...)
   -> validate_review_claims(text="...")                                           # if claim_validation_recommended
   -> create_review_receipt
   -> manage_change_intent(action="clear")
@@ -421,14 +451,11 @@ manage_change_intent(action="list_workspace")
 ### Multi-agent queue
 
 ```
-manage_change_intent(action="list_workspace")                                    # foreign_active found
-  -> analyze_repository
-  -> manage_change_intent(action="declare", scope={...}, on_conflict="queue")    # queued behind foreign
+start_controlled_change(scope={...}, on_conflict="queue")                        # queued behind foreign
   -> [wait for foreign intent to clear]
   -> manage_change_intent(action="promote", intent_id=...)                       # queued → active
-  -> get_blast_radius(files=[...])
-  -> check_patch_contract(mode="budget")
-  -> [edit within scope, then verify as normal]
+  -> [edit within scope]
+  -> finish_controlled_change(intent_id=..., changed_files=[...])                # verify + clear
 ```
 
 ### Coverage review

@@ -45,11 +45,12 @@ _SERVER_INSTRUCTIONS = (
     "bounded metrics drill-down, and prefer generate_pr_summary(format='markdown') "
     "unless machine JSON is required. Coverage join accepts external Cobertura "
     "XML as a current-run signal and does not become baseline truth. Pass an "
-    "absolute repository root to analysis tools. For file edits, call "
-    "manage_change_intent(action='list_workspace', root=...) before analysis, "
-    "then analyze, declare intent, inspect blast radius and patch budget, edit "
-    "within scope, renew intent lease before long blind windows, re-analyze, "
-    "verify, validate review claims, and clear intent. "
+    "absolute repository root to analysis tools. For file edits, prefer "
+    "start_controlled_change and finish_controlled_change for the complete "
+    "edit cycle. Use manage_change_intent for queue/promote/recover "
+    "operations. Atomic tools (get_blast_radius, check_patch_contract, "
+    "validate_review_claims, create_review_receipt) remain available for "
+    "advanced inspection and diagnostic use. "
     "If concurrent intents overlap, narrow scope or coordinate. This server never "
     "updates baselines and never mutates source files, analysis cache, or reports; "
     "it may write ephemeral workspace coordination state under "
@@ -910,6 +911,78 @@ def build_mcp_server(
     )
     def list_reviewed_findings(run_id: str | None = None) -> dict[str, object]:
         return service.list_reviewed_findings(run_id=run_id)
+
+    @tool(
+        title="Start Controlled Change",
+        description=(
+            "Pre-edit workflow: check workspace for concurrent intents, "
+            "declare change intent with scope, compute blast radius "
+            "(direct + bounded transitive for high-radius changes), and "
+            "return patch budget — all in one call. Requires an existing "
+            "analysis run for the given root; call analyze_repository "
+            "first if needed. Returns intent_id for finish_controlled_change. "
+            "Does not run analysis implicitly."
+        ),
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def start_controlled_change(
+        root: str,
+        scope: dict[str, object],
+        intent: str,
+        expected_effects: list[str] | None = None,
+        on_conflict: str | None = None,
+        strictness: str = "ci",
+        ttl_seconds: int | None = None,
+        blast_radius_depth: str = "auto",
+    ) -> dict[str, object]:
+        return service.start_controlled_change(
+            root=root,
+            scope=scope,
+            intent=intent,
+            expected_effects=expected_effects,
+            on_conflict=on_conflict,
+            strictness=strictness,
+            ttl_seconds=ttl_seconds,
+            blast_radius_depth=blast_radius_depth,
+        )
+
+    @tool(
+        title="Finish Controlled Change",
+        description=(
+            "Post-edit workflow: verify scope compliance, run patch "
+            "contract verification, validate review claims (when "
+            "review_text provided and recommended), generate review "
+            "receipt, and clear intent — all in one call. Pass the "
+            "intent_id from start_controlled_change. For Python "
+            "structural or governance config changes, pass after_run_id "
+            "from a post-edit analyze_repository call. For docs-only or "
+            "non-Python changes, changed_files or diff_ref evidence is "
+            "sufficient without after_run_id."
+        ),
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def finish_controlled_change(
+        intent_id: str,
+        changed_files: list[str] | None = None,
+        diff_ref: str | None = None,
+        after_run_id: str | None = None,
+        review_text: str | None = None,
+        create_receipt: bool = True,
+        auto_clear: bool = True,
+        strictness: str = "ci",
+    ) -> dict[str, object]:
+        return service.finish_controlled_change(
+            intent_id=intent_id,
+            changed_files=changed_files,
+            diff_ref=diff_ref,
+            after_run_id=after_run_id,
+            review_text=review_text,
+            create_receipt=create_receipt,
+            auto_clear=auto_clear,
+            strictness=strictness,
+        )
 
     @tool(
         title="Manage Change Intent",

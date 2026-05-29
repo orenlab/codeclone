@@ -117,15 +117,22 @@ drill into one finding or one hotspot family.
 | `check_cohesion`   | `run_id` or `root`, `path`, `max_results`, `detail_level`                              | Cohesion hotspot query   |
 | `check_dead_code`  | `run_id` or `root`, `path`, `min_severity`, `max_results`, `detail_level`              | Dead code query          |
 
-### Change control tools
+### Workflow tools (preferred)
+
+| Tool                          | Key parameters                                                            | Purpose                                                                               |
+|-------------------------------|---------------------------------------------------------------------------|---------------------------------------------------------------------------------------|
+| `start_controlled_change`     | `root`, `scope`, `intent`, `expected_effects`, `on_conflict`, `strictness`, `blast_radius_depth` | Pre-edit: workspace check + declare + blast radius + budget in one call. Returns `intent_id` for `finish`. Does not run analysis |
+| `finish_controlled_change`    | `intent_id`, `changed_files` or `diff_ref`, `after_run_id`, `review_text`, `create_receipt`, `auto_clear` | Post-edit: scope check + verify + claims + receipt + clear in one call. `after_run_id` required for Python structural / governance config profiles |
+
+### Atomic change control tools (advanced / diagnostic)
 
 | Tool                     | Key parameters                                                                                              | Purpose                                                                                     |
 |--------------------------|-------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
-| `manage_change_intent`   | `action`, `root`, `run_id`, `intent_id`, `scope`, `on_conflict`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace. `on_conflict="queue"` creates a queued intent when scope overlaps a foreign active. `action="promote"` transitions queued → active. Declare returns `workspace_relations` with forbidden-scope signals |
-| `get_blast_radius`       | `run_id`, `files`, `depth`, `include`                                                                       | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context           |
-| `check_patch_contract`   | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref` | Budget query or post-edit verification. Verify auto-resolves `before_run_id` from intent when omitted. Non-accepted responses include `next_step` hint and `claim_validation_recommended` flag |
-| `create_review_receipt`  | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                           | Deterministic audit artifact: provenance, scope, reviewed findings, patch status            |
-| `validate_review_claims` | `text`, `run_id`, `require_citations`                                                                       | Citation-based overclaim detection against stored run semantics                             |
+| `manage_change_intent`   | `action`, `root`, `run_id`, `intent_id`, `scope`, `on_conflict`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace. Use for queue/promote/recover operations alongside workflow tools |
+| `get_blast_radius`       | `run_id`, `files`, `depth`, `include`                                                                       | Pre-change risk boundary: full transitive graph, custom include filters                 |
+| `check_patch_contract`   | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref` | Manual budget query or step-by-step verification                                        |
+| `create_review_receipt`  | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                           | Manual receipt generation                                                               |
+| `validate_review_claims` | `text`, `run_id`, `require_citations`                                                                       | Standalone citation-based overclaim detection                                           |
 
 ??? info "Blast radius: do_not_touch vs review_context"
     `do_not_touch` is limited to actionable negative context: baselines,

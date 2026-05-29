@@ -35,7 +35,6 @@ from ._session_baseline import (
     resolve_clone_baseline_state,
     resolve_metrics_baseline_state,
 )
-from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
 from ._session_shared import (
     _REPORT_DUMMY_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -76,6 +75,7 @@ from ._session_shared import (
     process,
     report,
 )
+from ._session_workflow_mixin import _MCPSessionWorkflowMixin
 
 __all__ = [
     "DEFAULT_MCP_HISTORY_LIMIT",
@@ -96,7 +96,7 @@ __all__ = [
 ]
 
 
-class MCPSession(_MCPSessionClaimGuardMixin):
+class MCPSession(_MCPSessionWorkflowMixin):
     def __init__(
         self,
         *,

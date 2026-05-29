@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.1.0a2] - Unreleased
+
+### Added
+
+- Add `start_controlled_change` MCP tool — aggregates workspace check,
+  intent declaration, blast radius computation (direct + bounded transitive
+  for high-radius changes), and patch budget into a single pre-edit call.
+- Add `finish_controlled_change` MCP tool — aggregates scope check, patch
+  verification, claim validation, review receipt, and intent cleanup into
+  a single post-edit call.
+
+### Changed
+
+- Agent workflow reduced from 7–11 MCP calls to 3–4 per edit cycle.
+  CLAUDE.md and plugin skills updated to prefer workflow tools.
+- Atomic change control tools remain available for advanced/diagnostic
+  use and backward compatibility.
+
 ## [2.1.0a1] - 2026-05-22
 
 `2.1.0a1` opens the v2.1 alpha line for structural change control.

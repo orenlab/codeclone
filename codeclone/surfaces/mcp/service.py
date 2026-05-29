@@ -84,6 +84,18 @@ class _QueryServiceMixin:
     ) -> dict[str, object]:
         return self._run_dict("validate_review_claims", **params)
 
+    def start_controlled_change(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("start_controlled_change", **params)
+
+    def finish_controlled_change(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("finish_controlled_change", **params)
+
     def generate_pr_summary(
         self: _RunDictService,
         **params: object,
@@ -347,6 +359,26 @@ def _apply_public_method_signatures() -> None:
             _kwonly("finding_id", "str"),
             _kwonly("run_id", "str | None", None),
             _kwonly("note", "str | None", None),
+        ),
+        "start_controlled_change": (
+            _kwonly("root", "str"),
+            _kwonly("scope", "dict[str, object]"),
+            _kwonly("intent", "str"),
+            _kwonly("expected_effects", "Sequence[str] | None", None),
+            _kwonly("on_conflict", "str | None", None),
+            _kwonly("strictness", "str", "ci"),
+            _kwonly("ttl_seconds", "int | None", None),
+            _kwonly("blast_radius_depth", "str", "auto"),
+        ),
+        "finish_controlled_change": (
+            _kwonly("intent_id", "str"),
+            _kwonly("changed_files", "Sequence[str] | None", None),
+            _kwonly("diff_ref", "str | None", None),
+            _kwonly("after_run_id", "str | None", None),
+            _kwonly("review_text", "str | None", None),
+            _kwonly("create_receipt", "bool", True),
+            _kwonly("auto_clear", "bool", True),
+            _kwonly("strictness", "str", "ci"),
         ),
     }
     self_param = inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)
