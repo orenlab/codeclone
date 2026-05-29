@@ -4,7 +4,7 @@ const {spawn} = require("node:child_process");
 const {EventEmitter} = require("node:events");
 
 const {version: EXTENSION_VERSION} = require("../package.json");
-const {logChannelMessage, trimTail} = require("./support");
+const {logChannelMessage, spawnEnvForMcp, trimTail} = require("./support");
 
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
@@ -233,7 +233,7 @@ class CodeCloneMcpClient extends EventEmitter {
         await new Promise((resolve, reject) => {
             const child = spawn(launchSpec.command, launchSpec.args, {
                 cwd: launchSpec.cwd,
-                env: process.env,
+                env: spawnEnvForMcp(launchSpec.cwd),
                 shell: false,
                 stdio: ["pipe", "pipe", "pipe"],
             });

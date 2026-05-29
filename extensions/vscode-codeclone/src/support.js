@@ -1,5 +1,6 @@
 "use strict";
 
+const fs = require("node:fs");
 const path = require("node:path");
 
 const STALE_REASON_EDITOR = "unsaved editor changes";
@@ -99,10 +100,54 @@ const BLOCKED_MCP_ARGS = new Set([
     "--json-response",
     "--stateless-http",
 ]);
+const STDIO_TRANSPORT_ARGS = Object.freeze(["--transport", "stdio"]);
+const SPAWN_ENV_EXACT_KEYS = new Set([
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "SystemRoot",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+    "TERM",
+    "PWD",
+    "OS",
+    "COMSPEC",
+    "PATHEXT",
+]);
+const SPAWN_ENV_PREFIXES = [
+    "CODECLONE_",
+    "PYTHON",
+    "UV_",
+    "VIRTUAL_ENV",
+    "POETRY_",
+];
+
+function hasPathSeparator(value) {
+    return value.includes("/") || value.includes("\\");
+}
+
+function validateConfiguredCommand(command) {
+    if (!command) {
+        return;
+    }
+    if (hasPathSeparator(command) && !path.isAbsolute(command)) {
+        throw new Error(
+            "Configured CodeClone launcher must be an absolute path or a bare command name."
+        );
+    }
+}
 
 function assertSafeMcpArgs(args) {
     for (const arg of args) {
-        if (BLOCKED_MCP_ARGS.has(arg)) {
+        const head = arg.split("=", 1)[0];
+        if (BLOCKED_MCP_ARGS.has(head)) {
             throw new Error(
                 `CodeClone MCP argument ${arg} is not allowed in the VS Code extension.`
             );
@@ -110,24 +155,99 @@ function assertSafeMcpArgs(args) {
     }
 }
 
+function forceStdioTransportArgs(args) {
+    return [...args, ...STDIO_TRANSPORT_ARGS];
+}
+
+function lockResolvedCommand(command) {
+    if (!path.isAbsolute(command)) {
+        return command;
+    }
+    try {
+        const real = fs.realpathSync(command);
+        const stat = fs.statSync(real);
+        if (!stat.isFile()) {
+            throw new Error(`Resolved launcher is not a regular file: ${real}`);
+        }
+        return real;
+    } catch (error) {
+        if (
+            error instanceof Error &&
+            error.message.startsWith("Resolved launcher is not a regular file:")
+        ) {
+            throw error;
+        }
+        return command;
+    }
+}
+
+function isLauncherWithinWorkspace(command, rootPath) {
+    const root = String(rootPath || "").trim();
+    const launcher = String(command || "").trim();
+    if (!root || !launcher) {
+        return false;
+    }
+    try {
+        const resolvedCommand = fs.realpathSync(launcher);
+        const resolvedRoot = fs.realpathSync(root);
+        const relative = path.relative(resolvedRoot, resolvedCommand);
+        return (
+            relative !== "" &&
+            !relative.startsWith("..") &&
+            !path.isAbsolute(relative)
+        );
+    } catch {
+        return false;
+    }
+}
+
+function spawnEnvAllowsKey(key) {
+    if (SPAWN_ENV_EXACT_KEYS.has(key)) {
+        return true;
+    }
+    return SPAWN_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
+function spawnEnvForMcp(workspaceRoot, baseEnv = process.env) {
+    /** @type {NodeJS.ProcessEnv} */
+    const env = {};
+    for (const [key, value] of Object.entries(baseEnv)) {
+        if (typeof value === "string" && spawnEnvAllowsKey(key)) {
+            env[key] = value;
+        }
+    }
+    const root = String(workspaceRoot || "").trim();
+    if (root && !String(env.CODECLONE_WORKSPACE_ROOT || "").trim()) {
+        env.CODECLONE_WORKSPACE_ROOT = root;
+    }
+    return env;
+}
+
 function normalizedLaunchSpec(spec) {
     const command = String(spec?.command || "").trim();
     if (!command) {
         throw new Error("CodeClone MCP launcher command must not be empty.");
     }
-    const args = Array.isArray(spec?.args)
+    validateConfiguredCommand(command);
+    const userArgs = Array.isArray(spec?.args)
         ? spec.args
             .filter((value) => typeof value === "string")
             .map((value) => value.trim())
             .filter(Boolean)
         : [];
-    assertSafeMcpArgs(args);
+    assertSafeMcpArgs(userArgs);
+    const args = forceStdioTransportArgs(userArgs);
     const cwd = String(spec?.cwd || "").trim();
     if (!cwd) {
         throw new Error("CodeClone MCP launcher cwd must not be empty.");
     }
     const source = String(spec?.source || "").trim();
-    return {command, args, cwd, source};
+    return {
+        command: lockResolvedCommand(command),
+        args,
+        cwd,
+        source,
+    };
 }
 
 function trimTail(value, maxChars) {
@@ -415,9 +535,11 @@ module.exports = {
     analysisThresholdOverrides,
     compareCodeCloneVersions,
     customAnalysisThresholds,
+    isLauncherWithinWorkspace,
     isMinimumSupportedCodeCloneVersion,
     launchSpecOrigin,
     locationsNeedDetailHydration,
+    lockResolvedCommand,
     normalizedLaunchSpec,
     normalizeAnalysisProfile,
     parseUtcTimestamp,
@@ -428,8 +550,10 @@ module.exports = {
     resolveAnalysisSettings,
     sameAnalysisSettings,
     signedInteger,
+    spawnEnvForMcp,
     staleMessage,
     trimTail,
     unsupportedVersionMessage,
+    validateConfiguredCommand,
     workspaceLocalLauncherCandidates,
 };

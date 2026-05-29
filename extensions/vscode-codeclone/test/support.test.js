@@ -3,6 +3,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
+const path = require("node:path");
+
 const {
     ANALYSIS_PROFILE_CUSTOM,
     ANALYSIS_PROFILE_DEEPER_REVIEW,
@@ -16,6 +18,7 @@ const {
     analysisThresholdOverrides,
     compareCodeCloneVersions,
     customAnalysisThresholds,
+    isLauncherWithinWorkspace,
     isMinimumSupportedCodeCloneVersion,
     launchSpecOrigin,
     logChannelMessage,
@@ -29,9 +32,11 @@ const {
     resolveAnalysisSettings,
     sameAnalysisSettings,
     signedInteger,
+    spawnEnvForMcp,
     staleMessage,
     trimTail,
     unsupportedVersionMessage,
+    validateConfiguredCommand,
     workspaceLocalLauncherCandidates,
 } = require("../src/support");
 
@@ -108,7 +113,7 @@ test("normalizedLaunchSpec trims arguments and rejects empty command or cwd", ()
         }),
         {
             command: "codeclone-mcp",
-            args: ["--stdio"],
+            args: ["--stdio", "--transport", "stdio"],
             cwd: "/tmp/workspace",
             source: "",
         }
@@ -133,6 +138,62 @@ test("normalizedLaunchSpec rejects blocked remote transport args", () => {
             }),
         /--transport/
     );
+    assert.throws(
+        () =>
+            normalizedLaunchSpec({
+                command: "codeclone-mcp",
+                args: ["--transport=streamable-http"],
+                cwd: "/tmp/workspace",
+            }),
+        /--transport=streamable-http/
+    );
+});
+
+test("validateConfiguredCommand rejects relative paths with separators", () => {
+    assert.throws(
+        () => validateConfiguredCommand("./codeclone-mcp"),
+        /absolute path or a bare command name/
+    );
+    assert.doesNotThrow(() => validateConfiguredCommand("codeclone-mcp"));
+});
+
+test("isLauncherWithinWorkspace rejects launchers outside the workspace root", () => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codeclone-vscode-"));
+    const workspace = path.join(tmpRoot, "workspace");
+    const outside = path.join(tmpRoot, "outside");
+    fs.mkdirSync(workspace, {recursive: true});
+    fs.mkdirSync(outside, {recursive: true});
+    const launcher = path.join(workspace, ".venv", "bin", "codeclone-mcp");
+    const malicious = path.join(outside, "codeclone-mcp");
+    fs.mkdirSync(path.dirname(launcher), {recursive: true});
+    fs.writeFileSync(malicious, "");
+    fs.symlinkSync(malicious, launcher);
+    try {
+        assert.equal(isLauncherWithinWorkspace(launcher, workspace), false);
+        fs.unlinkSync(launcher);
+        fs.writeFileSync(launcher, "");
+        assert.equal(isLauncherWithinWorkspace(launcher, workspace), true);
+    } finally {
+        fs.rmSync(tmpRoot, {recursive: true, force: true});
+    }
+});
+
+test("spawnEnvForMcp keeps launcher-relevant env keys only", () => {
+    const env = spawnEnvForMcp("/workspace/repo", {
+        PATH: "/bin",
+        HOME: "/home/user",
+        SECRET_TOKEN: "hidden",
+        CODECLONE_MCP_SHUTDOWN_GRACE_MS: "1000",
+        PYTHONPATH: "/tmp",
+    });
+    assert.equal(env.PATH, "/bin");
+    assert.equal(env.HOME, "/home/user");
+    assert.equal(env.CODECLONE_MCP_SHUTDOWN_GRACE_MS, "1000");
+    assert.equal(env.PYTHONPATH, "/tmp");
+    assert.equal(env.CODECLONE_WORKSPACE_ROOT, "/workspace/repo");
+    assert.equal(env.SECRET_TOKEN, undefined);
 });
 
 test("launchSpecOrigin makes launcher provenance explicit", () => {

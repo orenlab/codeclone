@@ -17,11 +17,19 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _hook_io import read_bounded_stdin
 
 
 def main() -> None:
+    raw = read_bounded_stdin()
+    if not raw:
+        print("{}")
+        return
     try:
-        data = json.loads(sys.stdin.read())
+        data = json.loads(raw)
     except (json.JSONDecodeError, OSError):
         print("{}")
         return

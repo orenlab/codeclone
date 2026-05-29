@@ -295,6 +295,27 @@ def test_hooks_referenced_scripts_exist() -> None:
                     )
 
 
+def test_hooks_commands_avoid_shell_metacharacters() -> None:
+    hooks_json = json.loads((_HOOKS_DIR / "hooks.json").read_text(encoding="utf-8"))
+    for event, entries in hooks_json["hooks"].items():
+        for entry in entries:
+            cmd = entry["command"]
+            assert "||" not in cmd, f"{event} hook still uses shell fallback: {cmd}"
+            assert "&&" not in cmd, f"{event} hook still uses shell chaining: {cmd}"
+
+
+def test_post_edit_hook_rejects_oversized_stdin() -> None:
+    oversized = json.dumps({"path": "src/module.py"}) + (" " * 70000)
+    assert _run_hook(_POST_EDIT, oversized) == _EMPTY
+
+
+def test_session_hook_rejects_oversized_stdin(tmp_path: Path) -> None:
+    transcript = tmp_path / "transcript.txt"
+    transcript.write_text('{"action":"declare"}\n', encoding="utf-8")
+    oversized = json.dumps({"transcript_path": str(transcript)}) + (" " * 70000)
+    assert _run_hook(_SESSION_CHECK, oversized) == _EMPTY
+
+
 def test_hooks_no_bash_scripts_remain() -> None:
     sh_files = list(_HOOKS_DIR.glob("*.sh"))
     assert sh_files == [], f"Stale bash scripts found: {sh_files}"

@@ -15,6 +15,33 @@ const BLOCKED_ARGS = new Set([
     "--json-response",
     "--stateless-http",
 ]);
+const SPAWN_ENV_EXACT_KEYS = new Set([
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "SystemRoot",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+    "TERM",
+    "PWD",
+    "OS",
+    "COMSPEC",
+    "PATHEXT",
+]);
+const SPAWN_ENV_PREFIXES = [
+    "CODECLONE_",
+    "PYTHON",
+    "UV_",
+    "VIRTUAL_ENV",
+    "POETRY_",
+];
 
 /**
  * @typedef {{
@@ -113,6 +140,62 @@ function validateAdditionalArgs(args) {
                 `Unsupported launcher argument ${arg}. This bundle always uses local stdio transport.`,
             );
         }
+    }
+}
+
+/**
+ * @param {string} key
+ * @returns {boolean}
+ */
+function spawnEnvAllowsKey(key) {
+    if (SPAWN_ENV_EXACT_KEYS.has(key)) {
+        return true;
+    }
+    return SPAWN_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
+/**
+ * @param {string | null | undefined} workspaceRoot
+ * @param {NodeJS.ProcessEnv} [baseEnv]
+ * @returns {NodeJS.ProcessEnv}
+ */
+function buildSpawnEnv(workspaceRoot, baseEnv = process.env) {
+    /** @type {NodeJS.ProcessEnv} */
+    const env = {};
+    for (const [key, value] of Object.entries(baseEnv)) {
+        if (typeof value === "string" && spawnEnvAllowsKey(key)) {
+            env[key] = value;
+        }
+    }
+    const root = normalizeConfiguredValue(workspaceRoot ?? "");
+    if (root && !normalizeConfiguredValue(env.CODECLONE_WORKSPACE_ROOT)) {
+        env.CODECLONE_WORKSPACE_ROOT = root;
+    }
+    return env;
+}
+
+/**
+ * @param {string} command
+ * @param {string} root
+ * @returns {boolean}
+ */
+function isLauncherWithinWorkspace(command, root) {
+    const launcher = String(command || "").trim();
+    const workspaceRoot = String(root || "").trim();
+    if (!launcher || !workspaceRoot) {
+        return false;
+    }
+    try {
+        const resolvedCommand = fsSync.realpathSync(launcher);
+        const resolvedRoot = fsSync.realpathSync(workspaceRoot);
+        const relative = path.relative(resolvedRoot, resolvedCommand);
+        return (
+            relative !== "" &&
+            !relative.startsWith("..") &&
+            !path.isAbsolute(relative)
+        );
+    } catch {
+        return false;
     }
 }
 
@@ -302,6 +385,9 @@ async function candidateWorkspaceCommands(env, platform, cwd) {
             continue;
         }
         if (await fileExists(candidate.command)) {
+            if (!isLauncherWithinWorkspace(candidate.command, candidate.root)) {
+                continue;
+            }
             existing.push(candidate);
             seen.add(candidate.command);
         }
@@ -323,6 +409,9 @@ async function candidateWorkspaceCommands(env, platform, cwd) {
                 continue;
             }
             if (await fileExists(command)) {
+                if (!isLauncherWithinWorkspace(command, ancestor)) {
+                    continue;
+                }
                 existing.push({command, root: ancestor});
                 seen.add(command);
             }
@@ -621,10 +710,7 @@ async function runProxy(options = {}) {
     }
 
     const spawnCwd = spec.cwd && spec.cwd.length > 0 ? spec.cwd : undefined;
-    const childEnv = {...process.env};
-    if (spawnCwd && !normalizeConfiguredValue(childEnv.CODECLONE_WORKSPACE_ROOT)) {
-        childEnv.CODECLONE_WORKSPACE_ROOT = spawnCwd;
-    }
+    const childEnv = buildSpawnEnv(spawnCwd ?? null);
 
     /** @type {string} */
     let resolvedCommand;
@@ -689,9 +775,11 @@ async function runProxy(options = {}) {
 module.exports = {
     BLOCKED_ARGS,
     buildSetupMessage,
+    buildSpawnEnv,
     candidateAutoCommands,
     candidateWorkspaceCommands,
     exitProxy,
+    isLauncherWithinWorkspace,
     normalizeConfiguredValue,
     parseLauncherArgsJson,
     resolveLaunchSpec,

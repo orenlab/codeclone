@@ -105,6 +105,7 @@ const {
     STALE_REASON_EDITOR,
     STALE_REASON_WORKSPACE,
     isMinimumSupportedCodeCloneVersion,
+    isLauncherWithinWorkspace,
     launchSpecOrigin,
     resolveAnalysisSettings,
     sameAnalysisSettings,
@@ -665,7 +666,10 @@ class CodeCloneController {
             }))
         );
         const localLauncher = candidateChecks.find((entry) => entry.exists)?.candidate;
-        if (localLauncher) {
+        if (
+            localLauncher &&
+            isLauncherWithinWorkspace(localLauncher, folder.uri.fsPath)
+        ) {
             return normalizedLaunchSpec({
                 command: localLauncher,
                 args: Array.isArray(configuredArgs) ? configuredArgs : [],
@@ -691,6 +695,11 @@ class CodeCloneController {
     }
 
     async ensureConnected(folder) {
+        if (!(await this.ensureWorkspaceTrust())) {
+            throw new MCPClientError(
+                "CodeClone requires a trusted workspace before starting the local MCP server."
+            );
+        }
         const launchSpec = await this.resolveLaunchSpec(folder);
         if (this.client.isConnected() && this.connectionInfo.launchSpec) {
             const activeLaunchSpec = this.connectionInfo.launchSpec;
@@ -2824,7 +2833,7 @@ class CodeCloneController {
             if (!input || !input.trim()) {
                 return;
             }
-            files.push(input.trim());
+            files.push(this.normalizeBlastRadiusFileInput(folder, input));
         }
         try {
             await this.ensureConnected(folder);
@@ -2859,6 +2868,9 @@ class CodeCloneController {
         if (!folder) {
             return;
         }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
         const state = this.getWorkspaceState(folder);
         if (!state.currentRunId) {
             await vscode.window.showInformationMessage(
@@ -2876,7 +2888,7 @@ class CodeCloneController {
             if (!input || !input.trim()) {
                 return;
             }
-            files.push(input.trim());
+            files.push(this.normalizeBlastRadiusFileInput(folder, input));
         }
         try {
             await this.ensureConnected(folder);
@@ -2909,6 +2921,16 @@ class CodeCloneController {
             return [relativePath];
         }
         return [];
+    }
+
+    normalizeBlastRadiusFileInput(folder, input) {
+        const resolved = resolveWorkspacePath(folder.uri.fsPath, input);
+        if (!resolved) {
+            throw new MCPClientError(
+                "Blast radius path must be a workspace-relative file inside the open folder."
+            );
+        }
+        return path.relative(folder.uri.fsPath, resolved).split(path.sep).join("/");
     }
 
     async clearSessionState() {

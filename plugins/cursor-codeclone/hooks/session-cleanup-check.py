@@ -21,6 +21,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _hook_io import read_bounded_stdin
+
 _EMPTY = "{}"
 
 _WARNING = json.dumps(
@@ -77,7 +80,11 @@ def _read_validated_transcript(stdin_payload: str) -> str | None:
 
 
 def main() -> None:
-    content = _read_validated_transcript(sys.stdin.read())
+    raw = read_bounded_stdin()
+    if not raw:
+        print(_EMPTY)
+        return
+    content = _read_validated_transcript(raw)
     if content is None:
         print(_EMPTY)
         return
