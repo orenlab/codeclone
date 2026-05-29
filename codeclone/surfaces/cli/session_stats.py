@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ... import ui_messages as ui
 from ...contracts import ExitCode
 from .types import PrinterLike
 
@@ -75,7 +76,9 @@ def render_session_stats(
     try:
         snapshot = _collect_session_snapshot(root_path)
     except Exception as exc:
-        console.print(f"CONTRACT ERROR: failed to read session state: {exc}")
+        console.print(
+            ui.fmt_contract_error(ui.SESSION_STATS_READ_FAILED.format(error=exc))
+        )
         return int(ExitCode.CONTRACT_ERROR)
     if quiet:
         return _render_quiet(console, snapshot)
@@ -199,26 +202,28 @@ def _collect_session_snapshot(root_path: Path) -> _SessionSnapshot:
 def _render_quiet(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
     live_agents = [a for a in snapshot.agents if a.alive]
     total_intents = sum(len(a.intents) for a in snapshot.agents)
-    parts = [
-        f"session-stats: {snapshot.workspace_health}",
-        "|",
-        f"agents={len(live_agents)}",
-        f"intents={total_intents}",
-        f"stale={snapshot.stale_count}",
-        f"latest_run={snapshot.latest_run_id or 'none'}",
-    ]
+    line = ui.SESSION_STATS_QUIET_TEMPLATE.format(
+        prefix=ui.SESSION_STATS_QUIET_PREFIX,
+        workspace_health=snapshot.workspace_health,
+        agents=len(live_agents),
+        intents=total_intents,
+        stale=snapshot.stale_count,
+        latest_run=snapshot.latest_run_id or ui.SESSION_STATS_LATEST_RUN_NONE,
+    )
     if snapshot.latest_run_health is not None:
-        parts.append(f"health={snapshot.latest_run_health}")
-    console.print(" ".join(parts))
+        line += " " + ui.SESSION_STATS_QUIET_HEALTH.format(
+            health=snapshot.latest_run_health
+        )
+    console.print(line)
     return int(ExitCode.SUCCESS)
 
 
 def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
     if _supports_rich(console):
         return _render_verbose_rich(console, snapshot)
-    console.print("[bold]╍╍╍ Session Stats ╍╍╍[/bold]")
+    console.print(f"[bold]╍╍╍ {ui.SESSION_STATS_TITLE} ╍╍╍[/bold]")
     console.print()
-    console.print(f"  Workspace:       {snapshot.root}")
+    console.print(f"  {ui.SESSION_STATS_WORKSPACE:<17}{snapshot.root}")
 
     if snapshot.cache_present and snapshot.latest_run_id:
         age_str = _format_age(snapshot.latest_run_age_seconds)
@@ -233,20 +238,22 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
             else ""
         )
         console.print(
-            f"  Latest run:      {snapshot.latest_run_id}"
+            f"  {ui.SESSION_STATS_LATEST_RUN:<17}{snapshot.latest_run_id}"
             f" ({age_str}{health_part}{findings_part})"
         )
         if snapshot.latest_run_files is not None:
             console.print(
-                f"  Cache:           report.json present"
-                f" ({snapshot.latest_run_files} files)"
+                f"  {ui.SESSION_STATS_CACHE:<17}"
+                f"{ui.SESSION_STATS_REPORT_PRESENT.format(files=snapshot.latest_run_files)}"
             )
     else:
-        console.print("  Latest run:      none")
+        console.print(
+            f"  {ui.SESSION_STATS_LATEST_RUN:<17}{ui.SESSION_STATS_LATEST_RUN_NONE}"
+        )
 
     console.print()
     live_agents = [a for a in snapshot.agents if a.alive]
-    console.print(f"  Active agents:   {len(live_agents)}")
+    console.print(f"  {ui.SESSION_STATS_ACTIVE_AGENTS:<17}{len(live_agents)}")
 
     for agent in live_agents:
         label = agent.label or "unknown"
@@ -270,48 +277,66 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
             console.print(f"        lease: {lease_str} remaining")
 
     console.print()
-    console.print(f"  Stale intents:   {snapshot.stale_count}")
-    console.print(f"  Expired intents: {snapshot.expired_count}")
-    console.print(f"  Recoverable:     {snapshot.recoverable_count}")
+    console.print(f"  {ui.SESSION_STATS_STALE:<17}{snapshot.stale_count}")
+    console.print(f"  {ui.SESSION_STATS_EXPIRED:<15}{snapshot.expired_count}")
+    console.print(f"  {ui.SESSION_STATS_RECOVERABLE:<17}{snapshot.recoverable_count}")
     if snapshot.mcp_token_footprint is not None and snapshot.mcp_token_event_count > 0:
         enc = snapshot.mcp_token_encoding or "unknown"
         console.print(
-            f"  MCP payload footprint: "
-            f"~{snapshot.mcp_token_footprint:,} tokens "
-            f"({enc}, {snapshot.mcp_token_event_count} tool calls)"
+            "  "
+            + ui.SESSION_STATS_MCP_FOOTPRINT_VERBOSE.format(
+                tokens=snapshot.mcp_token_footprint,
+                encoding=enc,
+                calls=snapshot.mcp_token_event_count,
+            )
         )
     console.print()
-    console.print(f"  Workspace health: {snapshot.workspace_health}")
+    console.print(f"  {ui.SESSION_STATS_WORKSPACE_HEALTH} {snapshot.workspace_health}")
     return int(ExitCode.SUCCESS)
 
 
 def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
     box, panel_cls, rule_cls, table_cls, text_cls = _rich_session_symbols()
 
-    console.print(rule_cls("Session Stats", style="dim", characters="─"))
+    console.print(rule_cls(ui.SESSION_STATS_TITLE, style="dim", characters="─"))
 
     summary = table_cls.grid(padding=(0, 2))
     summary.add_column(style="dim", no_wrap=True)
     summary.add_column()
-    summary.add_row("Workspace", str(snapshot.root))
+    summary.add_row(ui.SESSION_STATS_WORKSPACE.rstrip(":"), str(snapshot.root))
     if snapshot.cache_present and snapshot.latest_run_id:
         run_text = _latest_run_text(snapshot)
-        summary.add_row("Latest run", run_text)
+        summary.add_row(ui.SESSION_STATS_LATEST_RUN.rstrip(":"), run_text)
         if snapshot.latest_run_files is not None:
             summary.add_row(
-                "Cache",
-                f"report.json present ({snapshot.latest_run_files} files)",
+                ui.SESSION_STATS_CACHE.rstrip(":"),
+                ui.SESSION_STATS_REPORT_PRESENT.format(files=snapshot.latest_run_files),
             )
     else:
-        summary.add_row("Latest run", "none")
-    summary.add_row("Active agents", str(len([a for a in snapshot.agents if a.alive])))
-    summary.add_row("Stale intents", str(snapshot.stale_count))
-    summary.add_row("Expired intents", str(snapshot.expired_count))
-    summary.add_row("Recoverable", str(snapshot.recoverable_count))
+        summary.add_row(
+            ui.SESSION_STATS_LATEST_RUN.rstrip(":"),
+            ui.SESSION_STATS_LATEST_RUN_NONE,
+        )
+    summary.add_row(
+        ui.SESSION_STATS_ACTIVE_AGENTS.rstrip(":"),
+        str(len([a for a in snapshot.agents if a.alive])),
+    )
+    summary.add_row(
+        ui.SESSION_STATS_STALE.rstrip(":"),
+        str(snapshot.stale_count),
+    )
+    summary.add_row(
+        ui.SESSION_STATS_EXPIRED.rstrip(":"),
+        str(snapshot.expired_count),
+    )
+    summary.add_row(
+        ui.SESSION_STATS_RECOVERABLE.rstrip(":"),
+        str(snapshot.recoverable_count),
+    )
     if snapshot.mcp_token_footprint is not None and snapshot.mcp_token_event_count > 0:
         enc = snapshot.mcp_token_encoding or "unknown"
         summary.add_row(
-            "MCP payload footprint",
+            ui.SESSION_STATS_MCP_FOOTPRINT,
             f"~{snapshot.mcp_token_footprint:,} tokens "
             f"({enc}, {snapshot.mcp_token_event_count} tool calls)",
         )
@@ -319,32 +344,35 @@ def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> in
         snapshot.workspace_health,
         style=_health_style(snapshot.workspace_health),
     )
-    summary.add_row("Workspace health", health_text)
+    summary.add_row(
+        ui.SESSION_STATS_WORKSPACE_HEALTH.rstrip(":"),
+        health_text,
+    )
     console.print(
         panel_cls(summary, border_style=_health_style(snapshot.workspace_health))
     )
 
     live_agents = [agent for agent in snapshot.agents if agent.alive]
     if not live_agents:
-        console.print("[dim]No live workspace agents found.[/dim]")
+        console.print(f"[dim]{ui.SESSION_STATS_NO_AGENTS}[/dim]")
         return int(ExitCode.SUCCESS)
 
     table = table_cls(
-        title="Workspace intents",
+        title=ui.SESSION_STATS_WORKSPACE_INTENTS_TITLE,
         box=box.SIMPLE_HEAVY,
         show_lines=False,
         expand=True,
     )
-    table.add_column("PID", no_wrap=True, style="dim")
-    table.add_column("Agent", overflow="fold")
-    table.add_column("Ownership", no_wrap=True)
-    table.add_column("Status", no_wrap=True)
-    table.add_column("Scope", justify="right", no_wrap=True)
-    table.add_column("Lease", no_wrap=True)
-    table.add_column("Files", overflow="fold")
+    table.add_column(ui.SESSION_STATS_COL_PID, no_wrap=True, style="dim")
+    table.add_column(ui.SESSION_STATS_COL_AGENT, overflow="fold")
+    table.add_column(ui.SESSION_STATS_COL_OWNERSHIP, no_wrap=True)
+    table.add_column(ui.SESSION_STATS_COL_STATUS, no_wrap=True)
+    table.add_column(ui.SESSION_STATS_COL_SCOPE, justify="right", no_wrap=True)
+    table.add_column(ui.SESSION_STATS_COL_LEASE, no_wrap=True)
+    table.add_column(ui.SESSION_STATS_COL_FILES, overflow="fold")
 
     for agent in live_agents:
-        label = agent.label or "unknown"
+        label = agent.label or ui.SESSION_STATS_AGENT_UNKNOWN
         for intent in agent.intents:
             table.add_row(
                 str(agent.pid),
@@ -390,7 +418,8 @@ def _allowed_files_label(files: tuple[str, ...]) -> str:
     shown = files[:_MAX_ALLOWED_FILES_SHOWN]
     label = ", ".join(shown)
     if len(files) > _MAX_ALLOWED_FILES_SHOWN:
-        label += f" ... and {len(files) - _MAX_ALLOWED_FILES_SHOWN} more"
+        extra = ui.BLAST_RADIUS_MORE.format(count=len(files) - _MAX_ALLOWED_FILES_SHOWN)
+        label += f" {extra}"
     return label
 
 

@@ -13,6 +13,8 @@ Document HTML rendering as a pure view layer over canonical report data.
 - Snippet/highlight helpers: `codeclone/report/html/widgets/snippets.py`
 - Sections/widgets/assets: `codeclone/report/html/sections/*`,
   `codeclone/report/html/widgets/*`, `codeclone/report/html/assets/*`
+- User-facing copy catalog: `codeclone/report/messages/*` (glossary,
+  suggestions, explainability, overview, security, chrome)
 
 ## Data model
 

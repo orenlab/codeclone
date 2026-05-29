@@ -31,7 +31,7 @@ def render_audit(
     json_summary: bool = False,
 ) -> int:
     if not audit_enabled:
-        console.print(ui.fmt_contract_error("audit is not enabled."))
+        console.print(ui.fmt_contract_error(ui.AUDIT_NOT_ENABLED))
         return int(ExitCode.CONTRACT_ERROR)
     try:
         db_path = resolve_audit_path(root_path=root_path, value=audit_path)
@@ -51,13 +51,15 @@ def render_audit(
 
 def _render_quiet(*, console: PrinterLike, summary: AuditSummary) -> int:
     console.print(
-        "audit: "
-        f"{summary.total_events} events | "
-        f"intents={summary.intent_events} "
-        f"contracts={summary.contract_events} "
-        f"receipts={summary.receipt_events} "
-        f"violations={summary.violation_events} "
-        f"last={_relative_time(summary.latest_event_utc)}"
+        ui.AUDIT_QUIET_TEMPLATE.format(
+            prefix=ui.AUDIT_QUIET_PREFIX,
+            total_events=summary.total_events,
+            intent_events=summary.intent_events,
+            contract_events=summary.contract_events,
+            receipt_events=summary.receipt_events,
+            violation_events=summary.violation_events,
+            last_relative=_relative_time(summary.latest_event_utc),
+        )
     )
     return int(ExitCode.SUCCESS)
 
@@ -82,13 +84,19 @@ def _render_verbose(*, console: PrinterLike, summary: AuditSummary) -> int:
     if _supports_rich(console):
         return _render_verbose_rich(console=console, summary=summary)
 
-    console.print("[bold]╍╍╍ Controller Audit Trail ╍╍╍[/bold]")
+    console.print(f"[bold]╍╍╍ {ui.AUDIT_TITLE} ╍╍╍[/bold]")
     console.print()
-    console.print(f"  Database:     {summary.db_path} ({summary.total_events} events)")
+    console.print(
+        f"  {ui.AUDIT_DATABASE:<13} {summary.db_path} ({summary.total_events} events)"
+    )
     if summary.retention_days is not None:
-        console.print(f"  Retention:    {summary.retention_days} days")
-    console.print(f"  Oldest event: {summary.oldest_event_utc or 'none'}")
-    console.print(f"  Latest event: {summary.latest_event_utc or 'none'}")
+        console.print(f"  {ui.AUDIT_RETENTION:<13} {summary.retention_days} days")
+    console.print(
+        f"  {ui.AUDIT_OLDEST:<13} {summary.oldest_event_utc or ui.AUDIT_NONE}"
+    )
+    console.print(
+        f"  {ui.AUDIT_LATEST:<13} {summary.latest_event_utc or ui.AUDIT_NONE}"
+    )
     console.print()
     for event in summary.events:
         console.print(
@@ -101,12 +109,12 @@ def _render_verbose(*, console: PrinterLike, summary: AuditSummary) -> int:
         )
     console.print()
     console.print(
-        "  Summary: "
+        f"  {ui.AUDIT_SUMMARY} "
         f"{summary.intent_events} intents, "
         f"{summary.contract_events} contracts, "
         f"{summary.receipt_events} receipts"
     )
-    console.print(f"  Violations: {summary.violation_events}")
+    console.print(f"  {ui.AUDIT_VIOLATIONS} {summary.violation_events}")
     return int(ExitCode.SUCCESS)
 
 
@@ -117,22 +125,28 @@ def _render_verbose_rich(*, console: PrinterLike, summary: AuditSummary) -> int:
     from rich.table import Table
     from rich.text import Text
 
-    console.print(Rule("Controller Audit Trail", style="dim", characters="─"))
+    console.print(Rule(ui.AUDIT_TITLE, style="dim", characters="─"))
 
     meta = Table.grid(padding=(0, 2))
     meta.add_column(style="dim", no_wrap=True)
     meta.add_column()
     meta.add_row(
-        "Database",
+        ui.AUDIT_DATABASE.rstrip(":"),
         f"{summary.db_path} ({summary.total_events} events, "
         f"{_format_bytes(summary.db_size_bytes)})",
     )
     if summary.retention_days is not None:
-        meta.add_row("Retention", f"{summary.retention_days} days")
-    meta.add_row("Oldest event", summary.oldest_event_utc or "none")
-    meta.add_row("Latest event", summary.latest_event_utc or "none")
+        meta.add_row(ui.AUDIT_RETENTION.rstrip(":"), f"{summary.retention_days} days")
     meta.add_row(
-        "Summary",
+        ui.AUDIT_OLDEST.rstrip(":"),
+        summary.oldest_event_utc or ui.AUDIT_NONE,
+    )
+    meta.add_row(
+        ui.AUDIT_LATEST.rstrip(":"),
+        summary.latest_event_utc or ui.AUDIT_NONE,
+    )
+    meta.add_row(
+        ui.AUDIT_SUMMARY.rstrip(":"),
         (
             f"{summary.intent_events} intents, "
             f"{summary.contract_events} contracts, "
@@ -140,7 +154,7 @@ def _render_verbose_rich(*, console: PrinterLike, summary: AuditSummary) -> int:
         ),
     )
     meta.add_row(
-        "Violations",
+        ui.AUDIT_VIOLATIONS.rstrip(":"),
         Text(
             str(summary.violation_events),
             style="red" if summary.violation_events else "green",
@@ -149,20 +163,20 @@ def _render_verbose_rich(*, console: PrinterLike, summary: AuditSummary) -> int:
     fp = summary.payload_footprint
     if fp is not None:
         meta.add_row(
-            "MCP payload footprint",
+            ui.AUDIT_MCP_PAYLOAD_FOOTPRINT_ROW,
             f"~{fp.total_tokens:,} tokens ({fp.encoding}, {fp.tool_calls} tool calls)",
         )
     console.print(Panel(meta, border_style="cyan"))
 
     table = Table(box=box.SIMPLE_HEAVY)
-    table.add_column("Tokens", justify="right", no_wrap=True)
-    table.add_column("Time", no_wrap=True)
-    table.add_column("Type", no_wrap=True)
-    table.add_column("Severity", no_wrap=True)
-    table.add_column("Intent", no_wrap=True)
-    table.add_column("Status", no_wrap=True)
-    table.add_column("Run", no_wrap=True)
-    table.add_column("Agent", no_wrap=True)
+    table.add_column(ui.AUDIT_COL_TOKENS, justify="right", no_wrap=True)
+    table.add_column(ui.AUDIT_COL_TIME, no_wrap=True)
+    table.add_column(ui.AUDIT_COL_TYPE, no_wrap=True)
+    table.add_column(ui.AUDIT_COL_SEVERITY, no_wrap=True)
+    table.add_column(ui.AUDIT_COL_INTENT, no_wrap=True)
+    table.add_column(ui.AUDIT_COL_STATUS, no_wrap=True)
+    table.add_column(ui.AUDIT_COL_RUN, no_wrap=True)
+    table.add_column(ui.AUDIT_COL_AGENT, no_wrap=True)
     for event in summary.events:
         table.add_row(
             _format_tokens(event.estimated_tokens),
@@ -203,19 +217,19 @@ def _render_payload_analytics(
     stats = Table.grid(padding=(0, 2))
     stats.add_column(style="dim", no_wrap=True)
     stats.add_column(justify="right", no_wrap=True)
-    stats.add_row("Total tokens", f"~{fp.total_tokens:,}")
-    stats.add_row("Tool calls", str(fp.tool_calls))
-    stats.add_row("Avg tokens/call", str(fp.avg_tokens))
-    stats.add_row("p95 tokens", str(fp.p95_tokens))
-    stats.add_row("Max tokens", str(fp.max_tokens))
-    stats.add_row("Encoding", fp.encoding)
+    stats.add_row(ui.AUDIT_STAT_TOTAL_TOKENS, f"~{fp.total_tokens:,}")
+    stats.add_row(ui.AUDIT_STAT_TOOL_CALLS, str(fp.tool_calls))
+    stats.add_row(ui.AUDIT_STAT_AVG_TOKENS, str(fp.avg_tokens))
+    stats.add_row(ui.AUDIT_STAT_P95_TOKENS, str(fp.p95_tokens))
+    stats.add_row(ui.AUDIT_STAT_MAX_TOKENS, str(fp.max_tokens))
+    stats.add_row(ui.AUDIT_STAT_ENCODING, fp.encoding)
 
     # ── Breakdown by type ──
     breakdown = Table(box=box.SIMPLE, show_edge=False)
-    breakdown.add_column("Type", no_wrap=True)
-    breakdown.add_column("Calls", justify="right", no_wrap=True)
-    breakdown.add_column("Total", justify="right", no_wrap=True)
-    breakdown.add_column("Max", justify="right", no_wrap=True)
+    breakdown.add_column(ui.AUDIT_COL_TYPE, no_wrap=True)
+    breakdown.add_column(ui.AUDIT_BREAKDOWN_COL_CALLS, justify="right", no_wrap=True)
+    breakdown.add_column(ui.AUDIT_BREAKDOWN_COL_TOTAL, justify="right", no_wrap=True)
+    breakdown.add_column(ui.AUDIT_BREAKDOWN_COL_MAX, justify="right", no_wrap=True)
     for tp in fp.by_type:
         breakdown.add_row(
             _short_type(tp.event_type),
@@ -226,10 +240,10 @@ def _render_payload_analytics(
 
     # ── Top payloads ──
     top = Table(box=box.SIMPLE, show_edge=False)
-    top.add_column("#", justify="right", no_wrap=True, style="dim")
-    top.add_column("Type", no_wrap=True)
-    top.add_column("Tokens", justify="right", no_wrap=True)
-    top.add_column("Time", no_wrap=True)
+    top.add_column(ui.AUDIT_TOP_COL_RANK, justify="right", no_wrap=True, style="dim")
+    top.add_column(ui.AUDIT_COL_TYPE, no_wrap=True)
+    top.add_column(ui.AUDIT_COL_TOKENS, justify="right", no_wrap=True)
+    top.add_column(ui.AUDIT_COL_TIME, no_wrap=True)
     for i, payload in enumerate(fp.top_payloads, 1):
         style = (
             "bold red"
@@ -249,27 +263,33 @@ def _render_payload_analytics(
     warnings: list[str] = []
     if fp.total_tokens > _WORKFLOW_WATCH:
         warnings.append(
-            f"Workflow total {fp.total_tokens:,} tokens exceeds "
-            f"{_WORKFLOW_WATCH:,} threshold (heavy)"
+            ui.AUDIT_BUDGET_WORKFLOW_HEAVY.format(
+                total_tokens=fp.total_tokens,
+                threshold=_WORKFLOW_WATCH,
+            )
         )
     elif fp.total_tokens > _WORKFLOW_OK:
         warnings.append(
-            f"Workflow total {fp.total_tokens:,} tokens exceeds "
-            f"{_WORKFLOW_OK:,} threshold (watch)"
+            ui.AUDIT_BUDGET_WORKFLOW_WATCH.format(
+                total_tokens=fp.total_tokens,
+                threshold=_WORKFLOW_OK,
+            )
         )
     warnings.extend(
-        f"{_short_type(payload.event_type)} payload "
-        f"{payload.estimated_tokens:,} tokens (heavy)"
+        ui.AUDIT_BUDGET_PAYLOAD_HEAVY.format(
+            event_type=_short_type(payload.event_type),
+            estimated_tokens=payload.estimated_tokens,
+        )
         for payload in fp.top_payloads
         if payload.estimated_tokens > _SINGLE_PAYLOAD_WATCH
     )
 
     # ── Render ──
     console.print()
-    console.print(Panel(stats, title="MCP Payload Footprint", border_style="cyan"))
-    console.print(Panel(breakdown, title="Tokens by Type", border_style="dim"))
+    console.print(Panel(stats, title=ui.AUDIT_MCP_FOOTPRINT_PANEL, border_style="cyan"))
+    console.print(Panel(breakdown, title=ui.AUDIT_TOKENS_BY_TYPE, border_style="dim"))
     if fp.top_payloads:
-        console.print(Panel(top, title="Top Payloads", border_style="dim"))
+        console.print(Panel(top, title=ui.AUDIT_TOP_PAYLOADS, border_style="dim"))
     if warnings:
         warning_text = Text()
         for w in warnings:
@@ -277,7 +297,7 @@ def _render_payload_analytics(
         console.print(
             Panel(
                 warning_text,
-                title="Payload Budget Warnings",
+                title=ui.AUDIT_PAYLOAD_BUDGET_WARNINGS,
                 border_style="yellow",
             )
         )
@@ -288,37 +308,21 @@ def _supports_rich(console: PrinterLike) -> bool:
 
 
 def _short_type(event_type: str) -> str:
-    aliases = {
-        "intent.declared": "decl",
-        "intent.checked": "check",
-        "intent.expanded": "expand",
-        "intent.violated": "intent!",
-        "intent.cleared": "clear",
-        "intent.renewed": "renew",
-        "blast_radius.computed": "radius",
-        "patch_budget.computed": "budget",
-        "patch_contract.verified": "verify",
-        "patch_contract.violated": "verify!",
-        "patch_contract.expired": "expired",
-        "claim_validation.completed": "claims",
-        "claim_validation.violated": "claims!",
-        "review_receipt.created": "receipt",
-        "baseline_abuse.detected": "baseline!",
-        "workspace.conflict_detected": "conflict",
-        "workspace.gc_completed": "gc",
-    }
-    return aliases.get(event_type, event_type.rsplit(".", maxsplit=1)[-1])
+    return ui.AUDIT_EVENT_TYPE_ALIASES.get(
+        event_type,
+        event_type.rsplit(".", maxsplit=1)[-1],
+    )
 
 
 def _short_intent(intent_id: str | None) -> str:
     if not intent_id:
-        return "-"
+        return ui.AUDIT_FIELD_EMPTY
     return intent_id.removeprefix("intent-")
 
 
 def _short_agent(agent_label: str | None) -> str:
     if not agent_label:
-        return "-"
+        return ui.AUDIT_FIELD_EMPTY
     return agent_label.replace("claude-code/", "cc/")
 
 
@@ -339,7 +343,7 @@ def _short_time(value: str) -> str:
 def _relative_time(value: str | None) -> str:
     parsed = _parse_utc(value or "")
     if parsed is None:
-        return "none"
+        return ui.AUDIT_RELATIVE_NONE
     seconds = max(0, int((datetime.now(timezone.utc) - parsed).total_seconds()))
     if seconds < 60:
         return f"{seconds}s ago"
@@ -365,7 +369,7 @@ def _parse_utc(value: str) -> datetime | None:
 
 def _format_tokens(value: int | None) -> str:
     if value is None:
-        return "—"
+        return ui.AUDIT_TOKENS_EMPTY
     return f"{value:,}"
 
 

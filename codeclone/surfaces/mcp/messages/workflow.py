@@ -49,6 +49,14 @@ FINISH_RECEIPT_FAILED: Final = (
 
 FINISH_DONE: Final = "Done. Intent cleared."
 
+FINISH_EVIDENCE_XOR: Final = (
+    "finish_controlled_change requires exactly one of "
+    "changed_files or diff_ref, not both."
+)
+FINISH_EVIDENCE_REQUIRED: Final = (
+    "finish_controlled_change requires changed_files or diff_ref."
+)
+
 
 def start_controlled_change_message(
     *,

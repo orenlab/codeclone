@@ -11,6 +11,8 @@ from collections.abc import Mapping, Sequence
 from ...domain.source_scope import IMPACT_SCOPE_NON_RUNTIME, SOURCE_KIND_OTHER
 from ...utils.coerce import as_int, as_mapping, as_sequence
 from .._formatting import format_spread_text
+from ..messages import explain as explain_msgs
+from ..messages import projections as proj
 
 _as_int = as_int
 _as_mapping = as_mapping
@@ -21,7 +23,7 @@ def format_meta_text_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if value is None:
-        return "(none)"
+        return proj.PROJECTION_NONE
     if isinstance(value, float):
         return f"{value:.2f}".rstrip("0").rstrip(".") or "0"
     if isinstance(value, Sequence) and not isinstance(
@@ -29,9 +31,9 @@ def format_meta_text_value(value: object) -> str:
         (str, bytes, bytearray),
     ):
         formatted = [format_meta_text_value(item) for item in value]
-        return ", ".join(formatted) if formatted else "(none)"
+        return ", ".join(formatted) if formatted else proj.PROJECTION_NONE
     text = str(value).strip()
-    return text if text else "(none)"
+    return text if text else proj.PROJECTION_NONE
 
 
 def _format_key_values(
@@ -45,9 +47,9 @@ def _format_key_values(
         if key not in mapping:
             continue
         formatted = format_meta_text_value(mapping.get(key))
-        if not skip_empty or formatted != "(none)":
+        if not skip_empty or formatted != proj.PROJECTION_NONE:
             parts.append(f"{key}={formatted}")
-    return " ".join(parts) if parts else "(none)"
+    return " ".join(parts) if parts else proj.PROJECTION_NONE
 
 
 def _spread_text(spread: Mapping[str, object]) -> str:
@@ -67,15 +69,9 @@ def _scope_text(source_scope: Mapping[str, object]) -> str:
 
 def _structural_kind_label(kind: object) -> str:
     kind_text = str(kind).strip()
-    match kind_text:
-        case "duplicated_branches":
-            return "Duplicated branches"
-        case "clone_guard_exit_divergence":
-            return "Clone guard/exit divergence"
-        case "clone_cohort_drift":
-            return "Clone cohort drift"
-        case _:
-            return kind_text or "(none)"
+    if kind_text in explain_msgs.STRUCTURAL_KIND_LABELS:
+        return explain_msgs.STRUCTURAL_KIND_LABELS[kind_text]
+    return kind_text or proj.PROJECTION_NONE
 
 
 def _location_line(
@@ -112,7 +108,7 @@ def _append_clone_section(
     ]
     lines.append(f"{title} ({novelty.upper()}) (groups={len(section_groups)})")
     if not section_groups:
-        lines.append("(none)")
+        lines.append(proj.PROJECTION_NONE)
         return
     for idx, group in enumerate(section_groups, start=1):
         lines.append(f"=== Clone group #{idx} ===")
@@ -164,7 +160,7 @@ def _append_suppressed_clone_section(
     section_groups = [_as_mapping(group) for group in groups]
     lines.append(f"{title} (groups={len(section_groups)})")
     if not section_groups:
-        lines.append("(none)")
+        lines.append(proj.PROJECTION_NONE)
         return
     for idx, group in enumerate(section_groups, start=1):
         lines.append(f"=== Suppressed clone group #{idx} ===")
@@ -204,9 +200,11 @@ def _append_suppressed_clone_section(
 
 def _append_structural_findings(lines: list[str], groups: Sequence[object]) -> None:
     structural_groups = [_as_mapping(group) for group in groups]
-    lines.append(f"STRUCTURAL FINDINGS (groups={len(structural_groups)})")
+    lines.append(
+        proj.TEXT_STRUCTURAL_FINDINGS_HEADER.format(count=len(structural_groups))
+    )
     if not structural_groups:
-        lines.append("(none)")
+        lines.append(proj.PROJECTION_NONE)
         return
     for idx, group in enumerate(structural_groups, start=1):
         lines.append(f"=== Structural finding #{idx} ===")
@@ -285,7 +283,7 @@ def _append_single_item_findings(
     finding_groups = [_as_mapping(group) for group in groups]
     lines.append(f"{title} (groups={len(finding_groups)})")
     if not finding_groups:
-        lines.append("(none)")
+        lines.append(proj.PROJECTION_NONE)
         return
     for idx, group in enumerate(finding_groups, start=1):
         lines.append(f"=== Finding #{idx} ===")
@@ -329,7 +327,7 @@ def _suppression_bindings_text(item: Mapping[str, object]) -> str:
     source = str(item.get("suppression_source", "")).strip()
     if rule or source:
         return f"{rule or 'unknown'}@{source or 'unknown'}"
-    return "(none)"
+    return proj.PROJECTION_NONE
 
 
 def _append_suppressed_dead_code_items(
@@ -338,9 +336,11 @@ def _append_suppressed_dead_code_items(
     items: Sequence[object],
 ) -> None:
     suppressed_items = [_as_mapping(item) for item in items]
-    lines.append(f"SUPPRESSED DEAD CODE (items={len(suppressed_items)})")
+    lines.append(
+        proj.TEXT_SUPPRESSED_DEAD_CODE_HEADER.format(count=len(suppressed_items))
+    )
     if not suppressed_items:
-        lines.append("(none)")
+        lines.append(proj.PROJECTION_NONE)
         return
     for idx, item in enumerate(suppressed_items, start=1):
         lines.append(f"=== Suppressed dead-code item #{idx} ===")
@@ -389,9 +389,9 @@ def _append_suggestions(
     finding_index = {
         str(group.get("id")): group for group in _flatten_findings(findings)
     }
-    lines.append(f"SUGGESTIONS (count={len(suggestion_rows)})")
+    lines.append(proj.TEXT_SUGGESTIONS_HEADER.format(count=len(suggestion_rows)))
     if not suggestion_rows:
-        lines.append("(none)")
+        lines.append(proj.PROJECTION_NONE)
         return
     for idx, suggestion in enumerate(suggestion_rows, start=1):
         finding = finding_index.get(str(suggestion.get("finding_id")), {})
@@ -429,10 +429,10 @@ def _append_overview(
     overview: Mapping[str, object],
     hotlists: Mapping[str, object],
 ) -> None:
-    lines.append("DERIVED OVERVIEW")
+    lines.append(proj.TEXT_SECTION_DERIVED_OVERVIEW)
     families = _as_mapping(overview.get("families"))
     lines.append(
-        "Families: "
+        proj.TEXT_OVERVIEW_FAMILIES
         + _format_key_values(
             families,
             ("clones", "structural", "dead_code", "design"),
@@ -440,7 +440,7 @@ def _append_overview(
     )
     source_breakdown = _as_mapping(overview.get("source_scope_breakdown"))
     lines.append(
-        "Source scope breakdown: "
+        proj.TEXT_OVERVIEW_SOURCE_SCOPE
         + _format_key_values(
             source_breakdown,
             ("production", "tests", "fixtures", "other"),
@@ -448,7 +448,7 @@ def _append_overview(
     )
     health_snapshot = _as_mapping(overview.get("health_snapshot"))
     lines.append(
-        "Health snapshot: "
+        proj.TEXT_OVERVIEW_HEALTH_SNAPSHOT
         + _format_key_values(
             health_snapshot,
             ("score", "grade", "strongest_dimension", "weakest_dimension"),
@@ -465,7 +465,7 @@ def _append_overview(
         ),
     }
     lines.append(
-        "Hotlists: "
+        proj.TEXT_OVERVIEW_HOTLISTS
         + _format_key_values(
             hotlist_counts,
             (
@@ -478,9 +478,9 @@ def _append_overview(
     )
     top_risks = list(map(_as_mapping, _as_sequence(overview.get("top_risks"))))
     if not top_risks:
-        lines.append("Top risks: (none)")
+        lines.append(proj.TEXT_OVERVIEW_TOP_RISKS_NONE)
         return
-    lines.append("Top risks:")
+    lines.append(proj.TEXT_OVERVIEW_TOP_RISKS)
     lines.extend(
         (
             "- "
@@ -572,7 +572,7 @@ def _append_top_metric_family(
     lines.extend(["", title])
     rows = list(map(_as_mapping, items[:10]))
     if not rows:
-        lines.append("(none)")
+        lines.append(proj.PROJECTION_NONE)
         return
     lines.extend("- " + _format_key_values(item, key_order) for item in rows)
 
@@ -586,7 +586,7 @@ def _append_metric_family_sections(
     if coverage_join_family:
         _append_top_metric_family(
             lines,
-            title="COVERAGE JOIN (top 10)",
+            title=proj.TEXT_SECTION_COVERAGE_JOIN,
             items=_as_sequence(coverage_join_family.get("items")),
             key_order=(
                 "relative_path",
@@ -605,7 +605,7 @@ def _append_metric_family_sections(
         overloaded_modules_family = _as_mapping(metrics_families.get("god_modules"))
     _append_top_metric_family(
         lines,
-        title="OVERLOADED MODULES (top 10)",
+        title=proj.TEXT_SECTION_OVERLOADED_MODULES,
         items=_as_sequence(overloaded_modules_family.get("items")),
         key_order=(
             "module",
@@ -623,7 +623,7 @@ def _append_metric_family_sections(
     security_surfaces_family = _as_mapping(metrics_families.get("security_surfaces"))
     _append_top_metric_family(
         lines,
-        title="SECURITY SURFACES (top 10)",
+        title=proj.TEXT_SECTION_SECURITY_SURFACES,
         items=_as_sequence(security_surfaces_family.get("items")),
         key_order=(
             "category",
@@ -646,9 +646,9 @@ def _append_findings_sections(
     metrics_families: Mapping[str, object],
 ) -> None:
     for title, group_key, metric_name in (
-        ("FUNCTION CLONES", "functions", "loc"),
-        ("BLOCK CLONES", "blocks", "size"),
-        ("SEGMENT CLONES", "segments", "size"),
+        (proj.TEXT_SECTION_FUNCTION_CLONES, "functions", "loc"),
+        (proj.TEXT_SECTION_BLOCK_CLONES, "blocks", "size"),
+        (proj.TEXT_SECTION_SEGMENT_CLONES, "segments", "size"),
     ):
         groups = _as_sequence(clone_groups.get(group_key))
         lines.append("")
@@ -670,9 +670,9 @@ def _append_findings_sections(
 
     if suppressed_clone_groups:
         for title, group_key, metric_name in (
-            ("SUPPRESSED FUNCTION CLONES", "functions", "loc"),
-            ("SUPPRESSED BLOCK CLONES", "blocks", "size"),
-            ("SUPPRESSED SEGMENT CLONES", "segments", "size"),
+            (proj.TEXT_SECTION_SUPPRESSED_FUNCTION_CLONES, "functions", "loc"),
+            (proj.TEXT_SECTION_SUPPRESSED_BLOCK_CLONES, "blocks", "size"),
+            (proj.TEXT_SECTION_SUPPRESSED_SEGMENT_CLONES, "segments", "size"),
         ):
             lines.append("")
             _append_suppressed_clone_section(
@@ -690,7 +690,7 @@ def _append_findings_sections(
     lines.append("")
     _append_single_item_findings(
         lines,
-        title="DEAD CODE FINDINGS",
+        title=proj.TEXT_SECTION_DEAD_CODE_FINDINGS,
         groups=_as_sequence(
             _as_mapping(findings_groups.get("dead_code")).get("groups")
         ),
@@ -705,7 +705,7 @@ def _append_findings_sections(
     lines.append("")
     _append_single_item_findings(
         lines,
-        title="DESIGN FINDINGS",
+        title=proj.TEXT_SECTION_DESIGN_FINDINGS,
         groups=_as_sequence(_as_mapping(findings_groups.get("design")).get("groups")),
         fact_keys=("lcom4", "method_count", "instance_var_count", "fan_out", "risk"),
     )
@@ -749,66 +749,77 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         suppressed_summary_keys.append("clones")
 
     lines = [
-        "REPORT METADATA",
-        "Report schema version: "
-        f"{format_meta_text_value(payload.get('report_schema_version'))}",
-        "CodeClone version: "
-        f"{format_meta_text_value(meta_payload.get('codeclone_version'))}",
-        f"Project name: {format_meta_text_value(meta_payload.get('project_name'))}",
-        f"Scan root: {format_meta_text_value(meta_payload.get('scan_root'))}",
-        f"Python version: {format_meta_text_value(meta_payload.get('python_version'))}",
-        f"Python tag: {format_meta_text_value(meta_payload.get('python_tag'))}",
-        f"Analysis mode: {format_meta_text_value(meta_payload.get('analysis_mode'))}",
-        f"Report mode: {format_meta_text_value(meta_payload.get('report_mode'))}",
-        "Report generated (UTC): "
-        f"{format_meta_text_value(runtime_meta.get('report_generated_at_utc'))}",
-        "Computed metric families: "
-        f"{format_meta_text_value(meta_payload.get('computed_metric_families'))}",
-        f"Baseline path: {format_meta_text_value(baseline.get('path'))}",
-        "Baseline fingerprint version: "
-        f"{format_meta_text_value(baseline.get('fingerprint_version'))}",
-        "Baseline schema version: "
-        f"{format_meta_text_value(baseline.get('schema_version'))}",
-        f"Baseline Python tag: {format_meta_text_value(baseline.get('python_tag'))}",
-        "Baseline generator name: "
-        f"{format_meta_text_value(baseline.get('generator_name'))}",
-        "Baseline generator version: "
-        f"{format_meta_text_value(baseline.get('generator_version'))}",
-        "Baseline payload sha256: "
-        f"{format_meta_text_value(baseline.get('payload_sha256'))}",
-        "Baseline payload verified: "
-        f"{format_meta_text_value(baseline.get('payload_sha256_verified'))}",
-        f"Baseline loaded: {format_meta_text_value(baseline.get('loaded'))}",
-        f"Baseline status: {format_meta_text_value(baseline.get('status'))}",
-        f"Cache path: {format_meta_text_value(cache.get('path'))}",
-        f"Cache schema version: {format_meta_text_value(cache.get('schema_version'))}",
-        f"Cache status: {format_meta_text_value(cache.get('status'))}",
-        f"Cache used: {format_meta_text_value(cache.get('used'))}",
-        "Metrics baseline path: "
-        f"{format_meta_text_value(metrics_baseline.get('path'))}",
-        "Metrics baseline loaded: "
-        f"{format_meta_text_value(metrics_baseline.get('loaded'))}",
-        "Metrics baseline status: "
-        f"{format_meta_text_value(metrics_baseline.get('status'))}",
-        "Metrics baseline schema version: "
-        f"{format_meta_text_value(metrics_baseline.get('schema_version'))}",
-        "Metrics baseline payload sha256: "
-        f"{format_meta_text_value(metrics_baseline.get('payload_sha256'))}",
-        "Metrics baseline payload verified: "
-        f"{format_meta_text_value(metrics_baseline.get('payload_sha256_verified'))}",
+        proj.TEXT_SECTION_REPORT_METADATA,
+        proj.TEXT_META_REPORT_SCHEMA_VERSION
+        + f"{format_meta_text_value(payload.get('report_schema_version'))}",
+        proj.TEXT_META_CODECLONE_VERSION
+        + f"{format_meta_text_value(meta_payload.get('codeclone_version'))}",
+        proj.TEXT_META_PROJECT_NAME
+        + f"{format_meta_text_value(meta_payload.get('project_name'))}",
+        proj.TEXT_META_SCAN_ROOT
+        + f"{format_meta_text_value(meta_payload.get('scan_root'))}",
+        proj.TEXT_META_PYTHON_VERSION
+        + f"{format_meta_text_value(meta_payload.get('python_version'))}",
+        proj.TEXT_META_PYTHON_TAG
+        + f"{format_meta_text_value(meta_payload.get('python_tag'))}",
+        proj.TEXT_META_ANALYSIS_MODE
+        + f"{format_meta_text_value(meta_payload.get('analysis_mode'))}",
+        proj.TEXT_META_REPORT_MODE
+        + f"{format_meta_text_value(meta_payload.get('report_mode'))}",
+        proj.TEXT_META_REPORT_GENERATED
+        + f"{format_meta_text_value(runtime_meta.get('report_generated_at_utc'))}",
+        proj.TEXT_META_COMPUTED_METRIC_FAMILIES
+        + f"{format_meta_text_value(meta_payload.get('computed_metric_families'))}",
+        proj.TEXT_META_BASELINE_PATH
+        + f"{format_meta_text_value(baseline.get('path'))}",
+        proj.TEXT_META_BASELINE_FINGERPRINT_VERSION
+        + f"{format_meta_text_value(baseline.get('fingerprint_version'))}",
+        proj.TEXT_META_BASELINE_SCHEMA_VERSION
+        + f"{format_meta_text_value(baseline.get('schema_version'))}",
+        proj.TEXT_META_BASELINE_PYTHON_TAG
+        + f"{format_meta_text_value(baseline.get('python_tag'))}",
+        proj.TEXT_META_BASELINE_GENERATOR_NAME
+        + f"{format_meta_text_value(baseline.get('generator_name'))}",
+        proj.TEXT_META_BASELINE_GENERATOR_VERSION
+        + f"{format_meta_text_value(baseline.get('generator_version'))}",
+        proj.TEXT_META_BASELINE_PAYLOAD_SHA256
+        + f"{format_meta_text_value(baseline.get('payload_sha256'))}",
+        proj.TEXT_META_BASELINE_PAYLOAD_VERIFIED
+        + f"{format_meta_text_value(baseline.get('payload_sha256_verified'))}",
+        proj.TEXT_META_BASELINE_LOADED
+        + f"{format_meta_text_value(baseline.get('loaded'))}",
+        proj.TEXT_META_BASELINE_STATUS
+        + f"{format_meta_text_value(baseline.get('status'))}",
+        proj.TEXT_META_CACHE_PATH + f"{format_meta_text_value(cache.get('path'))}",
+        proj.TEXT_META_CACHE_SCHEMA_VERSION
+        + f"{format_meta_text_value(cache.get('schema_version'))}",
+        proj.TEXT_META_CACHE_STATUS + f"{format_meta_text_value(cache.get('status'))}",
+        proj.TEXT_META_CACHE_USED + f"{format_meta_text_value(cache.get('used'))}",
+        proj.TEXT_META_METRICS_BASELINE_PATH
+        + f"{format_meta_text_value(metrics_baseline.get('path'))}",
+        proj.TEXT_META_METRICS_BASELINE_LOADED
+        + f"{format_meta_text_value(metrics_baseline.get('loaded'))}",
+        proj.TEXT_META_METRICS_BASELINE_STATUS
+        + f"{format_meta_text_value(metrics_baseline.get('status'))}",
+        proj.TEXT_META_METRICS_BASELINE_SCHEMA_VERSION
+        + f"{format_meta_text_value(metrics_baseline.get('schema_version'))}",
+        proj.TEXT_META_METRICS_BASELINE_PAYLOAD_SHA256
+        + f"{format_meta_text_value(metrics_baseline.get('payload_sha256'))}",
+        proj.TEXT_META_METRICS_BASELINE_PAYLOAD_VERIFIED
+        + f"{format_meta_text_value(metrics_baseline.get('payload_sha256_verified'))}",
     ]
 
     if (
         baseline.get("loaded") is not True
         or str(baseline.get("status", "")).strip().lower() != "ok"
     ):
-        lines.append("Note: baseline is untrusted; all groups are treated as NEW.")
+        lines.append(proj.TEXT_BASELINE_UNTRUSTED_NOTE)
 
     lines.extend(
         [
             "",
-            "INVENTORY",
-            "Files: "
+            proj.TEXT_SECTION_INVENTORY,
+            proj.TEXT_INVENTORY_FILES
             + _format_key_values(
                 inventory_files,
                 (
@@ -819,44 +830,45 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
                     "source_io_skipped",
                 ),
             ),
-            "Code: "
+            proj.TEXT_INVENTORY_CODE
             + _format_key_values(
                 inventory_code,
                 ("scope", "parsed_lines", "functions", "methods", "classes"),
             ),
-            "File registry: "
-            f"encoding={format_meta_text_value(file_registry.get('encoding'))} "
+            proj.TEXT_INVENTORY_FILE_REGISTRY
+            + f"encoding={format_meta_text_value(file_registry.get('encoding'))} "
             f"count={len(_as_sequence(file_registry.get('items')))}",
             "",
-            "FINDINGS SUMMARY",
-            f"Total groups: {format_meta_text_value(findings_summary.get('total'))}",
-            "Families: "
+            proj.TEXT_SECTION_FINDINGS_SUMMARY,
+            proj.TEXT_FINDINGS_TOTAL_GROUPS
+            + f"{format_meta_text_value(findings_summary.get('total'))}",
+            proj.TEXT_FINDINGS_FAMILIES
             + _format_key_values(
                 findings_families,
                 ("clones", "structural", "dead_code", "design"),
             ),
-            "Severity: "
+            proj.TEXT_FINDINGS_SEVERITY
             + _format_key_values(
                 findings_severity,
                 ("critical", "warning", "info"),
             ),
-            "Impact scope: "
+            proj.TEXT_FINDINGS_IMPACT_SCOPE
             + _format_key_values(
                 findings_impact_scope,
                 ("runtime", "non_runtime", "mixed"),
             ),
-            "Clones: "
+            proj.TEXT_FINDINGS_CLONES
             + _format_key_values(
                 findings_clones,
                 tuple(clone_summary_keys),
             ),
-            "Suppressed: "
+            proj.TEXT_FINDINGS_SUPPRESSED
             + _format_key_values(
                 findings_suppressed,
                 tuple(suppressed_summary_keys),
             ),
             "",
-            "METRICS SUMMARY",
+            proj.TEXT_SECTION_METRICS_SUMMARY,
         ]
     )
     _append_metrics_summary_lines(lines, metrics_summary=metrics_summary)
@@ -877,13 +889,13 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
     lines.extend(
         [
             "",
-            "INTEGRITY",
-            "Canonicalization: "
+            proj.TEXT_SECTION_INTEGRITY,
+            proj.TEXT_INTEGRITY_CANONICALIZATION
             + _format_key_values(
                 canonicalization,
                 ("version", "scope", "sections"),
             ),
-            "Digest: "
+            proj.TEXT_INTEGRITY_DIGEST
             + _format_key_values(
                 digest,
                 ("algorithm", "verified", "value"),

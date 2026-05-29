@@ -98,8 +98,10 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         current_state = self._current_state(record)
         gate_preview = self._gate_preview(record=record, budgets=budgets)
         is_queued = intent is not None and intent.status == IntentStatus.QUEUED
+        from .messages import patch_contract as patch_msgs
+
         budget_message = (
-            "Budget computed for queued intent. Do not edit until promoted."
+            patch_msgs.QUEUED_BUDGET_MESSAGE
             if is_queued
             else self._budget_message(
                 strictness=strictness,
@@ -258,18 +260,23 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
 
     def _validated_patch_contract_mode(self, mode: str) -> PatchContractMode:
         if mode not in VALID_PATCH_CONTRACT_MODES:
-            expected = ", ".join(sorted(VALID_PATCH_CONTRACT_MODES))
+            from .messages import errors as err_msgs
+
             raise MCPServiceContractError(
-                f"Invalid value for mode: {mode!r}. Expected one of: {expected}."
+                err_msgs.invalid_choice("mode", mode, VALID_PATCH_CONTRACT_MODES)
             )
         return "verify" if mode == "verify" else "budget"
 
     def _validated_strictness(self, strictness: str) -> StrictnessProfile:
         if strictness not in VALID_STRICTNESS_PROFILES:
-            expected = ", ".join(sorted(VALID_STRICTNESS_PROFILES))
+            from .messages import errors as err_msgs
+
             raise MCPServiceContractError(
-                "Invalid value for strictness: "
-                f"{strictness!r}. Expected one of: {expected}."
+                err_msgs.invalid_choice(
+                    "strictness",
+                    strictness,
+                    VALID_STRICTNESS_PROFILES,
+                )
             )
         if strictness == "strict":
             return "strict"
@@ -287,46 +294,9 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
 
     @staticmethod
     def _next_step_hint(reason: str) -> str | None:
-        """Return an actionable hint for non-accepted verify outcomes."""
-        hints: dict[str, str] = {
-            "no_before_run": (
-                "Run analyze_repository, then pass the run_id as"
-                " before_run_id — or pass intent_id to auto-resolve."
-            ),
-            "no_after_run": (
-                "Run analyze_repository after editing, then pass the"
-                " new run_id as after_run_id."
-            ),
-            "after_run_required_for_governance": (
-                "Governance config changes require a post-edit analysis."
-                " Run analyze_repository and pass after_run_id."
-            ),
-            "incomparable_runs": (
-                "Before and after runs are not comparable."
-                " Re-run analyze_repository with the same settings."
-            ),
-            "intent_not_active": (
-                "Queued intent must be promoted before editing or"
-                " verification. Call"
-                " manage_change_intent(action='promote')."
-            ),
-            "report_digest_mismatch": (
-                "Intent was declared against a different report."
-                " Do not redeclare on the after-run — use the original"
-                " intent_id with the original before_run_id."
-            ),
-            "state_artifact_mutation": (
-                "Baseline, cache, or generated state was touched."
-                " Remove those files from the patch and use a separate"
-                " workflow."
-            ),
-            "scope_violation": (
-                "Patch touched files outside declared scope."
-                " Redeclare intent with expanded scope, or remove the"
-                " out-of-scope changes."
-            ),
-        }
-        return hints.get(reason)
+        from .messages.patch_contract import next_step_hint
+
+        return next_step_hint(reason)
 
     @staticmethod
     def _claim_validation_recommended(
@@ -528,6 +498,8 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         scope_check: dict[str, object] | None,
     ) -> dict[str, object]:
         """Return violated status for state artifact mutations."""
+        from .messages import patch_contract as patch_msgs
+
         profile_payload = classification.to_payload()
         violations = ["state_artifact_mutation"]
         if (
@@ -549,10 +521,7 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             **profile_payload,
             "next_step": self._next_step_hint(reason),
             "claim_validation_recommended": False,
-            "message": (
-                "Patch touched CodeClone generated state. "
-                "This requires a separate explicit workflow."
-            ),
+            "message": patch_msgs.STATE_ARTIFACT_VIOLATION_MESSAGE,
         }
         self._audit_emit(
             root=before.root,
@@ -1105,13 +1074,15 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         classification: ClassificationResult | None = None,
         scope_check: dict[str, object] | None = None,
     ) -> dict[str, object]:
+        from .messages import patch_contract as patch_msgs
+
         profile_fields: dict[str, object] = (
             classification.to_payload() if classification is not None else {}
         )
         message = (
             profile_unverified_message(classification.profile)
             if classification is not None
-            else f"Patch contract unverified: {reason}."
+            else patch_msgs.VERIFY_UNVERIFIED_PREFIX.format(reason=reason)
         )
         return {
             "mode": "verify",
@@ -1138,6 +1109,8 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         intent: IntentRecord,
     ) -> dict[str, object]:
         reason = "report_digest_mismatch"
+        from .messages import patch_contract as patch_msgs
+
         payload: dict[str, object] = {
             "mode": "verify",
             "status": PatchContractStatus.EXPIRED.value,
@@ -1148,9 +1121,7 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             "contract_violations": ["intent_expired"],
             "next_step": self._next_step_hint(reason),
             "claim_validation_recommended": False,
-            "message": (
-                "Patch contract expired: intent was declared for another report digest."
-            ),
+            "message": patch_msgs.PATCH_CONTRACT_EXPIRED_MESSAGE,
         }
         self._audit_emit(
             root=after.root,
@@ -1170,18 +1141,17 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         strictness: StrictnessProfile,
         gate_preview: Mapping[str, object],
     ) -> str:
-        if strictness == "relaxed":
-            return "Relaxed patch budget is advisory; gate failures are not blocking."
-        if gate_preview.get("would_fail"):
-            return "Current run is already outside the selected patch budget."
-        return "Current run is inside the selected patch budget."
+        from .messages import patch_contract as patch_msgs
+
+        return patch_msgs.budget_message(
+            relaxed=strictness == "relaxed",
+            would_fail=bool(gate_preview.get("would_fail")),
+        )
 
     def _verify_message(self, *, status: str, violations: Sequence[str]) -> str:
-        if status == PatchContractStatus.ACCEPTED.value:
-            return "Patch contract accepted."
-        if status == PatchContractStatus.ACCEPTED_EXTERNAL.value:
-            return "Patch contract accepted; external workspace changes detected."
-        return "Patch contract violated: " + ", ".join(violations)
+        from .messages import patch_contract as patch_msgs
+
+        return patch_msgs.verify_message(status=status, violations=violations)
 
 
 def _as_mapping(value: object) -> Mapping[str, object]:

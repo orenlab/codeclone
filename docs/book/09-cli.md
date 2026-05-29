@@ -18,7 +18,9 @@ and exit routing.
 - Summary renderer: `codeclone/surfaces/cli/summary.py:_print_summary`
 - Output path validation and writes:
   `codeclone/surfaces/cli/reports_output.py`
-- Message catalog: `codeclone/ui_messages/__init__.py`
+- Message catalog: `codeclone/ui_messages/*` (`help`, `labels`, `runtime`,
+  `markers`, `formatters`, `controller`, `styling`; stable names re-exported from
+  `__init__.py`)
 
 ## Data model
 

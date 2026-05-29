@@ -33,9 +33,15 @@ review receipts, and workflow consolidation tools.
 - CLI controller query modes: `--blast-radius` and `--patch-verify`.
 - Audit trail events for intent lifecycle and token budget tracking.
 - MCP tool JSON schemas now include concise per-parameter descriptions.
-- MCP message catalog at `codeclone/surfaces/mcp/messages/*` for tool/resource
-  descriptions, help topics, workflow/intent copy, and parameter Field docs
-  (mirrors CLI `ui_messages/`).
+- Split monolithic `codeclone/ui_messages/__init__.py` into focused modules
+  (`help`, `labels`, `runtime`, `markers`, `formatters`, `controller`, `styling`;
+  stable names re-exported from `__init__.py`).
+- `codeclone/report/messages/glossary.py` for HTML tooltip definitions.
+- `codeclone/report/messages/` modules for suggestions, explainability, overview,
+  security, chrome, projections, gate reason prefixes, plus `markdown.py` and
+  `sarif.py` for Markdown/SARIF projection copy.
+- MCP `messages/patch_contract`, `verification`, `remediation`, `errors`,
+  `receipt`, `claims`, and `blast_radius` modules.
 - `help(detail="compact")` includes `anti_patterns`; `trust_boundaries` help topic.
 - Analyze responses include a single `next_tool` hint; summary adds
   `security_surfaces.note` for report-only inventory semantics.
@@ -48,6 +54,16 @@ review receipts, and workflow consolidation tools.
 - MCP long UI strings moved out of `server.py`, `_session_shared.py`, and session
   mixins into `codeclone/surfaces/mcp/messages/*`; `_tool_param_docs.py` re-exports
   `messages/params.py`.
+- Controller CLI screen copy centralized in `ui_messages/controller.py`.
+- HTML glossary terms moved to `report/messages/glossary.py`.
+- Report suggestion/explainability copy moved to `report/messages/*`; gate reason
+  prefixes shared between `gates/evaluator.py` and `gates/reasons.py`.
+- Text, Markdown, and SARIF renderers and HTML overview/structural/security/chrome
+  sections consume `report/messages/*` instead of inline copy.
+- MCP tool/resource `title=` strings centralized in `messages/tools.py` and
+  `messages/resources.py`; validation errors use `messages/errors.py`.
+- MCP receipt, claim-guard, and blast-radius user copy moved to
+  `surfaces/mcp/messages/*`.
 - `pydantic` is now a base dependency (MCP schema export today; validation
   migration planned separately).
 - MCP always loads `golden_fixture_paths` from pyproject governance keys even when

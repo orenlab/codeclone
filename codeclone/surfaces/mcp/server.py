@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal, TypeVar
 
 from ... import __version__
 from ...contracts import DEFAULT_COVERAGE_MIN, DOCS_URL
+from .messages import errors as err_msgs
 from .messages import instructions as mcp_instructions
 from .messages import resources as mcp_resources
 from .messages import tools as mcp_tools
@@ -164,8 +165,11 @@ def _validated_analysis_mode(value: str) -> AnalysisMode:
     if value == "clones_only":
         return "clones_only"
     raise MCPServiceContractError(
-        f"Invalid value for analysis_mode: {value!r}. "
-        "Expected one of: clones_only, full."
+        err_msgs.invalid_choice(
+            "analysis_mode",
+            value,
+            ("clones_only", "full"),
+        )
     )
 
 
@@ -175,11 +179,9 @@ def _validated_cache_policy(value: str) -> CachePolicy:
     if value == "off":
         return "off"
     if value == "refresh":
-        raise MCPServiceContractError(
-            "cache_policy='refresh' is CLI-only. MCP accepts: reuse, off."
-        )
+        raise MCPServiceContractError(err_msgs.CACHE_POLICY_CLI_ONLY)
     raise MCPServiceContractError(
-        f"Invalid value for cache_policy: {value!r}. Expected one of: off, reuse."
+        err_msgs.invalid_choice("cache_policy", value, ("off", "reuse"))
     )
 
 
@@ -246,7 +248,7 @@ def build_mcp_server(
         return register
 
     @tool(
-        title="Analyze Repository",
+        title=mcp_tools.TITLE_ANALYZE_REPOSITORY,
         description=mcp_tools.ANALYZE_REPOSITORY,
         annotations=analysis_tool,
         structured_output=True,
@@ -307,7 +309,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Analyze Changed Paths",
+        title=mcp_tools.TITLE_ANALYZE_CHANGED_PATHS,
         description=mcp_tools.ANALYZE_CHANGED_PATHS,
         annotations=analysis_tool,
         structured_output=True,
@@ -368,7 +370,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Get Run Summary",
+        title=mcp_tools.TITLE_GET_RUN_SUMMARY,
         description=mcp_tools.GET_RUN_SUMMARY,
         annotations=read_only_tool,
         structured_output=True,
@@ -377,7 +379,7 @@ def build_mcp_server(
         return service.get_run_summary(run_id)
 
     @tool(
-        title="Get Production Triage",
+        title=mcp_tools.TITLE_GET_PRODUCTION_TRIAGE,
         description=mcp_tools.GET_PRODUCTION_TRIAGE,
         annotations=read_only_tool,
         structured_output=True,
@@ -394,7 +396,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Get Blast Radius",
+        title=mcp_tools.TITLE_GET_BLAST_RADIUS,
         description=mcp_tools.GET_BLAST_RADIUS,
         annotations=read_only_tool,
         structured_output=True,
@@ -413,7 +415,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Check Patch Contract",
+        title=mcp_tools.TITLE_CHECK_PATCH_CONTRACT,
         description=mcp_tools.CHECK_PATCH_CONTRACT,
         annotations=read_only_tool,
         structured_output=True,
@@ -440,7 +442,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Create Review Receipt",
+        title=mcp_tools.TITLE_CREATE_REVIEW_RECEIPT,
         description=mcp_tools.CREATE_REVIEW_RECEIPT,
         annotations=read_only_tool,
         structured_output=True,
@@ -461,7 +463,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Validate Review Claims",
+        title=mcp_tools.TITLE_VALIDATE_REVIEW_CLAIMS,
         description=mcp_tools.VALIDATE_REVIEW_CLAIMS,
         annotations=read_only_tool,
         structured_output=True,
@@ -478,7 +480,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Help",
+        title=mcp_tools.TITLE_HELP,
         description=mcp_tools.HELP,
         annotations=read_only_tool,
         structured_output=True,
@@ -493,7 +495,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Evaluate Gates",
+        title=mcp_tools.TITLE_EVALUATE_GATES,
         description=mcp_tools.EVALUATE_GATES,
         annotations=read_only_tool,
         structured_output=True,
@@ -540,7 +542,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Get Report Section",
+        title=mcp_tools.TITLE_GET_REPORT_SECTION,
         description=mcp_tools.GET_REPORT_SECTION,
         annotations=read_only_tool,
         structured_output=True,
@@ -563,7 +565,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="List Findings",
+        title=mcp_tools.TITLE_LIST_FINDINGS,
         description=mcp_tools.LIST_FINDINGS,
         annotations=read_only_tool,
         structured_output=True,
@@ -602,7 +604,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Get Finding",
+        title=mcp_tools.TITLE_GET_FINDING,
         description=mcp_tools.GET_FINDING,
         annotations=read_only_tool,
         structured_output=True,
@@ -619,7 +621,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Get Remediation",
+        title=mcp_tools.TITLE_GET_REMEDIATION,
         description=mcp_tools.GET_REMEDIATION,
         annotations=read_only_tool,
         structured_output=True,
@@ -636,7 +638,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="List Hotspots",
+        title=mcp_tools.TITLE_LIST_HOTSPOTS,
         description=mcp_tools.LIST_HOTSPOTS,
         annotations=read_only_tool,
         structured_output=True,
@@ -663,7 +665,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Compare Runs",
+        title=mcp_tools.TITLE_COMPARE_RUNS,
         description=mcp_tools.COMPARE_RUNS,
         annotations=read_only_tool,
         structured_output=True,
@@ -680,7 +682,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Check Complexity",
+        title=mcp_tools.TITLE_CHECK_COMPLEXITY,
         description=mcp_tools.CHECK_COMPLEXITY,
         annotations=read_only_tool,
         structured_output=True,
@@ -703,7 +705,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Check Clones",
+        title=mcp_tools.TITLE_CHECK_CLONES,
         description=mcp_tools.CHECK_CLONES,
         annotations=read_only_tool,
         structured_output=True,
@@ -728,7 +730,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Check Coupling",
+        title=mcp_tools.TITLE_CHECK_COUPLING,
         description=mcp_tools.CHECK_COUPLING,
         annotations=read_only_tool,
         structured_output=True,
@@ -749,7 +751,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Check Cohesion",
+        title=mcp_tools.TITLE_CHECK_COHESION,
         description=mcp_tools.CHECK_COHESION,
         annotations=read_only_tool,
         structured_output=True,
@@ -770,7 +772,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Check Dead Code",
+        title=mcp_tools.TITLE_CHECK_DEAD_CODE,
         description=mcp_tools.CHECK_DEAD_CODE,
         annotations=read_only_tool,
         structured_output=True,
@@ -793,7 +795,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Generate PR Summary",
+        title=mcp_tools.TITLE_GENERATE_PR_SUMMARY,
         description=mcp_tools.GENERATE_PR_SUMMARY,
         annotations=read_only_tool,
         structured_output=True,
@@ -812,7 +814,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Mark Finding Reviewed",
+        title=mcp_tools.TITLE_MARK_FINDING_REVIEWED,
         description=mcp_tools.MARK_FINDING_REVIEWED,
         annotations=session_tool,
         structured_output=True,
@@ -829,7 +831,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="List Reviewed Findings",
+        title=mcp_tools.TITLE_LIST_REVIEWED_FINDINGS,
         description=mcp_tools.LIST_REVIEWED_FINDINGS,
         annotations=read_only_tool,
         structured_output=True,
@@ -838,7 +840,7 @@ def build_mcp_server(
         return service.list_reviewed_findings(run_id=run_id)
 
     @tool(
-        title="Start Controlled Change",
+        title=mcp_tools.TITLE_START_CONTROLLED_CHANGE,
         description=mcp_tools.START_CONTROLLED_CHANGE,
         annotations=session_tool,
         structured_output=True,
@@ -865,7 +867,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Finish Controlled Change",
+        title=mcp_tools.TITLE_FINISH_CONTROLLED_CHANGE,
         description=mcp_tools.FINISH_CONTROLLED_CHANGE,
         annotations=session_tool,
         structured_output=True,
@@ -892,7 +894,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Manage Change Intent",
+        title=mcp_tools.TITLE_MANAGE_CHANGE_INTENT,
         description=mcp_tools.MANAGE_CHANGE_INTENT,
         annotations=session_tool,
         structured_output=True,
@@ -927,7 +929,7 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Clear Session Runs",
+        title=mcp_tools.TITLE_CLEAR_SESSION_RUNS,
         description=mcp_tools.CLEAR_SESSION_RUNS,
         annotations=session_tool,
         structured_output=True,
@@ -937,7 +939,7 @@ def build_mcp_server(
 
     @resource(
         "codeclone://latest/summary",
-        title="Latest Run Summary",
+        title=mcp_resources.TITLE_LATEST_SUMMARY,
         description=mcp_resources.LATEST_SUMMARY,
         mime_type="application/json",
     )
@@ -946,7 +948,7 @@ def build_mcp_server(
 
     @resource(
         "codeclone://latest/report.json",
-        title="Latest Canonical Report",
+        title=mcp_resources.TITLE_LATEST_REPORT,
         description=mcp_resources.LATEST_REPORT,
         mime_type="application/json",
     )
@@ -955,7 +957,7 @@ def build_mcp_server(
 
     @resource(
         "codeclone://latest/health",
-        title="Latest Health Snapshot",
+        title=mcp_resources.TITLE_LATEST_HEALTH,
         description=mcp_resources.LATEST_HEALTH,
         mime_type="application/json",
     )
@@ -964,7 +966,7 @@ def build_mcp_server(
 
     @resource(
         "codeclone://latest/gates",
-        title="Latest Gate Evaluation",
+        title=mcp_resources.TITLE_LATEST_GATES,
         description=mcp_resources.LATEST_GATES,
         mime_type="application/json",
     )
@@ -973,7 +975,7 @@ def build_mcp_server(
 
     @resource(
         "codeclone://latest/changed",
-        title="Latest Changed Findings",
+        title=mcp_resources.TITLE_LATEST_CHANGED,
         description=mcp_resources.LATEST_CHANGED,
         mime_type="application/json",
     )
@@ -982,7 +984,7 @@ def build_mcp_server(
 
     @resource(
         "codeclone://latest/triage",
-        title="Latest Production Triage",
+        title=mcp_resources.TITLE_LATEST_TRIAGE,
         description=mcp_resources.LATEST_TRIAGE,
         mime_type="application/json",
     )
@@ -991,7 +993,7 @@ def build_mcp_server(
 
     @resource(
         "codeclone://schema",
-        title="CodeClone Report Schema",
+        title=mcp_resources.TITLE_REPORT_SCHEMA,
         description=mcp_resources.REPORT_SCHEMA,
         mime_type="application/json",
     )
@@ -1000,7 +1002,7 @@ def build_mcp_server(
 
     @resource(
         "codeclone://runs/{run_id}/summary",
-        title="Run Summary",
+        title=mcp_resources.TITLE_RUN_SUMMARY,
         description=mcp_resources.RUN_SUMMARY,
         mime_type="application/json",
     )
@@ -1009,7 +1011,7 @@ def build_mcp_server(
 
     @resource(
         "codeclone://runs/{run_id}/report.json",
-        title="Run Canonical Report",
+        title=mcp_resources.TITLE_RUN_REPORT,
         description=mcp_resources.RUN_REPORT,
         mime_type="application/json",
     )
@@ -1018,7 +1020,7 @@ def build_mcp_server(
 
     @resource(
         "codeclone://runs/{run_id}/findings/{finding_id}",
-        title="Run Finding",
+        title=mcp_resources.TITLE_RUN_FINDING,
         description=mcp_resources.RUN_FINDING,
         mime_type="application/json",
     )

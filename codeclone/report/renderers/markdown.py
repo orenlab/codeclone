@@ -9,9 +9,10 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from ...domain.findings import FAMILY_CLONE, FAMILY_DEAD_CODE, FAMILY_STRUCTURAL
 from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
 from .._formatting import format_spread_text
+from ..messages import markdown as md_msgs
+from ..messages.projections import PROJECTION_NONE
 
 if TYPE_CHECKING:
     from ...models import StructuralFindingGroup, Suggestion, SuppressedCloneGroup
@@ -26,43 +27,21 @@ _as_float = as_float
 _as_mapping = as_mapping
 _as_sequence = as_sequence
 
-_ANCHORS: tuple[tuple[str, str, int], ...] = (
-    ("overview", "Overview", 2),
-    ("inventory", "Inventory", 2),
-    ("findings-summary", "Findings Summary", 2),
-    ("top-risks", "Top Risks", 2),
-    ("suggestions", "Suggestions", 2),
-    ("findings", "Findings", 2),
-    ("clone-findings", "Clone Findings", 3),
-    ("structural-findings", "Structural Findings", 3),
-    ("dead-code-findings", "Dead Code Findings", 3),
-    ("design-findings", "Design Findings", 3),
-    ("metrics", "Metrics", 2),
-    ("health", "Health", 3),
-    ("complexity", "Complexity", 3),
-    ("coupling", "Coupling", 3),
-    ("cohesion", "Cohesion", 3),
-    ("coverage-join", "Coverage Join", 3),
-    ("overloaded-modules", "Overloaded Modules", 3),
-    ("dependencies", "Dependencies", 3),
-    ("dead-code-metrics", "Dead Code", 3),
-    ("dead-code-suppressed", "Suppressed Dead Code", 3),
-    ("integrity", "Integrity", 2),
-)
 _ANCHOR_MAP: dict[str, tuple[str, str, int]] = {
-    anchor[0]: anchor for anchor in _ANCHORS
+    anchor_id: (anchor_id, title, level)
+    for anchor_id, title, level in md_msgs.MD_ANCHORS
 }
 
 
 def _text(value: object) -> str:
     if value is None:
-        return "(none)"
+        return PROJECTION_NONE
     if isinstance(value, float):
         return f"{value:.2f}".rstrip("0").rstrip(".") or "0"
     if isinstance(value, bool):
         return "true" if value else "false"
     text = str(value).strip()
-    return text or "(none)"
+    return text or PROJECTION_NONE
 
 
 def _source_scope_text(scope: Mapping[str, object]) -> str:
@@ -113,17 +92,11 @@ def _append_kv_bullets(
 
 
 def _finding_heading(group: Mapping[str, object]) -> str:
-    family = str(group.get("family", "")).strip()
-    category = str(group.get("category", "")).strip()
-    clone_type = str(group.get("clone_type", "")).strip()
-    if family == FAMILY_CLONE:
-        suffix = f" ({clone_type})" if clone_type else ""
-        return f"{category.title()} clone group{suffix}"
-    if family == FAMILY_STRUCTURAL:
-        return f"Structural finding: {category}"
-    if family == FAMILY_DEAD_CODE:
-        return f"Dead code: {category}"
-    return f"Design finding: {category}"
+    return md_msgs.finding_heading(
+        family=str(group.get("family", "")).strip(),
+        category=str(group.get("category", "")).strip(),
+        clone_type=str(group.get("clone_type", "")).strip(),
+    )
 
 
 def _append_facts_block(
@@ -145,7 +118,7 @@ def _append_findings_section(
 ) -> None:
     finding_rows = [_as_mapping(group) for group in groups]
     if not finding_rows:
-        lines.append("_None._")
+        lines.append(md_msgs.MD_NONE)
         lines.append("")
         return
     for group in finding_rows:
@@ -154,32 +127,40 @@ def _append_findings_section(
         _append_kv_bullets(
             lines,
             (
-                ("Finding ID", f"`{_text(group.get('id'))}`"),
-                ("Family", group.get("family")),
-                ("Category", group.get("category")),
-                ("Kind", group.get("kind")),
-                ("Severity", group.get("severity")),
-                ("Confidence", group.get("confidence")),
-                ("Priority", _as_float(group.get("priority"))),
-                ("Scope", _source_scope_text(_as_mapping(group.get("source_scope")))),
-                ("Spread", _spread_text(_as_mapping(group.get("spread")))),
-                ("Occurrences", group.get("count")),
+                (md_msgs.MD_FINDING_ID, f"`{_text(group.get('id'))}`"),
+                (md_msgs.MD_FAMILY, group.get("family")),
+                (md_msgs.MD_CATEGORY, group.get("category")),
+                (md_msgs.MD_KIND, group.get("kind")),
+                (md_msgs.MD_SEVERITY, group.get("severity")),
+                (md_msgs.MD_CONFIDENCE, group.get("confidence")),
+                (md_msgs.MD_PRIORITY, _as_float(group.get("priority"))),
+                (
+                    md_msgs.MD_SCOPE,
+                    _source_scope_text(_as_mapping(group.get("source_scope"))),
+                ),
+                (md_msgs.MD_SPREAD, _spread_text(_as_mapping(group.get("spread")))),
+                (md_msgs.MD_OCCURRENCES, group.get("count")),
             ),
         )
         facts = _as_mapping(group.get("facts"))
         display_facts = _as_mapping(group.get("display_facts"))
         if facts or display_facts:
-            _append_facts_block(lines, title="Facts", facts=facts)
-            _append_facts_block(lines, title="Presentation facts", facts=display_facts)
+            _append_facts_block(lines, title=md_msgs.MD_FACTS, facts=facts)
+            _append_facts_block(
+                lines,
+                title=md_msgs.MD_PRESENTATION_FACTS,
+                facts=display_facts,
+            )
             lines.append("")
         items = list(map(_as_mapping, _as_sequence(group.get("items"))))
-        lines.append("- Locations:")
+        lines.append(f"- {md_msgs.MD_LOCATIONS}:")
         visible_items = items[:_MAX_FINDING_LOCATIONS]
         lines.extend(f"  - {_location_text(item)}" for item in visible_items)
         if len(items) > len(visible_items):
-            lines.append(
-                f"  - ... and {len(items) - len(visible_items)} more occurrence(s)"
+            extra = md_msgs.MD_MORE_OCCURRENCES.format(
+                count=len(items) - len(visible_items)
             )
+            lines.append(f"  - {extra}")
         lines.append("")
 
 
@@ -190,11 +171,11 @@ def _append_suppressed_clone_findings(
 ) -> None:
     finding_rows = [_as_mapping(group) for group in groups]
     if not finding_rows:
-        lines.append("_None._")
+        lines.append(md_msgs.MD_NONE)
         lines.append("")
         return
     for group in finding_rows:
-        lines.append("#### Suppressed clone group")
+        lines.append(f"#### {md_msgs.MD_SUPPRESSED_CLONE_GROUP}")
         lines.append("")
         _append_kv_bullets(
             lines,
@@ -215,7 +196,7 @@ def _append_suppressed_clone_findings(
                         for item in _as_sequence(group.get("matched_patterns"))
                         if str(item).strip()
                     )
-                    or "(none)",
+                    or PROJECTION_NONE,
                 ),
             ),
         )
@@ -284,16 +265,25 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     source_breakdown = _as_mapping(overview.get("source_scope_breakdown"))
 
     lines = [
-        "# CodeClone Report",
+        md_msgs.MD_TITLE,
         "",
-        f"- Markdown schema: {MARKDOWN_SCHEMA_VERSION}",
-        f"- Source report schema: {_text(payload.get('report_schema_version'))}",
-        f"- Project: {_text(meta.get('project_name'))}",
-        f"- Analysis mode: {_text(meta.get('analysis_mode'))}",
-        f"- Report mode: {_text(meta.get('report_mode'))}",
-        f"- Generated by: codeclone {_text(meta.get('codeclone_version'))}",
-        f"- Python: {_text(meta.get('python_tag'))}",
-        f"- Report generated (UTC): {_text(runtime.get('report_generated_at_utc'))}",
+        f"- {md_msgs.MD_SCHEMA_LABEL}: {MARKDOWN_SCHEMA_VERSION}",
+        (
+            f"- {md_msgs.MD_SOURCE_SCHEMA_LABEL}: "
+            f"{_text(payload.get('report_schema_version'))}"
+        ),
+        f"- {md_msgs.MD_PROJECT_LABEL}: {_text(meta.get('project_name'))}",
+        f"- {md_msgs.MD_ANALYSIS_MODE_LABEL}: {_text(meta.get('analysis_mode'))}",
+        f"- {md_msgs.MD_REPORT_MODE_LABEL}: {_text(meta.get('report_mode'))}",
+        (
+            f"- {md_msgs.MD_GENERATED_BY_LABEL}: "
+            f"codeclone {_text(meta.get('codeclone_version'))}"
+        ),
+        f"- {md_msgs.MD_PYTHON_LABEL}: {_text(meta.get('python_tag'))}",
+        (
+            f"- {md_msgs.MD_REPORT_GENERATED_LABEL}: "
+            f"{_text(runtime.get('report_generated_at_utc'))}"
+        ),
         "",
     ]
 
@@ -301,24 +291,29 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     _append_kv_bullets(
         lines,
         (
-            ("Project", meta.get("project_name")),
             (
-                "Health",
+                md_msgs.MD_LABEL_HEALTH,
                 (
                     f"{_text(health_snapshot.get('score'))} "
                     f"({_text(health_snapshot.get('grade'))})"
                 ),
             ),
-            ("Total findings", findings_summary.get("total")),
+            (md_msgs.MD_LABEL_TOTAL_FINDINGS, findings_summary.get("total")),
             (
-                "Families",
+                md_msgs.MD_LABEL_FAMILIES,
                 ", ".join(
                     f"{name}={_text(family_summary.get(name))}"
                     for name in ("clones", "structural", "dead_code", "design")
                 ),
             ),
-            ("Strongest dimension", health_snapshot.get("strongest_dimension")),
-            ("Weakest dimension", health_snapshot.get("weakest_dimension")),
+            (
+                md_msgs.MD_LABEL_STRONGEST_DIMENSION,
+                health_snapshot.get("strongest_dimension"),
+            ),
+            (
+                md_msgs.MD_LABEL_WEAKEST_DIMENSION,
+                health_snapshot.get("weakest_dimension"),
+            ),
         ),
     )
 
@@ -327,7 +322,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         lines,
         (
             (
-                "Files",
+                md_msgs.MD_LABEL_FILES,
                 ", ".join(
                     f"{name}={_text(inventory_files.get(name))}"
                     for name in (
@@ -340,7 +335,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
                 ),
             ),
             (
-                "Code",
+                md_msgs.MD_LABEL_CODE,
                 ", ".join(
                     f"{name}={_text(inventory_code.get(name))}"
                     for name in (
@@ -358,36 +353,36 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     _append_kv_bullets(
         lines,
         (
-            ("Total", findings_summary.get("total")),
+            (md_msgs.MD_LABEL_TOTAL, findings_summary.get("total")),
             (
-                "By family",
+                md_msgs.MD_LABEL_BY_FAMILY,
                 ", ".join(
                     f"{name}={_text(family_summary.get(name))}"
                     for name in ("clones", "structural", "dead_code", "design")
                 ),
             ),
             (
-                "By severity",
+                md_msgs.MD_LABEL_BY_SEVERITY,
                 ", ".join(
                     f"{name}={_text(severity_summary.get(name))}"
                     for name in ("critical", "warning", "info")
                 ),
             ),
             (
-                "By impact scope",
+                md_msgs.MD_LABEL_BY_IMPACT_SCOPE,
                 ", ".join(
                     f"{name}={_text(impact_summary.get(name))}"
                     for name in ("runtime", "non_runtime", "mixed")
                 ),
             ),
             (
-                "Source scope breakdown",
+                md_msgs.MD_LABEL_SOURCE_SCOPE,
                 ", ".join(
                     f"{name}={_text(source_breakdown.get(name))}"
                     for name in ("production", "tests", "fixtures", "other")
                     if name in source_breakdown
                 )
-                or "(none)",
+                or PROJECTION_NONE,
             ),
         ),
     )
@@ -403,7 +398,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
                 f"count={_text(risk.get('count'))})"
             )
     else:
-        lines.append("_None._")
+        lines.append(md_msgs.MD_NONE)
     lines.append("")
 
     if suggestions:

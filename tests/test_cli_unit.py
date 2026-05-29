@@ -1447,8 +1447,10 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
 
 
 def test_ui_summary_formatters_cover_optional_branches() -> None:
-    assert ui._vn(0) == "[dim]0[/dim]"
-    assert ui._vn(1200) == "1,200"
+    from codeclone.ui_messages.styling import _vn
+
+    assert _vn(0) == "[dim]0[/dim]"
+    assert _vn(1200) == "1,200"
 
     parsed = ui.fmt_summary_parsed(lines=1200, functions=3, methods=2, classes=1)
     assert parsed is not None

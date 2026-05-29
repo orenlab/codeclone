@@ -35,6 +35,7 @@ from ._session_shared import (
     MCPRunRecord,
     MCPServiceContractError,
 )
+from .messages import errors as err_msgs
 from .messages import workflow as workflow_msgs
 
 TRANSITIVE_SUMMARY_LIMIT: Final[int] = 10
@@ -352,14 +353,9 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
         has_files = changed_files is not None and len(changed_files) > 0
         has_ref = diff_ref is not None and str(diff_ref).strip() != ""
         if has_files and has_ref:
-            raise MCPServiceContractError(
-                "finish_controlled_change requires exactly one of "
-                "changed_files or diff_ref, not both."
-            )
+            raise MCPServiceContractError(workflow_msgs.FINISH_EVIDENCE_XOR)
         if not has_files and not has_ref:
-            raise MCPServiceContractError(
-                "finish_controlled_change requires changed_files or diff_ref."
-            )
+            raise MCPServiceContractError(workflow_msgs.FINISH_EVIDENCE_REQUIRED)
         if has_ref:
             return self._git_diff_paths(root_path=root_path, git_diff_ref=str(diff_ref))
         assert changed_files is not None
@@ -439,10 +435,12 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
 
 def _validated_blast_radius_depth(value: str) -> str:
     if value not in VALID_BLAST_RADIUS_DEPTHS:
-        expected = ", ".join(sorted(VALID_BLAST_RADIUS_DEPTHS))
         raise MCPServiceContractError(
-            f"Invalid value for blast_radius_depth: {value!r}. "
-            f"Expected one of: {expected}."
+            err_msgs.invalid_choice(
+                "blast_radius_depth",
+                value,
+                VALID_BLAST_RADIUS_DEPTHS,
+            )
         )
     return value
 

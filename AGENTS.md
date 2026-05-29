@@ -410,6 +410,8 @@ Architecture is layered, but grounded in current code (not aspirational diagrams
 
 - **CLI entry + orchestration surface** (`codeclone/main.py`, `codeclone/surfaces/cli/*`, `codeclone/ui_messages/*`)
   owns argument parsing, runtime/config resolution, summaries, report writes, and exit routing.
+  User-facing copy lives in `ui_messages/` submodules (`help`, `labels`, `runtime`,
+  `markers`, `formatters`, `controller`, `styling`).
 - **Config layer** (`codeclone/config/*`) is the single source of truth for option specs, parser construction,
   `pyproject.toml` loading, and CLI > pyproject > defaults resolution.
 - **Core orchestration** (`codeclone/core/*`) owns bootstrap → discovery → worker processing → project metrics →
@@ -509,7 +511,8 @@ Use this map to route changes to the right owner module.
 - `codeclone/surfaces/mcp/server.py` — optional MCP launcher/server wiring, transport config, and MCP tool/resource
   registration; keep dependency loading lazy so base installs/CI do not require MCP runtime packages.
 - `codeclone/surfaces/mcp/messages/*` — MCP user-facing copy (tool/resource descriptions, help topics, workflow and
-  intent messages, parameter Field docs). Keep message policy centralized like `ui_messages/`.
+  intent messages, parameter Field docs, patch-contract hints, verification copy, remediation shapes). Keep message
+  policy centralized like `ui_messages/`.
 - `codeclone/audit/*` — audit event schema, validation, writer/reader; passive evidence only.
 - `codeclone/budget/*` — patch/token budget estimation shared by CLI and MCP surfaces.
 - `tests/test_mcp_service.py`, `tests/test_mcp_server.py` — MCP contract and integration tests; run these when
@@ -520,6 +523,9 @@ Use this map to route changes to the right owner module.
 - `codeclone/domain/*.py` — centralized domain taxonomies/IDs (families, categories, source scopes, risk/severity
   levels); use these constants in pipeline/report/UI instead of scattering raw literals.
 - `codeclone/ui_messages/*` — CLI text/marker/help constants and formatter helpers. Keep message policy centralized.
+- `codeclone/report/messages/*` — report-layer user copy (glossary, suggestions,
+  explainability, overview, security, chrome, text/markdown/sarif projections,
+  gate prefixes).
 - `docs/`, `mkdocs.yml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py` — docs-site source,
   publication workflow, and live sample-report generation; keep published docs aligned with code contracts.
 - `extensions/vscode-codeclone/*` — stable VS Code extension surface; keep it baseline-aware, triage-first,
@@ -758,8 +764,9 @@ These rules exist because of real incidents in this repo. They are non-negotiabl
   `codeclone/report/html/assets/*`) are imported, not duplicated locally inside
   `codeclone/report/html/sections/*`.
   If you need a helper that doesn't exist, add it to the shared module.
-- Glossary terms used in stat-card labels live in `codeclone/report/html/widgets/glossary.py`. Adding a
-  new label without a glossary entry is a contract gap.
+- Glossary term definitions live in `codeclone/report/messages/glossary.py`;
+  `codeclone/report/html/widgets/glossary.py` renders HTML tooltips from that
+  catalog. Adding a new stat-card label without a glossary entry is a contract gap.
 
 ### Conflict avoidance
 

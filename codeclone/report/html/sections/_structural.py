@@ -27,6 +27,7 @@ from ...derived import (
     report_location_from_structural_occurrence,
 )
 from ...findings import _dedupe_items, _finding_scope_text, _spread
+from ...messages import explain as explain_msgs
 from ...suggestions import (
     structural_action_steps,
     structural_has_separate_suggestion,
@@ -48,11 +49,7 @@ __all__ = [
     "render_structural_panel",
 ]
 
-_KIND_LABEL: dict[str, str] = {
-    STRUCTURAL_KIND_DUPLICATED_BRANCHES: "Duplicated branches",
-    STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE: "Clone guard/exit divergence",
-    STRUCTURAL_KIND_CLONE_COHORT_DRIFT: "Clone cohort drift",
-}
+_KIND_LABEL: dict[str, str] = dict(explain_msgs.STRUCTURAL_KIND_LABELS)
 
 
 def _sort_key_group(g: StructuralFindingGroup) -> tuple[str, int, str]:
@@ -154,35 +151,26 @@ def _finding_reason_list_html(
     spread = _spread(items)
     clone_cohort_reasons = {
         STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE: [
-            (
-                f"{len(items)} divergent clone members were detected after "
-                "stable sorting and deduplication."
+            explain_msgs.GUARD_DIVERGENCE_MEMBERS.format(count=len(items)),
+            explain_msgs.GUARD_DIVERGENCE_COMPARE,
+            explain_msgs.GUARD_DIVERGENCE_COHORT.format(
+                cohort_id=group.signature.get("cohort_id", "unknown"),
+                majority_guard_count=group.signature.get("majority_guard_count", "0"),
             ),
-            (
-                "Members were compared by entry-guard count/profile, terminal "
-                "kind, and side-effect-before-guard marker."
-            ),
-            (
-                f"Cohort id: {group.signature.get('cohort_id', 'unknown')}; "
-                "majority guard count: "
-                f"{group.signature.get('majority_guard_count', '0')}."
-            ),
-            (
-                f"Spread includes {spread['functions']} "
-                f"{'function' if spread['functions'] == 1 else 'functions'} in "
-                f"{spread['files']} {'file' if spread['files'] == 1 else 'files'}."
-            ),
-            "This is a report-only finding and does not affect clone gating.",
+            explain_msgs.fmt_spread(spread["functions"], spread["files"]),
+            explain_msgs.REPORT_ONLY_NO_GATING,
         ],
         STRUCTURAL_KIND_CLONE_COHORT_DRIFT: [
-            f"{len(items)} clone members diverge from the cohort majority profile.",
-            f"Drift fields: {group.signature.get('drift_fields', 'n/a')}.",
-            (
-                f"Cohort id: {group.signature.get('cohort_id', 'unknown')} with "
-                f"arity {group.signature.get('cohort_arity', 'n/a')}."
+            explain_msgs.DRIFT_MEMBERS.format(count=len(items)),
+            explain_msgs.DRIFT_FIELDS.format(
+                drift_fields=group.signature.get("drift_fields", "n/a")
             ),
-            "Majority profile is compared deterministically with lexical tie-breaks.",
-            "This is a report-only finding and does not affect clone gating.",
+            explain_msgs.DRIFT_COHORT.format(
+                cohort_id=group.signature.get("cohort_id", "unknown"),
+                cohort_arity=group.signature.get("cohort_arity", "n/a"),
+            ),
+            explain_msgs.DRIFT_MAJORITY,
+            explain_msgs.REPORT_ONLY_NO_GATING,
         ],
     }
     if group.finding_kind in clone_cohort_reasons:
@@ -191,27 +179,15 @@ def _finding_reason_list_html(
     stmt_seq = group.signature.get("stmt_seq", "n/a")
     terminal = group.signature.get("terminal", "n/a")
     reasons = [
-        (
-            f"{len(items)} non-overlapping branch bodies remained after "
-            "deduplication and overlap pruning."
+        explain_msgs.BRANCH_BODIES_REMAINED.format(count=len(items)),
+        explain_msgs.fmt_spread(
+            spread["functions"],
+            spread["files"],
+            template=explain_msgs.SPREAD_ALL_OCCURRENCES,
         ),
-        (
-            f"All occurrences belong to {spread['functions']} "
-            f"{'function' if spread['functions'] == 1 else 'functions'} in "
-            f"{spread['files']} {'file' if spread['files'] == 1 else 'files'}."
-        ),
-        (
-            f"The detector grouped them by structural signature: "
-            f"stmt seq: {stmt_seq}, terminal: {terminal}."
-        ),
-        (
-            "Call/raise buckets and nested control-flow flags must also match "
-            "for branches to land in the same finding group."
-        ),
-        (
-            "This is a local, report-only hint. It does not change clone groups "
-            "or CI verdicts."
-        ),
+        explain_msgs.SIGNATURE_GROUPED.format(stmt_seq=stmt_seq, terminal=terminal),
+        explain_msgs.SIGNATURE_MATCH_RULE,
+        explain_msgs.REPORT_ONLY_LOCAL_HINT,
     ]
     return _render_reason_list_html(reasons)
 
@@ -227,16 +203,8 @@ def _finding_matters_html(
     spread = _spread(items)
     count = len(items)
     special_messages = {
-        STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE: (
-            "Members of one function-clone cohort diverged in guard/exit behavior. "
-            "This often points to a partial fix where one path was updated and "
-            "other siblings were left unchanged."
-        ),
-        STRUCTURAL_KIND_CLONE_COHORT_DRIFT: (
-            "Members of one function-clone cohort drifted from a stable majority "
-            "profile (terminal, guard, try/finally, side-effect order). Review "
-            "whether divergence is intentional."
-        ),
+        STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE: explain_msgs.IMPACT_GUARD_DIVERGENCE,
+        STRUCTURAL_KIND_CLONE_COHORT_DRIFT: explain_msgs.IMPACT_COHORT_DRIFT,
     }
     if group.finding_kind in special_messages:
         return _finding_matters_paragraph(special_messages[group.finding_kind])
@@ -244,30 +212,20 @@ def _finding_matters_html(
     terminal = str(group.signature.get("terminal", "")).strip()
     stmt_seq = str(group.signature.get("stmt_seq", "")).strip()
     if spread["functions"] > 1 or spread["files"] > 1:
-        message = (
-            f"This pattern repeats across {spread['functions']} functions and "
-            f"{spread['files']} files, so the same branch policy may be copied "
-            "between multiple code paths."
+        message = explain_msgs.IMPACT_CROSS_FUNCTION.format(
+            functions=spread["functions"],
+            files=spread["files"],
         )
     else:
         terminal_messages = {
-            "raise": (
-                "This group points to repeated guard or validation exits inside one "
-                "function. Consolidating the shared exit policy usually reduces "
-                "branch noise."
-            ),
-            "return": (
-                "This group points to repeated return-path logic inside one function. "
-                "A helper can often keep the branch predicate local while sharing "
-                "the emitted behavior."
-            ),
+            "raise": explain_msgs.IMPACT_TERMINAL_RAISE,
+            "return": explain_msgs.IMPACT_TERMINAL_RETURN,
         }
         message = terminal_messages.get(
             terminal,
-            (
-                f"This group reports {count} branches with the same local shape "
-                f"({stmt_seq or 'unknown signature'}). Review whether the local "
-                "branch logic should stay duplicated or be simplified in place."
+            explain_msgs.IMPACT_DEFAULT_BRANCHES.format(
+                count=count,
+                signature=stmt_seq or "unknown signature",
             ),
         )
     return _finding_matters_paragraph(message)
@@ -320,7 +278,8 @@ def _finding_inline_action_html(
     primary_action = action_steps[0]
     return (
         '<div class="sf-inline-action">'
-        '<span class="sf-inline-action-label">Suggested action</span>'
+        '<span class="sf-inline-action-label">'
+        f"{explain_msgs.STRUCTURAL_INLINE_ACTION_LABEL}</span>"
         f'<span class="sf-inline-action-text">{_escape_html(primary_action)}</span>'
         "</div>"
     )
@@ -346,47 +305,51 @@ def _finding_why_template_html(
         for idx, item in enumerate(preview_items)
     )
     if group.finding_kind == STRUCTURAL_KIND_DUPLICATED_BRANCHES:
-        showing_note = (
-            f"Showing the first {len(preview_items)} matching branches from "
-            f"{len(items)} total occurrences."
+        showing_note = explain_msgs.SHOWING_BRANCHES.format(
+            shown=len(preview_items),
+            total=len(items),
         )
-        reported_subject = "structurally matching branch bodies"
+        reported_subject = explain_msgs.SUBJECT_BRANCH_BODIES
     elif group.finding_kind == STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE:
-        showing_note = (
-            f"Showing the first {len(preview_items)} cohort members from "
-            f"{len(items)} divergent occurrences."
+        showing_note = explain_msgs.SHOWING_GUARD_DIVERGENCE.format(
+            shown=len(preview_items),
+            total=len(items),
         )
-        reported_subject = "clone cohort members with guard/exit divergence"
+        reported_subject = explain_msgs.SUBJECT_GUARD_DIVERGENCE
     elif group.finding_kind == STRUCTURAL_KIND_CLONE_COHORT_DRIFT:
-        showing_note = (
-            f"Showing the first {len(preview_items)} cohort members from "
-            f"{len(items)} divergent occurrences."
+        showing_note = explain_msgs.SHOWING_COHORT_DRIFT.format(
+            shown=len(preview_items),
+            total=len(items),
         )
-        reported_subject = "clone cohort members that drift from majority profile"
+        reported_subject = explain_msgs.SUBJECT_COHORT_DRIFT
     else:
-        showing_note = (
-            f"Showing the first {len(preview_items)} matching branches from "
-            f"{len(items)} total occurrences."
+        showing_note = explain_msgs.SHOWING_BRANCHES.format(
+            shown=len(preview_items),
+            total=len(items),
         )
-        reported_subject = "structurally matching branch bodies"
+        reported_subject = explain_msgs.SUBJECT_BRANCH_BODIES
+    rationale_intro = explain_msgs.DETECTION_RATIONALE_INTRO.format(
+        count=len(items),
+        subject=reported_subject,
+        scope=_finding_scope_text(items),
+    )
     return (
         '<div class="metrics-section">'
-        '<div class="metrics-section-title">Impact</div>'
+        f'<div class="metrics-section-title">{explain_msgs.STRUCTURAL_SECTION_IMPACT}</div>'
         f"{_finding_matters_html(group, items)}"
         "</div>"
         '<div class="metrics-section">'
-        '<div class="metrics-section-title">Detection Rationale</div>'
-        f'<p class="finding-why-text">CodeClone reported this group because it found '
-        f"{len(items)} {reported_subject} "
-        f"{_escape_html(_finding_scope_text(items))}.</p>"
+        f'<div class="metrics-section-title">'
+        f"{explain_msgs.STRUCTURAL_SECTION_DETECTION_RATIONALE}</div>"
+        f'<p class="finding-why-text">{_escape_html(rationale_intro)}</p>'
         f"{_finding_reason_list_html(group, items)}"
         "</div>"
         '<div class="metrics-section">'
-        '<div class="metrics-section-title">Signature</div>'
+        f'<div class="metrics-section-title">{explain_msgs.STRUCTURAL_SECTION_SIGNATURE}</div>'
         f'<div class="finding-why-chips">{_signature_chips_html(group.signature)}</div>'
         "</div>"
         '<div class="metrics-section">'
-        '<div class="metrics-section-title">Examples</div>'
+        f'<div class="metrics-section-title">{explain_msgs.STRUCTURAL_SECTION_EXAMPLES}</div>'
         f'<div class="finding-why-note">{_escape_html(showing_note)}</div>'
         f'<div class="finding-why-examples">{examples_html}</div>'
         "</div>"
@@ -463,7 +426,7 @@ def _render_finding_card(
         f"{spread['functions']} {func_word} \u00b7 {spread['files']} {file_word}</span>"
         f'<button class="btn ghost sf-why-btn" type="button" '
         f'data-finding-why-btn="{_escape_html(why_template_id)}" '
-        'aria-haspopup="dialog">Why?</button>'
+        f'aria-haspopup="dialog">{explain_msgs.STRUCTURAL_WHY_BUTTON}</button>'
         "</span></div>"
         '<div class="sf-body">'
         f'<div class="suggestion-context">{context_chips}</div>'
@@ -491,15 +454,17 @@ def build_structural_findings_html_panel(
 ) -> str:
     intro = (
         '<div class="insight-banner insight-info">'
-        '<div class="insight-question">What are structural findings?</div>'
-        '<div class="insight-answer">Repeated non-overlapping branch-body shapes '
-        "detected inside individual functions. These are local, report-only "
-        "refactoring hints and do not affect clone detection or CI verdicts.</div>"
+        '<div class="insight-question">'
+        + explain_msgs.STRUCTURAL_INTRO_QUESTION
+        + "</div>"
+        '<div class="insight-answer">'
+        + _escape_html(explain_msgs.STRUCTURAL_INTRO_ANSWER)
+        + "</div>"
         "</div>"
     )
     normalized_groups = normalize_structural_findings(groups)
     if not normalized_groups:
-        return intro + _tab_empty("No structural findings detected.")
+        return intro + _tab_empty(explain_msgs.STRUCTURAL_EMPTY)
 
     resolved_file_cache = file_cache if file_cache is not None else _FileCache()
     why_templates: list[str] = []
@@ -522,7 +487,7 @@ def build_structural_findings_html_panel(
     sub_tabs: list[tuple[str, str, int, str]] = [
         (
             "all",
-            "All",
+            explain_msgs.TAB_LABEL_ALL,
             len(all_cards),
             f'<div class="sf-list">{"".join(all_cards)}</div>',
         ),

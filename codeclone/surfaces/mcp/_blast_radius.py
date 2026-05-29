@@ -11,6 +11,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
+from .messages import blast_radius as br_msgs
+
 BlastRadiusDepth = Literal["direct", "transitive"]
 BlastRadiusInclude = Literal[
     "imports",
@@ -545,10 +547,7 @@ def _compute_change_boundaries(
         _append_boundary_entry(
             do_not_touch_entries,
             path=pattern,
-            reason=(
-                "baseline, CodeClone state/cache, and generated artifacts "
-                "require explicit separate changes"
-            ),
+            reason=br_msgs.BOUNDARY_REASON_BASELINE_OR_STATE,
             category="baseline_or_generated_state",
             severity="hard",
         )
@@ -556,7 +555,7 @@ def _compute_change_boundaries(
         _append_boundary_entry(
             do_not_touch_entries,
             path=pattern,
-            reason="declared forbidden path",
+            reason=br_msgs.BOUNDARY_REASON_EXPLICIT_FORBIDDEN,
             category="explicit_forbidden",
             severity="hard",
         )
@@ -568,7 +567,7 @@ def _compute_change_boundaries(
                 _append_review_entry(
                     review_entries,
                     path=path,
-                    reason="known baseline debt outside declared origin",
+                    reason=br_msgs.REVIEW_REASON_KNOWN_BASELINE_DEBT,
                     category="known_baseline_debt",
                 )
     for group in _suppressed_clone_buckets(report_document):
@@ -577,7 +576,7 @@ def _compute_change_boundaries(
                 _append_review_entry(
                     review_entries,
                     path=path,
-                    reason="golden fixture clone suppression surface",
+                    reason=br_msgs.REVIEW_REASON_GOLDEN_FIXTURE_SURFACE,
                     category="golden_fixture_surface",
                 )
     metrics = _as_mapping(report_document.get("metrics"))
@@ -585,10 +584,14 @@ def _compute_change_boundaries(
     for family_name, reason, category in (
         (
             "security_surfaces",
-            "report-only security boundary inventory",
+            br_msgs.REVIEW_REASON_SECURITY_BOUNDARY,
             "security_boundary_context",
         ),
-        ("overloaded_modules", "report-only design signal", "report_only_context"),
+        (
+            "overloaded_modules",
+            br_msgs.REVIEW_REASON_REPORT_ONLY_DESIGN,
+            "report_only_context",
+        ),
     ):
         family = _as_mapping(families.get(family_name))
         for raw_item in _as_sequence(family.get("items")):
@@ -606,7 +609,7 @@ def _compute_change_boundaries(
                 _append_boundary_entry(
                     do_not_touch_entries,
                     path=path,
-                    reason="affected by blast radius but outside declared edit scope",
+                    reason=br_msgs.BOUNDARY_REASON_AFFECTED_NOT_ALLOWED,
                     category="affected_but_not_allowed",
                     severity="requires_expansion",
                 )
@@ -630,13 +633,13 @@ def _guardrails(
     do_not_touch: Sequence[Mapping[str, str]],
 ) -> tuple[str, ...]:
     guardrails = [
-        "review direct dependents before editing public behavior",
-        "treat clone cohort members as comparison context, not automatic edit targets",
+        br_msgs.GUARDRAIL_REVIEW_DEPENDENTS,
+        br_msgs.GUARDRAIL_CLONE_COHORT_CONTEXT,
     ]
     if radius_level == "high":
-        guardrails.append("high blast radius requires explicit human scope approval")
+        guardrails.append(br_msgs.GUARDRAIL_HIGH_RADIUS_APPROVAL)
     if do_not_touch:
-        guardrails.append("do-not-touch paths require separate explicit approval")
+        guardrails.append(br_msgs.GUARDRAIL_DO_NOT_TOUCH_APPROVAL)
     return tuple(guardrails)
 
 

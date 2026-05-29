@@ -14,6 +14,66 @@ from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
+from ...messages.overview import (
+    ADOPTION_ADDED_SYMBOLS,
+    ADOPTION_API_DISABLED,
+    ADOPTION_API_SURFACE_LABEL,
+    ADOPTION_BREAKING_CHANGES,
+    ADOPTION_CLUSTER_DESC,
+    ADOPTION_CLUSTER_TITLE,
+    ADOPTION_COVERAGE_LABEL,
+    ADOPTION_DOCSTRINGS,
+    ADOPTION_ENABLE_VIA,
+    ADOPTION_ENABLE_VIA_FLAG,
+    ADOPTION_MODULES,
+    ADOPTION_PARAM_ANNOTATIONS,
+    ADOPTION_PUBLIC_SYMBOLS,
+    ADOPTION_RETURN_ANNOTATIONS,
+    ADOPTION_STRICT_MODE,
+    ADOPTION_STRICT_MODE_ENABLED,
+    ADOPTION_TYPED_AS_ANY,
+    CLUSTER_EXECUTIVE_SUMMARY,
+    CLUSTER_HEALTH_PROFILE,
+    CLUSTER_HEALTH_PROFILE_DESC,
+    CLUSTER_HEALTH_PROFILE_LABEL,
+    CLUSTER_HOTSPOTS_BY_DIRECTORY,
+    CLUSTER_HOTSPOTS_BY_DIRECTORY_DESC,
+    CLUSTER_ISSUE_BREAKDOWN,
+    CLUSTER_OVERLOADED_MODULES,
+    CLUSTER_OVERLOADED_MORE_CANDIDATES,
+    CLUSTER_OVERLOADED_TOP_CANDIDATES,
+    CLUSTER_RADAR_CAPTION,
+    CLUSTER_RADAR_CAPTION_SUFFIX,
+    CLUSTER_SOURCE_BREAKDOWN,
+    DIRECTORY_BUCKET_LABELS,
+    DIRECTORY_BUCKET_ORDER,
+    DIRECTORY_KIND_LABELS,
+    EXECUTIVE_HEALTH_SNAPSHOT_QUESTION,
+    EXECUTIVE_SCAN_SCOPE_DEFAULT,
+    EXECUTIVE_THRESHOLDS_PREFIX,
+    ISSUE_BREAKDOWN_EMPTY,
+    ISSUE_BREAKDOWN_ROW_LABELS,
+    KPI_CLONE_GROUPS,
+    KPI_DEAD_CODE,
+    KPI_DEP_CYCLES,
+    KPI_FINDINGS,
+    KPI_HEALTH,
+    KPI_HEALTH_NA,
+    KPI_HIGH_COMPLEXITY,
+    KPI_HIGH_COUPLING,
+    KPI_LOW_COHESION,
+    KPI_SUGGESTIONS,
+    KPI_TIP_CLONE_GROUPS,
+    KPI_TIP_DEAD_CODE,
+    KPI_TIP_DEP_CYCLES,
+    KPI_TIP_FINDINGS,
+    KPI_TIP_HIGH_COMPLEXITY,
+    KPI_TIP_HIGH_COUPLING,
+    KPI_TIP_LOW_COHESION,
+    KPI_TIP_SUGGESTIONS,
+    RADAR_DIMENSIONS,
+    RADAR_LABELS,
+)
 from ..primitives.escape import _escape_html
 from ..widgets.badges import (
     _inline_empty,
@@ -38,36 +98,9 @@ _as_float = _coerce.as_float
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
 
-_DIRECTORY_BUCKET_LABELS: dict[str, str] = {
-    "all": "All Findings",
-    "clones": "Clone Groups",
-    "structural": "Structural Findings",
-    "complexity": "High Complexity",
-    "cohesion": "Low Cohesion",
-    "coupling": "High Coupling",
-    "dead_code": "Dead Code",
-    "dependency": "Dependency Cycles",
-}
-_DIRECTORY_BUCKET_ORDER: tuple[str, ...] = (
-    "all",
-    "clones",
-    "structural",
-    "complexity",
-    "cohesion",
-    "coupling",
-    "dead_code",
-    "dependency",
-)
-_DIRECTORY_KIND_LABELS: dict[str, str] = {
-    "clones": "clones",
-    "structural": "structural",
-    "complexity": "complexity",
-    "cohesion": "cohesion",
-    "coupling": "coupling",
-    "dead_code": "dead code",
-    "coverage": "coverage",
-    "dependency": "dependency",
-}
+_DIRECTORY_BUCKET_LABELS = DIRECTORY_BUCKET_LABELS
+_DIRECTORY_BUCKET_ORDER = DIRECTORY_BUCKET_ORDER
+_DIRECTORY_KIND_LABELS = DIRECTORY_KIND_LABELS
 
 
 def _health_gauge_html(
@@ -76,8 +109,8 @@ def _health_gauge_html(
     """Render an SVG ring gauge for health score with optional baseline arc."""
     if score < 0:
         return _stat_card(
-            "Health",
-            "n/a",
+            KPI_HEALTH,
+            KPI_HEALTH_NA,
             css_class="meta-item overview-health-card",
             glossary_tip_fn=glossary_tip,
         )
@@ -169,25 +202,8 @@ def _health_gauge_html(
 # Analytics: Health Radar (pure SVG)
 # ---------------------------------------------------------------------------
 
-_RADAR_DIMENSIONS = (
-    "clones",
-    "complexity",
-    "coupling",
-    "cohesion",
-    "dead_code",
-    "dependencies",
-    "coverage",
-)
-
-_RADAR_LABELS = {
-    "clones": "Clones",
-    "complexity": "Complexity",
-    "coupling": "Coupling",
-    "cohesion": "Cohesion",
-    "dead_code": "Dead Code",
-    "dependencies": "Deps",
-    "coverage": "Coverage",
-}
+_RADAR_DIMENSIONS = RADAR_DIMENSIONS
+_RADAR_LABELS = RADAR_LABELS
 
 _RADAR_CX, _RADAR_CY, _RADAR_R = 200.0, 200.0, 130.0
 _RADAR_LABEL_R = 155.0
@@ -316,22 +332,24 @@ def _issue_breakdown_html(
     dep_cycles = len(_as_sequence(ctx.dependencies_map.get("cycles")))
     structural = len(ctx.structural_findings)
 
-    # (key, label, count, color)
     raw_rows: list[tuple[str, str, int, str]] = [
-        ("clones", "Clone Groups", ctx.clone_groups_total, "var(--error)"),
-        ("structural", "Structural", structural, "var(--warning)"),
-        ("complexity", "Complexity", complexity_high, "var(--warning)"),
-        ("cohesion", "Cohesion", cohesion_low, "var(--info)"),
-        ("coupling", "Coupling", coupling_high, "var(--info)"),
-        ("dead_code", "Dead Code", dead_total, "var(--text-muted)"),
-        ("dep_cycles", "Dep. Cycles", dep_cycles, "var(--text-muted)"),
+        (key, ISSUE_BREAKDOWN_ROW_LABELS[key], count, color)
+        for key, count, color in (
+            ("clones", ctx.clone_groups_total, "var(--error)"),
+            ("structural", structural, "var(--warning)"),
+            ("complexity", complexity_high, "var(--warning)"),
+            ("cohesion", cohesion_low, "var(--info)"),
+            ("coupling", coupling_high, "var(--info)"),
+            ("dead_code", dead_total, "var(--text-muted)"),
+            ("dep_cycles", dep_cycles, "var(--text-muted)"),
+        )
     ]
     # Filter out zeros — show only actual issues
     rows = [
         (key, label, count, color) for key, label, count, color in raw_rows if count > 0
     ]
     if not rows:
-        return _inline_empty("No issues detected", tone="good")
+        return _inline_empty(ISSUE_BREAKDOWN_EMPTY, tone="good")
 
     max_count = max(c for _, _, c, _ in rows)
     parts: list[str] = []
@@ -461,17 +479,17 @@ def _adoption_card_html(adoption_summary: Mapping[str, object]) -> str:
 
     rows = [
         _fact_row(
-            "Param annotations",
+            ADOPTION_PARAM_ANNOTATIONS,
             _format_permille_pct(adoption_summary.get("param_permille")),
             delta=_delta_or_none("param_delta"),
         ),
         _fact_row(
-            "Return annotations",
+            ADOPTION_RETURN_ANNOTATIONS,
             _format_permille_pct(adoption_summary.get("return_permille")),
             delta=_delta_or_none("return_delta"),
         ),
         _fact_row(
-            "Docstrings",
+            ADOPTION_DOCSTRINGS,
             _format_permille_pct(adoption_summary.get("docstring_permille")),
             delta=_delta_or_none("docstring_delta"),
         ),
@@ -480,7 +498,7 @@ def _adoption_card_html(adoption_summary: Mapping[str, object]) -> str:
     any_count = _as_int(adoption_summary.get("typing_any_count"))
     rows.append(
         _fact_row(
-            "Typed as Any",
+            ADOPTION_TYPED_AS_ANY,
             _format_count(any_count),
             value_cls="good" if any_count == 0 else "warn",
         )
@@ -492,17 +510,17 @@ def _adoption_card_html(adoption_summary: Mapping[str, object]) -> str:
 def _api_card_html(api_summary: Mapping[str, object]) -> str:
     if not bool(api_summary.get("enabled")):
         return (
-            '<div class="overview-summary-value">Disabled in this run.</div>'
+            f'<div class="overview-summary-value">{ADOPTION_API_DISABLED}</div>'
             '<div class="overview-fact-list">'
-            + _fact_row("Enable via", "--api-surface")
+            + _fact_row(ADOPTION_ENABLE_VIA, ADOPTION_ENABLE_VIA_FLAG)
             + "</div>"
         )
 
     symbols = _as_int(api_summary.get("public_symbols"))
     modules = _as_int(api_summary.get("modules"))
     rows = [
-        _fact_row("Public symbols", _format_count(symbols)),
-        _fact_row("Modules", _format_count(modules)),
+        _fact_row(ADOPTION_PUBLIC_SYMBOLS, _format_count(symbols)),
+        _fact_row(ADOPTION_MODULES, _format_count(modules)),
     ]
 
     if bool(api_summary.get("baseline_diff_available")):
@@ -510,15 +528,19 @@ def _api_card_html(api_summary: Mapping[str, object]) -> str:
         added = _as_int(api_summary.get("added"))
         rows.append(
             _fact_row(
-                "Breaking changes",
+                ADOPTION_BREAKING_CHANGES,
                 _format_count(breaking),
                 value_cls="warn" if breaking > 0 else "good",
             )
         )
-        rows.append(_fact_row("Added symbols", _format_count(added)))
+        rows.append(_fact_row(ADOPTION_ADDED_SYMBOLS, _format_count(added)))
 
     if bool(api_summary.get("strict_types")):
-        rows.append(_fact_row("Strict mode", "enabled", value_cls="good"))
+        rows.append(
+            _fact_row(
+                ADOPTION_STRICT_MODE, ADOPTION_STRICT_MODE_ENABLED, value_cls="good"
+            )
+        )
 
     return '<div class="overview-fact-list">' + "".join(rows) + "</div>"
 
@@ -536,24 +558,21 @@ def _adoption_and_api_section(ctx: ReportContext) -> str:
     if adoption_summary:
         cards.append(
             overview_summary_item_html(
-                label="Adoption coverage",
+                label=ADOPTION_COVERAGE_LABEL,
                 body_html=_adoption_card_html(adoption_summary),
             )
         )
     if api_summary:
         cards.append(
             overview_summary_item_html(
-                label="Public API surface",
+                label=ADOPTION_API_SURFACE_LABEL,
                 body_html=_api_card_html(api_summary),
             )
         )
 
     return (
         '<section class="overview-cluster">'
-        + overview_cluster_header(
-            "Adoption & API",
-            "Type/docstring adoption and public API surface are shown as facts, not style pressure.",
-        )
+        + overview_cluster_header(ADOPTION_CLUSTER_TITLE, ADOPTION_CLUSTER_DESC)
         + '<div class="overview-summary-grid overview-summary-grid--2col">'
         + "".join(cards)
         + "</div></section>"
@@ -564,7 +583,7 @@ def _scan_scope_subtitle(ctx: ReportContext) -> str:
     """Build a subtitle string with scan-scope essentials for the Executive Summary header."""
     inventory = _as_mapping(getattr(ctx, "inventory_map", {}))
     if not inventory:
-        return "Project-wide context derived from the full scanned root."
+        return EXECUTIVE_SCAN_SCOPE_DEFAULT
 
     files = _as_mapping(inventory.get("files"))
     code = _as_mapping(inventory.get("code"))
@@ -586,7 +605,7 @@ def _scan_scope_subtitle(ctx: ReportContext) -> str:
         return scope_summary
     return (
         f"{scope_summary}. "
-        "Thresholds: "
+        f"{EXECUTIVE_THRESHOLDS_PREFIX}"
         f"func {_as_int(analysis_profile.get('min_loc'))}/"
         f"{_as_int(analysis_profile.get('min_stmt'))} \u00b7 "
         f"block {_as_int(analysis_profile.get('block_min_loc'))}/"
@@ -685,8 +704,8 @@ def _directory_hotspots_section(ctx: ReportContext) -> str:
     return (
         '<section class="overview-cluster">'
         + overview_cluster_header(
-            "Hotspots by Directory",
-            "Directories with the highest concentration of findings by category.",
+            CLUSTER_HOTSPOTS_BY_DIRECTORY,
+            CLUSTER_HOTSPOTS_BY_DIRECTORY_DESC,
         )
         + '<div class="overview-summary-grid overview-summary-grid--2col">'
         + "".join(cards)
@@ -747,15 +766,15 @@ def _overloaded_modules_section(ctx: ReportContext) -> str:
     right_html = "".join(rows_html[mid:])
     return (
         '<section class="overview-cluster">'
-        + overview_cluster_header("Overloaded Modules", subtitle)
+        + overview_cluster_header(CLUSTER_OVERLOADED_MODULES, subtitle)
         + '<div class="overview-summary-grid overview-summary-grid--2col">'
         + overview_summary_item_html(
-            label="Top candidates",
+            label=CLUSTER_OVERLOADED_TOP_CANDIDATES,
             body_html='<div class="overloaded-module-list">' + left_html + "</div>",
         )
         + (
             overview_summary_item_html(
-                label="More candidates",
+                label=CLUSTER_OVERLOADED_MORE_CANDIDATES,
                 body_html='<div class="overloaded-module-list">'
                 + right_html
                 + "</div>",
@@ -913,71 +932,71 @@ def render_overview_panel(ctx: ReportContext) -> str:
 
     kpis = [
         _stat_card(
-            "Clone Groups",
+            KPI_CLONE_GROUPS,
             ctx.clone_groups_total,
             detail=_clone_detail,
-            tip="Detected code clone groups by detection level",
+            tip=KPI_TIP_CLONE_GROUPS,
             delta_new=_new_clones,
             value_tone=_clone_tone,
         ),
         _stat_card(
-            "High Complexity",
+            KPI_HIGH_COMPLEXITY,
             complexity_high_risk,
             detail=_cx_detail,
-            tip="Functions with cyclomatic complexity above threshold",
+            tip=KPI_TIP_HIGH_COMPLEXITY,
             value_tone=_cx_tone,
             delta_new=_new_complexity,
         ),
         _stat_card(
-            "High Coupling",
+            KPI_HIGH_COUPLING,
             coupling_high_risk,
             detail=_cp_detail,
-            tip="Classes with high coupling between objects (CBO)",
+            tip=KPI_TIP_HIGH_COUPLING,
             value_tone=_cp_tone,
             delta_new=_new_coupling,
         ),
         _stat_card(
-            "Low Cohesion",
+            KPI_LOW_COHESION,
             cohesion_low,
             detail=_micro_badges(
                 ("avg", cohesion_summary.get("average", "n/a")),
                 ("max", cohesion_summary.get("max", "n/a")),
             ),
-            tip="Classes with low internal cohesion (high LCOM4)",
+            tip=KPI_TIP_LOW_COHESION,
             value_tone="good" if cohesion_low == 0 else "warn",
         ),
         _stat_card(
-            "Dep. Cycles",
+            KPI_DEP_CYCLES,
             dependency_cycle_count,
             detail=_cy_detail,
-            tip="Circular dependencies between project modules",
+            tip=KPI_TIP_DEP_CYCLES,
             value_tone=_cy_tone,
             delta_new=_new_cycles,
         ),
         _stat_card(
-            "Dead Code",
+            KPI_DEAD_CODE,
             dead_total,
             detail=_dc_detail,
-            tip="Potentially unused functions, classes, or imports",
+            tip=KPI_TIP_DEAD_CODE,
             value_tone=_dc_tone,
             delta_new=_new_dead,
         ),
         _stat_card(
-            "Findings",
+            KPI_FINDINGS,
             structural_count,
             detail=_micro_badges(("kinds", structural_kind_count)),
-            tip="Active structural findings reported in production code",
+            tip=KPI_TIP_FINDINGS,
             value_tone="good" if structural_count == 0 else "warn",
         ),
         _stat_card(
-            "Suggestions",
+            KPI_SUGGESTIONS,
             len(ctx.suggestions),
             detail=_micro_badges(
                 ("clone", clone_suggestion_count),
                 ("struct", structural_suggestion_count),
                 ("metric", metrics_suggestion_count),
             ),
-            tip="Actionable recommendations derived from clones, findings, and metrics",
+            tip=KPI_TIP_SUGGESTIONS,
             value_tone="good" if not ctx.suggestions else "warn",
         ),
     ]
@@ -998,14 +1017,14 @@ def render_overview_panel(ctx: ReportContext) -> str:
     scan_scope_subtitle = _scan_scope_subtitle(ctx)
     executive = (
         '<section class="overview-cluster">'
-        + overview_cluster_header("Executive Summary", scan_scope_subtitle)
+        + overview_cluster_header(CLUSTER_EXECUTIVE_SUMMARY, scan_scope_subtitle)
         + '<div class="overview-summary-grid overview-summary-grid--2col">'
         + overview_summary_item_html(
-            label="Issue breakdown",
+            label=CLUSTER_ISSUE_BREAKDOWN,
             body_html=_issue_breakdown_html(ctx, deltas=_issue_deltas),
         )
         + overview_summary_item_html(
-            label="Source breakdown",
+            label=CLUSTER_SOURCE_BREAKDOWN,
             body_html=overview_source_breakdown_html(
                 _as_mapping(ctx.overview_data.get("source_breakdown"))
             ),
@@ -1019,7 +1038,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
 
     return (
         insight_block(
-            question="Current health snapshot",
+            question=EXECUTIVE_HEALTH_SNAPSHOT_QUESTION,
             answer=overview_answer,
             tone=overview_tone,
         )
@@ -1047,20 +1066,19 @@ def _analytics_section(ctx: ReportContext) -> str:
     radar_html = _health_radar_svg(dimensions)
     radar_legend = (
         '<div class="health-radar-legend">'
-        "Higher values indicate better code health."
-        " Red labels highlight dimensions below 60."
+        f"{CLUSTER_RADAR_CAPTION}{CLUSTER_RADAR_CAPTION_SUFFIX}"
         "</div>"
     )
 
     return (
         '<section class="overview-cluster">'
         + overview_cluster_header(
-            "Health Profile",
-            "Dimension scores across all quality axes.",
+            CLUSTER_HEALTH_PROFILE,
+            CLUSTER_HEALTH_PROFILE_DESC,
         )
         + '<div class="overview-summary-grid">'
         + overview_summary_item_html(
-            label="Health profile", body_html=radar_html + radar_legend
+            label=CLUSTER_HEALTH_PROFILE_LABEL, body_html=radar_html + radar_legend
         )
         + "</div></section>"
     )

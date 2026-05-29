@@ -81,28 +81,26 @@ def _validated_origin_paths(
     if invalid:
         rendered = "\n".join(f"  - {item}" for item in invalid[:10])
         if len(invalid) > 10:
-            rendered += f"\n  ... and {len(invalid) - 10} more"
+            rendered += f"\n  {ui.BLAST_RADIUS_MORE.format(count=len(invalid) - 10)}"
         console.print(
-            ui.fmt_contract_error("Invalid --blast-radius path selection:\n" + rendered)
+            ui.fmt_contract_error(
+                ui.BLAST_RADIUS_INVALID_SELECTION.format(rendered=rendered)
+            )
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
 
     if skipped and not quiet:
         rendered = ", ".join(skipped[:5])
         if len(skipped) > 5:
-            rendered += f", ... and {len(skipped) - 5} more"
+            rendered += f", {ui.BLAST_RADIUS_MORE.format(count=len(skipped) - 5)}"
         console.print(
             ui.fmt_cli_runtime_warning(
-                f"Blast radius skipped files outside analysis inventory: {rendered}"
+                ui.BLAST_RADIUS_SKIPPED_INVENTORY.format(rendered=rendered)
             )
         )
 
     if not valid:
-        console.print(
-            ui.fmt_contract_error(
-                "--blast-radius requires at least one file from the analysis inventory."
-            )
-        )
+        console.print(ui.fmt_contract_error(ui.BLAST_RADIUS_REQUIRES_INVENTORY_FILE))
         sys.exit(ExitCode.CONTRACT_ERROR)
     return tuple(sorted(valid))
 
@@ -120,12 +118,13 @@ def _print_items(
 ) -> None:
     console.print(f"  [bold]{title} ({len(items)}):[/bold]")
     if not items:
-        console.print("    [dim]none[/dim]")
+        console.print(f"    [dim]{ui.BLAST_RADIUS_NONE}[/dim]")
         return
     for item in items[:_MAX_RENDERED_ITEMS]:
         console.print(f"    {item}")
     if len(items) > _MAX_RENDERED_ITEMS:
-        console.print(f"    [dim]... and {len(items) - _MAX_RENDERED_ITEMS} more[/dim]")
+        more = ui.BLAST_RADIUS_MORE.format(count=len(items) - _MAX_RENDERED_ITEMS)
+        console.print(f"    [dim]{more}[/dim]")
 
 
 def _print_entries(
@@ -136,7 +135,7 @@ def _print_entries(
 ) -> None:
     console.print(f"  [bold]{title} ({len(entries)}):[/bold]")
     if not entries:
-        console.print("    [dim]none[/dim]")
+        console.print(f"    [dim]{ui.BLAST_RADIUS_NONE}[/dim]")
         return
     for entry in entries[:_MAX_RENDERED_ITEMS]:
         path = str(entry.get("path", "")).strip()
@@ -145,9 +144,8 @@ def _print_entries(
         suffix = f" [{severity}]" if severity else ""
         console.print(f"    {path}  [dim]{reason}{suffix}[/dim]")
     if len(entries) > _MAX_RENDERED_ITEMS:
-        console.print(
-            f"    [dim]... and {len(entries) - _MAX_RENDERED_ITEMS} more[/dim]"
-        )
+        more = ui.BLAST_RADIUS_MORE.format(count=len(entries) - _MAX_RENDERED_ITEMS)
+        console.print(f"    [dim]{more}[/dim]")
 
 
 def _contract_error_result(*, console: PrinterLike, message: str) -> int:
@@ -180,7 +178,7 @@ def render_blast_radius(
     if report_document is None:
         return _contract_error_result(
             console=console,
-            message="Blast radius requires a canonical report document.",
+            message=ui.BLAST_RADIUS_REQUIRES_REPORT,
         )
 
     origin_paths = _validated_origin_paths(
@@ -201,38 +199,39 @@ def render_blast_radius(
     console.print()
     console.print(f"[bold]{ui.BLAST_RADIUS_TITLE}[/bold]")
     console.print()
-    console.print(f"  [bold]Files:[/bold] {', '.join(result.origin)}")
+    console.print(f"  [bold]{ui.BLAST_RADIUS_FILES}[/bold] {', '.join(result.origin)}")
     console.print(
-        f"  [bold]Risk level:[/bold] {_style(result.radius_level, styles=_RISK_STYLES)}"
+        f"  [bold]{ui.BLAST_RADIUS_RISK_LEVEL}[/bold] "
+        f"{_style(result.radius_level, styles=_RISK_STYLES)}"
     )
     console.print()
     _print_items(
         console=console,
-        title="Direct dependents",
+        title=ui.BLAST_RADIUS_DIRECT_DEPENDENTS,
         items=result.direct_dependents,
     )
     _print_items(
         console=console,
-        title="Clone cohort members",
+        title=ui.BLAST_RADIUS_CLONE_COHORT,
         items=result.clone_cohort_members,
     )
     _print_items(
         console=console,
-        title="Dependency cycles",
+        title=ui.BLAST_RADIUS_DEPENDENCY_CYCLES,
         items=result.in_dependency_cycle,
     )
     _print_entries(
         console=console,
-        title="Do not touch",
+        title=ui.BLAST_RADIUS_DO_NOT_TOUCH,
         entries=result.do_not_touch,
     )
     _print_entries(
         console=console,
-        title="Review context",
+        title=ui.BLAST_RADIUS_REVIEW_CONTEXT,
         entries=result.review_context,
     )
     if result.guardrails:
-        console.print("  [bold]Guardrails:[/bold]")
+        console.print(f"  [bold]{ui.BLAST_RADIUS_GUARDRAILS}[/bold]")
         for guardrail in result.guardrails:
             console.print(f"    - {guardrail}")
     return int(ExitCode.SUCCESS)

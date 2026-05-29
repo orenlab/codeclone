@@ -251,22 +251,34 @@ def render_patch_verify(
     console.print()
     console.print(Rule(ui.PATCH_VERIFY_TITLE))
     console.print()
-    console.print(f"  [bold]Strictness:[/bold] {validated_strictness}")
-    console.print(f"  [bold]Status:[/bold] {_status_text(status)}")
+    console.print(
+        f"  [bold]{ui.PATCH_VERIFY_LABEL_STRICTNESS}[/bold] {validated_strictness}"
+    )
+    console.print(
+        f"  [bold]{ui.PATCH_VERIFY_LABEL_STATUS}[/bold] {_status_text(status)}"
+    )
     console.print()
     console.print(
-        f"  [bold]Health:[/bold] {health_before} -> {health_after} "
+        f"  [bold]{ui.PATCH_VERIFY_LABEL_HEALTH}[/bold] "
+        f"{health_before} -> {health_after} "
         f"(delta: {health_after - health_before})"
     )
     console.print()
-    console.print("  [bold]Structural delta:[/bold]")
-    console.print(f"    Regressions: {diff_context.new_clones_count}")
-    console.print("    Improvements: 0")
-    verdict = "regressed" if diff_context.new_clones_count > 0 else "stable"
-    console.print(f"    Verdict: {verdict}")
+    console.print(f"  [bold]{ui.PATCH_VERIFY_LABEL_STRUCTURAL_DELTA}[/bold]")
+    console.print(
+        f"    {ui.PATCH_VERIFY_LABEL_REGRESSIONS} {diff_context.new_clones_count}"
+    )
+    console.print(f"    {ui.PATCH_VERIFY_LABEL_IMPROVEMENTS} 0")
+    verdict = (
+        ui.PATCH_VERIFY_VERDICT_REGRESSED
+        if diff_context.new_clones_count > 0
+        else ui.PATCH_VERIFY_VERDICT_STABLE
+    )
+    console.print(f"    {ui.PATCH_VERIFY_LABEL_VERDICT} {verdict}")
     console.print()
     console.print(
-        f"  [bold]Gate preview:[/bold] {gate_status} (exit {gate_result.exit_code})"
+        f"  [bold]{ui.PATCH_VERIFY_LABEL_GATE_PREVIEW}[/bold] {gate_status} "
+        f"{ui.PATCH_VERIFY_GATE_EXIT.format(exit_code=gate_result.exit_code)}"
     )
     if gate_result.reasons:
         for reason in gate_result.reasons:
@@ -274,19 +286,16 @@ def render_patch_verify(
     console.print()
     _render_reasons(
         console=console,
-        title="Contract violations",
+        title=ui.PATCH_VERIFY_CONTRACT_VIOLATIONS,
         values=violations,
     )
     console.print()
     if status == "accepted":
-        console.print("  [bold green]Patch contract accepted.[/bold green]")
+        console.print(f"  [bold green]{ui.PATCH_VERIFY_ACCEPTED}[/bold green]")
     elif validated_strictness == "relaxed":
-        console.print(
-            "  [yellow]Patch contract has advisory violations "
-            "but relaxed mode exits 0.[/yellow]"
-        )
+        console.print(f"  [yellow]{ui.PATCH_VERIFY_RELAXED_ADVISORY}[/yellow]")
     else:
-        console.print("  [bold red]Patch contract violated.[/bold red]")
+        console.print(f"  [bold red]{ui.PATCH_VERIFY_VIOLATED}[/bold red]")
     return exit_code
 
 

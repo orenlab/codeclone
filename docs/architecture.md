@@ -195,7 +195,12 @@ Operational note:
 
 - `codeclone/surfaces/mcp/server.py` is only a thin launcher/registration layer.
 - Agent-facing MCP copy lives in `codeclone/surfaces/mcp/messages/*` (tool/resource
-  descriptions, help topics, workflow/intent strings, parameter Field docs).
+  titles and descriptions, help topics, workflow/intent strings, parameter Field
+  docs, patch-contract and verification copy).
+- Report-layer user copy lives in `codeclone/report/messages/*` (glossary,
+  suggestions, explainability, overview, security, chrome, text/markdown/sarif
+  projections, gate reason prefixes). HTML widgets such as
+  `report/html/widgets/glossary.py` render facts from those catalogs.
 - The optional MCP runtime is imported lazily so the base `codeclone` install
   and normal CI paths do not require MCP packages.
 - `codeclone/surfaces/mcp/service.py` is the in-process adapter over the existing

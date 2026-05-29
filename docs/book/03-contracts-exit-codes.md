@@ -9,7 +9,8 @@ Define stable process exit semantics and category boundaries.
 - Exit enum: `codeclone/contracts/__init__.py:ExitCode`
 - CLI entry: `codeclone/main.py:main`
 - CLI orchestration: `codeclone/surfaces/cli/workflow.py:_main_impl`
-- Error markers/formatters: `codeclone/ui_messages/__init__.py`
+- Error markers/formatters: `codeclone/ui_messages/*` (canonical definitions in
+  `markers.py` and `formatters.py`; re-exported from `__init__.py`)
 
 ## Data model
 

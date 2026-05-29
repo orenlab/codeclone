@@ -197,57 +197,33 @@ def _validate_controller_query_flags(
         )
         sys.exit(ExitCode.CONTRACT_ERROR)
     if strictness_explicit and not patch_verify:
-        printer.print(
-            ui.fmt_contract_error("--strictness is only valid with --patch-verify.")
-        )
+        printer.print(ui.fmt_contract_error(ui.ERR_STRICTNESS_PATCH_VERIFY_ONLY))
         sys.exit(ExitCode.CONTRACT_ERROR)
     session_stats = bool_attr(args, "session_stats")
     audit = bool_attr(args, "audit")
     if session_stats and (blast_radius or patch_verify or audit):
-        printer.print(
-            ui.fmt_contract_error(
-                "--session-stats cannot be combined with "
-                "--audit, --blast-radius, or --patch-verify."
-            )
-        )
+        printer.print(ui.fmt_contract_error(ui.ERR_SESSION_STATS_COMBINED))
         sys.exit(ExitCode.CONTRACT_ERROR)
     if audit and (blast_radius or patch_verify):
-        printer.print(
-            ui.fmt_contract_error(
-                "--audit cannot be combined with --blast-radius or --patch-verify."
-            )
-        )
+        printer.print(ui.fmt_contract_error(ui.ERR_AUDIT_COMBINED))
         sys.exit(ExitCode.CONTRACT_ERROR)
     if blast_radius and patch_verify:
-        printer.print(
-            ui.fmt_contract_error("Use --blast-radius or --patch-verify, not both.")
-        )
+        printer.print(ui.fmt_contract_error(ui.ERR_BLAST_PATCH_BOTH))
         sys.exit(ExitCode.CONTRACT_ERROR)
     if not (blast_radius or patch_verify or session_stats or audit):
         return
     if bool_attr(args, "update_baseline") or bool_attr(args, "update_metrics_baseline"):
-        printer.print(
-            ui.fmt_contract_error("Controller query modes cannot update baselines.")
-        )
+        printer.print(ui.fmt_contract_error(ui.ERR_CONTROLLER_NO_BASELINE_UPDATE))
         sys.exit(ExitCode.CONTRACT_ERROR)
     if (
         bool_attr(args, "changed_only")
         or getattr(args, "diff_against", None)
         or getattr(args, "paths_from_git_diff", None)
     ):
-        printer.print(
-            ui.fmt_contract_error(
-                "Controller query modes cannot be combined with changed-scope flags."
-            )
-        )
+        printer.print(ui.fmt_contract_error(ui.ERR_CONTROLLER_NO_CHANGED_SCOPE))
         sys.exit(ExitCode.CONTRACT_ERROR)
     if report_outputs_requested:
-        printer.print(
-            ui.fmt_contract_error(
-                "Controller query modes are terminal-only and cannot be combined "
-                "with report output flags."
-            )
-        )
+        printer.print(ui.fmt_contract_error(ui.ERR_CONTROLLER_TERMINAL_ONLY))
         sys.exit(ExitCode.CONTRACT_ERROR)
 
 

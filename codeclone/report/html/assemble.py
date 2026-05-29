@@ -16,6 +16,37 @@ from ...contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
 from ...domain.quality import CONFIDENCE_HIGH
 from ...findings.structural.detectors import normalize_structural_findings
 from ...utils import coerce as _coerce
+from ..messages.chrome import (
+    BADGE_COPY,
+    BADGE_DISCLAIMER,
+    BADGE_FIELD_HTML,
+    BADGE_FIELD_MARKDOWN,
+    BADGE_TAB_FULL,
+    BADGE_TAB_GRADE,
+    FOOTER_BRAND,
+    FOOTER_DOCS,
+    FOOTER_REPORT_ISSUE,
+    FOOTER_SCHEMA_BASELINE,
+    FOOTER_SCHEMA_CACHE,
+    FOOTER_SCHEMA_REPORT,
+    IDE_PICKER_LABEL,
+    IDE_PICKER_TITLE,
+    MODAL_BADGE_TITLE,
+    MODAL_FINDING_CLOSE,
+    MODAL_FINDING_TITLE,
+    PROVENANCE_ARIA_LABEL,
+    PROVENANCE_TITLE_PREFIX,
+    TAB_CLONES,
+    TAB_DEAD_CODE,
+    TAB_DEPENDENCIES,
+    TAB_FINDINGS,
+    TAB_OVERVIEW,
+    TAB_QUALITY,
+    TAB_SUGGESTIONS,
+    TABLIST_ARIA_LABEL,
+    THEME_BUTTON_TEXT,
+    THEME_TOGGLE_LABEL,
+)
 from ._context import _meta_pick, build_context
 from .assets.css import build_css
 from .assets.js import build_js
@@ -144,20 +175,20 @@ def build_html_report(
         "structural-findings": "structural-findings",
     }
     tab_defs = [
-        ("overview", "Overview", overview_html, ""),
-        ("clones", "Clones", clones_html, _tab_badge(ctx.clone_groups_total)),
-        ("quality", "Quality", quality_html, _tab_badge(quality_issues)),
-        ("dependencies", "Dependencies", dependencies_html, _tab_badge(dep_cycles)),
-        ("dead-code", "Dead Code", dead_code_html, _tab_badge(dead_high_conf)),
+        ("overview", TAB_OVERVIEW, overview_html, ""),
+        ("clones", TAB_CLONES, clones_html, _tab_badge(ctx.clone_groups_total)),
+        ("quality", TAB_QUALITY, quality_html, _tab_badge(quality_issues)),
+        ("dependencies", TAB_DEPENDENCIES, dependencies_html, _tab_badge(dep_cycles)),
+        ("dead-code", TAB_DEAD_CODE, dead_code_html, _tab_badge(dead_high_conf)),
         (
             "suggestions",
-            "Suggestions",
+            TAB_SUGGESTIONS,
             suggestions_html,
             _tab_badge(len(ctx.suggestions)),
         ),
         (
             "structural-findings",
-            "Findings",
+            TAB_FINDINGS,
             structural_html,
             _tab_badge(structural_count),
         ),
@@ -193,7 +224,7 @@ def build_html_report(
 
     tabs_html = (
         '<div class="main-tabs-wrap">'
-        '<nav class="main-tabs" role="tablist" aria-label="Report sections">'
+        f'<nav class="main-tabs" role="tablist" aria-label="{TABLIST_ARIA_LABEL}">'
         + "".join(tab_buttons)
         + "</nav></div>"
     )
@@ -232,13 +263,13 @@ def build_html_report(
         '<div class="topbar-actions">'
         '<div class="ide-picker">'
         '<button class="ide-picker-btn" type="button" aria-expanded="false" '
-        f'aria-haspopup="true" title="Open in IDE">{ICONS["ide"]}'
-        '<span class="ide-picker-label">IDE</span></button>'
+        f'aria-haspopup="true" title="{IDE_PICKER_TITLE}">{ICONS["ide"]}'
+        f'<span class="ide-picker-label">{IDE_PICKER_LABEL}</span></button>'
         f'<ul class="ide-menu" role="menu">{ide_menu_items}</ul></div>'
         f'<button class="btn btn-prov prov-pill prov-pill--{prov_status_color}" '
         f'type="button" data-prov-open '
-        f'aria-label="Report Provenance" '
-        f'title="Report Provenance \u2014 {_escape_html(prov_tooltip)}">'
+        f'aria-label="{PROVENANCE_ARIA_LABEL}" '
+        f'title="{PROVENANCE_TITLE_PREFIX}{_escape_html(prov_tooltip)}">'
         f'<svg class="prov-pill-icon" viewBox="0 0 16 16" width="16" height="16" '
         f'fill="none" stroke="currentColor" stroke-width="1.6" '
         f'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -247,9 +278,9 @@ def build_html_report(
         f'<path d="M5.5 8l1.8 1.8L10.5 6"/></svg>'
         f'<span class="prov-pill-label">{_escape_html(prov_status_label)}</span>'
         f"</button>"
-        f'<button class="theme-toggle" type="button" title="Toggle theme" '
-        f'aria-label="Toggle theme">'
-        f"{ICONS['theme_sun']}{ICONS['theme_moon']}Theme</button>"
+        f'<button class="theme-toggle" type="button" title="{THEME_TOGGLE_LABEL}" '
+        f'aria-label="{THEME_TOGGLE_LABEL}">'
+        f"{ICONS['theme_sun']}{ICONS['theme_moon']}{THEME_BUTTON_TEXT}</button>"
         "</div></div></header>"
     )
 
@@ -266,11 +297,15 @@ def build_html_report(
     )
     _schema_parts: list[str] = []
     if _report_schema:
-        _schema_parts.append(f"Report schema {_escape_html(str(_report_schema))}")
+        _schema_parts.append(
+            f"{FOOTER_SCHEMA_REPORT}{_escape_html(str(_report_schema))}"
+        )
     if _baseline_schema:
-        _schema_parts.append(f"Baseline schema {_escape_html(str(_baseline_schema))}")
+        _schema_parts.append(
+            f"{FOOTER_SCHEMA_BASELINE}{_escape_html(str(_baseline_schema))}"
+        )
     if _cache_schema:
-        _schema_parts.append(f"Cache schema {_escape_html(str(_cache_schema))}")
+        _schema_parts.append(f"{FOOTER_SCHEMA_CACHE}{_escape_html(str(_cache_schema))}")
     _schema_line = (
         f'<div class="report-footer-schemas muted">{" · ".join(_schema_parts)}</div>'
         if _schema_parts
@@ -279,10 +314,11 @@ def build_html_report(
     footer_html = (
         '<footer class="report-footer">'
         '<div class="report-footer-main">'
-        f'<a href="{REPOSITORY_URL}" target="_blank" rel="noopener">CodeClone</a> '
+        f'<a href="{REPOSITORY_URL}" target="_blank" rel="noopener">{FOOTER_BRAND}</a> '
         f'<span class="muted">v{_escape_html(version)}</span> · '
-        f'<a href="{DOCS_URL}" target="_blank" rel="noopener">Docs</a> · '
-        f'<a href="{ISSUES_URL}" target="_blank" rel="noopener">Report Issue</a>'
+        f'<a href="{DOCS_URL}" target="_blank" rel="noopener">{FOOTER_DOCS}</a> · '
+        f'<a href="{ISSUES_URL}" target="_blank" rel="noopener">'
+        f"{FOOTER_REPORT_ISSUE}</a>"
         "</div>"
         f"{_schema_line}"
         "</footer>"
@@ -291,11 +327,11 @@ def build_html_report(
     cmd_palette_html = ""  # removed
     finding_why_modal_html = (
         '<dialog class="finding-why-modal" id="finding-why-modal" '
-        'aria-label="Finding Details">'
+        f'aria-label="{MODAL_FINDING_TITLE}">'
         '<div class="modal-head">'
-        "<h2>Finding Details</h2>"
+        f"<h2>{MODAL_FINDING_TITLE}</h2>"
         '<button class="modal-close" type="button" data-finding-why-close '
-        'aria-label="Close">&times;</button>'
+        f'aria-label="{MODAL_FINDING_CLOSE}">&times;</button>'
         "</div>"
         '<div class="modal-body"></div>'
         "</dialog>"
@@ -303,35 +339,35 @@ def build_html_report(
     help_modal_html = ""  # removed
 
     badge_modal_html = (
-        '<dialog class="badge-modal" id="badge-modal" aria-label="Get Badge">'
+        '<dialog class="badge-modal" id="badge-modal" '
+        f'aria-label="{MODAL_BADGE_TITLE}">'
         '<div class="modal-head">'
-        "<h2>Get Badge</h2>"
+        f"<h2>{MODAL_BADGE_TITLE}</h2>"
         '<button class="modal-close" type="button" data-badge-close '
-        'aria-label="Close">&times;</button>'
+        f'aria-label="{MODAL_FINDING_CLOSE}">&times;</button>'
         "</div>"
         '<div class="modal-body">'
         # -- variant tabs --
         '<div class="badge-tabs" role="tablist">'
         '<button class="badge-tab badge-tab--active" role="tab" '
-        'aria-selected="true" data-badge-tab="grade">Grade only</button>'
+        f'aria-selected="true" data-badge-tab="grade">{BADGE_TAB_GRADE}</button>'
         '<button class="badge-tab" role="tab" '
-        'aria-selected="false" data-badge-tab="full">Score + Grade</button>'
+        f'aria-selected="false" data-badge-tab="full">{BADGE_TAB_FULL}</button>'
         "</div>"
         # -- preview --
         '<div class="badge-preview" id="badge-preview"></div>'
-        '<p class="badge-disclaimer">'
-        "Badge reflects the current report snapshot.</p>"
+        f'<p class="badge-disclaimer">{BADGE_DISCLAIMER}</p>'
         # -- embed fields --
-        '<label class="badge-field-label">Markdown</label>'
+        f'<label class="badge-field-label">{BADGE_FIELD_MARKDOWN}</label>'
         '<div class="badge-code-wrap">'
         '<code class="badge-code" id="badge-code-md"></code>'
-        '<button class="badge-copy-btn" type="button" '
-        'data-badge-copy="md">Copy</button></div>'
-        '<label class="badge-field-label">HTML</label>'
+        f'<button class="badge-copy-btn" type="button" '
+        f'data-badge-copy="md">{BADGE_COPY}</button></div>'
+        f'<label class="badge-field-label">{BADGE_FIELD_HTML}</label>'
         '<div class="badge-code-wrap">'
         '<code class="badge-code" id="badge-code-html"></code>'
-        '<button class="badge-copy-btn" type="button" '
-        'data-badge-copy="html">Copy</button></div>'
+        f'<button class="badge-copy-btn" type="button" '
+        f'data-badge-copy="html">{BADGE_COPY}</button></div>'
         "</div></dialog>"
     )
 

@@ -30,6 +30,20 @@ from enum import Enum
 from fnmatch import fnmatchcase
 from typing import Final
 
+from .messages.verification import (
+    EMPTY_PROFILE_REASON,
+    PROFILE_REASONS,
+)
+from .messages.verification import (
+    profile_accepted_message as _profile_accepted_message,
+)
+from .messages.verification import (
+    profile_limitations as _profile_limitations,
+)
+from .messages.verification import (
+    profile_unverified_message as _profile_unverified_message,
+)
+
 
 class VerificationProfile(str, Enum):
     """Verification depth derived from the patch diff."""
@@ -181,27 +195,6 @@ def check_matrix(profile: VerificationProfile) -> CheckMatrix:
     return _MATRICES[profile]
 
 
-# ── classifier ──────────────────────────────────────────────────────
-
-_PROFILE_REASONS: Final[dict[VerificationProfile, str]] = {
-    VerificationProfile.STATE_ARTIFACT_CHANGE: (
-        "changed files include CodeClone state artifacts"
-    ),
-    VerificationProfile.PYTHON_STRUCTURAL: ("changed files include Python source"),
-    VerificationProfile.GOVERNANCE_CONFIG: (
-        "changed files include governance or analysis configuration"
-    ),
-    VerificationProfile.DOCUMENTATION_ONLY: (
-        "all changed files match documentation patterns"
-    ),
-    VerificationProfile.NON_PYTHON_PATCH: (
-        "changed files are outside Python source and documentation patterns"
-    ),
-}
-
-_EMPTY_REASON: Final = "no changed files detected"
-
-
 @dataclass(frozen=True, slots=True)
 class ClassificationResult:
     """Immutable result of ``classify_patch``."""
@@ -238,7 +231,7 @@ def classify_patch(
     if not changed_files:
         return ClassificationResult(
             profile=VerificationProfile.NON_PYTHON_PATCH,
-            reason=_EMPTY_REASON,
+            reason=EMPTY_PROFILE_REASON,
             python_source_touched=False,
             state_artifact_touched=False,
             governance_config_touched=False,
@@ -274,72 +267,26 @@ def classify_patch(
 
     return ClassificationResult(
         profile=profile,
-        reason=_PROFILE_REASONS[profile],
+        reason=PROFILE_REASONS[profile.value],
         python_source_touched=has_python_source,
         state_artifact_touched=has_state_artifact,
         governance_config_touched=has_governance_config,
     )
 
 
-# ── limitations ─────────────────────────────────────────────────────
-
-_LIMITATIONS: Final[dict[VerificationProfile, tuple[str, ...]]] = {
-    VerificationProfile.NON_PYTHON_PATCH: (
-        "Patch did not touch Python source files, so Python structural "
-        "regressions were not checked.",
-        "Changed files are not classified as documentation-only; "
-        "review non-Python side effects manually.",
-    ),
-    VerificationProfile.DOCUMENTATION_ONLY: (),
-    VerificationProfile.GOVERNANCE_CONFIG: (),
-    VerificationProfile.PYTHON_STRUCTURAL: (),
-    VerificationProfile.STATE_ARTIFACT_CHANGE: (),
-}
-
-
 def profile_limitations(profile: VerificationProfile) -> tuple[str, ...]:
     """Return human-readable limitations for *profile*."""
-    return _LIMITATIONS[profile]
-
-
-# ── message templates ───────────────────────────────────────────────
-
-_ACCEPTED_MESSAGES: Final[dict[VerificationProfile, str]] = {
-    VerificationProfile.DOCUMENTATION_ONLY: (
-        "Patch contract accepted. No Python source files touched; "
-        "structural checks not applicable."
-    ),
-    VerificationProfile.NON_PYTHON_PATCH: (
-        "Patch scope accepted. No Python source files were touched; "
-        "Python structural checks were not applicable. "
-        "Changed files are outside the documentation-only profile, "
-        "so review limitations apply."
-    ),
-}
-
-_UNVERIFIED_MESSAGES: Final[dict[VerificationProfile, str]] = {
-    VerificationProfile.PYTHON_STRUCTURAL: (
-        "Python source files were changed; after_run_id is required "
-        "for structural verification."
-    ),
-    VerificationProfile.GOVERNANCE_CONFIG: (
-        "Configuration that may affect analysis or CI gates was changed; "
-        "after_run_id is required for verification."
-    ),
-}
+    return _profile_limitations(profile.value)
 
 
 def profile_accepted_message(profile: VerificationProfile) -> str:
     """Return the accepted message for a lightweight-verified profile."""
-    return _ACCEPTED_MESSAGES.get(profile, "Patch contract accepted.")
+    return _profile_accepted_message(profile.value)
 
 
 def profile_unverified_message(profile: VerificationProfile) -> str:
     """Return the unverified message when after_run is missing."""
-    return _UNVERIFIED_MESSAGES.get(
-        profile,
-        "after_run_id is required for verification.",
-    )
+    return _profile_unverified_message(profile.value)
 
 
 # ── internals ───────────────────────────────────────────────────────

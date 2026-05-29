@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from ..messages import gates as gate_msgs
+
 __all__ = [
     "parse_metric_reason_entry",
     "policy_context",
@@ -65,58 +67,53 @@ def parse_metric_reason_entry(reason: str) -> tuple[str, str]:
         return trimmed[len(prefix) :]
 
     simple_prefixes: tuple[tuple[str, str], ...] = (
-        ("New high-risk functions vs metrics baseline: ", "new_high_risk_functions"),
-        (
-            "New high-coupling classes vs metrics baseline: ",
-            "new_high_coupling_classes",
-        ),
-        ("New dependency cycles vs metrics baseline: ", "new_dependency_cycles"),
-        ("New dead code items vs metrics baseline: ", "new_dead_code_items"),
+        (gate_msgs.GATE_REASON_NEW_HIGH_RISK_FUNCTIONS, "new_high_risk_functions"),
+        (gate_msgs.GATE_REASON_NEW_HIGH_COUPLING, "new_high_coupling_classes"),
+        (gate_msgs.GATE_REASON_NEW_CYCLES, "new_dependency_cycles"),
+        (gate_msgs.GATE_REASON_NEW_DEAD_CODE, "new_dead_code_items"),
     )
     for prefix, kind in simple_prefixes:
         if trimmed.startswith(prefix):
             return kind, tail(prefix)
 
-    if trimmed.startswith("Health score regressed vs metrics baseline: delta="):
+    if trimmed.startswith(gate_msgs.GATE_REASON_HEALTH_REGRESSION):
         return "health_delta", trimmed.rsplit("=", maxsplit=1)[1]
     typing_detail = _parse_two_part_metric_detail(
         trimmed,
-        prefix="Typing coverage regressed vs metrics baseline: ",
+        prefix=gate_msgs.GATE_REASON_TYPING_REGRESSION,
         right_label="returns_delta",
     )
     if typing_detail is not None:
         return "typing_coverage_delta", typing_detail
-    if trimmed.startswith("Docstring coverage regressed vs metrics baseline: delta="):
+    if trimmed.startswith(gate_msgs.GATE_REASON_DOCSTRING_REGRESSION):
         return "docstring_coverage_delta", trimmed.rsplit("=", maxsplit=1)[1]
-    if trimmed.startswith("Public API breaking changes vs metrics baseline: "):
-        return "api_breaking_changes", tail(
-            "Public API breaking changes vs metrics baseline: "
-        )
+    if trimmed.startswith(gate_msgs.GATE_REASON_API_BREAKING):
+        return "api_breaking_changes", tail(gate_msgs.GATE_REASON_API_BREAKING)
     coverage_detail = _parse_two_part_metric_detail(
         trimmed,
-        prefix="Coverage hotspots detected: ",
+        prefix=gate_msgs.GATE_REASON_COVERAGE_HOTSPOTS,
         right_label="threshold",
     )
     if coverage_detail is not None:
         return "coverage_hotspots", coverage_detail
 
-    if trimmed.startswith("Dependency cycles detected: "):
-        return "dependency_cycles", tail("Dependency cycles detected: ").replace(
-            " cycle(s)", ""
+    if trimmed.startswith(gate_msgs.GATE_REASON_CYCLES_DETECTED):
+        return "dependency_cycles", tail(gate_msgs.GATE_REASON_CYCLES_DETECTED).replace(
+            gate_msgs.GATE_SUFFIX_CYCLES, ""
         )
 
-    if trimmed.startswith("Dead code detected (high confidence): "):
+    if trimmed.startswith(gate_msgs.GATE_REASON_DEAD_CODE_DETECTED):
         return "dead_code_items", tail(
-            "Dead code detected (high confidence): "
-        ).replace(" item(s)", "")
+            gate_msgs.GATE_REASON_DEAD_CODE_DETECTED
+        ).replace(gate_msgs.GATE_SUFFIX_ITEMS, "")
 
     threshold_prefixes: tuple[tuple[str, str], ...] = (
-        ("Complexity threshold exceeded: ", "complexity_max"),
-        ("Coupling threshold exceeded: ", "coupling_max"),
-        ("Cohesion threshold exceeded: ", "cohesion_max"),
-        ("Health score below threshold: ", "health_score"),
-        ("Typing coverage below threshold: ", "typing_coverage"),
-        ("Docstring coverage below threshold: ", "docstring_coverage"),
+        (gate_msgs.GATE_REASON_COMPLEXITY_THRESHOLD, "complexity_max"),
+        (gate_msgs.GATE_REASON_COUPLING_THRESHOLD, "coupling_max"),
+        (gate_msgs.GATE_REASON_COHESION_THRESHOLD, "cohesion_max"),
+        (gate_msgs.GATE_REASON_HEALTH_THRESHOLD, "health_score"),
+        (gate_msgs.GATE_REASON_TYPING_THRESHOLD, "typing_coverage"),
+        (gate_msgs.GATE_REASON_DOCSTRING_THRESHOLD, "docstring_coverage"),
     )
     for prefix, kind in threshold_prefixes:
         threshold_detail = _parse_two_part_metric_detail(
@@ -203,7 +200,11 @@ def print_gating_failure_block(
     entries: tuple[tuple[str, object], ...] | list[tuple[str, object]],
     args: _GatingArgs,
 ) -> None:
-    console.print(f"\n\u2717 GATING FAILURE [{code}]", style="bold red", markup=False)
+    console.print(
+        f"\n\u2717 {gate_msgs.GATE_FAILURE_HEADER.format(code=code)}",
+        style="bold red",
+        markup=False,
+    )
     normalized_entries = [("policy", policy_context(args=args, gate_kind=code))]
     normalized_entries.extend((key, str(value)) for key, value in entries)
     width = max(len(key) for key, _ in normalized_entries)

@@ -11,6 +11,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
+from .messages import claims as claim_msgs
+
 MAX_REVIEW_CLAIM_TEXT_CHARS: Final = 50_000
 TEXT_WINDOW_RADIUS: Final = 80
 SECURITY_SURFACES_FAMILY: Final = "security_surfaces"
@@ -153,14 +155,15 @@ def validate_claims(
 
 def validate_text_input(text: object) -> str:
     if not isinstance(text, str):
-        raise ValueError("text must be a string.")
+        raise ValueError(claim_msgs.ERR_TEXT_NOT_STRING)
     cleaned = text.strip()
     if not cleaned:
-        raise ValueError("text must not be empty.")
+        raise ValueError(claim_msgs.ERR_TEXT_EMPTY)
     if len(text) > MAX_REVIEW_CLAIM_TEXT_CHARS:
         raise ValueError(
-            "text exceeds the maximum supported length "
-            f"({MAX_REVIEW_CLAIM_TEXT_CHARS} characters)."
+            claim_msgs.ERR_TEXT_TOO_LONG.format(
+                max_chars=MAX_REVIEW_CLAIM_TEXT_CHARS,
+            )
         )
     return text
 
@@ -282,10 +285,7 @@ def _check_security_vulnerability_overclaim(
                 pattern="P-1",
                 claim=citation.text_window,
                 cited_id=citation.cited_id,
-                reason=(
-                    "Security Surfaces are report-only trust-boundary inventory, "
-                    "not vulnerability claims."
-                ),
+                reason=claim_msgs.VIOLATION_REASON_SECURITY_NOT_VULNERABILITY,
                 source_flag="security_surfaces.gate_keys=()",
             )
         )
@@ -310,9 +310,8 @@ def _check_report_only_gate_overclaim(
                 pattern="P-2",
                 claim=citation.text_window,
                 cited_id=citation.cited_id,
-                reason=(
-                    f"'{citation.cited_id}' is a report-only signal "
-                    "(gate_keys=()). It cannot fail CI or block a pipeline."
+                reason=claim_msgs.VIOLATION_REASON_REPORT_ONLY_GATE.format(
+                    family=citation.cited_id,
                 ),
                 source_flag=f"{citation.cited_id}.gate_keys=()",
             )
@@ -339,10 +338,7 @@ def _check_known_debt_overclaim(
                 pattern="P-3",
                 claim=citation.text_window,
                 cited_id=citation.cited_id,
-                reason=(
-                    "This finding has novelty='known'; it exists in baseline "
-                    "and cannot be described as a new regression."
-                ),
+                reason=claim_msgs.VIOLATION_REASON_KNOWN_DEBT_OVERCLAIM,
                 source_flag="finding.novelty='known'",
             )
         )
@@ -375,9 +371,8 @@ def _check_dead_code_reachability_overclaim(
                 pattern="P-4",
                 claim=citation.text_window,
                 cited_id=citation.cited_id,
-                reason=(
-                    f"'{reachable[0]}' has runtime reachability evidence; "
-                    "it must not be claimed as definitely dead code."
+                reason=claim_msgs.VIOLATION_REASON_DEAD_CODE_REACHABILITY.format(
+                    qualname=reachable[0],
                 ),
                 source_flag="runtime_reachability.evidence_present",
             )
@@ -404,10 +399,7 @@ def _check_fix_without_verification(
                 pattern="P-5",
                 claim=citation.text_window,
                 cited_id=citation.cited_id,
-                reason=(
-                    "Fix claimed but no post-patch analysis run is available. "
-                    "Run analysis after editing and verify the patch contract."
-                ),
+                reason=claim_msgs.VIOLATION_REASON_FIX_WITHOUT_VERIFICATION,
                 source_flag="session.comparison_run_available=false",
             )
         )
@@ -426,10 +418,7 @@ def _warnings_for_text(
         warnings.append(
             {
                 "type": "no_citations",
-                "message": (
-                    "No known CodeClone finding IDs or metric family citations "
-                    "were found in the text."
-                ),
+                "message": claim_msgs.WARN_NO_CITATIONS,
             }
         )
     for match in _UNKNOWN_SHORT_FINDING_RE.finditer(text):
@@ -438,8 +427,8 @@ def _warnings_for_text(
             warnings.append(
                 {
                     "type": "unknown_finding",
-                    "message": (
-                        f"Finding citation '{cited_id}' is not present in this run."
+                    "message": claim_msgs.WARN_UNKNOWN_FINDING.format(
+                        cited_id=cited_id,
                     ),
                 }
             )
@@ -452,10 +441,8 @@ def _warnings_for_text(
         warnings.append(
             {
                 "type": "structural_checks_not_applicable",
-                "message": (
-                    f"Review references structural verification, but the "
-                    f"verification profile is '{profile}' — structural "
-                    f"checks were not applicable for this patch."
+                "message": claim_msgs.WARN_STRUCTURAL_CHECKS_NOT_APPLICABLE.format(
+                    profile=profile,
                 ),
             }
         )

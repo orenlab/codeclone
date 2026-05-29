@@ -16,6 +16,7 @@ from ._verification_profile import (
     classify_patch,
     profile_limitations,
 )
+from .messages import receipt as receipt_msgs
 
 RECEIPT_VERSION: Final = "1"
 ReceiptFormat = Literal["json", "markdown"]
@@ -38,21 +39,15 @@ class ReceiptPatchStatus(str, Enum):
 CLAIMS_NOT_MADE: Final[tuple[dict[str, str], ...]] = (
     {
         "claim_type": "security_vulnerability",
-        "reason": (
-            "Security Surfaces are report-only trust-boundary inventory, "
-            "not vulnerability claims."
-        ),
+        "reason": receipt_msgs.CLAIM_REASON_SECURITY_NOT_VULNERABILITY,
     },
     {
         "claim_type": "baseline_regression",
-        "reason": (
-            "Known baseline debt was not treated as a new regression; "
-            "novelty='known' remains baseline context."
-        ),
+        "reason": receipt_msgs.CLAIM_REASON_BASELINE_DEBT_NOT_REGRESSION,
     },
     {
         "claim_type": "report_only_ci_failure",
-        "reason": ("Report-only signals were not treated as CI gate failures."),
+        "reason": receipt_msgs.CLAIM_REASON_REPORT_ONLY_NOT_CI_FAILURE,
     },
 )
 
@@ -98,10 +93,7 @@ def derive_human_decision_points(
                 _decision_point(
                     category="clone_divergence",
                     finding_id=str(finding.get("id", "")),
-                    reason=(
-                        "Clone cohort member was in changed scope; "
-                        "confirm divergence is intentional."
-                    ),
+                    reason=receipt_msgs.DECISION_REASON_CLONE_DIVERGENCE,
                 )
             )
         if str(finding.get("novelty", "")).strip() == "known":
@@ -109,10 +101,7 @@ def derive_human_decision_points(
                 _decision_point(
                     category="baseline_debt_touched",
                     finding_id=str(finding.get("id", "")),
-                    reason=(
-                        "Known baseline finding was in changed scope; "
-                        "confirm whether the patch addresses or preserves it."
-                    ),
+                    reason=receipt_msgs.DECISION_REASON_BASELINE_DEBT_TOUCHED,
                 )
             )
     if intent_status == "expanded":
@@ -120,10 +109,7 @@ def derive_human_decision_points(
             _decision_point(
                 category="scope_expansion",
                 finding_id="",
-                reason=(
-                    "Edit scope expanded beyond declared files; "
-                    "human confirmation is required."
-                ),
+                reason=receipt_msgs.DECISION_REASON_SCOPE_EXPANSION,
             )
         )
     return _numbered_decisions(points[:MAX_HUMAN_DECISION_POINTS])
@@ -137,10 +123,7 @@ def derive_claims_not_made(
         claims.append(
             {
                 "claim_type": "suppressed_clone_regression",
-                "reason": (
-                    "Suppressed clone groups were not counted as active new "
-                    "regressions."
-                ),
+                "reason": receipt_msgs.CLAIM_REASON_SUPPRESSED_CLONE_NOT_REGRESSION,
             }
         )
     return claims
@@ -201,15 +184,21 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
     claims = _mapping_rows(receipt.get("claims_not_made"))
 
     lines = [
-        "## CodeClone Agent Review Receipt",
+        receipt_msgs.RECEIPT_MD_TITLE,
         "",
-        f"**Report:** `{provenance.get('report_digest', 'unknown')}`",
+        (
+            f"**Report:** "
+            f"`{provenance.get('report_digest', receipt_msgs.RECEIPT_MD_UNKNOWN)}`"
+        ),
         (
             f"**Schema:** "
             f"`{provenance.get('report_schema_version', REPORT_SCHEMA_VERSION)}`"
         ),
-        f"**Baseline:** {provenance.get('baseline_status', 'unknown')}",
-        "**Review contract:** v1",
+        (
+            f"**Baseline:** "
+            f"{provenance.get('baseline_status', receipt_msgs.RECEIPT_MD_UNKNOWN)}"
+        ),
+        receipt_msgs.RECEIPT_MD_REVIEW_CONTRACT,
         "",
         "---",
     ]
@@ -217,11 +206,11 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
     lines.extend(
         [
             "",
-            "### Scope",
+            receipt_msgs.RECEIPT_MD_SECTION_SCOPE,
         ]
     )
     if scope is None:
-        lines.append("No intent declared.")
+        lines.append(receipt_msgs.RECEIPT_MD_NO_INTENT)
     else:
         lines.extend(
             [
@@ -232,9 +221,9 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
                 f"**Unexpected files:** {_inline_paths(scope.get('unexpected_files'))}",
             ]
         )
-    lines.extend(["", "### Blast Radius"])
+    lines.extend(["", receipt_msgs.RECEIPT_MD_SECTION_BLAST_RADIUS])
     if blast_radius is None:
-        lines.append("Not available.")
+        lines.append(receipt_msgs.RECEIPT_MD_NOT_AVAILABLE)
     else:
         lines.extend(
             [
@@ -253,7 +242,7 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
                 ),
             ]
         )
-    lines.extend(["", "### Reviewed Evidence"])
+    lines.extend(["", receipt_msgs.RECEIPT_MD_SECTION_REVIEWED_EVIDENCE])
     lines.append(
         f"**Reviewed:** {reviewed.get('reviewed_count', 0)} / "
         f"{reviewed.get('total_gate_relevant', 0)} gate-relevant findings"
@@ -266,10 +255,10 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
             f" ({item.get('severity', 'info')}){suffix}"
         )
     if not _mapping_rows(reviewed.get("items")):
-        lines.append("- none")
-    lines.extend(["", "### Patch Contract"])
+        lines.append(receipt_msgs.RECEIPT_MD_LIST_NONE)
+    lines.extend(["", receipt_msgs.RECEIPT_MD_SECTION_PATCH_CONTRACT])
     if patch is None:
-        lines.append("Not available.")
+        lines.append(receipt_msgs.RECEIPT_MD_NOT_AVAILABLE)
     else:
         lines.extend(
             [
@@ -282,11 +271,11 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
     lines.extend(
         [
             "",
-            "### Structural Delta",
+            receipt_msgs.RECEIPT_MD_SECTION_STRUCTURAL_DELTA,
             f"**Verdict:** {structural_delta.get('verdict', 'stable')}",
             f"**Health delta:** {_signed_delta(structural_delta.get('health_delta'))}",
             "",
-            "### Human Decisions Requested",
+            receipt_msgs.RECEIPT_MD_SECTION_HUMAN_DECISIONS,
         ]
     )
     if decisions:
@@ -295,8 +284,8 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
             for decision in decisions
         )
     else:
-        lines.append("- none")
-    lines.extend(["", "### Claims Not Made"])
+        lines.append(receipt_msgs.RECEIPT_MD_LIST_NONE)
+    lines.extend(["", receipt_msgs.RECEIPT_MD_SECTION_CLAIMS_NOT_MADE])
     lines.extend(f"- {claim.get('reason', '')}" for claim in claims)
     lines.extend(
         [
