@@ -9,7 +9,9 @@ Centralize machine-readable status sets used across baseline/cache/report/CLI co
 - Baseline statuses: `codeclone/baseline/trust.py:BaselineStatus`
 - Cache statuses: `codeclone/cache/versioning.py:CacheStatus`
 - Exit categories: `codeclone/contracts/__init__.py:ExitCode`
+- Intent status: `codeclone/surfaces/mcp/_intent.py:IntentStatus`
 - Intent ownership: `codeclone/surfaces/mcp/_workspace_intents.py:IntentOwnership`
+- Workspace intent status: `codeclone/surfaces/mcp/_workspace_intents.py:WorkspaceIntentStatus`
 - Patch contract: `codeclone/surfaces/mcp/_patch_contract.py:PatchContractStatus`
 - Verification profile: `codeclone/surfaces/mcp/_verification_profile.py:VerificationProfile`
 
@@ -55,6 +57,20 @@ Defined by `BASELINE_UNTRUSTED_STATUSES`.
 - `3` gating failure
 - `5` internal error
 
+### IntentStatus
+
+- `active`
+- `queued`
+- `clean`
+- `expanded`
+- `violated`
+- `unverified`
+- `expired`
+
+Semantics are defined in
+[Structural Change Controller § Pre-Change Workflow](../24-structural-change-controller.md#pre-change-workflow)
+and [§ Intent Queue](../24-structural-change-controller.md#intent-queue).
+
 ### IntentOwnership
 
 - `own_active`
@@ -77,6 +93,27 @@ Semantics are defined in
 
 Semantics are defined in
 [Structural Change Controller § Scope-Aware Patch Contract Verification](../24-structural-change-controller.md#scope-aware-patch-contract-verification).
+
+### WorkspaceIntentStatus
+
+- `active`
+- `queued`
+
+Workspace registry records mirror the session-local `IntentStatus` for `active`
+and `queued`. Other session-local statuses (`clean`, `expanded`, etc.) are not
+persisted to the workspace registry.
+
+### VerificationProfile
+
+- `state_artifact_change`
+- `python_structural`
+- `governance_config`
+- `documentation_only`
+- `non_python_patch`
+
+Priority-ordered. A single file from a higher-priority category overrides
+the entire patch. Semantics are defined in
+[Structural Change Controller § Verification Profiles](../24-structural-change-controller.md#verification-profiles).
 
 ## Contracts
 

@@ -6,6 +6,22 @@
 
 ### Added
 
+- Add intent queue for multi-agent scope coordination. When scope overlaps a
+  foreign active intent, `manage_change_intent(action="declare",
+  on_conflict="queue")` creates a queued intent instead of reporting a conflict.
+  Queued intents are visible in workspace listings but do not own scope, do not
+  pin the before-run, and cannot pass patch verification. A separate
+  `manage_change_intent(action="promote")` transitions queued → active after
+  re-checking workspace conflicts, pinning the run, and renewing the lease. If
+  conflicts persist, promote returns `blocking_count` without state change.
+- Add verify ergonomics: `check_patch_contract(mode="verify")` auto-resolves
+  `before_run_id` from the intent record when `intent_id` is provided but
+  `before_run_id` is omitted. Non-accepted verify responses include `next_step`
+  with an actionable hint for each failure reason and
+  `claim_validation_recommended` to advise whether `validate_review_claims` is
+  meaningful for the verification profile.
+- Add `intent.queued`, `intent.promoted`, and `intent.queue_blocked` audit trail
+  events with compact payload handlers for MCP payload token budget tracking.
 - Add MCP `get_blast_radius` as a deterministic pre-change projection over the
   canonical report: direct dependents, clone cohorts, dependency-cycle
   membership, coverage/risk signals, actionable do-not-touch paths, and
@@ -46,6 +62,10 @@
 
 ### Internal
 
+- Keep queued intents unpinned: active intents call `_runs.pin()` to prevent
+  eviction from bounded history, queued intents do not — pinning happens at
+  promotion. Conflict detection in `_detect_scope_state` skips records with
+  `status == "queued"` so queued records do not block active declares.
 - Keep intent and blast-radius cache state in MCP process memory only; they do
   not mutate source files, baselines, cache artifacts, reports, or canonical
   report integrity. Workspace intent files are ephemeral coordination state,

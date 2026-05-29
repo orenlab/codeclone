@@ -23,6 +23,8 @@ queries:
 | Scope-aware verification    | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
 | Workspace relations         | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
 | Verification profiles       | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
+| Intent queue                | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
+| Verify ergonomics           | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
 | MCP payload token budget    | Live in `2.1.0a1` | Audit trail, CLI `--audit`, `--session-stats`    |
 
 ## Contract
@@ -355,6 +357,99 @@ indistinguishable:
    signal.
 3. No edit overlap, but the current agent explicitly excludes the foreign
    agent's target files (`target_excludes_foreign`).
+
+## Intent Queue
+
+When multiple agents target overlapping scope, `manage_change_intent` supports
+an advisory queue so a blocked agent can register its intent without failing.
+
+### Declare with queue
+
+`manage_change_intent(action="declare", on_conflict="queue")` first attempts a
+normal declare. If `detect_conflicts` finds overlapping foreign active intents,
+it downgrades the already-registered intent to `queued` instead of returning an
+error.
+
+A queued intent:
+
+- Is visible in `list_workspace` as a workspace record with `status="queued"`.
+- Does **not** own scope — conflict detection skips queued records.
+- Does **not** pin the before-run — long waits may cause eviction from bounded
+  run history.
+- Cannot pass `check_patch_contract(mode="verify")` or
+  `check_patch_contract(mode="budget")` with `edit_allowed=true`.
+- Can be cleared via `manage_change_intent(action="clear")`.
+
+The declare response includes `blocked_by` (list of blocking intents with
+`intent_id`, `agent_pid`, `ownership`, `overlapping_files`) and
+`queue_position` (deterministic ordering by `declared_at_utc`, then
+`intent_id`).
+
+### Promote
+
+`manage_change_intent(action="promote", intent_id=...)` transitions a queued
+intent to active:
+
+1. Validates the intent has `status="queued"`.
+2. Resolves the before-run — if evicted, returns `status="unverified"` with
+   `reason="before_run_evicted"` and a `next_step` hint.
+3. Re-checks workspace conflicts. If conflicts persist, returns `status="queued"`
+   with `blocking_count` and `blocked_by` without changing state.
+4. On success: sets status to `active`, pins the run, renews the lease, and
+   updates the workspace record.
+
+### Queue semantic invariants
+
+- `queued` is a lifecycle status, not an ownership classification. Ownership
+  (`own_active`, `foreign_active`, etc.) and status (`active`, `queued`) are
+  orthogonal.
+- Queued intents do not block other agents. `_detect_scope_state` skips records
+  with `status == "queued"`.
+- Queue position is deterministic: sorted by `declared_at_utc`, then
+  `intent_id` as tiebreaker.
+
+### Audit events
+
+| Event                  | When                           |
+|------------------------|--------------------------------|
+| `intent.queued`        | Declare downgrades to queued   |
+| `intent.promoted`      | Promote succeeds               |
+| `intent.queue_blocked` | Promote blocked by conflicts   |
+
+## Verify Ergonomics
+
+`check_patch_contract(mode="verify")` includes three ergonomic features that
+reduce agent error and wasted context tokens.
+
+### Auto-resolve before_run_id
+
+When `intent_id` is provided but `before_run_id` is omitted, verify resolves
+the before-run from the intent record's `run_id`. This eliminates the most
+common agent error: forgetting to pass `before_run_id`.
+
+### Next-step hints
+
+Non-accepted verify responses include a `next_step` field with an actionable
+hint matched to the failure reason:
+
+| Reason                              | Hint                                                    |
+|-------------------------------------|---------------------------------------------------------|
+| `no_before_run`                     | Run analysis or pass intent_id to auto-resolve          |
+| `no_after_run`                      | Run analysis after editing and pass after_run_id        |
+| `after_run_required_for_governance` | Governance changes require post-edit analysis           |
+| `incomparable_runs`                 | Re-run analysis with the same settings                  |
+| `intent_not_active`                 | Queued intent must be promoted first                    |
+| `report_digest_mismatch`            | Use the original intent_id with the original before-run |
+| `state_artifact_mutation`           | Remove baseline/cache files from the patch              |
+| `scope_violation`                   | Redeclare intent with expanded scope                    |
+
+### Claim validation recommended
+
+The `claim_validation_recommended` boolean in verify responses advises whether
+calling `validate_review_claims` is meaningful for the verification profile.
+It is `true` for `python_structural` and `governance_config` profiles, `false`
+for `documentation_only`, `non_python_patch`, `state_artifact_change`, and
+non-accepted outcomes.
 
 ## MCP Payload Token Budget
 

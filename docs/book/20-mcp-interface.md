@@ -121,9 +121,9 @@ drill into one finding or one hotspot family.
 
 | Tool                     | Key parameters                                                                                              | Purpose                                                                                     |
 |--------------------------|-------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
-| `manage_change_intent`   | `action`, `root`, `run_id`, `intent_id`, `scope`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, list_workspace, gc_workspace, recover, reset_workspace. Declare returns `workspace_relations` with forbidden-scope signals |
+| `manage_change_intent`   | `action`, `root`, `run_id`, `intent_id`, `scope`, `on_conflict`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace. `on_conflict="queue"` creates a queued intent when scope overlaps a foreign active. `action="promote"` transitions queued → active. Declare returns `workspace_relations` with forbidden-scope signals |
 | `get_blast_radius`       | `run_id`, `files`, `depth`, `include`                                                                       | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context           |
-| `check_patch_contract`   | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref` | Budget query or post-edit verification                                                      |
+| `check_patch_contract`   | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref` | Budget query or post-edit verification. Verify auto-resolves `before_run_id` from intent when omitted. Non-accepted responses include `next_step` hint and `claim_validation_recommended` flag |
 | `create_review_receipt`  | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                           | Deterministic audit artifact: provenance, scope, reviewed findings, patch status            |
 | `validate_review_claims` | `text`, `run_id`, `require_citations`                                                                       | Citation-based overclaim detection against stored run semantics                             |
 
@@ -136,16 +136,20 @@ drill into one finding or one hotspot family.
 
 ??? info "Patch contract modes"
     **Budget** reads one stored run and optional intent. Shows regression
-    headroom per quality dimension before editing. **Verify** compares
-    explicit before/after stored runs, previews gates, validates scope, and
-    reports baseline-abuse signals. Missing runs return
-    `status="unverified"`.
+    headroom per quality dimension before editing. Queued intents return
+    `edit_allowed=false`. **Verify** compares explicit before/after stored
+    runs, previews gates, validates scope, and reports baseline-abuse
+    signals. When `intent_id` is provided but `before_run_id` is omitted,
+    verify auto-resolves the before-run from the intent record. Missing runs
+    return `status="unverified"`. Non-accepted responses include a
+    `next_step` hint and `claim_validation_recommended` flag.
 
     When a change intent is active, verify mode attributes regressions and
     gate changes to the declared scope. Intent-scope regressions produce
     contract violations; external regressions are reported as informational
-    context. See
-    [Scope-Aware Patch Contract Verification](24-structural-change-controller.md#scope-aware-patch-contract-verification).
+    context. Queued intents are rejected with `reason="intent_not_active"`.
+    See [Scope-Aware Patch Contract Verification](24-structural-change-controller.md#scope-aware-patch-contract-verification)
+    and [Verify Ergonomics](24-structural-change-controller.md#verify-ergonomics).
 
 ### Session-local tools
 

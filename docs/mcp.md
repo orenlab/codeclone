@@ -278,6 +278,15 @@ sequenceDiagram
     A ->> M: declare(scope, intent)
     M ->> D: write intent record
     M -->> A: intent_id, blast_radius, concurrent_intents
+    alt Scope conflict with on_conflict="queue"
+        A ->> M: declare(scope, intent, on_conflict="queue")
+        M ->> D: write queued intent record
+        M -->> A: status=queued, blocked_by, queue_position
+        Note over A: Wait for foreign intent to clear
+        A ->> M: promote(intent_id)
+        M ->> D: re-check conflicts, update to active
+        M -->> A: status=active
+    end
     A ->> M: get_blast_radius(files)
     M -->> A: do_not_touch, review_context
     A ->> M: check_patch_contract(mode=budget)
@@ -306,7 +315,7 @@ sequenceDiagram
 
 | Tool                     | Purpose                                                                                                     |
 |--------------------------|-------------------------------------------------------------------------------------------------------------|
-| `manage_change_intent`   | Intent lifecycle: declare, get, check, clear, renew, list_workspace, gc_workspace, recover, reset_workspace |
+| `manage_change_intent`   | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace |
 | `get_blast_radius`       | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                           |
 | `check_patch_contract`   | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                      |
 | `create_review_receipt`  | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile      |
@@ -320,11 +329,15 @@ debt. Review context is information, not an edit ban.
 
 ??? info "Patch contract modes"
 **Budget** reads one stored run and optional intent. Shows regression
-headroom per quality dimension before editing. **Verify** compares explicit
-before/after stored runs, previews gates, validates scope, and reports
-baseline-abuse signals. Verify derives a **verification profile** from
-changed files — docs-only and non-Python patches skip structural checks;
-Python source changes require a full after-run. Missing runs return
+headroom per quality dimension before editing. Queued intents return
+`edit_allowed=false`. **Verify** compares explicit before/after stored
+runs, previews gates, validates scope, and reports baseline-abuse signals.
+When `intent_id` is provided but `before_run_id` is omitted, verify
+auto-resolves the before-run from the intent record. Verify derives a
+**verification profile** from changed files — docs-only and non-Python
+patches skip structural checks; Python source changes require a full
+after-run. Non-accepted responses include a `next_step` hint and
+`claim_validation_recommended` flag. Missing runs return
 `status=unverified`.
 
 ### Phase 6: Session management
@@ -399,10 +412,23 @@ manage_change_intent(action="list_workspace")
   -> manage_change_intent(action="renew", intent_id=...)                         # optional: long edits
   -> analyze_repository                                                          # after-run
   -> manage_change_intent(action="check", intent_id=..., changed_files=[...])
-  -> check_patch_contract(mode="verify", before_run_id=..., after_run_id=..., intent_id=...)
-  -> validate_review_claims(text="...")
+  -> check_patch_contract(mode="verify", after_run_id=..., intent_id=...)        # before_run_id auto-resolved
+  -> validate_review_claims(text="...")                                           # if claim_validation_recommended
   -> create_review_receipt
   -> manage_change_intent(action="clear")
+```
+
+### Multi-agent queue
+
+```
+manage_change_intent(action="list_workspace")                                    # foreign_active found
+  -> analyze_repository
+  -> manage_change_intent(action="declare", scope={...}, on_conflict="queue")    # queued behind foreign
+  -> [wait for foreign intent to clear]
+  -> manage_change_intent(action="promote", intent_id=...)                       # queued → active
+  -> get_blast_radius(files=[...])
+  -> check_patch_contract(mode="budget")
+  -> [edit within scope, then verify as normal]
 ```
 
 ### Coverage review
