@@ -4241,6 +4241,112 @@ def test_mcp_patch_contract_verify_incomparable_and_expired_edges(
     assert expired["status"] == "expired"
 
 
+def _seed_docs_intent(
+    root: Path,
+    *,
+    run_id: str = "docseed112345678",
+    digest: str = "docs-seed-digest",
+    intent_text: str = "docs intent",
+) -> tuple[CodeCloneMCPService, str]:
+    """Create a service with one registered run and a README-scoped intent."""
+    service = CodeCloneMCPService(history_limit=4)
+    before = _patch_contract_run_record(
+        root,
+        run_id=run_id,
+        digest=digest,
+        include_regression=False,
+        complexity=6,
+        health=90,
+    )
+    service._runs.register(before)
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id=run_id[:8],
+        scope={"allowed_files": ["README.md"]},
+        intent=intent_text,
+    )
+    return service, str(declared["intent_id"])
+
+
+def test_mcp_verify_auto_resolves_before_run_id_from_intent(
+    tmp_path: Path,
+) -> None:
+    """When before_run_id is omitted but intent_id is provided, verify
+    auto-resolves before_run_id from the intent's stored run_id."""
+    service, intent_id = _seed_docs_intent(
+        tmp_path, run_id="autoresol12345678", digest="auto-resolve-digest"
+    )
+
+    # Verify WITHOUT before_run_id — should auto-resolve from intent.
+    result = service.check_patch_contract(
+        mode="verify",
+        intent_id=intent_id,
+        changed_files=["README.md"],
+    )
+    assert result["status"] == "accepted"
+    assert result["intent_id"] == intent_id
+    before_ref = cast("dict[str, object]", result["before"])
+    assert before_ref["run_id"] == "autoreso"
+
+    # Without intent_id AND without before_run_id → still unverified.
+    no_ids = service.check_patch_contract(mode="verify")
+    assert no_ids["status"] == "unverified"
+    assert no_ids["reason"] == "no_before_run"
+
+
+def test_mcp_verify_returns_next_step_hints(tmp_path: Path) -> None:
+    """Non-accepted verify responses include actionable next_step hints."""
+    service = CodeCloneMCPService(history_limit=4)
+
+    # no_before_run: no before_run_id and no intent_id
+    no_before = service.check_patch_contract(mode="verify")
+    assert no_before["status"] == "unverified"
+    assert no_before["reason"] == "no_before_run"
+    assert isinstance(no_before["next_step"], str)
+    assert "before_run_id" in no_before["next_step"]
+
+    # no_after_run: before_run provided, no after and no evidence
+    before = _patch_contract_run_record(
+        tmp_path,
+        run_id="hinttest12345678",
+        digest="hint-digest",
+        include_regression=False,
+        complexity=6,
+        health=90,
+    )
+    service._runs.register(before)
+    no_after = service.check_patch_contract(
+        mode="verify",
+        before_run_id="hinttest",
+    )
+    assert no_after["status"] == "unverified"
+    assert isinstance(no_after["next_step"], str)
+    assert "after_run_id" in no_after["next_step"]
+
+
+def test_mcp_verify_returns_claim_validation_recommended(
+    tmp_path: Path,
+) -> None:
+    """Verify responses include claim_validation_recommended flag."""
+    service, intent_id = _seed_docs_intent(
+        tmp_path, run_id="claimval12345678", digest="claim-val-digest"
+    )
+
+    # Docs-only fast path: claim validation not recommended
+    docs_result = service.check_patch_contract(
+        mode="verify",
+        before_run_id="claimval",
+        intent_id=intent_id,
+        changed_files=["README.md"],
+    )
+    assert docs_result["status"] == "accepted"
+    assert docs_result["claim_validation_recommended"] is False
+
+    # Unverified without classification: defaults to recommended (unknown profile)
+    no_before = service.check_patch_contract(mode="verify")
+    assert no_before["claim_validation_recommended"] is True
+
+
 def test_claim_guard_detects_deterministic_overclaims() -> None:
     payload = mcp_claim_guard_mod.validate_claims(
         text=(

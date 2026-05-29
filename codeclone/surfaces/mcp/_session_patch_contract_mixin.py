@@ -141,10 +141,16 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         changed_files: Sequence[str] | None,
     ) -> dict[str, object]:
         # ── 1. Resolve before-run (required for intent binding) ─────
-        if before_run_id is None:
+        #   When intent_id is provided but before_run_id is not, auto-
+        #   resolve from the intent's stored run_id.  This removes one
+        #   mandatory parameter the agent must track across sessions.
+        resolved_before_run_id = before_run_id
+        if resolved_before_run_id is None and intent_id is not None:
+            resolved_before_run_id = self._before_run_id_from_intent(intent_id)
+        if resolved_before_run_id is None:
             return self._unverified_patch_contract(reason="no_before_run")
         try:
-            before = self._runs.get(before_run_id)
+            before = self._runs.get(resolved_before_run_id)
         except MCPRunNotFoundError:
             return self._unverified_patch_contract(reason="no_before_run")
 
@@ -254,6 +260,64 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         if strictness == "relaxed":
             return "relaxed"
         return "ci"
+
+    def _before_run_id_from_intent(self, intent_id: str) -> str | None:
+        """Resolve before_run_id from an active intent's stored run_id."""
+        with self._state_lock:
+            intent = self._active_intents.get(intent_id)
+        if intent is not None:
+            return intent.run_id
+        return None
+
+    @staticmethod
+    def _next_step_hint(reason: str) -> str | None:
+        """Return an actionable hint for non-accepted verify outcomes."""
+        hints: dict[str, str] = {
+            "no_before_run": (
+                "Run analyze_repository, then pass the run_id as"
+                " before_run_id — or pass intent_id to auto-resolve."
+            ),
+            "no_after_run": (
+                "Run analyze_repository after editing, then pass the"
+                " new run_id as after_run_id."
+            ),
+            "after_run_required_for_governance": (
+                "Governance config changes require a post-edit analysis."
+                " Run analyze_repository and pass after_run_id."
+            ),
+            "incomparable_runs": (
+                "Before and after runs are not comparable."
+                " Re-run analyze_repository with the same settings."
+            ),
+            "report_digest_mismatch": (
+                "Intent was declared against a different report."
+                " Do not redeclare on the after-run — use the original"
+                " intent_id with the original before_run_id."
+            ),
+            "state_artifact_mutation": (
+                "Baseline, cache, or generated state was touched."
+                " Remove those files from the patch and use a separate"
+                " workflow."
+            ),
+            "scope_violation": (
+                "Patch touched files outside declared scope."
+                " Redeclare intent with expanded scope, or remove the"
+                " out-of-scope changes."
+            ),
+        }
+        return hints.get(reason)
+
+    @staticmethod
+    def _claim_validation_recommended(
+        classification: ClassificationResult | None,
+    ) -> bool:
+        """Decide whether claim validation is meaningful for the profile."""
+        if classification is None:
+            return True
+        return classification.profile in (
+            VerificationProfile.PYTHON_STRUCTURAL,
+            VerificationProfile.GOVERNANCE_CONFIG,
+        )
 
     def _optional_intent(
         self,
@@ -450,10 +514,11 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             and scope_check.get("status") == IntentStatus.VIOLATED.value
         ):
             violations.append("scope_violation")
+        reason = "state_artifact_mutation"
         payload: dict[str, object] = {
             "mode": "verify",
             "status": PatchContractStatus.VIOLATED.value,
-            "reason": "state_artifact_mutation",
+            "reason": reason,
             "before": self._run_ref_payload(before),
             "after": None,
             "intent_id": intent.intent_id if intent is not None else None,
@@ -461,6 +526,8 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             "contract_violations": violations,
             "blocking_violations": violations,
             **profile_payload,
+            "next_step": self._next_step_hint(reason),
+            "claim_validation_recommended": False,
             "message": (
                 "Patch touched CodeClone generated state. "
                 "This requires a separate explicit workflow."
@@ -499,11 +566,12 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
 
         # Scope violation is always blocking, regardless of profile.
         if scope_violated and strictness != "relaxed":
-            violations = ["scope_violation"]
+            reason = "scope_violation"
+            violations = [reason]
             payload: dict[str, object] = {
                 "mode": "verify",
                 "status": PatchContractStatus.VIOLATED.value,
-                "reason": "scope_violation",
+                "reason": reason,
                 "before": self._run_ref_payload(before),
                 "after": None,
                 "intent_id": (intent.intent_id if intent is not None else None),
@@ -511,6 +579,8 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
                 "contract_violations": violations,
                 "blocking_violations": violations,
                 **profile_payload,
+                "next_step": self._next_step_hint(reason),
+                "claim_validation_recommended": False,
                 "message": self._verify_message(
                     status=PatchContractStatus.VIOLATED.value,
                     violations=tuple(violations),
@@ -566,6 +636,9 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             "blocking_violations": [],
             **profile_payload,
             "limitations": limitations,
+            "claim_validation_recommended": self._claim_validation_recommended(
+                classification
+            ),
             "message": profile_accepted_message(profile),
         }
         self._audit_emit(
@@ -659,6 +732,7 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         else:
             status = PatchContractStatus.ACCEPTED.value
         profile_payload = classification.to_payload()
+        violated = status == PatchContractStatus.VIOLATED.value
         payload: dict[str, object] = {
             "mode": "verify",
             "status": status,
@@ -682,6 +756,7 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             "contract_violations": list(violations),
             "blocking_violations": list(blocking_violations),
             **profile_payload,
+            "claim_validation_recommended": not violated,
             "message": self._verify_message(status=status, violations=violations),
         }
         event_type = (
@@ -1027,6 +1102,10 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             "scope_check": scope_check,
             "contract_violations": [],
             **profile_fields,
+            "next_step": self._next_step_hint(reason),
+            "claim_validation_recommended": self._claim_validation_recommended(
+                classification
+            ),
             "message": message,
         }
 
@@ -1037,14 +1116,17 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
         after: MCPRunRecord,
         intent: IntentRecord,
     ) -> dict[str, object]:
+        reason = "report_digest_mismatch"
         payload: dict[str, object] = {
             "mode": "verify",
             "status": PatchContractStatus.EXPIRED.value,
-            "reason": "report_digest_mismatch",
+            "reason": reason,
             "before": self._run_ref_payload(before),
             "after": self._run_ref_payload(after),
             "intent_id": intent.intent_id,
             "contract_violations": ["intent_expired"],
+            "next_step": self._next_step_hint(reason),
+            "claim_validation_recommended": False,
             "message": (
                 "Patch contract expired: intent was declared for another report digest."
             ),
