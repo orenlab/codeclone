@@ -219,10 +219,16 @@ report document used by JSON/HTML/SARIF.
 
 Security boundaries:
 
-- Read-only by design — no tool mutates source files, baselines, or repo state.
+- Read-only with respect to source files, baselines, analysis cache
+  (`cache.json`), and canonical report artifacts.
+- Allowed repo-local writes are limited to ephemeral controller coordination
+  (`.cache/codeclone/intents/`) and optional audit trail
+  (`.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true`).
+- Session-local review markers and in-memory run history do not survive
+  process restart.
 - `--allow-remote` guard required for non-local transports; default is `stdio`.
-- Cache policies `reuse`, `refresh`, and `off` are accepted by MCP.
-- Review markers are session-local in-memory state, never persisted.
+- MCP accepts cache policies `reuse` and `off`; `refresh` is rejected at
+  runtime with a contract error.
 - Run history bounded by `--history-limit` to prevent unbounded memory growth.
 - `git_diff_ref` validated as a safe single revision expression before any
   `git diff` subprocess call.

@@ -9,6 +9,7 @@ The following versions currently receive security updates:
 
 | Version | Supported |
 |---------|-----------|
+| 2.1.x   | Yes       |
 | 2.0.x   | Yes       |
 | 1.4.x   | No        |
 | 1.3.x   | No        |
@@ -43,7 +44,9 @@ CodeClone operates purely on static input and follows a conservative execution m
 ### Baseline and cache integrity
 
 - Baseline files are schema/type validated with size limits and tamper-evident integrity fields
-  (`meta.generator` as trust gate, `meta.payload_sha256` as integrity hash in baseline schema `2.0`).
+  (`meta.generator` as trust gate, `meta.payload_sha256` as integrity hash in
+  baseline schema `2.1`; legacy `2.0` payloads remain readable under the trust
+  model).
 - Baseline integrity is tamper-evident (audit signal), not tamper-proof cryptographic signing.
   An actor who can rewrite baseline content and recompute `payload_sha256` can still alter it.
 - Baseline hash covers canonical clone payload (`clones.functions`, `clones.blocks`,
@@ -64,8 +67,13 @@ CodeClone operates purely on static input and follows a conservative execution m
 CodeClone includes an optional read-only MCP server (`codeclone[mcp]`) that exposes
 analysis results over JSON-RPC (stdio transport).
 
-- The MCP server is **read-only**: it never mutates baselines, source files, cache, or repo state.
-- Session-local review markers are in-memory only and discarded on process exit.
+- The MCP server is **read-only** with respect to source files, baselines,
+  analysis cache, and canonical report artifacts.
+- Allowed repo-local writes are limited to ephemeral controller coordination
+  (`.cache/codeclone/intents/`) and optional audit trail
+  (`.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true`).
+- Session-local review markers and in-memory run history do not survive process
+  exit.
 - Tool arguments that accept git refs (`git_diff_ref`) are validated against a strict regex
   to prevent command injection via `subprocess` calls.
 - The MCP run store is bounded (`history_limit`) with FIFO eviction to prevent unbounded

@@ -553,8 +553,9 @@ include `total`, `shown`, and `truncated` summaries.
 | Remote exposure   | Explicit `--allow-remote` required for non-loopback        |
 | Lazy loading      | Base `codeclone` install does not require MCP packages     |
 | Repository access | Limited to what the server process can read locally        |
-| Session state     | In-memory only; does not survive restart                   |
+| Session state     | In-memory runs and review markers; do not survive restart  |
 | Workspace intents | Ephemeral coordination under `.cache/codeclone/intents/`   |
+| Audit trail       | Optional SQLite under `.cache/codeclone/db/` when enabled  |
 
 ---
 

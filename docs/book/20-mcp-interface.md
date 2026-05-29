@@ -214,6 +214,7 @@ not trigger analysis.
 - Change intent, blast-radius cache, and workspace registry state do not
   enter canonical report integrity, baseline, or cache artifacts.
 - Run history is process-local and does not survive restart.
+- MCP accepts cache policies `reuse` and `off`; `refresh` is rejected at runtime.
 - Missing optional MCP dependency is surfaced explicitly by the launcher.
 - `metrics_detail(family="security_surfaces")` exposes a compact, report-only
   inventory of security-relevant capability surfaces. It does not claim
@@ -230,7 +231,7 @@ not trigger analysis.
 | Default transport | Local `stdio`                                                                   |
 | Remote exposure   | Explicit `--allow-remote` required for non-loopback                             |
 | Lazy loading      | Base installs and CI do not require MCP packages                                |
-| Read-only         | Never mutates repo state or synthesizes findings outside canonical report facts |
+| Read-only         | Never mutates source, baseline, cache, or report artifacts; optional ephemeral coordination under `.cache/codeclone/intents/` and audit DB when enabled |
 
 ---
 

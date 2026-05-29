@@ -29,11 +29,19 @@ Security-relevant input classes:
 - Sensitive root directories are blocked by scanner policy.
 - Symlink traversal outside the root is skipped.
 - HTML escapes text and attribute contexts before embedding.
-- MCP is read-only by design:
-  no tool mutates source files, baselines, cache, or report artifacts.
+- MCP is read-only with respect to source files, baselines, analysis cache
+  (`cache.json`), and canonical report artifacts.
+- Allowed repo-local writes are limited to ephemeral controller coordination
+  (`.cache/codeclone/intents/`) and optional audit trail
+  (`.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true`).
+- Session-local review markers and in-memory run history do not survive
+  process restart.
+- Five session/coordination tools are marked `destructiveHint` in MCP metadata
+  (`manage_change_intent`, `start_controlled_change`,
+  `finish_controlled_change`, `mark_finding_reviewed`, `clear_session_runs`).
 - `--allow-remote` is required for non-local transports.
-- Cache policies `reuse`, `refresh`, and `off` are accepted by MCP.
-- Review markers are session-local in-memory state only.
+- MCP accepts cache policies `reuse` and `off`; `refresh` is rejected at
+  runtime with a contract error.
 - `git_diff_ref` is validated as a safe single revision expression before any `git diff` subprocess call.
 
 Refs:
