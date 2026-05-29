@@ -45,7 +45,8 @@ It must not:
 
 The plugin currently provides:
 
-- `.codex-plugin/plugin.json`
+- `.codex-plugin/plugin.json` — version tracks the CodeClone package release
+  line in `pyproject.toml` (currently `2.1.0a1`)
 - `.mcp.json`
 - `scripts/launch_mcp`
 - `README.md`

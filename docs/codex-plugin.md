@@ -23,6 +23,10 @@ Install the plugin from the Codex marketplace:
 marketplace add orenlab/codeclone-codex
 ```
 
+The plugin manifest version tracks the CodeClone package release line (currently
+`2.1.0a1` in this monorepo). It describes the bundled guidance surface, not the
+live MCP tool count — tools come from the resolved `codeclone-mcp` server.
+
 The plugin expects a local `codeclone-mcp` command. Install CodeClone with the
 MCP extra in the workspace or globally:
 

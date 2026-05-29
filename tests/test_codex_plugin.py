@@ -18,16 +18,24 @@ def _assert_contains_all(text: str, needles: tuple[str, ...]) -> None:
         assert needle in text
 
 
+def _codeclone_package_version(root: Path) -> str:
+    for line in (root / "pyproject.toml").read_text(encoding="utf-8").splitlines():
+        if line.startswith("version = "):
+            return line.split("=", 1)[1].strip().strip('"')
+    raise AssertionError("pyproject.toml version not found")
+
+
 def test_codex_plugin_manifest_is_consistent() -> None:
     root = Path(__file__).resolve().parents[1]
     plugin_root = root / "plugins" / "codeclone"
     manifest = _load_json(plugin_root / ".codex-plugin" / "plugin.json")
     marketplace = _load_json(root / ".agents" / "plugins" / "marketplace.json")
+    package_version = _codeclone_package_version(root)
 
     assert isinstance(manifest, dict)
     assert manifest["name"] == plugin_root.name
     assert manifest["name"] == "codeclone"
-    assert manifest["version"] == "2.0.0"
+    assert manifest["version"] == package_version
     assert manifest["skills"] == "./skills/"
     assert manifest["mcpServers"] == "./.mcp.json"
     assert manifest["license"] == "MPL-2.0"
