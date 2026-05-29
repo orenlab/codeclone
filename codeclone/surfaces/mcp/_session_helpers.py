@@ -73,6 +73,7 @@ from ._session_shared import (
     _suggestion_finding_id_payload,
     _summarize_metrics_diff,
 )
+from .messages.facts import SECURITY_SURFACES_SUMMARY_NOTE
 from .payloads import short_id
 
 _MCP_MAX_PROCESS_COUNT = 64
@@ -798,7 +799,7 @@ def _summary_security_surfaces_payload(record: MCPRunRecord) -> dict[str, object
         "production": _as_int(summary.get("production", 0), 0),
         "tests": _as_int(summary.get("tests", 0), 0),
         "report_only": bool(summary.get("report_only", True)),
-        "note": "report_only inventory; not a vulnerability scan",
+        "note": SECURITY_SURFACES_SUMMARY_NOTE,
     }
 
 

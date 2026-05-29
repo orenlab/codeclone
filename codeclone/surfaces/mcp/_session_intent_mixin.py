@@ -73,6 +73,7 @@ from ._workspace_intents import (
     workspace_status_counts,
     write_workspace_intent,
 )
+from .messages import intent as intent_msgs
 
 
 @dataclass(frozen=True, slots=True)
@@ -403,7 +404,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         payload["blocked_by"] = blocked_by
         payload["queue_position"] = queue_position
         payload["ttl_seconds"] = ttl
-        payload["message"] = "Queued. Promote before editing."
+        payload["message"] = intent_msgs.QUEUED_PROMOTE_BEFORE_EDIT
         self._audit_emit(
             root=record.root,
             event_type=EVENT_INTENT_QUEUED,
@@ -442,14 +443,8 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 "intent_id": intent_id,
                 "status": "unverified",
                 "reason": "before_run_evicted",
-                "next_step": (
-                    "Run analyze_repository to create a fresh"
-                    " before-run, then redeclare the intent."
-                ),
-                "message": (
-                    "Before-run was evicted from bounded history. "
-                    "Re-analyze and redeclare the intent."
-                ),
+                "next_step": intent_msgs.PROMOTE_BEFORE_RUN_EVICTED_NEXT,
+                "message": intent_msgs.PROMOTE_BEFORE_RUN_EVICTED,
             }
         # Re-check workspace conflicts.
         workspace_existing = list_workspace_intents(root=record.root)
@@ -478,7 +473,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 "status": "queued",
                 "blocked_by": blocked_by,
                 "blocking_count": len(blocked_by),
-                "message": ("Intent is still blocked by active workspace intents."),
+                "message": intent_msgs.PROMOTE_STILL_BLOCKED,
             }
             self._audit_emit(
                 root=record.root,
@@ -514,10 +509,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             "previous_status": "queued",
             "status": "active",
             "run_id": _helpers._short_run_id(record.run_id),
-            "message": (
-                "Queued intent promoted. Re-check blast radius "
-                "and patch budget before editing."
-            ),
+            "message": intent_msgs.PROMOTED_RECHECK,
         }
         self._audit_emit(
             root=record.root,
@@ -558,7 +550,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                     {
                         "intent_id": record.intent_id,
                         "overlapping_files": overlap,
-                        "message": ("Another agent is waiting for this scope."),
+                        "message": intent_msgs.QUEUED_SCOPE_WAITING,
                     }
                 )
         return context
@@ -1257,10 +1249,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 "agent_start_epoch": workspace_record.agent_start_epoch,
                 "agent_label": workspace_record.agent_label,
                 "escalation_hint": hint,
-                "message": (
-                    "Intent belongs to a live process. Coordinate "
-                    "with the owning agent or user before resetting it."
-                ),
+                "message": intent_msgs.RESET_LIVE_FOREIGN,
             }
         ttl = resolved_ttl_seconds(
             ttl_seconds,
@@ -1308,7 +1297,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                     "scope_digest": record.scope_digest,
                     "previous_agent_label": record.agent_label,
                     "lease_expired_at_utc": self._lease_expired_at_utc(record),
-                    "hint": ("Use action='recover' with matching run_id to reclaim."),
+                    "hint": intent_msgs.RECOVERY_HINT,
                 }
             )
         return sorted(
@@ -1343,19 +1332,11 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
 
     def _recovery_rejection_message(self, ownership: IntentOwnership) -> str:
         if ownership == IntentOwnership.FOREIGN_ACTIVE:
-            return (
-                "Intent has a valid lease from a live process. Cannot recover. "
-                "Use action='list_workspace' to inspect, then coordinate with "
-                "the user."
-            )
+            return intent_msgs.RECOVERY_FOREIGN_ACTIVE
         if ownership == IntentOwnership.FOREIGN_STALE:
-            return (
-                "Intent belongs to a live process with an expired lease. "
-                "The owner may still be working. Coordinate with the user "
-                "before recovering."
-            )
+            return intent_msgs.RECOVERY_FOREIGN_STALE
         if ownership == IntentOwnership.EXPIRED:
-            return "Intent has expired (TTL). Declare a new intent instead."
+            return intent_msgs.RECOVERY_EXPIRED
         if ownership == IntentOwnership.OWN_ACTIVE:
             return "Intent is already actively owned by this session."
         return "Intent is not recoverable."
@@ -1451,15 +1432,15 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         if forbidden or unexpected:
             status = IntentStatus.VIOLATED
             required_action = "human_approval"
-            message = "Patch touched forbidden or out-of-scope files."
+            message = intent_msgs.SCOPE_CHECK_FORBIDDEN
         elif expanded:
             status = IntentStatus.EXPANDED
             required_action = None
-            message = "Patch touched allowed related files outside primary scope."
+            message = intent_msgs.SCOPE_CHECK_RELATED
         else:
             status = IntentStatus.CLEAN
             required_action = None
-            message = "Patch stayed inside declared scope."
+            message = intent_msgs.SCOPE_CHECK_CLEAN
         return IntentCheckResult(
             status=status,
             declared_scope=declared_scope,

@@ -33,6 +33,9 @@ review receipts, and workflow consolidation tools.
 - CLI controller query modes: `--blast-radius` and `--patch-verify`.
 - Audit trail events for intent lifecycle and token budget tracking.
 - MCP tool JSON schemas now include concise per-parameter descriptions.
+- MCP message catalog at `codeclone/surfaces/mcp/messages/*` for tool/resource
+  descriptions, help topics, workflow/intent copy, and parameter Field docs
+  (mirrors CLI `ui_messages/`).
 - `help(detail="compact")` includes `anti_patterns`; `trust_boundaries` help topic.
 - Analyze responses include a single `next_tool` hint; summary adds
   `security_surfaces.note` for report-only inventory semantics.
@@ -42,14 +45,24 @@ review receipts, and workflow consolidation tools.
 - MCP rejects `cache_policy=refresh` at the server boundary (CLI-only).
 - `finish_controlled_change` sets `user_action_required` on digest mismatch.
 - Workflow messages shortened (`Done. Intent cleared.`; queued declare hint).
-
-
+- MCP long UI strings moved out of `server.py`, `_session_shared.py`, and session
+  mixins into `codeclone/surfaces/mcp/messages/*`; `_tool_param_docs.py` re-exports
+  `messages/params.py`.
+- `pydantic` is now a base dependency (MCP schema export today; validation
+  migration planned separately).
+- MCP always loads `golden_fixture_paths` from pyproject governance keys even when
+  `respect_pyproject=false`, keeping baseline health aligned with CLI defaults.
 - MCP session state (intents, blast-radius cache, review markers) is
   process-local only; workspace intent files are ephemeral coordination
   state, not analysis cache or report truth.
 - Queued intents do not pin runs; pinning happens at promotion.
 - Workspace intent registry v2 with lease and report-digest fields;
   v1 records accepted with conservative defaults until expiry.
+
+### Fixed
+
+- MCP analysis with `respect_pyproject=false` no longer surfaces golden-fixture
+  clone groups as false `new` regressions when pyproject excludes them.
 
 ## [2.0.2] - 2026-05-19
 

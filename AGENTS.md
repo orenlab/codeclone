@@ -428,9 +428,10 @@ Architecture is layered, but grounded in current code (not aspirational diagrams
   and deterministic projections.
 - **HTML/UI rendering** (`codeclone/report/html/*`) renders views from canonical report/meta
   facts. HTML is render-only.
-- **MCP agent interface** (`codeclone/surfaces/mcp/*`) exposes the same pipeline/report contracts as a deterministic
-  MCP surface for AI agents and MCP-capable clients, read-only with respect to repository artifacts and stateful only
-  for session-local controller/review state, workspace intent coordination, and optional audit.
+- **MCP agent interface** (`codeclone/surfaces/mcp/*`, `codeclone/surfaces/mcp/messages/*`)
+  exposes the same pipeline/report contracts as a deterministic MCP surface for AI agents and MCP-capable clients,
+  read-only with respect to repository artifacts and stateful only for session-local controller/review state,
+  workspace intent coordination, and optional audit.
 - **Audit trail** (`codeclone/audit/*`) stores optional passive evidence (SQLite by default via
   `codeclone/surfaces/cli/audit.py` / MCP audit emit). It must not affect canonical report digests, baseline trust,
   cache compatibility, or finding identity.
@@ -507,6 +508,8 @@ Use this map to route changes to the right owner module.
   ephemeral workspace intent records under `.cache/codeclone/intents/`.
 - `codeclone/surfaces/mcp/server.py` — optional MCP launcher/server wiring, transport config, and MCP tool/resource
   registration; keep dependency loading lazy so base installs/CI do not require MCP runtime packages.
+- `codeclone/surfaces/mcp/messages/*` — MCP user-facing copy (tool/resource descriptions, help topics, workflow and
+  intent messages, parameter Field docs). Keep message policy centralized like `ui_messages/`.
 - `codeclone/audit/*` — audit event schema, validation, writer/reader; passive evidence only.
 - `codeclone/budget/*` — patch/token budget estimation shared by CLI and MCP surfaces.
 - `tests/test_mcp_service.py`, `tests/test_mcp_server.py` — MCP contract and integration tests; run these when

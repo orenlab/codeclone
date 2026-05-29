@@ -22,6 +22,7 @@ engine or a second persistence model.
 | Package extra     | `codeclone[mcp]`                                                         |
 | Launcher          | `codeclone-mcp`                                                          |
 | Server wiring     | `codeclone/surfaces/mcp/server.py`                                       |
+| Message catalog   | `codeclone/surfaces/mcp/messages/*`                                      |
 | Service / session | `codeclone/surfaces/mcp/service.py`, `codeclone/surfaces/mcp/session.py` |
 
 ---

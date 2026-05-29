@@ -3,8 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
-"""Backward-compatible re-export of MCP tool parameter annotations."""
+
+"""User-facing MCP copy: tool descriptions, help topics, workflow messages."""
 
 from __future__ import annotations
-
-from .messages.params import *  # noqa: F403

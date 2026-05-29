@@ -15,7 +15,10 @@ from typing import TYPE_CHECKING, Literal, TypeVar
 
 from ... import __version__
 from ...contracts import DEFAULT_COVERAGE_MIN, DOCS_URL
-from ._tool_param_docs import (
+from .messages import instructions as mcp_instructions
+from .messages import resources as mcp_resources
+from .messages import tools as mcp_tools
+from .messages.params import (
     AfterRunIdParam,
     AnalysisModeParam,
     ApiSurfaceParam,
@@ -105,35 +108,6 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
     from mcp.types import ToolAnnotations
 
-_SERVER_INSTRUCTIONS = (
-    "CodeClone MCP is a deterministic, baseline-aware, read-only analysis server "
-    "for Python repositories. Use analyze_repository first for full runs or "
-    "analyze_changed_paths for PR-style review, then prefer get_run_summary or "
-    "get_production_triage for the first pass. Use list_hotspots or focused "
-    "check_* tools before broader list_findings calls, then drill into one "
-    "finding with get_finding or get_remediation. Use "
-    "help(topic=...) when workflow or contract semantics are unclear. Use "
-    "default or pyproject-resolved thresholds for the first pass, and lower "
-    "them only for an explicit higher-sensitivity follow-up when needed. Use "
-    "get_report_section(section='metrics_detail', family=..., limit=...) for "
-    "bounded metrics drill-down, and prefer generate_pr_summary(format='markdown') "
-    "unless machine JSON is required. Coverage join accepts external Cobertura "
-    "XML as a current-run signal and does not become baseline truth. Pass an "
-    "absolute repository root to analysis tools. For file edits, prefer "
-    "start_controlled_change and finish_controlled_change for the complete "
-    "edit cycle. Use manage_change_intent for queue/promote/recover "
-    "operations. Atomic tools (get_blast_radius, check_patch_contract, "
-    "validate_review_claims, create_review_receipt) remain available for "
-    "advanced inspection and diagnostic use. "
-    "If concurrent intents overlap, narrow scope or coordinate. This server never "
-    "updates baselines and never mutates source files, analysis cache, or reports; "
-    "it may write ephemeral workspace coordination state under "
-    ".cache/codeclone/intents/."
-)
-_MCP_INSTALL_HINT = (
-    "CodeClone MCP support requires the optional 'mcp' extra. "
-    "Install it with: pip install 'codeclone[mcp]'"
-)
 DEFAULT_MCP_HOST = "127.0.0.1"
 DEFAULT_MCP_PORT = 8000
 DEFAULT_MCP_JSON_RESPONSE = True
@@ -159,7 +133,7 @@ def _load_mcp_runtime() -> tuple[
         from mcp.server.fastmcp import FastMCP as imported_fastmcp
         from mcp.types import ToolAnnotations as runtime_tool_annotations
     except ImportError as exc:
-        raise MCPDependencyError(_MCP_INSTALL_HINT) from exc
+        raise MCPDependencyError(mcp_instructions.MCP_INSTALL_HINT) from exc
     runtime_fastmcp: type[FastMCP] = imported_fastmcp
     return (
         runtime_fastmcp,
@@ -233,7 +207,7 @@ def build_mcp_server(
 
     mcp = runtime_fastmcp(
         name="CodeClone",
-        instructions=_SERVER_INSTRUCTIONS,
+        instructions=mcp_instructions.SERVER_INSTRUCTIONS,
         lifespan=_lifespan,
         website_url=DOCS_URL,
         host=host,
@@ -273,12 +247,7 @@ def build_mcp_server(
 
     @tool(
         title="Analyze Repository",
-        description=(
-            "Run a deterministic CodeClone analysis and register it as the "
-            "latest MCP run. Pass an absolute repository root; relative roots "
-            "like '.' are rejected in MCP. MCP cache_policy accepts reuse or "
-            "off only. Start with get_production_triage."
-        ),
+        description=mcp_tools.ANALYZE_REPOSITORY,
         annotations=analysis_tool,
         structured_output=True,
     )
@@ -339,11 +308,7 @@ def build_mcp_server(
 
     @tool(
         title="Analyze Changed Paths",
-        description=(
-            "Run changed-files analysis from explicit paths or git diff ref. "
-            "Absolute root required. MCP cache_policy: reuse or off. "
-            "Response includes next_tool hint."
-        ),
+        description=mcp_tools.ANALYZE_CHANGED_PATHS,
         annotations=analysis_tool,
         structured_output=True,
     )
@@ -404,10 +369,7 @@ def build_mcp_server(
 
     @tool(
         title="Get Run Summary",
-        description=(
-            "Compact run snapshot for latest or specified run. run_id accepts "
-            "8-char short id or full digest."
-        ),
+        description=mcp_tools.GET_RUN_SUMMARY,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -416,12 +378,7 @@ def build_mcp_server(
 
     @tool(
         title="Get Production Triage",
-        description=(
-            "Return a production-first triage view over a stored run: health, "
-            "cache freshness, production hotspots, and production suggestions, "
-            "while keeping global source-kind counters visible. Use this as the "
-            "default first-pass review on noisy repositories."
-        ),
+        description=mcp_tools.GET_PRODUCTION_TRIAGE,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -438,13 +395,7 @@ def build_mcp_server(
 
     @tool(
         title="Get Blast Radius",
-        description=(
-            "Return the deterministic structural risk boundary for changing "
-            "the given files. Shows direct dependents, clone cohort members, "
-            "coverage gaps, actionable do-not-touch paths, and review-only "
-            "context. Derived from the canonical report; no new analysis is "
-            "performed."
-        ),
+        description=mcp_tools.GET_BLAST_RADIUS,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -463,12 +414,7 @@ def build_mcp_server(
 
     @tool(
         title="Check Patch Contract",
-        description=(
-            "Pre-edit budget query (mode='budget') or post-edit structural "
-            "verification (mode='verify'). Composes stored runs, gate "
-            "evaluation, run comparison, and session-local change intent "
-            "without running analysis or mutating repository state."
-        ),
+        description=mcp_tools.CHECK_PATCH_CONTRACT,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -495,13 +441,7 @@ def build_mcp_server(
 
     @tool(
         title="Create Review Receipt",
-        description=(
-            "Generate a deterministic, auditable review receipt from stored "
-            "MCP state: report provenance, intent scope, blast radius, "
-            "reviewed findings, patch contract status, human decision points, "
-            "and claims-not-made. Output markdown or JSON without mutating "
-            "repository state."
-        ),
+        description=mcp_tools.CREATE_REVIEW_RECEIPT,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -522,15 +462,7 @@ def build_mcp_server(
 
     @tool(
         title="Validate Review Claims",
-        description=(
-            "Validate cited review text against canonical report semantics. "
-            "Detects deterministic mischaracterizations: Security Surfaces "
-            "called vulnerabilities, report-only signals called CI failures, "
-            "known baseline debt called new regressions, dead code claimed "
-            "where runtime reachability evidence exists, and fixes claimed "
-            "without post-patch verification. Structural citation matching; "
-            "not NLP."
-        ),
+        description=mcp_tools.VALIDATE_REVIEW_CLAIMS,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -547,11 +479,7 @@ def build_mcp_server(
 
     @tool(
         title="Help",
-        description=(
-            "Bounded workflow/contract guidance with doc links. compact "
-            "includes anti_patterns; normal adds warnings. Topics include "
-            "workflow, change_control, trust_boundaries."
-        ),
+        description=mcp_tools.HELP,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -566,10 +494,7 @@ def build_mcp_server(
 
     @tool(
         title="Evaluate Gates",
-        description=(
-            "Evaluate CodeClone gate conditions against an existing MCP run without "
-            "modifying baselines or exiting the process."
-        ),
+        description=mcp_tools.EVALUATE_GATES,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -616,10 +541,7 @@ def build_mcp_server(
 
     @tool(
         title="Get Report Section",
-        description=(
-            "Return one canonical report section. Prefer metrics, metrics_detail, "
-            "changed, findings over all unless necessary."
-        ),
+        description=mcp_tools.GET_REPORT_SECTION,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -642,12 +564,7 @@ def build_mcp_server(
 
     @tool(
         title="List Findings",
-        description=(
-            "List canonical finding groups with deterministic ordering, optional "
-            "filters, pagination, and compact summary cards by default. Prefer "
-            "list_hotspots or focused check_* tools for first-pass triage; use "
-            "this when you need a broader filtered list."
-        ),
+        description=mcp_tools.LIST_FINDINGS,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -686,12 +603,7 @@ def build_mcp_server(
 
     @tool(
         title="Get Finding",
-        description=(
-            "Return a single canonical finding group by short or full id. "
-            "Normal detail is the default. Use this after list_hotspots, "
-            "list_findings, or check_* instead of requesting larger lists at "
-            "higher detail."
-        ),
+        description=mcp_tools.GET_FINDING,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -708,11 +620,7 @@ def build_mcp_server(
 
     @tool(
         title="Get Remediation",
-        description=(
-            "Return actionable remediation guidance for a single finding. "
-            "Normal detail is the default. Use this when you need the fix packet "
-            "for one finding without pulling larger detail lists."
-        ),
+        description=mcp_tools.GET_REMEDIATION,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -729,11 +637,7 @@ def build_mcp_server(
 
     @tool(
         title="List Hotspots",
-        description=(
-            "Return one of the derived CodeClone hotlists for the latest or "
-            "specified MCP run, using compact summary cards by default. Prefer "
-            "this for first-pass triage before broader list_findings calls."
-        ),
+        description=mcp_tools.LIST_HOTSPOTS,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -760,10 +664,7 @@ def build_mcp_server(
 
     @tool(
         title="Compare Runs",
-        description=(
-            "Compare two runs by finding ids. run_id accepts short or full ids. "
-            "Returns incomparable when roots or settings differ."
-        ),
+        description=mcp_tools.COMPARE_RUNS,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -780,13 +681,7 @@ def build_mcp_server(
 
     @tool(
         title="Check Complexity",
-        description=(
-            "Return complexity hotspots from a compatible stored run. "
-            "Use analyze_repository first if no full run is available. When "
-            "filtering by root without run_id, pass an absolute root. Prefer "
-            "this narrower tool instead of list_findings when you only need "
-            "complexity hotspots."
-        ),
+        description=mcp_tools.CHECK_COMPLEXITY,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -809,13 +704,7 @@ def build_mcp_server(
 
     @tool(
         title="Check Clones",
-        description=(
-            "Return clone findings from a compatible stored run. "
-            "Use analyze_repository first if no compatible run is available. "
-            "When filtering by root without run_id, pass an absolute root. "
-            "Prefer this narrower tool instead of list_findings when you only "
-            "need clone findings."
-        ),
+        description=mcp_tools.CHECK_CLONES,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -840,13 +729,7 @@ def build_mcp_server(
 
     @tool(
         title="Check Coupling",
-        description=(
-            "Return coupling hotspots from a compatible stored run. "
-            "Use analyze_repository first if no full run is available. When "
-            "filtering by root without run_id, pass an absolute root. Prefer "
-            "this narrower tool instead of list_findings when you only need "
-            "coupling hotspots."
-        ),
+        description=mcp_tools.CHECK_COUPLING,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -867,13 +750,7 @@ def build_mcp_server(
 
     @tool(
         title="Check Cohesion",
-        description=(
-            "Return cohesion hotspots from a compatible stored run. "
-            "Use analyze_repository first if no full run is available. When "
-            "filtering by root without run_id, pass an absolute root. Prefer "
-            "this narrower tool instead of list_findings when you only need "
-            "cohesion hotspots."
-        ),
+        description=mcp_tools.CHECK_COHESION,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -894,13 +771,7 @@ def build_mcp_server(
 
     @tool(
         title="Check Dead Code",
-        description=(
-            "Return dead-code findings from a compatible stored run. "
-            "Use analyze_repository first if no full run is available. When "
-            "filtering by root without run_id, pass an absolute root. Prefer "
-            "this narrower tool instead of list_findings when you only need "
-            "dead-code findings."
-        ),
+        description=mcp_tools.CHECK_DEAD_CODE,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -923,11 +794,7 @@ def build_mcp_server(
 
     @tool(
         title="Generate PR Summary",
-        description=(
-            "Generate a PR-friendly CodeClone summary for changed files. Prefer "
-            "format='markdown' for compact LLM-facing output; use 'json' only "
-            "for machine post-processing."
-        ),
+        description=mcp_tools.GENERATE_PR_SUMMARY,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -946,10 +813,7 @@ def build_mcp_server(
 
     @tool(
         title="Mark Finding Reviewed",
-        description=(
-            "Mark finding reviewed in this MCP session only; cleared on "
-            "process restart or clear_session_runs."
-        ),
+        description=mcp_tools.MARK_FINDING_REVIEWED,
         annotations=session_tool,
         structured_output=True,
     )
@@ -966,9 +830,7 @@ def build_mcp_server(
 
     @tool(
         title="List Reviewed Findings",
-        description=(
-            "List in-memory reviewed findings for the current or specified run."
-        ),
+        description=mcp_tools.LIST_REVIEWED_FINDINGS,
         annotations=read_only_tool,
         structured_output=True,
     )
@@ -977,15 +839,7 @@ def build_mcp_server(
 
     @tool(
         title="Start Controlled Change",
-        description=(
-            "Pre-edit workflow: check workspace for concurrent intents, "
-            "declare change intent with scope, compute blast radius "
-            "(direct + bounded transitive for high-radius changes), and "
-            "return patch budget — all in one call. Requires an existing "
-            "analysis run for the given root; call analyze_repository "
-            "first if needed. Returns intent_id for finish_controlled_change. "
-            "Does not run analysis implicitly."
-        ),
+        description=mcp_tools.START_CONTROLLED_CHANGE,
         annotations=session_tool,
         structured_output=True,
     )
@@ -1012,11 +866,7 @@ def build_mcp_server(
 
     @tool(
         title="Finish Controlled Change",
-        description=(
-            "Post-edit verify, receipt, and intent clear. Pass after_run_id "
-            "when verification.verification_profile requires it. Read "
-            "verification.verification_profile for applied checks."
-        ),
+        description=mcp_tools.FINISH_CONTROLLED_CHANGE,
         annotations=session_tool,
         structured_output=True,
     )
@@ -1043,19 +893,7 @@ def build_mcp_server(
 
     @tool(
         title="Manage Change Intent",
-        description=(
-            "Manage the agent change intent lifecycle for the current MCP "
-            "session and optional workspace registry. Actions: 'list_workspace' "
-            "to inspect concurrent workspace intents, 'declare' to declare "
-            "intended scope before editing, 'get' to retrieve active intent, "
-            "'check' to verify actual diff against declared scope, 'clear' to "
-            "remove intent, 'renew' to refresh the active lease before long "
-            "edits or test runs, 'gc_workspace' to clean stale registry files, "
-            "'recover' to explicitly reclaim a recoverable intent, and "
-            "'reset_workspace' for interrupted-session recovery. In-memory "
-            "intent state remains session-local; workspace coordination state "
-            "is ephemeral under .cache/codeclone/intents/."
-        ),
+        description=mcp_tools.MANAGE_CHANGE_INTENT,
         annotations=session_tool,
         structured_output=True,
     )
@@ -1090,10 +928,7 @@ def build_mcp_server(
 
     @tool(
         title="Clear Session Runs",
-        description=(
-            "Clear all in-memory MCP analysis runs and ephemeral session state "
-            "for this server process."
-        ),
+        description=mcp_tools.CLEAR_SESSION_RUNS,
         annotations=session_tool,
         structured_output=True,
     )
@@ -1103,7 +938,7 @@ def build_mcp_server(
     @resource(
         "codeclone://latest/summary",
         title="Latest Run Summary",
-        description="Canonical JSON summary for the latest run in this MCP session.",
+        description=mcp_resources.LATEST_SUMMARY,
         mime_type="application/json",
     )
     def latest_summary_resource() -> str:
@@ -1112,7 +947,7 @@ def build_mcp_server(
     @resource(
         "codeclone://latest/report.json",
         title="Latest Canonical Report",
-        description="Canonical JSON report for the latest run in this MCP session.",
+        description=mcp_resources.LATEST_REPORT,
         mime_type="application/json",
     )
     def latest_report_resource() -> str:
@@ -1121,7 +956,7 @@ def build_mcp_server(
     @resource(
         "codeclone://latest/health",
         title="Latest Health Snapshot",
-        description="Health snapshot for the latest run in this MCP session.",
+        description=mcp_resources.LATEST_HEALTH,
         mime_type="application/json",
     )
     def latest_health_resource() -> str:
@@ -1130,7 +965,7 @@ def build_mcp_server(
     @resource(
         "codeclone://latest/gates",
         title="Latest Gate Evaluation",
-        description="Gate evaluation for the latest run in this MCP session.",
+        description=mcp_resources.LATEST_GATES,
         mime_type="application/json",
     )
     def latest_gates_resource() -> str:
@@ -1139,9 +974,7 @@ def build_mcp_server(
     @resource(
         "codeclone://latest/changed",
         title="Latest Changed Findings",
-        description=(
-            "Changed-files projection for the latest diff-aware run in this session."
-        ),
+        description=mcp_resources.LATEST_CHANGED,
         mime_type="application/json",
     )
     def latest_changed_resource() -> str:
@@ -1150,7 +983,7 @@ def build_mcp_server(
     @resource(
         "codeclone://latest/triage",
         title="Latest Production Triage",
-        description="Production triage for the latest run in this MCP session.",
+        description=mcp_resources.LATEST_TRIAGE,
         mime_type="application/json",
     )
     def latest_triage_resource() -> str:
@@ -1159,7 +992,7 @@ def build_mcp_server(
     @resource(
         "codeclone://schema",
         title="CodeClone Report Schema",
-        description="JSON schema-style descriptor for the canonical CodeClone report.",
+        description=mcp_resources.REPORT_SCHEMA,
         mime_type="application/json",
     )
     def schema_resource() -> str:
@@ -1168,7 +1001,7 @@ def build_mcp_server(
     @resource(
         "codeclone://runs/{run_id}/summary",
         title="Run Summary",
-        description="Canonical JSON summary for a specific CodeClone MCP run.",
+        description=mcp_resources.RUN_SUMMARY,
         mime_type="application/json",
     )
     def run_summary_resource(run_id: str) -> str:
@@ -1177,7 +1010,7 @@ def build_mcp_server(
     @resource(
         "codeclone://runs/{run_id}/report.json",
         title="Run Canonical Report",
-        description="Canonical JSON report for a specific CodeClone MCP run.",
+        description=mcp_resources.RUN_REPORT,
         mime_type="application/json",
     )
     def run_report_resource(run_id: str) -> str:
@@ -1186,7 +1019,7 @@ def build_mcp_server(
     @resource(
         "codeclone://runs/{run_id}/findings/{finding_id}",
         title="Run Finding",
-        description="Canonical JSON finding group for a specific CodeClone MCP run.",
+        description=mcp_resources.RUN_FINDING,
         mime_type="application/json",
     )
     def run_finding_resource(run_id: str, finding_id: str) -> str:

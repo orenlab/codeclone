@@ -3,8 +3,13 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
-"""Backward-compatible re-export of MCP tool parameter annotations."""
+
+"""Report-facing MCP summary notes."""
 
 from __future__ import annotations
 
-from .messages.params import *  # noqa: F403
+from typing import Final
+
+SECURITY_SURFACES_SUMMARY_NOTE: Final = (
+    "report_only inventory; not a vulnerability scan"
+)

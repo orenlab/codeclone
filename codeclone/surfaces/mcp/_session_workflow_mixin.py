@@ -35,6 +35,7 @@ from ._session_shared import (
     MCPRunRecord,
     MCPServiceContractError,
 )
+from .messages import workflow as workflow_msgs
 
 TRANSITIVE_SUMMARY_LIMIT: Final[int] = 10
 
@@ -86,10 +87,7 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
                 "intent_id": None,
                 "edit_allowed": False,
                 "root": str(root_path),
-                "message": (
-                    "No analysis run available for this root. "
-                    "Call analyze_repository first."
-                ),
+                "message": workflow_msgs.START_NEEDS_ANALYSIS,
                 "workspace": _workspace_summary(workspace),
             }
 
@@ -116,10 +114,7 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
                 "queue_position": declare_payload.get("queue_position", 1),
                 "before_run_pinned": declare_payload.get("before_run_pinned", False),
                 "edit_allowed": False,
-                "message": (
-                    "Intent queued behind active workspace intent. "
-                    "Do not edit until promoted."
-                ),
+                "message": workflow_msgs.START_QUEUED,
             }
 
         # 4. Blast radius (full payload, not just declare's subset)
@@ -202,10 +197,8 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
                 "receipt": None,
                 "intent_cleared": False,
                 "user_action_required": False,
-                "next_step": (
-                    "Promote the queued intent before editing or verification."
-                ),
-                "message": ("Queued intent must be promoted before verification."),
+                "next_step": workflow_msgs.FINISH_PROMOTE_BEFORE_VERIFY,
+                "message": workflow_msgs.FINISH_QUEUED_NOT_ACTIVE,
             }
 
         # 2. Resolve changed files — exactly one source
@@ -236,12 +229,8 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
                 "receipt": None,
                 "intent_cleared": False,
                 "user_action_required": True,
-                "next_step": (
-                    "Intent was declared against a different report. "
-                    "Do not redeclare on the after-run — use the "
-                    "original intent_id with the original before_run_id."
-                ),
-                "message": "Intent expired: report digest mismatch.",
+                "next_step": workflow_msgs.FINISH_DIGEST_MISMATCH_NEXT,
+                "message": workflow_msgs.FINISH_DIGEST_MISMATCH,
             }
 
         # 4. Scope violation — early exit
@@ -256,11 +245,8 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
                 "receipt": None,
                 "intent_cleared": False,
                 "user_action_required": True,
-                "next_step": (
-                    "Redeclare intent with expanded scope, or "
-                    "remove the out-of-scope changes."
-                ),
-                "message": ("Patch touched files outside declared scope."),
+                "next_step": workflow_msgs.FINISH_SCOPE_VIOLATION_NEXT,
+                "message": workflow_msgs.FINISH_SCOPE_VIOLATION,
             }
 
         # 5. Verify (before_run_id auto-resolves from intent)
@@ -431,16 +417,11 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
         blast_payload: dict[str, object],
         budget_payload: dict[str, object],
     ) -> str:
-        parts: list[str] = ["Intent active."]
-        radius_level = str(blast_payload.get("radius_level", "low"))
-        if radius_level == "high":
-            parts.append("Blast radius is high — review transitive summary.")
         gate = budget_payload.get("gate_preview")
-        if isinstance(gate, dict) and gate.get("would_fail"):
-            parts.append("Budget is already outside CI thresholds.")
-        else:
-            parts.append("Budget is within CI thresholds.")
-        return " ".join(parts)
+        return workflow_msgs.start_controlled_change_message(
+            radius_level=str(blast_payload.get("radius_level", "low")),
+            budget_would_fail=(isinstance(gate, dict) and bool(gate.get("would_fail"))),
+        )
 
     @staticmethod
     def _finish_message(
@@ -449,14 +430,11 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
         intent_cleared: bool,
         receipt_error: str | None,
     ) -> str:
-        if receipt_error is not None:
-            return (
-                "Change verified but receipt creation failed. "
-                "Intent not cleared for retry."
-            )
-        if intent_cleared:
-            return "Done. Intent cleared."
-        return f"Verified ({verify_status}). Intent still active."
+        return workflow_msgs.finish_controlled_change_message(
+            verify_status=verify_status,
+            intent_cleared=intent_cleared,
+            receipt_error=receipt_error,
+        )
 
 
 def _validated_blast_radius_depth(value: str) -> str:
