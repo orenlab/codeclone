@@ -28,7 +28,7 @@ CLI modes:
 - gating mode (`--ci`, `--fail-on-new`, explicit metric gates)
 - baseline update mode (`--update-baseline`, `--update-metrics-baseline`)
 - controller query mode (`--blast-radius`, `--patch-verify`)
-- session query mode (`--session-stats`)
+- workspace query modes (`--session-stats`, `--audit`, `--audit-json`)
 
 Summary metrics include:
 
@@ -74,12 +74,23 @@ Refs:
     - `--patch-verify` compares the current run against the trusted clone
       baseline, previews gate status, and exits `3` for blocking violations in
       `ci` or `strict` mode.
-    - `--strictness {ci,strict,relaxed}` is valid only with `--patch-verify`.
-    - controller query mode does not write reports, baselines, or analysis
-      cache data.
 - Session query mode is terminal-only:
     - `--session-stats` shows workspace session status: active agents, intents,
       and lease health. Read-only, does not run analysis.
+- Audit query mode is terminal-only:
+    - `--audit` shows the local Controller audit trail from the configured audit
+      database. Read-only, does not run analysis. Requires `audit_enabled=true`
+      in effective configuration (`[tool.codeclone]` or resolved defaults).
+    - `--audit-json` outputs audit payload footprint as JSON. Implies `--audit`.
+      Useful for cross-repository comparison.
+- Controller and workspace query flags are mutually exclusive where enforced:
+    - `--blast-radius` and `--patch-verify` cannot be combined.
+    - `--strictness {ci,strict,relaxed}` is valid only with `--patch-verify`.
+    - `--session-stats` cannot combine with `--audit`, `--blast-radius`, or
+      `--patch-verify`.
+    - `--audit` cannot combine with `--blast-radius` or `--patch-verify`.
+    - controller and workspace query modes do not write reports, baselines, or
+      analysis cache data.
 - Contract errors use `CONTRACT ERROR:`.
 - Gating failures use `GATING FAILURE:`.
 - Internal errors use `fmt_internal_error` and include traceback only in debug mode.
@@ -90,6 +101,7 @@ Refs:
 - `codeclone/ui_messages/__init__.py:fmt_contract_error`
 - `codeclone/ui_messages/__init__.py:fmt_internal_error`
 - `codeclone/surfaces/cli/changed_scope.py:_validate_changed_scope_args`
+- `codeclone/surfaces/cli/workflow.py:_validate_controller_query_flags`
 
 ## Invariants (MUST)
 
@@ -98,9 +110,13 @@ Refs:
 - `--timestamped-report-paths` requires at least one requested report output.
 - `--changed-only` requires a diff source.
 - `--blast-radius` and `--patch-verify` are mutually exclusive.
-- Controller query mode is incompatible with report output flags and baseline
-  update flags.
+- `--session-stats` cannot combine with `--audit`, `--blast-radius`, or
+  `--patch-verify`.
+- `--audit` cannot combine with `--blast-radius` or `--patch-verify`.
+- Controller and workspace query modes are incompatible with report output flags,
+  baseline update flags, and changed-scope flags.
 - `--patch-verify` requires a trusted clone baseline.
+- `--audit` requires `audit_enabled=true` in effective configuration.
 - Browser-open failure after successful HTML write is warning-only.
 - In gating mode, unreadable source files are contract errors with higher priority than clone/metric gate failures.
 
@@ -123,6 +139,7 @@ Refs:
 | Invalid output extension/path                                     | contract             | `2`  |
 | Invalid changed-scope flag combination                            | contract             | `2`  |
 | Invalid controller query flag combination                         | contract             | `2`  |
+| `--audit` with `audit_enabled=false`                            | contract             | `2`  |
 | `--patch-verify` without trusted baseline                         | contract             | `2`  |
 | Baseline untrusted in CI/gating                                   | contract             | `2`  |
 | Coverage/API regression gate without required baseline capability | contract             | `2`  |
@@ -148,6 +165,7 @@ Refs:
 ## Locked by tests
 
 - `tests/test_cli_unit.py::test_cli_help_text_consistency`
+- `tests/test_cli_help_snapshot.py::test_cli_help_snapshot`
 - `tests/test_cli_unit.py::test_argument_parser_contract_error_marker_for_invalid_args`
 - `tests/test_cli_inprocess.py::test_cli_summary_format_stable`
 - `tests/test_cli_inprocess.py::test_cli_unreadable_source_fails_in_ci_with_contract_error`
