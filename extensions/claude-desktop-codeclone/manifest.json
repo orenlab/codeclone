@@ -4,7 +4,7 @@
   "display_name": "CodeClone",
   "version": "2.1.0",
   "description": "Structural change controller for Python — deterministic, baseline-aware, built for CI and AI agents.",
-  "long_description": "CodeClone for Claude Desktop wraps the local codeclone-mcp launcher as an MCP bundle. It keeps Claude on the same canonical 25-tool MCP surface used by the CLI, HTML report, VS Code extension, and Codex plugin — read-only, baseline-aware, local stdio only. The v2.1 change controller includes intent declaration, blast radius, patch contract, and review receipt; claim guard is a planned follow-up.",
+  "long_description": "CodeClone for Claude Desktop wraps the local codeclone-mcp launcher as an MCP bundle. It keeps Claude on the same canonical 28-tool MCP surface used by the CLI, HTML report, VS Code extension, and Codex plugin — read-only, baseline-aware, local stdio only. The v2.1 change controller includes intent declaration, blast radius, patch contract, review receipt, and claim validation via validate_review_claims and finish_controlled_change.",
   "author": {
     "name": "Den Rozhnovskiy",
     "email": "pytelemonbot@mail.ru",
@@ -57,12 +57,24 @@
       "description": "Change intent lifecycle: declare scope, get status, check diff, clear intent."
     },
     {
+      "name": "start_controlled_change",
+      "description": "Pre-edit workflow: declare change intent, compute blast radius, and return patch budget in one call."
+    },
+    {
+      "name": "finish_controlled_change",
+      "description": "Post-edit workflow: verify scope, run patch contract, validate claims, generate receipt, and clear intent."
+    },
+    {
       "name": "check_patch_contract",
       "description": "Patch contract checks: budget before editing, verify before/after runs after editing."
     },
     {
       "name": "create_review_receipt",
       "description": "Deterministic audit artifact: provenance, intent scope, blast radius, patch status, and claims-not-made."
+    },
+    {
+      "name": "validate_review_claims",
+      "description": "Validate cited review text against canonical report semantics and detect deterministic mischaracterizations."
     },
     {
       "name": "list_hotspots",

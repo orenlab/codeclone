@@ -32,6 +32,17 @@ test("manifest keeps the setup surface bounded and local", () => {
     ]);
     assert.equal(manifest.documentation, "https://orenlab.github.io/codeclone/claude-desktop-bundle/");
     assert.equal(manifest.tools_generated, true);
-    assert.equal(manifest.tools.length, 25);
+    assert.equal(manifest.tools.length, 28);
     assert.equal("instructions" in manifest, false);
+});
+
+test("manifest tools match MCP contract snapshot", () => {
+    const snapshotPath = path.join(
+        rootDir,
+        "../../tests/fixtures/contract_snapshots/mcp_tool_schemas.json",
+    );
+    const snapshot = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
+    const expected = snapshot.map((entry) => entry.name).sort();
+    const actual = manifest.tools.map((entry) => entry.name).sort();
+    assert.deepEqual(actual, expected);
 });
