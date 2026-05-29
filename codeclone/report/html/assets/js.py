@@ -346,8 +346,19 @@ _MODALS = """\
     const group=btn.closest('.group');
     if(!group)return;
     const d=group.dataset;
-    const items=[];
-    function add(label,val){if(val)items.push('<div><dt>'+label+'</dt><dd>'+val+'</dd></div>')}
+    const body=dlg.querySelector('#modal-body');
+    body.replaceChildren();
+    const list=document.createElement('dl');
+    list.className='info-dl';
+    function add(label,val){
+      if(!val)return;
+      const dt=document.createElement('dt');
+      dt.textContent=label;
+      const dd=document.createElement('dd');
+      dd.textContent=val;
+      list.appendChild(dt);
+      list.appendChild(dd);
+    }
     add('Match rule',d.matchRule);
     add('Block size',d.blockSize);
     add('Signature',d.signatureKind);
@@ -361,11 +372,18 @@ _MODALS = """\
     add('Group arity',d.groupArity);
     add('Clone type',d.cloneType);
     add('Source kind',d.sourceKind);
-    if(d.spreadFiles)add('Spread',d.spreadFunctions+' fn / '+d.spreadFiles+' files');
+    if(d.spreadFiles){
+      add('Spread',d.spreadFunctions+' fn / '+d.spreadFiles+' files');
+    }
+    if(list.childNodes.length){
+      body.appendChild(list);
+    }else{
+      const empty=document.createElement('p');
+      empty.className='muted';
+      empty.textContent='No metadata available.';
+      body.appendChild(empty);
+    }
     dlg.querySelector('#modal-title').textContent='Group: '+groupId;
-    dlg.querySelector('#modal-body').innerHTML=items.length
-      ?'<dl class="info-dl">'+items.join('')+'</dl>'
-      :'<p class="muted">No metadata available.</p>';
     dlg.showModal();
   });
 })();
@@ -586,7 +604,14 @@ _META_PANEL = """\
     var tplId=btn.getAttribute('data-finding-why-btn');
     var tpl=document.getElementById(tplId);
     if(!tpl)return;
-    body.innerHTML=tpl.innerHTML;
+    body.replaceChildren();
+    if(tpl.content){
+      body.appendChild(document.importNode(tpl.content,true));
+    }else{
+      Array.from(tpl.childNodes).forEach(function(node){
+        body.appendChild(node.cloneNode(true));
+      });
+    }
     dlg.showModal();
   });
 })();
