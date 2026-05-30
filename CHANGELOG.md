@@ -8,136 +8,73 @@ review receipts, and workflow consolidation tools.
 
 ### Added
 
-- Structural change controller for MCP: 28 tools total, including
-  `start_controlled_change` and `finish_controlled_change` workflow tools
-  that reduce the edit cycle from 7–11 MCP calls to 3–4.
-- Change intent lifecycle (`manage_change_intent`): declare scope, check
-  changed files, clear intent, queue behind foreign agents with
-  `on_conflict="queue"`, promote queued intents, recover stale intents.
-- Workspace intent registry under `.cache/codeclone/intents/` for
-  multi-agent coordination across separate MCP stdio processes.
-- Blast radius projection (`get_blast_radius`): direct/transitive
-  dependents, clone cohorts, structural risk, do-not-touch boundaries.
-- Patch contract (`check_patch_contract`): pre-edit budget and post-edit
-  verification with profile-aware depth (python_structural,
-  documentation_only, governance_config, non_python_patch,
-  state_artifact_change).
-- Claim guard (`validate_review_claims`): citation-based overclaim
-  detection against canonical report semantics; optional `patch_health_delta`
-  from verify for regression-free claim checks.
-- Review receipts (`create_review_receipt`): deterministic audit
-  artifacts with provenance, scope, patch status, and claims-not-made.
-- Verify ergonomics: auto-resolve `before_run_id` from intent, `next_step`
-  hints, `claim_validation_recommended` flag.
-- MCP workspace hygiene tips: when the repository root `.gitignore` does not
-  cover `.cache/codeclone/` (or `.cache/`), analysis and change-control
-  responses include a non-blocking `tips[]` advisory to add the entry.
-  The CLI prints the same advisory after interactive analysis runs. MCP and
-  CLI never edit `.gitignore` automatically.
-- Lease-aware intent recovery: renewable ownership leases,
-  own/recoverable/foreign-active classification, explicit recovery.
+- Structural change controller for MCP: 28 tools total, with
+  `start_controlled_change` / `finish_controlled_change` reducing the edit
+  cycle from 7–11 MCP calls to 3–4.
+- Change intent lifecycle (`manage_change_intent`): declare, check, clear,
+  queue (`on_conflict="queue"`), promote, recover. Renewable ownership leases
+  with own/recoverable/foreign-active classification.
+- Workspace intent registry under `.cache/codeclone/intents/` for multi-agent
+  coordination. Optional SQLite backend (`intent_registry_backend = "sqlite"`,
+  env `CODECLONE_INTENT_REGISTRY_BACKEND`); closed intents auditable up to
+  `intent_registry_retention_days` (default 7). Cross-process locks, lazy
+  closure on reads, scoped git working-tree hygiene, and repo-level
+  `workspace_dirty_summary` on `list_workspace`.
+- Blast radius projection (`get_blast_radius`): direct/transitive dependents,
+  clone cohorts, structural risk, do-not-touch boundaries.
+- Patch contract (`check_patch_contract`): pre-edit budget and post-edit verify
+  with profile-aware depth (python_structural, documentation_only,
+  governance_config, non_python_patch, state_artifact_change). Auto-resolved
+  `before_run_id` from intent, `next_step` hints, `claim_validation_recommended`
+  flag.
+- Claim guard (`validate_review_claims`): citation-based overclaim detection;
+  optional `patch_health_delta` from verify for regression-free claim checks.
+- Review receipts (`create_review_receipt`): deterministic audit artifacts with
+  provenance, scope, patch status, and claims-not-made.
+- Workspace hygiene tips when `.cache/codeclone/` is not gitignored — advisory
+  in MCP `tips[]` and CLI output; never edits `.gitignore` automatically.
 - CLI controller query modes: `--blast-radius` and `--patch-verify`.
 - Audit trail events for intent lifecycle and token budget tracking.
-- MCP tool JSON schemas now include concise per-parameter descriptions.
-- One-time interactive CLI migration note when a trusted `2.0.2` baseline is
-  analyzed by `2.1.0` or newer, explaining that LCOM4 cohesion counts may
-  change because Protocol interfaces and Pydantic validation hooks are excluded
-  from the cohesion graph.
-- Split monolithic `codeclone/ui_messages/__init__.py` into focused modules
-  (`help`, `labels`, `runtime`, `markers`, `formatters`, `controller`, `styling`;
-  stable names re-exported from `__init__.py`).
-- `codeclone/report/messages/glossary.py` for HTML tooltip definitions.
-- `codeclone/report/messages/` modules for suggestions, explainability, overview,
-  security, chrome, projections, gate reason prefixes, plus `markdown.py` and
-  `sarif.py` for Markdown/SARIF projection copy.
-- MCP `messages/patch_contract`, `verification`, `remediation`, `errors`,
-  `receipt`, `claims`, and `blast_radius` modules.
-- `help(detail="compact")` includes `anti_patterns`; `trust_boundaries` help topic.
-- Analyze responses include a single `next_tool` hint; summary adds
-  `security_surfaces.note` for report-only inventory semantics.
-- Optional SQLite workspace intent registry backend (`intent_registry_backend =
-  "sqlite"` in `[tool.codeclone]`; default remains file-based JSON under
-  `.cache/codeclone/intents/`). Records keep the same integrity-protected JSON
-  payload contract; storage path defaults to
-  `.cache/codeclone/db/intents.sqlite3`. Closed intents (`clean`, `expired`,
-  `orphaned`) remain auditable in SQLite and are purged only after
-  `intent_registry_retention_days` (default `7`, maximum `14` on the open-source
-  edition; see [Plans and Retention](https://orenlab.github.io/codeclone/plans-and-retention/)).
-- Environment overrides: `CODECLONE_INTENT_REGISTRY_BACKEND`,
-  `CODECLONE_INTENT_REGISTRY_PATH`, `CODECLONE_INTENT_REGISTRY_RETENTION_DAYS`.
-- `list_workspace` and `--session-stats` report registry backend/storage;
-  audit footprint reads `audit_enabled` from pyproject instead of assuming the
-  default DB path.
-- Workspace registry hygiene: lazy intent closure on agent-facing
-  reads, cross-process registry locks, scoped git working-tree hygiene at
-  `start_controlled_change` / `finish_controlled_change`, and repo-level
-  `workspace_dirty_summary` on `manage_change_intent(list_workspace)`.
+- MCP tool JSON schemas with per-parameter descriptions; `next_tool` hint in
+  analysis responses; `help(detail="compact")` includes `anti_patterns`;
+  `trust_boundaries` help topic.
+- One-time CLI migration note when a 2.0.2 baseline is analyzed by 2.1.0+
+  (LCOM4 cohesion change due to Protocol/Pydantic exclusions).
+- Extract UI/message strings into focused submodules: `ui_messages/*`,
+  `report/messages/*`, `surfaces/mcp/messages/*`.
 
 ### Changed
 
-- `start_controlled_change` may return workflow `status: "blocked"` with
-  `edit_allowed: false` when foreign scope overlap or scoped hygiene blocks;
-  edit permission requires `status == "active"` **and** `edit_allowed == true`.
-  `blocked` is workflow-only — never persisted registry lifecycle status.
-- Workspace intent registry I/O is serialized with cross-process locks; SQLite
-  `gc()` runs as one locked scan→close→purge transaction. Lazy close on read
-  uses a narrower predicate than `gc_workspace`; orphaned intents stay
-  recoverable until TTL expiry or explicit GC.
-- LCOM4 cohesion graph applicability refined: Protocol class methods and Pydantic
-  validation/serialization decorator hooks are excluded from the cohesion graph;
-  `computed_field` remains because it commonly reads `self.*` and carries real
-  instance behavior. Reported class `method_count` still includes all methods.
-- Workspace intent registry Pydantic contract validation refactored to eliminate
-  duplicated-branch structural noise without changing validation semantics or wire
-  payloads.
-
-- MCP rejects `cache_policy=refresh` at the server boundary (CLI-only).
+- `start_controlled_change` may return `status: "blocked"` with
+  `edit_allowed: false` on foreign scope overlap or hygiene blocks; `blocked`
+  is workflow-only, never persisted.
+- LCOM4 cohesion graph excludes Protocol methods and Pydantic
+  validation/serialization hooks; `computed_field` remains included.
+- MCP rejects `cache_policy=refresh` (CLI-only); always loads
+  `golden_fixture_paths` from pyproject even with `respect_pyproject=false`.
+- Workspace intent registry v2 with lease and report-digest fields; v1 records
+  accepted until expiry. Registry I/O serialized with cross-process locks.
 - `finish_controlled_change` sets `user_action_required` on digest mismatch.
-- Workflow messages shortened (`Done. Intent cleared.`; queued declare hint).
-- MCP long UI strings moved out of `server.py`, `_session_shared.py`, and session
-  mixins into `codeclone/surfaces/mcp/messages/*`; `_tool_param_docs.py` re-exports
-  `messages/params.py`.
-- Controller CLI screen copy centralized in `ui_messages/controller.py`.
-- HTML glossary terms moved to `report/messages/glossary.py`.
-- Report suggestion/explainability copy moved to `report/messages/*`; gate reason
-  prefixes shared between `gates/evaluator.py` and `gates/reasons.py`.
-- Text, Markdown, and SARIF renderers and HTML overview/structural/security/chrome
-  sections consume `report/messages/*` instead of inline copy.
-- MCP tool/resource `title=` strings centralized in `messages/tools.py` and
-  `messages/resources.py`; validation errors use `messages/errors.py`.
-- MCP receipt, claim-guard, and blast-radius user copy moved to
-  `surfaces/mcp/messages/*`.
-- `pydantic` is now a base dependency (MCP schema export today; validation
-  migration planned separately).
-- MCP always loads `golden_fixture_paths` from pyproject governance keys even when
-  `respect_pyproject=false`, keeping baseline health aligned with CLI defaults.
-- MCP session state (intents, blast-radius cache, review markers) is
-  process-local only; workspace intent files are ephemeral coordination
-  state, not analysis cache or report truth.
-- Queued intents do not pin runs; pinning happens at promotion.
-- Workspace intent registry v2 with lease and report-digest fields;
-  v1 records accepted with conservative defaults until expiry.
+- `pydantic` is now a base dependency.
+- MCP session state is process-local; workspace intent files are ephemeral
+  coordination state, not analysis cache or report truth. Queued intents do
+  not pin runs; pinning happens at promotion.
 
 ### Fixed
 
-- MCP change control: `dirty_scope_policy=continue_own_wip` allows resuming own
-  dirty scope at start when no live foreign dirty overlap exists; finish still
-  requires `changed_files` or `diff_ref` evidence.
-- Queued foreign intents no longer populate `foreign_dirty_overlaps`, so they do
-  not block finish for an active agent on overlapping scope.
-- Patch verify rejects identical before/after runs for `python_structural` and
-  `governance_config` profiles (`reason: after_run_not_new`).
-- Negative `health_delta` on accepted verify surfaces
-  `health_regression_advisory`; Claim Guard warns/violates "no regressions"
-  overclaims when `patch_health_delta < 0` (auto on finish; explicit on
-  atomic `validate_review_claims`).
-- `list_workspace` recovery discoverability after MCP restart:
-  `recovery_available` includes candidates with `run_available: false` and
-  `recovery_next_step` guidance.
-- `start_controlled_change` budget `gate_preview.would_fail` advisory message when
-  edit is still allowed.
-- MCP analysis with `respect_pyproject=false` no longer surfaces golden-fixture
-  clone groups as false `new` regressions when pyproject excludes them.
+- `dirty_scope_policy=continue_own_wip` allows resuming own dirty scope when
+  no foreign overlap; finish still requires evidence.
+- Queued foreign intents no longer populate `foreign_dirty_overlaps`, unblocking
+  active agents on overlapping scope.
+- Patch verify rejects identical before/after runs for python_structural and
+  governance_config profiles (`reason: after_run_not_new`).
+- Negative `health_delta` on verify surfaces `health_regression_advisory`; Claim
+  Guard warns on overclaims when `patch_health_delta < 0`.
+- `list_workspace` recovery discoverability after MCP restart.
+- `start_controlled_change` budget `gate_preview.would_fail` advisory when edit
+  is still allowed.
+- `respect_pyproject=false` no longer surfaces golden-fixture clone groups as
+  false `new` regressions.
 
 ## [2.0.2] - 2026-05-19
 
