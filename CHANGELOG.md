@@ -33,6 +33,10 @@ review receipts, and workflow consolidation tools.
 - CLI controller query modes: `--blast-radius` and `--patch-verify`.
 - Audit trail events for intent lifecycle and token budget tracking.
 - MCP tool JSON schemas now include concise per-parameter descriptions.
+- One-time interactive CLI migration note when a trusted `2.0.2` baseline is
+  analyzed by `2.1.0` or newer, explaining that LCOM4 cohesion counts may
+  change because Protocol interfaces and Pydantic validation hooks are excluded
+  from the cohesion graph.
 - Split monolithic `codeclone/ui_messages/__init__.py` into focused modules
   (`help`, `labels`, `runtime`, `markers`, `formatters`, `controller`, `styling`;
   stable names re-exported from `__init__.py`).
@@ -60,6 +64,11 @@ review receipts, and workflow consolidation tools.
   default DB path.
 
 ### Changed
+
+- LCOM4 cohesion graph applicability refined: Protocol class methods and Pydantic
+  validation/serialization decorator hooks are excluded from the cohesion graph;
+  `computed_field` remains because it commonly reads `self.*` and carries real
+  instance behavior. Reported class `method_count` still includes all methods.
 
 - MCP rejects `cache_policy=refresh` at the server boundary (CLI-only).
 - `finish_controlled_change` sets `user_action_required` on digest mismatch.

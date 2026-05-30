@@ -126,4 +126,12 @@ NOTE_DEAD_CODE_REACHABILITY_2_0_2_MIGRATION = (
     "framework hooks, public exports, and guarded dynamic dispatch now produce "
     "fewer false positives, not weaker detection.[/dim]"
 )
+NOTE_COHESION_LCOM4_2_1_MIGRATION = (
+    "\n[dim]Note:[/dim] Class cohesion (LCOM4) applicability was refined in "
+    "2.1.0.\n"
+    "[dim]Cohesion counts and low-cohesion class totals may change after "
+    "upgrading from 2.0.2: Protocol interfaces and Pydantic validation hooks "
+    "are excluded from the LCOM4 graph. This reflects tighter applicability "
+    "rules, not weaker detection.[/dim]"
+)
 NOTE_DEAD_CODE_REACHABILITY_MIGRATION = NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION

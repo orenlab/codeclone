@@ -332,6 +332,37 @@ class UnknownCall:
     assert compute_lcom4(class_node) == (2, 2, 1)
 
 
+def test_compute_lcom4_honors_ignored_methods() -> None:
+    class_node = _parse_named_node(
+        """
+class Mixed:
+    def connected_left(self) -> None:
+        self.shared = 1
+        self.connected_right()
+
+    def connected_right(self) -> None:
+        self.shared = 2
+
+    def isolated(self) -> int:
+        return 1
+""".strip(),
+        "Mixed",
+    )
+    assert isinstance(class_node, ast.ClassDef)
+    assert compute_lcom4(class_node) == (2, 3, 2)
+    assert compute_lcom4(class_node, ignored_methods=frozenset({"isolated"})) == (
+        1,
+        3,
+        2,
+    )
+    assert compute_lcom4(
+        class_node,
+        ignored_methods=frozenset(
+            {"connected_left", "connected_right", "isolated"},
+        ),
+    ) == (1, 3, 0)
+
+
 def test_cohesion_risk_boundaries() -> None:
     assert cohesion_risk(1) == "low"
     assert cohesion_risk(3) == "medium"

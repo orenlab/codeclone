@@ -378,6 +378,7 @@ def test_cli_dead_code_reachability_migration_note_version_gate(
         "expected_message",
         "expected_tip_key",
         "preexisting_tip_keys",
+        "print_note",
     ),
     [
         (
@@ -386,6 +387,7 @@ def test_cli_dead_code_reachability_migration_note_version_gate(
             "Dead-code reachability was refined in 2.0.1",
             "dead_code_reachability_2_0_1_migration_shown",
             (),
+            cli_tips.maybe_print_dead_code_reachability_migration_note,
         ),
         (
             "2.0.1",
@@ -393,16 +395,26 @@ def test_cli_dead_code_reachability_migration_note_version_gate(
             "Dead-code reachability was refined again in 2.0.2",
             "dead_code_reachability_2_0_2_migration_shown",
             ("dead_code_reachability_2_0_1_migration_shown",),
+            cli_tips.maybe_print_dead_code_reachability_migration_note,
+        ),
+        (
+            "2.0.2",
+            "2.1.0a1",
+            "Class cohesion (LCOM4) applicability was refined in 2.1.0",
+            "cohesion_lcom4_2_1_migration_shown",
+            (),
+            cli_tips.maybe_print_cohesion_lcom4_migration_note,
         ),
     ],
 )
-def test_cli_dead_code_reachability_migration_note_uses_one_shot_cache(
+def test_cli_migration_notes_use_one_shot_cache(
     tmp_path: Path,
     baseline_version: str,
     current_version: str,
     expected_message: str,
     expected_tip_key: str,
     preexisting_tip_keys: tuple[str, ...],
+    print_note: Callable[..., bool],
 ) -> None:
     printer = _RecordingPrinter()
     args = SimpleNamespace(quiet=False, ci=False)
@@ -420,7 +432,7 @@ def test_cli_dead_code_reachability_migration_note_uses_one_shot_cache(
             "utf-8",
         )
 
-    shown = cli_tips.maybe_print_dead_code_reachability_migration_note(
+    shown = print_note(
         args=args,
         console=printer,
         codeclone_version=current_version,
@@ -440,7 +452,7 @@ def test_cli_dead_code_reachability_migration_note_uses_one_shot_cache(
     for tip_key in (*preexisting_tip_keys, expected_tip_key):
         assert state["tips"][tip_key]["shown"] is True
 
-    shown_again = cli_tips.maybe_print_dead_code_reachability_migration_note(
+    shown_again = print_note(
         args=args,
         console=printer,
         codeclone_version=current_version,
@@ -498,6 +510,32 @@ def test_cli_dead_code_reachability_migration_note_respects_gates(
 
     assert shown is False
     assert printer.lines == []
+
+
+@pytest.mark.parametrize(
+    ("baseline_version", "current_version", "expected"),
+    [
+        ("2.0.2", "2.1.0a1", True),
+        ("2.0.2", "2.1.0", True),
+        ("2.0.2", "2.0.2", False),
+        ("2.0.1", "2.1.0a1", False),
+        ("2.0.1", "2.1.0", False),
+        ("2.0.0", "2.1.0", False),
+        (None, "2.1.0a1", False),
+    ],
+)
+def test_cli_cohesion_lcom4_migration_note_version_gate(
+    baseline_version: str | None,
+    current_version: str,
+    expected: bool,
+) -> None:
+    assert (
+        cli_tips._cohesion_lcom4_migration(
+            baseline_generator_version=baseline_version,
+            codeclone_version=current_version,
+        )
+        is not None
+    ) is expected
 
 
 def test_cli_module_main_guard(monkeypatch: pytest.MonkeyPatch) -> None:

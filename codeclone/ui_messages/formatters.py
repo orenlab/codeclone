@@ -39,6 +39,7 @@ from .runtime import (
     ERR_REPORT_WRITE_FAILED,
     ERR_UNREADABLE_SOURCE_IN_GATING,
     INFO_PROCESSING_CHANGED,
+    NOTE_COHESION_LCOM4_2_1_MIGRATION,
     NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION,
     NOTE_DEAD_CODE_REACHABILITY_2_0_2_MIGRATION,
     TIP_VSCODE_EXTENSION,
@@ -143,6 +144,14 @@ def fmt_dead_code_reachability_migration_note(
     if target_version == "2.0.2":
         return NOTE_DEAD_CODE_REACHABILITY_2_0_2_MIGRATION
     return NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION
+
+
+def fmt_cohesion_lcom4_migration_note(
+    *,
+    target_version: str = "2.1.0",
+) -> str:
+    _ = target_version
+    return NOTE_COHESION_LCOM4_2_1_MIGRATION
 
 
 def fmt_legacy_cache_warning(*, legacy_path: Path, new_path: Path) -> str:

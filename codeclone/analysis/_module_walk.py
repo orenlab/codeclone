@@ -60,6 +60,13 @@ _PYDANTIC_DECORATOR_NAMES = frozenset(
         "validator",
     }
 )
+# Cohesion ignores declarative validation/serialization hooks because they are
+# field-local framework callbacks, not instance-behavior methods. `computed_field`
+# is deliberately excluded: it commonly reads `self.*` and participates in real
+# object cohesion, so it stays in the LCOM4 graph.
+_COHESION_IGNORED_PYDANTIC_HOOKS = _PYDANTIC_DECORATOR_NAMES - frozenset(
+    {"computed_field"}
+)
 
 
 def _resolve_import_target(
@@ -97,6 +104,9 @@ class _ModuleWalkState:
         default_factory=lambda: set(_NON_RUNTIME_DECORATOR_SYMBOLS)
     )
     pydantic_module_aliases: set[str] = field(default_factory=lambda: {"pydantic"})
+    cohesion_ignored_decorator_aliases: set[str] = field(
+        default_factory=lambda: set(_COHESION_IGNORED_PYDANTIC_HOOKS)
+    )
 
 
 def _append_module_dep(
@@ -387,6 +397,9 @@ def _collect_import_from_node(
         state.non_runtime_decorator_aliases.update(
             _matching_import_aliases(node, _PYDANTIC_DECORATOR_NAMES)
         )
+        state.cohesion_ignored_decorator_aliases.update(
+            _matching_import_aliases(node, _COHESION_IGNORED_PYDANTIC_HOOKS)
+        )
 
     if not collect_referenced_names or not target:
         return
@@ -446,6 +459,69 @@ def _is_known_pydantic_decorator(
         module_alias == alias or module_alias.startswith(f"{alias}.")
         for alias in pydantic_module_aliases
     )
+
+
+def _is_cohesion_ignored_decorator(
+    name: str,
+    *,
+    cohesion_ignored_decorator_aliases: frozenset[str],
+    pydantic_module_aliases: frozenset[str],
+) -> bool:
+    # Bare or no-asname form: the decorator name matches a known hook alias.
+    if name in cohesion_ignored_decorator_aliases:
+        return True
+    # Dotted form, e.g. pydantic.field_validator.
+    terminal = name.rsplit(".", 1)[-1]
+    if terminal not in _COHESION_IGNORED_PYDANTIC_HOOKS or "." not in name:
+        return False
+    module_alias = name.rsplit(".", 1)[0]
+    return any(
+        module_alias == alias or module_alias.startswith(f"{alias}.")
+        for alias in pydantic_module_aliases
+    )
+
+
+def _cohesion_ignored_method_names(
+    class_node: ast.ClassDef,
+    *,
+    protocol_symbol_aliases: frozenset[str],
+    protocol_module_aliases: frozenset[str],
+    pydantic_module_aliases: frozenset[str],
+    cohesion_ignored_decorator_aliases: frozenset[str],
+) -> frozenset[str]:
+    """Return method names excluded from LCOM4 cohesion for this class.
+
+    Protocol declarations contribute all their method names (the whole class is
+    an interface surface). Other classes contribute only methods decorated with
+    Pydantic validator/serializer hooks. ``computed_field`` is never ignored
+    because it commonly reads ``self.*`` and carries real cohesion.
+    """
+    methods = [
+        node
+        for node in class_node.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    if _is_protocol_class(
+        class_node,
+        protocol_symbol_aliases=protocol_symbol_aliases,
+        protocol_module_aliases=protocol_module_aliases,
+    ):
+        return frozenset(method.name for method in methods)
+
+    ignored: set[str] = set()
+    for method in methods:
+        for decorator in method.decorator_list:
+            name = _decorator_expr_name(decorator)
+            if name is None:
+                continue
+            if _is_cohesion_ignored_decorator(
+                name,
+                cohesion_ignored_decorator_aliases=cohesion_ignored_decorator_aliases,
+                pydantic_module_aliases=pydantic_module_aliases,
+            ):
+                ignored.add(method.name)
+                break
+    return frozenset(ignored)
 
 
 def _is_non_runtime_candidate(
@@ -633,6 +709,7 @@ class _ModuleWalkResult(NamedTuple):
     protocol_module_aliases: frozenset[str]
     non_runtime_decorator_aliases: frozenset[str]
     pydantic_module_aliases: frozenset[str]
+    cohesion_ignored_decorator_aliases: frozenset[str]
 
 
 def _collect_module_walk_data(
@@ -693,6 +770,9 @@ def _collect_module_walk_data(
         protocol_module_aliases=frozenset(state.protocol_module_aliases),
         non_runtime_decorator_aliases=frozenset(state.non_runtime_decorator_aliases),
         pydantic_module_aliases=frozenset(state.pydantic_module_aliases),
+        cohesion_ignored_decorator_aliases=frozenset(
+            state.cohesion_ignored_decorator_aliases
+        ),
     )
 
 

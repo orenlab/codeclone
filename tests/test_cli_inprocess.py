@@ -2351,6 +2351,11 @@ def test_cli_shows_vscode_extension_tip_once_per_version(
             "Dead-code reachability was refined again in 2.0.2",
             "dead_code_reachability_2_0_2_migration_shown",
         ),
+        (
+            "2.0.2",
+            "Class cohesion (LCOM4) applicability was refined in 2.1.0",
+            "cohesion_lcom4_2_1_migration_shown",
+        ),
     ],
 )
 def test_cli_shows_dead_code_reachability_migration_note_once(

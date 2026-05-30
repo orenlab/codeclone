@@ -1210,6 +1210,126 @@ class Service:
     )
 
 
+def test_extract_protocol_class_excludes_stub_methods_from_lcom4() -> None:
+    src = """
+from typing import Protocol
+
+class Reader(Protocol):
+    def read(self) -> str: ...
+
+    def write(self, data: str) -> None: ...
+
+    def close(self) -> None: ...
+"""
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=src,
+        filepath="pkg/reader.py",
+        module_name="pkg.reader",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert file_metrics.class_metrics == (
+        ClassMetrics(
+            qualname="pkg.reader:Reader",
+            filepath="pkg/reader.py",
+            start_line=4,
+            end_line=9,
+            cbo=0,
+            lcom4=1,
+            method_count=3,
+            instance_var_count=0,
+            risk_coupling="low",
+            risk_cohesion="low",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "filepath", "module_name", "lcom4", "method_count", "risk"),
+    (
+        pytest.param(
+            """
+from pydantic import BaseModel, field_validator
+
+class Config(BaseModel):
+    name: str
+    value: int
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("value")
+    @classmethod
+    def validate_value(cls, value: int) -> int:
+        return value
+
+    def describe(self) -> str:
+        return self.name
+""".strip(),
+            "pkg/config.py",
+            "pkg.config",
+            1,
+            3,
+            "low",
+            id="field_validators_ignored",
+        ),
+        pytest.param(
+            """
+from pydantic import BaseModel, computed_field
+
+class Item(BaseModel):
+    first: str
+    second: str
+
+    @computed_field
+    @property
+    def left(self) -> str:
+        return self.first
+
+    @computed_field
+    @property
+    def right(self) -> str:
+        return self.second
+
+    def unrelated(self) -> int:
+        return 1
+""".strip(),
+            "pkg/item.py",
+            "pkg.item",
+            3,
+            3,
+            "medium",
+            id="computed_field_in_graph",
+        ),
+    ),
+)
+def test_extract_pydantic_cohesion_exclusions(
+    source: str,
+    filepath: str,
+    module_name: str,
+    lcom4: int,
+    method_count: int,
+    risk: str,
+) -> None:
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath=filepath,
+        module_name=module_name,
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    assert len(file_metrics.class_metrics) == 1
+    metric = file_metrics.class_metrics[0]
+    assert metric.lcom4 == lcom4
+    assert metric.method_count == method_count
+    assert metric.risk_cohesion == risk
+
+
 def test_dead_code_marks_symbol_dead_when_referenced_only_by_tests() -> None:
     src_prod = """
 def orphan():

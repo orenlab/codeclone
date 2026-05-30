@@ -120,6 +120,9 @@ maybe_print_vscode_extension_tip = cli_tips.maybe_print_vscode_extension_tip
 maybe_print_dead_code_reachability_migration_note = (
     cli_tips.maybe_print_dead_code_reachability_migration_note
 )
+maybe_print_cohesion_lcom4_migration_note = (
+    cli_tips.maybe_print_cohesion_lcom4_migration_note
+)
 
 _report_path_origins = cli_reports_output._report_path_origins
 _resolve_output_paths = cli_reports_output._resolve_output_paths
@@ -705,6 +708,14 @@ def _main_impl() -> None:
         console=_console(),
     )
     maybe_print_dead_code_reachability_migration_note(
+        args=args,
+        console=_console(),
+        codeclone_version=__version__,
+        cache_path=cache_path,
+        baseline_generator_version=baseline_state.baseline.generator_version,
+        baseline_trusted_for_diff=baseline_state.trusted_for_diff,
+    )
+    maybe_print_cohesion_lcom4_migration_note(
         args=args,
         console=_console(),
         codeclone_version=__version__,

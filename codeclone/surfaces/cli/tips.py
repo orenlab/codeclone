@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import NamedTuple, TextIO
 
@@ -26,6 +26,7 @@ _DEAD_CODE_REACHABILITY_2_0_1_MIGRATION_TIP_KEY = (
 _DEAD_CODE_REACHABILITY_2_0_2_MIGRATION_TIP_KEY = (
     "dead_code_reachability_2_0_2_migration_shown"
 )
+_COHESION_LCOM4_2_1_MIGRATION_TIP_KEY = "cohesion_lcom4_2_1_migration_shown"
 _TIPS_SCHEMA_VERSION = 1
 _VSCODE_EXTENSION_URL = (
     "https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone"
@@ -69,6 +70,25 @@ _DEAD_CODE_REACHABILITY_MIGRATIONS: tuple[
         baseline_max=Version("2.0.0"),
         current_min=Version("2.0.1"),
         target_version="2.0.1",
+    ),
+)
+
+
+class _CohesionLcom4Migration(NamedTuple):
+    tip_key: str
+    baseline_min: Version
+    baseline_max: Version
+    current_min: Version
+    target_version: str
+
+
+_COHESION_LCOM4_MIGRATIONS: tuple[_CohesionLcom4Migration, ...] = (
+    _CohesionLcom4Migration(
+        tip_key=_COHESION_LCOM4_2_1_MIGRATION_TIP_KEY,
+        baseline_min=Version("2.0.2"),
+        baseline_max=Version("2.0.2"),
+        current_min=Version("2.1.0a1"),
+        target_version="2.1.0",
     ),
 )
 
@@ -194,11 +214,12 @@ def _tip_context_allowed(
     return _stream_is_tty(stream)
 
 
-def _dead_code_reachability_migration(
+def _select_baseline_migration(
+    migrations: tuple[_DeadCodeReachabilityMigration | _CohesionLcom4Migration, ...],
     *,
     baseline_generator_version: str | None,
     codeclone_version: str,
-) -> _DeadCodeReachabilityMigration | None:
+) -> _DeadCodeReachabilityMigration | _CohesionLcom4Migration | None:
     if not baseline_generator_version:
         return None
     try:
@@ -206,12 +227,42 @@ def _dead_code_reachability_migration(
         current_version = Version(codeclone_version)
     except InvalidVersion:
         return None
-    for migration in _DEAD_CODE_REACHABILITY_MIGRATIONS:
+    for migration in migrations:
         if (
             migration.baseline_min <= baseline_version <= migration.baseline_max
             and current_version >= migration.current_min
         ):
             return migration
+    return None
+
+
+def _dead_code_reachability_migration(
+    *,
+    baseline_generator_version: str | None,
+    codeclone_version: str,
+) -> _DeadCodeReachabilityMigration | None:
+    selected = _select_baseline_migration(
+        _DEAD_CODE_REACHABILITY_MIGRATIONS,
+        baseline_generator_version=baseline_generator_version,
+        codeclone_version=codeclone_version,
+    )
+    if isinstance(selected, _DeadCodeReachabilityMigration):
+        return selected
+    return None
+
+
+def _cohesion_lcom4_migration(
+    *,
+    baseline_generator_version: str | None,
+    codeclone_version: str,
+) -> _CohesionLcom4Migration | None:
+    selected = _select_baseline_migration(
+        _COHESION_LCOM4_MIGRATIONS,
+        baseline_generator_version=baseline_generator_version,
+        codeclone_version=codeclone_version,
+    )
+    if isinstance(selected, _CohesionLcom4Migration):
+        return selected
     return None
 
 
@@ -256,23 +307,16 @@ def maybe_print_vscode_extension_tip(
     return True
 
 
-def maybe_print_dead_code_reachability_migration_note(
+def _maybe_print_baseline_migration_note(
     *,
     args: object,
     console: PrinterLike,
-    codeclone_version: str,
     cache_path: Path,
-    baseline_generator_version: str | None,
-    baseline_trusted_for_diff: bool,
+    migration: _DeadCodeReachabilityMigration | _CohesionLcom4Migration | None,
+    format_note: Callable[..., str],
     environ: Mapping[str, str] | None = None,
     stream: TextIO | None = None,
 ) -> bool:
-    if not baseline_trusted_for_diff:
-        return False
-    migration = _dead_code_reachability_migration(
-        baseline_generator_version=baseline_generator_version,
-        codeclone_version=codeclone_version,
-    )
     if migration is None:
         return False
 
@@ -293,11 +337,7 @@ def maybe_print_dead_code_reachability_migration_note(
     ):
         return False
 
-    console.print(
-        ui.fmt_dead_code_reachability_migration_note(
-            target_version=migration.target_version,
-        )
-    )
+    console.print(format_note(target_version=migration.target_version))
     try:
         _remember_tip_shown(
             path=state_path,
@@ -309,7 +349,62 @@ def maybe_print_dead_code_reachability_migration_note(
     return True
 
 
+def maybe_print_dead_code_reachability_migration_note(
+    *,
+    args: object,
+    console: PrinterLike,
+    codeclone_version: str,
+    cache_path: Path,
+    baseline_generator_version: str | None,
+    baseline_trusted_for_diff: bool,
+    environ: Mapping[str, str] | None = None,
+    stream: TextIO | None = None,
+) -> bool:
+    if not baseline_trusted_for_diff:
+        return False
+    return _maybe_print_baseline_migration_note(
+        args=args,
+        console=console,
+        cache_path=cache_path,
+        migration=_dead_code_reachability_migration(
+            baseline_generator_version=baseline_generator_version,
+            codeclone_version=codeclone_version,
+        ),
+        format_note=ui.fmt_dead_code_reachability_migration_note,
+        environ=environ,
+        stream=stream,
+    )
+
+
+def maybe_print_cohesion_lcom4_migration_note(
+    *,
+    args: object,
+    console: PrinterLike,
+    codeclone_version: str,
+    cache_path: Path,
+    baseline_generator_version: str | None,
+    baseline_trusted_for_diff: bool,
+    environ: Mapping[str, str] | None = None,
+    stream: TextIO | None = None,
+) -> bool:
+    if not baseline_trusted_for_diff:
+        return False
+    return _maybe_print_baseline_migration_note(
+        args=args,
+        console=console,
+        cache_path=cache_path,
+        migration=_cohesion_lcom4_migration(
+            baseline_generator_version=baseline_generator_version,
+            codeclone_version=codeclone_version,
+        ),
+        format_note=ui.fmt_cohesion_lcom4_migration_note,
+        environ=environ,
+        stream=stream,
+    )
+
+
 __all__ = [
+    "maybe_print_cohesion_lcom4_migration_note",
     "maybe_print_dead_code_reachability_migration_note",
     "maybe_print_vscode_extension_tip",
 ]

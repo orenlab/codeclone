@@ -34,6 +34,7 @@ from ..models import (
 from ..paths import is_test_filepath
 from ._module_walk import (
     _build_suppression_index_for_source,
+    _cohesion_ignored_method_names,
     _collect_dead_candidates,
     _collect_module_walk_data,
 )
@@ -136,6 +137,7 @@ def extract_units_and_stats_from_source(
     protocol_module_aliases = _walk.protocol_module_aliases
     non_runtime_decorator_aliases = _walk.non_runtime_decorator_aliases
     pydantic_module_aliases = _walk.pydantic_module_aliases
+    cohesion_ignored_decorator_aliases = _walk.cohesion_ignored_decorator_aliases
 
     suppression_index = _build_suppression_index_for_source(
         source=source,
@@ -245,6 +247,13 @@ def extract_units_and_stats_from_source(
             structural_findings.extend(structure_facts.structural_findings)
 
     for class_qualname, class_node in collector.class_nodes:
+        cohesion_ignored_methods = _cohesion_ignored_method_names(
+            class_node,
+            protocol_symbol_aliases=protocol_symbol_aliases,
+            protocol_module_aliases=protocol_module_aliases,
+            pydantic_module_aliases=pydantic_module_aliases,
+            cohesion_ignored_decorator_aliases=cohesion_ignored_decorator_aliases,
+        )
         class_metric = _class_metrics_for_node(
             module_name=module_name,
             class_qualname=class_qualname,
@@ -252,6 +261,7 @@ def extract_units_and_stats_from_source(
             filepath=filepath,
             module_import_names=module_import_names,
             module_class_names=module_class_names,
+            cohesion_ignored_methods=cohesion_ignored_methods,
         )
         if class_metric is not None:
             class_metrics.append(class_metric)
