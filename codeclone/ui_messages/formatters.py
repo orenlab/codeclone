@@ -17,6 +17,10 @@ from pathlib import Path
 
 from .. import __version__
 from ..contracts import ISSUES_URL
+from ..paths.gitignore import (
+    GITIGNORE_CODECLONE_CACHE_MESSAGE,
+    GITIGNORE_CODECLONE_CACHE_SUGGESTED_ENTRY,
+)
 from .labels import (
     CLI_LAYOUT_MAX_WIDTH,
     SUMMARY_COMPACT,
@@ -42,6 +46,7 @@ from .runtime import (
     NOTE_COHESION_LCOM4_2_1_MIGRATION,
     NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION,
     NOTE_DEAD_CODE_REACHABILITY_2_0_2_MIGRATION,
+    TIP_GITIGNORE_CODECLONE_CACHE,
     TIP_VSCODE_EXTENSION,
     WARN_BATCH_ITEM_FAILED,
     WARN_CACHE_SAVE_FAILED,
@@ -135,6 +140,13 @@ def fmt_cache_save_failed(error: object) -> str:
 
 def fmt_vscode_extension_tip(*, url: str) -> str:
     return TIP_VSCODE_EXTENSION.format(url=url)
+
+
+def fmt_gitignore_codeclone_cache_tip() -> str:
+    return TIP_GITIGNORE_CODECLONE_CACHE.format(
+        message=GITIGNORE_CODECLONE_CACHE_MESSAGE,
+        entry=GITIGNORE_CODECLONE_CACHE_SUGGESTED_ENTRY,
+    )
 
 
 def fmt_dead_code_reachability_migration_note(

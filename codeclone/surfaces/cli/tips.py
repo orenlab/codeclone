@@ -15,6 +15,7 @@ from typing import NamedTuple, TextIO
 from packaging.version import InvalidVersion, Version
 
 from ... import ui_messages as ui
+from ...paths.gitignore import repo_gitignore_covers_codeclone_cache
 from ...utils.json_io import read_json_object, write_json_document_atomically
 from .attrs import bool_attr
 from .types import PrinterLike
@@ -403,8 +404,31 @@ def maybe_print_cohesion_lcom4_migration_note(
     )
 
 
+def maybe_print_gitignore_codeclone_cache_tip(
+    *,
+    args: object,
+    console: PrinterLike,
+    root_path: Path,
+    environ: Mapping[str, str] | None = None,
+    stream: TextIO | None = None,
+) -> bool:
+    effective_environ = os.environ if environ is None else environ
+    effective_stream = sys.stdout if stream is None else stream
+    if not _tip_context_allowed(
+        args=args,
+        environ=effective_environ,
+        stream=effective_stream,
+    ):
+        return False
+    if repo_gitignore_covers_codeclone_cache(root_path):
+        return False
+    console.print(ui.fmt_gitignore_codeclone_cache_tip())
+    return True
+
+
 __all__ = [
     "maybe_print_cohesion_lcom4_migration_note",
     "maybe_print_dead_code_reachability_migration_note",
+    "maybe_print_gitignore_codeclone_cache_tip",
     "maybe_print_vscode_extension_tip",
 ]

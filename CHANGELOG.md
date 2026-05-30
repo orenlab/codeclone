@@ -28,6 +28,11 @@ review receipts, and workflow consolidation tools.
   artifacts with provenance, scope, patch status, and claims-not-made.
 - Verify ergonomics: auto-resolve `before_run_id` from intent, `next_step`
   hints, `claim_validation_recommended` flag.
+- MCP workspace hygiene tips: when the repository root `.gitignore` does not
+  cover `.cache/codeclone/` (or `.cache/`), analysis and change-control
+  responses include a non-blocking `tips[]` advisory to add the entry.
+  The CLI prints the same advisory after interactive analysis runs. MCP and
+  CLI never edit `.gitignore` automatically.
 - Lease-aware intent recovery: renewable ownership leases,
   own/recoverable/foreign-active classification, explicit recovery.
 - CLI controller query modes: `--blast-radius` and `--patch-verify`.

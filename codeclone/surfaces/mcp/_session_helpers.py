@@ -911,3 +911,23 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
     else:
         lines.extend([f"- `{reason}`" for reason in blocking_gates])
     return "\n".join(lines)
+
+
+def workspace_hygiene_tips(root: Path) -> list[dict[str, object]]:
+    from ...paths.gitignore import repo_gitignore_covers_codeclone_cache
+    from .messages.tips import gitignore_codeclone_cache_tip
+
+    if repo_gitignore_covers_codeclone_cache(root):
+        return []
+    return [gitignore_codeclone_cache_tip()]
+
+
+def attach_workspace_hygiene_tips(
+    payload: dict[str, object],
+    *,
+    root: Path,
+) -> dict[str, object]:
+    tips = workspace_hygiene_tips(root)
+    if tips:
+        payload["tips"] = tips
+    return payload

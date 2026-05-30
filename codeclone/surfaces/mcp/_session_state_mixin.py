@@ -548,6 +548,8 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
             if security_surfaces:
                 payload["security_surfaces"] = security_surfaces
         payload["next_tool"] = "get_production_triage"
+        if record is not None:
+            _helpers.attach_workspace_hygiene_tips(payload, root=record.root)
         return payload
 
     def _summary_baseline_payload(
@@ -1026,6 +1028,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         security_surfaces = _helpers._summary_security_surfaces_payload(record)
         if security_surfaces:
             payload["security_surfaces"] = security_surfaces
+        _helpers.attach_workspace_hygiene_tips(payload, root=record.root)
         return payload
 
     def get_help(

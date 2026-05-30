@@ -71,6 +71,12 @@ Refs:
   `2.0.2`, the CLI may print a one-time note that cohesion counts can change
   because Protocol interfaces and Pydantic validation hooks are excluded from
   the LCOM4 graph.
+- After a normal interactive analysis run, the CLI may print a workspace
+  hygiene tip when the repository root `.gitignore` does not cover
+  `.cache/codeclone/` (or the broader `.cache/` tree). The tip is advisory
+  only, suppressed in `--quiet`, CI, and non-TTY contexts, and repeats on
+  each eligible run until `.gitignore` covers the cache path. CodeClone never
+  edits `.gitignore` automatically.
 - Changed-scope review uses:
     - `--changed-only`
     - `--diff-against`

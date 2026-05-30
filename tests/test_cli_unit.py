@@ -339,6 +339,36 @@ def test_cli_vscode_extension_tip_respects_context_gates(
     assert printer.lines == []
 
 
+def test_cli_gitignore_codeclone_cache_tip(tmp_path: Path) -> None:
+    printer = _RecordingPrinter()
+    shown = cli_tips.maybe_print_gitignore_codeclone_cache_tip(
+        args=SimpleNamespace(quiet=False, ci=False),
+        console=printer,
+        root_path=tmp_path,
+        environ={},
+        stream=_TTYStream(is_tty=True),
+    )
+    assert shown is True
+    assert len(printer.lines) == 1
+    assert ".cache/codeclone/" in printer.lines[0]
+
+    covered_root = tmp_path / "covered"
+    covered_root.mkdir()
+    (covered_root / ".gitignore").write_text(".cache/\n", encoding="utf-8")
+    silent_printer = _RecordingPrinter()
+    assert (
+        cli_tips.maybe_print_gitignore_codeclone_cache_tip(
+            args=SimpleNamespace(quiet=False, ci=False),
+            console=silent_printer,
+            root_path=covered_root,
+            environ={},
+            stream=_TTYStream(is_tty=True),
+        )
+        is False
+    )
+    assert silent_printer.lines == []
+
+
 @pytest.mark.parametrize(
     ("baseline_version", "current_version", "expected"),
     [

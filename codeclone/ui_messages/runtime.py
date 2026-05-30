@@ -134,4 +134,7 @@ NOTE_COHESION_LCOM4_2_1_MIGRATION = (
     "are excluded from the LCOM4 graph. This reflects tighter applicability "
     "rules, not weaker detection.[/dim]"
 )
+TIP_GITIGNORE_CODECLONE_CACHE = (
+    "\n[dim]Tip:[/dim] {message}\n[dim]Suggested entry: `{entry}`[/dim]"
+)
 NOTE_DEAD_CODE_REACHABILITY_MIGRATION = NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION

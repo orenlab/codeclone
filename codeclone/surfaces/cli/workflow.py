@@ -82,6 +82,7 @@ __all__ = [
     "discover",
     "gate",
     "main",
+    "maybe_print_gitignore_codeclone_cache_tip",
     "maybe_print_vscode_extension_tip",
     "print_banner",
     "process",
@@ -122,6 +123,9 @@ maybe_print_dead_code_reachability_migration_note = (
 )
 maybe_print_cohesion_lcom4_migration_note = (
     cli_tips.maybe_print_cohesion_lcom4_migration_note
+)
+maybe_print_gitignore_codeclone_cache_tip = (
+    cli_tips.maybe_print_gitignore_codeclone_cache_tip
 )
 
 _report_path_origins = cli_reports_output._report_path_origins
@@ -728,6 +732,11 @@ def _main_impl() -> None:
         console=_console(),
         codeclone_version=__version__,
         cache_path=cache_path,
+    )
+    maybe_print_gitignore_codeclone_cache_tip(
+        args=args,
+        console=_console(),
+        root_path=root_path,
     )
     print_pipeline_done_if_needed(args=args, run_started_at=run_started_at)
 

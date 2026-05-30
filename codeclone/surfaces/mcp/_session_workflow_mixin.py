@@ -83,14 +83,17 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
         # 2. Root-aware run resolution (not _runs.get(None) — multi-repo safe)
         record = self._latest_run_for_root(root_path)
         if record is None:
-            return {
-                "status": "needs_analysis",
-                "intent_id": None,
-                "edit_allowed": False,
-                "root": str(root_path),
-                "message": workflow_msgs.START_NEEDS_ANALYSIS,
-                "workspace": _workspace_summary(workspace),
-            }
+            return _helpers.attach_workspace_hygiene_tips(
+                {
+                    "status": "needs_analysis",
+                    "intent_id": None,
+                    "edit_allowed": False,
+                    "root": str(root_path),
+                    "message": workflow_msgs.START_NEEDS_ANALYSIS,
+                    "workspace": _workspace_summary(workspace),
+                },
+                root=root_path,
+            )
 
         # 3. Declare intent
         declare_payload = self._declare_change_intent(
@@ -107,16 +110,21 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
 
         # Queued: no blast radius or budget
         if status == IntentStatus.QUEUED.value:
-            return {
-                "intent_id": intent_id,
-                "status": "queued",
-                "run_id": _helpers._short_run_id(record.run_id),
-                "blocked_by": declare_payload.get("blocked_by", []),
-                "queue_position": declare_payload.get("queue_position", 1),
-                "before_run_pinned": declare_payload.get("before_run_pinned", False),
-                "edit_allowed": False,
-                "message": workflow_msgs.START_QUEUED,
-            }
+            return _helpers.attach_workspace_hygiene_tips(
+                {
+                    "intent_id": intent_id,
+                    "status": "queued",
+                    "run_id": _helpers._short_run_id(record.run_id),
+                    "blocked_by": declare_payload.get("blocked_by", []),
+                    "queue_position": declare_payload.get("queue_position", 1),
+                    "before_run_pinned": declare_payload.get(
+                        "before_run_pinned", False
+                    ),
+                    "edit_allowed": False,
+                    "message": workflow_msgs.START_QUEUED,
+                },
+                root=root_path,
+            )
 
         # 4. Blast radius (full payload, not just declare's subset)
         with self._state_lock:
@@ -152,17 +160,20 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
         )
 
         # 7. Compose response
-        return {
-            "intent_id": intent_id,
-            "status": "active",
-            "run_id": _helpers._short_run_id(record.run_id),
-            "workspace": _workspace_summary(workspace),
-            "blast_radius": blast_payload,
-            "budget": _budget_summary(budget_payload),
-            "scope": active_intent.scope.to_payload(),
-            "edit_allowed": True,
-            "message": self._start_message(blast_payload, budget_payload),
-        }
+        return _helpers.attach_workspace_hygiene_tips(
+            {
+                "intent_id": intent_id,
+                "status": "active",
+                "run_id": _helpers._short_run_id(record.run_id),
+                "workspace": _workspace_summary(workspace),
+                "blast_radius": blast_payload,
+                "budget": _budget_summary(budget_payload),
+                "scope": active_intent.scope.to_payload(),
+                "edit_allowed": True,
+                "message": self._start_message(blast_payload, budget_payload),
+            },
+            root=root_path,
+        )
 
     # ------------------------------------------------------------------
     # finish_controlled_change

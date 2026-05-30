@@ -103,6 +103,13 @@ drill into one finding or one hotspot family.
 | `evaluate_gates`        | `run_id`, gate flags, threshold overrides, `coverage_min`                                                                    | Preview CI gating decisions without mutating state                   |
 | `help`                  | `topic`, `detail`                                                                                                            | Bounded workflow/contract guidance                                   |
 
+Selected analysis and workflow responses may include non-blocking `tips[]`
+entries for workspace hygiene (for example when `.cache/codeclone/` is not
+covered by the repository root `.gitignore`). The CLI prints the same
+advisory after interactive analysis runs (suppressed in `--quiet`, CI, and
+non-TTY contexts). Tips are advisory only; MCP and CLI never edit
+`.gitignore` automatically.
+
 ### Report and finding projection tools
 
 | Tool                  | Key parameters                                                                                                                     | Purpose                                             |

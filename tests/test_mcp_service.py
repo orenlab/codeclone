@@ -8263,3 +8263,60 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
         )
         is None
     )
+
+
+def test_mcp_workspace_hygiene_gitignore_tip(tmp_path: Path) -> None:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    request = MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False)
+
+    summary = service.analyze_repository(request)
+    tips = cast("list[dict[str, object]]", summary["tips"])
+    assert tips[0]["id"] == "gitignore-codeclone-cache"
+    assert tips[0]["category"] == "workspace_hygiene"
+    assert tips[0]["suggested_entry"] == ".cache/codeclone/"
+
+    run_summary = service.get_run_summary(run_id=str(summary["run_id"]))
+    assert cast("list[dict[str, object]]", run_summary["tips"])[0]["id"] == (
+        "gitignore-codeclone-cache"
+    )
+
+    triage = service.get_production_triage(run_id=str(summary["run_id"]))
+    assert cast("list[dict[str, object]]", triage["tips"])[0]["id"] == (
+        "gitignore-codeclone-cache"
+    )
+
+    started = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["pkg/dup.py"]},
+        intent="touch dup",
+    )
+    assert started["status"] == "active"
+    assert cast("list[dict[str, object]]", started["tips"])[0]["id"] == (
+        "gitignore-codeclone-cache"
+    )
+
+    fresh_service = CodeCloneMCPService(history_limit=2)
+    needs = fresh_service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["pkg/dup.py"]},
+        intent="touch dup",
+    )
+    assert needs["status"] == "needs_analysis"
+    assert cast("list[dict[str, object]]", needs["tips"])[0]["id"] == (
+        "gitignore-codeclone-cache"
+    )
+
+    (tmp_path / ".gitignore").write_text(".cache/\n", encoding="utf-8")
+    covered_service = CodeCloneMCPService(history_limit=2)
+    covered_summary = covered_service.analyze_repository(request)
+    assert "tips" not in covered_summary
+
+    _register_docs_patch_run(covered_service, tmp_path)
+    started = covered_service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="docs patch",
+    )
+    assert started["status"] == "active"
+    assert "tips" not in started

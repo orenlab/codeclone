@@ -237,6 +237,26 @@ stored runs.
 After analysis, call `get_run_summary` or `get_production_triage` first.
 Prefer `list_hotspots` or `check_*` before broad `list_findings` calls.
 
+### Workspace hygiene tips
+
+Selected MCP responses may include a non-blocking `tips[]` array with
+structured workspace guidance. The first tip checks whether the repository
+root `.gitignore` covers `.cache/codeclone/` (or the broader `.cache/` tree).
+
+| Field             | Example                     |
+|-------------------|-----------------------------|
+| `id`              | `gitignore-codeclone-cache` |
+| `severity`        | `info`                      |
+| `category`        | `workspace_hygiene`         |
+| `suggested_entry` | `.cache/codeclone/`         |
+
+Tips are advisory only — not findings, gates, or failures. MCP never edits
+`.gitignore` automatically; agents must declare scope before changing it.
+
+Surfaces: `analyze_repository`, `get_run_summary`, `get_production_triage`,
+`start_controlled_change`, and the CLI after a normal interactive analysis run
+(suppressed in `--quiet`, CI, and non-TTY contexts).
+
 ### Phase 3: Drill down
 
 | Tool                  | Purpose                                                     |
@@ -315,13 +335,13 @@ sequenceDiagram
     M ->> D: close intent (file: delete row; sqlite: status=clean)
 ```
 
-| Tool                     | Purpose                                                                                                     |
-|--------------------------|-------------------------------------------------------------------------------------------------------------|
+| Tool                     | Purpose                                                                                                              |
+|--------------------------|----------------------------------------------------------------------------------------------------------------------|
 | `manage_change_intent`   | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace |
-| `get_blast_radius`       | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                           |
-| `check_patch_contract`   | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                      |
-| `create_review_receipt`  | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile      |
-| `validate_review_claims` | Citation-based overclaim detection against stored run semantics                                             |
+| `get_blast_radius`       | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                    |
+| `check_patch_contract`   | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                               |
+| `create_review_receipt`  | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile               |
+| `validate_review_claims` | Citation-based overclaim detection against stored run semantics                                                      |
 
 ??? info "Blast radius: do_not_touch vs review_context"
 `do_not_touch` contains actionable edit prohibitions: baselines, generated
@@ -408,19 +428,18 @@ analyze_changed_paths(changed_paths=[...] or git_diff_ref="HEAD~1")
 sequenceDiagram
     participant Agent
     participant MCP as CodeClone MCP
-
-    Note over Agent,MCP: Primary workflow (workflow tools)
-    Agent->>MCP: analyze_repository
-    MCP-->>Agent: run_id
-    Agent->>MCP: start_controlled_change(scope, intent)
-    MCP-->>Agent: intent_id, blast_radius, budget
+    Note over Agent, MCP: Primary workflow (workflow tools)
+    Agent ->> MCP: analyze_repository
+    MCP -->> Agent: run_id
+    Agent ->> MCP: start_controlled_change(scope, intent)
+    MCP -->> Agent: intent_id, blast_radius, budget
     Note over Agent: edit files
     opt Python structural / governance config
-        Agent->>MCP: analyze_repository
-        MCP-->>Agent: after_run_id
+        Agent ->> MCP: analyze_repository
+        MCP -->> Agent: after_run_id
     end
-    Agent->>MCP: finish_controlled_change(intent_id, changed_files, after_run_id?)
-    MCP-->>Agent: status, receipt, intent_cleared
+    Agent ->> MCP: finish_controlled_change(intent_id, changed_files, after_run_id?)
+    MCP -->> Agent: status, receipt, intent_cleared
 ```
 
 !!! info "Tool tiers"
@@ -503,11 +522,12 @@ Separate accepted baseline debt from new regressions.
 ```
 
 !!! tip "Best practices"
+
 - Use `analyze_changed_paths` for PRs, not full analysis.
 - Prefer `get_run_summary` or `get_production_triage` as the first pass.
 - Prefer `list_hotspots` or narrow `check_*` tools before broad `list_findings`.
 - Use `get_finding` / `get_remediation` for one finding instead of raising
-`detail_level` on larger lists.
+  `detail_level` on larger lists.
 - Pass an absolute `root` — MCP rejects relative roots like `.`.
 - Use `coverage_xml` only with `analysis_mode="full"`.
 - Use `source_kind="production-only"` to cut test/fixture noise.
@@ -546,16 +566,16 @@ include `total`, `shown`, and `truncated` summaries.
 
 ## Security
 
-| Property          | Guarantee                                                  |
-|-------------------|------------------------------------------------------------|
-| Read-only         | Never mutates source, baseline, cache, or report artifacts |
-| Default transport | Local `stdio`                                              |
-| Remote exposure   | Explicit `--allow-remote` required for non-loopback        |
-| Lazy loading      | Base `codeclone` install does not require MCP packages     |
-| Repository access | Limited to what the server process can read locally        |
-| Session state     | In-memory runs and review markers; do not survive restart  |
+| Property          | Guarantee                                                                                                                                                                                                                                                   |
+|-------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Read-only         | Never mutates source, baseline, cache, or report artifacts                                                                                                                                                                                                  |
+| Default transport | Local `stdio`                                                                                                                                                                                                                                               |
+| Remote exposure   | Explicit `--allow-remote` required for non-loopback                                                                                                                                                                                                         |
+| Lazy loading      | Base `codeclone` install does not require MCP packages                                                                                                                                                                                                      |
+| Repository access | Limited to what the server process can read locally                                                                                                                                                                                                         |
+| Session state     | In-memory runs and review markers; do not survive restart                                                                                                                                                                                                   |
 | Workspace intents | File backend: ephemeral JSON under `.cache/codeclone/intents/`; SQLite backend: auditable rows under `.cache/codeclone/db/intents.sqlite3` with retention purge (default 7 days, max 14 in open source — see [Plans and Retention](plans-and-retention.md)) |
-| Audit trail       | Optional SQLite under `.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true` |
+| Audit trail       | Optional SQLite under `.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true`                                                                                                                                                                         |
 
 ---
 

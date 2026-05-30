@@ -2338,6 +2338,32 @@ def test_cli_shows_vscode_extension_tip_once_per_version(
     assert "VS Code detected" not in second_out
 
 
+def test_cli_shows_gitignore_codeclone_cache_tip_when_uncovered(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_default_source(tmp_path)
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(cli_tips, "_stream_is_tty", lambda _stream: True)
+
+    _run_parallel_main(monkeypatch, [str(tmp_path), "--no-progress", "--no-color"])
+    out = capsys.readouterr().out
+    _assert_after_summary(
+        out,
+        "Tip:",
+        ".cache/codeclone/",
+        "Suggested entry",
+    )
+
+    (tmp_path / ".gitignore").write_text(".cache/\n", encoding="utf-8")
+    _run_parallel_main(monkeypatch, [str(tmp_path), "--no-progress", "--no-color"])
+    covered_out = capsys.readouterr().out
+    assert "Suggested entry: `.cache/codeclone/`" not in covered_out
+
+
 @pytest.mark.parametrize(
     ("generator_version", "expected_message", "expected_tip_key"),
     [
