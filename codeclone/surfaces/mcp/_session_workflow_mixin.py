@@ -466,9 +466,19 @@ class _MCPSessionWorkflowMixin:
         if not has_files and not has_ref:
             raise MCPServiceContractError(workflow_msgs.FINISH_EVIDENCE_REQUIRED)
         if has_ref:
-            return self._git_diff_paths(root_path=root_path, git_diff_ref=str(diff_ref))
+            return _helpers.coerce_repo_path_tuple(
+                self._git_diff_paths(
+                    root_path=root_path,
+                    git_diff_ref=str(diff_ref),
+                )
+            )
         assert changed_files is not None
-        return self._normalize_changed_paths(root_path=root_path, paths=changed_files)
+        return _helpers.coerce_repo_path_tuple(
+            self._normalize_changed_paths(
+                root_path=root_path,
+                paths=changed_files,
+            )
+        )
 
     def _compute_transitive_summary(
         self,
@@ -518,10 +528,12 @@ class _MCPSessionWorkflowMixin:
             health_delta = structural_delta.get("health_delta")
             if isinstance(health_delta, int):
                 patch_health_delta = health_delta
-        return self.validate_review_claims(
-            text=review_text,
-            run_id=record.run_id,
-            patch_health_delta=patch_health_delta,
+        return _helpers.coerce_object_dict(
+            self.validate_review_claims(
+                text=review_text,
+                run_id=record.run_id,
+                patch_health_delta=patch_health_delta,
+            )
         )
 
     @staticmethod

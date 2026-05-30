@@ -18,7 +18,7 @@ from ...audit import (
 )
 from ...utils.coerce import as_int as _coerce_int
 from . import _session_helpers as _helpers
-from ._intent import IntentRecord, IntentScope, IntentStatus
+from ._intent import IntentCheckResult, IntentRecord, IntentScope, IntentStatus
 from ._patch_contract import (
     VALID_PATCH_CONTRACT_MODES,
     VALID_STRICTNESS_PROFILES,
@@ -328,6 +328,7 @@ class _MCPSessionPatchContractMixin:
     ) -> IntentRecord | None:
         if intent_id is not None:
             _, intent = self._resolve_intent(run_id=None, intent_id=intent_id)
+            assert isinstance(intent, IntentRecord)
             return intent
         with self._state_lock:
             matching = [
@@ -450,11 +451,13 @@ class _MCPSessionPatchContractMixin:
         changed_files: Sequence[str] | None,
     ) -> tuple[str, ...]:
         if changed_files:
-            return self._normalize_changed_paths(
-                root_path=after.root, paths=changed_files
+            return _helpers.coerce_repo_path_tuple(
+                self._normalize_changed_paths(root_path=after.root, paths=changed_files)
             )
         if diff_ref is not None:
-            return self._git_diff_paths(root_path=after.root, git_diff_ref=diff_ref)
+            return _helpers.coerce_repo_path_tuple(
+                self._git_diff_paths(root_path=after.root, git_diff_ref=diff_ref)
+            )
         return tuple(after.changed_paths)
 
     def _patch_changed_files_flexible(
@@ -482,11 +485,15 @@ class _MCPSessionPatchContractMixin:
             except MCPRunNotFoundError:
                 pass
         if changed_files:
-            return self._normalize_changed_paths(
-                root_path=before.root, paths=changed_files
+            return _helpers.coerce_repo_path_tuple(
+                self._normalize_changed_paths(
+                    root_path=before.root, paths=changed_files
+                )
             )
         if diff_ref is not None:
-            return self._git_diff_paths(root_path=before.root, git_diff_ref=diff_ref)
+            return _helpers.coerce_repo_path_tuple(
+                self._git_diff_paths(root_path=before.root, git_diff_ref=diff_ref)
+            )
         return ()
 
     def _optional_after_run(self, after_run_id: str | None) -> MCPRunRecord | None:
@@ -819,6 +826,7 @@ class _MCPSessionPatchContractMixin:
         actual: Sequence[str],
     ) -> dict[str, object]:
         check_result = self._intent_check_result(intent=intent, actual=actual)
+        assert isinstance(check_result, IntentCheckResult)
         return check_result.to_payload()
 
     def _partition_regressions(

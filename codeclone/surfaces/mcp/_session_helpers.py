@@ -937,3 +937,11 @@ def workspace_dirty_summary_payload(*, root: Path) -> dict[str, object]:
     from ._workspace_hygiene import workspace_dirty_summary
 
     return workspace_dirty_summary(root=root)
+
+
+def coerce_repo_path_tuple(paths: Iterable[object]) -> tuple[str, ...]:
+    return tuple(str(path) for path in paths)
+
+
+def coerce_object_dict(payload: Mapping[object, object]) -> dict[str, object]:
+    return {str(key): value for key, value in payload.items()}

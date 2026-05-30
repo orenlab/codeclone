@@ -126,6 +126,7 @@ class _MCPSessionIntentMixin:
             depth=depth,
             include=include,
         )
+        normalized_payload = _helpers.coerce_object_dict(payload)
         self._renew_lease_for_run(record=record)
         self._audit_emit(
             root=record.root,
@@ -133,10 +134,10 @@ class _MCPSessionIntentMixin:
             severity="info",
             run_id=_helpers._short_run_id(record.run_id),
             report_digest=self._report_digest_value(record),
-            status=str(payload.get("radius_level", "")),
-            payload=payload,
+            status=str(normalized_payload.get("radius_level", "")),
+            payload=normalized_payload,
         )
-        return payload
+        return normalized_payload
 
     def manage_change_intent(
         self,

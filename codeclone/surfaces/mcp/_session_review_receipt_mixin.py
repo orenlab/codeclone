@@ -299,7 +299,7 @@ class _MCPSessionReviewReceiptMixin:
         canonical_id: str,
     ) -> dict[str, object] | None:
         for finding in self._base_findings(record):
-            if str(finding.get("id", "")) == canonical_id:
+            if isinstance(finding, dict) and str(finding.get("id", "")) == canonical_id:
                 return finding
         return None
 
