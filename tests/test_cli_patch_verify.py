@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -416,3 +417,79 @@ def test_controller_query_flags_reject_mutually_exclusive_modes() -> None:
         cli_workflow._validate_controller_query_flags(args=args)
 
     assert exc.value.code == int(ExitCode.CONTRACT_ERROR)
+
+
+def test_run_controller_query_routes_blast_radius(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def _render_blast_radius(**kwargs: object) -> int:
+        files_obj = kwargs.get("files", ())
+        assert isinstance(files_obj, tuple)
+        calls.append(tuple(str(path) for path in files_obj))
+        return int(ExitCode.SUCCESS)
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.blast_radius.render_blast_radius",
+        _render_blast_radius,
+    )
+    args = Namespace(
+        blast_radius=("pkg/a.py",),
+        patch_verify=False,
+        quiet=True,
+    )
+    result = cli_workflow._run_controller_query(
+        args=cast(Any, args),
+        report_document={"integrity": {"digest": {"value": "a" * 64}}},
+        root_path=tmp_path,
+        analysis_result=_analysis(),
+        diff_context=_diff_context(),
+        baseline_state=cast(Any, _baseline_state()),
+    )
+    assert result == int(ExitCode.SUCCESS)
+    assert calls == [("pkg/a.py",)]
+
+
+def test_run_controller_query_routes_patch_verify(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _render_patch_verify(**_kwargs: object) -> int:
+        return int(ExitCode.GATING_FAILURE)
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.patch_verify.render_patch_verify",
+        _render_patch_verify,
+    )
+    args = Namespace(
+        blast_radius=(),
+        patch_verify=True,
+        quiet=True,
+        strictness="strict",
+    )
+    result = cli_workflow._run_controller_query(
+        args=cast(Any, args),
+        report_document=None,
+        root_path=tmp_path,
+        analysis_result=_analysis(),
+        diff_context=_diff_context(),
+        baseline_state=cast(Any, _baseline_state()),
+    )
+    assert result == int(ExitCode.GATING_FAILURE)
+
+
+def test_run_controller_query_returns_none_without_controller_mode(
+    tmp_path: Path,
+) -> None:
+    args = Namespace(blast_radius=(), patch_verify=False, quiet=True)
+    result = cli_workflow._run_controller_query(
+        args=cast(Any, args),
+        report_document=None,
+        root_path=tmp_path,
+        analysis_result=_analysis(),
+        diff_context=_diff_context(),
+        baseline_state=cast(Any, _baseline_state()),
+    )
+    assert result is None

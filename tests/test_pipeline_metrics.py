@@ -62,7 +62,12 @@ from codeclone.core.metrics_payload import (
 )
 from codeclone.core.parallelism import _should_use_parallel
 from codeclone.core.pipeline import compute_project_metrics
-from codeclone.metrics.overloaded_modules import build_overloaded_modules_payload
+from codeclone.metrics.overloaded_modules import (
+    _percentile_rank,
+    _score_quantile,
+    _source_kind,
+    build_overloaded_modules_payload,
+)
 from codeclone.models import (
     ApiBreakingChange,
     ApiParamSpec,
@@ -715,6 +720,49 @@ def test_build_overloaded_modules_payload_flags_project_relative_candidates() ->
         "dependency_pressure",
         "hub_like_shape",
     ]
+
+
+def test_overloaded_modules_helper_edge_cases() -> None:
+    assert _source_kind(".", scan_root="") == "other"
+    assert _source_kind("/repo/tests/fixtures/data.py", scan_root="/repo") == "fixtures"
+    assert _score_quantile((), 0.5) == 0.0
+    assert _score_quantile((0.8,), 0.5) == 0.8
+    assert _score_quantile((0.0, 1.0), 0.5) == 0.5
+    assert _score_quantile((0.5, 0.5), 0.5) == 0.5
+    assert _percentile_rank(1.0, ()) == 0.0
+    assert _percentile_rank(1.0, (2.0,)) == 1.0
+
+
+def test_build_overloaded_modules_payload_skips_unknown_units_and_external_deps() -> (
+    None
+):
+    payload = build_overloaded_modules_payload(
+        scan_root="/repo",
+        source_stats_by_file=[("/repo/pkg/a.py", 10, 1, 0, 0)],
+        units=[
+            {
+                "filepath": "/repo/missing.py",
+                "qualname": "pkg.missing:fn",
+                "cyclomatic_complexity": 5,
+            }
+        ],
+        class_metrics=(),
+        module_deps=[
+            ModuleDep(
+                source="outside.mod",
+                target="pkg.a",
+                import_type="import",
+                line=1,
+            )
+        ],
+    )
+
+    item_obj = payload["items"]
+    assert isinstance(item_obj, list) and item_obj
+    item = item_obj[0]
+    assert isinstance(item, dict)
+    assert item["complexity_total"] == 0
+    assert item["fan_in"] == 0
 
 
 def test_load_cached_metrics_ignores_referenced_names_from_test_files() -> None:

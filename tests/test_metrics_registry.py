@@ -7,7 +7,11 @@
 from __future__ import annotations
 
 from codeclone.metrics._base import MetricFamily
-from codeclone.metrics.registry import METRIC_FAMILIES
+from codeclone.metrics.registry import (
+    METRIC_FAMILIES,
+    _group_item_sort_key,
+    _module_names_from_units,
+)
 
 
 def test_registered_metric_families_define_contract_metadata() -> None:
@@ -21,3 +25,10 @@ def test_registered_metric_families_define_contract_metadata() -> None:
         assert family.report_section
         assert family.report_section not in report_sections
         report_sections.add(family.report_section)
+
+
+def test_registry_sort_helpers_handle_non_mapping_units() -> None:
+    assert _group_item_sort_key("not-a-mapping") == ("", 0, 0, "")
+    assert _module_names_from_units(
+        ("skip-me", {"qualname": "pkg.mod:fn"})
+    ) == frozenset(["pkg.mod"])

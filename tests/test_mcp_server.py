@@ -877,3 +877,12 @@ def test_mcp_server_host_loopback_detection() -> None:
     assert mcp_server._host_is_loopback("[::1]") is True
     assert mcp_server._host_is_loopback("0.0.0.0") is False
     assert mcp_server._host_is_loopback("example.com") is False
+
+
+def test_tool_param_docs_reexport() -> None:
+    from typing import get_args
+
+    from codeclone.surfaces.mcp._tool_param_docs import RootParam
+
+    field = get_args(RootParam)[1]
+    assert "Absolute repository root" in field.description
