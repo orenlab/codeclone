@@ -538,6 +538,39 @@ def test_cli_cohesion_lcom4_migration_note_version_gate(
     ) is expected
 
 
+def test_tip_was_shown_returns_false_for_malformed_state() -> None:
+    assert cli_tips._tip_was_shown({"tips": "not-a-mapping"}, tip_key="x") is False
+
+
+def test_migration_note_still_reports_when_tip_cache_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    printer = _RecordingPrinter()
+    args = SimpleNamespace(quiet=False, ci=False)
+    cache_path = tmp_path / ".cache" / "codeclone" / "cache.json"
+
+    def _fail_remember(**_kwargs: object) -> None:
+        raise OSError("read-only tips cache")
+
+    monkeypatch.setattr(cli_tips, "_remember_tip_shown", _fail_remember)
+
+    shown = cli_tips.maybe_print_cohesion_lcom4_migration_note(
+        args=args,
+        console=printer,
+        codeclone_version="2.1.0a1",
+        cache_path=cache_path,
+        baseline_generator_version="2.0.2",
+        baseline_trusted_for_diff=True,
+        environ={},
+        stream=_TTYStream(is_tty=True),
+    )
+
+    assert shown is True
+    assert len(printer.lines) == 1
+    assert "Class cohesion (LCOM4) applicability was refined" in printer.lines[0]
+
+
 def test_cli_module_main_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["codeclone", "--help"])
     with pytest.raises(SystemExit) as exc:
@@ -2258,6 +2291,44 @@ def _assert_main_impl_exit_code(
     with pytest.raises(SystemExit) as exc:
         cli._main_impl()
     assert exc.value.code == expected_code
+
+
+def test_main_impl_exits_on_pre_analysis_session_stats(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["codeclone", str(tmp_path), "--quiet", "--session-stats"],
+    )
+    monkeypatch.setattr(cli, "load_pyproject_config", lambda _root: {})
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.session_stats.render_session_stats",
+        lambda **_kwargs: 0,
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli._main_impl()
+    assert exc.value.code == 0
+
+
+def test_main_impl_exits_on_post_analysis_controller_query(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import codeclone.surfaces.cli.workflow as wf
+
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["codeclone", str(tmp_path), "--quiet", "--patch-verify"],
+    )
+    monkeypatch.setattr(cli, "load_pyproject_config", lambda _root: {})
+    _patch_main_pipeline_stubs(monkeypatch)
+    monkeypatch.setattr(wf, "_run_controller_query", lambda **_kwargs: 3)
+    with pytest.raises(SystemExit) as exc:
+        cli._main_impl()
+    assert exc.value.code == 3
 
 
 def _prepare_fail_on_new_metrics_case(

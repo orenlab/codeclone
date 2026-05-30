@@ -1330,6 +1330,36 @@ def test_extract_pydantic_cohesion_exclusions(
     assert metric.risk_cohesion == risk
 
 
+def test_extract_ignores_dynamic_pydantic_decorator_for_cohesion() -> None:
+    source = """
+import pydantic
+from pydantic import BaseModel
+
+class Item(BaseModel):
+    value: int
+
+    @getattr(pydantic, "field_validator")("value")
+    @classmethod
+    def validate_value(cls, value: int) -> int:
+        return value
+
+    def used(self) -> int:
+        return self.value
+""".strip()
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath="pkg/item.py",
+        module_name="pkg.item",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    assert len(file_metrics.class_metrics) == 1
+    assert file_metrics.class_metrics[0].method_count == 2
+    # Dynamic decorator names are not resolved; validator stays in the cohesion graph.
+    assert file_metrics.class_metrics[0].lcom4 == 2
+
+
 def test_dead_code_marks_symbol_dead_when_referenced_only_by_tests() -> None:
     src_prod = """
 def orphan():
