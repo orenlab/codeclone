@@ -93,7 +93,7 @@ def _collect_session_snapshot(root_path: Path) -> _SessionSnapshot:
     from ...surfaces.mcp._workspace_intents import (
         IntentOwnership,
         classify_intent_ownership,
-        list_workspace_intents,
+        list_workspace_intent_records_for_recovery,
         utc_now,
     )
 
@@ -102,7 +102,7 @@ def _collect_session_snapshot(root_path: Path) -> _SessionSnapshot:
     own_start_epoch = _process_start_epoch()
 
     try:
-        records = list_workspace_intents(root=root_path, exclude_stale=False)
+        records = list_workspace_intent_records_for_recovery(root=root_path)
     except Exception:
         records = ()
 
