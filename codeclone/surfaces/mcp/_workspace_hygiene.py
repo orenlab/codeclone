@@ -21,6 +21,7 @@ from ._workspace_intent_lifecycle import (
 from ._workspace_intent_store import WorkspaceIntentStore
 from ._workspace_intents import (
     IntentOwnership,
+    WorkspaceIntentRecord,
     _scope_all_sets,
     classify_intent_ownership,
     utc_now,
@@ -252,6 +253,22 @@ def finish_hygiene_check(
     )
 
 
+def _skip_foreign_dirty_record(
+    record: WorkspaceIntentRecord,
+    *,
+    own_pid: int,
+    own_start_epoch: int,
+    own_intent_id: str | None,
+) -> bool:
+    if (
+        record.agent_pid == own_pid and record.agent_start_epoch == own_start_epoch
+    ) or (own_intent_id is not None and record.intent_id == own_intent_id):
+        return True
+    if is_terminal_workspace_intent_status(record.status):
+        return True
+    return record.status == WorkspaceIntentStatus.QUEUED.value
+
+
 def _foreign_dirty_overlaps(
     *,
     dirty_paths: Sequence[str],
@@ -265,13 +282,12 @@ def _foreign_dirty_overlaps(
     now = utc_now()
     overlaps: list[ForeignDirtyOverlap] = []
     for record in store.list_records_for_hygiene():
-        if (
-            record.agent_pid == own_pid and record.agent_start_epoch == own_start_epoch
-        ) or (own_intent_id is not None and record.intent_id == own_intent_id):
-            continue
-        if is_terminal_workspace_intent_status(record.status):
-            continue
-        if record.status == WorkspaceIntentStatus.QUEUED.value:
+        if _skip_foreign_dirty_record(
+            record,
+            own_pid=own_pid,
+            own_start_epoch=own_start_epoch,
+            own_intent_id=own_intent_id,
+        ):
             continue
         foreign_allowed, _, _ = _scope_all_sets(record.scope)
         scoped_dirty_paths = [
@@ -283,22 +299,21 @@ def _foreign_dirty_overlaps(
             own_start_epoch=own_start_epoch,
             now=now,
         )
-        if ownership not in _FOREIGN_DIRTY_OWNERSHIP:
-            continue
-        overlaps.extend(
-            ForeignDirtyOverlap(
-                path=path,
-                foreign_intent_id=record.intent_id,
-                foreign_persisted_status=record.status,
-                foreign_ownership=ownership.value,
-                foreign_agent_label=record.agent_label,
-                message=(
-                    f"{_BASE_DIRTY_SCOPE_MESSAGE} Foreign intent "
-                    f"{record.intent_id} previously declared this path."
-                ),
+        if ownership in _FOREIGN_DIRTY_OWNERSHIP:
+            overlaps.extend(
+                ForeignDirtyOverlap(
+                    path=path,
+                    foreign_intent_id=record.intent_id,
+                    foreign_persisted_status=record.status,
+                    foreign_ownership=ownership.value,
+                    foreign_agent_label=record.agent_label,
+                    message=(
+                        f"{_BASE_DIRTY_SCOPE_MESSAGE} Foreign intent "
+                        f"{record.intent_id} previously declared this path."
+                    ),
+                )
+                for path in scoped_dirty_paths
             )
-            for path in scoped_dirty_paths
-        )
     return tuple(sorted(overlaps, key=lambda item: (item.path, item.foreign_intent_id)))
 
 
