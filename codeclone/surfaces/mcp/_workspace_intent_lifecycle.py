@@ -86,50 +86,15 @@ def is_lease_expired(record: WorkspaceIntentRecord) -> bool:
     return expiry is None or expiry <= utc_now()
 
 
-def ttl_expired(record: WorkspaceIntentRecord) -> bool:
-    expires = parse_utc(record.expires_at_utc)
-    return expires is None or expires <= utc_now()
-
-
-def stale_reason(record: WorkspaceIntentRecord) -> str | None:
-    if record.status == WorkspaceIntentStatus.EXPIRED.value:
-        return "expired"
-    if record.status == WorkspaceIntentStatus.ORPHANED.value:
-        return "orphaned"
-    expires = parse_utc(record.expires_at_utc)
-    if expires is None or expires <= utc_now():
-        return "expired"
-    if is_orphaned(record):
-        return "orphaned"
-    if is_lease_expired(record):
-        return "lease_expired"
-    return None
-
-
-def is_stale(record: WorkspaceIntentRecord) -> bool:
-    return stale_reason(record) is not None
-
-
-def gc_removal_reason(record: WorkspaceIntentRecord) -> str | None:
-    reason = stale_reason(record)
-    if reason == "lease_expired" and not ttl_expired(record):
-        return None
-    return reason
-
-
 __all__ = [
     "TERMINAL_WORKSPACE_INTENT_STATUSES",
     "WorkspaceIntentStatus",
-    "gc_removal_reason",
     "gc_status_for_reason",
     "is_lease_expired",
     "is_orphaned",
     "is_pid_alive",
-    "is_stale",
     "is_terminal_workspace_intent_status",
     "lease_expiry",
     "parse_utc",
-    "stale_reason",
-    "ttl_expired",
     "utc_now",
 ]

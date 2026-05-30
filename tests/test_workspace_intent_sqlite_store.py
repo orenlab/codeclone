@@ -28,11 +28,7 @@ from codeclone.config.intent_registry import (
     resolve_intent_registry_retention_days,
 )
 from codeclone.surfaces.mcp import _workspace_intents as workspace_intents
-from codeclone.surfaces.mcp._workspace_intent_lifecycle import (
-    gc_status_for_reason,
-    is_stale,
-    stale_reason,
-)
+from codeclone.surfaces.mcp._workspace_intent_lifecycle import gc_status_for_reason
 from codeclone.surfaces.mcp._workspace_intent_models import (
     signed_payload_json_from_record,
 )
@@ -42,6 +38,7 @@ from codeclone.surfaces.mcp._workspace_intent_schema import (
     get_meta,
     open_intent_registry_db,
 )
+from codeclone.surfaces.mcp._workspace_intent_staleness import is_stale, stale_reason
 from codeclone.surfaces.mcp._workspace_intent_store import (
     FileWorkspaceIntentStore,
     SqliteWorkspaceIntentStore,
@@ -208,7 +205,7 @@ def test_sqlite_store_write_list_find_update_close(sqlite_root: Path) -> None:
     )
     assert store.find(record.intent_id) is None
     assert isinstance(store, SqliteWorkspaceIntentStore)
-    archived = store._fetch_record(
+    archived = store._fetch_record_unlocked(
         pid=record.agent_pid,
         start_epoch=record.agent_start_epoch,
         intent_id=record.intent_id,
@@ -276,7 +273,7 @@ def test_sqlite_store_gc_closes_corrupted_and_stale(sqlite_root: Path) -> None:
     assert isinstance(corrupted_removed, int) and corrupted_removed >= 1
     assert store.find("intent-stale-001") is not None
     assert store.find("intent-expired-002") is None
-    archived = store._fetch_record(
+    archived = store._fetch_record_unlocked(
         pid=stale.agent_pid,
         start_epoch=stale.agent_start_epoch,
         intent_id=stale.intent_id,
@@ -307,7 +304,7 @@ def test_sqlite_store_retention_purges_closed_rows(sqlite_root: Path) -> None:
     result = store.gc()
     assert result["retention_purged"] == 1
     assert (
-        store._fetch_record(
+        store._fetch_record_unlocked(
             pid=closed.agent_pid,
             start_epoch=closed.agent_start_epoch,
             intent_id=closed.intent_id,

@@ -20,6 +20,8 @@ from codeclone.surfaces.mcp._workspace_intent_models import IntentScopeModel
 from codeclone.surfaces.mcp._workspace_intents import WorkspaceIntentRecord
 from codeclone.utils.json_io import read_json_object, write_json_document_atomically
 
+_PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
+
 
 @pytest.fixture(autouse=True)
 def _clear_intent_store_cache() -> Generator[None, None, None]:
@@ -116,7 +118,11 @@ def test_workspace_intent_write_validate_update_and_remove(tmp_path: Path) -> No
         intent_id=record.intent_id,
         new_status="clean",
     )
-    updated = workspace_intents.list_workspace_intents(root=tmp_path)[0]
+    from codeclone.surfaces.mcp._workspace_intents import (
+        list_workspace_intent_records_raw,
+    )
+
+    updated = list_workspace_intent_records_raw(root=tmp_path)[0]
     assert updated.status == "clean"
     assert workspace_intents.verify_intent_integrity(
         workspace_intents.signed_payload(updated)
@@ -190,9 +196,9 @@ def test_workspace_intent_validation_rejects_tampered_and_invalid_paths(
     write_json_document_atomically(path, payload, sort_keys=True)
 
     assert workspace_intents.list_workspace_intents(root=tmp_path) == ()
+    assert not path.exists()
     gc_payload = workspace_intents.gc_workspace(root=tmp_path)
-    assert gc_payload["corrupted_removed"] == 1
-    assert gc_payload["corrupted_filenames"] == [path.name]
+    assert gc_payload["corrupted_removed"] == 0
 
     invalid_scope: dict[str, object] = {
         "allowed_files": [str(tmp_path / "abs.py")],
@@ -235,8 +241,7 @@ def test_workspace_intent_stale_orphan_and_gc(
         assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
 
     monkeypatch.setattr(
-        workspace_intents,
-        "_is_pid_alive",
+        _PID_ALIVE,
         lambda pid: pid != orphaned.agent_pid,
     )
 
@@ -245,11 +250,8 @@ def test_workspace_intent_stale_orphan_and_gc(
     assert workspace_intents.list_workspace_intents(root=tmp_path) == (active,)
 
     gc_payload = workspace_intents.gc_workspace(root=tmp_path)
-    assert gc_payload["removed"] == 2
-    assert gc_payload["removed_reasons"] == {
-        expired.intent_id: "expired",
-        orphaned.intent_id: "orphaned",
-    }
+    assert gc_payload["removed"] == 1
+    assert gc_payload["remaining"] == 1
     assert workspace_intents.list_workspace_intents(root=tmp_path) == (active,)
 
 
@@ -263,7 +265,7 @@ def test_workspace_intent_lease_expiry_is_recoverable_not_gc(
         lease_seconds=workspace_intents.MIN_LEASE_SECONDS,
     )
     assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
-    monkeypatch.setattr(workspace_intents, "_is_pid_alive", lambda pid: True)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
 
     assert workspace_intents.stale_reason(record) == "lease_expired"
     assert workspace_intents.list_workspace_intents(root=tmp_path) == ()
@@ -648,7 +650,7 @@ def test_workspace_intent_foreign_stale_conflict_and_counts(
     for record in (active, foreign_stale, orphaned):
         assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
 
-    monkeypatch.setattr(workspace_intents, "_is_pid_alive", lambda pid: pid != 333)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: pid != 333)
 
     counts = workspace_intents.workspace_status_counts(root=tmp_path)
     assert counts == {"stale_count": 2, "orphaned_count": 1, "total_agents": 3}
@@ -727,7 +729,7 @@ def test_workspace_intent_ownership_classification(
     )
     expired = _record(expires_delta=timedelta(seconds=-1))
 
-    monkeypatch.setattr(workspace_intents, "_is_pid_alive", lambda pid: pid != 333)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: pid != 333)
 
     assert (
         workspace_intents.classify_intent_ownership(
@@ -930,7 +932,7 @@ def test_workspace_intent_conflict_detection() -> None:
 def test_workspace_intent_workspace_relations_forbidden_patterns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(workspace_intents, "_is_pid_alive", lambda pid: True)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
     foreign = _record(
         intent_id="intent-foreign-docs",
         pid=111,
@@ -987,7 +989,7 @@ def test_workspace_intent_workspace_relations_forbidden_patterns(
 def test_workspace_intent_workspace_relations_target_excludes_foreign(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(workspace_intents, "_is_pid_alive", lambda pid: True)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
     foreign = _record(
         intent_id="intent-foreign-docs",
         pid=111,
@@ -1086,7 +1088,7 @@ def test_workspace_intent_regression_stale_lease_silent_overlap(
         lease_renewed_delta=timedelta(minutes=-6),
         lease_seconds=workspace_intents.DEFAULT_LEASE_SECONDS,
     )
-    monkeypatch.setattr(workspace_intents, "_is_pid_alive", lambda pid: True)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
 
     conflicts = workspace_intents.detect_conflicts(
         new_scope={
@@ -1210,3 +1212,225 @@ def test_remove_workspace_intent_rejects_traversal(tmp_path: Path) -> None:
     )
     assert result is False
     assert sentinel.exists(), "sentinel file must survive traversal attempt"
+
+
+def test_lazy_close_removes_ttl_expired_on_list(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expired = _record(
+        intent_id="intent-expired-lazy-001",
+        expires_delta=timedelta(seconds=-1),
+    )
+    active = _record(intent_id="intent-active-lazy-001", start_epoch=102)
+    for record in (expired, active):
+        assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+
+    assert workspace_intents.list_workspace_intents(root=tmp_path) == (active,)
+    from codeclone.surfaces.mcp._workspace_intent_paths import registry_files
+
+    assert len(registry_files(tmp_path)) == 1
+
+
+def test_lazy_close_keeps_lease_only_stale(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _record(
+        intent_id="intent-lease-only-001",
+        lease_renewed_delta=timedelta(minutes=-10),
+        lease_seconds=workspace_intents.MIN_LEASE_SECONDS,
+    )
+    assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+
+    listed = workspace_intents.list_workspace_intents(
+        root=tmp_path,
+        exclude_stale=False,
+    )
+    assert listed == (record,)
+
+
+def test_registry_lock_file_ignored_by_listing(tmp_path: Path) -> None:
+    record = _record(intent_id="intent-lock-001")
+    assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+    from codeclone.surfaces.mcp._workspace_intent_paths import registry_dir
+
+    lock_path = registry_dir(tmp_path) / ".registry.lock"
+    lock_path.write_bytes(b"\0")
+
+    assert workspace_intents.list_workspace_intents(root=tmp_path) == (record,)
+
+
+def test_gc_removal_reason_keeps_orphaned_for_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.mcp._workspace_intent_staleness import gc_removal_reason
+
+    record = _record(intent_id="intent-orphan-recover-001", pid=33333)
+    assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: False)
+
+    assert workspace_intents.stale_reason(record) == "orphaned"
+    assert gc_removal_reason(record) == "orphaned"
+    assert gc_removal_reason(record, for_lazy_close=True) is None
+
+
+def test_lazy_close_keeps_dead_pid_for_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _record(intent_id="intent-orphan-lazy-001", pid=33333)
+    assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: False)
+
+    assert workspace_intents.list_workspace_intents(
+        root=tmp_path,
+        exclude_stale=False,
+    ) == (record,)
+    from codeclone.surfaces.mcp._workspace_intent_paths import registry_files
+
+    assert len(registry_files(tmp_path)) == 1
+
+
+def test_foreign_dirty_overlaps_only_live_foreign_agents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.mcp._workspace_hygiene import _foreign_dirty_overlaps
+    from codeclone.surfaces.mcp._workspace_intent_store import (
+        get_workspace_intent_store,
+    )
+
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: pid == 11111)
+    live_foreign = _record(
+        intent_id="intent-live-foreign-001",
+        pid=11111,
+        start_epoch=100,
+        scope={
+            "allowed_files": ["pkg/a.py"],
+            "allowed_related": [],
+            "forbidden": [],
+        },
+    )
+    recoverable_foreign = _record(
+        intent_id="intent-dead-foreign-001",
+        pid=99999,
+        start_epoch=200,
+        scope={
+            "allowed_files": ["pkg/a.py"],
+            "allowed_related": [],
+            "forbidden": [],
+        },
+    )
+    terminal_foreign = replace(
+        _record(
+            intent_id="intent-clean-foreign-001",
+            pid=44444,
+            start_epoch=300,
+            scope={
+                "allowed_files": ["pkg/a.py"],
+                "allowed_related": [],
+                "forbidden": [],
+            },
+        ),
+        status="clean",
+    )
+    for record in (live_foreign, recoverable_foreign, terminal_foreign):
+        assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+
+    store = get_workspace_intent_store(tmp_path)
+    overlaps = _foreign_dirty_overlaps(
+        dirty_paths=["pkg/a.py"],
+        store=store,
+        own_pid=22222,
+        own_start_epoch=400,
+        own_intent_id=None,
+    )
+    assert len(overlaps) == 1
+    assert overlaps[0].foreign_intent_id == live_foreign.intent_id
+    assert overlaps[0].foreign_ownership == "foreign_active"
+
+
+def test_foreign_dirty_overlaps_skip_queued_foreign(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.mcp._workspace_hygiene import _foreign_dirty_overlaps
+    from codeclone.surfaces.mcp._workspace_intent_store import (
+        get_workspace_intent_store,
+    )
+
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+    queued_foreign = replace(
+        _record(
+            intent_id="intent-queued-foreign-001",
+            pid=11111,
+            start_epoch=100,
+            scope={
+                "allowed_files": ["pkg/a.py"],
+                "allowed_related": [],
+                "forbidden": [],
+            },
+        ),
+        status="queued",
+    )
+    assert workspace_intents.write_workspace_intent(
+        root=tmp_path,
+        record=queued_foreign,
+    )
+    store = get_workspace_intent_store(tmp_path)
+    overlaps = _foreign_dirty_overlaps(
+        dirty_paths=["pkg/a.py"],
+        store=store,
+        own_pid=22222,
+        own_start_epoch=400,
+        own_intent_id=None,
+    )
+    assert overlaps == ()
+
+
+def test_hygiene_blocks_start_edit_continue_own_wip() -> None:
+    from codeclone.surfaces.mcp._workspace_hygiene import (
+        DIRTY_SCOPE_POLICY_BLOCK,
+        DIRTY_SCOPE_POLICY_CONTINUE_OWN_WIP,
+        ForeignDirtyOverlap,
+        WorkspaceHygieneResult,
+        hygiene_blocks_start_edit,
+    )
+
+    dirty = WorkspaceHygieneResult(
+        git_available=True,
+        dirty_paths=("pkg/a.py",),
+        dirty_paths_in_scope=("pkg/a.py",),
+        dirty_paths_outside_scope=(),
+        foreign_dirty_overlaps=(),
+        blocks_edit=True,
+    )
+    assert hygiene_blocks_start_edit(
+        dirty,
+        dirty_scope_policy=DIRTY_SCOPE_POLICY_BLOCK,
+    )
+    assert not hygiene_blocks_start_edit(
+        dirty,
+        dirty_scope_policy=DIRTY_SCOPE_POLICY_CONTINUE_OWN_WIP,
+    )
+    foreign = replace(
+        dirty,
+        foreign_dirty_overlaps=(
+            ForeignDirtyOverlap(
+                path="pkg/a.py",
+                foreign_intent_id="intent-foreign-001",
+                foreign_persisted_status="active",
+                foreign_ownership="foreign_active",
+                foreign_agent_label="other",
+                message="overlap",
+            ),
+        ),
+    )
+    assert hygiene_blocks_start_edit(
+        foreign,
+        dirty_scope_policy=DIRTY_SCOPE_POLICY_CONTINUE_OWN_WIP,
+    )

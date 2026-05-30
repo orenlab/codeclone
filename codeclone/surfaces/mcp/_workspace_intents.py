@@ -36,19 +36,10 @@ from ._workspace_intent_lifecycle import (
     utc_now,
 )
 from ._workspace_intent_lifecycle import (
-    is_lease_expired as _is_lease_expired,
-)
-from ._workspace_intent_lifecycle import (
-    is_pid_alive as _is_pid_alive,
-)
-from ._workspace_intent_lifecycle import (
     lease_expiry as _lease_expiry,
 )
 from ._workspace_intent_lifecycle import (
     parse_utc as _parse_utc,
-)
-from ._workspace_intent_lifecycle import (
-    ttl_expired as _ttl_expired,
 )
 from ._workspace_intent_paths import (
     intent_filename,
@@ -71,6 +62,12 @@ from ._workspace_intent_paths import (
 from ._workspace_intent_paths import (
     unlink as _unlink,
 )
+from ._workspace_intent_staleness import (
+    stale_reason,
+)
+from ._workspace_intent_staleness import (
+    ttl_expired as _ttl_expired,
+)
 
 
 class IntentOwnership(str, Enum):
@@ -82,23 +79,14 @@ class IntentOwnership(str, Enum):
     EXPIRED = "expired"
 
 
+def _is_pid_alive(pid: int) -> bool:
+    from . import _workspace_intent_pid as pid_mod
+
+    return pid_mod.is_agent_pid_alive(pid)
+
+
 def is_orphaned(record: WorkspaceIntentRecord) -> bool:
     return not _is_pid_alive(record.agent_pid)
-
-
-def stale_reason(record: WorkspaceIntentRecord) -> str | None:
-    if record.status == WorkspaceIntentStatus.EXPIRED.value:
-        return "expired"
-    if record.status == WorkspaceIntentStatus.ORPHANED.value:
-        return "orphaned"
-    expires = _parse_utc(record.expires_at_utc)
-    if expires is None or expires <= utc_now():
-        return "expired"
-    if is_orphaned(record):
-        return "orphaned"
-    if _is_lease_expired(record):
-        return "lease_expired"
-    return None
 
 
 def is_stale(record: WorkspaceIntentRecord) -> bool:
@@ -334,16 +322,36 @@ def list_workspace_intents(
     return tuple(sorted(records, key=_record_sort_key))
 
 
+def list_workspace_intent_records_raw(
+    *,
+    root: Path,
+) -> tuple[WorkspaceIntentRecord, ...]:
+    """Active registry rows without running lazy close."""
+    return _intent_store(root).list_records_raw()
+
+
+def list_workspace_intent_records_for_recovery(
+    *,
+    root: Path,
+) -> tuple[WorkspaceIntentRecord, ...]:
+    """Registry rows for recovery listing without lazy-close side effects."""
+    return _intent_store(root).list_records_for_hygiene()
+
+
 def find_workspace_intent(
     *,
     root: Path,
     intent_id: str,
+    apply_lazy_close: bool = True,
 ) -> WorkspaceIntentRecord | None:
-    return _intent_store(root).find(intent_id)
+    store = _intent_store(root)
+    if apply_lazy_close:
+        return store.find(intent_id)
+    return store.find_raw(intent_id)
 
 
 def workspace_status_counts(*, root: Path) -> dict[str, int]:
-    records = list(_intent_store(root).list_records())
+    records = list(_intent_store(root).list_records_current())
     stale_records = [record for record in records if stale_reason(record) is not None]
     return {
         "stale_count": len(stale_records),
@@ -575,7 +583,10 @@ def _forbidden_matches(
 
 
 def gc_workspace(*, root: Path) -> dict[str, object]:
-    return dict(_intent_store(root).gc())
+    store = _intent_store(root)
+    payload = dict(store.gc())
+    payload["raw_active_count"] = len(store.list_records_raw())
+    return payload
 
 
 def _updated_record(
@@ -678,6 +689,8 @@ __all__ = [
     "intent_path",
     "is_orphaned",
     "is_stale",
+    "list_workspace_intent_records_for_recovery",
+    "list_workspace_intent_records_raw",
     "list_workspace_intents",
     "registry_dir",
     "remove_workspace_intent",
