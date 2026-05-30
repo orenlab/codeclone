@@ -330,6 +330,12 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         if queued_context:
             payload["queued_context"] = queued_context
         payload["ttl_seconds"] = ttl
+        if concurrent_intents and on_conflict != "queue":
+            payload["edit_allowed"] = False
+            payload["user_action_required"] = True
+            payload["next_step"] = _declare_conflict_next_step(concurrent_intents)
+        else:
+            payload["edit_allowed"] = True
         self._audit_emit(
             root=record.root,
             event_type=EVENT_INTENT_DECLARED,
@@ -403,6 +409,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         payload["workspace_registered"] = workspace_registered
         payload["before_run_pinned"] = False
         payload["blocked_by"] = blocked_by
+        payload["concurrent_intents"] = concurrent_intents
         payload["queue_position"] = queue_position
         payload["ttl_seconds"] = ttl
         payload["message"] = intent_msgs.QUEUED_PROMOTE_BEFORE_EDIT
@@ -888,12 +895,18 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
 
     def _list_workspace_intents(self, *, root: str | None) -> dict[str, object]:
         from ...config.intent_registry import intent_registry_summary
+        from ._workspace_intents import list_workspace_intent_records_for_recovery
 
         root_path = self._resolve_workspace_root(root)
         counts = workspace_status_counts(root=root_path)
-        records = list_workspace_intents(root=root_path, exclude_stale=False)
         now = utc_now()
-        return {
+        recovery_records = list_workspace_intent_records_for_recovery(root=root_path)
+        records = list_workspace_intents(root=root_path, exclude_stale=False)
+        recovery_available = self._recovery_available_payload(
+            records=recovery_records,
+            now=now,
+        )
+        payload: dict[str, object] = {
             "workspace_intents": [
                 workspace_intent_to_payload(
                     item,
@@ -903,17 +916,20 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 )
                 for item in records
             ],
-            "recovery_available": self._recovery_available_payload(
-                records=records,
-                now=now,
-            ),
+            "recovery_available": recovery_available,
             "stale_count": counts["stale_count"],
             "orphaned_count": counts["orphaned_count"],
             "total_agents": len({item.agent_pid for item in records}),
             "own_pid": self._agent_pid,
             "own_start_epoch": self._agent_start_epoch,
+            "workspace_dirty_summary": _helpers.workspace_dirty_summary_payload(
+                root=root_path
+            ),
             **intent_registry_summary(root_path),
         }
+        if recovery_available:
+            payload["recovery_next_step"] = intent_msgs.RECOVERY_LIST_NEXT_STEP
+        return payload
 
     def _gc_workspace_intents(self, *, root: str | None) -> dict[str, object]:
         root_path = self._resolve_workspace_root(root)
@@ -1006,7 +1022,11 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
         intent_id: str,
     ) -> _RecoveryTarget | dict[str, object]:
         root_path = self._resolve_workspace_root(root)
-        found = find_workspace_intent(root=root_path, intent_id=intent_id)
+        found = find_workspace_intent(
+            root=root_path,
+            intent_id=intent_id,
+            apply_lazy_close=False,
+        )
         if found is None:
             return self._recovery_rejected(
                 intent_id=intent_id,
@@ -1209,7 +1229,11 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                 "action='reset_workspace' requires intent_id."
             )
         root_path = self._resolve_workspace_root(root)
-        found = find_workspace_intent(root=root_path, intent_id=intent_id)
+        found = find_workspace_intent(
+            root=root_path,
+            intent_id=intent_id,
+            apply_lazy_close=False,
+        )
         if found is None:
             raise MCPServiceContractError(f"Unknown workspace intent id: {intent_id}")
         workspace_record = found
@@ -1294,8 +1318,7 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
             )
             if ownership != IntentOwnership.RECOVERABLE:
                 continue
-            if self._optional_run_record(record.run_id) is None:
-                continue
+            run_available = self._optional_run_record(record.run_id) is not None
             available.append(
                 {
                     "intent_id": record.intent_id,
@@ -1303,7 +1326,12 @@ class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
                     "scope_digest": record.scope_digest,
                     "previous_agent_label": record.agent_label,
                     "lease_expired_at_utc": self._lease_expired_at_utc(record),
-                    "hint": intent_msgs.RECOVERY_HINT,
+                    "run_available": run_available,
+                    "hint": (
+                        intent_msgs.RECOVERY_HINT
+                        if run_available
+                        else intent_msgs.RECOVERY_NEEDS_ANALYSIS_HINT
+                    ),
                 }
             )
         return sorted(
@@ -1503,6 +1531,17 @@ def _parse_utc(value: str) -> datetime | None:
     if parsed.tzinfo is None:
         return None
     return parsed.astimezone(timezone.utc)
+
+
+def _declare_conflict_next_step(
+    concurrent_intents: list[dict[str, object]],
+) -> str:
+    ownerships = {str(item.get("ownership", "")) for item in concurrent_intents}
+    if "foreign_active" in ownerships:
+        return intent_msgs.DECLARE_FOREIGN_ACTIVE_OVERLAP
+    if "foreign_stale" in ownerships:
+        return intent_msgs.DECLARE_FOREIGN_STALE_OVERLAP
+    return intent_msgs.DECLARE_FOREIGN_OVERLAP
 
 
 __all__ = ["_MCPSessionIntentMixin"]

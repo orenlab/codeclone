@@ -301,6 +301,7 @@ def _apply_public_method_signatures() -> None:
             _kwonly("text", "str"),
             _kwonly("run_id", "str | None", None),
             _kwonly("require_citations", "bool", True),
+            _kwonly("patch_health_delta", "int | None", None),
         ),
         "manage_change_intent": (
             _kwonly("action", "str"),
@@ -369,6 +370,7 @@ def _apply_public_method_signatures() -> None:
             _kwonly("strictness", "str", "ci"),
             _kwonly("ttl_seconds", "int | None", None),
             _kwonly("blast_radius_depth", "str", "auto"),
+            _kwonly("dirty_scope_policy", "str", "block"),
         ),
         "finish_controlled_change": (
             _kwonly("intent_id", "str"),

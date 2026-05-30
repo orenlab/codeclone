@@ -26,13 +26,17 @@ class _MCPSessionClaimGuardMixin(_MCPSessionReviewReceiptMixin):
         text: str,
         run_id: str | None = None,
         require_citations: bool = True,
+        patch_health_delta: int | None = None,
     ) -> dict[str, object]:
         try:
             validated_text = validate_text_input(text)
         except ValueError as exc:
             raise MCPServiceContractError(str(exc)) from exc
         record = self._runs.get(run_id)
-        context = self._claim_guard_context(record)
+        context = self._claim_guard_context(
+            record,
+            patch_health_delta=patch_health_delta,
+        )
         payload = validate_claims(
             text=validated_text,
             report_context=context,
@@ -51,7 +55,12 @@ class _MCPSessionClaimGuardMixin(_MCPSessionReviewReceiptMixin):
         )
         return result
 
-    def _claim_guard_context(self, record: MCPRunRecord) -> ReportContext:
+    def _claim_guard_context(
+        self,
+        record: MCPRunRecord,
+        *,
+        patch_health_delta: int | None = None,
+    ) -> ReportContext:
         _canonical_to_short, short_to_canonical = self._finding_id_maps(record)
         findings = {
             canonical_id: dict(finding)
@@ -76,6 +85,7 @@ class _MCPSessionClaimGuardMixin(_MCPSessionReviewReceiptMixin):
             has_comparison_run=self._previous_run_for_root(record) is not None,
             metric_families=frozenset(sorted(METRIC_FAMILIES)),
             verification_profile=profile_value,
+            patch_health_delta=patch_health_delta,
         )
 
     def _reachable_qualnames(self, record: MCPRunRecord) -> frozenset[str]:

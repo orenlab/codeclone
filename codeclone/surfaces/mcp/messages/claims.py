@@ -47,3 +47,13 @@ WARN_STRUCTURAL_CHECKS_NOT_APPLICABLE: Final = (
     "Review references structural verification, but the verification profile "
     "is '{profile}' — structural checks were not applicable for this patch."
 )
+WARN_HEALTH_REGRESSION_OVERCLAIM: Final = (
+    "Patch verify reported a negative health delta ({health_delta:+d}) between "
+    "before-run and after-run. Do not claim regression-free or fully clean "
+    "verification."
+)
+
+VIOLATION_REASON_HEALTH_REGRESSION_OVERCLAIM: Final = (
+    "Review claims no regressions, but patch verify reported health delta "
+    "{health_delta:+d} between before-run and after-run."
+)

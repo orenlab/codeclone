@@ -111,6 +111,7 @@ class ReportContext:
     has_comparison_run: bool
     metric_families: frozenset[str]
     verification_profile: str | None = None
+    patch_health_delta: int | None = None
 
 
 def validate_claims(
@@ -124,6 +125,7 @@ def validate_claims(
         citations=citations,
         report_context=report_context,
     )
+    violations = (*violations, *_text_violations(text, report_context=report_context))
     warnings = _warnings_for_text(
         text=text,
         citations=citations,
@@ -446,7 +448,44 @@ def _warnings_for_text(
                 ),
             }
         )
+    health_delta = report_context.patch_health_delta
+    if (
+        health_delta is not None
+        and health_delta < 0
+        and _contains_keyword(text, STRUCTURAL_SCOPE_KEYWORDS)
+    ):
+        warnings.append(
+            {
+                "type": "health_regression_overclaim",
+                "message": claim_msgs.WARN_HEALTH_REGRESSION_OVERCLAIM.format(
+                    health_delta=health_delta,
+                ),
+            }
+        )
     return warnings
+
+
+def _text_violations(
+    text: str,
+    *,
+    report_context: ReportContext,
+) -> tuple[Violation, ...]:
+    health_delta = report_context.patch_health_delta
+    if health_delta is None or health_delta >= 0:
+        return ()
+    if not _contains_keyword(text, STRUCTURAL_SCOPE_KEYWORDS):
+        return ()
+    return (
+        Violation(
+            pattern="health_regression_overclaim",
+            claim=text.strip()[:TEXT_WINDOW_RADIUS],
+            cited_id="",
+            reason=claim_msgs.VIOLATION_REASON_HEALTH_REGRESSION_OVERCLAIM.format(
+                health_delta=health_delta,
+            ),
+            source_flag=f"patch.health_delta={health_delta}",
+        ),
+    )
 
 
 def _metric_family_patterns(family_name: str) -> tuple[re.Pattern[str], ...]:

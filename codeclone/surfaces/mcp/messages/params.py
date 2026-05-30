@@ -117,6 +117,15 @@ RequireCitationsParam = Annotated[
     bool,
     Field(description="Require finding ids or metric citations in text."),
 ]
+PatchHealthDeltaParam = Annotated[
+    int | None,
+    Field(
+        description=(
+            "Optional health delta from check_patch_contract verify "
+            "(after minus before). Enables health-regression overclaim checks."
+        ),
+    ),
+]
 HelpTopicParam = Annotated[
     str,
     Field(
@@ -248,6 +257,15 @@ TtlSecondsParam = Annotated[
 BlastRadiusDepthParam = Annotated[
     str,
     Field(description="auto, direct, or transitive pre-edit blast radius."),
+]
+DirtyScopePolicyParam = Annotated[
+    str,
+    Field(
+        description=(
+            "block (default) or continue_own_wip when uncommitted changes "
+            "already overlap declared scope."
+        ),
+    ),
 ]
 AfterRunIdParam = Annotated[
     str | None,

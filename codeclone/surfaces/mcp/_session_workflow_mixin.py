@@ -73,12 +73,14 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
         strictness: str = "ci",
         ttl_seconds: int | None = None,
         blast_radius_depth: str = "auto",
+        dirty_scope_policy: str = "block",
     ) -> dict[str, object]:
         validated_depth = _validated_blast_radius_depth(blast_radius_depth)
+        validated_dirty_scope_policy = _validated_dirty_scope_policy(dirty_scope_policy)
         root_path = _helpers._resolve_root(root)
 
-        # 1. Workspace check
-        workspace = self._list_workspace_intents(root=root)
+        # 1. Workspace check (lazy close inside list_workspace)
+        self._list_workspace_intents(root=root)
 
         # 2. Root-aware run resolution (not _runs.get(None) — multi-repo safe)
         record = self._latest_run_for_root(root_path)
@@ -90,7 +92,7 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
                     "edit_allowed": False,
                     "root": str(root_path),
                     "message": workflow_msgs.START_NEEDS_ANALYSIS,
-                    "workspace": _workspace_summary(workspace),
+                    "workspace": _workspace_summary_from_declare({}, {}),
                 },
                 root=root_path,
             )
@@ -106,10 +108,11 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
         )
 
         intent_id = str(declare_payload.get("intent_id", ""))
-        status = str(declare_payload.get("status", ""))
+        declare_status = str(declare_payload.get("status", ""))
 
         # Queued: no blast radius or budget
-        if status == IntentStatus.QUEUED.value:
+        if declare_status == IntentStatus.QUEUED.value:
+            workspace_after = self._list_workspace_intents(root=root)
             return _helpers.attach_workspace_hygiene_tips(
                 {
                     "intent_id": intent_id,
@@ -121,12 +124,18 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
                         "before_run_pinned", False
                     ),
                     "edit_allowed": False,
+                    "workspace": _workspace_summary_from_declare(
+                        workspace_after,
+                        declare_payload,
+                    ),
                     "message": workflow_msgs.START_QUEUED,
                 },
                 root=root_path,
             )
 
-        # 4. Blast radius (full payload, not just declare's subset)
+        # 4. Fresh workspace snapshot after declare
+        workspace_after = self._list_workspace_intents(root=root)
+
         with self._state_lock:
             active_intent = self._active_intents.get(intent_id)
         if active_intent is None:
@@ -134,6 +143,20 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
                 f"Intent {intent_id} not found after declare."
             )
 
+        from ._workspace_hygiene import evaluate_scoped_hygiene
+        from ._workspace_intent_store import get_workspace_intent_store
+
+        hygiene = evaluate_scoped_hygiene(
+            root=root_path,
+            allowed_files=active_intent.scope.allowed_files,
+            allowed_related=active_intent.scope.allowed_related,
+            store=get_workspace_intent_store(root_path),
+            own_pid=self._agent_pid,
+            own_start_epoch=self._agent_start_epoch,
+            own_intent_id=intent_id,
+        )
+
+        # 5. Blast radius (full payload, not just declare's subset)
         blast_result = self._blast_radius_result(
             record=record,
             files=active_intent.scope.allowed_paths,
@@ -142,7 +165,7 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
         )
         blast_payload = blast_result.to_payload()
 
-        # 5. Transitive summary (auto-escalated or explicit)
+        # 6. Transitive summary (auto-escalated or explicit)
         transitive_summary = self._compute_transitive_summary(
             record=record,
             intent=active_intent,
@@ -152,28 +175,73 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
         if transitive_summary is not None:
             blast_payload["transitive_summary"] = transitive_summary
 
-        # 6. Budget
+        # 7. Budget
         budget_payload = self._patch_contract_budget(
             run_id=record.run_id,
             intent_id=intent_id,
             strictness=self._validated_strictness(strictness),
         )
 
-        # 7. Compose response
-        return _helpers.attach_workspace_hygiene_tips(
-            {
-                "intent_id": intent_id,
-                "status": "active",
-                "run_id": _helpers._short_run_id(record.run_id),
-                "workspace": _workspace_summary(workspace),
-                "blast_radius": blast_payload,
-                "budget": _budget_summary(budget_payload),
-                "scope": active_intent.scope.to_payload(),
-                "edit_allowed": True,
-                "message": self._start_message(blast_payload, budget_payload),
-            },
-            root=root_path,
+        concurrent_intents = _as_conflict_list(
+            declare_payload.get("concurrent_intents")
         )
+        coordination_blocked = bool(concurrent_intents) and on_conflict != "queue"
+        edit_allowed = _start_edit_allowed(
+            declare_status=declare_status,
+            concurrent_intents=concurrent_intents,
+            on_conflict=on_conflict,
+            hygiene=hygiene,
+            dirty_scope_policy=validated_dirty_scope_policy,
+        )
+        workflow_status = _start_workflow_status(
+            declare_status=declare_status,
+            coordination_blocked=coordination_blocked,
+            hygiene=hygiene,
+            dirty_scope_policy=validated_dirty_scope_policy,
+        )
+
+        continuing_own_wip = (
+            validated_dirty_scope_policy == "continue_own_wip"
+            and hygiene.blocks_edit
+            and not hygiene.foreign_dirty_overlaps
+            and workflow_status == "active"
+        )
+
+        payload: dict[str, object] = {
+            "intent_id": intent_id,
+            "status": workflow_status,
+            "run_id": _helpers._short_run_id(record.run_id),
+            "dirty_scope_policy": validated_dirty_scope_policy,
+            "workspace": _workspace_summary_from_declare(
+                workspace_after,
+                declare_payload,
+            ),
+            "blast_radius": blast_payload,
+            "budget": _budget_summary(budget_payload),
+            "scope": active_intent.scope.to_payload(),
+            "edit_allowed": edit_allowed,
+            "message": self._start_message(
+                workflow_status=workflow_status,
+                blast_payload=blast_payload,
+                budget_payload=budget_payload,
+                concurrent_intents=concurrent_intents,
+                hygiene=hygiene,
+                continuing_own_wip=continuing_own_wip,
+            ),
+        }
+        if hygiene.git_available or hygiene.blocks_edit:
+            hygiene_payload = hygiene.to_payload()
+            if continuing_own_wip:
+                hygiene_payload["continuing_own_wip"] = True
+            payload["workspace_hygiene"] = hygiene_payload
+        if not edit_allowed:
+            payload["user_action_required"] = True
+            payload["next_step"] = _start_next_step(
+                concurrent_intents=concurrent_intents,
+                hygiene=hygiene,
+                dirty_scope_policy=validated_dirty_scope_policy,
+            )
+        return _helpers.attach_workspace_hygiene_tips(payload, root=root_path)
 
     # ------------------------------------------------------------------
     # finish_controlled_change
@@ -219,6 +287,35 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
             changed_files=changed_files,
             diff_ref=diff_ref,
         )
+
+        from ._workspace_hygiene import finish_hygiene_check
+        from ._workspace_intent_store import get_workspace_intent_store
+
+        finish_hygiene = finish_hygiene_check(
+            root=record.root,
+            allowed_files=active_intent.scope.allowed_files,
+            allowed_related=active_intent.scope.allowed_related,
+            resolved_files=resolved_files,
+            store=get_workspace_intent_store(record.root),
+            own_pid=self._agent_pid,
+            own_start_epoch=self._agent_start_epoch,
+            own_intent_id=intent_id,
+        )
+        if finish_hygiene.blocks_finish:
+            return {
+                "intent_id": intent_id,
+                "status": "unverified",
+                "reason": "workspace_hygiene",
+                "scope_check": None,
+                "verification": None,
+                "claims": None,
+                "receipt": None,
+                "intent_cleared": False,
+                "user_action_required": True,
+                "next_step": workflow_msgs.FINISH_HYGIENE_NEXT,
+                "workspace_hygiene": finish_hygiene.to_payload(),
+                "message": workflow_msgs.FINISH_HYGIENE_BLOCKED,
+            }
 
         # 3. Check (writes IntentRecord.check_result — required for receipt)
         check_payload = self._check_change_intent(
@@ -290,7 +387,7 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
                 "message": str(verify_payload.get("message", "")),
             }
 
-        # 7. Claim validation (conditional)
+        health_regression_advisory = verify_payload.get("health_regression_advisory")
         claims_payload = self._conditional_claim_validation(
             record=record,
             verify_payload=verify_payload,
@@ -334,6 +431,8 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
         }
         if receipt_error is not None:
             result["receipt_error"] = receipt_error
+        if isinstance(health_regression_advisory, dict):
+            result["health_regression_advisory"] = health_regression_advisory
         return result
 
     # ------------------------------------------------------------------
@@ -414,20 +513,39 @@ class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
             return None
         if not verify_payload.get("claim_validation_recommended"):
             return None
+        structural_delta = verify_payload.get("structural_delta")
+        patch_health_delta: int | None = None
+        if isinstance(structural_delta, dict):
+            health_delta = structural_delta.get("health_delta")
+            if isinstance(health_delta, int):
+                patch_health_delta = health_delta
         return self.validate_review_claims(
             text=review_text,
             run_id=record.run_id,
+            patch_health_delta=patch_health_delta,
         )
 
     @staticmethod
     def _start_message(
+        *,
+        workflow_status: str,
         blast_payload: dict[str, object],
         budget_payload: dict[str, object],
+        concurrent_intents: list[dict[str, object]],
+        hygiene: object,
+        continuing_own_wip: bool = False,
     ) -> str:
+        if workflow_status == "blocked":
+            return _start_next_step(
+                concurrent_intents=concurrent_intents,
+                hygiene=hygiene,
+                dirty_scope_policy="block",
+            )
         gate = budget_payload.get("gate_preview")
         return workflow_msgs.start_controlled_change_message(
             radius_level=str(blast_payload.get("radius_level", "low")),
             budget_would_fail=(isinstance(gate, dict) and bool(gate.get("would_fail"))),
+            continuing_own_wip=continuing_own_wip,
         )
 
     @staticmethod
@@ -456,13 +574,119 @@ def _validated_blast_radius_depth(value: str) -> str:
     return value
 
 
-def _workspace_summary(workspace: dict[str, object]) -> dict[str, object]:
-    """Extract workspace summary for the start response."""
+def _workspace_summary_from_declare(
+    workspace: dict[str, object],
+    declare_payload: dict[str, object],
+) -> dict[str, object]:
+    """Merge fresh workspace counts with declare conflict context."""
+    concurrent_intents = declare_payload.get("concurrent_intents")
+    if not concurrent_intents:
+        blocked_by = declare_payload.get("blocked_by", [])
+        if isinstance(blocked_by, list) and blocked_by:
+            concurrent_intents = blocked_by
     return {
-        "concurrent_intents": workspace.get("workspace_intents", []),
+        "concurrent_intents": concurrent_intents or [],
+        "workspace_relations": declare_payload.get("workspace_relations", []),
+        "queued_context": declare_payload.get("queued_context", []),
         "total_agents": workspace.get("total_agents", 0),
         "stale_count": workspace.get("stale_count", 0),
     }
+
+
+def _as_conflict_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _validated_dirty_scope_policy(value: str) -> str:
+    from ._workspace_hygiene import VALID_DIRTY_SCOPE_POLICIES
+
+    if value not in VALID_DIRTY_SCOPE_POLICIES:
+        raise MCPServiceContractError(
+            err_msgs.invalid_choice(
+                "dirty_scope_policy",
+                value,
+                VALID_DIRTY_SCOPE_POLICIES,
+            )
+        )
+    return value
+
+
+def _start_edit_allowed(
+    *,
+    declare_status: str,
+    concurrent_intents: list[dict[str, object]],
+    on_conflict: str | None,
+    hygiene: object,
+    dirty_scope_policy: str,
+) -> bool:
+    from ._workspace_hygiene import WorkspaceHygieneResult, hygiene_blocks_start_edit
+
+    if declare_status != IntentStatus.ACTIVE.value:
+        return False
+    if concurrent_intents and on_conflict != "queue":
+        return False
+    return not (
+        isinstance(hygiene, WorkspaceHygieneResult)
+        and hygiene_blocks_start_edit(
+            hygiene,
+            dirty_scope_policy=dirty_scope_policy,
+        )
+    )
+
+
+def _start_workflow_status(
+    *,
+    declare_status: str,
+    coordination_blocked: bool,
+    hygiene: object,
+    dirty_scope_policy: str,
+) -> str:
+    from ._workspace_hygiene import WorkspaceHygieneResult, hygiene_blocks_start_edit
+
+    if declare_status == IntentStatus.QUEUED.value:
+        return "queued"
+    if coordination_blocked:
+        return "blocked"
+    if isinstance(hygiene, WorkspaceHygieneResult) and hygiene_blocks_start_edit(
+        hygiene,
+        dirty_scope_policy=dirty_scope_policy,
+    ):
+        return "blocked"
+    return "active"
+
+
+def _start_next_step(
+    *,
+    concurrent_intents: list[dict[str, object]],
+    hygiene: object,
+    dirty_scope_policy: str = "block",
+) -> str:
+    from ._workspace_hygiene import WorkspaceHygieneResult, hygiene_blocks_start_edit
+
+    parts: list[str] = []
+    if concurrent_intents:
+        ownerships = {str(item.get("ownership", "")) for item in concurrent_intents}
+        if "foreign_active" in ownerships:
+            parts.append(workflow_msgs.START_FOREIGN_ACTIVE_OVERLAP)
+        elif "foreign_stale" in ownerships:
+            parts.append(workflow_msgs.START_FOREIGN_STALE_OVERLAP)
+        else:
+            parts.append(workflow_msgs.START_FOREIGN_ACTIVE_OVERLAP)
+    if isinstance(hygiene, WorkspaceHygieneResult) and hygiene_blocks_start_edit(
+        hygiene,
+        dirty_scope_policy=dirty_scope_policy,
+    ):
+        if concurrent_intents:
+            parts = [workflow_msgs.START_COMBINED_BLOCK]
+        elif hygiene.foreign_dirty_overlaps:
+            parts.append(workflow_msgs.START_FOREIGN_DIRTY_OVERLAP)
+        elif dirty_scope_policy == "continue_own_wip":
+            parts.append(workflow_msgs.START_CONTINUE_OWN_WIP)
+        else:
+            parts.append(workflow_msgs.START_DIRTY_SCOPE)
+    return " ".join(parts)
 
 
 def _budget_summary(budget_payload: dict[str, object]) -> dict[str, object]:

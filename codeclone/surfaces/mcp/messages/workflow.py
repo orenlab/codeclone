@@ -42,6 +42,15 @@ START_INTENT_ACTIVE: Final = "Intent active."
 START_HIGH_BLAST_RADIUS: Final = "Blast radius is high — review transitive summary."
 START_BUDGET_OUTSIDE_CI: Final = "Budget is already outside CI thresholds."
 START_BUDGET_WITHIN_CI: Final = "Budget is within CI thresholds."
+START_BUDGET_PREVIEW_ADVISORY: Final = (
+    "Budget preview already fails; edit is allowed, but final verification "
+    "may not be accepted."
+)
+
+START_CONTINUE_OWN_WIP: Final = (
+    "Continuing own uncommitted work in declared scope. Finish must cover all "
+    "dirty paths via changed_files or diff_ref."
+)
 
 FINISH_RECEIPT_FAILED: Final = (
     "Change verified but receipt creation failed. Intent not cleared for retry."
@@ -57,17 +66,61 @@ FINISH_EVIDENCE_REQUIRED: Final = (
     "finish_controlled_change requires changed_files or diff_ref."
 )
 
+START_FOREIGN_ACTIVE_OVERLAP: Final = (
+    "Foreign active intent overlaps your scope. Ask the user, narrow scope, "
+    'or restart with on_conflict="queue".'
+)
+
+START_FOREIGN_STALE_OVERLAP: Final = (
+    "Foreign stale intent overlaps your scope. Coordinate with the user or "
+    "recover the foreign intent before editing."
+)
+
+START_DIRTY_SCOPE: Final = (
+    "Uncommitted changes overlap your declared scope. Ask the user before "
+    "editing; inspect diff, then commit, stash, revert, or narrow scope."
+)
+
+START_FOREIGN_DIRTY_OVERLAP: Final = (
+    "Uncommitted changes overlap your declared scope and a foreign intent "
+    "previously declared overlapping paths. Ask the user before editing."
+)
+
+START_COMBINED_BLOCK: Final = (
+    "Foreign active intent overlaps your scope and dirty files exist in "
+    "declared scope. Ask the user before editing; queue or narrow scope, "
+    "or reconcile the working tree."
+)
+
+FINISH_HYGIENE_BLOCKED: Final = "Finish blocked by workspace hygiene."
+
+FINISH_HYGIENE_NEXT: Final = (
+    "Uncommitted changes in your declared scope were not fully reflected in "
+    "finish evidence, or foreign dirty overlap remains. Ask the user before "
+    "proceeding."
+)
+
+FINISH_HYGIENE_UNACKNOWLEDGED_DIRTY: Final = (
+    "Finish evidence does not cover all dirty paths in declared scope."
+)
+
+FINISH_HYGIENE_FOREIGN_DIRTY: Final = "Foreign dirty overlap remains in declared scope."
+
 
 def start_controlled_change_message(
     *,
     radius_level: str,
     budget_would_fail: bool,
+    continuing_own_wip: bool = False,
 ) -> str:
     parts: list[str] = [START_INTENT_ACTIVE]
+    if continuing_own_wip:
+        parts.append(START_CONTINUE_OWN_WIP)
     if radius_level == "high":
         parts.append(START_HIGH_BLAST_RADIUS)
     if budget_would_fail:
         parts.append(START_BUDGET_OUTSIDE_CI)
+        parts.append(START_BUDGET_PREVIEW_ADVISORY)
     else:
         parts.append(START_BUDGET_WITHIN_CI)
     return " ".join(parts)

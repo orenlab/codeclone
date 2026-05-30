@@ -121,11 +121,11 @@
     },
     {
       "name": "start_controlled_change",
-      "signature": "(self, *, root: 'str', scope: 'dict[str, object]', intent: 'str', expected_effects: 'Sequence[str] | None' = None, on_conflict: 'str | None' = None, strictness: 'str' = 'ci', ttl_seconds: 'int | None' = None, blast_radius_depth: 'str' = 'auto') -> 'dict[str, object]'"
+      "signature": "(self, *, root: 'str', scope: 'dict[str, object]', intent: 'str', expected_effects: 'Sequence[str] | None' = None, on_conflict: 'str | None' = None, strictness: 'str' = 'ci', ttl_seconds: 'int | None' = None, blast_radius_depth: 'str' = 'auto', dirty_scope_policy: 'str' = 'block') -> 'dict[str, object]'"
     },
     {
       "name": "validate_review_claims",
-      "signature": "(self, *, text: 'str', run_id: 'str | None' = None, require_citations: 'bool' = True) -> 'dict[str, object]'"
+      "signature": "(self, *, text: 'str', run_id: 'str | None' = None, require_citations: 'bool' = True, patch_health_delta: 'int | None' = None) -> 'dict[str, object]'"
     }
   ]
 }

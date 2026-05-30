@@ -63,9 +63,11 @@ VALIDATE_REVIEW_CLAIMS: Final = (
     "Detects deterministic mischaracterizations: Security Surfaces "
     "called vulnerabilities, report-only signals called CI failures, "
     "known baseline debt called new regressions, dead code claimed "
-    "where runtime reachability evidence exists, and fixes claimed "
-    "without post-patch verification. Structural citation matching; "
-    "not NLP."
+    "where runtime reachability evidence exists, fixes claimed "
+    "without post-patch verification, and regression-free claims when "
+    "patch_health_delta is negative. Pass patch_health_delta from "
+    "check_patch_contract verify or finish verification.structural_delta. "
+    "Structural citation matching; not NLP."
 )
 
 HELP: Final = (
@@ -177,6 +179,9 @@ START_CONTROLLED_CHANGE: Final = (
     "return patch budget — all in one call. Requires an existing "
     "analysis run for the given root; call analyze_repository "
     "first if needed. Returns intent_id for finish_controlled_change. "
+    "Use dirty_scope_policy=continue_own_wip to resume your own "
+    "uncommitted work in declared scope when no foreign dirty overlap "
+    "exists; finish must still prove scope via changed_files or diff_ref. "
     "Does not run analysis implicitly."
 )
 

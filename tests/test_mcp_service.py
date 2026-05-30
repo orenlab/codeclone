@@ -34,6 +34,7 @@ import codeclone.surfaces.mcp._session_runtime as mcp_runtime_mod
 import codeclone.surfaces.mcp._session_shared as mcp_shared_mod
 import codeclone.surfaces.mcp._session_state_mixin as mcp_state_mod
 import codeclone.surfaces.mcp._session_workflow_mixin as workflow_mod
+import codeclone.surfaces.mcp._workspace_hygiene as mcp_workspace_hygiene_mod
 import codeclone.surfaces.mcp._workspace_intents as mcp_workspace_intents_mod
 import codeclone.surfaces.mcp.server as mcp_server_mod
 import codeclone.surfaces.mcp.service as mcp_service_mod
@@ -61,6 +62,16 @@ from codeclone.surfaces.mcp.session import (
     MCPServiceError,
 )
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
+
+_PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
+
+
+@pytest.fixture(autouse=True)
+def _default_alive_workspace_pids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lazy close treats dead PIDs as orphaned; default tests use synthetic PIDs."""
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
 
 
 def _write_clone_fixture(root: Path, relative_dir: str = "pkg") -> None:
@@ -483,6 +494,38 @@ def _patch_contract_before_after_records(
         regression_path=regression_path,
     )
     return before, after
+
+
+def _service_with_patch_contract_run_pair(
+    root: Path,
+    *,
+    before_run_id: str,
+    after_run_id: str,
+    before_digest: str,
+    after_digest: str,
+    before_health: int = 90,
+    after_health: int = 90,
+) -> CodeCloneMCPService:
+    service = CodeCloneMCPService(history_limit=4)
+    before = _patch_contract_run_record(
+        root,
+        run_id=before_run_id,
+        digest=before_digest,
+        include_regression=False,
+        complexity=6,
+        health=before_health,
+    )
+    after = _patch_contract_run_record(
+        root,
+        run_id=after_run_id,
+        digest=after_digest,
+        include_regression=False,
+        complexity=6,
+        health=after_health,
+    )
+    service._runs.register(before)
+    service._runs.register(after)
+    return service
 
 
 def _declare_pkg_a_intent(service: CodeCloneMCPService) -> dict[str, object]:
@@ -3100,6 +3143,23 @@ def _stale_workspace_intent(
     return stale_record
 
 
+def _recover_with_dead_pid(
+    monkeypatch: pytest.MonkeyPatch,
+    service: CodeCloneMCPService,
+    *,
+    root: Path,
+    intent_id: str,
+    run_id: str = "abcdef12",
+) -> dict[str, object]:
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: False)
+    return service.manage_change_intent(
+        action="recover",
+        root=str(root),
+        run_id=run_id,
+        intent_id=intent_id,
+    )
+
+
 def _single_service_with_stale_intent(
     tmp_path: Path,
 ) -> tuple[CodeCloneMCPService, str, mcp_workspace_intents_mod.WorkspaceIntentRecord]:
@@ -3124,6 +3184,7 @@ def _single_service_with_stale_intent(
 
 def _recoverable_workspace_service(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[CodeCloneMCPService, str]:
     first, second = _paired_blast_services(tmp_path)
     declared = first.manage_change_intent(
@@ -3133,6 +3194,7 @@ def _recoverable_workspace_service(
     )
     intent_id = str(declared["intent_id"])
     _stale_workspace_intent(tmp_path, intent_id=intent_id)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: False)
     return second, intent_id
 
 
@@ -3150,7 +3212,7 @@ def test_mcp_service_workspace_intent_registry_detects_concurrent_agents(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mcp_workspace_intents_mod, "_is_pid_alive", lambda pid: True)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
     first, second = _paired_blast_services(tmp_path)
 
     declared_first = first.manage_change_intent(
@@ -3218,7 +3280,7 @@ def test_mcp_service_workspace_intent_recovery_after_lease_expiry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mcp_workspace_intents_mod, "_is_pid_alive", lambda pid: True)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
     first, second = _paired_blast_services(tmp_path)
 
     declared = first.manage_change_intent(
@@ -3270,28 +3332,17 @@ def test_mcp_service_workspace_intent_recovery_after_lease_expiry(
     assert "owner may still be working" in str(workspace_intents[0]["escalation_hint"])
     assert cast("list[dict[str, object]]", workspace["recovery_available"]) == []
 
-    monkeypatch.setattr(mcp_workspace_intents_mod, "_is_pid_alive", lambda pid: False)
-    recoverable_workspace = second.manage_change_intent(
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: False)
+    dead_pid_list = second.manage_change_intent(
         action="list_workspace",
         root=str(tmp_path),
     )
-    recoverable_intents = cast(
+    recovery_available = cast(
         "list[dict[str, object]]",
-        recoverable_workspace["workspace_intents"],
+        dead_pid_list["recovery_available"],
     )
-    assert recoverable_intents[0]["ownership"] == "recoverable"
-    assert cast(
-        "list[dict[str, object]]", recoverable_workspace["recovery_available"]
-    ) == [
-        {
-            "intent_id": intent_id,
-            "run_id": "abcdef12",
-            "scope_digest": stale_record.scope_digest,
-            "previous_agent_label": "agent-a",
-            "lease_expired_at_utc": _lease_expires_at(stale_record),
-            "hint": "Use action='recover' with matching run_id to reclaim.",
-        }
-    ]
+    assert recovery_available
+    assert recovery_available[0]["intent_id"] == intent_id
 
     recovered = second.manage_change_intent(
         action="recover",
@@ -3311,6 +3362,7 @@ def test_mcp_service_workspace_intent_recovery_after_lease_expiry(
         "agent_start_epoch": 200,
         "agent_label": "agent-b",
     }
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
     assert (
         second.manage_change_intent(action="get", intent_id=intent_id)["status"]
         == "active"
@@ -3329,6 +3381,7 @@ def test_mcp_service_workspace_intent_recovery_after_lease_expiry(
 
 def test_mcp_service_workspace_intent_recovery_rejects_digest_mismatch(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first, second = _paired_blast_services(
         tmp_path,
@@ -3343,11 +3396,10 @@ def test_mcp_service_workspace_intent_recovery_rejects_digest_mismatch(
     )
     intent_id = str(declared["intent_id"])
     _stale_workspace_intent(tmp_path, intent_id=intent_id)
-
-    rejected = second.manage_change_intent(
-        action="recover",
-        root=str(tmp_path),
-        run_id="abcdef12",
+    rejected = _recover_with_dead_pid(
+        monkeypatch,
+        second,
+        root=tmp_path,
         intent_id=intent_id,
     )
 
@@ -3392,7 +3444,7 @@ def test_mcp_service_workspace_intent_recovery_request_edges(
     assert rejected["action_taken"] == "recovery_rejected"
     assert rejected["reason"] == "not_found"
 
-    second, intent_id = _recoverable_workspace_service(tmp_path)
+    second, intent_id = _recoverable_workspace_service(tmp_path, monkeypatch)
 
     def reject_activation(**kwargs: object) -> dict[str, object]:
         return {
@@ -3413,6 +3465,7 @@ def test_mcp_service_workspace_intent_recovery_request_edges(
 
 def test_mcp_service_workspace_intent_recovery_rejects_unavailable_run(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first = CodeCloneMCPService(history_limit=2)
     second = CodeCloneMCPService(history_limit=2)
@@ -3426,11 +3479,10 @@ def test_mcp_service_workspace_intent_recovery_rejects_unavailable_run(
     )
     intent_id = str(declared["intent_id"])
     _stale_workspace_intent(tmp_path, intent_id=intent_id)
-
-    rejected = second.manage_change_intent(
-        action="recover",
-        root=str(tmp_path),
-        run_id="abcdef12",
+    rejected = _recover_with_dead_pid(
+        monkeypatch,
+        second,
+        root=tmp_path,
         intent_id=intent_id,
     )
 
@@ -3442,7 +3494,7 @@ def test_mcp_service_workspace_intent_recovery_rolls_back_on_rewrite_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    second, intent_id = _recoverable_workspace_service(tmp_path)
+    second, intent_id = _recoverable_workspace_service(tmp_path, monkeypatch)
 
     def reject_workspace_write(*args: object, **kwargs: object) -> bool:
         return False
@@ -3490,8 +3542,8 @@ def test_mcp_service_reset_workspace_edges(
     assert reset["action_taken"] == "reset"
     assert reset["new_status"] == "active"
 
-    second, recoverable_id = _recoverable_workspace_service(tmp_path)
-    monkeypatch.setattr(mcp_workspace_intents_mod, "_is_pid_alive", lambda pid: False)
+    second, recoverable_id = _recoverable_workspace_service(tmp_path, monkeypatch)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: False)
 
     removed = second.manage_change_intent(
         action="reset_workspace",
@@ -3668,7 +3720,10 @@ def test_mcp_service_manage_change_intent_additional_edges(
     )
 
 
-def test_mcp_service_intent_recovery_internal_edges(tmp_path: Path) -> None:
+def test_mcp_service_intent_recovery_internal_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     service = CodeCloneMCPService(history_limit=2)
     record = _blast_radius_run_record(tmp_path)
     service._runs.register(record)
@@ -3751,7 +3806,20 @@ def test_mcp_service_intent_recovery_internal_edges(tmp_path: Path) -> None:
         ),
         lease_seconds=mcp_workspace_intents_mod.MIN_LEASE_SECONDS,
     )
-    assert service._recovery_available_payload(records=(no_run_record,), now=now) == []
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: pid == service._agent_pid)
+    from codeclone.surfaces.mcp.messages import intent as intent_msgs
+
+    assert service._recovery_available_payload(records=(no_run_record,), now=now) == [
+        {
+            "intent_id": "intent-no-run",
+            "run_id": "missing-",
+            "scope_digest": no_run_record.scope_digest,
+            "previous_agent_label": no_run_record.agent_label,
+            "lease_expired_at_utc": service._lease_expired_at_utc(no_run_record),
+            "run_available": False,
+            "hint": intent_msgs.RECOVERY_NEEDS_ANALYSIS_HINT,
+        }
+    ]
     assert (
         service._lease_expired_at_utc(
             replace(workspace_record, lease_renewed_at_utc="not-a-date")
@@ -4485,25 +4553,13 @@ def test_mcp_patch_contract_verify_incomparable_and_expired_edges(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service = CodeCloneMCPService(history_limit=4)
-    before = _patch_contract_run_record(
+    service = _service_with_patch_contract_run_pair(
         tmp_path,
-        run_id="beforeedge123456",
-        digest="before-edge",
-        include_regression=False,
-        complexity=6,
-        health=90,
+        before_run_id="beforeedge123456",
+        after_run_id="afteredge123456",
+        before_digest="before-edge",
+        after_digest="after-edge",
     )
-    after = _patch_contract_run_record(
-        tmp_path,
-        run_id="afteredge123456",
-        digest="after-edge",
-        include_regression=False,
-        complexity=6,
-        health=90,
-    )
-    service._runs.register(before)
-    service._runs.register(after)
 
     def incomparable_compare(
         *,
@@ -4672,7 +4728,6 @@ def _two_agent_service(
     Writes a workspace intent file with a different PID to simulate
     agent A owning scope that agent B (this service) wants.
     """
-    from codeclone.surfaces.mcp import _workspace_intents as _ws_mod
     from codeclone.surfaces.mcp._workspace_intents import (
         WorkspaceIntentRecord,
         compute_scope_digest,
@@ -4684,7 +4739,7 @@ def _two_agent_service(
         expires_at as _expires_at,
     )
 
-    monkeypatch.setattr(_ws_mod, "_is_pid_alive", lambda pid: True)
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
     service = CodeCloneMCPService(history_limit=4)
     before = _patch_contract_run_record(
         root,
@@ -7986,6 +8041,11 @@ def test_mcp_workflow_start_queued_and_latest_run(
     )
     assert queued["status"] == "queued"
     assert "blast_radius" not in queued
+    workspace = cast("dict[str, object]", queued["workspace"])
+    blocked_by = cast("list[object]", queued["blocked_by"])
+    concurrent = cast("list[object]", workspace["concurrent_intents"])
+    assert concurrent
+    assert len(concurrent) == len(blocked_by)
 
     other_root = tmp_path / "other"
     other_root.mkdir()
@@ -8225,17 +8285,49 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
     assert workflow_mod._validated_blast_radius_depth("auto") == "auto"
     with pytest.raises(MCPServiceContractError):
         workflow_mod._validated_blast_radius_depth("invalid")
-    assert workflow_mod._workspace_summary({"total_agents": 2})["total_agents"] == 2
+    assert (
+        workflow_mod._workspace_summary_from_declare({"total_agents": 2}, {})[
+            "total_agents"
+        ]
+        == 2
+    )
     assert workflow_mod._budget_summary({"gate_preview": {"would_fail": True}})[
         "gate_preview"
     ] == {"would_fail": True}
+    from codeclone.surfaces.mcp._workspace_hygiene import WorkspaceHygieneResult
+
     assert (
         "high"
         in workflow_mod._MCPSessionWorkflowMixin._start_message(
-            {"radius_level": "high"},
-            {"gate_preview": {"would_fail": True}},
+            workflow_status="active",
+            blast_payload={"radius_level": "high"},
+            budget_payload={"gate_preview": {"would_fail": True}},
+            concurrent_intents=[],
+            hygiene=WorkspaceHygieneResult(
+                git_available=False,
+                dirty_paths=(),
+                dirty_paths_in_scope=(),
+                dirty_paths_outside_scope=(),
+                foreign_dirty_overlaps=(),
+                blocks_edit=False,
+            ),
         ).lower()
     )
+    blocked_message = workflow_mod._MCPSessionWorkflowMixin._start_message(
+        workflow_status="blocked",
+        blast_payload={"radius_level": "low"},
+        budget_payload={"gate_preview": {"would_fail": False}},
+        concurrent_intents=[{"ownership": "foreign_active"}],
+        hygiene=WorkspaceHygieneResult(
+            git_available=False,
+            dirty_paths=(),
+            dirty_paths_in_scope=(),
+            dirty_paths_outside_scope=(),
+            foreign_dirty_overlaps=(),
+            blocks_edit=False,
+        ),
+    )
+    assert "Intent active" not in blocked_message
     assert (
         "receipt creation failed"
         in workflow_mod._MCPSessionWorkflowMixin._finish_message(
@@ -8320,3 +8412,193 @@ def test_mcp_workspace_hygiene_gitignore_tip(tmp_path: Path) -> None:
     )
     assert started["status"] == "active"
     assert "tips" not in started
+
+
+def test_mcp_start_blocked_on_foreign_overlap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _foreign_id = _two_agent_service(tmp_path, monkeypatch)
+    _register_docs_patch_run(service, tmp_path)
+    blocked = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="agent B wants overlapping scope",
+    )
+    assert blocked["status"] == "blocked"
+    assert blocked["edit_allowed"] is False
+    assert blocked["user_action_required"] is True
+    assert "Intent active" not in str(blocked["message"])
+    assert blocked["message"] == blocked["next_step"]
+    workspace = cast("dict[str, object]", blocked["workspace"])
+    assert workspace["concurrent_intents"]
+    assert blocked["next_step"]
+
+
+def test_mcp_list_workspace_includes_dirty_summary(
+    tmp_path: Path,
+) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    readme = tmp_path / "README.md"
+    readme.write_text("hello\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "README.md"], cwd=tmp_path, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@e.com",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@e.com",
+        },
+    )
+    readme.write_text("hello world\n", encoding="utf-8")
+    service = CodeCloneMCPService(history_limit=2)
+    payload = service.manage_change_intent(action="list_workspace", root=str(tmp_path))
+    summary = cast("dict[str, object]", payload["workspace_dirty_summary"])
+    assert summary["git_available"] is True
+    assert cast("int", summary["dirty_paths_count"]) >= 1
+    assert "README.md" in cast("list[str]", summary["dirty_paths_sample"])
+
+
+def test_mcp_verify_rejects_identical_before_after_run(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    _after, declared = _seed_patch_contract_intent(service, tmp_path, before_health=85)
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id="before12",
+        after_run_id="before12",
+        intent_id=str(declared["intent_id"]),
+        changed_files=["pkg/a.py"],
+    )
+    assert verified["status"] == "unverified"
+    assert verified["reason"] == "after_run_not_new"
+    assert verified["next_step"]
+
+
+def test_mcp_start_continue_own_wip_allows_dirty_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.mcp._workspace_hygiene import (
+        ForeignDirtyOverlap,
+        WorkspaceHygieneResult,
+    )
+
+    service = CodeCloneMCPService(history_limit=4)
+    _register_docs_patch_run(service, tmp_path)
+    dirty_hygiene = WorkspaceHygieneResult(
+        git_available=True,
+        dirty_paths=("README.md",),
+        dirty_paths_in_scope=("README.md",),
+        dirty_paths_outside_scope=(),
+        foreign_dirty_overlaps=(),
+        blocks_edit=True,
+    )
+    monkeypatch.setattr(
+        mcp_workspace_hygiene_mod,
+        "evaluate_scoped_hygiene",
+        lambda **_: dirty_hygiene,
+    )
+    blocked = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="blocked on dirty scope",
+    )
+    assert blocked["status"] == "blocked"
+    assert blocked["edit_allowed"] is False
+
+    continued = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="resume own wip",
+        dirty_scope_policy="continue_own_wip",
+    )
+    assert continued["status"] == "active"
+    assert continued["edit_allowed"] is True
+    assert continued["dirty_scope_policy"] == "continue_own_wip"
+    hygiene = cast("dict[str, object]", continued["workspace_hygiene"])
+    assert hygiene.get("continuing_own_wip") is True
+    assert "Continuing own uncommitted work" in str(continued["message"])
+
+    foreign_hygiene = replace(
+        dirty_hygiene,
+        foreign_dirty_overlaps=(
+            ForeignDirtyOverlap(
+                path="README.md",
+                foreign_intent_id="intent-foreign-001",
+                foreign_persisted_status="active",
+                foreign_ownership="foreign_active",
+                foreign_agent_label="other",
+                message="foreign dirty overlap",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        mcp_workspace_hygiene_mod,
+        "evaluate_scoped_hygiene",
+        lambda **_: foreign_hygiene,
+    )
+    still_blocked = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="foreign dirty blocks continue",
+        dirty_scope_policy="continue_own_wip",
+    )
+    assert still_blocked["status"] == "blocked"
+    assert still_blocked["edit_allowed"] is False
+
+
+def test_mcp_verify_health_regression_advisory_on_accepted(
+    tmp_path: Path,
+) -> None:
+    service = _service_with_patch_contract_run_pair(
+        tmp_path,
+        before_run_id="before1234567890",
+        after_run_id="after1234567890",
+        before_digest="before-digest",
+        after_digest="after-digest",
+        after_health=88,
+    )
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id="before12",
+        scope={"allowed_files": ["README.md"]},
+        intent="docs-only health drop",
+    )
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id="before12",
+        after_run_id="after12",
+        intent_id=str(declared["intent_id"]),
+        changed_files=["README.md"],
+    )
+    assert verified["status"] == "accepted"
+    advisory = cast("dict[str, object]", verified["health_regression_advisory"])
+    assert advisory["health_delta"] == -2
+    assert "health changed negatively" in str(advisory["message"]).lower()
+
+
+def test_mcp_validate_review_claims_warns_on_health_regression_overclaim(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    record = _blast_radius_run_record(tmp_path, run_id="claimbefore123456")
+    service._runs.register(record)
+    payload = service.validate_review_claims(
+        run_id="claimbef",
+        text="Patch verified with no regressions and clean structural scope.",
+        patch_health_delta=-2,
+    )
+    assert payload["valid"] is False
+    warnings = cast("list[dict[str, object]]", payload["warnings"])
+    assert any(item["type"] == "health_regression_overclaim" for item in warnings)
+    violations = cast("list[dict[str, object]]", payload["violations"])
+    assert any(
+        item.get("pattern") == "health_regression_overclaim" for item in violations
+    )

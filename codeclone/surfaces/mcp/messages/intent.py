@@ -34,6 +34,14 @@ RESET_LIVE_FOREIGN: Final = (
 )
 
 RECOVERY_HINT: Final = "Use action='recover' with matching run_id to reclaim."
+RECOVERY_NEEDS_ANALYSIS_HINT: Final = (
+    "Recoverable intent found. Run analyze_repository in this MCP session, "
+    "then use action='recover' with the matching run_id."
+)
+RECOVERY_LIST_NEXT_STEP: Final = (
+    "Recovery candidates may require a fresh analyze_repository run after "
+    "MCP restart before recover succeeds."
+)
 
 SCOPE_CHECK_FORBIDDEN: Final = "Patch touched forbidden or out-of-scope files."
 SCOPE_CHECK_RELATED: Final = (
@@ -52,3 +60,17 @@ RECOVERY_FOREIGN_STALE: Final = (
 )
 
 RECOVERY_EXPIRED: Final = "Intent has expired (TTL). Declare a new intent instead."
+
+DECLARE_FOREIGN_ACTIVE_OVERLAP: Final = (
+    "Foreign active intent overlaps your scope. Ask the user, narrow scope, "
+    'or restart with on_conflict="queue".'
+)
+
+DECLARE_FOREIGN_STALE_OVERLAP: Final = (
+    "Foreign stale intent overlaps your scope. Coordinate with the user or "
+    "recover the foreign intent before editing."
+)
+
+DECLARE_FOREIGN_OVERLAP: Final = (
+    "Foreign intent overlaps your scope. Ask the user before editing."
+)

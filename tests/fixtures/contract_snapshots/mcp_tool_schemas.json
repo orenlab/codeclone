@@ -2225,6 +2225,12 @@
           "description": "auto, direct, or transitive pre-edit blast radius.",
           "title": "Blast Radius Depth",
           "type": "string"
+        },
+        "dirty_scope_policy": {
+          "default": "block",
+          "description": "block (default) or continue_own_wip when uncommitted changes already overlap declared scope.",
+          "title": "Dirty Scope Policy",
+          "type": "string"
         }
       },
       "required": [
@@ -2263,6 +2269,19 @@
           "description": "Require finding ids or metric citations in text.",
           "title": "Require Citations",
           "type": "boolean"
+        },
+        "patch_health_delta": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional health delta from check_patch_contract verify (after minus before). Enables health-regression overclaim checks.",
+          "title": "Patch Health Delta"
         }
       },
       "required": [

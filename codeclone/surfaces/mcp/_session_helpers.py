@@ -931,3 +931,9 @@ def attach_workspace_hygiene_tips(
     if tips:
         payload["tips"] = tips
     return payload
+
+
+def workspace_dirty_summary_payload(*, root: Path) -> dict[str, object]:
+    from ._workspace_hygiene import workspace_dirty_summary
+
+    return workspace_dirty_summary(root=root)

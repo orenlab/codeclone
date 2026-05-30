@@ -38,6 +38,7 @@ from .messages.params import (
     CreateReceiptParam,
     DetailLevelParam,
     DiffRefParam,
+    DirtyScopePolicyParam,
     ExcludeReviewedParam,
     ExpectedEffectsParam,
     FamilyParam,
@@ -72,6 +73,7 @@ from .messages.params import (
     OptionalPathParam,
     OptionalRootParam,
     OptionalScopeParam,
+    PatchHealthDeltaParam,
     PatchModeParam,
     PathFilterParam,
     PrFormatParam,
@@ -472,11 +474,13 @@ def build_mcp_server(
         text: ReviewTextParam,
         run_id: RunIdParam = None,
         require_citations: RequireCitationsParam = True,
+        patch_health_delta: PatchHealthDeltaParam = None,
     ) -> dict[str, object]:
         return service.validate_review_claims(
             text=text,
             run_id=run_id,
             require_citations=require_citations,
+            patch_health_delta=patch_health_delta,
         )
 
     @tool(
@@ -854,6 +858,7 @@ def build_mcp_server(
         strictness: StrictnessParam = "ci",
         ttl_seconds: TtlSecondsParam = None,
         blast_radius_depth: BlastRadiusDepthParam = "auto",
+        dirty_scope_policy: DirtyScopePolicyParam = "block",
     ) -> dict[str, object]:
         return service.start_controlled_change(
             root=root,
@@ -864,6 +869,7 @@ def build_mcp_server(
             strictness=strictness,
             ttl_seconds=ttl_seconds,
             blast_radius_depth=blast_radius_depth,
+            dirty_scope_policy=dirty_scope_policy,
         )
 
     @tool(

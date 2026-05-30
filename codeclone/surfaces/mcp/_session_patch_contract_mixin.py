@@ -248,6 +248,17 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
                 before=before,
                 classification=classification,
             )
+        if before.run_id == after.run_id and classification.profile in {
+            VerificationProfile.PYTHON_STRUCTURAL,
+            VerificationProfile.GOVERNANCE_CONFIG,
+        }:
+            return self._unverified_patch_contract(
+                reason="after_run_not_new",
+                before=before,
+                after=after,
+                classification=classification,
+                scope_check=scope_check,
+            )
         return self._full_structural_verify(
             before=before,
             after=after,
@@ -723,6 +734,23 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             status = PatchContractStatus.ACCEPTED.value
         profile_payload = classification.to_payload()
         violated = status == PatchContractStatus.VIOLATED.value
+        health_delta_value = structural_delta.get("health_delta")
+        health_regression_advisory: dict[str, object] | None = None
+        if (
+            isinstance(health_delta_value, int)
+            and health_delta_value < 0
+            and status
+            in {
+                PatchContractStatus.ACCEPTED.value,
+                PatchContractStatus.ACCEPTED_EXTERNAL.value,
+            }
+        ):
+            from .messages import patch_contract as patch_msgs
+
+            health_regression_advisory = {
+                "health_delta": health_delta_value,
+                "message": patch_msgs.HEALTH_REGRESSION_ADVISORY,
+            }
         payload: dict[str, object] = {
             "mode": "verify",
             "status": status,
@@ -747,8 +775,16 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             "blocking_violations": list(blocking_violations),
             **profile_payload,
             "claim_validation_recommended": not violated,
-            "message": self._verify_message(status=status, violations=violations),
+            "message": self._verify_message(
+                status=status,
+                violations=violations,
+                health_delta=(
+                    health_delta_value if isinstance(health_delta_value, int) else None
+                ),
+            ),
         }
+        if health_regression_advisory is not None:
+            payload["health_regression_advisory"] = health_regression_advisory
         event_type = (
             EVENT_PATCH_VIOLATED
             if status == PatchContractStatus.VIOLATED.value
@@ -1148,10 +1184,20 @@ class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
             would_fail=bool(gate_preview.get("would_fail")),
         )
 
-    def _verify_message(self, *, status: str, violations: Sequence[str]) -> str:
+    def _verify_message(
+        self,
+        *,
+        status: str,
+        violations: Sequence[str],
+        health_delta: int | None = None,
+    ) -> str:
         from .messages import patch_contract as patch_msgs
 
-        return patch_msgs.verify_message(status=status, violations=violations)
+        return patch_msgs.verify_message(
+            status=status,
+            violations=violations,
+            health_delta=health_delta,
+        )
 
 
 def _as_mapping(value: object) -> Mapping[str, object]:

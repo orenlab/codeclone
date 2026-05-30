@@ -20,6 +20,10 @@ NEXT_STEP_HINTS: Final[dict[str, str]] = {
         "Run analyze_repository after editing, then pass the"
         " new run_id as after_run_id."
     ),
+    "after_run_not_new": (
+        "After-run matches the intent before-run. Run analyze_repository "
+        "after editing and pass the new run_id as after_run_id."
+    ),
     "after_run_required_for_governance": (
         "Governance config changes require a post-edit analysis."
         " Run analyze_repository and pass after_run_id."
@@ -78,15 +82,29 @@ VERIFY_ACCEPTED: Final = "Patch contract accepted."
 VERIFY_ACCEPTED_EXTERNAL: Final = (
     "Patch contract accepted; external workspace changes detected."
 )
+HEALTH_REGRESSION_ADVISORY: Final = (
+    "Patch accepted, but repository health changed negatively between "
+    "before-run and after-run. Report this as advisory context, not as "
+    "regression-free verification."
+)
 VERIFY_UNVERIFIED_PREFIX: Final = "Patch contract unverified: {reason}."
 
 
-def verify_message(*, status: str, violations: Sequence[str]) -> str:
+def verify_message(
+    *,
+    status: str,
+    violations: Sequence[str],
+    health_delta: int | None = None,
+) -> str:
     if status == "accepted":
-        return VERIFY_ACCEPTED
-    if status == "accepted_with_external_changes":
-        return VERIFY_ACCEPTED_EXTERNAL
-    return "Patch contract violated: " + ", ".join(violations)
+        message = VERIFY_ACCEPTED
+    elif status == "accepted_with_external_changes":
+        message = VERIFY_ACCEPTED_EXTERNAL
+    else:
+        return "Patch contract violated: " + ", ".join(violations)
+    if health_delta is not None and health_delta < 0:
+        return f"{message} {HEALTH_REGRESSION_ADVISORY}"
+    return message
 
 
 def budget_message(*, relaxed: bool, would_fail: bool) -> str:
