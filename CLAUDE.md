@@ -47,6 +47,8 @@ Before editing any repository files:
    — if `status: "needs_analysis"`, run `analyze_repository` first
    — if `status: "queued"`, do not edit; wait for promotion
    — if `concurrent_intents` non-empty without queue, narrow scope or ask
+   — if start blocks on your own dirty scope with no foreign overlap, retry with
+   `dirty_scope_policy="continue_own_wip"`; finish must still prove scope
 3. Edit within declared scope only
 4. `analyze_repository(root="<abs_path>")`
    — after-run; required for Python structural and governance config changes.
@@ -55,8 +57,9 @@ Before editing any repository files:
 5. `finish_controlled_change(intent_id=..., changed_files=[...], after_run_id=...)`
    — returns scope check, verification, receipt, and clears intent
    — if `status: "unverified"`, the intent stays active; follow `next_step`
-   (e.g., run `analyze_repository`), then call `finish` again on the
-   **same `intent_id`** with the missing evidence
+   (e.g. run `analyze_repository` with a **new** run_id — identical before/after
+   runs return `after_run_not_new` for Python structural patches), then call
+   `finish` again on the **same `intent_id`** with the missing evidence
    — if `status: "violated"` (scope), the intent stays active; either
    remove out-of-scope changes and retry `finish`, or expand scope via
    `start_controlled_change` with a wider scope
@@ -140,6 +143,13 @@ Ask the user only when:
 
 Routine controller work is automatic. Boundary decisions require the user.
 
+**Edit permission (MCP workflow):** do not edit unless
+`start_controlled_change` returned `status == "active"` **and**
+`edit_allowed == true`. Workflow `status: "blocked"` is not persisted
+registry lifecycle — clear abandoned blocked intents via
+`manage_change_intent(action="clear")`. Finish `reason=workspace_hygiene`
+requires user reconciliation — do not bypass with atomic verify.
+
 ### Completion gate
 
 Do not say "done", "implemented", "validated", "verified", "ready", or
@@ -158,8 +168,8 @@ equivalent unless all of these are true:
 5. claim validation was handled by `finish_controlled_change` when
    `review_text` was provided and `claim_validation_recommended` was
    `true`; for atomic workflow, final summary claims passed
-   `validate_review_claims` unless `claim_validation_recommended` was
-   explicitly `false`.
+   `validate_review_claims` with `patch_health_delta` from verify unless
+   `claim_validation_recommended` was explicitly `false`.
 
 If status is `accepted_with_external_changes`, report the external-change
 advisory instead of presenting the patch as fully clean.

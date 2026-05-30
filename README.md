@@ -146,15 +146,15 @@ CFG semantics: [CFG semantics](https://orenlab.github.io/codeclone/cfg/)
 The Controller governs AI-assisted edits before they become invisible diffs. Every stage is deterministic — structural
 facts come from the canonical report, not from LLM inference.
 
-| Stage                       | Surface                                          | Purpose                                                                 |
-|-----------------------------|--------------------------------------------------|-------------------------------------------------------------------------|
-| **Declare intent**          | `manage_change_intent`                           | Agent states intended scope and rationale before editing                |
-| **Map blast radius**        | `get_blast_radius` &middot; `--blast-radius`     | Reverse imports, clone cohorts, review context, do-not-touch boundaries |
-| **Check patch contract**    | `check_patch_contract` &middot; `--patch-verify` | Pre-edit budget check and post-edit structural verification             |
-| **Validate claims**         | `validate_review_claims`                         | Cross-check review text against cited report facts                      |
-| **Generate receipt**        | `create_review_receipt`                          | Auditable artifact: intent, scope, blast radius, patch outcome          |
-| **Coordinate workspace**    | workspace intent registry                        | Make active declared scopes visible across MCP processes                |
-| **Audit controller events** | optional audit trail                             | Record passive workflow events and MCP payload footprint when enabled   |
+| Stage                       | Surface                                          | Purpose                                                                                       |
+|-----------------------------|--------------------------------------------------|-----------------------------------------------------------------------------------------------|
+| **Declare intent**          | `manage_change_intent`                           | Agent states intended scope and rationale before editing                                      |
+| **Map blast radius**        | `get_blast_radius` &middot; `--blast-radius`     | Reverse imports, clone cohorts, review context, do-not-touch boundaries                       |
+| **Check patch contract**    | `check_patch_contract` &middot; `--patch-verify` | Pre-edit budget check and post-edit structural verification                                   |
+| **Validate claims**         | `validate_review_claims`                         | Cross-check review text; optional `patch_health_delta` from verify for regression-free claims |
+| **Generate receipt**        | `create_review_receipt`                          | Auditable artifact: intent, scope, blast radius, patch outcome                                |
+| **Coordinate workspace**    | workspace intent registry                        | Make active declared scopes visible across MCP processes                                      |
+| **Audit controller events** | optional audit trail                             | Record passive workflow events and MCP payload footprint when enabled                         |
 
 Intent execution is **session-local**. Cross-agent visibility is optional, advisory, TTL/lease-bound, and stored as
 ephemeral workspace coordination state under `.cache/codeclone/intents/`.
@@ -273,7 +273,8 @@ codeclone-mcp --transport streamable-http   # HTTP transport
 
 > [!WARNING]
 > Analysis tools require an absolute repository root. Relative roots such as `.` are rejected.
-> Keep `stdio` as the default transport for local IDE and agent clients; HTTP exposure beyond loopback requires explicit `--allow-remote`.
+> Keep `stdio` as the default transport for local IDE and agent clients; HTTP exposure beyond loopback requires explicit
+`--allow-remote`.
 
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/) &middot;
 [MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
@@ -530,15 +531,26 @@ Quick links:
   &middot; [Scope map](https://github.com/orenlab/codeclone/blob/main/LICENSES.md)
 
 <!-- Shields -->
+
 [pypi-shield]: https://img.shields.io/pypi/v/codeclone?style=flat-square&color=6366f1
+
 [status-shield]: https://img.shields.io/pypi/status/codeclone?style=flat-square&color=6366f1
+
 [downloads-shield]: https://img.shields.io/pypi/dm/codeclone?style=flat-square&color=6366f1
+
 [python-shield]: https://img.shields.io/pypi/pyversions/codeclone?style=flat-square&color=6366f1
+
 [license-shield]: https://img.shields.io/badge/license-MPL--2.0-6366f1?style=flat-square
+
 [tests-shield]: https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/tests.yml?branch=main&style=flat-square&label=tests
+
 [benchmark-shield]: https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/benchmark.yml?style=flat-square&label=benchmark
 <!-- Links -->
+
 [pypi-link]: https://pypi.org/project/codeclone/
+
 [license-link]: #license
+
 [tests-link]: https://github.com/orenlab/codeclone/actions/workflows/tests.yml
+
 [benchmark-link]: https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml

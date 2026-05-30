@@ -135,8 +135,19 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 
 | Tool                          | Key parameters                                                            | Purpose                                                                               |
 |-------------------------------|---------------------------------------------------------------------------|---------------------------------------------------------------------------------------|
-| `start_controlled_change`     | `root`, `scope`, `intent`, `expected_effects`, `on_conflict`, `strictness`, `blast_radius_depth` | Pre-edit: workspace check + declare + blast radius + budget in one call. Returns `intent_id` for `finish`. Does not run analysis |
+| `start_controlled_change`     | `root`, `scope`, `intent`, `expected_effects`, `on_conflict`, `strictness`, `blast_radius_depth`, `dirty_scope_policy` | Pre-edit: workspace check + declare + blast radius + budget in one call. Returns `intent_id` for `finish`. `dirty_scope_policy=continue_own_wip` resumes own dirty scope when no foreign overlap. Does not run analysis |
 | `finish_controlled_change`    | `intent_id`, `changed_files` or `diff_ref`, `after_run_id`, `review_text`, `create_receipt`, `auto_clear` | Post-edit: scope check + verify + claims + receipt + clear in one call. `after_run_id` required for Python structural / governance config profiles |
+
+??? info "Start/finish workspace hygiene"
+    Edit permission requires `start_controlled_change` to return
+    `status == "active"` **and** `edit_allowed == true`. Workflow
+    `status: "blocked"` is not persisted registry lifecycle. Start may attach
+    scoped `workspace_hygiene`; finish may fail with `reason: "workspace_hygiene"`.
+    Queued foreign intents do not populate `foreign_dirty_overlaps`. Lazy close
+    on read and `gc_workspace` use different predicates — see book/24.
+    `manage_change_intent(list_workspace)` returns repo-level
+    `workspace_dirty_summary` only. See
+    [Workspace hygiene and registry consistency](24-structural-change-controller.md#workspace-hygiene-and-registry-consistency).
 
 ### Atomic change control tools (advanced / diagnostic)
 
@@ -146,7 +157,7 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 | `get_blast_radius`       | `run_id`, `files`, `depth`, `include`                                                                       | Pre-change risk boundary: full transitive graph, custom include filters                 |
 | `check_patch_contract`   | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref` | Manual budget query or step-by-step verification                                        |
 | `create_review_receipt`  | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                           | Manual receipt generation                                                               |
-| `validate_review_claims` | `text`, `run_id`, `require_citations`                                                                       | Standalone citation-based overclaim detection                                           |
+| `validate_review_claims` | `text`, `run_id`, `require_citations`, `patch_health_delta`                                                 | Standalone citation-based overclaim detection; pass `patch_health_delta` from verify when using the atomic workflow |
 
 ??? info "Blast radius: do_not_touch vs review_context"
     `do_not_touch` is limited to actionable negative context: baselines,
@@ -162,7 +173,9 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
     runs, previews gates, validates scope, and reports baseline-abuse
     signals. When `intent_id` is provided but `before_run_id` is omitted,
     verify auto-resolves the before-run from the intent record. Missing runs
-    return `status="unverified"`. Non-accepted responses include a
+    return `status="unverified"`. Identical before/after runs for
+    `python_structural` / `governance_config` return
+    `reason="after_run_not_new"`. Non-accepted responses include a
     `next_step` hint and `claim_validation_recommended` flag.
 
     When a change intent is active, verify mode attributes regressions and

@@ -7,7 +7,9 @@ description: Mandatory before any repository file edit when CodeClone MCP is con
 
 Edit pipeline for the **target Python repository** (source, `tests/`, docs, config).
 CodeClone MCP available → follow this pipeline. Coverage/CI/docs labels do **not**
-skip intent. WIP needs a new intent each cycle.
+skip intent. Resume your own uncommitted WIP with
+`dirty_scope_policy="continue_own_wip"` when start would otherwise block on dirty
+scope alone — finish must still prove scope via `changed_files` or `diff_ref`.
 
 **Skip pipeline** only when: no files will change; analysis-only; MCP unavailable
 (edits → BLOCKED). Not for read-only review (`codeclone-review`) or snapshots
@@ -46,11 +48,24 @@ Intent binds to the **before-run digest** — do not redeclare on the after-run.
 
 ### After `start` (`edit_allowed` gate)
 
-| Response         | Action                                                                                                |
-|------------------|-------------------------------------------------------------------------------------------------------|
-| `needs_analysis` | Run step 1 for same `root`, then `start` again                                                        |
-| `queued`         | **No edits.** Wait → `manage_change_intent(promote)`. If `before_run_evicted`: step 1 → `start` again |
-| `active`         | Read `blast_radius` + `budget`. Edit only if `edit_allowed=true`                                      |
+| Response         | Action                                                                                                  |
+|------------------|---------------------------------------------------------------------------------------------------------|
+| `needs_analysis` | Run step 1 for same `root`, then `start` again                                                          |
+| `queued`         | **No edits.** Wait → `manage_change_intent(promote)`. If `before_run_evicted`: step 1 → `start` again   |
+| `blocked`        | **No edits.** Intent exists — clear via `manage_change_intent(clear)` if abandoning; follow `next_step`. If dirty scope is your own WIP with no foreign overlap, retry `start` with `dirty_scope_policy="continue_own_wip"`. |
+| `active`         | Read `blast_radius` + `budget`. Edit only if `edit_allowed=true`. Budget `gate_preview.would_fail` is advisory — edit may proceed, but verify may reject. |
+
+**Edit permission:** `status == "active"` alone is not enough — require
+`edit_allowed == true`. Treat unknown start statuses as no permission.
+
+Three independent contours (do not collapse):
+
+```text
+status     = persisted registry lifecycle
+ownership  = runtime view (PID / TTL / lease)
+hygiene    = git working tree ∩ declared scope
+permission = edit_allowed (with status gate)
+```
 
 Before edit: scan `do_not_touch` (hard boundary), `direct_dependents`, clone
 cohort / `review_context` (context only). `get_blast_radius(transitive)` only if
@@ -86,6 +101,7 @@ Internal order (do not replicate manually): scope **check** → **verify** → c
 | `unverified`                                  | Intent stays active. Follow `next_step` (usually after-run), then **retry same `intent_id`**           |
 | `violated` (scope)                            | Fix files or expand scope via new `start`; retry same `intent_id`                                      |
 | `expired`                                     | Before-run digest stale. Re-analyze → new `start`                                                      |
+| `reason=workspace_hygiene`                    | **No atomic verify bypass.** Reconcile dirty scope/evidence → retry same `intent_id`. Queued foreign intents do not block finish. |
 | `user_action_required=true`                   | Stop; follow `next_step` or escalate                                                                   |
 
 Do not start a new intent unless scope changed or intent expired.
@@ -108,7 +124,9 @@ Read **before** the user summary, even when `intent_cleared=true`:
 
 | Field                                        | Report when                            |
 |----------------------------------------------|----------------------------------------|
-| `verification.structural_delta.health_delta` | `< 0` — health dropped; cite delta     |
+| `verification.structural_delta.health_delta` | `< 0` — health dropped; cite delta even when verify `accepted` |
+| `health_regression_advisory`                   | present on accepted finish when delta negative                 |
+| `verification.reason: after_run_not_new`     | after-run equals before-run — re-analyze with new run_id       |
 | `verification.structural_delta.verdict`      | `regressed` or `mixed`                 |
 | `external_regressions`, `gate_worsened`      | non-empty / true                       |
 | `accepted_with_external_changes`             | name external workspace signal         |
@@ -145,7 +163,8 @@ When start/finish unavailable:
 
 ```
 list_workspace → analyze → declare → budget → edit → analyze → check → verify
-→ validate_review_claims → create_review_receipt → clear
+→ validate_review_claims(text=..., patch_health_delta=verify.structural_delta.health_delta)
+→ create_review_receipt → clear
 ```
 
 Say explicitly which tools were skipped. Never mix with normal pipeline in one cycle.

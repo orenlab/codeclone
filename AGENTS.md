@@ -253,11 +253,13 @@ cache or report truth.
 For file edits, agents should prefer the workflow tools
 `start_controlled_change` and `finish_controlled_change` — they aggregate
 workspace check, intent declaration, blast radius, budget, verification,
-receipt, and cleanup into two calls. Atomic change control tools
-(`manage_change_intent`, `get_blast_radius`, `check_patch_contract`,
+receipt, and cleanup into two calls. Use `dirty_scope_policy="continue_own_wip"`
+when resuming own uncommitted scope without foreign dirty overlap. Atomic change
+control tools (`manage_change_intent`, `get_blast_radius`, `check_patch_contract`,
 `validate_review_claims`, `create_review_receipt`) remain available for
 queue/promote/recover operations, deep inspection, and backward
-compatibility with older MCP servers.
+compatibility with older MCP servers. Pass `patch_health_delta` to
+`validate_review_claims` when using the atomic verify path.
 
 ### Report invariants
 

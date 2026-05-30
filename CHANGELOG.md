@@ -23,7 +23,8 @@ review receipts, and workflow consolidation tools.
   documentation_only, governance_config, non_python_patch,
   state_artifact_change).
 - Claim guard (`validate_review_claims`): citation-based overclaim
-  detection against canonical report semantics.
+  detection against canonical report semantics; optional `patch_health_delta`
+  from verify for regression-free claim checks.
 - Review receipts (`create_review_receipt`): deterministic audit
   artifacts with provenance, scope, patch status, and claims-not-made.
 - Verify ergonomics: auto-resolve `before_run_id` from intent, `next_step`
@@ -67,9 +68,21 @@ review receipts, and workflow consolidation tools.
 - `list_workspace` and `--session-stats` report registry backend/storage;
   audit footprint reads `audit_enabled` from pyproject instead of assuming the
   default DB path.
+- Workspace registry hygiene: lazy intent closure on agent-facing
+  reads, cross-process registry locks, scoped git working-tree hygiene at
+  `start_controlled_change` / `finish_controlled_change`, and repo-level
+  `workspace_dirty_summary` on `manage_change_intent(list_workspace)`.
 
 ### Changed
 
+- `start_controlled_change` may return workflow `status: "blocked"` with
+  `edit_allowed: false` when foreign scope overlap or scoped hygiene blocks;
+  edit permission requires `status == "active"` **and** `edit_allowed == true`.
+  `blocked` is workflow-only — never persisted registry lifecycle status.
+- Workspace intent registry I/O is serialized with cross-process locks; SQLite
+  `gc()` runs as one locked scan→close→purge transaction. Lazy close on read
+  uses a narrower predicate than `gc_workspace`; orphaned intents stay
+  recoverable until TTL expiry or explicit GC.
 - LCOM4 cohesion graph applicability refined: Protocol class methods and Pydantic
   validation/serialization decorator hooks are excluded from the cohesion graph;
   `computed_field` remains because it commonly reads `self.*` and carries real
@@ -107,6 +120,22 @@ review receipts, and workflow consolidation tools.
 
 ### Fixed
 
+- MCP change control: `dirty_scope_policy=continue_own_wip` allows resuming own
+  dirty scope at start when no live foreign dirty overlap exists; finish still
+  requires `changed_files` or `diff_ref` evidence.
+- Queued foreign intents no longer populate `foreign_dirty_overlaps`, so they do
+  not block finish for an active agent on overlapping scope.
+- Patch verify rejects identical before/after runs for `python_structural` and
+  `governance_config` profiles (`reason: after_run_not_new`).
+- Negative `health_delta` on accepted verify surfaces
+  `health_regression_advisory`; Claim Guard warns/violates "no regressions"
+  overclaims when `patch_health_delta < 0` (auto on finish; explicit on
+  atomic `validate_review_claims`).
+- `list_workspace` recovery discoverability after MCP restart:
+  `recovery_available` includes candidates with `run_available: false` and
+  `recovery_next_step` guidance.
+- `start_controlled_change` budget `gate_preview.would_fail` advisory message when
+  edit is still allowed.
 - MCP analysis with `respect_pyproject=false` no longer surfaces golden-fixture
   clone groups as false `new` regressions when pyproject excludes them.
 

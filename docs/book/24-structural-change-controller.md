@@ -125,7 +125,8 @@ and `truncated`.
 coordination:
 
 - `list_workspace`: list active workspace intent records from all agents for a
-  repository root.
+  repository root. Includes `recovery_available` (with `run_available` and
+  per-candidate `hint`) and `recovery_next_step` when recoverable intents exist.
 - `renew`: refresh the active lease before long edits or test runs.
 - `gc_workspace`: remove expired, orphaned, or corrupted registry records.
 - `recover`: explicitly reclaim a recoverable intent when the caller has the
@@ -225,6 +226,11 @@ The guard checks for deterministic overclaims:
 Warnings, such as missing or unknown citations, do not make the response
 invalid. Violations make `valid=false`.
 
+When `patch_health_delta` is negative, regression-free or fully-clean structural
+claims produce a `health_regression_overclaim` violation even if patch verify
+returned `accepted`. `finish_controlled_change` passes delta automatically;
+atomic callers must pass it from verify output.
+
 ## Verification Profiles
 
 `check_patch_contract(mode="verify")` derives a **verification profile** from
@@ -259,6 +265,8 @@ evidence, verify returns `unverified` to preserve backward compatibility.
 - Receipts use "not applicable" for skipped structural checks, never "passed".
 - Claim guard warns when review text references structural verification but
   the profile says structural checks were not applicable.
+- Claim guard warns and violates regression-free claims when
+  `patch_health_delta < 0`.
 
 ### Public surface
 
@@ -455,6 +463,7 @@ hint matched to the failure reason:
 |-------------------------------------|---------------------------------------------------------|
 | `no_before_run`                     | Run analysis or pass intent_id to auto-resolve          |
 | `no_after_run`                      | Run analysis after editing and pass after_run_id        |
+| `after_run_not_new`                 | After-run matches before-run; run fresh post-edit analysis |
 | `after_run_required_for_governance` | Governance changes require post-edit analysis           |
 | `incomparable_runs`                 | Re-run analysis with the same settings                  |
 | `intent_not_active`                 | Queued intent must be promoted first                    |
@@ -558,3 +567,51 @@ never run analysis implicitly.
 The same semantic audit events are preserved regardless of which
 approach the agent uses. Atomic tools remain available for backward
 compatibility and advanced use cases.
+
+## Workspace hygiene and registry consistency
+
+Three independent contours (do not collapse):
+
+```text
+status     = persisted registry lifecycle
+ownership  = runtime view (PID / TTL / lease)
+hygiene    = git working tree ∩ declared scope
+permission = edit_allowed (with status gate)
+```
+
+**Lazy intent closure:** agent-facing registry reads (`list_workspace`,
+declare/start workspace refresh) close eligible non-terminal intents using a
+**lazy-close predicate** (`for_lazy_close=True`). Lease-only staleness with valid
+TTL is not closed on read. **Orphaned** (dead PID) intents stay recoverable until
+TTL expiry or explicit `gc_workspace` — lazy close does not purge them.
+
+**Explicit GC:** `gc_workspace` performs cleanup/purge in one atomic transaction
+using a broader removal predicate. Lazy close and GC share intent lifecycle
+concepts, but **not** an identical close predicate.
+
+Registry I/O is serialized with cross-process locks; SQLite `gc()` is one
+atomic scan→close→purge transaction.
+
+**Continuing own WIP:** when uncommitted changes already overlap your declared
+scope, default `dirty_scope_policy="block"` returns workflow `status: "blocked"`.
+Pass `dirty_scope_policy="continue_own_wip"` to resume your own dirty scope when
+**no** live foreign dirty overlap exists (`foreign_dirty_overlaps` empty). Finish
+must still prove all dirty paths via `changed_files` or `diff_ref`.
+
+**Start blocking:** when foreign active/stale scope overlap is unresolved
+(without `on_conflict="queue"`) or scoped hygiene detects dirty paths in
+`allowed_files`, `start_controlled_change` returns workflow `status: "blocked"`,
+`edit_allowed: false`, and populated `workspace` / `workspace_hygiene` payloads.
+`blocked` is workflow-only — never persisted registry lifecycle status.
+
+**Finish hygiene gate:** `finish_controlled_change` re-checks scoped hygiene
+before scope check / verify. Failures return `reason: "workspace_hygiene"`,
+`intent_cleared: false`, and `user_action_required: true`. **Queued** foreign
+intents do not populate `foreign_dirty_overlaps` — a queued peer does not block
+finish for an active agent on overlapping scope.
+
+**List workspace:** `manage_change_intent(action="list_workspace")` attaches
+repo-level `workspace_dirty_summary` only (bounded dirty path sample). Scoped
+`workspace_hygiene.blocks_edit` applies only to start/finish. When recoverable
+intents exist, the response includes `recovery_available` (each entry may show
+`run_available: false` after MCP restart) and top-level `recovery_next_step`.

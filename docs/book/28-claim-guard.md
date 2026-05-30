@@ -54,6 +54,7 @@ The pipeline is fully deterministic:
 | `text`              | `str`         | required | Markdown, plain text, or JSON string to validate                |
 | `run_id`            | `str \| None` | latest   | Stored MCP run whose report semantics are used                  |
 | `require_citations` | `bool`        | `true`   | Warn when no known finding IDs or metric family names are cited |
+| `patch_health_delta` | `int \| None` | omitted  | Optional `health_after - health_before` from verify. When negative, flags regression-free or fully-clean claims even if verify `accepted` |
 
 !!! info "Text limits"
     Text must be non-empty and at most `50,000` characters.
@@ -122,6 +123,21 @@ When the verification profile is not `python_structural`, the guard emits a
 suggesting structural checks were performed (e.g. "no regressions",
 "all checks passed", "structural verification"). This is a warning, not a
 violation — it does not set `valid=false`.
+
+### Health regression overclaim
+
+When `patch_health_delta` is negative (from `check_patch_contract` verify or
+`finish_controlled_change` → `verification.structural_delta.health_delta`), the
+guard emits a `health_regression_overclaim` **warning** and a matching
+**violation** if the text contains structural-scope keywords such as
+"no regressions", "regression-free", or "all checks passed". Verify may still
+return `accepted`; negative health delta is advisory context, not an automatic
+verify failure. `finish_controlled_change` also surfaces
+`health_regression_advisory` on accepted verify when delta is negative.
+
+Pass `patch_health_delta` explicitly when using the atomic workflow
+(`check_patch_contract` → `validate_review_claims`). `finish_controlled_change`
+passes it automatically when `review_text` is supplied.
 
 ---
 

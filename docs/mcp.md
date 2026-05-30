@@ -327,7 +327,7 @@ sequenceDiagram
     M -->> A: clean / expanded / violated
     A ->> M: check_patch_contract(mode=verify, before_run_id, after_run_id, intent_id)
     M -->> A: accepted / violated
-    A ->> M: validate_review_claims(text)
+    A ->> M: validate_review_claims(text, patch_health_delta?)
     M -->> A: valid / violations
     A ->> M: create_review_receipt
     M -->> A: audit artifact
@@ -337,11 +337,13 @@ sequenceDiagram
 
 | Tool                     | Purpose                                                                                                              |
 |--------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `start_controlled_change` | Pre-edit workflow: workspace check + declare + blast radius + budget (`dirty_scope_policy` for own WIP)           |
+| `finish_controlled_change` | Post-edit workflow: scope check + verify + claims + receipt + clear                                              |
 | `manage_change_intent`   | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace |
 | `get_blast_radius`       | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                    |
 | `check_patch_contract`   | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                               |
 | `create_review_receipt`  | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile               |
-| `validate_review_claims` | Citation-based overclaim detection against stored run semantics                                                      |
+| `validate_review_claims` | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks       |
 
 ??? info "Blast radius: do_not_touch vs review_context"
 `do_not_touch` contains actionable edit prohibitions: baselines, generated
@@ -358,9 +360,11 @@ When `intent_id` is provided but `before_run_id` is omitted, verify
 auto-resolves the before-run from the intent record. Verify derives a
 **verification profile** from changed files — docs-only and non-Python
 patches skip structural checks; Python source changes require a full
-after-run. Non-accepted responses include a `next_step` hint and
+after-run. Identical before/after runs for `python_structural` and
+`governance_config` return `reason: after_run_not_new`. Non-accepted responses include a `next_step` hint and
 `claim_validation_recommended` flag. Missing runs return
-`status=unverified`.
+`status=unverified`. Accepted verify with negative `health_delta` may
+include `health_regression_advisory`.
 
 ### Phase 6: Session management
 
@@ -431,8 +435,8 @@ sequenceDiagram
     Note over Agent, MCP: Primary workflow (workflow tools)
     Agent ->> MCP: analyze_repository
     MCP -->> Agent: run_id
-    Agent ->> MCP: start_controlled_change(scope, intent)
-    MCP -->> Agent: intent_id, blast_radius, budget
+    Agent ->> MCP: start_controlled_change(scope, intent, dirty_scope_policy?)
+    MCP -->> Agent: intent_id, blast_radius, budget, edit_allowed
     Note over Agent: edit files
     opt Python structural / governance config
         Agent ->> MCP: analyze_repository
@@ -464,7 +468,7 @@ manage_change_intent(action="list_workspace")
   -> analyze_repository                                                          # after-run
   -> manage_change_intent(action="check", intent_id=..., changed_files=[...])
   -> check_patch_contract(mode="verify", after_run_id=..., intent_id=...)
-  -> validate_review_claims(text="...")                                           # if claim_validation_recommended
+  -> validate_review_claims(text="...", patch_health_delta=...)                    # if claim_validation_recommended; delta from verify
   -> create_review_receipt
   -> manage_change_intent(action="clear")
 ```
@@ -478,6 +482,130 @@ start_controlled_change(scope={...}, on_conflict="queue")                       
   -> [edit within scope]
   -> finish_controlled_change(intent_id=..., changed_files=[...])                # verify + clear
 ```
+
+### Workspace hygiene and lazy intent closure
+
+Three independent contours (do not collapse):
+
+```text
+status     = persisted registry lifecycle
+ownership  = runtime view (PID / TTL / lease)
+hygiene    = git working tree ∩ declared scope
+permission = edit_allowed (with status gate)
+```
+
+- **Lazy close:** agent-facing reads close TTL-expired and corrupted records on
+  list/declare/start refresh. **Orphaned** (dead PID) intents stay recoverable
+  until TTL expiry or explicit `gc_workspace` — not removed on read.
+- **`gc_workspace`:** explicit GC removes orphaned, expired, and other eligible
+  records in one transaction. Lazy close and GC share lifecycle concepts but use
+  **different** close predicates (`for_lazy_close` vs full GC removal).
+- **`dirty_scope_policy`:** default `block` when scoped hygiene detects dirty
+  paths in `allowed_files`. `continue_own_wip` allows start when dirty scope is
+  yours alone (no live `foreign_dirty_overlaps`); finish still requires evidence.
+- **`start_controlled_change`:** may return workflow `status: "blocked"` with
+  `edit_allowed: false` when foreign scope overlap or scoped hygiene blocks.
+  When `budget.gate_preview.would_fail` is true, edit may still be allowed —
+  the preview is advisory; final verify may not accept the patch.
+  Response includes `workspace.concurrent_intents`, `workspace_relations`, and
+  optional scoped `workspace_hygiene`.
+- **`finish_controlled_change`:** re-checks scoped hygiene before verify. Failures
+  return `reason: "workspace_hygiene"` and keep the intent active.
+- **`manage_change_intent(list_workspace)`:** returns repo-level
+  `workspace_dirty_summary` only (no scoped `blocks_edit`). When recoverable
+  intents exist, includes `recovery_available` (`run_available`, per-candidate
+  `hint`) and `recovery_next_step`.
+
+See [Change-control payload semantics](#change-control-payload-semantics) for
+`health_delta`, multi-agent hygiene, and start/finish transition tables.
+
+### Change-control payload semantics
+
+This section supplements the workflow diagrams above. It does not repeat tool
+lists or atomic step sequences — see
+[Structural Change Controller](book/24-structural-change-controller.md) for those.
+
+#### `structural_delta.health_delta` vs receipt `health.delta`
+
+Verify compares the intent's **before-run** to the explicit **after-run** via
+`compare_runs`. `structural_delta` mirrors that comparison:
+
+```json
+"before": { "run_id": "14d82d39", "health": 90 },
+"after": { "run_id": "74cb3c0e", "health": 88 },
+"structural_delta": {
+  "verdict": "regressed",
+  "health_delta": -2,
+  "regressions": [ "...new finding ids..." ]
+}
+```
+
+| Field | Source | Meaning |
+|-------|--------|---------|
+| `verification.before` / `.after` | Intent before-run vs `after_run_id` | Run refs used for patch contract |
+| `structural_delta.health_delta` | `health_after - health_before` from `compare_runs` | **Patch delta** between those two stored runs |
+| `receipt.health.delta` | After-run summary vs trusted baseline | **Repository drift** signal in the receipt narrative |
+
+If `before.run_id == after.run_id` for `python_structural` or
+`governance_config` profiles, verify returns `status: "unverified"` with
+`reason: "after_run_not_new"` — run a fresh post-edit analysis and pass the new
+`after_run_id`. For documentation-only patches the identical-run case is not
+structurally gated the same way.
+
+Negative `health_delta` sets `structural_delta.verdict` to `"regressed"` (or
+`"mixed"` when improvements coexist). It does **not** by itself set
+`verification.status` to `"violated"` — blocking comes from intent-scoped
+finding regressions, gate worsening attributable to the patch, scope
+violations, or baseline-abuse signals. Agents should still surface
+`health_delta < 0` in review text. Accepted verify may include
+`health_regression_advisory`. Claim Guard warns and violates regression-free
+claims when `patch_health_delta < 0` (passed automatically by
+`finish_controlled_change`; explicit on atomic `validate_review_claims`).
+
+#### Multi-agent hygiene (who blocks whom)
+
+Hygiene reads the **shared git working tree**, not per-agent sandboxes.
+
+| Actor | Trigger | Start | Finish |
+|-------|---------|-------|--------|
+| **Foreign active/stale** intent on overlapping scope | `concurrent_intents` | `status: "blocked"` (coordination) | — |
+| **Any** uncommitted dirty file in your `allowed_files` | `workspace_hygiene.blocks_edit` | `edit_allowed: false` (unless `dirty_scope_policy="continue_own_wip"` and no live foreign dirty overlap) | — |
+| Dirty in scope **not** listed in `changed_files` / `diff_ref` | `unacknowledged_dirty_in_scope` | — | `reason: "workspace_hygiene"` |
+| **Live** foreign intent (`foreign_active` / `foreign_stale`) previously declared overlapping dirty paths | `foreign_dirty_overlaps` | Contributes to `blocks_edit` context; overlap list only for live foreign | `blocks_finish: true` if overlaps remain |
+
+Recoverable, expired, terminal, or **queued** foreign records **do not**
+populate `foreign_dirty_overlaps`. A queued peer does not block finish for an
+active agent.
+
+**Typical two-agent overlap on `pkg/a.py`:**
+
+1. Agent A (active intent) edits → working tree dirty on `pkg/a.py`.
+2. Agent B calls `start` on the same path → blocked by **coordination**
+   (`foreign_active`) **and** **hygiene** (`blocks_edit` because the tree is
+   dirty in scope). B should not edit.
+3. Agent A calls `finish` with `changed_files` including `pkg/a.py` → passes
+   own dirty acknowledgment. Finish fails on **live** foreign dirty overlap only
+   (`foreign_active` / `foreign_stale`). **Queued** foreign peers do not
+   appear in `foreign_dirty_overlaps`.
+4. Resolution: coordinate (queue/promote/clear **active** foreign intent),
+   stash/commit foreign WIP, or narrow scope — not kill foreign PIDs.
+
+#### Start / finish workflow transitions
+
+Workflow `status` values are **not** persisted registry lifecycle states.
+
+| Tool response | `edit_allowed` | Agent action |
+|---------------|----------------|--------------|
+| `start` → `needs_analysis` | `false` | `analyze_repository` → `start` again |
+| `start` → `queued` | `false` | Wait → `promote`; re-analyze if `before_run_evicted` |
+| `start` → `blocked` | `false` | Follow `next_step` (`message` matches); do not edit unless `continue_own_wip` was requested and returned `active` |
+| `start` → `active` | `true` | Edit inside declared scope only; read `budget.gate_preview` as advisory |
+| `finish` → `accepted` | — | Intent cleared; optional Claim Guard on review text |
+| `finish` → `unverified` / `workspace_hygiene` | — | Fix evidence or coordinate foreign overlap |
+| `finish` → `violated` | — | Fix regressions or widen scope via new `start` |
+
+Interactive version: open the **Change-control transitions** canvas in the IDE
+(alongside this doc).
 
 ### Coverage review
 
