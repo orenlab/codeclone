@@ -13,9 +13,11 @@ from pydantic import ValidationError
 
 from codeclone.surfaces.mcp import _workspace_intents as workspace_intents
 from codeclone.surfaces.mcp._workspace_intent_models import (
+    IntentIntegrityModel,
     IntentScopeModel,
     WorkspaceIntentRowModel,
     parse_workspace_document,
+    parse_workspace_document_json,
     record_from_document,
     signed_payload_dict_from_record,
     signed_payload_json_from_record,
@@ -38,6 +40,34 @@ def test_intent_scope_model_rejects_traversal() -> None:
         IntentScopeModel.model_validate(
             {"allowed_files": ["../outside.py"], "allowed_related": [], "forbidden": []}
         )
+
+
+def test_intent_scope_model_rejects_empty_allowed_files() -> None:
+    with pytest.raises(ValidationError, match="allowed_files must not be empty"):
+        IntentScopeModel.model_validate(
+            {"allowed_files": ["", "   "], "allowed_related": [], "forbidden": []}
+        )
+
+
+def test_intent_scope_model_skips_blank_entries() -> None:
+    scope = IntentScopeModel.model_validate(
+        {
+            "allowed_files": ["pkg/a.py", "", "  "],
+            "allowed_related": [],
+            "forbidden": [],
+        }
+    )
+    assert scope.allowed_files == ["pkg/a.py"]
+
+
+def test_intent_integrity_model_rejects_invalid_digest() -> None:
+    with pytest.raises(ValidationError, match="64-char hex digest"):
+        IntentIntegrityModel.model_validate({"payload_sha256": "not-a-digest"})
+
+
+def test_parse_workspace_document_json_rejects_invalid_payload() -> None:
+    assert parse_workspace_document_json("{not-json") is None
+    assert parse_workspace_document_json('{"registry_version":"2"}') is None
 
 
 def test_workspace_intent_document_rejects_tampered_integrity() -> None:
@@ -74,6 +104,15 @@ def test_workspace_intent_document_rejects_tampered_integrity() -> None:
     assert parse_workspace_document(payload) is None
 
 
+def test_workspace_intent_document_rejects_naive_timestamp() -> None:
+    from tests.test_workspace_intents import _record
+
+    record = _record()
+    payload = signed_payload_dict_from_record(record)
+    payload["declared_at_utc"] = "2026-05-29T20:00:00"
+    assert parse_workspace_document(payload) is None
+
+
 def test_signed_payload_json_roundtrip_via_pydantic() -> None:
     from tests.test_workspace_intents import _record
 
@@ -106,5 +145,20 @@ def test_workspace_intent_row_model_validates_payload_json() -> None:
             intent_id=record.intent_id,
             declared_at_utc=record.declared_at_utc,
             payload_json="{not-json",
+            updated_at_utc=record.declared_at_utc,
+        )
+
+
+def test_workspace_intent_row_model_rejects_unsafe_intent_id() -> None:
+    from tests.test_workspace_intents import _record
+
+    record = _record()
+    with pytest.raises(ValidationError):
+        WorkspaceIntentRowModel.from_record_fields(
+            agent_pid=record.agent_pid,
+            agent_start_epoch=record.agent_start_epoch,
+            intent_id="../evil",
+            declared_at_utc=record.declared_at_utc,
+            payload_json=signed_payload_json_from_record(record),
             updated_at_utc=record.declared_at_utc,
         )

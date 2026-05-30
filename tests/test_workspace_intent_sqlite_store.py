@@ -19,6 +19,7 @@ from codeclone.config.intent_registry import (
     DEFAULT_INTENT_REGISTRY_BACKEND,
     DEFAULT_INTENT_REGISTRY_DB_PATH,
     DEFAULT_INTENT_REGISTRY_RETENTION_DAYS,
+    IntentRegistryConfig,
     IntentRegistryConfigError,
     intent_registry_summary,
     resolve_intent_registry_backend,
@@ -27,13 +28,24 @@ from codeclone.config.intent_registry import (
     resolve_intent_registry_retention_days,
 )
 from codeclone.surfaces.mcp import _workspace_intents as workspace_intents
+from codeclone.surfaces.mcp._workspace_intent_lifecycle import (
+    gc_status_for_reason,
+    is_stale,
+    stale_reason,
+)
+from codeclone.surfaces.mcp._workspace_intent_models import (
+    signed_payload_json_from_record,
+)
+from codeclone.surfaces.mcp._workspace_intent_paths import intent_path
 from codeclone.surfaces.mcp._workspace_intent_schema import (
     INTENT_REGISTRY_SCHEMA_VERSION,
     get_meta,
     open_intent_registry_db,
 )
 from codeclone.surfaces.mcp._workspace_intent_store import (
+    FileWorkspaceIntentStore,
     SqliteWorkspaceIntentStore,
+    _record_from_json,
     clear_workspace_intent_store_cache,
     get_workspace_intent_store,
 )
@@ -124,6 +136,60 @@ def test_resolve_intent_registry_db_path_rejects_unsafe_values(
             root_path=tmp_path,
             value="../outside.sqlite3",
         )
+    with pytest.raises(IntentRegistryConfigError, match="must be a string"):
+        resolve_intent_registry_db_path(root_path=tmp_path, value=123)
+    with pytest.raises(IntentRegistryConfigError, match="must not be empty"):
+        resolve_intent_registry_db_path(root_path=tmp_path, value="   ")
+    with pytest.raises(IntentRegistryConfigError, match="must end with"):
+        resolve_intent_registry_db_path(
+            root_path=tmp_path,
+            value=".cache/intents.txt",
+        )
+
+
+@pytest.mark.parametrize("value", [True, "7"])
+def test_resolve_intent_registry_retention_days_rejects_non_int(
+    value: object,
+) -> None:
+    with pytest.raises(IntentRegistryConfigError, match="must be an integer"):
+        resolve_intent_registry_retention_days(value)
+
+
+def test_resolve_intent_registry_backend_rejects_non_string() -> None:
+    with pytest.raises(IntentRegistryConfigError, match="must be a string"):
+        resolve_intent_registry_backend(123)
+
+
+def test_resolve_intent_registry_config_ignores_invalid_pyproject(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CODECLONE_INTENT_REGISTRY_BACKEND", raising=False)
+    (tmp_path / "pyproject.toml").write_bytes(b"not-valid-toml{")
+    config = resolve_intent_registry_config(tmp_path)
+    assert config.backend == DEFAULT_INTENT_REGISTRY_BACKEND
+
+
+def test_intent_registry_summary_falls_back_to_absolute_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outside = Path("/tmp/codeclone-intent-registry-outside.sqlite3")
+
+    def _outside_config(_root: Path) -> IntentRegistryConfig:
+        return IntentRegistryConfig(
+            backend="sqlite",
+            storage_path=outside,
+            retention_days=DEFAULT_INTENT_REGISTRY_RETENTION_DAYS,
+        )
+
+    monkeypatch.setattr(
+        "codeclone.config.intent_registry.resolve_intent_registry_config",
+        _outside_config,
+    )
+    summary = intent_registry_summary(tmp_path)
+    assert summary["registry_backend"] == "sqlite"
+    assert summary["registry_storage"] == str(outside)
 
 
 def test_sqlite_store_write_list_find_update_close(sqlite_root: Path) -> None:
@@ -250,6 +316,110 @@ def test_sqlite_store_retention_purges_closed_rows(sqlite_root: Path) -> None:
     )
 
 
+def test_sqlite_store_exposes_storage_path_and_closes(sqlite_root: Path) -> None:
+    db_path = sqlite_root / DEFAULT_INTENT_REGISTRY_DB_PATH
+    store = SqliteWorkspaceIntentStore(db_path=db_path, retention_days=7)
+    assert store.storage_path == db_path
+    store.close()
+
+
+def test_sqlite_store_write_returns_false_for_invalid_record(
+    sqlite_root: Path,
+) -> None:
+    db_path = sqlite_root / DEFAULT_INTENT_REGISTRY_DB_PATH
+    store = SqliteWorkspaceIntentStore(db_path=db_path, retention_days=7)
+    assert store.write(object()) is False  # type: ignore[arg-type]
+
+
+def test_sqlite_store_gc_returns_empty_result_on_query_failure(
+    sqlite_root: Path,
+) -> None:
+    db_path = sqlite_root / DEFAULT_INTENT_REGISTRY_DB_PATH
+    store = SqliteWorkspaceIntentStore(db_path=db_path, retention_days=7)
+    store.close()
+    result = store.gc()
+    assert result["removed"] == 0
+    assert result["remaining"] == 0
+
+
+def test_record_from_json_accepts_dict_payload() -> None:
+    from tests.test_workspace_intents import _record
+
+    record = _record()
+    payload = json.loads(signed_payload_json_from_record(record))
+    parsed = _record_from_json(payload)
+    assert parsed == record
+
+
+def test_record_from_json_rejects_non_mapping_payload() -> None:
+    assert _record_from_json(123) is None
+
+
+def test_file_store_backend_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CODECLONE_INTENT_REGISTRY_BACKEND", raising=False)
+    monkeypatch.delenv("CODECLONE_INTENT_REGISTRY_PATH", raising=False)
+    clear_workspace_intent_store_cache()
+    store = get_workspace_intent_store(tmp_path)
+    assert isinstance(store, FileWorkspaceIntentStore)
+    assert store.backend == "file"
+    assert store.storage_path == tmp_path / ".cache" / "codeclone" / "intents"
+
+
+def test_file_store_write_returns_false_on_os_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CODECLONE_INTENT_REGISTRY_BACKEND", raising=False)
+    clear_workspace_intent_store_cache()
+    store = get_workspace_intent_store(tmp_path)
+    record = _record()
+
+    def _fail(**_kwargs: object) -> None:
+        raise OSError("read-only registry")
+
+    import codeclone.surfaces.mcp._workspace_intent_store as intent_store_mod
+
+    monkeypatch.setattr(intent_store_mod, "write_json_document_atomically", _fail)
+    assert store.write(record) is False
+
+
+def test_file_store_gc_removes_corrupted_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CODECLONE_INTENT_REGISTRY_BACKEND", raising=False)
+    clear_workspace_intent_store_cache()
+    store = get_workspace_intent_store(tmp_path)
+    record = _record(intent_id="intent-corrupt-001")
+    bad_path = intent_path(
+        root=tmp_path,
+        pid=record.agent_pid,
+        start_epoch=record.agent_start_epoch,
+        intent_id=record.intent_id,
+    )
+    bad_path.parent.mkdir(parents=True, exist_ok=True)
+    bad_path.write_text("{not-json", encoding="utf-8")
+    result = store.gc()
+    assert result["corrupted_removed"] == 1
+
+
+def test_resolve_intent_registry_config_honors_env_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CODECLONE_INTENT_REGISTRY_RETENTION_DAYS", raising=False)
+    monkeypatch.setenv("CODECLONE_INTENT_REGISTRY_BACKEND", "sqlite")
+    monkeypatch.setenv(
+        "CODECLONE_INTENT_REGISTRY_PATH",
+        DEFAULT_INTENT_REGISTRY_DB_PATH,
+    )
+    config = resolve_intent_registry_config(tmp_path)
+    assert config.backend == "sqlite"
+    assert config.storage_path == tmp_path / DEFAULT_INTENT_REGISTRY_DB_PATH
+
+
 def test_intent_registry_summary_file_backend(tmp_path: Path) -> None:
     summary = intent_registry_summary(tmp_path)
     assert summary["registry_backend"] == "file"
@@ -319,3 +489,25 @@ def test_sqlite_payload_roundtrip_preserves_integrity(sqlite_root: Path) -> None
     ] == workspace_intents.compute_intent_digest(
         {k: v for k, v in payload.items() if k != "integrity"}
     )
+
+
+def test_gc_status_for_reason_maps_orphaned_status() -> None:
+    assert gc_status_for_reason("orphaned") == "orphaned"
+    assert gc_status_for_reason("expired") == "expired"
+
+
+def test_stale_reason_honors_terminal_status_fields() -> None:
+    expired = replace(_record(), status="expired")
+    orphaned = replace(_record(), status="orphaned")
+    assert stale_reason(expired) == "expired"
+    assert stale_reason(orphaned) == "orphaned"
+
+
+def test_is_stale_reports_expired_ttl() -> None:
+    stale = replace(
+        _record(intent_id="intent-stale-ttl-001"),
+        expires_at_utc=workspace_intents.format_utc(
+            workspace_intents.utc_now() - timedelta(hours=1)
+        ),
+    )
+    assert is_stale(stale) is True
