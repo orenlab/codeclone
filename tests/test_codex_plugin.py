@@ -147,9 +147,18 @@ def test_codex_plugin_skill_exists() -> None:
         change_control_skill_text,
         (
             "name: codeclone-change-control",
-            "Declare intent before editing",
+            "Mandatory before any repository file edit",
+            "target Python repository",
+            "Normal pipeline",
+            "Tool tiers",
+            "changed_files` XOR `diff_ref",
+            "needs_analysis",
             "start_controlled_change",
             "finish_controlled_change",
+            "Completion gate",
+            "Advisory acceptance",
+            "health_delta",
+            "patch contract passed",
         ),
     )
 
@@ -157,6 +166,10 @@ def test_codex_plugin_skill_exists() -> None:
     assert 'get_report_section(section="metrics")' in manifest["instructions"]
     assert 'help(topic="coverage")' in manifest["instructions"]
     assert "never fall back to CLI, local report files" in manifest["instructions"]
+    assert "codeclone-change-control skill" in manifest["instructions"]
+    assert "start_controlled_change" in manifest["instructions"]
+    assert "finish_controlled_change" in manifest["instructions"]
+    assert "structural_delta" in manifest["instructions"]
 
 
 def test_codex_plugin_readme_and_docs_exist() -> None:

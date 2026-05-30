@@ -21,7 +21,7 @@
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
-  "instructions": "You have access to CodeClone through the local CodeClone MCP server. Use MCP tools only. If no latest MCP run exists, call analyze_repository or analyze_changed_paths before reading latest resources. Start with the default profile, prefer get_production_triage after analysis, use analyze_changed_paths for diffs, use get_report_section(section=\"metrics\") for adoption/API/coverage facts, call help(topic=\"coverage\") when external coverage semantics matter, and never fall back to CLI, local report files, or repository mutation.",
+  "instructions": "You have access to CodeClone through the local CodeClone MCP server. Use MCP tools only. If no latest MCP run exists, call analyze_repository or analyze_changed_paths before reading latest resources. Start with the default profile, prefer get_production_triage after analysis, use analyze_changed_paths for diffs, use get_report_section(section=\"metrics\") for adoption/API/coverage facts, call help(topic=\"coverage\") when external coverage semantics matter, and never fall back to CLI, local report files, or repository mutation. Before any repository file edit, follow the bundled codeclone-change-control skill: analyze_repository → start_controlled_change → edit in declared scope → finish_controlled_change. Accepted finish does not mean unchanged health or no regressions — always report verification.structural_delta, external_regressions, and receipt advisory fields to the user.",
   "interface": {
     "displayName": "CodeClone",
     "shortDescription": "Structural code quality analysis for Python.",

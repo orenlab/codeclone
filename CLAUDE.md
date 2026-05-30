@@ -14,8 +14,10 @@ user explicitly permits it for a specific task. "Реализуй" / "Implement"
 is explicit permission. "Проверь" / "Validate" is not.
 
 When permitted to edit code, follow the change control workflow below.
-Creating or editing a spec is also a repository edit. "Spec only" is not a
-reason to skip change control.
+Applies to any tracked file in the target repository. Task type (coverage, CI,
+docs-only) does not skip `start`. Spec edits count too. When CodeClone MCP is
+available, read the bundled **`codeclone-change-control`** skill for the full
+pipeline (tool tiers, decision tables, profiles).
 
 ## Change control workflow
 
@@ -53,11 +55,11 @@ Before editing any repository files:
 5. `finish_controlled_change(intent_id=..., changed_files=[...], after_run_id=...)`
    — returns scope check, verification, receipt, and clears intent
    — if `status: "unverified"`, the intent stays active; follow `next_step`
-     (e.g., run `analyze_repository`), then call `finish` again on the
-     **same `intent_id`** with the missing evidence
+   (e.g., run `analyze_repository`), then call `finish` again on the
+   **same `intent_id`** with the missing evidence
    — if `status: "violated"` (scope), the intent stays active; either
-     remove out-of-scope changes and retry `finish`, or expand scope via
-     `start_controlled_change` with a wider scope
+   remove out-of-scope changes and retry `finish`, or expand scope via
+   `start_controlled_change` with a wider scope
    — if `user_action_required: true`, stop and escalate to the user
    — `auto_clear=true` by default; intent cleared only on accepted
 
@@ -80,24 +82,9 @@ Queue/promote workflow (when `start` returns `status: "queued"`):
 
 ### Atomic workflow (fallback)
 
-Use the atomic workflow only when `start_controlled_change` or
-`finish_controlled_change` are unavailable (older MCP servers),
-for step-by-step debugging, or for recovery operations:
-
-```
-manage_change_intent(action="list_workspace", root=...)
-→ analyze_repository
-→ manage_change_intent(action="declare")
-→ get_blast_radius
-→ check_patch_contract(mode="budget")
-→ edit declared files
-→ analyze_repository
-→ manage_change_intent(action="check", intent_id=..., changed_files=[...])
-→ check_patch_contract(mode="verify", after_run_id=..., intent_id=...)
-→ validate_review_claims
-→ create_review_receipt
-→ manage_change_intent(action="clear")
-```
+When `start_controlled_change` / `finish_controlled_change` are unavailable,
+use the atomic path in the change-control skill. Do not mix primary and atomic
+verification in one cycle.
 
 ### Rules
 
@@ -113,7 +100,7 @@ manage_change_intent(action="list_workspace", root=...)
 - `finish_controlled_change` does not run analysis. For Python
   structural and governance config changes, run `analyze_repository`
   after editing and pass `after_run_id`.
-- MUST NOT edit files without declaring intent first.
+- MUST NOT edit files without declaring intent first — including `tests/**/*.py`.
 - MUST NOT silently expand scope. If the fix requires files outside the
   declared scope, stop before editing them. Expand scope only after user
   approval unless the user already explicitly allowed expansion. Call
@@ -199,6 +186,8 @@ the profile — it is computed by `finish_controlled_change` (through
 
 Key rules:
 
+- **`start` is always required** before edit; lighter profiles only affect
+  after-run / verify, not intent declaration.
 - If **any** Python source, governance configuration, baseline, cache, or
   generated state files were touched, the lightweight path is not accepted.
 - Documentation-only patches can verify without `after_run_id`

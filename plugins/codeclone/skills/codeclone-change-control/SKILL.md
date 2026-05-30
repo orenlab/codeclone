@@ -1,323 +1,164 @@
 ---
 name: codeclone-change-control
-description: Use when Codex should modify a Python repository through CodeClone MCP — intent-first change workflow, blast radius, scoped edits, patch verification, and review receipt.
+description: Mandatory before any repository file edit when CodeClone MCP is connected — intent, scoped edit, verify, receipt, advisory reporting.
 ---
 
 # CodeClone Change Control
 
-Use this skill when the task requires changing files in a Python repository with
-CodeClone MCP available.
+Edit pipeline for the **target Python repository** (source, `tests/`, docs, config).
+CodeClone MCP available → follow this pipeline. Coverage/CI/docs labels do **not**
+skip intent. WIP needs a new intent each cycle.
 
-This is not a passive review workflow. CodeClone starts before a diff exists:
-declare intent, inspect structural risk, edit inside scope, then verify the
-patch.
+**Skip pipeline** only when: no files will change; analysis-only; MCP unavailable
+(edits → BLOCKED). Not for read-only review (`codeclone-review`) or snapshots
+(`codeclone-hotspots`).
 
-## Activation contract
+Findings are source of truth — do not reinterpret. No CLI/local-report fallback.
+Never mutate baseline, cache, canonical reports, or generated state; never
+auto-suppress. Pass absolute `root` to analysis tools.
 
-Use this workflow whenever this skill is selected for a repository edit. Start
-with a workspace intent check, then run pre-edit analysis and keep the returned
-`run_id` and `intent_id` for verification. If a required MCP tool is
-unavailable, continue only for read-only analysis. For repository edits that
-require change control, stop and report the blocker unless the unavailable tool
-is explicitly optional or legacy-compatible.
+Use CodeClone MCP tools via the plugin MCP config.
 
-Do not downgrade the task to an ordinary edit after this skill has been
-selected. The only valid reasons to skip the workflow are: no repository files
-will be changed, the user explicitly asks for analysis only, or CodeClone MCP
-is unavailable and the task remains read-only. Do not perform repository edits
-without change control after this skill is selected.
+## Tool tiers
 
-## Rules
+| Tier               | Tools                                                                                         | Role                             |
+|--------------------|-----------------------------------------------------------------------------------------------|----------------------------------|
+| **Normal**         | `analyze_repository`, `start_controlled_change`, `finish_controlled_change`                   | Every edit cycle — use these     |
+| **Queue/recovery** | `manage_change_intent` (promote, recover, renew, reset)                                       | Multi-agent wait, crash recovery |
+| **Advanced**       | `get_blast_radius`, `check_patch_contract`, `validate_review_claims`, `create_review_receipt` | Debugging or legacy servers only |
 
-- Use MCP tools only when invoked through the CodeClone plugin.
-- For workflow tools, `start_controlled_change` performs workspace
-  coordination. For atomic fallback, call
-  `manage_change_intent(action="list_workspace", root=...)` before
-  analysis when supported.
-- If no valid recent run exists for the same absolute root, call
-  `analyze_repository` before `start_controlled_change`.
-- Declare intent before editing; in the primary workflow this means
-  `start_controlled_change` must return `status: "active"` before edits.
-- If the fix requires files outside declared scope, stop before editing
-  them. Get user approval unless expansion was already explicitly
-  allowed, then call `start_controlled_change` again with the expanded
-  scope. Continue only when the expanded intent is active. Do not edit
-  extra files based on blast-radius context alone.
-- If concurrent workspace intents overlap your files, prefer
-  `on_conflict="queue"` for follow-up work. Ask the user only when immediate
-  editing is required or queue is not appropriate.
-- Treat blast-radius dependents and clone cohorts as review context, not
-  permission to modify.
-- Treat `do_not_touch` as a boundary unless the user explicitly expands scope.
-  Escalate to user only if the edit requires touching them.
-- Treat `review_context` as context, not an edit ban.
-- Do not update baselines, CodeClone state/cache, analysis cache, canonical
-  reports, or generated state as part of a functional change.
-- Do not fall back to CLI or local report files.
-- CodeClone is the source of truth — do not reinterpret findings independently.
-- Never auto-suppress findings or mutate CodeClone baseline state.
-- Run routine controller steps automatically. Queue blocked follow-up work
-  automatically — do not ask before queueing. Ask the user only when: scope
-  expansion is needed and was not already explicitly allowed, a `do_not_touch`
-  path must be touched, patch contract returned `violated` or returned
-  `unverified` and the agent cannot execute the deterministic `next_step`, or
-  baseline/CodeClone state/cache/generated state would be modified.
+Workflow tools orchestrate the same steps as atomic tools. They **never run
+analysis**. Do not call atomic verify/receipt/clear in the same cycle when
+start/finish are available.
 
-## Workflow
+## Normal pipeline
 
-### Primary workflow
+One edit cycle:
 
 ```
-analyze_repository                                            # before-run
-→ start_controlled_change(root=..., scope={...}, intent="...")
-→ edit declared files
-→ analyze_repository                                          # after-run (profile-dependent)
-→ finish_controlled_change(intent_id=..., changed_files=[...], after_run_id=...)
+1. analyze_repository(root=abs)           # before-run; skip if valid recent run
+2. start_controlled_change(...)           # see decision table — before first edit
+3. edit inside declared scope only
+4. analyze_repository(root=abs)           # after-run ONLY if finish will require it
+5. finish_controlled_change(...)          # see decision table — same intent_id
 ```
 
-Use this workflow when the connected MCP server supports
-`start_controlled_change` and `finish_controlled_change`.
+Keep `run_id`, `intent_id`, and the before-run from step 1 through the cycle.
+Intent binds to the **before-run digest** — do not redeclare on the after-run.
 
-`start_controlled_change` returns workspace state, blast radius (direct
-dependents, structural risk, do-not-touch, review context), and patch
-budget in a single call. If `status: "needs_analysis"`, call
-`analyze_repository` first.
+### After `start` (`edit_allowed` gate)
 
-`finish_controlled_change` handles scope check, patch verification,
-claim validation, review receipt, and intent cleanup. If
-`user_action_required: true`, stop and follow the `next_step` hint.
+| Response         | Action                                                                                                |
+|------------------|-------------------------------------------------------------------------------------------------------|
+| `needs_analysis` | Run step 1 for same `root`, then `start` again                                                        |
+| `queued`         | **No edits.** Wait → `manage_change_intent(promote)`. If `before_run_evicted`: step 1 → `start` again |
+| `active`         | Read `blast_radius` + `budget`. Edit only if `edit_allowed=true`                                      |
 
-Workflow profiles determine which steps are needed:
+Before edit: scan `do_not_touch` (hard boundary), `direct_dependents`, clone
+cohort / `review_context` (context only). `get_blast_radius(transitive)` only if
+start summary is insufficient.
 
-- **Python structural / governance config**:
-  `analyze` → `start` → edit → `analyze` → `finish(after_run_id=...)`
-- **Documentation-only / non-Python**:
-  `analyze` → `start` → edit → `finish(changed_files=[...])`
-  For `non_python_patch`, report controller-stated limitations and do not
-  present the result as full structural verification.
+Declare in `start`: `allowed_files`, `allowed_related`, `forbidden`, `intent`,
+`expected_effects`. Outside scope → stop → user OK (unless already allowed) →
+new `start` with wider scope. Silent expansion = failed patch. Foreign overlap →
+`on_conflict=queue` unless immediate edit required.
 
-Do not mix workflow and atomic verification paths in the same edit
-cycle. Queue/promote/recover via `manage_change_intent` is allowed.
+### After edit → `finish`
 
-### Queue/promote workflow
-
-When `start_controlled_change` returns `status: "queued"`:
-
-1. Do not edit until promoted.
-2. Wait for the foreign intent to clear.
-3. `manage_change_intent(action="promote", intent_id=...)`
-   — edit only after promote returns `status: "active"`
-   — if `before_run_evicted`: re-analyze and re-start
-
-### Atomic workflow (fallback)
-
-Use the atomic workflow only when `start_controlled_change` or
-`finish_controlled_change` are unavailable, or for advanced operations
-(queue management, recovery, step-by-step debugging):
-
-```
-manage_change_intent(action="list_workspace", root=...)
-→ analyze_repository
-→ manage_change_intent(action="declare")
-→ get_blast_radius
-→ check_patch_contract(mode="budget")
-→ edit declared files
-→ analyze_repository
-→ manage_change_intent(action="check", intent_id=..., changed_files=[...])
-→ check_patch_contract(mode="verify", after_run_id=..., intent_id=...)
-→ validate_review_claims
-→ create_review_receipt
-→ manage_change_intent(action="clear")
-```
-
-Older MCP servers may not support `start_controlled_change`,
-`finish_controlled_change`, `validate_review_claims`, or
-`create_review_receipt`. Legacy-compatible steps may be skipped when
-unavailable, and the summary must say so explicitly.
-
-## Intent first
-
-Before editing, call `start_controlled_change`. It declares the intent,
-returns workspace coordination state, blast radius, and patch budget.
-
-Declare scope includes:
-
-- intended files (`allowed_files`)
-- allowed related files (`allowed_related`)
-- forbidden files (`forbidden`)
-- short intent description
-- expected structural effects
-
-Example expected effects:
-
-- no new clone group
-- no new dead code
-- no dependency cycle
-- no baseline update
-
-Use `manage_change_intent(action="declare")` only in the atomic fallback
-workflow or when explicitly following a controller-provided recovery path.
-
-## Scope expansion
-
-If the fix requires a file outside declared scope:
-
-1. stop;
-2. explain why the extra file is needed;
-3. get user approval unless the user already explicitly allowed expansion;
-4. call `start_controlled_change` again with the expanded scope to get
-   a fresh intent with updated blast radius and budget;
-5. continue only after the expanded intent is active.
-
-A patch that fixes the issue but expands scope silently is a failed patch.
-Do not edit extra files based on blast-radius context alone.
-
-## Blast radius
-
-`start_controlled_change` returns blast radius context in its response:
-direct dependents, clone cohort members, structural risk signals,
-do-not-touch paths, and review context. When the radius is high, a
-bounded transitive summary is also included.
-
-Use a separate `get_blast_radius(depth="transitive")` call only when
-the bounded summary is insufficient and you need the full transitive
-dependency graph.
-
-Read the blast radius response this way:
-
-- `direct_dependents`: review before changing public behavior
-- `clone_cohort_members`: comparison context, not automatic edit targets
-- `structural_risk`: risk context for review priority
-- `do_not_touch`: paths that require explicit approval; escalate to user
-  only if the edit requires touching them
-- `review_context`: supporting context, not a ban
-- `transitive_summary`: downstream risk awareness (when present)
-
-## Patch budget
-
-Budget is included in the `start_controlled_change` response. Review that
-budget before editing. Do not introduce new clone groups, dead code,
-dependency cycles, API breaks, or baseline changes unless explicitly allowed.
-
-Use `check_patch_contract(mode="budget")` only in the atomic fallback
-workflow or for standalone planning, such as planning around a queued
-intent. Budget on a queued intent is advisory and does not grant edit
-permission.
-
-## Patch verification
-
-After editing, call `finish_controlled_change`:
+Evidence: **`changed_files` XOR `diff_ref`** — exactly one; both or neither is
+an error. `before_run_id` is resolved from the intent — do not pass a new declare.
 
 ```
 finish_controlled_change(
-    intent_id=...,
-    changed_files=[...],              # or diff_ref=...
-    after_run_id=...,                 # required for python_structural / governance_config
-    review_text="...",                # optional, for claim validation
+  intent_id=...,
+  changed_files=[...] | diff_ref=...,     # XOR
+  after_run_id=...,                       # when verification.after_run_required
+  review_text=...,                        # optional; validated if recommended
 )
 ```
 
-The tool handles: scope check, patch contract verification, claim
-validation, review receipt generation, and intent cleanup.
+Internal order (do not replicate manually): scope **check** → **verify** → claims
+(if `review_text` + `claim_validation_recommended`) → receipt → clear.
 
-Intent stays active on non-accepted results — retry `finish` on the
-**same `intent_id`** after resolving the issue:
+### After `finish`
 
-- `status: "unverified"` — follow `next_step` (e.g., run
-  `analyze_repository`, then call `finish` again with `after_run_id`)
-- `status: "violated"` (scope) — either remove out-of-scope changes and
-  retry `finish`, or expand scope via `start_controlled_change`
-- `user_action_required: true` — stop and escalate to the user
+| Status                                        | Action                                                                                                 |
+|-----------------------------------------------|--------------------------------------------------------------------------------------------------------|
+| `accepted` / `accepted_with_external_changes` | Cycle complete only if `intent_cleared=true` **and** §Completion gate + §Advisory acceptance satisfied |
+| `unverified`                                  | Intent stays active. Follow `next_step` (usually after-run), then **retry same `intent_id`**           |
+| `violated` (scope)                            | Fix files or expand scope via new `start`; retry same `intent_id`                                      |
+| `expired`                                     | Before-run digest stale. Re-analyze → new `start`                                                      |
+| `user_action_required=true`                   | Stop; follow `next_step` or escalate                                                                   |
 
-Do not start a new cycle unless the intent is expired or scope must
-change. Do not claim the patch is verified on non-accepted status.
+Do not start a new intent unless scope changed or intent expired.
 
-## Verification profiles
+## Completion gate
 
-The controller derives a **verification profile** from actual changed files
-during `finish_controlled_change` (through the underlying verify path), or
-directly during `check_patch_contract(mode="verify")` in the atomic workflow.
-The profile determines which structural checks apply. The agent does not
-choose the profile.
+No "done" / "verified" / "implemented" / "ready" unless all hold:
 
-| Profile                 | When                          | `after_run` required | Structural checks |
-|-------------------------|-------------------------------|----------------------|-------------------|
-| `python_structural`     | any `.py` / `.pyi` touched    | yes                  | all               |
-| `governance_config`     | config files only             | yes                  | not applicable    |
-| `documentation_only`    | only docs files               | no                   | not applicable    |
-| `non_python_patch`      | other files, no Python / docs | no                   | not applicable    |
-| `state_artifact_change` | baseline or CodeClone state/cache touched | no (violated) | not applicable |
+- `finish.status` is `accepted` or `accepted_with_external_changes`
+- `intent_cleared=true`
+- claim warnings reported when `claims.valid` is false
+- §Advisory acceptance signals reported when present
 
-Rules:
+`accepted` = patch contract passed for declared scope — **not** "no regressions" or
+unchanged health.
 
-- If any Python source, governance config, baseline, CodeClone state/cache, or generated state
-  was touched, the lightweight path is not accepted.
-- Documentation-only patches can verify without `after_run_id` when
-  `changed_files` or `diff_ref` evidence is provided.
-- Other non-Python patches may verify without `after_run_id`, but only with
-  controller-reported limitations. Do not present this as full structural
-  verification.
-- Do not claim which profile applies — CodeClone decides.
-- Receipts use "not applicable" for skipped structural checks, never "passed".
-- Claim Guard may reject or warn on claims that exceed the derived profile.
-  For documentation-only patches, "no Python files touched" is allowed;
-  "no structural regressions" requires structural evidence from an after-run.
+## Advisory acceptance (do not hide)
 
-## Claim discipline
+Read **before** the user summary, even when `intent_cleared=true`:
 
-In the primary workflow, pass `review_text` to `finish_controlled_change`
-when you want final summary claims validated. If claim validation is
-recommended and `review_text` is provided, `finish` runs claim validation
-and returns the result.
+| Field                                        | Report when                            |
+|----------------------------------------------|----------------------------------------|
+| `verification.structural_delta.health_delta` | `< 0` — health dropped; cite delta     |
+| `verification.structural_delta.verdict`      | `regressed` or `mixed`                 |
+| `external_regressions`, `gate_worsened`      | non-empty / true                       |
+| `accepted_with_external_changes`             | name external workspace signal         |
+| `contract_violations`                        | non-empty (`relaxed` may still accept) |
+| `receipt.verdict`, `human_decision_points`   | `needs_attention` or non-empty         |
 
-Use `validate_review_claims` directly only in the atomic fallback workflow
-or when re-validating changed review text after `finish`.
+**Anti-pattern:** `status: accepted` → skip reporting health drop or structural
+regressions. Contract acceptance clears the intent; structural delta is
+user-facing advisory.
 
-Do not claim:
+**Example:** docs-only patch → `accepted`, `intent_cleared=true`, but
+`health_delta: -2`, `verdict: regressed` → tell the user health fell; do not stop
+at "patch accepted".
 
-- report-only signals are CI failures
-- Security Surfaces are vulnerabilities
-- known baseline debt is a new regression
-- dead code exists where runtime reachability evidence says otherwise
-- a fix is verified without an after-run and patch contract check
+## Verify profiles (controller decides)
 
-## Review receipt
+**`start` always required.** Profile affects after-run and structural checks only.
 
-In the primary workflow, `finish_controlled_change` creates the review
-receipt when `create_receipt=true` (default). Do not call
-`create_review_receipt` separately unless using the atomic fallback
-workflow or manually regenerating a receipt.
+| Priority | Profile                 | Trigger                         | After-run |
+|----------|-------------------------|---------------------------------|-----------|
+| 1        | `state_artifact_change` | baseline/cache touched          | violated  |
+| 2        | `python_structural`     | any `.py`/`.pyi` incl. tests    | yes       |
+| 3        | `governance_config`     | pyproject, CI, Dockerfile… only | yes       |
+| 4        | `documentation_only`    | docs only                       | no        |
+| 5        | `non_python_patch`      | other non-py, non-docs          | no        |
 
-The final user summary should include:
+Read `verification.verification_profile` and `after_run_required` from `finish` —
+do not guess. Docs/non-python may verify without after-run when diff evidence
+exists. Receipts: skipped checks = "not applicable", never "passed".
 
-- declared scope
-- scope expansion, if any
-- blast radius summary
-- patch contract status
-- remaining human decisions
-- receipt content, if returned in finish response
+## Atomic fallback (legacy / debug only)
 
-## Success criteria
+When start/finish unavailable:
 
-The task is complete only when:
+```
+list_workspace → analyze → declare → budget → edit → analyze → check → verify
+→ validate_review_claims → create_review_receipt → clear
+```
 
-- `start_controlled_change` returned an active intent before editing;
-  if queued, it was promoted before editing
-- blast radius was inspected (included in start response)
-- edits stayed inside declared scope, or expansion was explicit
-- `finish_controlled_change` returned `status: "accepted"` or
-  `"accepted_with_external_changes"`; `after_run_id` was provided when
-  required by the verification profile
-- `intent_cleared` is `true` in the finish response
-- baseline, CodeClone state/cache, and generated reports were not changed
-  accidentally
-- if finish returned claims warnings, they were reported
+Say explicitly which tools were skipped. Never mix with normal pipeline in one cycle.
 
-## Non-goals
+## Escalate to user
 
-- Do not use this skill for quick hotspot snapshots; use `codeclone-hotspots`.
-- Do not use this skill for passive structural review with no edits; use
-  `codeclone-review`.
-- Do not auto-fix unrelated findings.
-- Do not turn report-only context into gates.
-- Do not make baseline refresh part of a functional patch.
+Scope expansion; touch `do_not_touch`; foreign active without queue; blocked
+`next_step`; baseline/cache/report mutation; recover foreign intent. Routine
+analyze/queue/promote runs automatically.
+
+## Claims (do not)
+
+Report-only ≠ CI fail; Security Surfaces ≠ vulns; baselined debt ≠ new regression;
+dead code vs runtime reachability; structural verify without profile evidence.

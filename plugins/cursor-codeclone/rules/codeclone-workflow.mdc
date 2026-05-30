@@ -30,5 +30,13 @@ You have access to CodeClone through the local CodeClone MCP server.
 
 ## Change control
 
-- For repository edits, use `start_controlled_change` → edit →
-  `finish_controlled_change` (see the change-control skill).
+Before **any** repo edit when MCP is available (including `tests/`, `docs/`,
+config):
+
+1. `analyze_repository` — skip if valid recent run exists
+2. `start_controlled_change` — `status: active` before first edit
+3. edit in declared scope
+4. `finish_controlled_change`
+
+Read the `codeclone-change-control` skill for profiles, queue/promote, and
+atomic fallback.
