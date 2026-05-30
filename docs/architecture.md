@@ -209,17 +209,19 @@ Operational note:
 The MCP layer is intentionally thin. It does not add a separate analysis engine;
 it adapts the existing pipeline into tools/resources such as:
 
-- analyze repository
-- analyze changed paths
-- get run summary
-- compare runs
-- list findings
-- inspect one finding
-- project remediation payloads
-- list hotspots
+- analyze repository or changed paths
+- get run summary, production triage, and report sections
+- compare runs, list findings/hotspots, inspect one finding, project remediation
+- focused `check_*` queries and gate preview
 - generate PR summary
-- preview gate outcomes
-- keep session-local reviewed markers
+- structural change control (`start_controlled_change`, `finish_controlled_change`,
+  `manage_change_intent`, `get_blast_radius`, `check_patch_contract`,
+  `validate_review_claims`, `create_review_receipt`)
+- session-local review markers and bounded in-memory run history
+
+Native clients (VS Code extension, Claude Desktop bundle, Codex plugin, Cursor
+plugin) connect to the same `codeclone-mcp` contract; they do not introduce a
+second analysis engine.
 
 This keeps agent integrations deterministic and aligned with the same canonical
 report document used by JSON/HTML/SARIF.

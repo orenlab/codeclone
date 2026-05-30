@@ -70,7 +70,7 @@ If the default pass looks clean:
 - For finding/list/check tools, use `detail_level="summary"`, `"normal"`, or
   `"full"` only. `compact` is valid only for `help(detail="compact")`.
 - Use `get_finding` / `get_remediation` for one finding — not `detail_level=full` on lists.
-- Use `"production-only"` / `source_kind` filters to cut test noise.
+- Use `source_kind="production"` (or `tests`, `fixtures`, `mixed`, `other`) to cut test noise.
 - Use `get_report_section(section="metrics")` for adoption, API-surface, or Coverage Join facts.
 - Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
 - Pass absolute `root` — MCP rejects relative roots.

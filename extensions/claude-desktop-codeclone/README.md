@@ -4,7 +4,10 @@ Structural change controller for Python — local MCP bundle wrapper for
 `codeclone-mcp`. Installs as a `.mcpb` package instead of manual JSON editing.
 
 Same canonical 28-tool MCP surface used by CLI, VS Code, Codex, and Claude Code.
-Read-only, baseline-aware, local stdio only.
+Repository read-only (source, baselines, cache, canonical reports); local stdio
+only. The bundle proxies the full MCP server, including change-control and
+session tools — ephemeral coordination under `.cache/codeclone/intents/` and
+optional audit records when enabled.
 As the local `codeclone-mcp` server gains new canonical surfaces, the bundle
 exposes them without adding a second client-side interpretation layer.
 
@@ -48,6 +51,7 @@ command** in the extension settings to an absolute path.
 
 | Setting                        | Purpose                                              |
 |--------------------------------|------------------------------------------------------|
+| **Workspace root path**        | Optional absolute project root; launcher prefers that workspace `.venv` when Claude starts outside the repo |
 | **CodeClone launcher command** | Absolute path or bare command for `codeclone-mcp`    |
 | **Advanced launcher args**     | JSON array of extra args (transport is always stdio) |
 
@@ -60,11 +64,11 @@ command** in the extension settings to an absolute path.
 Use CodeClone to analyze this repository.
 
 # 2. Declare intent before editing
-Declare a change intent for refactoring codeclone/core/parser.py — I plan to
+Declare a change intent for refactoring codeclone/analysis/parser.py — I plan to
 extract the CFG builder into a separate module.
 
 # 3. Check blast radius
-Show the blast radius for codeclone/core/parser.py.
+Show the blast radius for codeclone/analysis/parser.py.
 
 # 4. After editing — verify the patch
 Check my change intent against the current diff.

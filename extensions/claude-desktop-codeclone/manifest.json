@@ -4,7 +4,7 @@
   "display_name": "CodeClone",
   "version": "2.1.0",
   "description": "Structural change controller for Python — deterministic, baseline-aware, built for CI and AI agents.",
-  "long_description": "CodeClone for Claude Desktop wraps the local codeclone-mcp launcher as an MCP bundle. It keeps Claude on the same canonical 28-tool MCP surface used by the CLI, HTML report, VS Code extension, and Codex plugin — read-only, baseline-aware, local stdio only. The v2.1 change controller includes intent declaration, blast radius, patch contract, review receipt, and claim validation via validate_review_claims and finish_controlled_change.",
+  "long_description": "CodeClone for Claude Desktop wraps the local codeclone-mcp launcher as an MCP bundle. It keeps Claude on the same canonical 28-tool MCP surface used by the CLI, HTML report, VS Code extension, and Codex plugin — repository read-only (source, baselines, cache, reports), baseline-aware, local stdio only. The v2.1 change controller includes intent declaration, blast radius, patch contract, review receipt, and claim validation via validate_review_claims and finish_controlled_change. Ephemeral coordination may be stored under .cache/codeclone/intents/.",
   "author": {
     "name": "Den Rozhnovskiy",
     "email": "pytelemonbot@mail.ru",

@@ -136,8 +136,16 @@ intent.
 
 Additive — the plugin provides a local MCP definition, five skills, one agent,
 two rules, and two hooks. New canonical MCP surfaces from the local
-`codeclone-mcp` version flow through directly. The plugin does not install a
+`codeclone-mcp` version flow through directly; the bundled launcher does not
+filter tools (full 28-tool passthrough). The plugin does not install a
 second server binary or mutate Cursor settings.
+
+## Read-only contract
+
+Repository truth stays read-only: MCP must not mutate source files, baselines,
+analysis cache, or canonical report artifacts. Change-control and session tools
+may write ephemeral coordination state under `.cache/codeclone/intents/` and
+optional audit records when enabled.
 
 ## Current limits
 
@@ -145,7 +153,9 @@ second server binary or mutate Cursor settings.
   keep only one setup path to avoid duplicate MCP surfaces.
 - The bundled `mcp.json` expects `codeclone-mcp` on `PATH` or configured with
   an absolute path.
-- Hooks use shell scripts and require `bash` and `grep`.
+- Hooks are Python scripts (`hooks/post-edit-reminder.py`,
+  `hooks/session-cleanup-check.py`) bundled with the plugin; they emit advisory
+  reminders only and do not call MCP directly.
 
 ## Further reading
 

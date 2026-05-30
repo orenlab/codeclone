@@ -20,7 +20,9 @@ The Claude Desktop bundle is:
 
 - a local `.mcpb` install surface for Claude Desktop
 - a small Node wrapper around `codeclone-mcp`
-- read-only with respect to repository state
+- read-only with respect to source files, baselines, analysis cache, and
+  canonical report artifacts (full MCP passthrough, including change-control
+  and session tools for ephemeral coordination state)
 - local-stdio-only by design
 - configuration-aware only for launcher resolution
 
@@ -51,7 +53,8 @@ The bundle currently provides:
 - one local Node launcher wrapper
 - the same canonical MCP tool/help surface exposed by the resolved local
   `codeclone-mcp` version
-- two user settings:
+- three user settings:
+    - workspace root path (optional project root for launcher resolution)
     - launcher command
     - advanced launcher args as a JSON array
 - one build script for deterministic local packaging

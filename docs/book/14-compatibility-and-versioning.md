@@ -47,7 +47,8 @@ Operational compatibility rules:
 - runtime writes baseline schema `2.1`
 - runtime accepts clone baseline `1.0`, `2.0`, and `2.1`
 - runtime writes standalone metrics-baseline schema `1.2`
-- runtime accepts standalone metrics-baseline `1.1` and `1.2`
+- runtime accepts standalone metrics-baseline `1.x` where the baseline minor
+  version is less than or equal to the runtime minor (currently through `1.2`)
 - runtime writes cache schema `2.8`
 - MCP does not define a separate schema constant; tool/resource semantics are
   package-versioned public surface

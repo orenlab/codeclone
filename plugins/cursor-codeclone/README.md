@@ -49,7 +49,7 @@ codeclone-mcp --help
 
 ## Agent
 
-**Structural Reviewer** — a code review agent that uses CodeClone MCP tools to
+**Structural Reviewer** (`codeclone-structural-reviewer`) — a code review agent that uses CodeClone MCP tools to
 assess clone risk, complexity hotspots, coupling, and blast radius. Reports
 deterministic findings with file paths and evidence, not opinions.
 
@@ -78,10 +78,9 @@ deterministic findings with file paths and evidence, not opinions.
 
 The plugin bundles a stdio-based `codeclone-mcp` server configuration via
 `python3 ./scripts/launch_mcp.py` (workspace `.venv` → Poetry env → `PATH`).
-The server exposes 28 tools for repository analysis, findings, blast radius,
-change control, and review workflows. See the
-[MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
-for the full tool list.
+The server exposes all 28 MCP tools (full passthrough). Skills and rules steer
+agents toward the documented workflow; the plugin does not filter tools at the
+transport layer.
 
 ## Distribution
 
@@ -106,8 +105,9 @@ ln -s /path/to/codeclone/plugins/cursor-codeclone ~/.cursor/plugins/local/codecl
 
 - **No second truth model** — health, findings, and drift come exclusively from
   `codeclone-mcp` and canonical report semantics.
-- **Read-only by default** — the plugin never edits source files, baselines,
-  caches, or report artifacts.
+- **Repository read-only** — the plugin never edits source files, baselines,
+  caches, or report artifacts. Agents reach the full MCP server (28 tools),
+  including change-control and session tools, via the bundled stdio launcher.
 - **Intent-first edits** — the change control skill enforces the full declare /
   blast-radius / edit / verify / clear cycle.
 - **Deterministic, not opinionated** — the agent reports what CodeClone finds,

@@ -45,6 +45,7 @@ codeclone-mcp --help
 
 | Setting                        | Purpose                                              |
 |--------------------------------|------------------------------------------------------|
+| **Workspace root path**        | Optional absolute project root; launcher prefers that workspace `.venv` when Claude starts outside the repo |
 | **CodeClone launcher command** | Absolute path or bare command for `codeclone-mcp`    |
 | **Advanced launcher args**     | JSON array of extra args (transport is always stdio) |
 

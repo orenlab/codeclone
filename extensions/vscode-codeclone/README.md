@@ -4,8 +4,11 @@
 [![Requires CodeClone](https://img.shields.io/badge/requires-codeclone_%3E%3D2.0.0-6366f1?style=flat-square)](https://orenlab.github.io/codeclone/)
 
 Native VS Code surface for [codeclone-mcp](https://orenlab.github.io/codeclone/mcp/).
-Brings baseline-aware structural analysis into the editor — triage-first, read-only,
-and driven by the same canonical report as the CLI and HTML output.
+Brings baseline-aware structural analysis into the editor — triage-first,
+repository read-only, and driven by the same canonical report as the CLI and HTML
+output. Session tools (`mark_finding_reviewed`, `clear_session_runs`) update
+ephemeral MCP state only; they never mutate source, baselines, cache, or report
+artifacts.
 
 > **Not a linter panel.** CodeClone for VS Code is designed for structural review and
 > refactoring flow, not diagnostics or Problems integration.
@@ -31,7 +34,7 @@ and driven by the same canonical report as the CLI and HTML output.
 
 ## Requirements
 
-- VS Code `1.85+`
+- VS Code `1.100.0+` (`engines.vscode` in `package.json`)
 - Python workspace (trusted)
 - `codeclone-mcp` launcher (`codeclone >= 2.0.0`)
 
@@ -127,7 +130,7 @@ external resource access.
 | `codeclone.mcp.args`                | `[]`           | Machine  | Extra arguments passed to the launcher.                                                             |
 | `codeclone.analysis.cachePolicy`    | —              | Resource | Default cache policy for analysis requests. Can differ per workspace or folder.                     |
 | `codeclone.analysis.changedDiffRef` | —              | Resource | Git revision used by **Review Changes**.                                                            |
-| `codeclone.analysis.profile`        | `conservative` | Resource | Analysis sensitivity. Use `deeper` or `custom` only as deliberate follow-ups.                       |
+| `codeclone.analysis.profile`        | `defaults`     | Resource | Analysis sensitivity: `defaults` (conservative first pass), `deeperReview`, or `custom`.            |
 | `codeclone.analysis.minLoc`         | —              | Resource | Function/block/segment thresholds — active only when profile is `custom`.                           |
 | `codeclone.analysis.coverageXml`    | —              | Resource | Path to `coverage.xml`. Auto-detects workspace-root file when unset.                                |
 | `codeclone.ui.showStatusBar`        | `true`         | Window   | Show or hide the workspace-level status bar item.                                                   |
@@ -155,7 +158,13 @@ full analysis and MCP are disabled until workspace trust is granted.
 
 - **No second truth model** — health, findings, and drift come exclusively from
   `codeclone-mcp` and canonical report semantics.
-- **Read-only** — the extension never edits source files, baselines, caches, or report artifacts.
+- **Repository read-only** — the extension never edits source files, baselines,
+  caches, or report artifacts. **Mark Reviewed** and **Clear Session** call
+  ephemeral MCP session tools only.
+- **Curated MCP surface** — IDE commands invoke a fixed subset of MCP tools
+  (analysis, triage, blast radius, review markers, session clear). Change-control
+  tools remain on the server for agent clients but are not wired to VS Code UI
+  commands.
 - **Report-only separation** — Security Surfaces and Overloaded Modules are visible but
   intentionally excluded from findings, gates, and health scoring.
 - **Source-first** — the default review action moves you to code before opening deeper detail.

@@ -82,8 +82,11 @@ The extension currently supports:
 
 - full-workspace analysis
 - changed-files analysis against a configured git diff reference
-- conservative default analysis with an explicit deeper-review or custom-threshold
+- conservative default analysis with an explicit `deeperReview` or `custom`
   follow-up profile
+- blast-radius inspection (`Show Blast Radius`, `Copy Blast Radius Brief`) via
+  `get_blast_radius`
+- session reset via `Clear Session` (`clear_session_runs`)
 - compact overview of structural health, current run state, baseline drift, and
   current-run `Coverage Join` facts when MCP exposes `metrics.coverage_join`,
   plus report-only `Security Surfaces` when MCP exposes
@@ -135,6 +138,7 @@ Reviewed markers:
 
 The extension runs as a workspace extension and requires:
 
+- VS Code `1.100.0` or newer
 - local filesystem access
 - local git access for changed-files review
 - a local `codeclone-mcp` launcher, or an explicitly configured launcher
@@ -158,9 +162,9 @@ For this reason:
 
 - **Native VS Code first**: tree views, status bar, Quick Pick, CodeLens, and
   file decorations before any custom UI.
-- **Conservative by default**: the extension starts with repo defaults or
-  `pyproject`-resolved thresholds and treats lower-threshold analysis as an
-  explicit exploratory follow-up.
+- **Conservative by default**: the extension starts with the `defaults`
+  profile (repo defaults or `pyproject`-resolved thresholds) and treats
+  `deeperReview` or `custom` as explicit exploratory follow-ups.
 - **Source-first**: findings prefer `Reveal Source` over detail panels;
   canonical detail and HTML report bridge are opt-in.
 - **Report-only separation**: Overloaded Modules stay visually distinct from

@@ -11,28 +11,32 @@ The v2.1 alpha currently includes intent, blast-radius, patch-contract checks,
 review receipts, workspace intent visibility, claim guard, and CLI controller
 queries:
 
-| Phase                     | Status            | Surface                                          |
-|---------------------------|-------------------|--------------------------------------------------|
-| Intent declaration        | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Blast radius              | Live in `2.1.0a1` | MCP `get_blast_radius`, CLI `--blast-radius`     |
-| Patch contract            | Live in `2.1.0a1` | MCP `check_patch_contract`, CLI `--patch-verify` |
-| Review receipt            | Live in `2.1.0a1` | MCP `create_review_receipt`                      |
-| Workspace intent registry | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Lease and recovery        | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Claim guard               | Live in `2.1.0a1` | MCP `validate_review_claims`                     |
-| Scope-aware verification  | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
-| Workspace relations       | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Verification profiles     | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
-| Intent queue              | Live in `2.1.0a1` | MCP `manage_change_intent`                       |
-| Verify ergonomics         | Live in `2.1.0a1` | MCP `check_patch_contract`                       |
-| MCP payload token budget  | Live in `2.1.0a1` | Audit trail, CLI `--audit`, `--session-stats`    |
+| Phase                     | Status            | Surface                                                   |
+|---------------------------|-------------------|-----------------------------------------------------------|
+| Declarative workflow      | Live in `2.1.0a1` | MCP `start_controlled_change`, `finish_controlled_change` |
+| Intent declaration        | Live in `2.1.0a1` | MCP `manage_change_intent`                                |
+| Blast radius              | Live in `2.1.0a1` | MCP `get_blast_radius`, CLI `--blast-radius`              |
+| Patch contract            | Live in `2.1.0a1` | MCP `check_patch_contract`, CLI `--patch-verify`          |
+| Review receipt            | Live in `2.1.0a1` | MCP `create_review_receipt`                               |
+| Workspace intent registry | Live in `2.1.0a1` | MCP `manage_change_intent`                                |
+| Lease and recovery        | Live in `2.1.0a1` | MCP `manage_change_intent`                                |
+| Claim guard               | Live in `2.1.0a1` | MCP `validate_review_claims`                              |
+| Scope-aware verification  | Live in `2.1.0a1` | MCP `check_patch_contract`                                |
+| Workspace relations       | Live in `2.1.0a1` | MCP `manage_change_intent`                                |
+| Verification profiles     | Live in `2.1.0a1` | MCP `check_patch_contract`                                |
+| Intent queue              | Live in `2.1.0a1` | MCP `manage_change_intent`                                |
+| Verify ergonomics         | Live in `2.1.0a1` | MCP `check_patch_contract`                                |
+| MCP payload token budget  | Live in `2.1.0a1` | Audit trail, CLI `--audit`, `--session-stats`             |
 
 ## Contract
 
 - The canonical report remains the source of truth.
-- Intent truth is session-local and in-memory.
+- Intent truth is **session-local** for the active MCP process; the optional
+  workspace registry under `.cache/codeclone/intents/` provides advisory,
+  TTL/lease-bound cross-process visibility only.
 - MCP may write ephemeral workspace coordination records under
-  `.cache/codeclone/intents/`.
+  `.cache/codeclone/intents/` and optional audit records under
+  `.cache/codeclone/db/` when enabled.
 - MCP must not mutate source files, baselines, reports, or analysis cache data.
 - Tools derive responses from existing run/report facts rather than LLM
   inference.
@@ -43,7 +47,7 @@ queries:
 The CLI exposes read-only terminal projections for humans:
 
 ```bash
-codeclone . --blast-radius codeclone/core/parser.py
+codeclone . --blast-radius codeclone/analysis/parser.py
 codeclone . --patch-verify --diff-against HEAD~1
 codeclone . --patch-verify --strictness relaxed
 codeclone . --session-stats
@@ -459,17 +463,17 @@ common agent error: forgetting to pass `before_run_id`.
 Non-accepted verify responses include a `next_step` field with an actionable
 hint matched to the failure reason:
 
-| Reason                              | Hint                                                    |
-|-------------------------------------|---------------------------------------------------------|
-| `no_before_run`                     | Run analysis or pass intent_id to auto-resolve          |
-| `no_after_run`                      | Run analysis after editing and pass after_run_id        |
+| Reason                              | Hint                                                       |
+|-------------------------------------|------------------------------------------------------------|
+| `no_before_run`                     | Run analysis or pass intent_id to auto-resolve             |
+| `no_after_run`                      | Run analysis after editing and pass after_run_id           |
 | `after_run_not_new`                 | After-run matches before-run; run fresh post-edit analysis |
-| `after_run_required_for_governance` | Governance changes require post-edit analysis           |
-| `incomparable_runs`                 | Re-run analysis with the same settings                  |
-| `intent_not_active`                 | Queued intent must be promoted first                    |
-| `report_digest_mismatch`            | Use the original intent_id with the original before-run |
-| `state_artifact_mutation`           | Remove baseline/cache files from the patch              |
-| `scope_violation`                   | Redeclare intent with expanded scope                    |
+| `after_run_required_for_governance` | Governance changes require post-edit analysis              |
+| `incomparable_runs`                 | Re-run analysis with the same settings                     |
+| `intent_not_active`                 | Queued intent must be promoted first                       |
+| `report_digest_mismatch`            | Use the original intent_id with the original before-run    |
+| `state_artifact_mutation`           | Remove baseline/cache files from the patch                 |
+| `scope_violation`                   | Redeclare intent with expanded scope                       |
 
 ### Claim validation recommended
 

@@ -21,23 +21,24 @@ Main ownership layers:
 
 ## Data model
 
-| Layer                   | Modules                                                                                         | Responsibility                                                                                        |
-|-------------------------|-------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
-| Entry                   | `codeclone/main.py`                                                                             | Public CLI entrypoint only                                                                            |
-| CLI surface             | `codeclone/surfaces/cli/*`, `codeclone/ui_messages/*`                                           | Parse args, resolve runtime mode, print summaries, write outputs, route exits                         |
-| Report copy             | `codeclone/report/messages/*`                                                                   | Glossary, suggestions, explainability, overview, security, chrome, text/markdown/sarif projections, gate prefixes |
-| Config                  | `codeclone/config/*`                                                                            | Option specs, parser construction, pyproject loading, CLI > pyproject > defaults merge                |
-| Core runtime            | `codeclone/core/*`                                                                              | Bootstrap, discovery, worker processing, project metrics, report/gate integration                     |
-| Analysis                | `codeclone/analysis/*`, `codeclone/blocks/*`, `codeclone/paths/*`, `codeclone/qualnames/*`      | Parse source, normalize AST/CFG facts, extract units, prepare deterministic analysis inputs           |
-| Findings                | `codeclone/findings/clones/*`, `codeclone/findings/structural/*`                                | Clone grouping and structural finding derivation                                                      |
-| Metrics                 | `codeclone/metrics/*`                                                                           | Complexity, coupling, cohesion, dependencies, dead code, health, adoption, coverage join, API surface |
-| Contracts/domain        | `codeclone/contracts/*`, `codeclone/models.py`, `codeclone/domain/*`                            | Version constants, enums, typed exceptions, shared models, domain taxonomies                          |
-| Persistence             | `codeclone/baseline/*`, `codeclone/cache/*`                                                     | Trusted comparison state and optimization-only cache contracts                                        |
-| Canonical report        | `codeclone/report/document/*`, `codeclone/report/gates/*`, `codeclone/report/*.py`              | Canonical report payload, derived projections, explainability, suggestions, gate reasons              |
-| Deterministic renderers | `codeclone/report/renderers/*`                                                                  | Text/Markdown/SARIF/JSON projections over the canonical report                                        |
-| HTML render layer       | `codeclone/report/html/*`                                                                       | Render-only HTML view over canonical report/meta facts                                                |
-| MCP surface             | `codeclone/surfaces/mcp/*`, `codeclone/surfaces/mcp/messages/*`                                 | Read-only MCP tools/resources, change-control projections, claim validation, and centralized agent-facing copy |
-| Client surfaces         | `extensions/vscode-codeclone/*`, `extensions/claude-desktop-codeclone/*`, `plugins/codeclone/*`, `plugins/cursor-codeclone/*` | Native clients/install surfaces over `codeclone-mcp`                                                  |
+| Layer                   | Modules                                                                                                                       | Responsibility                                                                                                                                             |
+|-------------------------|-------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Entry                   | `codeclone/main.py`                                                                                                           | Public CLI entrypoint only                                                                                                                                 |
+| CLI surface             | `codeclone/surfaces/cli/*`, `codeclone/ui_messages/*`                                                                         | Parse args, resolve runtime mode, print summaries, write outputs, route exits                                                                              |
+| Report copy             | `codeclone/report/messages/*`                                                                                                 | Glossary, suggestions, explainability, overview, security, chrome, text/markdown/sarif projections, gate prefixes                                          |
+| Config                  | `codeclone/config/*`                                                                                                          | Option specs, parser construction, pyproject loading, CLI > pyproject > defaults merge                                                                     |
+| Core runtime            | `codeclone/core/*`                                                                                                            | Bootstrap, discovery, worker processing, project metrics, report/gate integration                                                                          |
+| Analysis                | `codeclone/analysis/*`, `codeclone/blocks/*`, `codeclone/paths/*`, `codeclone/qualnames/*`                                    | Parse source, normalize AST/CFG facts, extract units, prepare deterministic analysis inputs                                                                |
+| Findings                | `codeclone/findings/clones/*`, `codeclone/findings/structural/*`                                                              | Clone grouping and structural finding derivation                                                                                                           |
+| Metrics                 | `codeclone/metrics/*`                                                                                                         | Complexity, coupling, cohesion, dependencies, dead code, health, adoption, coverage join, API surface                                                      |
+| Contracts/domain        | `codeclone/contracts/*`, `codeclone/models.py`, `codeclone/domain/*`                                                          | Version constants, enums, typed exceptions, shared models, domain taxonomies                                                                               |
+| Persistence             | `codeclone/baseline/*`, `codeclone/cache/*`                                                                                   | Trusted comparison state and optimization-only cache contracts                                                                                             |
+| Canonical report        | `codeclone/report/document/*`, `codeclone/report/gates/*`, `codeclone/report/*.py`                                            | Canonical report payload, derived projections, explainability, suggestions, gate reasons                                                                   |
+| Deterministic renderers | `codeclone/report/renderers/*`                                                                                                | Text/Markdown/SARIF/JSON projections over the canonical report                                                                                             |
+| HTML render layer       | `codeclone/report/html/*`                                                                                                     | Render-only HTML view over canonical report/meta facts                                                                                                     |
+| MCP surface             | `codeclone/surfaces/mcp/*`, `codeclone/surfaces/mcp/messages/*`                                                               | Read-only MCP tools/resources, change-control projections (intent, blast radius, patch budget/verify, claim validation), and centralized agent-facing copy |
+| Audit trail             | `codeclone/audit/*`                                                                                                           | Optional controller event and MCP payload footprint recording under `.cache/codeclone/db/` when enabled                                                    |
+| Client surfaces         | `extensions/vscode-codeclone/*`, `extensions/claude-desktop-codeclone/*`, `plugins/codeclone/*`, `plugins/cursor-codeclone/*` | Native clients/install surfaces over `codeclone-mcp`                                                                                                       |
 
 Refs:
 
@@ -58,7 +59,7 @@ Refs:
 - MCP is read-only and must not create a second analysis truth path. Change
   control and claim guard are projections over stored run/report semantics, not
   new analyzers.
-- VS Code, Claude Desktop, and Codex plugin surfaces are clients over MCP, not second analyzers.
+- VS Code, Claude Desktop, Codex plugin, and Cursor plugin surfaces are clients over MCP, not second analyzers.
 
 Refs:
 

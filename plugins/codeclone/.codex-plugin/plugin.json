@@ -25,7 +25,7 @@
   "interface": {
     "displayName": "CodeClone",
     "shortDescription": "Structural code quality analysis for Python.",
-    "longDescription": "CodeClone for Codex — clone detection, quality metrics, and baseline-aware governance over the canonical codeclone-mcp server. Ships review, hotspot discovery, and change-control skills for conservative-first structural review and intent-first repository edits.",
+    "longDescription": "CodeClone for Codex — clone detection, quality metrics, and baseline-aware governance over the canonical codeclone-mcp server. Repository read-only (source, baselines, cache, reports); full 28-tool MCP passthrough including change control. Ships review, hotspot discovery, and change-control skills for conservative-first structural review and intent-first repository edits.",
     "developerName": "OrenLab",
     "category": "Developer Tools",
     "capabilities": [

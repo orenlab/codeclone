@@ -115,7 +115,7 @@ codeclone . --paths-from-git-diff HEAD~1
 codeclone . --html --json --timestamped-report-paths
 
 # Structural Change Controller — CLI surface
-codeclone . --blast-radius codeclone/core/parser.py
+codeclone . --blast-radius codeclone/analysis/parser.py
 codeclone . --patch-verify --diff-against HEAD~1
 ```
 
@@ -148,11 +148,13 @@ facts come from the canonical report, not from LLM inference.
 
 | Stage                       | Surface                                          | Purpose                                                                                       |
 |-----------------------------|--------------------------------------------------|-----------------------------------------------------------------------------------------------|
-| **Declare intent**          | `manage_change_intent`                           | Agent states intended scope and rationale before editing                                      |
-| **Map blast radius**        | `get_blast_radius` &middot; `--blast-radius`     | Reverse imports, clone cohorts, review context, do-not-touch boundaries                       |
-| **Check patch contract**    | `check_patch_contract` &middot; `--patch-verify` | Pre-edit budget check and post-edit structural verification                                   |
+| **Start controlled change** | `start_controlled_change`                        | Pre-edit: workspace check, declare scope, blast radius, patch budget                          |
+| **Finish controlled change**| `finish_controlled_change`                       | Post-edit: scope check, verify, optional claims/receipt, clear intent                         |
+| **Map blast radius**        | `get_blast_radius` · `--blast-radius`            | Reverse imports, clone cohorts, review context, do-not-touch boundaries                       |
+| **Check patch contract**    | `check_patch_contract` · `--patch-verify`        | Pre-edit budget check and post-edit structural verification                                   |
 | **Validate claims**         | `validate_review_claims`                         | Cross-check review text; optional `patch_health_delta` from verify for regression-free claims |
 | **Generate receipt**        | `create_review_receipt`                          | Auditable artifact: intent, scope, blast radius, patch outcome                                |
+| **Intent lifecycle (atomic)** | `manage_change_intent`                         | Queue/promote/recover and atomic declare/check/clear when workflow tools are unavailable      |
 | **Coordinate workspace**    | workspace intent registry                        | Make active declared scopes visible across MCP processes                                      |
 | **Audit controller events** | optional audit trail                             | Record passive workflow events and MCP payload footprint when enabled                         |
 
@@ -286,6 +288,7 @@ codeclone-mcp --transport streamable-http   # HTTP transport
 | **VS Code extension**     | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)                                 | [Guide](https://orenlab.github.io/codeclone/book/21-vscode-extension/)      |
 | **Claude Desktop bundle** | [`extensions/claude-desktop-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone) | [Guide](https://orenlab.github.io/codeclone/book/22-claude-desktop-bundle/) |
 | **Codex plugin**          | [`orenlab/codeclone-codex`](https://github.com/orenlab/codeclone-codex)                                                      | [Guide](https://orenlab.github.io/codeclone/book/23-codex-plugin/)          |
+| **Cursor plugin**         | [`plugins/cursor-codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/cursor-codeclone)                       | [Guide](https://orenlab.github.io/codeclone/book/25-cursor-plugin/)         |
 
 All clients connect to the same `codeclone-mcp` contract — no second analysis engine.
 

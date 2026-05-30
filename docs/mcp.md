@@ -291,21 +291,21 @@ sequenceDiagram
     participant A as Agent
     participant M as MCP Server
     participant D as Intent Registry
-    A ->> M: list_workspace(root)
+    A ->> M: manage_change_intent(action="list_workspace", root)
     M ->> D: read active intents (file or sqlite backend)
     D -->> M: active intents
     M -->> A: workspace state
     A ->> M: analyze_repository(root)
     M -->> A: run registered
-    A ->> M: declare(scope, intent)
+    A ->> M: manage_change_intent(action="declare", scope, intent)
     M ->> D: write intent record
     M -->> A: intent_id, blast_radius, concurrent_intents
     alt Scope conflict with on_conflict="queue"
-        A ->> M: declare(scope, intent, on_conflict="queue")
+        A ->> M: manage_change_intent(action="declare", scope, intent, on_conflict="queue")
         M ->> D: write queued intent record
         M -->> A: status=queued, blocked_by, queue_position
         Note over A: Wait for foreign intent to clear
-        A ->> M: promote(intent_id)
+        A ->> M: manage_change_intent(action="promote", intent_id)
         M ->> D: re-check conflicts, update to active
         M -->> A: status=active
     end
@@ -315,14 +315,14 @@ sequenceDiagram
     M -->> A: regression budget, headroom
     Note over A: Edit files within scope
     opt Long edit or test run
-        A ->> M: renew(intent_id, lease_seconds)
+        A ->> M: manage_change_intent(action="renew", intent_id, lease_seconds)
         M ->> D: update lease timestamp
         M -->> A: lease_renewed
     end
 
     A ->> M: analyze_repository(root)
     M -->> A: after_run_id registered
-    A ->> M: check(intent_id, changed_files or diff_ref)
+    A ->> M: manage_change_intent(action="check", intent_id, changed_files or diff_ref)
     Note right of M: intent stays on before-run, changed scope is explicit
     M -->> A: clean / expanded / violated
     A ->> M: check_patch_contract(mode=verify, before_run_id, after_run_id, intent_id)
@@ -331,19 +331,19 @@ sequenceDiagram
     M -->> A: valid / violations
     A ->> M: create_review_receipt
     M -->> A: audit artifact
-    A ->> M: clear
+    A ->> M: manage_change_intent(action="clear", intent_id)
     M ->> D: close intent (file: delete row; sqlite: status=clean)
 ```
 
-| Tool                     | Purpose                                                                                                              |
-|--------------------------|----------------------------------------------------------------------------------------------------------------------|
-| `start_controlled_change` | Pre-edit workflow: workspace check + declare + blast radius + budget (`dirty_scope_policy` for own WIP)           |
-| `finish_controlled_change` | Post-edit workflow: scope check + verify + claims + receipt + clear                                              |
-| `manage_change_intent`   | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace |
-| `get_blast_radius`       | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                    |
-| `check_patch_contract`   | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                               |
-| `create_review_receipt`  | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile               |
-| `validate_review_claims` | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks       |
+| Tool                       | Purpose                                                                                                              |
+|----------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `start_controlled_change`  | Pre-edit workflow: workspace check + declare + blast radius + budget (`dirty_scope_policy` for own WIP)              |
+| `finish_controlled_change` | Post-edit workflow: scope check + verify + claims + receipt + clear                                                  |
+| `manage_change_intent`     | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace |
+| `get_blast_radius`         | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                    |
+| `check_patch_contract`     | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                               |
+| `create_review_receipt`    | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile               |
+| `validate_review_claims`   | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks       |
 
 ??? info "Blast radius: do_not_touch vs review_context"
 `do_not_touch` contains actionable edit prohibitions: baselines, generated
@@ -368,12 +368,12 @@ include `health_regression_advisory`.
 
 ### Phase 6: Session management
 
-| Tool                     | Purpose                                 |
-|--------------------------|-----------------------------------------|
-| `mark_finding_reviewed`  | Session-local review marker (in-memory) |
-| `list_reviewed_findings` | List reviewed findings for a run        |
-| `clear_session_runs`     | Reset in-memory runs and session state  |
-| `help`                   | Bounded workflow and contract guidance  |
+| Tool                     | Purpose                                                                                               |
+|--------------------------|-------------------------------------------------------------------------------------------------------|
+| `mark_finding_reviewed`  | Session-local review marker (in-memory)                                                               |
+| `list_reviewed_findings` | List reviewed findings for a run                                                                      |
+| `clear_session_runs`     | Reset in-memory runs, session review markers, and workspace intent registry state for the MCP process |
+| `help`                   | Bounded workflow and contract guidance                                                                |
 
 ---
 
@@ -531,20 +531,20 @@ Verify compares the intent's **before-run** to the explicit **after-run** via
 `compare_runs`. `structural_delta` mirrors that comparison:
 
 ```json
-"before": { "run_id": "14d82d39", "health": 90 },
-"after": { "run_id": "74cb3c0e", "health": 88 },
+"before": {"run_id": "14d82d39", "health": 90},
+"after": {"run_id": "74cb3c0e", "health": 88},
 "structural_delta": {
-  "verdict": "regressed",
-  "health_delta": -2,
-  "regressions": [ "...new finding ids..." ]
+"verdict": "regressed",
+"health_delta": -2,
+"regressions": ["...new finding ids..."]
 }
 ```
 
-| Field | Source | Meaning |
-|-------|--------|---------|
-| `verification.before` / `.after` | Intent before-run vs `after_run_id` | Run refs used for patch contract |
-| `structural_delta.health_delta` | `health_after - health_before` from `compare_runs` | **Patch delta** between those two stored runs |
-| `receipt.health.delta` | After-run summary vs trusted baseline | **Repository drift** signal in the receipt narrative |
+| Field                            | Source                                             | Meaning                                              |
+|----------------------------------|----------------------------------------------------|------------------------------------------------------|
+| `verification.before` / `.after` | Intent before-run vs `after_run_id`                | Run refs used for patch contract                     |
+| `structural_delta.health_delta`  | `health_after - health_before` from `compare_runs` | **Patch delta** between those two stored runs        |
+| `receipt.health.delta`           | After-run summary vs trusted baseline              | **Repository drift** signal in the receipt narrative |
 
 If `before.run_id == after.run_id` for `python_structural` or
 `governance_config` profiles, verify returns `status: "unverified"` with
@@ -566,12 +566,12 @@ claims when `patch_health_delta < 0` (passed automatically by
 
 Hygiene reads the **shared git working tree**, not per-agent sandboxes.
 
-| Actor | Trigger | Start | Finish |
-|-------|---------|-------|--------|
-| **Foreign active/stale** intent on overlapping scope | `concurrent_intents` | `status: "blocked"` (coordination) | — |
-| **Any** uncommitted dirty file in your `allowed_files` | `workspace_hygiene.blocks_edit` | `edit_allowed: false` (unless `dirty_scope_policy="continue_own_wip"` and no live foreign dirty overlap) | — |
-| Dirty in scope **not** listed in `changed_files` / `diff_ref` | `unacknowledged_dirty_in_scope` | — | `reason: "workspace_hygiene"` |
-| **Live** foreign intent (`foreign_active` / `foreign_stale`) previously declared overlapping dirty paths | `foreign_dirty_overlaps` | Contributes to `blocks_edit` context; overlap list only for live foreign | `blocks_finish: true` if overlaps remain |
+| Actor                                                                                                    | Trigger                         | Start                                                                                                    | Finish                                   |
+|----------------------------------------------------------------------------------------------------------|---------------------------------|----------------------------------------------------------------------------------------------------------|------------------------------------------|
+| **Foreign active/stale** intent on overlapping scope                                                     | `concurrent_intents`            | `status: "blocked"` (coordination)                                                                       | —                                        |
+| **Any** uncommitted dirty file in your `allowed_files`                                                   | `workspace_hygiene.blocks_edit` | `edit_allowed: false` (unless `dirty_scope_policy="continue_own_wip"` and no live foreign dirty overlap) | —                                        |
+| Dirty in scope **not** listed in `changed_files` / `diff_ref`                                            | `unacknowledged_dirty_in_scope` | —                                                                                                        | `reason: "workspace_hygiene"`            |
+| **Live** foreign intent (`foreign_active` / `foreign_stale`) previously declared overlapping dirty paths | `foreign_dirty_overlaps`        | Contributes to `blocks_edit` context; overlap list only for live foreign                                 | `blocks_finish: true` if overlaps remain |
 
 Recoverable, expired, terminal, or **queued** foreign records **do not**
 populate `foreign_dirty_overlaps`. A queued peer does not block finish for an
@@ -594,15 +594,15 @@ active agent.
 
 Workflow `status` values are **not** persisted registry lifecycle states.
 
-| Tool response | `edit_allowed` | Agent action |
-|---------------|----------------|--------------|
-| `start` → `needs_analysis` | `false` | `analyze_repository` → `start` again |
-| `start` → `queued` | `false` | Wait → `promote`; re-analyze if `before_run_evicted` |
-| `start` → `blocked` | `false` | Follow `next_step` (`message` matches); do not edit unless `continue_own_wip` was requested and returned `active` |
-| `start` → `active` | `true` | Edit inside declared scope only; read `budget.gate_preview` as advisory |
-| `finish` → `accepted` | — | Intent cleared; optional Claim Guard on review text |
-| `finish` → `unverified` / `workspace_hygiene` | — | Fix evidence or coordinate foreign overlap |
-| `finish` → `violated` | — | Fix regressions or widen scope via new `start` |
+| Tool response                                 | `edit_allowed` | Agent action                                                                                                      |
+|-----------------------------------------------|----------------|-------------------------------------------------------------------------------------------------------------------|
+| `start` → `needs_analysis`                    | `false`        | `analyze_repository` → `start` again                                                                              |
+| `start` → `queued`                            | `false`        | Wait → `promote`; re-analyze if `before_run_evicted`                                                              |
+| `start` → `blocked`                           | `false`        | Follow `next_step` (`message` matches); do not edit unless `continue_own_wip` was requested and returned `active` |
+| `start` → `active`                            | `true`         | Edit inside declared scope only; read `budget.gate_preview` as advisory                                           |
+| `finish` → `accepted`                         | —              | Intent cleared; optional Claim Guard on review text                                                               |
+| `finish` → `unverified` / `workspace_hygiene` | —              | Fix evidence or coordinate foreign overlap                                                                        |
+| `finish` → `violated`                         | —              | Fix regressions or widen scope via new `start`                                                                    |
 
 Interactive version: open the **Change-control transitions** canvas in the IDE
 (alongside this doc).
@@ -658,7 +658,8 @@ Separate accepted baseline debt from new regressions.
   `detail_level` on larger lists.
 - Pass an absolute `root` — MCP rejects relative roots like `.`.
 - Use `coverage_xml` only with `analysis_mode="full"`.
-- Use `source_kind="production-only"` to cut test/fixture noise.
+- Use `source_kind="production"` (or `tests`, `fixtures`, `mixed`, `other`) to
+  cut test/fixture noise.
 - Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
 
 ---

@@ -136,12 +136,12 @@ Such changes often require design-level discussion and may be staged across vers
 
 CodeClone maintains several versioned schema contracts:
 
-| Schema           | Current version | Owner                               |
-|------------------|-----------------|-------------------------------------|
-| Baseline         | `2.1`           | `codeclone/baseline.py`             |
-| Report           | `2.8`           | `codeclone/report/json_contract.py` |
-| Cache            | `2.4`           | `codeclone/cache_io.py`             |
-| Metrics baseline | `1.2`           | `codeclone/metrics_baseline.py`     |
+| Schema           | Current version | Owner                                    |
+|------------------|-----------------|------------------------------------------|
+| Baseline         | `2.1`           | `codeclone/baseline/clone_baseline.py`   |
+| Report           | `2.11`          | `codeclone/report/document/*`            |
+| Cache            | `2.8`           | `codeclone/cache/store.py`               |
+| Metrics baseline | `1.2`           | `codeclone/baseline/metrics_baseline.py` |
 
 Any change to schema shape or semantics requires version review, documentation, and tests.
 
@@ -153,8 +153,13 @@ CodeClone includes an optional **read-only MCP server** (`codeclone[mcp]`) for A
 
 When contributing to MCP:
 
-- MCP must remain **read-only** — it must never mutate baselines, source files, or repo state.
-- Session-local review markers are the only allowed mutable state (in-memory, ephemeral).
+- MCP must remain **read-only** with respect to source files, baselines, analysis
+  cache, and canonical report artifacts.
+- Allowed repo-local writes are limited to ephemeral controller coordination
+  (`.cache/codeclone/intents/`) and optional audit trail
+  (`.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true`).
+- Session-local review markers and in-memory run history are ephemeral and do
+  not survive process restart.
 - MCP reuses pipeline/report contracts — do not create a second analysis truth path.
 - Tool names, resource URIs, and response shapes are public surfaces — changes require tests and docs.
 

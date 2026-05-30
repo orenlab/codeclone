@@ -19,7 +19,9 @@ The Cursor plugin is:
 
 - sourced from `plugins/cursor-codeclone/` in this monorepo
 - backed by the Cursor Plugin manifest at `.cursor-plugin/plugin.json`
-- read-only with respect to repository state
+- read-only with respect to source files, baselines, analysis cache, and
+  canonical report artifacts; full 28-tool MCP passthrough via the bundled
+  stdio launcher (change-control and session tools included)
 - a composition of local MCP server metadata, AI skills, rules, hooks, and an
   agent definition
 - a native Cursor setup surface, not a second extension model
@@ -53,11 +55,12 @@ The plugin currently provides:
     - `codeclone-review` — full structural review session
     - `codeclone-change-control` — intent-first change workflow
 - one agent:
-    - `structural-reviewer` — deterministic code reviewer backed by MCP tools
+    - `codeclone-structural-reviewer` (`agents/structural-reviewer.md`) —
+      deterministic code reviewer backed by MCP tools
 - two rules:
     - `codeclone-workflow.mdc` — MCP discipline (always active)
     - `codeclone-python.mdc` — Python file context (glob-triggered)
-- two hooks:
+- two hooks (Python scripts under `hooks/`; advisory reminders only, no MCP calls):
     - `afterFileEdit` — post-edit re-analysis reminder
     - `stop` — session-end intent cleanup check
 
@@ -66,7 +69,8 @@ The plugin currently provides:
 The plugin surface is additive:
 
 - `mcp.json` contributes a local stdio MCP server definition via
-  `python3 ./scripts/launch_mcp.py` (workspace `.venv` → Poetry env → PATH)
+  `python3 ./scripts/launch_mcp.py` (workspace `.venv` → Poetry env → PATH);
+  the launcher does not filter tools — agents receive the full 28-tool MCP surface
 - the skills contribute workflow guidance and starter prompts
 - the rules enforce MCP-first discipline and Python-aware context
 - the hooks provide automated reminders for re-analysis and intent hygiene

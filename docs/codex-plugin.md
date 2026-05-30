@@ -75,11 +75,19 @@ Additive — the marketplace install provides a local MCP definition and three
 skills. New canonical MCP surfaces from the local `codeclone-mcp` version flow
 through directly, including Coverage Join facts and the optional `coverage`
 help topic when supported. The plugin does not mutate `~/.codex/config.toml` or
-install a second server binary.
+install a second server binary. The bundled launcher does not filter MCP tools;
+agents receive the full 28-tool surface from the resolved `codeclone-mcp` server.
 
 `.agents/plugins/marketplace.json` is the monorepo-local source entry used for
 development and packaging into `orenlab/codeclone-codex`; it is not the public
 install path.
+
+## Read-only contract
+
+Repository truth stays read-only: MCP must not mutate source files, baselines,
+analysis cache, or canonical report artifacts. Change-control and session tools
+may write ephemeral coordination state under `.cache/codeclone/intents/` and
+optional audit records when enabled.
 
 ## Current limits
 

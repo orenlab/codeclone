@@ -26,7 +26,8 @@ It does not create a second truth model and it does not mutate the repository.
 
 ## Install requirements
 
-The extension needs a local `codeclone-mcp` launcher.
+The extension needs a local `codeclone-mcp` launcher and VS Code `1.100.0` or newer
+(`engines.vscode` in `package.json`).
 
 Minimum supported CodeClone version: `2.0.0`.
 
@@ -103,6 +104,17 @@ The extension stays source-first:
 `Open in HTML Report` exists as an explicit bridge to the richer human report,
 not as the primary IDE workflow.
 
+## Blast radius and session commands
+
+The extension also exposes structural change-controller helpers over MCP:
+
+- **Show Blast Radius** — `get_blast_radius` for a repo-relative file path
+- **Copy Blast Radius Brief** — same payload formatted for review notes
+- **Clear Session** — `clear_session_runs` (in-memory runs, reviewed markers,
+  and workspace intent registry state for the MCP process)
+
+These commands require workspace trust and an active MCP connection.
+
 ## First-run path
 
 1. Open the `CodeClone` view container.
@@ -145,8 +157,8 @@ the local MCP launcher.
 
 - `codeclone.mcp.command` and `codeclone.mcp.args` are machine-scoped launcher
   settings, so they belong in user or remote settings.
-- `codeclone.analysis.profile` keeps the default conservative first pass
-  explicit and exposes `Deeper review` and `Custom` as deliberate follow-ups
+- `codeclone.analysis.profile` selects the analysis sensitivity profile:
+  `defaults` (conservative first pass), `deeperReview`, or `custom`
 - `codeclone.analysis.cachePolicy` and the threshold settings below are
   resource-scoped, so they can vary by workspace or folder
 - `codeclone.analysis.changedDiffRef` selects the git revision used by

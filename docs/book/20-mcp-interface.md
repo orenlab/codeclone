@@ -9,21 +9,21 @@ pipeline/report contracts as the CLI. It does not create a second analysis
 engine or a second persistence model.
 
 !!! note "Integration surface, not a second analyzer"
-    MCP composes over the canonical report and run state shared by CLI, HTML,
-    and SARIF. It never mutates source files, baselines, analysis cache, or
-    report artifacts.
+MCP composes over the canonical report and run state shared by CLI, HTML,
+and SARIF. It never mutates source files, baselines, analysis cache, or
+report artifacts.
 
 ---
 
 ## Public surface
 
-| Artifact          | Path                                                                     |
-|-------------------|--------------------------------------------------------------------------|
-| Package extra     | `codeclone[mcp]`                                                         |
-| Launcher          | `codeclone-mcp`                                                          |
-| Server wiring     | `codeclone/surfaces/mcp/server.py`                                       |
+| Artifact          | Path                                                                                                                                                           |
+|-------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Package extra     | `codeclone[mcp]`                                                                                                                                               |
+| Launcher          | `codeclone-mcp`                                                                                                                                                |
+| Server wiring     | `codeclone/surfaces/mcp/server.py`                                                                                                                             |
 | Message catalog   | `codeclone/surfaces/mcp/messages/*` (`tools`/`resources` titles, `help_topics`, `params`, `workflow`, `intent`, `errors`, patch-contract/verification copy, …) |
-| Service / session | `codeclone/surfaces/mcp/service.py`, `codeclone/surfaces/mcp/session.py` |
+| Service / session | `codeclone/surfaces/mcp/service.py`, `codeclone/surfaces/mcp/session.py`                                                                                       |
 
 ---
 
@@ -38,11 +38,10 @@ graph LR
     end
 
     T --> SVC --> SESS
-    SESS -->|"reads"| RP["Canonical Report"]
-    SESS -->|"writes"| WIR["Workspace intents<br/>file or sqlite backend"]
-
-    style Server stroke:#6366f1,stroke-width:2px
-    style WIR fill:#fef9c3
+    SESS -->|" reads "| RP["Canonical Report"]
+    SESS -->|" writes "| WIR["Workspace intents<br/>file or sqlite backend"]
+    style Server stroke: #6366f1, stroke-width: 2px
+    style WIR fill: #fef9c3
 ```
 
 Current server characteristics:
@@ -64,9 +63,9 @@ Current server characteristics:
   [Plans and Retention](../plans-and-retention.md).
 
 !!! warning "Absolute roots and remote exposure"
-    Analysis tools require an absolute repository root. HTTP exposure beyond
-    loopback requires explicit `--allow-remote` and has no built-in
-    authentication.
+Analysis tools require an absolute repository root. HTTP exposure beyond
+loopback requires explicit `--allow-remote` and has no built-in
+authentication.
 
 ---
 
@@ -82,10 +81,9 @@ graph LR
     D --> CC["5. Change control"]
     F --> CC
     CC --> S["6. Session"]
-
-    style A fill:#dbeafe
-    style T fill:#dbeafe
-    style CC fill:#f0fdf4
+    style A fill: #dbeafe
+    style T fill: #dbeafe
+    style CC fill: #f0fdf4
 ```
 
 The surface is intentionally triage-first: analyze → summarize/triage →
@@ -93,15 +91,15 @@ drill into one finding or one hotspot family.
 
 ### Analysis and run-level tools
 
-| Tool                    | Key parameters                                                                                                               | Purpose                                                              |
-|-------------------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------|
+| Tool                    | Key parameters                                                                                                                                                  | Purpose                                                              |
+|-------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------|
 | `analyze_repository`    | `root`, `analysis_mode`, thresholds, `api_surface`, `coverage_xml`, `baseline_path`, `metrics_baseline_path`, `cache_policy`, `changed_paths` or `git_diff_ref` | Full deterministic analysis; registers an in-memory run              |
-| `analyze_changed_paths` | `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, thresholds, `api_surface`, `coverage_xml`, `cache_policy`        | Diff-aware analysis with changed-files projection                    |
-| `get_run_summary`       | `run_id`                                                                                                                     | Cheapest run-level snapshot: health, findings, baseline/cache status |
-| `get_production_triage` | `run_id`, `max_hotspots`, `max_suggestions`                                                                                  | Production-first first-pass view                                     |
-| `compare_runs`          | `run_id_before`, `run_id_after`, `focus`                                                                                     | Run-to-run delta; returns `incomparable` when roots/settings differ  |
-| `evaluate_gates`        | `run_id`, gate flags, threshold overrides, `coverage_min`                                                                    | Preview CI gating decisions without mutating state                   |
-| `help`                  | `topic`, `detail`                                                                                                            | Bounded workflow/contract guidance                                   |
+| `analyze_changed_paths` | `root`, `changed_paths` or `git_diff_ref`, `analysis_mode`, thresholds, `api_surface`, `coverage_xml`, `cache_policy`                                           | Diff-aware analysis with changed-files projection                    |
+| `get_run_summary`       | `run_id`                                                                                                                                                        | Cheapest run-level snapshot: health, findings, baseline/cache status |
+| `get_production_triage` | `run_id`, `max_hotspots`, `max_suggestions`                                                                                                                     | Production-first first-pass view                                     |
+| `compare_runs`          | `run_id_before`, `run_id_after`, `focus`                                                                                                                        | Run-to-run delta; returns `incomparable` when roots/settings differ  |
+| `evaluate_gates`        | `run_id`, gate flags, threshold overrides, `coverage_min`                                                                                                       | Preview CI gating decisions without mutating state                   |
+| `help`                  | `topic`, `detail`                                                                                                                                               | Bounded workflow/contract guidance                                   |
 
 Selected analysis and workflow responses may include non-blocking `tips[]`
 entries for workspace hygiene (for example when `.cache/codeclone/` is not
@@ -133,50 +131,50 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 
 ### Workflow tools (preferred)
 
-| Tool                          | Key parameters                                                            | Purpose                                                                               |
-|-------------------------------|---------------------------------------------------------------------------|---------------------------------------------------------------------------------------|
-| `start_controlled_change`     | `root`, `scope`, `intent`, `expected_effects`, `on_conflict`, `strictness`, `blast_radius_depth`, `dirty_scope_policy` | Pre-edit: workspace check + declare + blast radius + budget in one call. Returns `intent_id` for `finish`. `dirty_scope_policy=continue_own_wip` resumes own dirty scope when no foreign overlap. Does not run analysis |
-| `finish_controlled_change`    | `intent_id`, `changed_files` or `diff_ref`, `after_run_id`, `review_text`, `create_receipt`, `auto_clear`, `strictness` | Post-edit: scope check + verify + claims + receipt + clear in one call. `after_run_id` required for Python structural / governance config profiles |
+| Tool                       | Key parameters                                                                                                          | Purpose                                                                                                                                                                                                                 |
+|----------------------------|-------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `start_controlled_change`  | `root`, `scope`, `intent`, `expected_effects`, `on_conflict`, `strictness`, `blast_radius_depth`, `dirty_scope_policy`  | Pre-edit: workspace check + declare + blast radius + budget in one call. Returns `intent_id` for `finish`. `dirty_scope_policy=continue_own_wip` resumes own dirty scope when no foreign overlap. Does not run analysis |
+| `finish_controlled_change` | `intent_id`, `changed_files` or `diff_ref`, `after_run_id`, `review_text`, `create_receipt`, `auto_clear`, `strictness` | Post-edit: scope check + verify + claims + receipt + clear in one call. `after_run_id` required for Python structural / governance config profiles                                                                      |
 
 ??? info "Start/finish workspace hygiene"
-    Edit permission requires `start_controlled_change` to return
-    `status == "active"` **and** `edit_allowed == true`. Workflow
-    `status: "blocked"` is not persisted registry lifecycle. Start may attach
-    scoped `workspace_hygiene`; finish may fail with `reason: "workspace_hygiene"`.
-    Queued foreign intents do not populate `foreign_dirty_overlaps`. Lazy close
-    on read and `gc_workspace` use different predicates — see book/24.
-    `manage_change_intent(list_workspace)` returns repo-level
-    `workspace_dirty_summary` only. See
-    [Workspace hygiene and registry consistency](24-structural-change-controller.md#workspace-hygiene-and-registry-consistency).
+Edit permission requires `start_controlled_change` to return
+`status == "active"` **and** `edit_allowed == true`. Workflow
+`status: "blocked"` is not persisted registry lifecycle. Start may attach
+scoped `workspace_hygiene`; finish may fail with `reason: "workspace_hygiene"`.
+Queued foreign intents do not populate `foreign_dirty_overlaps`. Lazy close
+on read and `gc_workspace` use different predicates — see book/24.
+`manage_change_intent(list_workspace)` returns repo-level
+`workspace_dirty_summary` only. See
+[Workspace hygiene and registry consistency](24-structural-change-controller.md#workspace-hygiene-and-registry-consistency).
 
 ### Atomic change control tools (advanced / diagnostic)
 
-| Tool                     | Key parameters                                                                                              | Purpose                                                                                     |
-|--------------------------|-------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
+| Tool                     | Key parameters                                                                                                                 | Purpose                                                                                                                                                                                 |
+|--------------------------|--------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `manage_change_intent`   | `action`, `root`, `run_id`, `intent_id`, `scope`, `on_conflict`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace. Use for queue/promote/recover operations alongside workflow tools |
-| `get_blast_radius`       | `run_id`, `files`, `depth`, `include`                                                                       | Pre-change risk boundary: full transitive graph, custom include filters                 |
-| `check_patch_contract`   | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref` | Manual budget query or step-by-step verification                                        |
-| `create_review_receipt`  | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                           | Manual receipt generation                                                               |
-| `validate_review_claims` | `text`, `run_id`, `require_citations`, `patch_health_delta`                                                 | Standalone citation-based overclaim detection; pass `patch_health_delta` from verify when using the atomic workflow |
+| `get_blast_radius`       | `run_id`, `files`, `depth`, `include`                                                                                          | Pre-change risk boundary: full transitive graph, custom include filters                                                                                                                 |
+| `check_patch_contract`   | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref`                    | Manual budget query or step-by-step verification                                                                                                                                        |
+| `create_review_receipt`  | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                                              | Manual receipt generation                                                                                                                                                               |
+| `validate_review_claims` | `text`, `run_id`, `require_citations`, `patch_health_delta`                                                                    | Standalone citation-based overclaim detection; pass `patch_health_delta` from verify when using the atomic workflow                                                                     |
 
 ??? info "Blast radius: do_not_touch vs review_context"
-    `do_not_touch` is limited to actionable negative context: baselines,
-    generated CodeClone state, explicit forbidden paths. Report-only signals
-    such as security boundary inventory and overloaded-module candidates are
-    returned as `review_context` — information, not edit prohibitions. Long
-    context sections include `total`, `shown`, and `truncated` summaries.
+`do_not_touch` is limited to actionable negative context: baselines,
+generated CodeClone state, explicit forbidden paths. Report-only signals
+such as security boundary inventory and overloaded-module candidates are
+returned as `review_context` — information, not edit prohibitions. Long
+context sections include `total`, `shown`, and `truncated` summaries.
 
 ??? info "Patch contract modes"
-    **Budget** reads one stored run and optional intent. Shows regression
-    headroom per quality dimension before editing. Queued intents return
-    `edit_allowed=false`. **Verify** compares explicit before/after stored
-    runs, previews gates, validates scope, and reports baseline-abuse
-    signals. When `intent_id` is provided but `before_run_id` is omitted,
-    verify auto-resolves the before-run from the intent record. Missing runs
-    return `status="unverified"`. Identical before/after runs for
-    `python_structural` / `governance_config` return
-    `reason="after_run_not_new"`. Non-accepted responses include a
-    `next_step` hint and `claim_validation_recommended` flag.
+**Budget** reads one stored run and optional intent. Shows regression
+headroom per quality dimension before editing. Queued intents return
+`edit_allowed=false`. **Verify** compares explicit before/after stored
+runs, previews gates, validates scope, and reports baseline-abuse
+signals. When `intent_id` is provided but `before_run_id` is omitted,
+verify auto-resolves the before-run from the intent record. Missing runs
+return `status="unverified"`. Identical before/after runs for
+`python_structural` / `governance_config` return
+`reason="after_run_not_new"`. Non-accepted responses include a
+`next_step` hint and `claim_validation_recommended` flag.
 
     When a change intent is active, verify mode attributes regressions and
     gate changes to the declared scope. Intent-scope regressions produce
@@ -187,11 +185,11 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 
 ### Session-local tools
 
-| Tool                     | Key parameters                 | Purpose                                 |
-|--------------------------|--------------------------------|-----------------------------------------|
-| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note` | Session-local review marker (in-memory) |
-| `list_reviewed_findings` | `run_id`                       | List reviewed markers for a run         |
-| `clear_session_runs`     | —                              | Reset in-memory runs and session state  |
+| Tool                     | Key parameters                 | Purpose                                                                                               |
+|--------------------------|--------------------------------|-------------------------------------------------------------------------------------------------------|
+| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note` | Session-local review marker (in-memory)                                                               |
+| `list_reviewed_findings` | `run_id`                       | List reviewed markers for a run                                                                       |
+| `clear_session_runs`     | —                              | Reset in-memory runs, session review markers, and workspace intent registry state for the MCP process |
 
 ---
 
@@ -253,11 +251,11 @@ not trigger analysis.
 
 ## Security model
 
-| Property          | Guarantee                                                                       |
-|-------------------|---------------------------------------------------------------------------------|
-| Default transport | Local `stdio`                                                                   |
-| Remote exposure   | Explicit `--allow-remote` required for non-loopback                             |
-| Lazy loading      | Base installs and CI do not require MCP packages                                |
+| Property          | Guarantee                                                                                                                                                              |
+|-------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Default transport | Local `stdio`                                                                                                                                                          |
+| Remote exposure   | Explicit `--allow-remote` required for non-loopback                                                                                                                    |
+| Lazy loading      | Base installs and CI do not require MCP packages                                                                                                                       |
 | Read-only         | Never mutates source, baseline, cache, or report artifacts; optional workspace intent registry (file or sqlite) and audit DB under `.cache/codeclone/db/` when enabled |
 
 ---
