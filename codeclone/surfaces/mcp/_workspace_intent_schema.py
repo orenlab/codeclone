@@ -63,11 +63,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     current = get_meta(conn, "schema_version")
     if current is None:
         create_schema_v1(conn)
-        return
-    if current == "1":
+    elif current == "1":
         _migrate_v1_to_v2(conn)
-        return
-    if current != INTENT_REGISTRY_SCHEMA_VERSION:
+    elif current != INTENT_REGISTRY_SCHEMA_VERSION:
         raise IntentRegistrySchemaError(
             f"Unsupported intent registry schema version: {current}"
         )

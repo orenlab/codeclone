@@ -69,6 +69,9 @@ review receipts, and workflow consolidation tools.
   validation/serialization decorator hooks are excluded from the cohesion graph;
   `computed_field` remains because it commonly reads `self.*` and carries real
   instance behavior. Reported class `method_count` still includes all methods.
+- Workspace intent registry Pydantic contract validation refactored to eliminate
+  duplicated-branch structural noise without changing validation semantics or wire
+  payloads.
 
 - MCP rejects `cache_policy=refresh` at the server boundary (CLI-only).
 - `finish_controlled_change` sets `user_action_required` on digest mismatch.

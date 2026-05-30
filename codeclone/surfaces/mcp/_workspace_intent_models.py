@@ -48,20 +48,25 @@ _VALID_STATUSES = frozenset(
 )
 
 
+def _scope_path_violation(path: str) -> str | None:
+    if Path(path).is_absolute() or ".." in Path(path).parts:
+        return "scope paths must be repo-relative without traversal"
+    return None
+
+
 def _normalize_path_list(value: list[str], *, required: bool) -> list[str]:
     paths: list[str] = []
     for item in value:
         path = item.replace("\\", "/").strip()
         if not path:
             continue
-        if Path(path).is_absolute() or ".." in Path(path).parts:
-            msg = "scope paths must be repo-relative without traversal"
-            raise ValueError(msg)
+        violation = _scope_path_violation(path)
+        if violation is not None:
+            raise ValueError(violation)
         paths.append(path.rstrip("/"))
     deduped = sorted(set(paths))
     if required and not deduped:
-        msg = "allowed_files must not be empty"
-        raise ValueError(msg)
+        raise ValueError("allowed_files must not be empty")
     return deduped
 
 
@@ -137,32 +142,28 @@ class WorkspaceIntentDocument(BaseModel):
     report_digest: str | None = None
     integrity: IntentIntegrityModel
 
-    @model_validator(mode="after")
-    def validate_contract(self) -> Self:
+    def _contract_violations(self) -> tuple[str, ...]:
+        violations: list[str] = []
         if _SAFE_INTENT_ID_RE.match(self.intent_id) is None:
-            msg = "intent_id contains unsafe characters"
-            raise ValueError(msg)
+            violations.append("intent_id contains unsafe characters")
         if not _is_hex_digest(self.scope_digest):
-            msg = "scope_digest must be a 64-char hex digest"
-            raise ValueError(msg)
+            violations.append("scope_digest must be a 64-char hex digest")
         if self.status not in _VALID_STATUSES:
-            msg = f"invalid workspace intent status: {self.status}"
-            raise ValueError(msg)
-
+            violations.append(f"invalid workspace intent status: {self.status}")
         if self.registry_version != LEGACY_REGISTRY_VERSION and (
             self.lease_renewed_at_utc is None
             or self.lease_seconds is None
             or self.report_digest is None
         ):
-            msg = "v2 registry records require lease and report_digest fields"
-            raise ValueError(msg)
+            violations.append(
+                "v2 registry records require lease and report_digest fields"
+            )
 
         lease_renewed_at, lease_seconds, _report_digest = self.normalized_lease_fields()
         if self.registry_version != LEGACY_REGISTRY_VERSION and (
             lease_seconds < MIN_LEASE_SECONDS or lease_seconds > MAX_LEASE_SECONDS
         ):
-            msg = "lease_seconds out of allowed range"
-            raise ValueError(msg)
+            violations.append("lease_seconds out of allowed range")
 
         for timestamp in (
             self.declared_at_utc,
@@ -170,18 +171,23 @@ class WorkspaceIntentDocument(BaseModel):
             lease_renewed_at,
         ):
             if _parse_utc(timestamp) is None:
-                msg = "timestamp fields must be valid UTC ISO-8601"
-                raise ValueError(msg)
+                violations.append("timestamp fields must be valid UTC ISO-8601")
+                break
 
         scope_payload = self.scope.model_dump(mode="json")
         if compute_scope_digest(scope_payload) != self.scope_digest.lower():
-            msg = "scope_digest does not match scope payload"
-            raise ValueError(msg)
+            violations.append("scope_digest does not match scope payload")
 
         expected = compute_intent_digest(unsigned_document_payload(self))
         if expected != self.integrity.payload_sha256:
-            msg = "integrity.payload_sha256 mismatch"
-            raise ValueError(msg)
+            violations.append("integrity.payload_sha256 mismatch")
+        return tuple(violations)
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> Self:
+        violations = self._contract_violations()
+        if violations:
+            raise ValueError(violations[0])
         return self
 
     def normalized_lease_fields(self) -> tuple[str, int, str]:

@@ -280,14 +280,13 @@ class SqliteWorkspaceIntentStore:
             if is_terminal_workspace_intent_status(record.status):
                 continue
             reason = gc_removal_reason(record)
-            if reason is None:
-                continue
-            closed = self.write(
-                replace(record, status=gc_status_for_reason(reason)),
-            )
-            if closed:
-                closed_ids.append(record.intent_id)
-                closed_reasons[record.intent_id] = reason
+            if reason is not None:
+                closed = self.write(
+                    replace(record, status=gc_status_for_reason(reason)),
+                )
+                if closed:
+                    closed_ids.append(record.intent_id)
+                    closed_reasons[record.intent_id] = reason
         retention_purged = self._purge_retention_rows()
         remaining = len(self.list_records())
         return {
