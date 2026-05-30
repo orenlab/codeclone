@@ -30,7 +30,6 @@ from ._patch_contract import (
     budgets_for_strictness,
     detect_baseline_abuse,
 )
-from ._session_intent_mixin import _MCPSessionIntentMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPGateRequest,
@@ -50,7 +49,7 @@ from ._verification_profile import (
 MAX_WORSENED_ITEMS = 20
 
 
-class _MCPSessionPatchContractMixin(_MCPSessionIntentMixin):
+class _MCPSessionPatchContractMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
 

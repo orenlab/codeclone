@@ -14,12 +14,11 @@ from ._claim_guard import (
     validate_claims,
     validate_text_input,
 )
-from ._session_review_receipt_mixin import _MCPSessionReviewReceiptMixin
 from ._session_shared import MCPRunRecord, MCPServiceContractError
 from ._verification_profile import classify_patch
 
 
-class _MCPSessionClaimGuardMixin(_MCPSessionReviewReceiptMixin):
+class _MCPSessionClaimGuardMixin:
     def validate_review_claims(
         self,
         *,

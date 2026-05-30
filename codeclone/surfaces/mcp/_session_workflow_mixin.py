@@ -29,7 +29,6 @@ from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
 from ._intent import IntentRecord, IntentStatus
 from ._patch_contract import PatchContractStatus
-from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunRecord,
@@ -52,7 +51,7 @@ _ACCEPTED_STATUSES: Final[frozenset[str]] = frozenset(
 )
 
 
-class _MCPSessionWorkflowMixin(_MCPSessionClaimGuardMixin):
+class _MCPSessionWorkflowMixin:
     """Workflow orchestration over atomic change-control primitives."""
 
     _runs: CodeCloneMCPRunStore

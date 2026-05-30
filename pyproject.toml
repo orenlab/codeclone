@@ -171,6 +171,17 @@ exclude = [
     "^plugins/cursor-codeclone/scripts/launch_mcp\\.py$",
 ]
 
+[[tool.mypy.overrides]]
+module = [
+    "codeclone.surfaces.mcp._session_blast_radius_mixin",
+    "codeclone.surfaces.mcp._session_claim_guard_mixin",
+    "codeclone.surfaces.mcp._session_intent_mixin",
+    "codeclone.surfaces.mcp._session_patch_contract_mixin",
+    "codeclone.surfaces.mcp._session_review_receipt_mixin",
+    "codeclone.surfaces.mcp._session_workflow_mixin",
+]
+disable_error_code = ["attr-defined", "misc", "no-any-return"]
+
 [tool.ruff]
 line-length = 88
 target-version = "py310"

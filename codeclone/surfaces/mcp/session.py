@@ -35,6 +35,11 @@ from ._session_baseline import (
     resolve_clone_baseline_state,
     resolve_metrics_baseline_state,
 )
+from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
+from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
+from ._session_intent_mixin import _MCPSessionIntentMixin
+from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
+from ._session_review_receipt_mixin import _MCPSessionReviewReceiptMixin
 from ._session_shared import (
     _REPORT_DUMMY_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -75,6 +80,7 @@ from ._session_shared import (
     process,
     report,
 )
+from ._session_state_mixin import _MCPSessionStateMixin
 from ._session_workflow_mixin import _MCPSessionWorkflowMixin
 
 __all__ = [
@@ -96,7 +102,15 @@ __all__ = [
 ]
 
 
-class MCPSession(_MCPSessionWorkflowMixin):
+class MCPSession(
+    _MCPSessionWorkflowMixin,
+    _MCPSessionClaimGuardMixin,
+    _MCPSessionReviewReceiptMixin,
+    _MCPSessionPatchContractMixin,
+    _MCPSessionIntentMixin,
+    _MCPSessionBlastRadiusMixin,
+    _MCPSessionStateMixin,
+):
     def __init__(
         self,
         *,

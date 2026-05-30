@@ -23,10 +23,9 @@ from ._session_shared import (
     MCPRunRecord,
     MCPServiceContractError,
 )
-from ._session_state_mixin import _MCPSessionStateMixin
 
 
-class _MCPSessionBlastRadiusMixin(_MCPSessionStateMixin):
+class _MCPSessionBlastRadiusMixin:
     _runs: CodeCloneMCPRunStore
     _blast_radius_cache: dict[tuple[str, tuple[str, ...], str], BlastRadiusResult]
 

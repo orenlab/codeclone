@@ -39,7 +39,6 @@ from ._intent import (
     normalize_expected_effects,
     normalize_intent_scope,
 )
-from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
@@ -90,7 +89,7 @@ class _RecoveryRun:
     report_digest: str
 
 
-class _MCPSessionIntentMixin(_MCPSessionBlastRadiusMixin):
+class _MCPSessionIntentMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
     _intent_sequence: int

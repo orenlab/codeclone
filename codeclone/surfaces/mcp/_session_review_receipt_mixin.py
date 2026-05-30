@@ -25,7 +25,6 @@ from ._review_receipt import (
     receipt_verdict,
     render_receipt_markdown,
 )
-from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunRecord,
@@ -33,7 +32,7 @@ from ._session_shared import (
 )
 
 
-class _MCPSessionReviewReceiptMixin(_MCPSessionPatchContractMixin):
+class _MCPSessionReviewReceiptMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
     _review_state: dict[str, OrderedDict[str, str | None]]
