@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 
 import pytest
 
@@ -15,6 +15,17 @@ from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 
 ReportMetaFactory = Callable[..., dict[str, object]]
+
+
+@pytest.fixture(autouse=True)
+def _clear_workspace_intent_store_cache() -> Generator[None, None, None]:
+    from codeclone.surfaces.mcp._workspace_intent_store import (
+        clear_workspace_intent_store_cache,
+    )
+
+    clear_workspace_intent_store_cache()
+    yield
+    clear_workspace_intent_store_cache()
 
 
 @pytest.fixture

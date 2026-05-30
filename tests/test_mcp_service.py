@@ -18,6 +18,7 @@ from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 
@@ -5241,6 +5242,23 @@ def test_claim_guard_no_citations_warning_and_unknown_short_id() -> None:
     ]
 
 
+def test_claim_guard_profile_and_health_keyword_edges() -> None:
+    context = replace(
+        _claim_guard_context(),
+        verification_profile="documentation_only",
+        patch_health_delta=-2,
+    )
+    payload = mcp_claim_guard_mod.validate_claims(
+        text="No structural regressions were introduced in this docs patch.",
+        report_context=context,
+        require_citations=False,
+    )
+    warnings = cast("list[dict[str, str]]", payload["warnings"])
+    assert any(item["type"] == "structural_checks_not_applicable" for item in warnings)
+    violations = cast("list[dict[str, str]]", payload["violations"])
+    assert any(item["pattern"] == "health_regression_overclaim" for item in violations)
+
+
 def test_mcp_service_validate_review_claims_contract(tmp_path: Path) -> None:
     service = CodeCloneMCPService(history_limit=4)
     record = _blast_radius_run_record(tmp_path, run_id="claimguard1234567890")
@@ -8294,7 +8312,10 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
     assert workflow_mod._budget_summary({"gate_preview": {"would_fail": True}})[
         "gate_preview"
     ] == {"would_fail": True}
-    from codeclone.surfaces.mcp._workspace_hygiene import WorkspaceHygieneResult
+    from codeclone.surfaces.mcp._workspace_hygiene import (
+        ForeignDirtyOverlap,
+        WorkspaceHygieneResult,
+    )
 
     assert (
         "high"
@@ -8354,6 +8375,138 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
             review_text="F-1 reviewed.",
         )
         is None
+    )
+    claims_record = _patch_contract_run_record(
+        Path("/tmp/root"),
+        run_id="claimhealth123456",
+        digest="claim-health-digest",
+        include_regression=False,
+        complexity=6,
+        health=88,
+    )
+    with patch.object(
+        service,
+        "validate_review_claims",
+        return_value={"valid": True},
+    ) as validate:
+        claims = workflow_mod._MCPSessionWorkflowMixin._conditional_claim_validation(
+            service,
+            record=claims_record,
+            verify_payload={
+                "claim_validation_recommended": True,
+                "structural_delta": {"health_delta": -2},
+            },
+            review_text="Health unchanged.",
+        )
+        assert claims == {"valid": True}
+        assert validate.call_args.kwargs["patch_health_delta"] == -2
+        validate.reset_mock()
+        claims_without_delta = (
+            workflow_mod._MCPSessionWorkflowMixin._conditional_claim_validation(
+                service,
+                record=claims_record,
+                verify_payload={
+                    "claim_validation_recommended": True,
+                    "structural_delta": {"health_delta": "not-an-int"},
+                },
+                review_text="Health unchanged.",
+            )
+        )
+        assert claims_without_delta == {"valid": True}
+        assert validate.call_args.kwargs["patch_health_delta"] is None
+    assert workflow_mod._workspace_summary_from_declare(
+        {"total_agents": 1},
+        {"blocked_by": [{"ownership": "foreign_active"}]},
+    )["concurrent_intents"] == [{"ownership": "foreign_active"}]
+    assert workflow_mod._as_conflict_list("not-a-list") == []
+    with pytest.raises(MCPServiceContractError):
+        workflow_mod._validated_dirty_scope_policy("invalid")
+    dirty_hygiene = WorkspaceHygieneResult(
+        git_available=True,
+        dirty_paths=("pkg/a.py",),
+        dirty_paths_in_scope=("pkg/a.py",),
+        dirty_paths_outside_scope=(),
+        foreign_dirty_overlaps=(),
+        blocks_edit=True,
+    )
+    assert (
+        workflow_mod._start_edit_allowed(
+            declare_status="active",
+            concurrent_intents=[],
+            on_conflict=None,
+            hygiene=dirty_hygiene,
+            dirty_scope_policy="block",
+        )
+        is False
+    )
+    assert (
+        workflow_mod._start_workflow_status(
+            declare_status="queued",
+            coordination_blocked=False,
+            hygiene=dirty_hygiene,
+            dirty_scope_policy="block",
+        )
+        == "queued"
+    )
+    assert (
+        workflow_mod._start_workflow_status(
+            declare_status="active",
+            coordination_blocked=True,
+            hygiene=dirty_hygiene,
+            dirty_scope_policy="block",
+        )
+        == "blocked"
+    )
+    foreign_stale_message = workflow_mod._start_next_step(
+        concurrent_intents=[{"ownership": "foreign_stale"}],
+        hygiene=dirty_hygiene,
+        dirty_scope_policy="block",
+    )
+    assert foreign_stale_message
+    combined_message = workflow_mod._start_next_step(
+        concurrent_intents=[{"ownership": "foreign_active"}],
+        hygiene=dirty_hygiene,
+        dirty_scope_policy="block",
+    )
+    assert "foreign" in combined_message.lower() or combined_message
+    dirty_message = workflow_mod._start_next_step(
+        concurrent_intents=[],
+        hygiene=dirty_hygiene,
+        dirty_scope_policy="block",
+    )
+    assert dirty_message
+    foreign_dirty = WorkspaceHygieneResult(
+        git_available=True,
+        dirty_paths=("pkg/a.py",),
+        dirty_paths_in_scope=("pkg/a.py",),
+        dirty_paths_outside_scope=(),
+        foreign_dirty_overlaps=(
+            ForeignDirtyOverlap(
+                path="pkg/a.py",
+                foreign_intent_id="intent-foreign-001",
+                foreign_persisted_status="active",
+                foreign_ownership="foreign_active",
+                foreign_agent_label="other",
+                message="overlap",
+            ),
+        ),
+        blocks_edit=True,
+    )
+    foreign_dirty_message = workflow_mod._start_next_step(
+        concurrent_intents=[],
+        hygiene=foreign_dirty,
+        dirty_scope_policy="block",
+    )
+    assert foreign_dirty_message
+    assert (
+        workflow_mod._start_edit_allowed(
+            declare_status="blocked",
+            concurrent_intents=[{"ownership": "foreign_active"}],
+            on_conflict=None,
+            hygiene=dirty_hygiene,
+            dirty_scope_policy="block",
+        )
+        is False
     )
 
 
@@ -8552,6 +8705,44 @@ def test_mcp_start_continue_own_wip_allows_dirty_scope(
     )
     assert still_blocked["status"] == "blocked"
     assert still_blocked["edit_allowed"] is False
+
+
+def test_mcp_finish_controlled_change_blocked_by_workspace_hygiene(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.mcp._workspace_hygiene import WorkspaceHygieneResult
+
+    service = CodeCloneMCPService(history_limit=4)
+    _register_docs_patch_run(service, tmp_path)
+    started = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="docs patch with finish hygiene gate",
+    )
+    assert started["status"] == "active"
+    blocked_hygiene = WorkspaceHygieneResult(
+        git_available=True,
+        dirty_paths=("README.md",),
+        dirty_paths_in_scope=("README.md",),
+        dirty_paths_outside_scope=(),
+        foreign_dirty_overlaps=(),
+        blocks_edit=True,
+        unacknowledged_dirty_in_scope=("README.md",),
+        blocks_finish=True,
+    )
+    monkeypatch.setattr(
+        mcp_workspace_hygiene_mod,
+        "finish_hygiene_check",
+        lambda **_: blocked_hygiene,
+    )
+    finished = service.finish_controlled_change(
+        intent_id=str(started["intent_id"]),
+        changed_files=["README.md"],
+    )
+    assert finished["status"] == "unverified"
+    assert finished["reason"] == "workspace_hygiene"
+    assert finished["user_action_required"] is True
 
 
 def test_mcp_verify_health_regression_advisory_on_accepted(

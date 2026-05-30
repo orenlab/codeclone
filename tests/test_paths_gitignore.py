@@ -43,6 +43,20 @@ def test_gitignore_pattern_covers_codeclone_cache(pattern: str, expected: bool) 
 def test_normalize_gitignore_pattern_strips_comments_and_slashes() -> None:
     assert normalize_gitignore_pattern("  /.cache/codeclone/  ") == ".cache/codeclone"
     assert normalize_gitignore_pattern("# ignore cache") == ""
+    assert normalize_gitignore_pattern("\\# .cache/codeclone/") == "# .cache/codeclone"
+
+
+def test_repo_gitignore_covers_codeclone_cache_read_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".gitignore").write_text(".cache/codeclone/\n", encoding="utf-8")
+
+    def raise_oserror(self: Path, encoding: str | None = None) -> str:
+        raise OSError("denied")
+
+    monkeypatch.setattr(Path, "read_text", raise_oserror)
+    assert repo_gitignore_covers_codeclone_cache(tmp_path) is False
 
 
 def test_repo_gitignore_covers_codeclone_cache(tmp_path: Path) -> None:

@@ -7,8 +7,8 @@
 from __future__ import annotations
 
 import json
-import os
-from collections.abc import Generator
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -45,15 +45,23 @@ from codeclone.surfaces.mcp._workspace_intent_store import (
     _record_from_json,
     clear_workspace_intent_store_cache,
     get_workspace_intent_store,
+    lazy_close_eligible_records,
 )
-from codeclone.surfaces.mcp._workspace_intents import WorkspaceIntentRecord
+from tests.test_workspace_intents import _record
 
 
-@pytest.fixture(autouse=True)
-def _clear_store_cache() -> Generator[None, None, None]:
-    clear_workspace_intent_store_cache()
-    yield
-    clear_workspace_intent_store_cache()
+@contextmanager
+def _open_sqlite_store(
+    sqlite_root: Path,
+    *,
+    retention_days: int = 7,
+) -> Iterator[SqliteWorkspaceIntentStore]:
+    db_path = sqlite_root / DEFAULT_INTENT_REGISTRY_DB_PATH
+    store = SqliteWorkspaceIntentStore(db_path=db_path, retention_days=retention_days)
+    try:
+        yield store
+    finally:
+        store.close()
 
 
 @pytest.fixture
@@ -65,39 +73,6 @@ def sqlite_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     clear_workspace_intent_store_cache()
     return tmp_path
-
-
-def _record(
-    *,
-    intent_id: str = "intent-abcdef12-001",
-    pid: int | None = None,
-    start_epoch: int = 100,
-    status: str = "active",
-) -> WorkspaceIntentRecord:
-    declared_at = workspace_intents.utc_now()
-    scope_payload: dict[str, object] = {
-        "allowed_files": ["pkg/a.py"],
-        "allowed_related": ["tests/test_a.py"],
-        "forbidden": [".cache/codeclone/**", "codeclone.baseline.json"],
-    }
-    return WorkspaceIntentRecord(
-        intent_id=intent_id,
-        agent_pid=pid or os.getpid(),
-        agent_start_epoch=start_epoch,
-        agent_label="agent-a",
-        run_id="abcdef1234567890",
-        declared_at_utc=workspace_intents.format_utc(declared_at),
-        expires_at_utc=workspace_intents.format_utc(declared_at + timedelta(hours=1)),
-        ttl_seconds=3600,
-        status=status,
-        intent="edit pkg.a",
-        scope=scope_payload,
-        scope_digest=workspace_intents.compute_scope_digest(scope_payload),
-        blast_radius_summary={"radius_level": "medium"},
-        lease_renewed_at_utc=workspace_intents.format_utc(declared_at),
-        lease_seconds=workspace_intents.DEFAULT_LEASE_SECONDS,
-        report_digest="digest-a",
-    )
 
 
 def test_resolve_intent_registry_backend_defaults() -> None:
@@ -225,123 +200,147 @@ def test_sqlite_store_write_list_find_update_close(sqlite_root: Path) -> None:
     assert store.find(closed_via_status.intent_id) is None
 
 
-def test_sqlite_store_gc_closes_corrupted_and_stale(sqlite_root: Path) -> None:
-    db_path = sqlite_root / DEFAULT_INTENT_REGISTRY_DB_PATH
-    store = SqliteWorkspaceIntentStore(db_path=db_path, retention_days=14)
-    record = _record(intent_id="intent-stale-001")
+def test_sqlite_store_list_records_for_hygiene_and_find_raw(
+    sqlite_root: Path,
+) -> None:
+    record = _record(intent_id="intent-hygiene-001")
+    store = get_workspace_intent_store(sqlite_root)
+    assert store.write(record)
+    hygiene_records = store.list_records_for_hygiene()
+    assert record in hygiene_records
+    assert store.find_raw(record.intent_id) == record
+    raw_records = store.list_records_raw()
+    assert record in raw_records
+
+
+def test_sqlite_store_remove_rejects_invalid_intent_id(sqlite_root: Path) -> None:
+    store = get_workspace_intent_store(sqlite_root)
+    assert store.remove(pid=1, start_epoch=1, intent_id="not-an-intent") is False
+
+
+def test_sqlite_store_lazy_close_eligible_records(sqlite_root: Path) -> None:
     stale = replace(
-        _record(
-            intent_id="intent-expired-002",
-            pid=record.agent_pid + 1,
-            start_epoch=101,
-        ),
+        _record(intent_id="intent-lazy-close-001"),
         expires_at_utc=workspace_intents.format_utc(
             workspace_intents.utc_now() - timedelta(hours=1)
         ),
     )
-    assert store.write(record)
+    store = get_workspace_intent_store(sqlite_root)
     assert store.write(stale)
-    with store._lock:
-        store._conn.execute(
-            """
-            INSERT INTO workspace_intents(
-                agent_pid,
-                agent_start_epoch,
-                intent_id,
-                declared_at_utc,
-                payload_json,
-                closed_at_utc,
-                updated_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                999,
-                999,
-                "intent-bad-003",
-                "2026-01-01T00:00:00Z",
-                "{not-json",
-                None,
-                "2026-01-01T00:00:00Z",
+    result = lazy_close_eligible_records(store)
+    assert stale.intent_id in result.closed_ids
+
+
+def test_sqlite_store_gc_closes_corrupted_and_stale(sqlite_root: Path) -> None:
+    with _open_sqlite_store(sqlite_root, retention_days=14) as store:
+        record = _record(intent_id="intent-stale-001")
+        stale = replace(
+            _record(
+                intent_id="intent-expired-002",
+                pid=record.agent_pid + 1,
+                start_epoch=101,
+            ),
+            expires_at_utc=workspace_intents.format_utc(
+                workspace_intents.utc_now() - timedelta(hours=1)
             ),
         )
-        store._conn.commit()
+        assert store.write(record)
+        assert store.write(stale)
+        with store._lock:
+            store._conn.execute(
+                """
+                INSERT INTO workspace_intents(
+                    agent_pid,
+                    agent_start_epoch,
+                    intent_id,
+                    declared_at_utc,
+                    payload_json,
+                    closed_at_utc,
+                    updated_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    999,
+                    999,
+                    "intent-bad-003",
+                    "2026-01-01T00:00:00Z",
+                    "{not-json",
+                    None,
+                    "2026-01-01T00:00:00Z",
+                ),
+            )
+            store._conn.commit()
 
-    result = store.gc()
-    removed = result["removed"]
-    corrupted_removed = result["corrupted_removed"]
-    assert isinstance(removed, int) and removed >= 1
-    assert isinstance(corrupted_removed, int) and corrupted_removed >= 1
-    assert store.find("intent-stale-001") is not None
-    assert store.find("intent-expired-002") is None
-    archived = store._fetch_record_unlocked(
-        pid=stale.agent_pid,
-        start_epoch=stale.agent_start_epoch,
-        intent_id=stale.intent_id,
-    )
-    assert archived is not None
-    assert archived.status == "expired"
+        result = store.gc()
+        removed = result["removed"]
+        corrupted_removed = result["corrupted_removed"]
+        assert isinstance(removed, int) and removed >= 1
+        assert isinstance(corrupted_removed, int) and corrupted_removed >= 1
+        assert store.find("intent-stale-001") is not None
+        assert store.find("intent-expired-002") is None
+        archived = store._fetch_record_unlocked(
+            pid=stale.agent_pid,
+            start_epoch=stale.agent_start_epoch,
+            intent_id=stale.intent_id,
+        )
+        assert archived is not None
+        assert archived.status == "expired"
 
 
 def test_sqlite_store_retention_purges_closed_rows(sqlite_root: Path) -> None:
-    db_path = sqlite_root / DEFAULT_INTENT_REGISTRY_DB_PATH
-    store = SqliteWorkspaceIntentStore(db_path=db_path, retention_days=7)
-    closed = replace(_record(intent_id="intent-old-001"), status="clean")
-    assert store.write(closed)
-    old_closed_at = workspace_intents.format_utc(
-        workspace_intents.utc_now() - timedelta(days=30)
-    )
-    with store._lock:
-        store._conn.execute(
-            """
-            UPDATE workspace_intents
-            SET closed_at_utc = ?
-            WHERE intent_id = ?
-            """,
-            (old_closed_at, closed.intent_id),
+    with _open_sqlite_store(sqlite_root) as store:
+        closed = replace(_record(intent_id="intent-old-001"), status="clean")
+        assert store.write(closed)
+        old_closed_at = workspace_intents.format_utc(
+            workspace_intents.utc_now() - timedelta(days=30)
         )
-        store._conn.commit()
+        with store._lock:
+            store._conn.execute(
+                """
+                UPDATE workspace_intents
+                SET closed_at_utc = ?
+                WHERE intent_id = ?
+                """,
+                (old_closed_at, closed.intent_id),
+            )
+            store._conn.commit()
 
-    result = store.gc()
-    assert result["retention_purged"] == 1
-    assert (
-        store._fetch_record_unlocked(
-            pid=closed.agent_pid,
-            start_epoch=closed.agent_start_epoch,
-            intent_id=closed.intent_id,
+        result = store.gc()
+        assert result["retention_purged"] == 1
+        assert (
+            store._fetch_record_unlocked(
+                pid=closed.agent_pid,
+                start_epoch=closed.agent_start_epoch,
+                intent_id=closed.intent_id,
+            )
+            is None
         )
-        is None
-    )
 
 
 def test_sqlite_store_exposes_storage_path_and_closes(sqlite_root: Path) -> None:
     db_path = sqlite_root / DEFAULT_INTENT_REGISTRY_DB_PATH
-    store = SqliteWorkspaceIntentStore(db_path=db_path, retention_days=7)
-    assert store.storage_path == db_path
-    store.close()
+    with _open_sqlite_store(sqlite_root) as store:
+        assert store.storage_path == db_path
 
 
 def test_sqlite_store_write_returns_false_for_invalid_record(
     sqlite_root: Path,
 ) -> None:
-    db_path = sqlite_root / DEFAULT_INTENT_REGISTRY_DB_PATH
-    store = SqliteWorkspaceIntentStore(db_path=db_path, retention_days=7)
-    assert store.write(object()) is False  # type: ignore[arg-type]
+    with _open_sqlite_store(sqlite_root) as store:
+        assert store.write(object()) is False  # type: ignore[arg-type]
 
 
 def test_sqlite_store_gc_returns_empty_result_on_query_failure(
     sqlite_root: Path,
 ) -> None:
-    db_path = sqlite_root / DEFAULT_INTENT_REGISTRY_DB_PATH
-    store = SqliteWorkspaceIntentStore(db_path=db_path, retention_days=7)
-    store.close()
-    result = store.gc()
-    assert result["removed"] == 0
-    assert result["remaining"] == 0
+    with _open_sqlite_store(sqlite_root) as store:
+        store.close()
+        result = store.gc()
+        assert result["removed"] == 0
+        assert result["remaining"] == 0
 
 
 def test_record_from_json_accepts_dict_payload() -> None:
-    from tests.test_workspace_intents import _record
-
     record = _record()
     payload = json.loads(signed_payload_json_from_record(record))
     parsed = _record_from_json(payload)

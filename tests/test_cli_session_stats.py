@@ -9,6 +9,7 @@ import io
 import json
 import os
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
@@ -24,6 +25,7 @@ from codeclone.surfaces.cli.session_stats import (
     _classify_workspace_health,
     _format_age,
     _format_duration,
+    _has_scope_overlap,
     _IntentSnapshot,
     _is_pid_alive,
     _lease_remaining_seconds,
@@ -168,6 +170,41 @@ def _snapshot(
     )
 
 
+def _write_audit_pyproject(
+    tmp_path: Path,
+    *,
+    enabled: bool = True,
+    audit_path: str | None = None,
+) -> None:
+    lines = ["[tool.codeclone]"]
+    if enabled:
+        lines.append("audit_enabled = true")
+    if audit_path is not None:
+        lines.append(f'audit_path = "{audit_path}"')
+    (tmp_path / "pyproject.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _snapshot_with_audit_and_run(
+    *,
+    health: int = 88,
+    findings: int = 3,
+    age_seconds: int = 12,
+    files: int | None = None,
+) -> session_stats_mod._SessionSnapshot:
+    return replace(
+        _snapshot(
+            latest_run_id="run1234567890",
+            latest_run_health=health,
+            latest_run_findings=findings,
+            latest_run_age_seconds=age_seconds,
+            latest_run_files=files,
+            cache_present=True,
+        ),
+        audit_enabled=True,
+        audit_storage=".cache/codeclone/db/audit.sqlite3",
+    )
+
+
 # ── Quiet mode tests ──
 
 
@@ -231,10 +268,7 @@ def test_session_stats_stale_quiet(tmp_path: Path) -> None:
     )
     printer = _RecordingPrinter()
 
-    with patch(
-        "codeclone.surfaces.mcp._workspace_intents._is_pid_alive",
-        return_value=False,
-    ):
+    with patch.object(session_stats_mod, "_is_pid_alive", return_value=False):
         exit_code = render_session_stats(
             console=printer,
             root_path=tmp_path,
@@ -477,7 +511,7 @@ def test_session_stats_reader_failure_is_idle(
         raise OSError("registry unavailable")
 
     monkeypatch.setattr(
-        "codeclone.surfaces.mcp._workspace_intents.list_workspace_intents",
+        "codeclone.surfaces.mcp._workspace_intents.list_workspace_intent_records_for_recovery",
         raise_reader_error,
     )
     printer = _RecordingPrinter()
@@ -516,6 +550,34 @@ def test_session_stats_contract_error(
     assert "failed to read session state: boom" in printer.text
 
 
+def test_collect_session_snapshot_tolerates_non_list_allowed_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    record = SimpleNamespace(
+        agent_pid=os.getpid(),
+        agent_start_epoch=100,
+        agent_label="agent",
+        intent_id="intent-bad-scope-001",
+        status="active",
+        declared_at_utc="2026-01-01T00:00:00Z",
+        expires_at_utc="2099-01-01T00:00:00Z",
+        lease_renewed_at_utc="2026-01-01T00:00:00Z",
+        lease_seconds=3600,
+        scope={"allowed_files": "pkg/a.py"},
+    )
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp._workspace_intents.list_workspace_intent_records_for_recovery",
+        lambda **_: (record,),
+    )
+    monkeypatch.setattr(session_stats_mod, "_process_start_epoch", lambda: 100)
+    snapshot = session_stats_mod._collect_session_snapshot(tmp_path)
+    assert len(snapshot.agents) == 1
+    assert snapshot.agents[0].intents[0].allowed_files == ()
+
+
 def test_session_stats_counts_expired_stale_and_recoverable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -548,7 +610,8 @@ def test_session_stats_counts_expired_stale_and_recoverable(
         session_stats_mod, "_process_start_epoch", lambda: own_start_epoch
     )
     monkeypatch.setattr(
-        "codeclone.surfaces.mcp._workspace_intents._is_pid_alive",
+        session_stats_mod,
+        "_is_pid_alive",
         lambda pid: pid == os.getpid(),
     )
 
@@ -1068,6 +1131,146 @@ def test_ownership_style_branches() -> None:
 # ── _resolve_mcp_tokens ──
 
 
+def test_read_audit_config_enabled_relative_path(tmp_path: Path) -> None:
+    _write_audit_pyproject(
+        tmp_path,
+        audit_path=".cache/codeclone/db/audit.sqlite3",
+    )
+    enabled, storage = session_stats_mod._read_audit_config(tmp_path)
+    assert enabled is True
+    assert storage == ".cache/codeclone/db/audit.sqlite3"
+
+
+def test_read_audit_config_config_validation_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.config.pyproject_loader import ConfigValidationError
+
+    monkeypatch.setattr(
+        "codeclone.config.pyproject_loader.load_pyproject_config",
+        lambda _root: (_ for _ in ()).throw(ConfigValidationError("bad")),
+    )
+    enabled, storage = session_stats_mod._read_audit_config(tmp_path)
+    assert enabled is False
+    assert storage is None
+
+
+def test_read_audit_config_disabled(tmp_path: Path) -> None:
+    enabled, storage = session_stats_mod._read_audit_config(tmp_path)
+    assert enabled is False
+    assert storage is None
+
+
+def test_read_audit_config_enabled_with_absolute_path(tmp_path: Path) -> None:
+    _write_audit_pyproject(tmp_path, audit_path="/tmp/audit.sqlite3")
+    enabled, storage = session_stats_mod._read_audit_config(tmp_path)
+    assert enabled is True
+    assert storage is None
+
+
+def test_read_audit_config_storage_falls_back_when_not_relative(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outside = Path("/tmp/codeclone-audit-outside.sqlite3")
+    _write_audit_pyproject(tmp_path, audit_path=".cache/codeclone/db/audit.sqlite3")
+    monkeypatch.setattr(
+        "codeclone.audit.validation.resolve_audit_path",
+        lambda **_: outside,
+    )
+    enabled, storage = session_stats_mod._read_audit_config(tmp_path)
+    assert enabled is True
+    assert storage == str(outside)
+
+
+def test_has_scope_overlap_ignores_non_active_intents() -> None:
+    queued = _IntentSnapshot(
+        intent_id="queued",
+        status="queued",
+        ownership="foreign_active",
+        scope_file_count=1,
+        allowed_files=("shared.py",),
+        declared_at_utc="",
+        lease_remaining_seconds=60,
+    )
+    active = _IntentSnapshot(
+        intent_id="active",
+        status="active",
+        ownership="foreign_active",
+        scope_file_count=1,
+        allowed_files=("other.py",),
+        declared_at_utc="",
+        lease_remaining_seconds=60,
+    )
+    agents = (
+        _AgentSnapshot(pid=1, start_epoch=1, label="a", alive=True, intents=(queued,)),
+        _AgentSnapshot(pid=2, start_epoch=2, label="b", alive=True, intents=(active,)),
+    )
+    assert _has_scope_overlap(list(agents)) is False
+
+
+@pytest.mark.parametrize(
+    ("renderer", "include_health_marker"),
+    [
+        ("plain", True),
+        ("rich", False),
+    ],
+)
+def test_session_stats_verbose_includes_audit_and_run(
+    renderer: str,
+    include_health_marker: bool,
+) -> None:
+    snapshot = _snapshot_with_audit_and_run(
+        health=90 if renderer == "rich" else 88,
+        findings=2 if renderer == "rich" else 3,
+        age_seconds=30 if renderer == "rich" else 12,
+        files=5 if renderer == "rich" else None,
+    )
+    if renderer == "plain":
+        printer = _RecordingPrinter()
+        exit_code = session_stats_mod._render_verbose(printer, snapshot)
+        text = printer.text
+    else:
+        output = io.StringIO()
+        console = Console(
+            file=output, force_terminal=True, color_system=None, width=100
+        )
+        exit_code = session_stats_mod._render_verbose_rich(
+            cast(PrinterLike, console),
+            snapshot,
+        )
+        text = output.getvalue()
+
+    assert exit_code == int(ExitCode.SUCCESS)
+    assert "audit.sqlite3" in text
+    assert "run1234567890" in text
+    if include_health_marker:
+        assert "health=88" in text
+
+
+def test_read_audit_token_footprint_handles_config_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "codeclone.config.pyproject_loader.load_pyproject_config",
+        lambda _root: (_ for _ in ()).throw(OSError("boom")),
+    )
+    tokens, encoding, count = session_stats_mod._read_audit_token_footprint(tmp_path)
+    assert tokens is None
+    assert encoding is None
+    assert count == 0
+
+
+def test_read_audit_token_footprint_when_db_missing(tmp_path: Path) -> None:
+    _write_audit_pyproject(tmp_path)
+    tokens, encoding, count = session_stats_mod._read_audit_token_footprint(tmp_path)
+    assert tokens is None
+    assert encoding is None
+    assert count == 0
+
+
 def test_resolve_mcp_tokens_with_audit_data(tmp_path: Path) -> None:
     """Exercise _resolve_mcp_tokens with existing audit DB (lines 585-592)."""
     from codeclone.audit.events import (
@@ -1078,10 +1281,7 @@ def test_resolve_mcp_tokens_with_audit_data(tmp_path: Path) -> None:
     from codeclone.audit.writer import SqliteAuditWriter
 
     db_path = tmp_path / ".cache" / "codeclone" / "db" / "audit.sqlite3"
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.codeclone]\naudit_enabled = true\n",
-        encoding="utf-8",
-    )
+    _write_audit_pyproject(tmp_path)
     writer = SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30)
     try:
         writer.emit(

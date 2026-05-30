@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Generator
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -21,17 +20,6 @@ from codeclone.surfaces.mcp._workspace_intents import WorkspaceIntentRecord
 from codeclone.utils.json_io import read_json_object, write_json_document_atomically
 
 _PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
-
-
-@pytest.fixture(autouse=True)
-def _clear_intent_store_cache() -> Generator[None, None, None]:
-    from codeclone.surfaces.mcp._workspace_intent_store import (
-        clear_workspace_intent_store_cache,
-    )
-
-    clear_workspace_intent_store_cache()
-    yield
-    clear_workspace_intent_store_cache()
 
 
 def _record(
