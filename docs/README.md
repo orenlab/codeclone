@@ -12,51 +12,52 @@ it intends to change, CodeClone maps the structural blast radius, verifies the
 patch against the declared boundary, and generates an auditable review receipt.
 
 !!! note "Licensing"
-    Source code: MPL-2.0. Documentation and docs-site content: MIT.
+Source code: MPL-2.0. Documentation and docs-site content: MIT.
 
 ---
 
 ## Getting Started
 
-| Goal | Start here |
-|------|-----------|
-| First install and run | [Getting started](getting-started.md) |
-| Understand the model | [Contracts and guarantees](book/00-intro.md) |
-| Terminology lookup | [Terminology](book/02-terminology.md) |
+| Goal                  | Start here                                   |
+|-----------------------|----------------------------------------------|
+| First install and run | [Getting started](getting-started.md)        |
+| Understand the model  | [Contracts and guarantees](book/00-intro.md) |
+| Terminology lookup    | [Terminology](book/02-terminology.md)        |
 
 ## CI and Gating
 
-| Goal | Start here |
-|------|-----------|
-| Baseline-aware CI | [Getting started: CI setup](getting-started.md#ci-setup) |
-| Exit codes and failure policy | [Exit codes](book/03-contracts-exit-codes.md) |
-| Quality gates and metrics | [Metrics and gates](book/15-metrics-and-quality-gates.md) |
-| Baseline contract | [Baseline](book/06-baseline.md) |
+| Goal                          | Start here                                                |
+|-------------------------------|-----------------------------------------------------------|
+| Baseline-aware CI             | [Getting started: CI setup](getting-started.md#ci-setup)  |
+| Exit codes and failure policy | [Exit codes](book/03-contracts-exit-codes.md)             |
+| Quality gates and metrics     | [Metrics and gates](book/15-metrics-and-quality-gates.md) |
+| Baseline contract             | [Baseline](book/06-baseline.md)                           |
 
 ## AI Agent Governance
 
-| Goal | Start here |
-|------|-----------|
-| Change controller workflow | [Structural Change Controller](book/24-structural-change-controller.md) |
-| MCP interface contract | [MCP interface](book/20-mcp-interface.md) |
-| MCP usage guide | [MCP guide](mcp.md) |
+| Goal                               | Start here                                                              |
+|------------------------------------|-------------------------------------------------------------------------|
+| Change controller workflow         | [Structural Change Controller](book/24-structural-change-controller.md) |
+| Engineering Memory (scope context) | [Engineering Memory](book/26-engineering-memory.md)                     |
+| MCP interface contract             | [MCP interface](book/20-mcp-interface.md)                               |
+| MCP usage guide                    | [MCP guide](mcp.md)                                                     |
 
 ## IDE and Agent Clients
 
-| Surface | Usage guide | Contract |
-|---------|------------|----------|
-| VS Code extension | [Guide](vscode-extension.md) | [Contract](book/21-vscode-extension.md) |
+| Surface               | Usage guide                       | Contract                                     |
+|-----------------------|-----------------------------------|----------------------------------------------|
+| VS Code extension     | [Guide](vscode-extension.md)      | [Contract](book/21-vscode-extension.md)      |
 | Claude Desktop bundle | [Guide](claude-desktop-bundle.md) | [Contract](book/22-claude-desktop-bundle.md) |
-| Codex plugin | [Guide](codex-plugin.md) | [Contract](book/23-codex-plugin.md) |
-| Cursor plugin | [Guide](cursor-plugin.md) | [Contract](book/25-cursor-plugin.md) |
+| Codex plugin          | [Guide](codex-plugin.md)          | [Contract](book/23-codex-plugin.md)          |
+| Cursor plugin         | [Guide](cursor-plugin.md)         | [Contract](book/25-cursor-plugin.md)         |
 
 ## Reports
 
-| Goal | Start here |
-|------|-----------|
-| Report model and schema | [Report contract](book/08-report.md) |
-| HTML rendering | [HTML render](book/10-html-render.md) |
-| Live sample | [Sample report](examples/report.md) |
+| Goal                    | Start here                            |
+|-------------------------|---------------------------------------|
+| Report model and schema | [Report contract](book/08-report.md)  |
+| HTML rendering          | [HTML render](book/10-html-render.md) |
+| Live sample             | [Sample report](examples/report.md)   |
 
 ---
 
@@ -76,6 +77,7 @@ Contract-first documentation derived from code and locked tests.
 ### Change Controller
 
 - [Structural Change Controller](book/24-structural-change-controller.md)
+- [Engineering Memory](book/26-engineering-memory.md)
 
 ### Interfaces
 
@@ -145,5 +147,5 @@ uv run python scripts/build_docs_example_report.py --output-dir site/examples/re
 ```
 
 !!! note "Generated output"
-    `site/` is generated output used for local preview and GitHub Pages publishing.
-    It is not committed to git.
+`site/` is generated output used for local preview and GitHub Pages publishing.
+It is not committed to git.

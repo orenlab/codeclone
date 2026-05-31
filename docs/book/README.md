@@ -39,6 +39,7 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 - [23-codex-plugin.md](23-codex-plugin.md)
 - [25-cursor-plugin.md](25-cursor-plugin.md)
 - [24-structural-change-controller.md](24-structural-change-controller.md)
+- [26-engineering-memory.md](26-engineering-memory.md)
 - [28-claim-guard.md](28-claim-guard.md)
 - [10-html-render.md](10-html-render.md)
 

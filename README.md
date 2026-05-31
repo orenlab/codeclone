@@ -279,7 +279,23 @@ codeclone-mcp --transport streamable-http   # HTTP transport
 `--allow-remote`.
 
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/) &middot;
-[MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
+[MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/) &middot;
+[Engineering Memory](https://orenlab.github.io/codeclone/book/26-engineering-memory/)
+
+### Engineering Memory
+
+Local SQLite store of evidence-linked repository facts — contract notes, document
+links, risk hotspots, git provenance, and governed drafts. Agents read ranked
+scope context via MCP after `start_controlled_change`; human/CI bootstraps the
+store with `codeclone memory init`.
+
+```bash
+codeclone memory init --root .
+codeclone memory search "baseline schema" --match all
+codeclone memory approve mem-…   # human-only governance
+```
+
+[Engineering Memory docs](https://orenlab.github.io/codeclone/book/26-engineering-memory/)
 
 ### Native Agent and IDE Clients
 

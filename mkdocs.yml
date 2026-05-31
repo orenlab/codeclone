@@ -113,6 +113,7 @@ nav:
           - Codex Plugin: book/23-codex-plugin.md
           - Cursor Plugin: book/25-cursor-plugin.md
           - Structural Change Controller: book/24-structural-change-controller.md
+          - Engineering Memory: book/26-engineering-memory.md
           - Claim Guard: book/28-claim-guard.md
           - HTML Render: book/10-html-render.md
 
