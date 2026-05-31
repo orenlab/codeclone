@@ -528,32 +528,40 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
     ),
     "engineering_memory": MCPHelpTopicSpec(
         summary=(
-            "Engineering Memory retrieval: ranked context for declared "
-            "edit scope via get_relevant_memory and query_engineering_memory."
+            "Engineering Memory: ranked scope context before edits, FTS search, "
+            "and draft-only agent writes. Requires prior codeclone memory init."
         ),
         key_points=(
-            "Call get_relevant_memory after start_controlled_change with "
-            "explicit scope or intent_id.",
-            "Use query_engineering_memory(mode=for_path) for targeted lookup.",
-            "Memory is read-only over the local SQLite store; run "
-            "codeclone memory init first.",
-            "Stale and draft records are excluded by default.",
-            "Memory cannot expand scope, authorize edits, or override findings.",
+            "After start_controlled_change with edit_allowed=true, call "
+            "get_relevant_memory(scope=... or intent_id=...).",
+            "Drill down with query_engineering_memory(mode=for_path|search|get).",
+            "Search filters.match_mode: any (default) or all.",
+            "Bootstrap is human/CI: codeclone memory init [--refresh] — not MCP.",
+            "Stale and draft records excluded by default; "
+            "do not ignore stale warnings.",
+            "Agent writes are draft-only: record_candidate, validate_claims, "
+            "finish(propose_memory=true). Human approve via CLI.",
+            "Memory cannot expand scope, authorize do_not_touch edits, "
+            "or override findings.",
         ),
         recommended_tools=(
             "help",
             "get_relevant_memory",
             "query_engineering_memory",
+            "manage_engineering_memory",
             "start_controlled_change",
+            "finish_controlled_change",
         ),
         doc_links=(MCP_INTERFACE_DOC_LINK,),
         warnings=(
-            "Do not treat inferred or draft records as established facts.",
-            "Do not ignore stale memory warnings for approved records.",
+            "Do not treat draft, inferred, or stale records as established facts.",
+            "Do not skip memory retrieval before high-radius scope edits.",
+            "MCP cannot run memory init or human approve/reject/archive.",
         ),
         anti_patterns=(
-            "Skipping memory retrieval before editing a high-radius scope.",
             "Using memory to justify touching do-not-touch paths.",
+            "Skipping get_relevant_memory because blast radius was already read.",
+            "Claiming a draft record is verified project policy without human approve.",
         ),
     ),
 }

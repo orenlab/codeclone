@@ -27,6 +27,9 @@ You have access to CodeClone through the local CodeClone MCP server.
 - Prefer `list_hotspots` or `check_*` before broad `list_findings`.
 - Use `get_finding` or `get_remediation` for one finding.
 - Use `source_kind` filters to cut test noise.
+- After `start_controlled_change` with `edit_allowed=true`, call
+  `get_relevant_memory` before editing scoped Python work.
+- Use `help(topic="engineering_memory")` when memory workflow is unclear.
 
 ## Change control
 
@@ -35,8 +38,11 @@ config):
 
 1. `analyze_repository` — skip if valid recent run exists
 2. `start_controlled_change` — `status: active` before first edit
-3. edit in declared scope
-4. `finish_controlled_change`
+3. `get_relevant_memory` — after `edit_allowed=true` (store must exist;
+   user/CI runs `codeclone memory init` once)
+4. edit in declared scope
+5. `finish_controlled_change` — optional `propose_memory=true` on accept
 
 Read the `codeclone-change-control` skill for profiles, queue/promote, and
-atomic fallback.
+atomic fallback. Read `codeclone-engineering-memory` for retrieval, draft
+writes, and human approve boundaries.

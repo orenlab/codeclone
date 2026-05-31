@@ -357,7 +357,12 @@ MemorySymbolParam = Annotated[
 ]
 MemoryFiltersParam = Annotated[
     dict[str, object] | None,
-    Field(description="Optional filters: types, statuses, confidences."),
+    Field(
+        description=(
+            "Optional filters: types, statuses, confidences, match_mode "
+            "(any|all, search mode only)."
+        ),
+    ),
 ]
 IncludeStaleParam = Annotated[
     bool,

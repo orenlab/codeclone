@@ -82,19 +82,37 @@ Workflow profiles determine which steps are needed:
 
 ### Memory-aware workflow
 
+Engineering Memory is a local SQLite store of evidence-linked repository facts.
+Full playbook: `docs/book/26-engineering-memory.md`. MCP help:
+`help(topic="engineering_memory")`.
+
+**Bootstrap (not agent MCP):** a human or CI must run `codeclone memory init`
+once per repo before memory tools return records. Use `init --refresh` after
+major structural or documentation changes. MCP returns a contract error if the
+DB is missing — do not fall back to inventing memory from local files.
+
 After `start_controlled_change` returns `edit_allowed: true`:
 
 1. Call `get_relevant_memory` with explicit `scope` or the active `intent_id`
-2. Read contract warnings, stale decisions, and contradiction alerts
-3. Do NOT ignore stale memory warnings — they indicate changed context
-4. Do NOT treat `inferred` or `draft` records as established facts
-5. If memory contains a `contradiction_note` for your scope, surface it to
+2. Read contract warnings, stale decisions, and `contradiction_note` alerts
+3. Use `query_engineering_memory(mode=for_path)` or `mode=search` for drill-down
+4. Do NOT ignore stale memory warnings — they indicate changed context
+5. Do NOT treat `draft`, `inferred`, or excluded stale records as established facts
+6. If memory contains a `contradiction_note` for your scope, surface it to
    the user before editing
 
-Use `query_engineering_memory(mode=for_path)` for targeted lookup.
-Run `codeclone memory init` once per repo before expecting memory tools to
-return records. Memory cannot authorize edits, expand scope, or override
-findings.
+**Optional writes (draft only — human approve required for active facts):**
+
+| When | Tool |
+|------|------|
+| Stable observation during edit | `manage_engineering_memory(action=record_candidate, record_type, statement, subject_path?)` |
+| Before finish claims | `manage_engineering_memory(action=validate_claims, text=…)` |
+| After accepted patch | `finish_controlled_change(..., propose_memory=true)` → review `memory_candidates` |
+
+Agents **cannot** call `memory approve/reject/archive` via MCP. Ask the user to
+promote drafts when a record should become trusted project memory.
+
+Memory cannot authorize edits, expand scope, or override findings.
 
 Queue/promote workflow (when `start` returns `status: "queued"`):
 
