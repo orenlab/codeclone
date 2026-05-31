@@ -12,7 +12,7 @@ import re
 import subprocess
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from ...contracts import (
     BASELINE_SCHEMA_VERSION,
@@ -578,6 +578,32 @@ def extract_test_anchors(
     return batch
 
 
+def _resolve_doc_anchor_path(
+    anchored: str,
+    *,
+    root_path: Path,
+    registry_paths: frozenset[str],
+) -> str | None:
+    normalized = anchored.replace("\\", "/").strip("/")
+    if not normalized:
+        return None
+    if normalized in registry_paths:
+        return normalized
+    if (root_path / normalized).is_file():
+        return normalized
+    if "/" in normalized or "\\" in anchored:
+        return None
+    basename = PurePosixPath(normalized).name
+    matches = sorted(
+        path
+        for path in registry_paths
+        if path == basename or path.endswith(f"/{basename}")
+    )
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
 def extract_document_links(
     *,
     project: MemoryProject,
@@ -585,9 +611,11 @@ def extract_document_links(
     git: GitProvenance,
     report_digest: str | None,
     analysis_fingerprint: str | None,
+    registry_paths: frozenset[str] | None = None,
 ) -> RecordBatch:
     batch = RecordBatch()
     now = current_report_timestamp_utc()
+    registry = registry_paths or frozenset()
     doc_paths = [
         root_path / "docs" / "mcp.md",
         root_path / "AGENTS.md",
@@ -604,6 +632,11 @@ def extract_document_links(
                 heading = line.lstrip("#").strip() or heading
             for match in _CODE_PATH_RE.finditer(line):
                 anchored = match.group(1)
+                resolved_path = _resolve_doc_anchor_path(
+                    anchored,
+                    root_path=root_path,
+                    registry_paths=registry,
+                )
                 identity = make_identity_key(
                     type="document_link",
                     subject_kind="doc",
@@ -631,6 +664,11 @@ def extract_document_links(
                             "doc_file": rel,
                             "heading": heading,
                             "anchored_symbols": [anchored],
+                            **(
+                                {"resolved_path": resolved_path}
+                                if resolved_path is not None
+                                else {}
+                            ),
                         },
                         created_at_utc=now,
                         updated_at_utc=now,
@@ -658,8 +696,8 @@ def extract_document_links(
                         relation="documents",
                     )
                 )
-                anchored_path = anchored.replace("\\", "/").strip("/")
-                if anchored_path.endswith(".py"):
+                anchored_path = resolved_path
+                if anchored_path is not None and anchored_path.endswith(".py"):
                     batch.subjects.append(
                         MemorySubject(
                             id=generate_memory_id(prefix="subj"),

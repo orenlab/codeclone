@@ -3,10 +3,10 @@
 [![License](https://img.shields.io/github/license/orenlab/codeclone?style=flat-square&color=6366f1)](LICENSE)
 [![Requires CodeClone](https://img.shields.io/badge/requires-codeclone_%3E%3D2.0.0-6366f1?style=flat-square)](https://orenlab.github.io/codeclone/)
 
-Native VS Code surface for [codeclone-mcp](https://orenlab.github.io/codeclone/mcp/).
-Brings baseline-aware structural analysis into the editor — triage-first,
-repository read-only, and driven by the same canonical report as the CLI and HTML
-output. Session tools (`mark_finding_reviewed`, `clear_session_runs`) update
+Native VS Code surface for [codeclone-mcp](https://orenlab.github.io/codeclone/mcp/) —
+**Structural Change Controller for AI-assisted Python development**. Brings
+baseline-aware structural analysis into the editor — triage-first, repository
+read-only, and driven by the same canonical report as the CLI and HTML output. Session tools (`mark_finding_reviewed`, `clear_session_runs`) update
 ephemeral MCP state only; they never mutate source, baselines, cache, or report
 artifacts.
 

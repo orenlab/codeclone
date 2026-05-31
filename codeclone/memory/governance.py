@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass
 
 from ..report.meta import current_report_timestamp_utc
@@ -20,7 +22,69 @@ from .models import (
     MemorySubject,
     generate_memory_id,
 )
+from .paths import normalize_repo_path
 from .sqlite_store import SqliteEngineeringMemoryStore
+
+_NEGATION_WINDOW = re.compile(
+    r"(?:cannot|can't|can not|does not|doesn't|do not|don't|never|not)\s+"
+    r"(?:\w+\s+){0,4}$",
+    re.IGNORECASE,
+)
+
+_FORBIDDEN_LITERALS = (
+    "edit allowed",
+    "do_not_touch cleared",
+    "gate passed because memory",
+)
+
+_FORBIDDEN_NEGATABLE = ("override finding",)
+
+_FORBIDDEN_PATTERNS = (
+    re.compile(r"\b(?:mcp|memory)\b[^.]{0,80}\bapprove\b[^.]{0,80}\bdraft", re.I),
+    re.compile(
+        r"\bapprove\b[^.]{0,80}\b(?:memory|draft)\b[^.]{0,80}\b(?:active|policy|verified)\b",
+        re.I,
+    ),
+)
+
+
+def _phrase_is_negated(text: str, phrase: str, *, start: int) -> bool:
+    window = text[max(0, start - 48) : start]
+    return _NEGATION_WINDOW.search(window) is not None
+
+
+def _contains_unnegated_phrase(text: str, phrase: str) -> bool:
+    lowered = text.lower()
+    needle = phrase.lower()
+    start = 0
+    while True:
+        index = lowered.find(needle, start)
+        if index < 0:
+            return False
+        if not _phrase_is_negated(lowered, needle, start=index):
+            return True
+        start = index + len(needle)
+    return False
+
+
+def _forbidden_claim_errors(text: str) -> tuple[str, ...]:
+    lowered = text.lower()
+    errors = [
+        f"Claim may grant permission memory cannot provide: {phrase!r}"
+        for phrase in _FORBIDDEN_LITERALS
+        if phrase in lowered
+    ]
+    errors.extend(
+        f"Claim may grant permission memory cannot provide: {phrase!r}"
+        for phrase in _FORBIDDEN_NEGATABLE
+        if _contains_unnegated_phrase(lowered, phrase)
+    )
+    errors.extend(
+        f"Claim may grant permission memory cannot provide: {pattern.pattern!r}"
+        for pattern in _FORBIDDEN_PATTERNS
+        if pattern.search(text)
+    )
+    return tuple(errors)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,12 +240,18 @@ def record_candidate(
             f"max_candidates_reached: {draft_count}/{max_candidates}"
         )
     now = current_report_timestamp_utc()
-    subject_key = subject_path or "general"
+    normalized_path = (
+        normalize_repo_path(subject_path) if subject_path is not None else None
+    )
+    statement_digest = hashlib.sha256(statement.strip().encode("utf-8")).hexdigest()[
+        :12
+    ]
+    subject_key = normalized_path or "general"
     identity = make_identity_key(
         type=record_type,
-        subject_kind="path" if subject_path else "module",
+        subject_kind="path" if normalized_path else "module",
         subject_key=subject_key.replace("/", ".").removesuffix(".py"),
-        discriminator="agent_candidate",
+        discriminator=f"agent_candidate:{statement_digest}",
     )
     if store.find_by_identity_key(project.id, identity) is not None:
         msg = f"Candidate already exists for identity_key={identity}"
@@ -198,7 +268,7 @@ def record_candidate(
         ingest_source="agent",
         statement=statement.strip(),
         summary=None,
-        payload={"subject_path": subject_path} if subject_path else None,
+        payload={"subject_path": normalized_path} if normalized_path else None,
         created_at_utc=now,
         updated_at_utc=now,
         last_verified_at_utc=now,
@@ -216,16 +286,28 @@ def record_candidate(
         verified_at_commit=None,
     )
     store.write_record(record)
-    if subject_path:
+    if normalized_path:
+        from .paths import repo_path_to_module_key
+
         store.write_subject(
             MemorySubject(
                 id=generate_memory_id(prefix="subj"),
                 memory_id=record.id,
                 subject_kind="path",
-                subject_key=subject_path.replace("\\", "/").strip("/"),
+                subject_key=normalized_path,
                 relation="about",
             )
         )
+        store.write_subject(
+            MemorySubject(
+                id=generate_memory_id(prefix="subj"),
+                memory_id=record.id,
+                subject_kind="module",
+                subject_key=repo_path_to_module_key(normalized_path),
+                relation="about",
+            )
+        )
+    store.commit()
     return record
 
 
@@ -236,19 +318,8 @@ def validate_memory_claims(
     text: str,
 ) -> ClaimValidationResult:
     warnings: list[str] = []
-    errors: list[str] = []
     lowered = text.lower()
-    forbidden_phrases = (
-        "edit allowed",
-        "do_not_touch cleared",
-        "override finding",
-        "gate passed because memory",
-    )
-    errors.extend(
-        f"Claim may grant permission memory cannot provide: {phrase!r}"
-        for phrase in forbidden_phrases
-        if phrase in lowered
-    )
+    errors = list(_forbidden_claim_errors(text))
     if "inferred" in lowered and "established fact" in lowered:
         warnings.append("Treat inferred memory as hypothesis, not established fact.")
     stale_hits = store.query_records(

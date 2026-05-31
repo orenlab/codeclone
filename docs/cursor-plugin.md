@@ -1,8 +1,8 @@
 # Cursor Plugin
 
-CodeClone ships a native Cursor plugin. Source lives in
-`plugins/cursor-codeclone/`; the plugin bundles an MCP server definition,
-five skills, one agent, two rules, and two hooks.
+**Structural Change Controller for AI-assisted Python development** — native
+Cursor plugin. Source lives in `plugins/cursor-codeclone/`; the plugin bundles
+an MCP server definition, five skills, one agent, two rules, and two hooks.
 
 ## What ships in the plugin
 
@@ -137,7 +137,7 @@ intent.
 Additive — the plugin provides a local MCP definition, five skills, one agent,
 two rules, and two hooks. New canonical MCP surfaces from the local
 `codeclone-mcp` version flow through directly; the bundled launcher does not
-filter tools (full 28-tool passthrough). The plugin does not install a
+filter tools (full 31-tool passthrough). The plugin does not install a
 second server binary or mutate Cursor settings.
 
 ## Read-only contract

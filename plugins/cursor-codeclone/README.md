@@ -1,7 +1,7 @@
 # CodeClone for Cursor
 
 Cursor plugin for [CodeClone](https://orenlab.github.io/codeclone/) —
-deterministic structural analysis for Python repositories.
+**Structural Change Controller for AI-assisted Python development**.
 
 Brings baseline-aware triage, blast radius inspection, change control, and
 structural review into Cursor's AI workflow through Skills, Rules, Hooks, and
@@ -106,7 +106,7 @@ ln -s /path/to/codeclone/plugins/cursor-codeclone ~/.cursor/plugins/local/codecl
 - **No second truth model** — health, findings, and drift come exclusively from
   `codeclone-mcp` and canonical report semantics.
 - **Repository read-only** — the plugin never edits source files, baselines,
-  caches, or report artifacts. Agents reach the full MCP server (28 tools),
+  caches, or report artifacts. Agents reach the full MCP server (31 tools),
   including change-control and session tools, via the bundled stdio launcher.
 - **Intent-first edits** — the change control skill enforces the full declare /
   blast-radius / edit / verify / clear cycle.

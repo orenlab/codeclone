@@ -1,7 +1,7 @@
 {
   "name": "codeclone",
   "displayName": "CodeClone",
-  "description": "Baseline-aware, triage-first structural review for Python, powered by CodeClone MCP.",
+  "description": "Structural Change Controller for AI-assisted Python development — baseline-aware, triage-first structural review in VS Code, powered by codeclone-mcp.",
   "version": "0.3.0",
   "publisher": "orenlab",
   "license": "MPL-2.0",

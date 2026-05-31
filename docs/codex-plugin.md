@@ -1,7 +1,8 @@
 # Codex Plugin
 
-CodeClone ships a native Codex plugin. Source lives in `plugins/codeclone/`;
-public installs use the distribution repo `orenlab/codeclone-codex`.
+**Structural Change Controller for AI-assisted Python development** — native
+Codex plugin. Source lives in `plugins/codeclone/`; public installs use the
+distribution repo `orenlab/codeclone-codex`.
 
 ## What ships in the plugin
 
@@ -13,6 +14,7 @@ public installs use the distribution repo `orenlab/codeclone-codex`.
 | `skills/codeclone-review/` | Conservative-first full review skill |
 | `skills/codeclone-hotspots/` | Quick hotspot discovery skill |
 | `skills/codeclone-change-control/` | Intent-first change workflow skill |
+| `skills/codeclone-engineering-memory/` | Engineering memory read/write skill |
 | `assets/` | Plugin branding |
 
 ## Install
@@ -76,7 +78,7 @@ skills. New canonical MCP surfaces from the local `codeclone-mcp` version flow
 through directly, including Coverage Join facts and the optional `coverage`
 help topic when supported. The plugin does not mutate `~/.codex/config.toml` or
 install a second server binary. The bundled launcher does not filter MCP tools;
-agents receive the full 28-tool surface from the resolved `codeclone-mcp` server.
+agents receive the full 31-tool surface from the resolved `codeclone-mcp` server.
 
 `.agents/plugins/marketplace.json` is the monorepo-local source entry used for
 development and packaging into `orenlab/codeclone-codex`; it is not the public

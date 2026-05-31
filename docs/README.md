@@ -1,6 +1,6 @@
 # CodeClone Docs
 
-> Structural change controller for Python —
+> Structural Change Controller for AI-assisted Python development —
 > deterministic, baseline-aware, built for CI and AI agents.
 
 CodeClone runs one deterministic analysis pipeline and emits a canonical JSON

@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Final, Literal
 
 MemoryBackend = Literal["sqlite", "postgres"]
+MemoryMcpSyncPolicy = Literal["off", "bootstrap_if_missing", "refresh_when_stale"]
 
 DEFAULT_MEMORY_BACKEND: Final[MemoryBackend] = "sqlite"
 DEFAULT_MEMORY_DB_PATH: Final = ".cache/codeclone/memory/engineering_memory.sqlite3"
@@ -25,6 +26,7 @@ DEFAULT_MEMORY_MAX_STATEMENT_CHARS: Final = 2_000
 DEFAULT_MEMORY_MAX_BLAST_RADIUS_CACHE_ENTRIES: Final = 500
 DEFAULT_MEMORY_GIT_HOTSPOT_PERIOD_DAYS: Final = 90
 DEFAULT_MEMORY_GIT_HOTSPOT_MIN_CHANGES: Final = 5
+DEFAULT_MEMORY_MCP_SYNC_POLICY: Final[MemoryMcpSyncPolicy] = "bootstrap_if_missing"
 
 MEMORY_ENV_DB_PATH: Final = "CODECLONE_MEMORY_DB_PATH"
 
@@ -41,9 +43,11 @@ __all__ = [
     "DEFAULT_MEMORY_MAX_EVIDENCE_PER_RECORD",
     "DEFAULT_MEMORY_MAX_RECORDS",
     "DEFAULT_MEMORY_MAX_STATEMENT_CHARS",
+    "DEFAULT_MEMORY_MCP_SYNC_POLICY",
     "DEFAULT_MEMORY_RECEIPT_RETENTION_DAYS",
     "DEFAULT_MEMORY_REJECTED_RETENTION_DAYS",
     "DEFAULT_MEMORY_STALE_RETENTION_DAYS",
     "MEMORY_ENV_DB_PATH",
     "MemoryBackend",
+    "MemoryMcpSyncPolicy",
 ]

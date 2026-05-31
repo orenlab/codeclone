@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import subprocess
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -66,6 +68,15 @@ def git_repo_with_cached_report(
     report_document: dict[str, object] = {
         "meta": {"scan_root": str(root.resolve())},
         "inventory": {"file_registry": {"items": registry_items}},
+    }
+    digest_payload = json.dumps(report_document, sort_keys=True, separators=(",", ":"))
+    digest_value = hashlib.sha256(digest_payload.encode("utf-8")).hexdigest()
+    report_document["integrity"] = {
+        "digest": {
+            "value": digest_value,
+            "algorithm": "sha256",
+            "verified": True,
+        }
     }
     return root, report_path, report_document
 

@@ -1,10 +1,11 @@
 # CodeClone for Codex
 
-Native Codex plugin for structural code quality analysis over `codeclone-mcp`.
+Native Codex plugin — **Structural Change Controller for AI-assisted Python
+development** — over `codeclone-mcp`.
 
 Same canonical MCP surface used by CLI, VS Code, Claude Desktop, and Claude Code.
 Repository read-only (source, baselines, cache, canonical reports); local stdio
-only. The bundled launcher exposes the full 28-tool MCP server, including
+only. The bundled launcher exposes the full 31-tool MCP server, including
 change-control and session tools — ephemeral coordination under
 `.cache/codeclone/intents/` and optional audit records when enabled.
 Current-run metric surfaces from the local `codeclone-mcp` version flow through

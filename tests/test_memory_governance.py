@@ -21,6 +21,11 @@ from codeclone.memory.project import resolve_project_identity
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 
 
+class _EmptyStubStore:
+    def query_records(self, _query: object) -> list[object]:
+        return []
+
+
 def test_record_candidate_and_approve_cycle(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
@@ -72,18 +77,78 @@ def test_reject_draft_record(tmp_path: Path) -> None:
         store.close()
 
 
-def test_validate_memory_claims_blocks_permission_overreach() -> None:
-    class _StubStore:
-        def query_records(self, _query: object) -> list[object]:
-            return []
-
+@pytest.mark.parametrize(
+    ("text", "expected_valid"),
+    [
+        ("edit allowed because memory says so", False),
+        ("Engineering Memory cannot override findings for this scope.", True),
+        ("MCP can approve memory drafts as active policy.", False),
+    ],
+)
+def test_validate_memory_claims_permission_guard(
+    text: str, expected_valid: bool
+) -> None:
     result = validate_memory_claims(
-        _StubStore(),  # type: ignore[arg-type]
+        _EmptyStubStore(),  # type: ignore[arg-type]
         project_id="proj",
-        text="edit allowed because memory says so",
+        text=text,
     )
-    assert result.valid is False
-    assert result.errors
+    assert result.valid is expected_valid
+    if expected_valid:
+        assert not result.errors
+    else:
+        assert result.errors
+
+
+def test_record_candidate_writes_path_and_module_subjects(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    project = resolve_project_identity(root)
+    store = SqliteEngineeringMemoryStore(tmp_path / "memory.sqlite3")
+    try:
+        store.initialize(project)
+        draft = record_candidate(
+            store,
+            project=project,
+            record_type="risk_note",
+            statement="Ranking is too noisy for scoped retrieval.",
+            subject_path="codeclone/memory/retrieval/ranking.py",
+            max_candidates=100,
+        )
+        subjects = store.list_subjects_for_memory(draft.id)
+        kinds = {(item.subject_kind, item.subject_key) for item in subjects}
+        assert ("path", "codeclone/memory/retrieval/ranking.py") in kinds
+        assert ("module", "codeclone.memory.retrieval.ranking") in kinds
+    finally:
+        store.close()
+
+
+def test_record_candidate_allows_multiple_notes_for_same_path(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    project = resolve_project_identity(root)
+    store = SqliteEngineeringMemoryStore(tmp_path / "memory.sqlite3")
+    try:
+        store.initialize(project)
+        first = record_candidate(
+            store,
+            project=project,
+            record_type="risk_note",
+            statement="First observation.",
+            subject_path="codeclone/memory/governance.py",
+            max_candidates=100,
+        )
+        second = record_candidate(
+            store,
+            project=project,
+            record_type="risk_note",
+            statement="Second observation.",
+            subject_path="codeclone/memory/governance.py",
+            max_candidates=100,
+        )
+        assert first.id != second.id
+    finally:
+        store.close()
 
 
 def test_cannot_approve_active_record(tmp_path: Path) -> None:

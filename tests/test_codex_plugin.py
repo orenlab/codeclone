@@ -64,7 +64,11 @@ def test_codex_plugin_manifest_is_consistent() -> None:
     )
     assert interface["composerIcon"] == "./assets/icon.png"
     assert interface["logo"] == "./assets/logo.png"
-    assert "change-control skills" in interface["longDescription"]
+    assert "engineering-memory skills" in interface["longDescription"]
+    assert (
+        "Structural Change Controller for AI-assisted Python development"
+        in (interface["shortDescription"])
+    )
     assert (plugin_root / "assets" / "icon.png").is_file()
     assert (plugin_root / "assets" / "logo.png").is_file()
     prompts = interface["defaultPrompt"]
@@ -186,6 +190,7 @@ def test_codex_plugin_readme_and_docs_exist() -> None:
     assert "without relying on `sh -lc`" in readme_text
     assert 'uv tool install "codeclone[mcp]"' in readme_text
     assert "codeclone-change-control" in readme_text
+    assert "Structural Change Controller for AI-assisted Python" in readme_text
 
     assert (root / "docs" / "codex-plugin.md").is_file()
     assert (root / "docs" / "terms-of-use.md").is_file()

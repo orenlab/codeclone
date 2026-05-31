@@ -20,7 +20,7 @@ The Cursor plugin is:
 - sourced from `plugins/cursor-codeclone/` in this monorepo
 - backed by the Cursor Plugin manifest at `.cursor-plugin/plugin.json`
 - read-only with respect to source files, baselines, analysis cache, and
-  canonical report artifacts; full 28-tool MCP passthrough via the bundled
+  canonical report artifacts; full 31-tool MCP passthrough via the bundled
   stdio launcher (change-control and session tools included)
 - a composition of local MCP server metadata, AI skills, rules, hooks, and an
   agent definition
@@ -70,7 +70,7 @@ The plugin surface is additive:
 
 - `mcp.json` contributes a local stdio MCP server definition via
   `python3 ./scripts/launch_mcp.py` (workspace `.venv` → Poetry env → PATH);
-  the launcher does not filter tools — agents receive the full 28-tool MCP surface
+  the launcher does not filter tools — agents receive the full 31-tool MCP surface
 - the skills contribute workflow guidance and starter prompts
 - the rules enforce MCP-first discipline and Python-aware context
 - the hooks provide automated reminders for re-analysis and intent hygiene

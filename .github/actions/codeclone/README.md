@@ -1,6 +1,7 @@
 # CodeClone GitHub Action
 
-Baseline-aware structural code quality analysis for Python with:
+**Structural Change Controller for AI-assisted Python development** — CI
+integration with:
 
 - configurable CI gating
 - SARIF upload for GitHub Code Scanning

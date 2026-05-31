@@ -86,10 +86,10 @@ Engineering Memory is a local SQLite store of evidence-linked repository facts.
 Full playbook: `docs/book/26-engineering-memory.md`. MCP help:
 `help(topic="engineering_memory")`.
 
-**Bootstrap (not agent MCP):** a human or CI must run `codeclone memory init`
-once per repo before memory tools return records. Use `init --refresh` after
-major structural or documentation changes. MCP returns a contract error if the
-DB is missing — do not fall back to inventing memory from local files.
+**Bootstrap:** default `mcp_sync_policy=bootstrap_if_missing` auto-creates the
+store from the latest MCP run on `get_relevant_memory`. Explicit refresh:
+`manage_engineering_memory(action="refresh_from_run")`. CLI `memory init` remains
+for CI/offline. Human approve still required for agent drafts.
 
 After `start_controlled_change` returns `edit_allowed: true`:
 

@@ -259,7 +259,7 @@ CodeClone ships an MCP control surface for AI agents and IDE clients, built on t
 Canonical analysis is **read-only by contract**: MCP tools never mutate source, baselines, generated reports, or
 analysis cache. Controller state is session-local or ephemeral workspace coordination state.
 
-- **28 tools across 6 workflow phases** — *analyze → triage → drill down → focused checks → change control → session*.
+- **31 tools across 6 workflow phases** — *analyze → triage → drill down → focused checks → change control → session*.
   Triage-first design avoids dumping the full report into agent context.
 - **Stable read-only resources** — `codeclone://latest/*` and `codeclone://runs/{run_id}/*` URIs return deterministic
   projections (summary, report, health, gates, changed, triage, schema) without re-triggering analysis.
@@ -286,8 +286,9 @@ codeclone-mcp --transport streamable-http   # HTTP transport
 
 Local SQLite store of evidence-linked repository facts — contract notes, document
 links, risk hotspots, git provenance, and governed drafts. Agents read ranked
-scope context via MCP after `start_controlled_change`; human/CI bootstraps the
-store with `codeclone memory init`.
+scope context via MCP after `start_controlled_change`. Default
+`mcp_sync_policy=bootstrap_if_missing` auto-creates the store from the latest MCP
+run; CLI `codeclone memory init` remains for CI/offline bootstrap.
 
 ```bash
 codeclone memory init --root .

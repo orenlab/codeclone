@@ -39,6 +39,10 @@ review receipts, and workflow consolidation tools.
   metrics, `codeclone memory coverage`, `finish_controlled_change(propose_memory=true)`
   for draft candidates and coverage delta on accepted patches, and receipt-based
   memory proposals via `manage_engineering_memory(action="propose_from_receipt")`.
+- Engineering Memory MCP sync (Phase 18.7): `mcp_sync_policy` config
+  (`off`, `bootstrap_if_missing`, `refresh_when_stale`), auto bootstrap on
+  `get_relevant_memory`, explicit `manage_engineering_memory(action="refresh_from_run")`,
+  and `memory_sync` payload on responses when ingest runs.
 - Engineering Memory search and git provenance (Phase 18.6): schema `1.1` with
   SQLite FTS5 index, `match_mode` (`any`/`all`) for CLI and MCP search,
   refresh-time digest reactivation for unchanged records, resilient git

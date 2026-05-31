@@ -38,8 +38,8 @@ config):
 
 1. `analyze_repository` — skip if valid recent run exists
 2. `start_controlled_change` — `status: active` before first edit
-3. `get_relevant_memory` — after `edit_allowed=true` (store must exist;
-   user/CI runs `codeclone memory init` once)
+3. `get_relevant_memory` — after `edit_allowed=true` (default policy auto-bootstraps
+   from latest MCP run; else `refresh_from_run` or CLI init)
 4. edit in declared scope
 5. `finish_controlled_change` — optional `propose_memory=true` on accept
 

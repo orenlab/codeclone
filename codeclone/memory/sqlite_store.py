@@ -530,6 +530,7 @@ class SqliteEngineeringMemoryStore:
                 subject.relation,
             ),
         )
+        self._conn.commit()  # standalone writes must survive store.close()
 
     def prune_duplicate_subjects(self, *, commit: bool = True) -> int:
         before = self._conn.execute("SELECT COUNT(*) FROM memory_subjects").fetchone()

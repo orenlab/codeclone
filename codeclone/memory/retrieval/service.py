@@ -260,10 +260,10 @@ def get_relevant_memory(
     normalized_blast = frozenset(
         normalize_repo_path(path) for path in (blast_dependents or ())
     )
-    context = RankingContext(
-        scope_paths=frozenset(normalized_scope),
-        symbols=normalized_symbols,
-        blast_dependents=normalized_blast,
+    context = RankingContext.from_scope(
+        scope_paths=normalized_scope,
+        symbols=tuple(normalized_symbols),
+        blast_dependents=tuple(normalized_blast),
     )
     statuses = _default_statuses(
         include_stale=include_stale,
@@ -540,18 +540,33 @@ def _fetch_for_symbol_mode_records(
     max_results: int,
 ) -> tuple[MemoryRecord, ...]:
     symbol_key = _require_query_field(symbol, mode="for_symbol", field="symbol")
-    return tuple(
-        store.query_records(
-            MemoryQuery(
-                project_id=project_id,
-                types=filter_types,
-                statuses=statuses,
-                subject_kind="symbol",
-                subject_key=symbol_key,
-                limit=max_results + 1,
-            )
+    records = store.query_records(
+        MemoryQuery(
+            project_id=project_id,
+            types=filter_types,
+            statuses=statuses,
+            subject_kind="symbol",
+            subject_key=symbol_key,
+            limit=max_results + 1,
         )
     )
+    if records:
+        return tuple(records)
+
+    module_prefix = symbol_key.rsplit(".", maxsplit=1)[0]
+    if module_prefix == symbol_key:
+        return ()
+    module_records = store.query_records(
+        MemoryQuery(
+            project_id=project_id,
+            types=filter_types,
+            statuses=statuses,
+            subject_kind="module",
+            subject_key=module_prefix,
+            limit=max_results + 1,
+        )
+    )
+    return tuple(module_records)
 
 
 def _records_for_list_mode(

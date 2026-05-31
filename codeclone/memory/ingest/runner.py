@@ -61,6 +61,19 @@ def enrich_batch_git_evidence(batch: RecordBatch, git: GitProvenance) -> None:
             batch.evidence.append(evidence)
 
 
+def _registry_paths(report_document: Mapping[str, object]) -> frozenset[str]:
+    inventory = report_document.get("inventory")
+    if not isinstance(inventory, dict):
+        return frozenset()
+    registry = inventory.get("file_registry")
+    if not isinstance(registry, dict):
+        return frozenset()
+    items = registry.get("items")
+    if not isinstance(items, list):
+        return frozenset()
+    return frozenset(str(item).replace("\\", "/").strip("/") for item in items)
+
+
 def build_init_batch(
     *,
     root_path: Path,
@@ -143,6 +156,7 @@ def build_init_batch(
                 git=git,
                 report_digest=report_digest,
                 analysis_fingerprint=analysis_fingerprint,
+                registry_paths=_registry_paths(report_document),
             )
         )
     merged = merge_batches(batches)
@@ -276,6 +290,9 @@ def run_memory_init(
         stats=stats,
         planned_counts=planned,
         git=git,
+        ingestion_mode="refresh" if options.refresh else "init",
+        records_marked_stale=stale_marked,
+        vacuum_deleted=vacuum_deleted,
     )
 
 

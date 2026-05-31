@@ -382,14 +382,27 @@ roles, and governed drafts.
 
 Full contract: [Engineering Memory (book)](book/26-engineering-memory.md).
 
-#### Bootstrap (human / CI — not MCP)
+#### Bootstrap and MCP sync
+
+Default policy `mcp_sync_policy = "bootstrap_if_missing"` auto-creates the store
+from the latest MCP analysis run on first `get_relevant_memory` — no separate CLI
+init required for agents.
+
+| Policy | Auto on `get_relevant_memory` | Explicit refresh |
+|--------|-------------------------------|------------------|
+| `bootstrap_if_missing` (default) | Create DB when missing | `manage_engineering_memory(action="refresh_from_run")` |
+| `refresh_when_stale` | Re-ingest when report digest changed | same |
+| `off` | Disabled | `refresh_from_run` still works |
+
+CLI init remains available for CI and offline bootstrap:
 
 ```bash
 codeclone memory init --root /abs/repo
 codeclone memory init --root /abs/repo --refresh   # re-ingest + staleness pass
 ```
 
-MCP memory tools return a contract error until init has run at least once.
+When auto-sync is disabled or no MCP run exists, memory tools return a contract
+error until init or `refresh_from_run` succeeds.
 
 #### Agent read path
 
@@ -402,6 +415,10 @@ sequenceDiagram
     A->>M: start_controlled_change
     M-->>A: intent_id, edit_allowed=true
     A->>M: get_relevant_memory(root, intent_id)
+    opt policy bootstrap / refresh
+        M->>M: sync from latest MCP run
+        M-->>A: memory_sync (when ingest ran)
+    end
     M->>DB: ranked scope query
     DB-->>M: active records + warnings
     M-->>A: contract notes, risks, contradictions
@@ -419,6 +436,7 @@ sequenceDiagram
 | After `start`, before edit | `get_relevant_memory(scope \| intent_id)` | Ranked scope context |
 | One path / symbol | `query_engineering_memory(mode=for_path\|for_symbol)` | Targeted lookup |
 | Keyword discovery | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` | FTS search |
+| Refresh system facts | `manage_engineering_memory(action=refresh_from_run, run_id?)` | Force ingest from MCP run |
 | Unclear semantics | `help(topic="engineering_memory")` | Compact playbook |
 
 Defaults exclude **stale** and **draft** records. Surface stale warnings when
@@ -428,6 +446,7 @@ present — they signal changed context.
 
 | Action | Tool | Result |
 |--------|------|--------|
+| Refresh from analysis run | `manage_engineering_memory(action=refresh_from_run, run_id?)` | System ingest from MCP report |
 | Observation during edit | `manage_engineering_memory(action=record_candidate, …)` | `draft` record |
 | Validate finish claims | `manage_engineering_memory(action=validate_claims, text=…)` | warnings/errors |
 | Post-edit proposals | `finish_controlled_change(propose_memory=true)` | draft candidates + staleness |
@@ -443,7 +462,10 @@ Memory **cannot**:
 - expand declared edit scope or authorize `do_not_touch` edits
 - override CodeClone structural findings
 - mutate baselines, analysis cache, canonical reports, or source files
-- run `memory init` / `refresh` (ask the user or CI)
+- approve/reject/archive drafts (human CLI only)
+
+MCP **can** bootstrap or refresh the memory store via `mcp_sync_policy` and
+`refresh_from_run` — system ingest only, not human governance.
 
 Treat `draft`, `inferred`, and excluded stale records as **non-authoritative**.
 

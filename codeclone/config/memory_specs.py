@@ -21,6 +21,7 @@ from .memory_defaults import (
     DEFAULT_MEMORY_MAX_EVIDENCE_PER_RECORD,
     DEFAULT_MEMORY_MAX_RECORDS,
     DEFAULT_MEMORY_MAX_STATEMENT_CHARS,
+    DEFAULT_MEMORY_MCP_SYNC_POLICY,
     DEFAULT_MEMORY_RECEIPT_RETENTION_DAYS,
     DEFAULT_MEMORY_REJECTED_RETENTION_DAYS,
     DEFAULT_MEMORY_STALE_RETENTION_DAYS,
@@ -43,6 +44,7 @@ MEMORY_CONFIG_KEY_SPECS: Final[dict[str, ConfigKeySpec]] = {
     "max_blast_radius_cache_entries": ConfigKeySpec(expected_type=int),
     "git_hotspot_period_days": ConfigKeySpec(expected_type=int),
     "git_hotspot_min_changes": ConfigKeySpec(expected_type=int),
+    "mcp_sync_policy": ConfigKeySpec(expected_type=str),
 }
 
 MEMORY_PATH_CONFIG_KEYS: Final[frozenset[str]] = frozenset({"db_path"})
@@ -63,6 +65,7 @@ MEMORY_CONFIG_DEFAULTS: Final[dict[str, object]] = {
     "max_blast_radius_cache_entries": DEFAULT_MEMORY_MAX_BLAST_RADIUS_CACHE_ENTRIES,
     "git_hotspot_period_days": DEFAULT_MEMORY_GIT_HOTSPOT_PERIOD_DAYS,
     "git_hotspot_min_changes": DEFAULT_MEMORY_GIT_HOTSPOT_MIN_CHANGES,
+    "mcp_sync_policy": DEFAULT_MEMORY_MCP_SYNC_POLICY,
 }
 
 MEMORY_NESTED_TABLE_KEY: Final = "memory"

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ...config.memory import MemoryConfig, resolve_memory_config
 from ...memory.exceptions import MemoryContractError
+from ...memory.ingest.mcp_sync import execute_mcp_memory_sync
 from ...memory.models import MemoryProject
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.retrieval import get_relevant_memory, query_engineering_memory
@@ -20,6 +21,7 @@ from ._intent import IntentRecord
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
+    MCPRunRecord,
     MCPServiceContractError,
 )
 
@@ -40,6 +42,7 @@ class _MCPSessionMemoryMixin:
         include_drafts: bool = False,
     ) -> dict[str, object]:
         root_path = _helpers._resolve_root(root)
+        memory_sync = self._maybe_auto_sync_memory(root_path)
         scope_paths, scope_resolved_from = self._resolve_memory_scope_paths(
             scope=scope,
             intent_id=intent_id,
@@ -47,7 +50,7 @@ class _MCPSessionMemoryMixin:
         store, _db_path, _config, project = self._open_memory_store(root_path)
         try:
             blast_dependents = self._memory_blast_dependents(root_path, scope_paths)
-            return get_relevant_memory(
+            result = get_relevant_memory(
                 store,
                 project_id=project.id,
                 scope_paths=scope_paths,
@@ -58,6 +61,10 @@ class _MCPSessionMemoryMixin:
                 include_stale=include_stale,
                 include_drafts=include_drafts,
             )
+            if memory_sync is not None:
+                result = dict(result)
+                result["memory_sync"] = memory_sync
+            return result
         finally:
             store.close()
 
@@ -116,36 +123,53 @@ class _MCPSessionMemoryMixin:
         from ...memory.exceptions import MemoryCapacityError, MemoryContractError
 
         root_path = _helpers._resolve_root(root)
-        store, _db_path, config, project = self._open_memory_store(root_path)
         try:
             normalized = action.strip().lower()
+            if normalized == "refresh_from_run":
+                return self._manage_memory_refresh_from_run(
+                    root_path,
+                    run_id=run_id,
+                )
             if normalized == "record_candidate":
-                return self._manage_memory_record_candidate(
-                    store,
-                    project=project,
-                    config=config,
-                    record_type=record_type,
-                    statement=statement,
-                    subject_path=subject_path,
-                )
+                store, _db_path, config, project = self._open_memory_store(root_path)
+                try:
+                    return self._manage_memory_record_candidate(
+                        store,
+                        project=project,
+                        config=config,
+                        record_type=record_type,
+                        statement=statement,
+                        subject_path=subject_path,
+                    )
+                finally:
+                    store.close()
             if normalized == "validate_claims":
-                return self._manage_memory_validate_claims(
-                    store,
-                    project=project,
-                    text=text,
-                )
+                store, _db_path, _config, project = self._open_memory_store(root_path)
+                try:
+                    return self._manage_memory_validate_claims(
+                        store,
+                        project=project,
+                        text=text,
+                    )
+                finally:
+                    store.close()
             if normalized == "propose_from_receipt":
-                return self._manage_memory_propose_from_receipt(
-                    store,
-                    project=project,
-                    config=config,
-                    text=text,
-                    intent_id=intent_id,
-                )
+                store, _db_path, config, project = self._open_memory_store(root_path)
+                try:
+                    return self._manage_memory_propose_from_receipt(
+                        store,
+                        project=project,
+                        config=config,
+                        text=text,
+                        intent_id=intent_id,
+                    )
+                finally:
+                    store.close()
             allowed = (
                 "record_candidate",
                 "validate_claims",
                 "propose_from_receipt",
+                "refresh_from_run",
             )
             raise MCPServiceContractError(
                 f"Unknown manage_engineering_memory action: {action!r}. "
@@ -155,8 +179,6 @@ class _MCPSessionMemoryMixin:
             raise MCPServiceContractError(str(exc)) from exc
         except MemoryContractError as exc:
             raise MCPServiceContractError(str(exc)) from exc
-        finally:
-            store.close()
 
     def _manage_memory_record_candidate(
         self,
@@ -241,6 +263,67 @@ class _MCPSessionMemoryMixin:
         )
         return {"action": "propose_from_receipt", "memory_candidates": candidates}
 
+    def _manage_memory_refresh_from_run(
+        self,
+        root_path: Path,
+        *,
+        run_id: str | None,
+    ) -> dict[str, object]:
+        record = self._memory_run_record(root_path, run_id)
+        config = resolve_memory_config(root_path)
+        sync_payload = execute_mcp_memory_sync(
+            root_path=root_path,
+            report_document=record.report_document,
+            config=config,
+            trigger="explicit",
+            run_id=record.run_id,
+            force=True,
+        )
+        return {"action": "refresh_from_run", **sync_payload}
+
+    def _maybe_auto_sync_memory(
+        self,
+        root_path: Path,
+        *,
+        run_id: str | None = None,
+    ) -> dict[str, object] | None:
+        config = resolve_memory_config(root_path)
+        if config.mcp_sync_policy == "off":
+            return None
+        try:
+            record = self._memory_run_record(root_path, run_id)
+        except MCPServiceContractError:
+            return None
+        sync_payload = execute_mcp_memory_sync(
+            root_path=root_path,
+            report_document=record.report_document,
+            config=config,
+            trigger="auto",
+            run_id=record.run_id,
+            force=False,
+        )
+        if sync_payload["status"] == "unchanged":
+            return None
+        return sync_payload
+
+    def _memory_run_record(
+        self,
+        root_path: Path,
+        run_id: str | None = None,
+    ) -> MCPRunRecord:
+        try:
+            record = self._runs.get(run_id)
+        except MCPRunNotFoundError as exc:
+            raise MCPServiceContractError(
+                "No MCP analysis run available for this repository. "
+                "Call analyze_repository first."
+            ) from exc
+        if record.root.resolve() != root_path.resolve():
+            raise MCPServiceContractError(
+                "The selected MCP run belongs to a different repository root."
+            )
+        return record
+
     def finish_propose_memory(
         self,
         *,
@@ -302,9 +385,12 @@ class _MCPSessionMemoryMixin:
         config = resolve_memory_config(root_path)
         db_path = resolve_memory_db_path(root_path, config)
         if not db_path.exists():
+            self._maybe_auto_sync_memory(root_path)
+        if not db_path.exists():
             raise MCPServiceContractError(
                 "Engineering memory database not found. "
-                "Run `codeclone memory init` first."
+                "Call manage_engineering_memory(action='refresh_from_run') after "
+                "analyze_repository, or run `codeclone memory init`."
             )
         project = resolve_project_identity(root_path)
         return SqliteEngineeringMemoryStore(db_path), db_path, config, project

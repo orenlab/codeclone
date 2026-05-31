@@ -1272,12 +1272,87 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
     )
 
 
-def test_mcp_service_get_relevant_memory_requires_initialized_db(
+def _memory_sync_service_with_run(
+    tmp_path: Path,
+    *,
+    run_id: str,
+    py_source: str,
+) -> tuple[CodeCloneMCPService, Path]:
+    from tests.memory_fixtures import git_repo_with_cached_report
+
+    root, _report_path, report_document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/mod.py": py_source},
+        registry_items=["pkg/mod.py"],
+    )
+    service = CodeCloneMCPService(history_limit=2)
+    record = replace(
+        _dummy_run_record(root, run_id),
+        report_document=report_document,
+    )
+    service._runs.register(record)
+    return service, root
+
+
+def test_mcp_service_get_relevant_memory_requires_db_without_run(
     tmp_path: Path,
 ) -> None:
     service = CodeCloneMCPService(history_limit=2)
     with pytest.raises(MCPServiceContractError, match="not found"):
         service.get_relevant_memory(root=str(tmp_path.resolve()))
+
+
+def test_mcp_service_get_relevant_memory_bootstraps_from_run(
+    tmp_path: Path,
+) -> None:
+    service, root = _memory_sync_service_with_run(
+        tmp_path,
+        run_id="run-bootstrap",
+        py_source="def f():\n    return 1\n",
+    )
+
+    result = service.get_relevant_memory(root=str(root.resolve()))
+    memory_sync = cast("dict[str, object]", result["memory_sync"])
+    assert memory_sync["status"] == "completed"
+    assert memory_sync["reason"] == "missing_db"
+    assert result["records"]
+
+
+def test_mcp_service_manage_engineering_memory_refresh_from_run(
+    tmp_path: Path,
+) -> None:
+    service, root = _memory_sync_service_with_run(
+        tmp_path,
+        run_id="run-refresh",
+        py_source="def g():\n    return 2\n",
+    )
+
+    payload = service.manage_engineering_memory(
+        root=str(root.resolve()),
+        action="refresh_from_run",
+    )
+    assert payload["action"] == "refresh_from_run"
+    assert payload["status"] == "completed"
+    assert payload["trigger"] == "explicit"
+
+
+def test_mcp_service_query_engineering_memory_bootstraps_from_run(
+    tmp_path: Path,
+) -> None:
+    service, root = _memory_sync_service_with_run(
+        tmp_path,
+        run_id="run-query-bootstrap",
+        py_source="def h():\n    return 3\n",
+    )
+
+    payload = service.query_engineering_memory(
+        root=str(root.resolve()),
+        mode="status",
+    )
+    status_payload = cast("dict[str, object]", payload["payload"])
+    assert payload["mode"] == "status"
+    assert status_payload["backend"] == "sqlite"
+    assert status_payload["db_exists"] is True
 
 
 def test_mcp_service_get_relevant_memory_resolves_intent_scope(

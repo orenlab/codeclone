@@ -13,15 +13,18 @@ Full contract: `docs/book/26-engineering-memory.md`. MCP help:
 
 ## Prerequisites
 
-Memory tools fail until the store exists. **Bootstrap is human/CI**, not MCP:
+Default `mcp_sync_policy=bootstrap_if_missing` auto-creates the store from the
+latest MCP analysis run on first `get_relevant_memory` after `analyze_repository`.
 
-```bash
-codeclone memory init --root /abs/repo
-codeclone memory init --root /abs/repo --refresh   # after major repo changes
-```
+| Need | Tool |
+|------|------|
+| Auto bootstrap (default) | `analyze_repository` → `get_relevant_memory` |
+| Explicit refresh | `manage_engineering_memory(action=refresh_from_run, run_id?)` |
+| CI / offline bootstrap | `codeclone memory init [--refresh]` |
 
-If MCP returns "database not found", ask the user to init — do not invent memory
-from local files or CLI report dumps.
+If policy is `off` or no MCP run exists and the DB is missing, call
+`refresh_from_run` after `analyze_repository` or ask the user to run CLI init.
+Do not invent memory from local files or report dumps.
 
 ## When to read
 
@@ -51,13 +54,15 @@ diagnostics.
 | Durable observation during edit | `manage_engineering_memory(action=record_candidate, record_type, statement, subject_path?)` | Creates **draft**            |
 | Validate claims before finish   | `manage_engineering_memory(action=validate_claims, text=…)`                                 | Memory-layer guard           |
 | Post-edit batch proposal        | `finish_controlled_change(..., propose_memory=true)`                                        | On **accept** only           |
+| Refresh system facts from run   | `manage_engineering_memory(action=refresh_from_run, run_id?)`                               | Force ingest                 |
 | Atomic fallback                 | `manage_engineering_memory(action=propose_from_receipt, text=…, intent_id?)`                | When finish hook unavailable |
 
 ### Write rules
 
 - Agents **never** approve, reject, or archive via MCP
 - Ask user to run `codeclone memory approve RECORD_ID` to promote drafts
-- Ask user to run `codeclone memory init --refresh` when system facts drift
+- Ask user to run `codeclone memory init --refresh` when policy is `off` and facts drift
+- Or call `refresh_from_run` when an MCP run is available
 - Memory writes do **not** satisfy change-control scope or verify requirements
 
 ## When NOT to use memory
@@ -98,6 +103,6 @@ Memory context is **advisory**. Blast radius `do_not_touch` remains a hard bound
 
 - `contradiction_note` in scope
 - Stale warnings on previously approved records you rely on
-- Missing memory DB (init required)
+- Missing memory DB with no MCP run (init or analyze first)
 - Draft candidate should become team policy (approve needed)
 - System facts outdated after large refactor (refresh needed)

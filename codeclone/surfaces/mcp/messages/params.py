@@ -379,7 +379,10 @@ MemoryMaxRecordsParam = Annotated[
 ManageMemoryActionParam = Annotated[
     str,
     Field(
-        description=("record_candidate, validate_claims, or propose_from_receipt."),
+        description=(
+            "record_candidate, validate_claims, propose_from_receipt, "
+            "or refresh_from_run."
+        ),
     ),
 ]
 MemoryRecordTypeParam = Annotated[

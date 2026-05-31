@@ -32,6 +32,9 @@ class InitReport:
     planned_counts: dict[str, int] = field(default_factory=dict)
     git: GitProvenance | None = None
     warnings: list[str] = field(default_factory=list)
+    ingestion_mode: str = "init"
+    records_marked_stale: int = 0
+    vacuum_deleted: int = 0
 
 
 __all__ = ["InitOptions", "InitReport", "RecordBatch"]

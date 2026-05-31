@@ -51,7 +51,8 @@ Intent binds to the **before-run digest** — do not redeclare on the after-run.
 ### Engineering Memory (step 3)
 
 After `edit_allowed=true`, call `get_relevant_memory` before the first edit.
-Requires prior `codeclone memory init` by user/CI — MCP cannot bootstrap the store.
+Requires `analyze_repository` before memory reads. Default policy auto-bootstraps
+on `get_relevant_memory`; use `refresh_from_run` for explicit ingest.
 
 | Need                 | Tool                                                                     |
 |----------------------|--------------------------------------------------------------------------|

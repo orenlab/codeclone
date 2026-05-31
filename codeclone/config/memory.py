@@ -10,11 +10,14 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from .memory_defaults import MEMORY_ENV_DB_PATH, MemoryBackend
+from .memory_defaults import MEMORY_ENV_DB_PATH, MemoryBackend, MemoryMcpSyncPolicy
 from .memory_specs import MEMORY_CONFIG_DEFAULTS
 from .pyproject_loader import load_pyproject_config, normalize_path_config_value
 
 _VALID_BACKENDS = frozenset({"sqlite", "postgres"})
+_VALID_MCP_SYNC_POLICIES = frozenset(
+    {"off", "bootstrap_if_missing", "refresh_when_stale"},
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +37,7 @@ class MemoryConfig:
     max_blast_radius_cache_entries: int
     git_hotspot_period_days: int
     git_hotspot_min_changes: int
+    mcp_sync_policy: MemoryMcpSyncPolicy
 
 
 def _memory_int(value: object, *, key: str) -> int:
@@ -46,6 +50,14 @@ def _memory_int(value: object, *, key: str) -> int:
         return int(value.strip())
     msg = f"Invalid tool.codeclone.memory.{key}: expected integer"
     raise ValueError(msg)
+
+
+def _memory_choice(value: object, *, key: str, valid: frozenset[str]) -> str:
+    raw = str(value).strip().lower()
+    if raw not in valid:
+        msg = f"Invalid tool.codeclone.memory.{key}: expected one of {sorted(valid)}"
+        raise ValueError(msg)
+    return raw
 
 
 def resolve_memory_config(
@@ -63,13 +75,17 @@ def resolve_memory_config(
     if isinstance(memory_obj, dict):
         merged.update(memory_obj)
 
-    backend_raw = str(merged["backend"]).strip().lower()
-    if backend_raw not in _VALID_BACKENDS:
-        msg = (
-            "Invalid tool.codeclone.memory.backend: "
-            f"expected one of {sorted(_VALID_BACKENDS)}"
-        )
-        raise ValueError(msg)
+    backend_raw = _memory_choice(
+        merged["backend"],
+        key="backend",
+        valid=_VALID_BACKENDS,
+    )
+
+    policy_raw = _memory_choice(
+        merged["mcp_sync_policy"],
+        key="mcp_sync_policy",
+        valid=_VALID_MCP_SYNC_POLICIES,
+    )
 
     db_path_raw = os.environ.get(MEMORY_ENV_DB_PATH, str(merged["db_path"]))
     db_path_value = normalize_path_config_value(
@@ -122,6 +138,7 @@ def resolve_memory_config(
             merged["git_hotspot_min_changes"],
             key="git_hotspot_min_changes",
         ),
+        mcp_sync_policy=policy_raw,  # type: ignore[arg-type]
     )
 
 

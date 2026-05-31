@@ -29,6 +29,7 @@ contract**, separate from analysis cache (`cache.json`) and baselines
 | 18.4  | Draft governance, claim validation                            | MCP `manage_engineering_memory`; CLI `review-candidates\|approve\|reject\|archive` |
 | 18.5  | Scope coverage, finish proposals                              | `finish_controlled_change(propose_memory=true)`                                    |
 | 18.6  | FTS search (`match_mode`), git hotspots, schema 1.1, Rich CLI | CLI `--match`; MCP `filters.match_mode`                                            |
+| 18.7  | MCP sync from analysis runs                                     | `mcp_sync_policy`; auto bootstrap on `get_relevant_memory`; `refresh_from_run`     |
 
 Schema version constant: `ENGINEERING_MEMORY_SCHEMA_VERSION` in
 `codeclone/contracts/__init__.py` (currently **`1.1`**).
@@ -106,8 +107,13 @@ flowchart LR
     end
 
     subgraph HumanCI["Human / CI"]
-        I[memory init / refresh]
+        I[memory init / refresh CLI]
         A[approve / reject / archive]
+    end
+
+    subgraph McpSync["MCP sync (policy-gated)"]
+        B[auto bootstrap on get_relevant_memory]
+        RF[refresh_from_run explicit]
     end
 
 subgraph Never["Never via MCP"]
@@ -119,12 +125,15 @@ end
 
 AgentCan --> Store[(Memory DB)]
 HumanCI --> Store
+McpSync -->|ingest system records| Store
 Never -.->|blocked|Store
 ```
 
 | Action                                  | Who                                   | Resulting status                           |
 |-----------------------------------------|---------------------------------------|--------------------------------------------|
 | Init / refresh ingest                   | Human or CI (`codeclone memory init`) | `active` system records                    |
+| Auto bootstrap / refresh from MCP run   | MCP when `mcp_sync_policy` allows     | `active` system records (same ingest path) |
+| `refresh_from_run`                      | Agent MCP (explicit)                  | Force ingest from selected MCP run         |
 | `record_candidate`                      | Agent MCP                             | `draft`                                    |
 | `finish(propose_memory=true)` on accept | Agent MCP                             | `draft` proposals + staleness side effects |
 | `approve`                               | Human CLI                             | `active` + `verified`/`supported`          |
@@ -160,9 +169,13 @@ Default retrieval excludes `stale` and `draft` unless
 
 ---
 
-## Bootstrap: init and refresh
+## Bootstrap: init, MCP sync, and refresh
 
-Before MCP memory tools return data, the store must exist:
+The memory store can be created or refreshed through **CLI init**, **MCP auto-sync**
+(default), or **explicit MCP refresh**. All paths call the same deterministic
+ingest pipeline (`run_memory_init`).
+
+### CLI init (human / CI)
 
 ```bash
 codeclone memory init --root /abs/repo
@@ -187,6 +200,55 @@ sequenceDiagram
     CLI ->> H: status summary
 ```
 
+### MCP sync (default agent path)
+
+Policy key: `mcp_sync_policy` in `[tool.codeclone.memory]` (default
+`bootstrap_if_missing`).
+
+| Policy                 | Auto behavior on `get_relevant_memory`              | Explicit `refresh_from_run` |
+|------------------------|-----------------------------------------------------|-----------------------------|
+| `off`                  | No auto sync; DB must exist                         | Always runs ingest          |
+| `bootstrap_if_missing` | Create store from latest MCP run when DB missing    | Always runs ingest          |
+| `refresh_when_stale`   | Re-ingest when stored digest ≠ current run digest   | Always runs ingest          |
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant M as MCP
+    participant S as mcp_sync
+    participant DB as SQLite store
+
+    A->>M: analyze_repository
+    M-->>A: run_id
+    A->>M: start_controlled_change
+    M-->>A: edit_allowed=true
+    A->>M: get_relevant_memory(intent_id)
+    M->>S: decide + execute (policy)
+    alt missing DB + bootstrap_if_missing
+        S->>DB: init ingest from run report
+        S-->>M: memory_sync completed
+    else digest changed + refresh_when_stale
+        S->>DB: refresh ingest + staleness
+        S-->>M: memory_sync completed
+    else unchanged
+        S-->>M: skip (no memory_sync field)
+    end
+    M->>DB: ranked scope query
+    M-->>A: records + optional memory_sync
+```
+
+**Explicit refresh:** `manage_engineering_memory(action="refresh_from_run", run_id?)`
+always ingests from the selected MCP run (defaults to latest). Use after
+`analyze_repository` when you need fresh system facts without waiting for policy
+triggers.
+
+**Agent rule:** MCP sync ingests **system records only** — same as CLI init.
+Human `approve` is still required for agent drafts. MCP never runs
+approve/reject/archive.
+
+When auto-sync does not run and the DB is missing, memory tools return a contract
+error pointing to `refresh_from_run` or CLI init.
+
 Ingest sources (non-exhaustive):
 
 | Record type          | Typical ingest source                       |
@@ -203,8 +265,7 @@ Git provenance (Phase 18.6): init attaches `git_commit` evidence when git is
 available; optional git hotspot records use
 `git_hotspot_period_days` / `git_hotspot_min_changes` from config.
 
-**Agent rule:** MCP does not run `memory init`. If the DB is missing, memory
-tools return a contract error directing the user to init first.
+Refs: `codeclone/memory/ingest/mcp_sync.py`, `codeclone/surfaces/mcp/_session_memory_mixin.py`.
 
 ---
 
@@ -222,6 +283,7 @@ git_hotspot_period_days = 90
 git_hotspot_min_changes = 5
 stale_retention_days = 180
 draft_retention_days = 14
+mcp_sync_policy = "bootstrap_if_missing"   # off | bootstrap_if_missing | refresh_when_stale
 ```
 
 Environment override: `CODECLONE_MEMORY_DB_PATH`.
@@ -280,6 +342,10 @@ Ranked, scope-aware context for the **declared edit scope**.
 When neither `scope` nor `intent_id` is passed, returns a **project summary**
 — useful for orientation, not pre-edit context.
 
+When auto-sync runs, the response includes a `memory_sync` object (`status`,
+`trigger`, `run_id`, `report_digest`, ingest stats). Omitted when sync was skipped
+(`status: unchanged`).
+
 #### `query_engineering_memory`
 
 Mode router for inspection and search.
@@ -311,6 +377,7 @@ CLI equivalent: `codeclone memory search QUERY --match any|all`.
 
 | `action`               | Required params                                     | Effect                                                     |
 |------------------------|-----------------------------------------------------|------------------------------------------------------------|
+| `refresh_from_run`     | optional `run_id` (defaults to latest MCP run)      | Force ingest from MCP run report                           |
 | `record_candidate`     | `record_type`, `statement`; optional `subject_path` | Creates **draft** record                                   |
 | `validate_claims`      | `text`                                              | Memory-layer claim guard (warnings/errors)                 |
 | `propose_from_receipt` | optional `text`, `intent_id`                        | Draft proposals from finish-like payload (atomic fallback) |
@@ -376,7 +443,7 @@ style G fill: #fef9c3
 | Stable observation during edit   | `record_candidate`                       | Draft only; cite scope in statement |
 | Patch accepted, workflow finish  | `propose_memory=true`                    | Preferred batch proposal            |
 | Atomic fallback (no finish hook) | `propose_from_receipt`                   | Same receipt shape as finish        |
-| System facts changed in repo     | Ask human to run `memory init --refresh` | Agent cannot refresh store          |
+| System facts changed in repo     | `refresh_from_run` or ask human for `memory init --refresh` | Explicit MCP refresh always available |
 | Promote draft to trusted fact    | **Not agent** — human `memory approve`   | Required for active/verified        |
 
 ### When **not** to use memory
@@ -472,9 +539,11 @@ graph LR
 
 ## Failure modes
 
-| Condition                | Behavior                                       |
-|--------------------------|------------------------------------------------|
-| DB missing               | MCP error: run `codeclone memory init`         |
+| Condition                | Behavior                                                                       |
+|--------------------------|--------------------------------------------------------------------------------|
+| DB missing, policy `off` | MCP error: run `refresh_from_run` or CLI init                                  |
+| DB missing, default policy | Auto bootstrap on `get_relevant_memory` when MCP run exists                  |
+| No MCP run for sync      | Auto sync skipped; DB missing → contract error                                 |
 | At `max_candidates`      | `record_candidate` raises capacity error       |
 | At `max_records`         | Init upsert skips or rejects per store policy  |
 | No cached report on init | Init runs analysis or fails with clear message |
@@ -484,6 +553,7 @@ graph LR
 
 ## Locked by tests
 
+- `tests/test_memory_mcp_sync.py`
 - `tests/test_memory_store.py`
 - `tests/test_memory_search.py`
 - `tests/test_memory_retrieval.py`

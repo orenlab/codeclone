@@ -56,9 +56,10 @@ QUERY_ENGINEERING_MEMORY: Final = (
 )
 
 MANAGE_ENGINEERING_MEMORY: Final = (
-    "Governance router for engineering memory. Actions: record_candidate "
-    "(draft agent memory), validate_claims (memory-layer claim guard), "
-    "propose_from_receipt (atomic fallback for finish hook)."
+    "Governance router for engineering memory. Actions: refresh_from_run "
+    "(ingest from MCP run report), record_candidate (draft agent memory), "
+    "validate_claims (memory-layer claim guard), propose_from_receipt "
+    "(atomic fallback for finish hook)."
 )
 
 CHECK_PATCH_CONTRACT: Final = (

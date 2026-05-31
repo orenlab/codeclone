@@ -1,7 +1,7 @@
 {
   "name": "codeclone",
   "version": "2.1.0a1",
-  "description": "Baseline-aware structural code quality analysis for Codex through the local CodeClone MCP server.",
+  "description": "Structural Change Controller for AI-assisted Python development — Codex plugin over local codeclone-mcp.",
   "author": {
     "name": "Den Rozhnovskiy",
     "email": "pytelemonbot@mail.ru",
@@ -24,8 +24,8 @@
   "instructions": "You have access to CodeClone through the local CodeClone MCP server. Use MCP tools only. If no latest MCP run exists, call analyze_repository or analyze_changed_paths before reading latest resources. Start with the default profile, prefer get_production_triage after analysis, use analyze_changed_paths for diffs, use get_report_section(section=\"metrics\") for adoption/API/coverage facts, call help(topic=\"coverage\") when external coverage semantics matter, and never fall back to CLI, local report files, or repository mutation. Before any repository file edit, follow the bundled codeclone-change-control skill: analyze_repository → start_controlled_change → edit in declared scope → finish_controlled_change. Accepted finish does not mean unchanged health or no regressions — always report verification.structural_delta, external_regressions, and receipt advisory fields to the user.",
   "interface": {
     "displayName": "CodeClone",
-    "shortDescription": "Structural code quality analysis for Python.",
-    "longDescription": "CodeClone for Codex — clone detection, quality metrics, and baseline-aware governance over the canonical codeclone-mcp server. Repository read-only (source, baselines, cache, reports); full 28-tool MCP passthrough including change control. Ships review, hotspot discovery, and change-control skills for conservative-first structural review and intent-first repository edits.",
+    "shortDescription": "Structural Change Controller for AI-assisted Python development.",
+    "longDescription": "CodeClone for Codex — structural change controller for AI-assisted Python development. Clone detection, quality metrics, baseline-aware governance, engineering memory, and intent-first change control over the canonical codeclone-mcp server. Repository read-only (source, baselines, cache, reports); full 31-tool MCP passthrough. Ships review, hotspot, change-control, and engineering-memory skills for conservative-first structural review and scoped repository edits.",
     "developerName": "OrenLab",
     "category": "Developer Tools",
     "capabilities": [

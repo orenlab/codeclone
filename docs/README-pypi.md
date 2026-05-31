@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <strong>Structural change controller for Python</strong>
+  <strong>Structural Change Controller for AI-assisted Python development</strong>
 </p>
 
 <p align="center">
@@ -27,7 +27,8 @@
 </p>
 
 Deterministic static analysis that combines clone detection, code-quality metrics,
-and baseline-aware CI gating — with a structural change controller for AI coding agents.
+and baseline-aware CI gating — structural change controller for AI-assisted
+Python development.
 
 ## Quick Start
 
@@ -45,7 +46,7 @@ codeclone . --ci               # CI mode
 - **Quality metrics** — complexity, coupling, cohesion, dead code, health score
 - **Baseline governance** — separates legacy debt from new regressions; CI fails only on what changed
 - **Change controller** — intent declaration, blast radius, patch contract, review receipt for AI agents
-- **MCP server** — 28-tool read-only interface for IDE and agent clients
+- **MCP server** — 31-tool read-only interface for IDE and agent clients
 - **Reports** — HTML, JSON, Markdown, SARIF, text from one canonical payload
 
 ## MCP Server

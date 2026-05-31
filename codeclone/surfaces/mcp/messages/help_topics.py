@@ -529,14 +529,21 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
     "engineering_memory": MCPHelpTopicSpec(
         summary=(
             "Engineering Memory: ranked scope context before edits, FTS search, "
-            "and draft-only agent writes. Requires prior codeclone memory init."
+            "MCP sync from analysis runs, and draft-only agent writes."
         ),
         key_points=(
             "After start_controlled_change with edit_allowed=true, call "
             "get_relevant_memory(scope=... or intent_id=...).",
+            "Default mcp_sync_policy=bootstrap_if_missing auto-creates the store "
+            "from the latest MCP run on first get_relevant_memory.",
+            "Explicit refresh: manage_engineering_memory(action=refresh_from_run) "
+            "after analyze_repository.",
+            "Optional mcp_sync_policy=refresh_when_stale in pyproject for digest-based "
+            "auto refresh.",
             "Drill down with query_engineering_memory(mode=for_path|search|get).",
+            "for_symbol resolves exact symbol subjects first, then falls back to "
+            "module_role records for the owning module prefix.",
             "Search filters.match_mode: any (default) or all.",
-            "Bootstrap is human/CI: codeclone memory init [--refresh] — not MCP.",
             "Stale and draft records excluded by default; "
             "do not ignore stale warnings.",
             "Agent writes are draft-only: record_candidate, validate_claims, "
@@ -546,6 +553,7 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         ),
         recommended_tools=(
             "help",
+            "analyze_repository",
             "get_relevant_memory",
             "query_engineering_memory",
             "manage_engineering_memory",
@@ -556,7 +564,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         warnings=(
             "Do not treat draft, inferred, or stale records as established facts.",
             "Do not skip memory retrieval before high-radius scope edits.",
-            "MCP cannot run memory init or human approve/reject/archive.",
+            "refresh_from_run ingests system records; human approve still required "
+            "for agent drafts.",
         ),
         anti_patterns=(
             "Using memory to justify touching do-not-touch paths.",

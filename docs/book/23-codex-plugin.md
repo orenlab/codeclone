@@ -22,7 +22,7 @@ The Codex plugin is:
 - backed by `.agents/plugins/marketplace.json` for local development and
   packaging
 - read-only with respect to source files, baselines, analysis cache, and
-  canonical report artifacts; full 28-tool MCP passthrough via the bundled
+  canonical report artifacts; full 31-tool MCP passthrough via the bundled
   stdio launcher (change-control and session tools included)
 - a composition of local MCP server metadata plus Codex skill guidance
 - a native Codex setup surface, not a second extension model
@@ -65,7 +65,7 @@ The plugin surface is additive:
 - `.mcp.json` contributes a local stdio MCP server definition
 - `plugins/codeclone/scripts/launch_mcp.py` resolves the local launcher without shell wrapping
 - that launcher prefers a workspace `.venv`, then a Poetry env, then `PATH`;
-  it does not filter MCP tools — agents receive the full 28-tool surface
+  it does not filter MCP tools — agents receive the full 31-tool surface
 - the skills contribute workflow guidance and starter prompts
 - `README.md` documents local usage and boundaries inside the repository tree
 - Codex remains free to use direct `mcp add` config alongside or instead of the
