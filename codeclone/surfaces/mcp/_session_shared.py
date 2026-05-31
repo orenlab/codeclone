@@ -243,6 +243,7 @@ _VALID_HELP_TOPICS = frozenset(
         "changed_scope",
         "change_control",
         "trust_boundaries",
+        "engineering_memory",
     }
 )
 _VALID_HELP_DETAILS = frozenset({"compact", "normal"})

@@ -57,7 +57,11 @@
     },
     {
       "name": "finish_controlled_change",
-      "signature": "(self, *, intent_id: 'str', changed_files: 'Sequence[str] | None' = None, diff_ref: 'str | None' = None, after_run_id: 'str | None' = None, review_text: 'str | None' = None, claims_text: 'str | None' = None, create_receipt: 'bool' = True, auto_clear: 'bool' = True, strictness: 'str' = 'ci') -> 'dict[str, object]'"
+      "signature": "(self, *, intent_id: 'str', changed_files: 'Sequence[str] | None' = None, diff_ref: 'str | None' = None, after_run_id: 'str | None' = None, review_text: 'str | None' = None, claims_text: 'str | None' = None, create_receipt: 'bool' = True, auto_clear: 'bool' = True, strictness: 'str' = 'ci', propose_memory: 'bool' = False) -> 'dict[str, object]'"
+    },
+    {
+      "name": "finish_propose_memory",
+      "signature": "(self, *, root_path: 'Path', changed_files: 'Sequence[str]', claims_text: 'str | None', review_text: 'str | None', verification_profile: 'str | None') -> 'dict[str, object]'"
     },
     {
       "name": "generate_pr_summary",
@@ -78,6 +82,10 @@
     {
       "name": "get_production_triage",
       "signature": "(self, *, run_id: 'str | None' = None, max_hotspots: 'int' = 3, max_suggestions: 'int' = 3) -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_relevant_memory",
+      "signature": "(self, *, root: 'str', scope: 'Sequence[str] | None' = None, intent_id: 'str | None' = None, symbols: 'Sequence[str] | None' = None, max_records: 'int' = 20, include_stale: 'bool' = False, include_drafts: 'bool' = False) -> 'dict[str, object]'"
     },
     {
       "name": "get_remediation",
@@ -108,8 +116,16 @@
       "signature": "(self, *, action: 'str', run_id: 'str | None' = None, intent_id: 'str | None' = None, scope: 'dict[str, object] | None' = None, intent: 'str | None' = None, expected_effects: 'Sequence[str] | None' = None, diff_ref: 'str | None' = None, changed_files: 'Sequence[str] | None' = None, root: 'str | None' = None, ttl_seconds: 'int | None' = None, lease_seconds: 'int | None' = None) -> 'dict[str, object]'"
     },
     {
+      "name": "manage_engineering_memory",
+      "signature": "(self, *, root: 'str', action: 'str', record_type: 'str | None' = None, statement: 'str | None' = None, subject_path: 'str | None' = None, text: 'str | None' = None, intent_id: 'str | None' = None, run_id: 'str | None' = None) -> 'dict[str, object]'"
+    },
+    {
       "name": "mark_finding_reviewed",
       "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, note: 'str | None' = None) -> 'dict[str, object]'"
+    },
+    {
+      "name": "query_engineering_memory",
+      "signature": "(self, *, root: 'str', mode: 'str', record_id: 'str | None' = None, path: 'str | None' = None, symbol: 'str | None' = None, query: 'str | None' = None, scope: 'Sequence[str] | None' = None, filters: 'Mapping[str, object] | None' = None, max_results: 'int' = 20, include_stale: 'bool' = False, include_drafts: 'bool' = False) -> 'dict[str, object]'"
     },
     {
       "name": "read_resource",

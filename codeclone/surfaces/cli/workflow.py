@@ -742,6 +742,10 @@ def _main_impl() -> None:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "memory":
+        from .memory import memory_main
+
+        raise SystemExit(memory_main(sys.argv[2:]))
     try:
         _main_impl()
     except SystemExit:

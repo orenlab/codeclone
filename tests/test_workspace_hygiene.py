@@ -345,11 +345,11 @@ def test_registry_lock_retries_until_acquired(
 
     times = iter([0.0, 0.05, 0.1])
     monkeypatch.setattr(
-        "codeclone.surfaces.mcp._workspace_intent_registry_lock.time.monotonic",
+        "codeclone.utils.file_lock.time.monotonic",
         lambda: next(times),
     )
     monkeypatch.setattr(
-        "codeclone.surfaces.mcp._workspace_intent_registry_lock._acquire_exclusive_lock",
+        "codeclone.utils.file_lock._acquire_exclusive_lock",
         _acquire_once,
     )
     with workspace_registry_lock(lock_path, timeout_seconds=1.0):
@@ -367,11 +367,11 @@ def test_registry_lock_timeout_raises(
         raise BlockingIOError
 
     monkeypatch.setattr(
-        "codeclone.surfaces.mcp._workspace_intent_registry_lock.time.monotonic",
+        "codeclone.utils.file_lock.time.monotonic",
         lambda: next(times),
     )
     monkeypatch.setattr(
-        "codeclone.surfaces.mcp._workspace_intent_registry_lock._acquire_exclusive_lock",
+        "codeclone.utils.file_lock._acquire_exclusive_lock",
         _always_busy,
     )
     with (

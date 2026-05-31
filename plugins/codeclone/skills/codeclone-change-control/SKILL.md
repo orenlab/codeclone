@@ -38,9 +38,10 @@ One edit cycle:
 ```
 1. analyze_repository(root=abs)           # before-run; skip if valid recent run
 2. start_controlled_change(...)           # see decision table — before first edit
-3. edit inside declared scope only
-4. analyze_repository(root=abs)           # after-run ONLY if finish will require it
-5. finish_controlled_change(...)          # see decision table — same intent_id
+3. get_relevant_memory(scope=... or intent_id=...)  # after edit_allowed=true
+4. edit inside declared scope only
+5. analyze_repository(root=abs)           # after-run ONLY if finish will require it
+6. finish_controlled_change(...)          # see decision table — same intent_id
 ```
 
 Keep `run_id`, `intent_id`, and the before-run from step 1 through the cycle.

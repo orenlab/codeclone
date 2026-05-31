@@ -173,6 +173,7 @@ exclude = [
 
 [[tool.mypy.overrides]]
 module = [
+    "codeclone.surfaces.mcp._session_memory_mixin",
     "codeclone.surfaces.mcp._session_blast_radius_mixin",
     "codeclone.surfaces.mcp._session_claim_guard_mixin",
     "codeclone.surfaces.mcp._session_intent_mixin",

@@ -258,6 +258,7 @@ class _MCPSessionWorkflowMixin:
         create_receipt: bool = True,
         auto_clear: bool = True,
         strictness: str = "ci",
+        propose_memory: bool = False,
     ) -> dict[str, object]:
         # 1. Resolve intent
         record, active_intent = self._resolve_intent(
@@ -476,6 +477,17 @@ class _MCPSessionWorkflowMixin:
             result["receipt_error"] = receipt_error
         if isinstance(health_regression_advisory, dict):
             result["health_regression_advisory"] = health_regression_advisory
+        if propose_memory and verify_status in _ACCEPTED_STATUSES:
+            profile = verify_payload.get("verification_profile")
+            memory_hook = self.finish_propose_memory(
+                root_path=record.root,
+                changed_files=resolved_files,
+                claims_text=claims_text,
+                review_text=review_text,
+                verification_profile=(str(profile) if profile is not None else None),
+            )
+            if memory_hook:
+                result.update(memory_hook)
         return result
 
     # ------------------------------------------------------------------

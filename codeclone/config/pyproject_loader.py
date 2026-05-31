@@ -14,6 +14,11 @@ from ..findings.clones.golden_fixtures import (
     GoldenFixturePatternError,
     normalize_golden_fixture_patterns,
 )
+from .memory_specs import (
+    MEMORY_CONFIG_KEY_SPECS,
+    MEMORY_NESTED_TABLE_KEY,
+    MEMORY_PATH_CONFIG_KEYS,
+)
 from .spec import CONFIG_KEY_SPECS, PATH_CONFIG_KEYS, ConfigKeySpec
 
 if TYPE_CHECKING:
@@ -116,7 +121,9 @@ def load_pyproject_config(
             f"{config_path}: 'tool.codeclone' must be object"
         )
 
-    unknown = sorted(set(codeclone_obj.keys()) - set(config_key_specs))
+    unknown = sorted(
+        set(codeclone_obj.keys()) - set(config_key_specs) - {MEMORY_NESTED_TABLE_KEY}
+    )
     if unknown:
         raise ConfigValidationError(
             "Unknown key(s) in tool.codeclone: " + ", ".join(unknown)
@@ -124,6 +131,8 @@ def load_pyproject_config(
 
     validated: dict[str, object] = {}
     for key in sorted(codeclone_obj.keys()):
+        if key == MEMORY_NESTED_TABLE_KEY:
+            continue
         value = validate_config_value(
             key=key,
             value=codeclone_obj[key],
@@ -134,6 +143,46 @@ def load_pyproject_config(
             value=value,
             root_path=root_path,
             path_config_keys=path_config_keys,
+        )
+
+    memory_obj = codeclone_obj.get(MEMORY_NESTED_TABLE_KEY)
+    if memory_obj is not None:
+        validated[MEMORY_NESTED_TABLE_KEY] = _validate_nested_memory_table(
+            memory_obj=memory_obj,
+            root_path=root_path,
+            config_path=config_path,
+        )
+    return validated
+
+
+def _validate_nested_memory_table(
+    *,
+    memory_obj: object,
+    root_path: Path,
+    config_path: Path,
+) -> dict[str, object]:
+    if not isinstance(memory_obj, dict):
+        raise ConfigValidationError(
+            "Invalid pyproject payload at "
+            f"{config_path}: 'tool.codeclone.memory' must be object"
+        )
+    unknown = sorted(set(memory_obj.keys()) - set(MEMORY_CONFIG_KEY_SPECS))
+    if unknown:
+        raise ConfigValidationError(
+            "Unknown key(s) in tool.codeclone.memory: " + ", ".join(unknown)
+        )
+    validated: dict[str, object] = {}
+    for key in sorted(memory_obj.keys()):
+        value = validate_config_value(
+            key=key,
+            value=memory_obj[key],
+            config_key_specs=MEMORY_CONFIG_KEY_SPECS,
+        )
+        validated[key] = normalize_path_config_value(
+            key=key,
+            value=value,
+            root_path=root_path,
+            path_config_keys=MEMORY_PATH_CONFIG_KEYS,
         )
     return validated
 

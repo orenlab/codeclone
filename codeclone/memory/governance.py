@@ -1,0 +1,277 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from ..report.meta import current_report_timestamp_utc
+from .enums import MemoryRecordType
+from .exceptions import MemoryCapacityError, MemoryContractError
+from .identity import make_identity_key
+from .models import (
+    MemoryProject,
+    MemoryQuery,
+    MemoryRecord,
+    MemoryRevision,
+    MemorySubject,
+    generate_memory_id,
+)
+from .sqlite_store import SqliteEngineeringMemoryStore
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimValidationResult:
+    valid: bool
+    warnings: tuple[str, ...]
+    errors: tuple[str, ...]
+
+
+def _require_record(
+    store: SqliteEngineeringMemoryStore,
+    record_id: str,
+) -> MemoryRecord:
+    record = store.find_record(record_id)
+    if record is None:
+        msg = f"Memory record not found: {record_id}"
+        raise MemoryContractError(msg)
+    return record
+
+
+def _write_governance_revision(
+    store: SqliteEngineeringMemoryStore,
+    record: MemoryRecord,
+    *,
+    record_id: str,
+    reason: str,
+    changed_by: str,
+    now: str,
+) -> None:
+    store.write_revision(
+        MemoryRevision(
+            id=generate_memory_id(prefix="rev"),
+            memory_id=record_id,
+            revision_number=store.next_revision_number(record_id),
+            previous_statement=record.statement,
+            new_statement=record.statement,
+            previous_payload=record.payload,
+            new_payload=record.payload,
+            reason=reason,
+            changed_by=changed_by,
+            changed_at_utc=now,
+            branch=record.verified_on_branch,
+            commit=record.verified_at_commit,
+        )
+    )
+
+
+def _finalize_governance_record(
+    store: SqliteEngineeringMemoryStore,
+    record_id: str,
+) -> MemoryRecord:
+    store.commit()
+    updated = store.find_record(record_id)
+    assert updated is not None
+    return updated
+
+
+def approve_record(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    record_id: str,
+    approved_by: str,
+) -> MemoryRecord:
+    record = _require_record(store, record_id)
+    if record.status not in {"draft", "stale"}:
+        msg = f"Cannot approve record in status '{record.status}'"
+        raise MemoryContractError(msg)
+    now = current_report_timestamp_utc()
+    store.update_record_status(
+        record_id,
+        status="active",
+        approved_by=approved_by,
+        approved_at_utc=now,
+        stale_reason=None,
+    )
+    _write_governance_revision(
+        store,
+        record,
+        record_id=record_id,
+        reason="human_approve",
+        changed_by=approved_by,
+        now=now,
+    )
+    return _finalize_governance_record(store, record_id)
+
+
+def reject_record(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    record_id: str,
+    rejected_by: str,
+    reason: str | None = None,
+) -> MemoryRecord:
+    record = _require_record(store, record_id)
+    if record.status != "draft":
+        msg = f"Cannot reject record in status '{record.status}'"
+        raise MemoryContractError(msg)
+    now = current_report_timestamp_utc()
+    store.update_record_status(
+        record_id,
+        status="rejected",
+        stale_reason=reason,
+    )
+    _write_governance_revision(
+        store,
+        record,
+        record_id=record_id,
+        reason=reason or "human_reject",
+        changed_by=rejected_by,
+        now=now,
+    )
+    return _finalize_governance_record(store, record_id)
+
+
+def archive_record(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    record_id: str,
+    archived_by: str,
+) -> MemoryRecord:
+    record = _require_record(store, record_id)
+    if record.status != "active":
+        msg = f"Cannot archive record in status '{record.status}'"
+        raise MemoryContractError(msg)
+    now = current_report_timestamp_utc()
+    store.update_record_status(record_id, status="archived")
+    _write_governance_revision(
+        store,
+        record,
+        record_id=record_id,
+        reason="human_archive",
+        changed_by=archived_by,
+        now=now,
+    )
+    return _finalize_governance_record(store, record_id)
+
+
+def record_candidate(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project: MemoryProject,
+    record_type: MemoryRecordType,
+    statement: str,
+    subject_path: str | None = None,
+    created_by: str = "agent",
+    max_candidates: int,
+) -> MemoryRecord:
+    if len(statement.strip()) == 0:
+        raise MemoryContractError("Candidate statement must not be empty.")
+    draft_count = store.count_records_by_status(project.id, "draft")
+    if draft_count >= max_candidates:
+        raise MemoryCapacityError(
+            f"max_candidates_reached: {draft_count}/{max_candidates}"
+        )
+    now = current_report_timestamp_utc()
+    subject_key = subject_path or "general"
+    identity = make_identity_key(
+        type=record_type,
+        subject_kind="path" if subject_path else "module",
+        subject_key=subject_key.replace("/", ".").removesuffix(".py"),
+        discriminator="agent_candidate",
+    )
+    if store.find_by_identity_key(project.id, identity) is not None:
+        msg = f"Candidate already exists for identity_key={identity}"
+        raise MemoryContractError(msg)
+
+    record = MemoryRecord(
+        id=generate_memory_id(),
+        project_id=project.id,
+        identity_key=identity,
+        type=record_type,
+        status="draft",
+        confidence="inferred",
+        origin="agent",
+        ingest_source="agent",
+        statement=statement.strip(),
+        summary=None,
+        payload={"subject_path": subject_path} if subject_path else None,
+        created_at_utc=now,
+        updated_at_utc=now,
+        last_verified_at_utc=now,
+        expires_at_utc=None,
+        created_by=created_by,
+        verified_by=None,
+        approved_by=None,
+        approved_at_utc=None,
+        report_digest=None,
+        code_fingerprint=None,
+        stale_reason=None,
+        created_on_branch=None,
+        created_at_commit=None,
+        verified_on_branch=None,
+        verified_at_commit=None,
+    )
+    store.write_record(record)
+    if subject_path:
+        store.write_subject(
+            MemorySubject(
+                id=generate_memory_id(prefix="subj"),
+                memory_id=record.id,
+                subject_kind="path",
+                subject_key=subject_path.replace("\\", "/").strip("/"),
+                relation="about",
+            )
+        )
+    return record
+
+
+def validate_memory_claims(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    text: str,
+) -> ClaimValidationResult:
+    warnings: list[str] = []
+    errors: list[str] = []
+    lowered = text.lower()
+    forbidden_phrases = (
+        "edit allowed",
+        "do_not_touch cleared",
+        "override finding",
+        "gate passed because memory",
+    )
+    errors.extend(
+        f"Claim may grant permission memory cannot provide: {phrase!r}"
+        for phrase in forbidden_phrases
+        if phrase in lowered
+    )
+    if "inferred" in lowered and "established fact" in lowered:
+        warnings.append("Treat inferred memory as hypothesis, not established fact.")
+    stale_hits = store.query_records(
+        MemoryQuery(
+            project_id=project_id,
+            statuses=("stale",),
+            limit=5,
+        )
+    )
+    if stale_hits and "no stale" in lowered:
+        warnings.append("Active stale records exist; do not claim freshness.")
+    return ClaimValidationResult(
+        valid=not errors,
+        warnings=tuple(warnings),
+        errors=tuple(errors),
+    )
+
+
+__all__ = [
+    "ClaimValidationResult",
+    "approve_record",
+    "archive_record",
+    "record_candidate",
+    "reject_record",
+    "validate_memory_claims",
+]

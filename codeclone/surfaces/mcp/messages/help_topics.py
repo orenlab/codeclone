@@ -526,4 +526,34 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             "Assuming MCP sandboxes optional absolute artifact paths.",
         ),
     ),
+    "engineering_memory": MCPHelpTopicSpec(
+        summary=(
+            "Engineering Memory retrieval: ranked context for declared "
+            "edit scope via get_relevant_memory and query_engineering_memory."
+        ),
+        key_points=(
+            "Call get_relevant_memory after start_controlled_change with "
+            "explicit scope or intent_id.",
+            "Use query_engineering_memory(mode=for_path) for targeted lookup.",
+            "Memory is read-only over the local SQLite store; run "
+            "codeclone memory init first.",
+            "Stale and draft records are excluded by default.",
+            "Memory cannot expand scope, authorize edits, or override findings.",
+        ),
+        recommended_tools=(
+            "help",
+            "get_relevant_memory",
+            "query_engineering_memory",
+            "start_controlled_change",
+        ),
+        doc_links=(MCP_INTERFACE_DOC_LINK,),
+        warnings=(
+            "Do not treat inferred or draft records as established facts.",
+            "Do not ignore stale memory warnings for approved records.",
+        ),
+        anti_patterns=(
+            "Skipping memory retrieval before editing a high-radius scope.",
+            "Using memory to justify touching do-not-touch paths.",
+        ),
+    ),
 }

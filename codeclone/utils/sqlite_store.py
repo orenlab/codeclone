@@ -22,6 +22,7 @@ def open_sqlite_db(
     path: Path,
     *,
     ensure_schema: Callable[[sqlite3.Connection], None],
+    foreign_keys: bool = False,
 ) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(
@@ -31,7 +32,13 @@ def open_sqlite_db(
         check_same_thread=False,
     )
     try:
-        for statement in _SQLITE_PRAGMAS:
+        pragmas: tuple[str, ...] = _SQLITE_PRAGMAS
+        if foreign_keys:
+            pragmas = tuple(
+                "PRAGMA foreign_keys=ON" if stmt.endswith("foreign_keys=OFF") else stmt
+                for stmt in _SQLITE_PRAGMAS
+            )
+        for statement in pragmas:
             conn.execute(statement)
         ensure_schema(conn)
     except Exception:

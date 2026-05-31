@@ -71,7 +71,7 @@ authentication.
 
 ## Tools
 
-Current tool set: **28 tools** organized by workflow phase.
+Current tool set: **31 tools** organized by workflow phase.
 
 ```mermaid
 graph LR
@@ -134,7 +134,7 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 | Tool                       | Key parameters                                                                                                          | Purpose                                                                                                                                                                                                                 |
 |----------------------------|-------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `start_controlled_change`  | `root`, `scope`, `intent`, `expected_effects`, `on_conflict`, `strictness`, `blast_radius_depth`, `dirty_scope_policy`  | Pre-edit: workspace check + declare + blast radius + budget in one call. Returns `intent_id` for `finish`. `dirty_scope_policy=continue_own_wip` resumes own dirty scope when no foreign overlap. Does not run analysis |
-| `finish_controlled_change` | `intent_id`, `changed_files` or `diff_ref`, `after_run_id`, `review_text`, `claims_text`, `create_receipt`, `auto_clear`, `strictness` | Post-edit: scope check + verify + optional claim validation + receipt + clear in one call. `after_run_id` required for Python structural / governance config profiles                                                     |
+| `finish_controlled_change` | `intent_id`, `changed_files` or `diff_ref`, `after_run_id`, `review_text`, `claims_text`, `propose_memory`, `create_receipt`, `auto_clear`, `strictness` | Post-edit: scope check + verify + optional claim validation + receipt + clear in one call. `after_run_id` required for Python structural / governance config profiles. Set `propose_memory=true` to attach draft memory candidates on accept |
 
 `finish_controlled_change` separates human notes from validated claims:
 `review_text` is an optional note, while `claims_text` is the text passed to
@@ -163,6 +163,9 @@ predicates — see book/24.
 |--------------------------|--------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `manage_change_intent`   | `action`, `root`, `run_id`, `intent_id`, `scope`, `on_conflict`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace. Use for queue/promote/recover operations alongside workflow tools |
 | `get_blast_radius`       | `run_id`, `files`, `depth`, `include`                                                                                          | Pre-change risk boundary: full transitive graph, custom include filters                                                                                                                 |
+| `get_relevant_memory`    | `root`, `scope`, `intent_id`, `symbols`, `max_records`, `include_stale`, `include_drafts`                                    | Ranked engineering memory for declared edit scope                                                                                                                                        |
+| `query_engineering_memory` | `root`, `mode`, `record_id`, `path`, `symbol`, `query`, `scope`, `filters`, `max_results`, `include_stale`, `include_drafts` | Mode router: search, get, for_path, for_symbol, stale, coverage, status                                                                                                                 |
+| `manage_engineering_memory` | `root`, `action`, `record`, `claims_text`, `receipt`, `scope`, `intent_id` | Agent-side memory governance: `record_candidate`, `validate_claims`, `propose_from_receipt`. Human approve/reject/archive remain CLI-only (`codeclone memory approve|reject|archive`) |
 | `check_patch_contract`   | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref`                    | Manual budget query or step-by-step verification                                                                                                                                        |
 | `create_review_receipt`  | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                                              | Manual receipt generation                                                                                                                                                               |
 | `validate_review_claims` | `text`, `run_id`, `require_citations`, `patch_health_delta`                                                                    | Standalone citation-based overclaim detection; pass `patch_health_delta` from verify when using the atomic workflow                                                                     |

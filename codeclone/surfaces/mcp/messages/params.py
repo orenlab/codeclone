@@ -325,3 +325,76 @@ LeaseSecondsParam = Annotated[
     int | None,
     Field(description="Lease renewal seconds for renew action."),
 ]
+MemoryScopeListParam = Annotated[
+    list[str] | None,
+    Field(description="Repo-relative scope paths for engineering memory retrieval."),
+]
+MemorySymbolsParam = Annotated[
+    list[str] | None,
+    Field(description="Optional symbol keys for engineering memory retrieval."),
+]
+MemoryQueryModeParam = Annotated[
+    str,
+    Field(
+        description=("search, get, for_path, for_symbol, stale, coverage, or status."),
+    ),
+]
+MemorySearchQueryParam = Annotated[
+    str | None,
+    Field(description="Keyword query for mode=search."),
+]
+MemoryRecordIdParam = Annotated[
+    str | None,
+    Field(description="Record id for mode=get."),
+]
+MemoryPathParam = Annotated[
+    str | None,
+    Field(description="Repo-relative path for mode=for_path."),
+]
+MemorySymbolParam = Annotated[
+    str | None,
+    Field(description="Symbol qualname for mode=for_symbol."),
+]
+MemoryFiltersParam = Annotated[
+    dict[str, object] | None,
+    Field(description="Optional filters: types, statuses, confidences."),
+]
+IncludeStaleParam = Annotated[
+    bool,
+    Field(description="Include stale engineering memory records."),
+]
+IncludeDraftsParam = Annotated[
+    bool,
+    Field(description="Include draft engineering memory records."),
+]
+MemoryMaxRecordsParam = Annotated[
+    int,
+    Field(description="Maximum engineering memory records to return."),
+]
+ManageMemoryActionParam = Annotated[
+    str,
+    Field(
+        description=("record_candidate, validate_claims, or propose_from_receipt."),
+    ),
+]
+MemoryRecordTypeParam = Annotated[
+    str | None,
+    Field(description="Memory record type for record_candidate."),
+]
+MemoryStatementParam = Annotated[
+    str | None,
+    Field(description="Candidate statement for record_candidate."),
+]
+MemoryClaimsTextParam = Annotated[
+    str | None,
+    Field(description="Claims text for validate_claims."),
+]
+ProposeMemoryParam = Annotated[
+    bool,
+    Field(
+        description=(
+            "When true on accepted finish, propose draft memory candidates "
+            "and mark scope-linked records stale."
+        ),
+    ),
+]

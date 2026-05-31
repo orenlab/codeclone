@@ -59,6 +59,24 @@ class _QueryServiceMixin:
     ) -> dict[str, object]:
         return self._run_dict("get_blast_radius", **params)
 
+    def get_relevant_memory(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("get_relevant_memory", **params)
+
+    def query_engineering_memory(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("query_engineering_memory", **params)
+
+    def manage_engineering_memory(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("manage_engineering_memory", **params)
+
     def manage_change_intent(
         self: _RunDictService,
         **params: object,
@@ -399,6 +417,38 @@ def _apply_public_method_signatures() -> None:
             _kwonly("blast_radius_depth", "str", "auto"),
             _kwonly("dirty_scope_policy", "str", "block"),
         ),
+        "get_relevant_memory": (
+            _kwonly("root", "str"),
+            _kwonly("scope", "Sequence[str] | None", None),
+            _kwonly("intent_id", "str | None", None),
+            _kwonly("symbols", "Sequence[str] | None", None),
+            _kwonly("max_records", "int", 20),
+            _kwonly("include_stale", "bool", False),
+            _kwonly("include_drafts", "bool", False),
+        ),
+        "query_engineering_memory": (
+            _kwonly("root", "str"),
+            _kwonly("mode", "str"),
+            _kwonly("record_id", "str | None", None),
+            _kwonly("path", "str | None", None),
+            _kwonly("symbol", "str | None", None),
+            _kwonly("query", "str | None", None),
+            _kwonly("scope", "Sequence[str] | None", None),
+            _kwonly("filters", "Mapping[str, object] | None", None),
+            _kwonly("max_results", "int", 20),
+            _kwonly("include_stale", "bool", False),
+            _kwonly("include_drafts", "bool", False),
+        ),
+        "manage_engineering_memory": (
+            _kwonly("root", "str"),
+            _kwonly("action", "str"),
+            _kwonly("record_type", "str | None", None),
+            _kwonly("statement", "str | None", None),
+            _kwonly("subject_path", "str | None", None),
+            _kwonly("text", "str | None", None),
+            _kwonly("intent_id", "str | None", None),
+            _kwonly("run_id", "str | None", None),
+        ),
         "finish_controlled_change": (
             _kwonly("intent_id", "str"),
             _kwonly("changed_files", "Sequence[str] | None", None),
@@ -409,6 +459,7 @@ def _apply_public_method_signatures() -> None:
             _kwonly("create_receipt", "bool", True),
             _kwonly("auto_clear", "bool", True),
             _kwonly("strictness", "str", "ci"),
+            _kwonly("propose_memory", "bool", False),
         ),
     }
     self_param = inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)

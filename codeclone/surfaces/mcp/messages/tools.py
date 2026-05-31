@@ -43,6 +43,24 @@ GET_BLAST_RADIUS: Final = (
     "performed."
 )
 
+GET_RELEVANT_MEMORY: Final = (
+    "Return ranked, evidence-linked engineering memory for the declared "
+    "edit scope. Pass explicit scope paths or an active intent_id from "
+    "start_controlled_change. Read-only; does not mutate the memory "
+    "database."
+)
+
+QUERY_ENGINEERING_MEMORY: Final = (
+    "Mode-based engineering memory inspection router. Modes: search, get, "
+    "for_path, for_symbol, stale, coverage, status. Read-only."
+)
+
+MANAGE_ENGINEERING_MEMORY: Final = (
+    "Governance router for engineering memory. Actions: record_candidate "
+    "(draft agent memory), validate_claims (memory-layer claim guard), "
+    "propose_from_receipt (atomic fallback for finish hook)."
+)
+
 CHECK_PATCH_CONTRACT: Final = (
     "Pre-edit budget query (mode='budget') or post-edit structural "
     "verification (mode='verify'). Composes stored runs, gate "
@@ -189,7 +207,8 @@ FINISH_CONTROLLED_CHANGE: Final = (
     "Post-edit verify, receipt, and intent clear. Pass after_run_id "
     "when verification.verification_profile requires it. Read "
     "verification.verification_profile for applied checks. Use claims_text "
-    "for claim validation; review_text is an optional human note."
+    "for claim validation; review_text is an optional human note. "
+    "Set propose_memory=true to attach draft memory candidates on accept."
 )
 
 MANAGE_CHANGE_INTENT: Final = (
@@ -216,6 +235,9 @@ TITLE_ANALYZE_CHANGED_PATHS: Final = "Analyze Changed Paths"
 TITLE_GET_RUN_SUMMARY: Final = "Get Run Summary"
 TITLE_GET_PRODUCTION_TRIAGE: Final = "Get Production Triage"
 TITLE_GET_BLAST_RADIUS: Final = "Get Blast Radius"
+TITLE_GET_RELEVANT_MEMORY: Final = "Get Relevant Memory"
+TITLE_QUERY_ENGINEERING_MEMORY: Final = "Query Engineering Memory"
+TITLE_MANAGE_ENGINEERING_MEMORY: Final = "Manage Engineering Memory"
 TITLE_CHECK_PATCH_CONTRACT: Final = "Check Patch Contract"
 TITLE_CREATE_REVIEW_RECEIPT: Final = "Create Review Receipt"
 TITLE_VALIDATE_REVIEW_CLAIMS: Final = "Validate Review Claims"

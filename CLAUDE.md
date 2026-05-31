@@ -80,6 +80,22 @@ Workflow profiles determine which steps are needed:
   For `non_python_patch`, report controller-stated limitations and do not
   present the result as full structural verification.
 
+### Memory-aware workflow
+
+After `start_controlled_change` returns `edit_allowed: true`:
+
+1. Call `get_relevant_memory` with explicit `scope` or the active `intent_id`
+2. Read contract warnings, stale decisions, and contradiction alerts
+3. Do NOT ignore stale memory warnings — they indicate changed context
+4. Do NOT treat `inferred` or `draft` records as established facts
+5. If memory contains a `contradiction_note` for your scope, surface it to
+   the user before editing
+
+Use `query_engineering_memory(mode=for_path)` for targeted lookup.
+Run `codeclone memory init` once per repo before expecting memory tools to
+return records. Memory cannot authorize edits, expand scope, or override
+findings.
+
 Queue/promote workflow (when `start` returns `status: "queued"`):
 
 1. `start_controlled_change(on_conflict="queue")` → `status: "queued"`

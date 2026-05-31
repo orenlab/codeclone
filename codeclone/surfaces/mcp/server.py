@@ -54,17 +54,32 @@ from .messages.params import (
     HelpTopicParam,
     HotspotKindParam,
     IncludeBlastRadiusParam,
+    IncludeDraftsParam,
     IncludeParam,
     IncludePatchContractParam,
+    IncludeStaleParam,
     IntentIdParam,
     IntentTextParam,
     LeaseSecondsParam,
     LimitParam,
     ManageActionParam,
+    ManageMemoryActionParam,
     MaxHotspotsParam,
     MaxResultsParam,
     MaxSizeMbParam,
     MaxSuggestionsParam,
+    MemoryClaimsTextParam,
+    MemoryFiltersParam,
+    MemoryMaxRecordsParam,
+    MemoryPathParam,
+    MemoryQueryModeParam,
+    MemoryRecordIdParam,
+    MemoryRecordTypeParam,
+    MemoryScopeListParam,
+    MemorySearchQueryParam,
+    MemoryStatementParam,
+    MemorySymbolParam,
+    MemorySymbolsParam,
     MinComplexityParam,
     MinSeverityParam,
     NoveltyParam,
@@ -80,6 +95,7 @@ from .messages.params import (
     PathFilterParam,
     PrFormatParam,
     ProcessesParam,
+    ProposeMemoryParam,
     ReceiptFormatParam,
     ReportSectionParam,
     RequireCitationsParam,
@@ -416,6 +432,91 @@ def build_mcp_server(
             run_id=run_id,
             depth=depth,
             include=include,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_GET_RELEVANT_MEMORY,
+        description=mcp_tools.GET_RELEVANT_MEMORY,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_relevant_memory(
+        root: RootParam,
+        scope: MemoryScopeListParam = None,
+        intent_id: OptionalIntentIdParam = None,
+        symbols: MemorySymbolsParam = None,
+        max_records: MemoryMaxRecordsParam = 20,
+        include_stale: IncludeStaleParam = False,
+        include_drafts: IncludeDraftsParam = False,
+    ) -> dict[str, object]:
+        return service.get_relevant_memory(
+            root=root,
+            scope=scope,
+            intent_id=intent_id,
+            symbols=symbols,
+            max_records=max_records,
+            include_stale=include_stale,
+            include_drafts=include_drafts,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_QUERY_ENGINEERING_MEMORY,
+        description=mcp_tools.QUERY_ENGINEERING_MEMORY,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def query_engineering_memory(
+        root: RootParam,
+        mode: MemoryQueryModeParam,
+        record_id: MemoryRecordIdParam = None,
+        path: MemoryPathParam = None,
+        symbol: MemorySymbolParam = None,
+        query: MemorySearchQueryParam = None,
+        scope: MemoryScopeListParam = None,
+        filters: MemoryFiltersParam = None,
+        max_results: MemoryMaxRecordsParam = 20,
+        include_stale: IncludeStaleParam = False,
+        include_drafts: IncludeDraftsParam = False,
+    ) -> dict[str, object]:
+        return service.query_engineering_memory(
+            root=root,
+            mode=mode,
+            record_id=record_id,
+            path=path,
+            symbol=symbol,
+            query=query,
+            scope=scope,
+            filters=filters,
+            max_results=max_results,
+            include_stale=include_stale,
+            include_drafts=include_drafts,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_MANAGE_ENGINEERING_MEMORY,
+        description=mcp_tools.MANAGE_ENGINEERING_MEMORY,
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def manage_engineering_memory(
+        root: RootParam,
+        action: ManageMemoryActionParam,
+        record_type: MemoryRecordTypeParam = None,
+        statement: MemoryStatementParam = None,
+        subject_path: MemoryPathParam = None,
+        text: MemoryClaimsTextParam = None,
+        intent_id: OptionalIntentIdParam = None,
+        run_id: RunIdParam = None,
+    ) -> dict[str, object]:
+        return service.manage_engineering_memory(
+            root=root,
+            action=action,
+            record_type=record_type,
+            statement=statement,
+            subject_path=subject_path,
+            text=text,
+            intent_id=intent_id,
+            run_id=run_id,
         )
 
     @tool(
@@ -890,6 +991,7 @@ def build_mcp_server(
         create_receipt: CreateReceiptParam = True,
         auto_clear: AutoClearParam = True,
         strictness: StrictnessParam = "ci",
+        propose_memory: ProposeMemoryParam = False,
     ) -> dict[str, object]:
         return service.finish_controlled_change(
             intent_id=intent_id,
@@ -901,6 +1003,7 @@ def build_mcp_server(
             create_receipt=create_receipt,
             auto_clear=auto_clear,
             strictness=strictness,
+            propose_memory=propose_memory,
         )
 
     @tool(

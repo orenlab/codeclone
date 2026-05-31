@@ -8,9 +8,10 @@ review receipts, and workflow consolidation tools.
 
 ### Added
 
-- Structural change controller for MCP: 28 tools total, with
+- Structural change controller for MCP: 31 tools total, with
   `start_controlled_change` / `finish_controlled_change` reducing the edit
-  cycle from 7–11 MCP calls to 3–4.
+  cycle from 7–11 MCP calls to 3–4, plus engineering memory tools
+  (`get_relevant_memory`, `query_engineering_memory`, `manage_engineering_memory`).
 - Change intent lifecycle (`manage_change_intent`): declare, check, clear,
   queue (`on_conflict="queue"`), promote, recover. Renewable ownership leases
   with own/recoverable/foreign-active classification.
@@ -20,6 +21,24 @@ review receipts, and workflow consolidation tools.
   `intent_registry_retention_days` (default 7). Cross-process locks, lazy
   closure on reads, scoped git working-tree hygiene, and repo-level
   `workspace_dirty_summary` on `list_workspace`.
+- Engineering Memory foundation (Phase 18.1): SQLite schema/store under
+  `.cache/codeclone/memory/`, `[tool.codeclone.memory]` config, CLI commands
+  `codeclone memory init|status|for-path|search`, and deterministic init ingestion
+  from analysis, contracts, docs, tests, git history, and contradictions.
+- Engineering Memory scoped retrieval (Phase 18.2): MCP tools
+  `get_relevant_memory` and `query_engineering_memory`, ranked scope-aware
+  retrieval, `help(topic="engineering_memory")`, and CLI `codeclone memory search`.
+- Engineering Memory staleness and retention (Phase 18.3): refresh-time
+  staleness engine, scope staleness on patch finish, `codeclone memory stale`,
+  `codeclone memory vacuum`, and retention-driven purge via `MemoryConfig`.
+- Engineering Memory governance (Phase 18.4): candidate/approve/reject/archive
+  lifecycle, claim validation guardrails, CLI `codeclone memory
+  review-candidates|approve|reject|archive`, and MCP `manage_engineering_memory`
+  for agent-side candidate recording and claim checks (human approval stays CLI).
+- Engineering Memory coverage and finish hook (Phase 18.5): scope coverage
+  metrics, `codeclone memory coverage`, `finish_controlled_change(propose_memory=true)`
+  for draft candidates and coverage delta on accepted patches, and receipt-based
+  memory proposals via `manage_engineering_memory(action="propose_from_receipt")`.
 - Blast radius projection (`get_blast_radius`): direct/transitive dependents,
   clone cohorts, structural risk, do-not-touch boundaries.
 - Patch contract (`check_patch_contract`): pre-edit budget and post-edit verify

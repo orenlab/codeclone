@@ -1261,6 +1261,154 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
     with pytest.raises(MCPServiceContractError, match="Invalid value for detail"):
         service.get_help(topic="baseline", detail="full")
 
+    memory_help = service.get_help(topic="engineering_memory", detail="normal")
+    assert "get_relevant_memory" in cast(
+        "list[str]",
+        memory_help["recommended_tools"],
+    )
+    assert "query_engineering_memory" in cast(
+        "list[str]",
+        memory_help["recommended_tools"],
+    )
+
+
+def test_mcp_service_get_relevant_memory_requires_initialized_db(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    with pytest.raises(MCPServiceContractError, match="not found"):
+        service.get_relevant_memory(root=str(tmp_path.resolve()))
+
+
+def test_mcp_service_get_relevant_memory_resolves_intent_scope(
+    tmp_path: Path,
+) -> None:
+    from codeclone.config.memory import resolve_memory_config
+    from codeclone.memory.identity import make_identity_key
+    from codeclone.memory.models import MemoryRecord, MemorySubject, generate_memory_id
+    from codeclone.memory.project import (
+        resolve_memory_db_path,
+        resolve_project_identity,
+    )
+    from codeclone.memory.schema import create_schema_v1, open_memory_db
+    from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
+    from codeclone.report.meta import current_report_timestamp_utc
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    allowed = "pkg/module.py"
+    config = resolve_memory_config(root)
+    db_path = resolve_memory_db_path(root, config)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    project = resolve_project_identity(root)
+    conn = open_memory_db(db_path)
+    try:
+        create_schema_v1(conn)
+    finally:
+        conn.close()
+    store = SqliteEngineeringMemoryStore(db_path)
+    try:
+        store.initialize(project)
+        now = current_report_timestamp_utc()
+        record = MemoryRecord(
+            id=generate_memory_id(),
+            project_id=project.id,
+            identity_key=make_identity_key(
+                type="module_role",
+                subject_kind="module",
+                subject_key="pkg.module",
+                discriminator="inventory_module",
+            ),
+            type="module_role",
+            status="active",
+            confidence="supported",
+            origin="system",
+            ingest_source="analysis",
+            statement="module owns retrieval helpers",
+            summary=None,
+            payload={"module_path": "pkg.module"},
+            created_at_utc=now,
+            updated_at_utc=now,
+            last_verified_at_utc=now,
+            expires_at_utc=None,
+            created_by="test",
+            verified_by=None,
+            approved_by=None,
+            approved_at_utc=None,
+            report_digest=None,
+            code_fingerprint=None,
+            stale_reason=None,
+            created_on_branch=None,
+            created_at_commit=None,
+            verified_on_branch=None,
+            verified_at_commit=None,
+        )
+        store.upsert_record(record)
+        store.write_subject(
+            MemorySubject(
+                id=generate_memory_id(prefix="subj"),
+                memory_id=record.id,
+                subject_kind="path",
+                subject_key=allowed,
+                relation="about",
+            )
+        )
+    finally:
+        store.close()
+
+    service = CodeCloneMCPService(history_limit=4)
+    _register_docs_patch_run(service, root)
+    started = service.start_controlled_change(
+        root=str(root.resolve()),
+        scope={"allowed_files": [allowed]},
+        intent="memory integration",
+    )
+    intent_id = str(started["intent_id"])
+    result = service.get_relevant_memory(
+        root=str(root.resolve()),
+        intent_id=intent_id,
+    )
+    assert result["scope_resolved_from"] == "intent"
+    records = cast("list[dict[str, object]]", result["records"])
+    assert records
+    assert records[0]["statement"] == "module owns retrieval helpers"
+
+
+def test_mcp_service_query_engineering_memory_unknown_mode(
+    tmp_path: Path,
+) -> None:
+    from codeclone.config.memory import resolve_memory_config
+    from codeclone.memory.project import (
+        resolve_memory_db_path,
+        resolve_project_identity,
+    )
+    from codeclone.memory.schema import create_schema_v1, open_memory_db
+    from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    config = resolve_memory_config(root)
+    db_path = resolve_memory_db_path(root, config)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    project = resolve_project_identity(root)
+    conn = open_memory_db(db_path)
+    try:
+        create_schema_v1(conn)
+    finally:
+        conn.close()
+    store = SqliteEngineeringMemoryStore(db_path)
+    try:
+        store.initialize(project)
+    finally:
+        store.close()
+
+    service = CodeCloneMCPService(history_limit=2)
+    with pytest.raises(MCPServiceContractError, match="Unknown query mode"):
+        service.query_engineering_memory(
+            root=str(root.resolve()),
+            mode="invalid",
+        )
+
 
 def test_mcp_service_summary_inventory_is_compact_and_report_inventory_stays_canonical(
     tmp_path: Path,

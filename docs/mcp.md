@@ -209,7 +209,7 @@ the client workspace.
 
 ## Tool surface
 
-Current surface: **28 tools**, **7 fixed resources**, **3 URI templates**.
+Current surface: **31 tools**, **7 fixed resources**, **3 URI templates**.
 
 The surface is organized by workflow phase. Start at the top, drill down
 as needed.
@@ -338,9 +338,12 @@ sequenceDiagram
 | Tool                       | Purpose                                                                                                              |
 |----------------------------|----------------------------------------------------------------------------------------------------------------------|
 | `start_controlled_change`  | Pre-edit workflow: workspace check + declare + blast radius + budget (`dirty_scope_policy` for own WIP)              |
-| `finish_controlled_change` | Post-edit workflow: scope check + verify + claims + receipt + clear                                                  |
+| `finish_controlled_change` | Post-edit workflow: scope check + verify + claims + receipt + clear (`propose_memory` for draft candidates on accept) |
 | `manage_change_intent`     | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace |
 | `get_blast_radius`         | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                    |
+| `get_relevant_memory`      | Ranked engineering memory for declared edit scope (explicit scope or active intent_id)                               |
+| `query_engineering_memory`   | Mode router: search, get, for_path, for_symbol, stale, coverage, status                                              |
+| `manage_engineering_memory`  | Agent memory governance: record_candidate, validate_claims, propose_from_receipt (approve/reject remain CLI-only)    |
 | `check_patch_contract`     | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                               |
 | `create_review_receipt`    | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile               |
 | `validate_review_claims`   | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks       |
