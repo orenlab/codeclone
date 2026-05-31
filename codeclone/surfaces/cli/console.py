@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from ... import __version__
 from ... import ui_messages as ui
@@ -100,6 +100,33 @@ def make_console(*, no_color: bool, width: int) -> RichConsole:
         theme=theme_cls(_RICH_THEME_STYLES),
         no_color=no_color,
         width=width,
+    )
+
+
+def supports_rich_console(console: PrinterLike) -> bool:
+    return console.__class__.__module__.startswith("rich.")
+
+
+@lru_cache(maxsize=1)
+def rich_panel_symbols() -> tuple[Any, Any, Any, Any, Any]:
+    from rich import box
+    from rich.panel import Panel
+    from rich.rule import Rule
+    from rich.table import Table
+    from rich.text import Text
+
+    return box, Panel, Rule, Table, Text
+
+
+def make_query_console(*, no_color: bool | None = None) -> PrinterLike:
+    resolved_no_color = (
+        bool(os.environ.get("NO_COLOR")) or not sys.stdout.isatty()
+        if no_color is None
+        else no_color
+    )
+    return cast(
+        PrinterLike,
+        make_console(no_color=resolved_no_color, width=ui.CLI_AUDIT_MAX_WIDTH),
     )
 
 

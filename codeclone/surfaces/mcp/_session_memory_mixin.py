@@ -114,67 +114,34 @@ class _MCPSessionMemoryMixin:
         run_id: str | None = None,
     ) -> dict[str, object]:
         from ...memory.exceptions import MemoryCapacityError, MemoryContractError
-        from ...memory.governance import (
-            record_candidate,
-            validate_memory_claims,
-        )
-        from ...memory.ingest.receipts import propose_memory_from_finish_payload
 
         root_path = _helpers._resolve_root(root)
         store, _db_path, config, project = self._open_memory_store(root_path)
         try:
             normalized = action.strip().lower()
             if normalized == "record_candidate":
-                if not record_type or not statement:
-                    raise MCPServiceContractError(
-                        "record_candidate requires record_type and statement."
-                    )
-                record = record_candidate(
+                return self._manage_memory_record_candidate(
                     store,
                     project=project,
-                    record_type=record_type,  # type: ignore[arg-type]
+                    config=config,
+                    record_type=record_type,
                     statement=statement,
                     subject_path=subject_path,
-                    max_candidates=config.max_candidates,
                 )
-                return {
-                    "action": normalized,
-                    "record_id": record.id,
-                    "status": record.status,
-                    "type": record.type,
-                }
             if normalized == "validate_claims":
-                if not text:
-                    raise MCPServiceContractError("validate_claims requires text.")
-                result = validate_memory_claims(
-                    store,
-                    project_id=project.id,
-                    text=text,
-                )
-                return {
-                    "action": normalized,
-                    "valid": result.valid,
-                    "warnings": list(result.warnings),
-                    "errors": list(result.errors),
-                }
-            if normalized == "propose_from_receipt":
-                payload: dict[str, object] = {
-                    "claims_text": text,
-                    "scope_check": {},
-                }
-                if intent_id:
-                    intent = self._active_intents.get(intent_id)
-                    if intent is not None:
-                        payload["scope_check"] = {
-                            "declared_scope": list(intent.scope.allowed_files),
-                        }
-                candidates = propose_memory_from_finish_payload(
+                return self._manage_memory_validate_claims(
                     store,
                     project=project,
-                    finish_payload=payload,
-                    max_candidates=config.max_candidates,
+                    text=text,
                 )
-                return {"action": normalized, "memory_candidates": candidates}
+            if normalized == "propose_from_receipt":
+                return self._manage_memory_propose_from_receipt(
+                    store,
+                    project=project,
+                    config=config,
+                    text=text,
+                    intent_id=intent_id,
+                )
             allowed = (
                 "record_candidate",
                 "validate_claims",
@@ -190,6 +157,89 @@ class _MCPSessionMemoryMixin:
             raise MCPServiceContractError(str(exc)) from exc
         finally:
             store.close()
+
+    def _manage_memory_record_candidate(
+        self,
+        store: SqliteEngineeringMemoryStore,
+        *,
+        project: MemoryProject,
+        config: MemoryConfig,
+        record_type: str | None,
+        statement: str | None,
+        subject_path: str | None,
+    ) -> dict[str, object]:
+        from ...memory.governance import record_candidate
+
+        if not record_type or not statement:
+            raise MCPServiceContractError(
+                "record_candidate requires record_type and statement."
+            )
+        record = record_candidate(
+            store,
+            project=project,
+            record_type=record_type,  # type: ignore[arg-type]
+            statement=statement,
+            subject_path=subject_path,
+            max_candidates=config.max_candidates,
+        )
+        return {
+            "action": "record_candidate",
+            "record_id": record.id,
+            "status": record.status,
+            "type": record.type,
+        }
+
+    def _manage_memory_validate_claims(
+        self,
+        store: SqliteEngineeringMemoryStore,
+        *,
+        project: MemoryProject,
+        text: str | None,
+    ) -> dict[str, object]:
+        from ...memory.governance import validate_memory_claims
+
+        if not text:
+            raise MCPServiceContractError("validate_claims requires text.")
+        result = validate_memory_claims(
+            store,
+            project_id=project.id,
+            text=text,
+        )
+        return {
+            "action": "validate_claims",
+            "valid": result.valid,
+            "warnings": list(result.warnings),
+            "errors": list(result.errors),
+        }
+
+    def _manage_memory_propose_from_receipt(
+        self,
+        store: SqliteEngineeringMemoryStore,
+        *,
+        project: MemoryProject,
+        config: MemoryConfig,
+        text: str | None,
+        intent_id: str | None,
+    ) -> dict[str, object]:
+        from ...memory.ingest.receipts import propose_memory_from_finish_payload
+
+        payload: dict[str, object] = {
+            "claims_text": text,
+            "scope_check": {},
+        }
+        if intent_id:
+            intent = self._active_intents.get(intent_id)
+            if intent is not None:
+                payload["scope_check"] = {
+                    "declared_scope": list(intent.scope.allowed_files),
+                }
+        candidates = propose_memory_from_finish_payload(
+            store,
+            project=project,
+            finish_payload=payload,
+            max_candidates=config.max_candidates,
+        )
+        return {"action": "propose_from_receipt", "memory_candidates": candidates}
 
     def finish_propose_memory(
         self,

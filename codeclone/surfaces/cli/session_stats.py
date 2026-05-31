@@ -14,10 +14,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ... import ui_messages as ui
 from ...contracts import ExitCode
+from . import console as cli_console
 from .types import PrinterLike
 
 if TYPE_CHECKING:
@@ -231,7 +232,7 @@ def _render_quiet(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
 
 
 def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
-    if _supports_rich(console):
+    if cli_console.supports_rich_console(console):
         return _render_verbose_rich(console, snapshot)
     console.print(f"[bold]╍╍╍ {ui.SESSION_STATS_TITLE} ╍╍╍[/bold]")
     console.print()
@@ -317,7 +318,7 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
 
 
 def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
-    box, panel_cls, rule_cls, table_cls, text_cls = _rich_session_symbols()
+    box, panel_cls, rule_cls, table_cls, text_cls = cli_console.rich_panel_symbols()
 
     console.print(rule_cls(ui.SESSION_STATS_TITLE, style="dim", characters="─"))
 
@@ -415,20 +416,6 @@ def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> in
             )
     console.print(table)
     return int(ExitCode.SUCCESS)
-
-
-def _rich_session_symbols() -> tuple[Any, Any, Any, Any, Any]:
-    from rich import box
-    from rich.panel import Panel
-    from rich.rule import Rule
-    from rich.table import Table
-    from rich.text import Text
-
-    return box, Panel, Rule, Table, Text
-
-
-def _supports_rich(console: PrinterLike) -> bool:
-    return console.__class__.__module__.startswith("rich.")
 
 
 def _latest_run_text(snapshot: _SessionSnapshot) -> str:

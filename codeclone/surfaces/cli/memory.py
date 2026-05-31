@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import cast
 
 from ...config.memory import MemoryConfig, resolve_memory_config
 from ...contracts import ExitCode
@@ -22,13 +21,25 @@ from ...memory.retrieval import query_engineering_memory, query_records_for_repo
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from ...memory.status_report import build_memory_status_report
 from ...memory.vacuum import run_memory_vacuum
-from .console import PlainConsole
 from .memory_analysis import load_report_for_memory_init
+from .memory_render import (
+    memory_console,
+    render_coverage_report,
+    render_draft_candidates,
+    render_governance_result,
+    render_init_note,
+    render_init_result,
+    render_path_results,
+    render_search_results,
+    render_stale_records,
+    render_status_report,
+    render_vacuum_report,
+)
 from .types import PrinterLike
 
 
 def memory_main(argv: list[str]) -> int:
-    console = cast(PrinterLike, PlainConsole())
+    console = memory_console()
     parser = _build_parser()
     args = parser.parse_args(argv)
     root_path = Path(args.root).expanduser().resolve()
@@ -96,7 +107,17 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_root(search_parser)
     search_parser.add_argument("query", help="Keyword query.")
     search_parser.add_argument("--limit", type=int, default=20)
-    search_parser.add_argument("--include-stale", action="store_true")
+    search_parser.add_argument(
+        "--match",
+        choices=("any", "all"),
+        default="any",
+        help="Match any token (default) or require all tokens.",
+    )
+    search_parser.add_argument(
+        "--active-only",
+        action="store_true",
+        help="Exclude stale records from search results.",
+    )
 
     stale_parser = subparsers.add_parser(
         "stale",
@@ -165,20 +186,7 @@ def _render_status(*, console: PrinterLike, root_path: Path) -> int:
         db_path=db_path,
         backend=config.backend,
     )
-    console.print("Engineering Memory status")
-    console.print(f"  root:             {report.project_root}")
-    console.print(f"  backend:          {report.backend}")
-    console.print(f"  db:               {report.db_path}")
-    console.print(f"  db_exists:        {report.db_exists}")
-    console.print(f"  schema_version:   {report.schema_version or 'n/a'}")
-    console.print(f"  project_id:       {report.project_id or 'n/a'}")
-    console.print(f"  analysis_fp:      {report.last_analysis_fingerprint or 'n/a'}")
-    console.print(f"  last_init_run_id: {report.last_init_run_id or 'n/a'}")
-    console.print(f"  record_count:     {report.record_count}")
-    if report.records_by_type:
-        console.print("  records_by_type:")
-        for key, count in sorted(report.records_by_type.items()):
-            console.print(f"    {key}: {count}")
+    render_status_report(console=console, report=report)
     return int(ExitCode.SUCCESS)
 
 
@@ -198,14 +206,20 @@ def _run_init(
         return int(ExitCode.CONTRACT_ERROR)
 
     if loaded.rejected_cache_reason:
-        console.print(
-            "  note: cached report rejected; running fresh analysis "
-            f"({loaded.rejected_cache_reason})"
+        render_init_note(
+            console=console,
+            message=(
+                "cached report rejected; running fresh analysis "
+                f"({loaded.rejected_cache_reason})"
+            ),
         )
     elif loaded.source == "fresh_analysis":
-        console.print("  note: no trusted cached report; running fresh analysis")
+        render_init_note(
+            console=console,
+            message="no trusted cached report; running fresh analysis",
+        )
     elif loaded.source == "trusted_cache":
-        console.print("  note: reusing trusted cached report")
+        render_init_note(console=console, message="reusing trusted cached report")
 
     options = InitOptions(
         dry_run=bool(args.dry_run),
@@ -223,26 +237,15 @@ def _run_init(
         console.print(f"Memory init failed: {exc}")
         return int(ExitCode.INTERNAL_ERROR)
 
-    if result.dry_run:
-        console.print("Engineering Memory init dry-run")
-        console.print(f"  project_id:          {result.project_id}")
-        console.print(f"  analysis_fingerprint:{result.analysis_fingerprint}")
-        console.print("  planned records:")
-        for key, count in sorted(result.planned_counts.items()):
-            console.print(f"    {key}: {count}")
-        return int(ExitCode.SUCCESS)
-
-    console.print("Engineering Memory initialized")
-    console.print(f"  project_id: {result.project_id}")
-    console.print(f"  db:         {result.db_path}")
-    if result.stats:
-        console.print("  upsert stats:")
-        for key, count in sorted(result.stats.items()):
-            console.print(f"    {key}: {count}")
-    if result.planned_counts:
-        console.print("  record types:")
-        for key, count in sorted(result.planned_counts.items()):
-            console.print(f"    {key}: {count}")
+    render_init_result(
+        console=console,
+        dry_run=bool(result.dry_run),
+        project_id=result.project_id,
+        db_path=str(result.db_path) if result.db_path else None,
+        analysis_fingerprint=result.analysis_fingerprint,
+        stats=result.stats,
+        planned_counts=result.planned_counts,
+    )
     return int(ExitCode.SUCCESS)
 
 
@@ -269,12 +272,7 @@ def _run_for_path(
     finally:
         store.close()
 
-    console.print(f"Engineering Memory for path: {rel_path}")
-    if not records:
-        console.print("  (no records)")
-        return int(ExitCode.SUCCESS)
-    for record in records:
-        console.print(f"  - [{record.type}/{record.status}] {record.statement}")
+    render_path_results(console=console, rel_path=rel_path, records=records)
     return int(ExitCode.SUCCESS)
 
 
@@ -299,8 +297,9 @@ def _run_search(
             db_path=db_path,
             mode="search",
             query=str(args.query),
+            filters={"match_mode": str(args.match)},
             max_results=max(1, int(args.limit)),
-            include_stale=bool(args.include_stale),
+            include_stale=not bool(args.active_only),
         )
     finally:
         store.close()
@@ -310,17 +309,10 @@ def _run_search(
         console.print("Memory search returned an unexpected payload.")
         return int(ExitCode.INTERNAL_ERROR)
     records = payload.get("records")
-    console.print(f"Engineering Memory search: {args.query!r}")
-    if not isinstance(records, list) or not records:
-        console.print("  (no records)")
-        return int(ExitCode.SUCCESS)
-    for item in records:
-        if not isinstance(item, dict):
-            continue
-        record_type = item.get("type", "?")
-        status = item.get("status", "?")
-        statement = item.get("statement", "")
-        console.print(f"  - [{record_type}/{status}] {statement}")
+    if not isinstance(records, list):
+        records = []
+    typed_records = [item for item in records if isinstance(item, dict)]
+    render_search_results(console=console, query=str(args.query), records=typed_records)
     return int(ExitCode.SUCCESS)
 
 
@@ -357,15 +349,8 @@ def _run_stale(
         store.close()
     payload = result.get("payload")
     records = payload.get("records") if isinstance(payload, dict) else None
-    console.print("Stale engineering memory records")
-    if not isinstance(records, list) or not records:
-        console.print("  (none)")
-        return int(ExitCode.SUCCESS)
-    for item in records:
-        if not isinstance(item, dict):
-            continue
-        reason = item.get("stale_reason", "")
-        console.print(f"  - [{item.get('type')}] {item.get('statement')} ({reason})")
+    typed_records = [item for item in (records or []) if isinstance(item, dict)]
+    render_stale_records(console=console, records=typed_records)
     return int(ExitCode.SUCCESS)
 
 
@@ -379,10 +364,7 @@ def _run_vacuum(*, console: PrinterLike, root_path: Path) -> int:
         report = run_memory_vacuum(store, config)
     finally:
         store.close()
-    console.print("Engineering Memory vacuum complete")
-    console.print(f"  deleted: {report.total_deleted}")
-    for key, count in report.deleted_by_status.items():
-        console.print(f"    {key}: {count}")
+    render_vacuum_report(console=console, report=report)
     return int(ExitCode.SUCCESS)
 
 
@@ -404,15 +386,7 @@ def _run_coverage(
         )
     finally:
         store.close()
-    console.print("Engineering Memory coverage")
-    console.print(
-        f"  covered: {report.scope_paths_with_memory}/{report.scope_paths_total} "
-        f"({report.scope_coverage_percent}%)"
-    )
-    if report.uncovered_paths:
-        console.print("  uncovered:")
-        for path in report.uncovered_paths:
-            console.print(f"    - {path}")
+    render_coverage_report(console=console, report=report)
     return int(ExitCode.SUCCESS)
 
 
@@ -434,12 +408,7 @@ def _run_review_candidates(
         )
     finally:
         store.close()
-    console.print("Draft memory candidates")
-    if not records:
-        console.print("  (none)")
-        return int(ExitCode.SUCCESS)
-    for record in records:
-        console.print(f"  - {record.id} [{record.type}] {record.statement}")
+    render_draft_candidates(console=console, records=records)
     return int(ExitCode.SUCCESS)
 
 
@@ -462,7 +431,12 @@ def _run_approve(
         return int(ExitCode.CONTRACT_ERROR)
     finally:
         store.close()
-    console.print(f"Approved {record.id} -> active")
+    render_governance_result(
+        console=console,
+        action="approved",
+        record_id=record.id,
+        detail=f"Approved {record.id} -> active",
+    )
     return int(ExitCode.SUCCESS)
 
 
@@ -486,7 +460,12 @@ def _run_reject(
         return int(ExitCode.CONTRACT_ERROR)
     finally:
         store.close()
-    console.print(f"Rejected {record.id}")
+    render_governance_result(
+        console=console,
+        action="rejected",
+        record_id=record.id,
+        detail=f"Rejected {record.id}",
+    )
     return int(ExitCode.SUCCESS)
 
 
@@ -509,7 +488,12 @@ def _run_archive(
         return int(ExitCode.CONTRACT_ERROR)
     finally:
         store.close()
-    console.print(f"Archived {record.id}")
+    render_governance_result(
+        console=console,
+        action="archived",
+        record_id=record.id,
+        detail=f"Archived {record.id}",
+    )
     return int(ExitCode.SUCCESS)
 
 

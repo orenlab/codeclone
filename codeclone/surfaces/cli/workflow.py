@@ -271,10 +271,7 @@ def _run_controller_query(
 def _controller_query_console(args: CLIArgsLike) -> StatusConsole:
     """Shared console for pre-analysis controller query screens."""
     return require_status_console(
-        _make_rich_console(
-            no_color=args.no_color,
-            width=ui.CLI_AUDIT_MAX_WIDTH,
-        )
+        cli_console.make_query_console(no_color=args.no_color)
     )
 
 
