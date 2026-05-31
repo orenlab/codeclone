@@ -29,6 +29,9 @@ class WorkspaceState {
         this.stale = false;
         this.staleReason = null;
         this.lastStaleCheckAt = 0;
+        this.lastTriageFetchAt = 0;
+        this.lastTriageFetchRunId = null;
+        this.triageFetchPromise = null;
     }
 }
 

@@ -166,11 +166,12 @@ def resolve_poetry_env_root(
 ) -> Path | None:
     if not (root / "pyproject.toml").is_file():
         return None
+    probe_env = minimal_child_env(env, root)
     try:
         completed = run_cmd(
             ["poetry", "env", "info", "-p"],
             cwd=str(root),
-            env=dict(env),
+            env=probe_env,
             capture_output=True,
             text=True,
             check=False,

@@ -17,6 +17,7 @@ const {
     REVIEW_DECORATION_THEMES,
     WORKSPACE_STATE_HOTSPOT_FOCUS_MODE,
     WORKSPACE_STATE_LAST_HELP_TOPIC,
+    TRIAGE_LIVE_REFRESH_COOLDOWN_MS,
 } = require("./constants");
 const {
     capitalize,
@@ -80,7 +81,7 @@ const {
     renderSetupMarkdown,
     renderTriageMarkdown,
 } = require("./renderers");
-const {loadRunArtifacts} = require("./runArtifacts");
+const {fetchProductionTriage, loadRunArtifacts, shouldUseCachedTriage} = require("./runArtifacts");
 const {
     HotspotsTreeProvider,
     OverviewTreeProvider,
@@ -1159,6 +1160,8 @@ class CodeCloneController {
                     state.currentRunId = runId;
                     state.latestSummary = artifacts.summary;
                     state.latestTriage = artifacts.triage;
+                    state.lastTriageFetchAt = Date.now();
+                    state.lastTriageFetchRunId = runId;
                     state.metricsSummary = artifacts.metricsSummary;
                     state.changedSummary = changedMode ? analysisPayload : null;
                     state.analysisSettings = analysisSettings;
@@ -1209,13 +1212,73 @@ class CodeCloneController {
 
     async openProductionTriage() {
         const state = this.getPrimaryState();
-        if (!state || !state.latestTriage) {
+        if (!state || !state.currentRunId) {
             await vscode.window.showInformationMessage(
                 "Start with Analyze Workspace or Review Changes before opening triage."
             );
             return;
         }
-        await this.showMarkdownDocument(renderTriageMarkdown(state));
+        try {
+            await this.ensureConnected(state.folder);
+            const triage = await this.resolveLiveTriage(state);
+            if (!triage) {
+                await vscode.window.showWarningMessage(
+                    "Could not load production triage for the current run."
+                );
+                return;
+            }
+            await this.showMarkdownDocument(renderTriageMarkdown(state));
+        } catch (error) {
+            this.handleError(error, "Could not open production triage.");
+        }
+    }
+
+    async resolveLiveTriage(state) {
+        const runId = state.currentRunId;
+        if (!runId) {
+            return null;
+        }
+        if (state.triageFetchPromise) {
+            return state.triageFetchPromise;
+        }
+        const now = Date.now();
+        if (
+            shouldUseCachedTriage(
+                {
+                    now,
+                    currentRunId: runId,
+                    lastTriageFetchAt: state.lastTriageFetchAt,
+                    lastTriageFetchRunId: state.lastTriageFetchRunId,
+                    stale: state.stale,
+                    cooldownMs: TRIAGE_LIVE_REFRESH_COOLDOWN_MS,
+                },
+                Boolean(state.latestTriage)
+            )
+        ) {
+            return state.latestTriage;
+        }
+        const fetchPromise = vscode.window
+            .withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Refreshing production triage",
+                    cancellable: false,
+                },
+                async () => fetchProductionTriage(this.client, runId)
+            )
+            .then((triage) => {
+                state.latestTriage = triage;
+                state.lastTriageFetchAt = Date.now();
+                state.lastTriageFetchRunId = runId;
+                return triage;
+            })
+            .finally(() => {
+                if (state.triageFetchPromise === fetchPromise) {
+                    state.triageFetchPromise = null;
+                }
+            });
+        state.triageFetchPromise = fetchPromise;
+        return fetchPromise;
     }
 
     setActiveReviewTarget(target) {
@@ -2946,6 +3009,9 @@ class CodeCloneController {
                 state.latestSummary = null;
                 state.metricsSummary = null;
                 state.latestTriage = null;
+                state.lastTriageFetchAt = 0;
+                state.lastTriageFetchRunId = null;
+                state.triageFetchPromise = null;
                 state.changedSummary = null;
                 state.analysisSettings = null;
                 state.reviewed = [];

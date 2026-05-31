@@ -115,6 +115,13 @@ The extension also exposes structural change-controller helpers over MCP:
 
 These commands require workspace trust and an active MCP connection.
 
+## Open Production Triage
+
+**Open Production Triage** calls `get_production_triage` for the current run before
+opening the markdown panel. Repeated opens reuse the cached payload for 5 seconds
+when the run is unchanged and not marked stale; concurrent opens share one
+in-flight request.
+
 ## First-run path
 
 1. Open the `CodeClone` view container.

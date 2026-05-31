@@ -124,6 +124,9 @@ def test_resolve_launch_target_prefers_poetry_before_path(tmp_path: Path) -> Non
 
     def fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert kwargs["cwd"] == str(workspace_root)
+        probe_env = kwargs["env"]
+        assert isinstance(probe_env, dict)
+        assert "SECRET_TOKEN" not in probe_env
         return subprocess.CompletedProcess(
             args=["poetry", "env", "info", "-p"],
             returncode=0,
@@ -132,7 +135,7 @@ def test_resolve_launch_target_prefers_poetry_before_path(tmp_path: Path) -> Non
         )
 
     target = launcher_mod.resolve_launch_target(
-        env={"PWD": str(workspace_root)},
+        env={"PWD": str(workspace_root), "SECRET_TOKEN": "hidden"},
         cwd=str(workspace_root),
         repo_root=workspace_root,
         run_cmd=fake_run,

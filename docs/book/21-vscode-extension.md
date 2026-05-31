@@ -87,6 +87,8 @@ The extension currently supports:
 - blast-radius inspection (`Show Blast Radius`, `Copy Blast Radius Brief`) via
   `get_blast_radius`
 - session reset via `Clear Session` (`clear_session_runs`)
+- live production triage via **Open Production Triage** (`get_production_triage`
+  with a 5-second per-run cooldown and in-flight deduplication)
 - compact overview of structural health, current run state, baseline drift, and
   current-run `Coverage Join` facts when MCP exposes `metrics.coverage_join`,
   plus report-only `Security Surfaces` when MCP exposes

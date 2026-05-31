@@ -3,7 +3,48 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const {loadRunArtifacts} = require("../src/runArtifacts");
+const {
+    fetchProductionTriage,
+    loadRunArtifacts,
+    shouldUseCachedTriage,
+} = require("../src/runArtifacts");
+
+test("shouldUseCachedTriage respects cooldown, run id, and stale flag", () => {
+    const base = {
+        now: 10_000,
+        currentRunId: "run-a",
+        lastTriageFetchAt: 8_000,
+        lastTriageFetchRunId: "run-a",
+        stale: false,
+        cooldownMs: 5_000,
+    };
+    assert.equal(shouldUseCachedTriage(base, true), true);
+    assert.equal(shouldUseCachedTriage({...base, now: 14_000}, true), false);
+    assert.equal(shouldUseCachedTriage({...base, stale: true}, true), false);
+    assert.equal(
+        shouldUseCachedTriage({...base, lastTriageFetchRunId: "run-b"}, true),
+        false
+    );
+    assert.equal(shouldUseCachedTriage(base, false), false);
+});
+
+test("fetchProductionTriage uses bounded hotspot and suggestion limits", async () => {
+    const calls = [];
+    const client = {
+        callTool(method, payload) {
+            calls.push([method, payload]);
+            return Promise.resolve({focus: "production"});
+        },
+    };
+    const triage = await fetchProductionTriage(client, "run-42");
+    assert.deepEqual(calls, [
+        [
+            "get_production_triage",
+            {run_id: "run-42", max_hotspots: 5, max_suggestions: 5},
+        ],
+    ]);
+    assert.deepEqual(triage, {focus: "production"});
+});
 
 test("loadRunArtifacts starts MCP reads and git snapshot together", async () => {
     const started = [];
