@@ -6,9 +6,9 @@ Define observable CLI behavior: argument handling, summaries, output writing,
 and exit routing.
 
 !!! note "Observable surface only"
-    This chapter covers scripting-visible behavior and user-facing CLI output
-    categories. Rich styling details may evolve as long as markers, exit
-    semantics, and deterministic output contracts stay stable.
+This chapter covers scripting-visible behavior and user-facing CLI output
+categories. Rich styling details may evolve as long as markers, exit
+semantics, and deterministic output contracts stay stable.
 
 ## Public surface
 
@@ -96,6 +96,17 @@ Refs:
       in effective configuration (`[tool.codeclone]` or resolved defaults).
     - `--audit-json` outputs audit payload footprint as JSON. Implies `--audit`.
       Useful for cross-repository comparison.
+- Engineering Memory commands (`codeclone memory`) are terminal-only and
+  read-only with respect to source files, baselines, and analysis cache:
+    - `init [--refresh] [--dry-run]` — create or refresh the local SQLite
+      memory store from canonical report + git + docs + tests.
+    - `status`, `for-path`, `search`, `stale`, `vacuum`, `coverage` — query
+      modes mirroring MCP `query_engineering_memory`.
+    - `review-candidates`, `approve`, `reject`, `archive` — human governance
+      for draft records (not available on MCP).
+    - `search` accepts `--match any|all` for FTS token matching (default `any`).
+    - Requires a prior normal analysis run or cached report for `init`.
+    - Full contract: [Engineering Memory](26-engineering-memory.md).
 - Controller and workspace query flags are mutually exclusive where enforced:
     - `--blast-radius` and `--patch-verify` cannot be combined.
     - `--strictness {ci,strict,relaxed}` is valid only with `--patch-verify`.
@@ -142,9 +153,9 @@ Refs:
 ## Failure modes
 
 !!! warning "Failure precedence"
-    Contract failures take precedence over gating failures. In CI and scripted
-    flows, invalid config or unreadable sources must surface as exit `2` before
-    any clone or metrics gate can fail with exit `3`.
+Contract failures take precedence over gating failures. In CI and scripted
+flows, invalid config or unreadable sources must surface as exit `2` before
+any clone or metrics gate can fail with exit `3`.
 
 | Condition                                                         | User-facing category | Exit |
 |-------------------------------------------------------------------|----------------------|------|
@@ -152,7 +163,7 @@ Refs:
 | Invalid output extension/path                                     | contract             | `2`  |
 | Invalid changed-scope flag combination                            | contract             | `2`  |
 | Invalid controller query flag combination                         | contract             | `2`  |
-| `--audit` with `audit_enabled=false`                            | contract             | `2`  |
+| `--audit` with `audit_enabled=false`                              | contract             | `2`  |
 | `--patch-verify` without trusted baseline                         | contract             | `2`  |
 | Baseline untrusted in CI/gating                                   | contract             | `2`  |
 | Coverage/API regression gate without required baseline capability | contract             | `2`  |

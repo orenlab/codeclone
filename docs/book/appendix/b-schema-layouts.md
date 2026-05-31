@@ -12,7 +12,10 @@ the actual version is defined in `codeclone/contracts/__init__.py` and
 ```json
 {
   "meta": {
-    "generator": { "name": "codeclone", "version": "2.0.2" },
+    "generator": {
+      "name": "codeclone",
+      "version": "2.0.2"
+    },
     "schema_version": "2.1",
     "fingerprint_version": "1",
     "python_tag": "cp314",
@@ -22,11 +25,19 @@ the actual version is defined in `codeclone/contracts/__init__.py` and
     "api_surface_payload_sha256": "..."
   },
   "clones": {
-    "functions": ["<fingerprint>|<loc_bucket>"],
-    "blocks": ["<block_hash>|<block_hash>|<block_hash>|<block_hash>"]
+    "functions": [
+      "<fingerprint>|<loc_bucket>"
+    ],
+    "blocks": [
+      "<block_hash>|<block_hash>|<block_hash>|<block_hash>"
+    ]
   },
-  "metrics": { "...": "optional embedded metrics snapshot" },
-  "api_surface": { "...": "optional embedded public API snapshot" }
+  "metrics": {
+    "...": "optional embedded metrics snapshot"
+  },
+  "api_surface": {
+    "...": "optional embedded public API snapshot"
+  }
 }
 ```
 
@@ -63,14 +74,19 @@ Notes:
 ```json
 {
   "meta": {
-    "generator": { "name": "codeclone", "version": "2.0.2" },
+    "generator": {
+      "name": "codeclone",
+      "version": "2.0.2"
+    },
     "schema_version": "1.2",
     "python_tag": "cp314",
     "created_at": "2026-03-11T00:00:00Z",
     "payload_sha256": "...",
     "api_surface_payload_sha256": "..."
   },
-  "metrics": { "...": "metrics snapshot" },
+  "metrics": {
+    "...": "metrics snapshot"
+  },
   "api_surface": {
     "modules": [
       {
@@ -113,25 +129,154 @@ Notes:
     },
     "files": {
       "codeclone/cache/store.py": {
-        "st": [1730000000000000000, 2048],
-        "ss": [450, 12, 3, 1],
-        "u": [[
-          "qualname", 1, 2, 2, 1, "fp", "0-19", 1, 0, "low", "raw_hash",
-          0, "none", 0, "fallthrough", "none", "none"
-        ]],
-        "b": [["qualname", 10, 14, 5, "block_hash"]],
-        "s": [["qualname", 10, 14, 5, "segment_hash", "segment_sig"]],
-        "cm": [["qualname", 1, 30, 3, 2, 4, 2, "low", "low"]],
-        "cc": [["qualname", ["pkg.a", "pkg.b"]]],
-        "md": [["pkg.a", "pkg.b", "import", 10]],
-        "dc": [["pkg.a:unused_fn", "unused_fn", 20, 24, "function"]],
-        "rn": ["used_name"],
-        "rq": ["pkg.dep:used_name"],
-        "in": ["pkg.dep"],
-        "cn": ["ClassName"],
-        "rr": [["pkg.api:list_items", 20, 24, "function", "fastapi", "registers_handler", "medium", "route decorator", "router.get", "pkg.api:router"]],
-        "sc": [["process_boundary", "subprocess_run", "pkg.runner", "pkg.runner:run", 10, 10, "callable", "exact_call", "call", "subprocess.run"]],
-        "sf": [["duplicated_branches", "key", [["stmt_seq", "Expr,Return"]], [["pkg.a:f", 10, 12]]]]
+        "st": [
+          1730000000000000000,
+          2048
+        ],
+        "ss": [
+          450,
+          12,
+          3,
+          1
+        ],
+        "u": [
+          [
+            "qualname",
+            1,
+            2,
+            2,
+            1,
+            "fp",
+            "0-19",
+            1,
+            0,
+            "low",
+            "raw_hash",
+            0,
+            "none",
+            0,
+            "fallthrough",
+            "none",
+            "none"
+          ]
+        ],
+        "b": [
+          [
+            "qualname",
+            10,
+            14,
+            5,
+            "block_hash"
+          ]
+        ],
+        "s": [
+          [
+            "qualname",
+            10,
+            14,
+            5,
+            "segment_hash",
+            "segment_sig"
+          ]
+        ],
+        "cm": [
+          [
+            "qualname",
+            1,
+            30,
+            3,
+            2,
+            4,
+            2,
+            "low",
+            "low"
+          ]
+        ],
+        "cc": [
+          [
+            "qualname",
+            [
+              "pkg.a",
+              "pkg.b"
+            ]
+          ]
+        ],
+        "md": [
+          [
+            "pkg.a",
+            "pkg.b",
+            "import",
+            10
+          ]
+        ],
+        "dc": [
+          [
+            "pkg.a:unused_fn",
+            "unused_fn",
+            20,
+            24,
+            "function"
+          ]
+        ],
+        "rn": [
+          "used_name"
+        ],
+        "rq": [
+          "pkg.dep:used_name"
+        ],
+        "in": [
+          "pkg.dep"
+        ],
+        "cn": [
+          "ClassName"
+        ],
+        "rr": [
+          [
+            "pkg.api:list_items",
+            20,
+            24,
+            "function",
+            "fastapi",
+            "registers_handler",
+            "medium",
+            "route decorator",
+            "router.get",
+            "pkg.api:router"
+          ]
+        ],
+        "sc": [
+          [
+            "process_boundary",
+            "subprocess_run",
+            "pkg.runner",
+            "pkg.runner:run",
+            10,
+            10,
+            "callable",
+            "exact_call",
+            "call",
+            "subprocess.run"
+          ]
+        ],
+        "sf": [
+          [
+            "duplicated_branches",
+            "key",
+            [
+              [
+                "stmt_seq",
+                "Expr,Return"
+              ]
+            ],
+            [
+              [
+                "pkg.a:f",
+                10,
+                12
+              ]
+            ]
+          ]
+        ]
       }
     }
   },
@@ -174,9 +319,21 @@ Notes:
     },
     "analysis_thresholds": {
       "design_findings": {
-        "complexity": { "metric": "cyclomatic_complexity", "operator": ">", "value": 20 },
-        "coupling": { "metric": "cbo", "operator": ">", "value": 10 },
-        "cohesion": { "metric": "lcom4", "operator": ">=", "value": 4 }
+        "complexity": {
+          "metric": "cyclomatic_complexity",
+          "operator": ">",
+          "value": 20
+        },
+        "coupling": {
+          "metric": "cbo",
+          "operator": ">",
+          "value": 10
+        },
+        "cohesion": {
+          "metric": "lcom4",
+          "operator": ">=",
+          "value": 4
+        }
       }
     },
     "baseline": {
@@ -644,10 +801,34 @@ DESIGN FINDINGS
 INTEGRITY
 ```
 
+## Engineering Memory schema (`1.1`)
+
+SQLite database at `.cache/codeclone/memory/engineering_memory.sqlite3` (default).
+Schema version stored in `memory_meta.schema_version`.
+
+Core tables:
+
+| Table                   | Role                                                      |
+|-------------------------|-----------------------------------------------------------|
+| `memory_records`        | Typed statements with status, confidence, origin, payload |
+| `memory_subjects`       | Path/symbol/module links (`subject_kind`, `subject_key`)  |
+| `memory_evidence`       | Deterministic evidence refs (report, git_commit, doc, …)  |
+| `memory_fts`            | FTS5 search index (schema 1.1+)                           |
+| `memory_revisions`      | Governance audit trail                                    |
+| `memory_ingestion_runs` | Init/refresh run metadata                                 |
+
+Record identity uses stable `identity_key` strings for upsert during refresh.
+Migration path: `codeclone/memory/schema_migrate.py`.
+
+See [Engineering Memory](../26-engineering-memory.md) for lifecycle and agent
+surfaces.
+
 ## Refs
 
 - `codeclone/baseline/clone_baseline.py`
 - `codeclone/cache/store.py`
+- `codeclone/memory/schema.py`
+- `codeclone/memory/schema_migrate.py`
 - `codeclone/report/document/builder.py`
 - `codeclone/report/renderers/text.py`
 - `codeclone/report/renderers/markdown.py`

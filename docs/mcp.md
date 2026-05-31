@@ -77,10 +77,12 @@ graph BT
     RR["_MCPSessionReviewReceiptMixin<br/><small>audit receipt composition</small>"]
     CG["_MCPSessionClaimGuardMixin<br/><small>citation-based validation</small>"]
     WF["_MCPSessionWorkflowMixin<br/><small>start/finish orchestration</small>"]
+    MM["_MCPSessionMemoryMixin<br/><small>engineering memory retrieval/governance</small>"]
     S["MCPSession"]
-    F --> CP --> AA --> RSB --> SM --> RPM --> STM --> BR --> IM --> PC --> RR --> CG --> WF --> S
+    F --> CP --> AA --> RSB --> SM --> RPM --> STM --> BR --> IM --> PC --> RR --> CG --> WF --> MM --> S
     style S stroke: #6366f1, stroke-width: 2px
     style WF fill: #eff6ff
+    style MM fill: #ecfdf5
     style CG fill: #f0fdf4
     style RR fill: #f0fdf4
     style PC fill: #f0fdf4
@@ -342,8 +344,8 @@ sequenceDiagram
 | `manage_change_intent`     | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace |
 | `get_blast_radius`         | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                    |
 | `get_relevant_memory`      | Ranked engineering memory for declared edit scope (explicit scope or active intent_id)                               |
-| `query_engineering_memory`   | Mode router: search, get, for_path, for_symbol, stale, coverage, status                                              |
-| `manage_engineering_memory`  | Agent memory governance: record_candidate, validate_claims, propose_from_receipt (approve/reject remain CLI-only)    |
+| `query_engineering_memory`   | Mode router: search, get, for_path, for_symbol, stale, coverage, status. Search supports `filters.match_mode` (`any`\|`all`) |
+| `manage_engineering_memory`  | Agent memory governance: `record_candidate`, `validate_claims`, `propose_from_receipt` (approve/reject/archive are CLI-only)    |
 | `check_patch_contract`     | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                               |
 | `create_review_receipt`    | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile               |
 | `validate_review_claims`   | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks       |
@@ -370,6 +372,80 @@ after-run. Identical before/after runs for `python_structural` and
 `claim_validation_recommended` flag. Missing runs return
 `status=unverified`. Accepted verify with negative `health_delta` may
 include `health_regression_advisory`.
+
+### Engineering Memory
+
+Engineering Memory is a **local SQLite store** of evidence-linked facts about the
+repository. It complements change control by giving agents ranked context for
+the declared edit scope — contract notes, document links, risk hotspots, module
+roles, and governed drafts.
+
+Full contract: [Engineering Memory (book)](book/26-engineering-memory.md).
+
+#### Bootstrap (human / CI — not MCP)
+
+```bash
+codeclone memory init --root /abs/repo
+codeclone memory init --root /abs/repo --refresh   # re-ingest + staleness pass
+```
+
+MCP memory tools return a contract error until init has run at least once.
+
+#### Agent read path
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant M as MCP
+    participant DB as Memory SQLite
+
+    A->>M: start_controlled_change
+    M-->>A: intent_id, edit_allowed=true
+    A->>M: get_relevant_memory(root, intent_id)
+    M->>DB: ranked scope query
+    DB-->>M: active records + warnings
+    M-->>A: contract notes, risks, contradictions
+    opt targeted lookup
+        A->>M: query_engineering_memory(mode=for_path, path=...)
+        M-->>A: path-linked records
+    end
+    Note over A: Edit in declared scope
+    A->>M: finish_controlled_change(propose_memory=true)
+    M-->>A: memory_candidates, memory_staleness, memory_coverage_delta
+```
+
+| When | Tool | Why |
+|------|------|-----|
+| After `start`, before edit | `get_relevant_memory(scope \| intent_id)` | Ranked scope context |
+| One path / symbol | `query_engineering_memory(mode=for_path\|for_symbol)` | Targeted lookup |
+| Keyword discovery | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` | FTS search |
+| Unclear semantics | `help(topic="engineering_memory")` | Compact playbook |
+
+Defaults exclude **stale** and **draft** records. Surface stale warnings when
+present — they signal changed context.
+
+#### Agent write path (draft only)
+
+| Action | Tool | Result |
+|--------|------|--------|
+| Observation during edit | `manage_engineering_memory(action=record_candidate, …)` | `draft` record |
+| Validate finish claims | `manage_engineering_memory(action=validate_claims, text=…)` | warnings/errors |
+| Post-edit proposals | `finish_controlled_change(propose_memory=true)` | draft candidates + staleness |
+| Atomic fallback | `manage_engineering_memory(action=propose_from_receipt, …)` | draft proposals |
+
+**Human promote:** `codeclone memory approve RECORD_ID` — agents cannot activate
+drafts via MCP.
+
+#### Trust boundaries
+
+Memory **cannot**:
+
+- expand declared edit scope or authorize `do_not_touch` edits
+- override CodeClone structural findings
+- mutate baselines, analysis cache, canonical reports, or source files
+- run `memory init` / `refresh` (ask the user or CI)
+
+Treat `draft`, `inferred`, and excluded stale records as **non-authoritative**.
 
 ### Phase 6: Session management
 
