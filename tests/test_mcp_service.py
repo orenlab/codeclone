@@ -2721,7 +2721,9 @@ def test_mcp_blast_radius_projection_is_deterministic() -> None:
         "known_baseline_debt",
         "security_boundary_context",
     ]
-    do_not_touch_only = direct.to_payload(include=("do_not_touch",))
+    do_not_touch_only = mcp_blast_radius_mod.blast_radius_to_payload(
+        direct, include=("do_not_touch",)
+    )
     assert do_not_touch_only["direct_dependents"] == []
     assert do_not_touch_only["review_context"] == []
     assert (
@@ -2756,7 +2758,9 @@ def test_mcp_blast_radius_high_scope_boundary_and_helper_edges() -> None:
         depth="direct",
         allowed_scope=("pkg/a.py",),
     )
-    risk_only = result.to_payload(include=("risk_signals",))
+    risk_only = mcp_blast_radius_mod.blast_radius_to_payload(
+        result, include=("risk_signals",)
+    )
 
     assert result.radius_level == "high"
     assert (
@@ -2841,7 +2845,9 @@ def test_mcp_blast_radius_payload_bounds_context_sections() -> None:
         guardrails=(),
     )
 
-    payload = result.to_payload(include=("review_context",))
+    payload = mcp_blast_radius_mod.blast_radius_to_payload(
+        result, include=("review_context",)
+    )
 
     assert len(cast("list[dict[str, object]]", payload["review_context"])) == 20
     assert cast(dict[str, object], payload["review_context_summary"]) == {

@@ -11,10 +11,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
 from ... import ui_messages as ui
+from ...analysis.blast_radius import BlastRadiusResult, compute_blast_radius
 from ...contracts import ExitCode
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
-from ..mcp._blast_radius import BlastRadiusResult, compute_blast_radius
 from .types import PrinterLike
 
 _RISK_STYLES = {

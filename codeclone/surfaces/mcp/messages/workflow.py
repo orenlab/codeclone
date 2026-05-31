@@ -95,9 +95,18 @@ START_COMBINED_BLOCK: Final = (
 FINISH_HYGIENE_BLOCKED: Final = "Finish blocked by workspace hygiene."
 
 FINISH_HYGIENE_NEXT: Final = (
-    "Uncommitted changes in your declared scope were not fully reflected in "
-    "finish evidence, or foreign dirty overlap remains. Ask the user before "
-    "proceeding."
+    "Finish evidence does not match git dirty paths in declared scope, or uncommitted "
+    "changes exist outside declared scope without a foreign intent attribution. "
+    "List every touched path in changed_files, redeclare scope, or reconcile the tree."
+)
+
+FINISH_HYGIENE_MISSING_EVIDENCE: Final = (
+    "Git shows dirty paths inside declared scope that are missing from finish evidence."
+)
+
+FINISH_HYGIENE_OWN_UNSCOPED: Final = (
+    "Git shows uncommitted changes outside declared scope that are not attributed to "
+    "a foreign workspace intent. Redeclare scope to include them or revert those edits."
 )
 
 FINISH_HYGIENE_UNACKNOWLEDGED_DIRTY: Final = (

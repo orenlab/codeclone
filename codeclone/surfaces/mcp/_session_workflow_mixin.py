@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Final
 
 from . import _session_helpers as _helpers
-from ._blast_radius import BlastRadiusResult
+from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
 from ._intent import IntentRecord, IntentStatus
 from ._patch_contract import PatchContractStatus
 from ._session_shared import (
@@ -162,7 +162,7 @@ class _MCPSessionWorkflowMixin:
             depth="direct",
             forbidden_patterns=active_intent.scope.forbidden,
         )
-        blast_payload = blast_result.to_payload()
+        blast_payload = blast_radius_to_payload(blast_result)
 
         # 6. Transitive summary (auto-escalated or explicit)
         transitive_summary = self._compute_transitive_summary(
@@ -306,6 +306,12 @@ class _MCPSessionWorkflowMixin:
             "workspace_dirty_summary": workspace_dirty_summary(root=record.root),
         }
         if finish_hygiene.blocks_finish:
+            block_reason = finish_hygiene.finish_block_reason or ""
+            detail_message = {
+                "missing_evidence": workflow_msgs.FINISH_HYGIENE_MISSING_EVIDENCE,
+                "own_unscoped_dirty": workflow_msgs.FINISH_HYGIENE_OWN_UNSCOPED,
+                "foreign_dirty_overlap": workflow_msgs.FINISH_HYGIENE_FOREIGN_DIRTY,
+            }.get(block_reason, workflow_msgs.FINISH_HYGIENE_BLOCKED)
             return {
                 "intent_id": intent_id,
                 "status": "unverified",
@@ -319,15 +325,21 @@ class _MCPSessionWorkflowMixin:
                 "next_step": workflow_msgs.FINISH_HYGIENE_NEXT,
                 "workspace_hygiene": finish_hygiene.to_payload(),
                 "workspace_hygiene_after": workspace_hygiene_after,
-                "message": workflow_msgs.FINISH_HYGIENE_BLOCKED,
+                "message": detail_message,
             }
+
+        scope_files = (
+            finish_hygiene.files_for_scope_check
+            if finish_hygiene.files_for_scope_check
+            else resolved_files
+        )
 
         # 3. Check (writes IntentRecord.check_result — required for receipt)
         check_payload = self._check_change_intent(
             run_id=None,
             intent_id=intent_id,
             diff_ref=None,
-            changed_files=resolved_files,
+            changed_files=scope_files,
         )
         check_status = str(check_payload.get("status", ""))
 
@@ -370,7 +382,7 @@ class _MCPSessionWorkflowMixin:
             intent_id=intent_id,
             strictness=self._validated_strictness(strictness),
             diff_ref=None,
-            changed_files=resolved_files,
+            changed_files=scope_files,
         )
         verify_status = str(verify_payload.get("status", ""))
 

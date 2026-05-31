@@ -16,6 +16,7 @@ from ._blast_radius import (
     VALID_BLAST_RADIUS_INCLUDE,
     BlastRadiusDepth,
     BlastRadiusResult,
+    blast_radius_to_payload,
     compute_blast_radius,
 )
 from ._session_shared import (
@@ -53,7 +54,7 @@ class _MCPSessionBlastRadiusMixin:
             files=normalized_files,
             depth=normalized_depth,
         )
-        return result.to_payload(include=normalized_include)
+        return blast_radius_to_payload(result, include=normalized_include)
 
     def _blast_radius_result(
         self,

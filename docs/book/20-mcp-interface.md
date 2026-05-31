@@ -146,8 +146,13 @@ Edit permission requires `start_controlled_change` to return
 `status == "active"` **and** `edit_allowed == true`. Workflow
 `status: "blocked"` is not persisted registry lifecycle. Start may attach
 scoped `workspace_hygiene`; finish may fail with `reason: "workspace_hygiene"`.
-Queued foreign intents do not populate `foreign_dirty_overlaps`. Lazy close
-on read and `gc_workspace` use different predicates — see book/24.
+Finish **reconciles agent evidence with the full git tree** (not honor-system):
+under-reported in-scope dirty → `finish_block_reason: missing_evidence`; own
+unscoped dirty → `own_unscoped_dirty`; foreign active/stale dirty outside your
+scope → `foreign_attributed_outside_scope` (ignored). **Recoverable** (dead PID)
+intents do not grant foreign attribution. Queued foreign intents do not populate
+`foreign_dirty_overlaps`. Lazy close on read and `gc_workspace` use different
+predicates — see book/24.
 `manage_change_intent(list_workspace)` returns repo-level
 `workspace_dirty_summary` only. See
 [Workspace hygiene and registry consistency](24-structural-change-controller.md#workspace-hygiene-and-registry-consistency).

@@ -62,6 +62,16 @@ review receipts, and workflow consolidation tools.
 
 ### Fixed
 
+- `finish_controlled_change` reconciles finish evidence with the **full git
+  working tree**: under-reported in-scope dirty paths block with
+  `finish_block_reason: missing_evidence`; own edits outside declared scope
+  block with `own_unscoped_dirty`. Foreign dirty paths outside your scope are
+  ignored when attributed to a **foreign active/stale** intent
+  (`foreign_attributed_outside_scope`); **recoverable** (dead PID) intents do
+  not grant foreign attribution.
+- Blast-radius graph core moved to `codeclone/analysis/blast_radius.py`; MCP and
+  CLI surfaces consume it as presentation adapters (fixes CLI→MCP import
+  violation).
 - `dirty_scope_policy=continue_own_wip` allows resuming own dirty scope when
   no foreign overlap; finish still requires evidence.
 - Queued foreign intents no longer populate `foreign_dirty_overlaps`, unblocking

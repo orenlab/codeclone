@@ -163,6 +163,81 @@ def test_evaluate_scoped_hygiene_without_git(tmp_path: Path) -> None:
 
 def test_finish_hygiene_check_blocks_unacknowledged_dirty(tmp_path: Path) -> None:
     store = get_workspace_intent_store(tmp_path)
+    with _mock_git_porcelain(" M pkg/a.py\n M pkg/b.py\n"):
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=["pkg/b.py"],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+        )
+    assert hygiene.unacknowledged_dirty_in_scope == ("pkg/b.py",)
+    assert hygiene.blocks_finish is True
+    assert hygiene.finish_block_reason == "missing_evidence"
+
+
+def test_finish_hygiene_check_blocks_own_unscoped_dirty(tmp_path: Path) -> None:
+    store = get_workspace_intent_store(tmp_path)
+    with _mock_git_porcelain(" M pkg/a.py\n M pkg/extra.py\n"):
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+        )
+    assert hygiene.own_unscoped_dirty == ("pkg/extra.py",)
+    assert hygiene.blocks_finish is True
+    assert hygiene.finish_block_reason == "own_unscoped_dirty"
+
+
+def test_finish_hygiene_check_ignores_foreign_unscoped_dirty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_pid = 33333
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive",
+        lambda pid: pid == live_pid,
+    )
+    foreign = _record(
+        intent_id="intent-foreign-other-001",
+        pid=live_pid,
+        start_epoch=300,
+        scope={
+            "allowed_files": ["pkg/foreign.py"],
+            "allowed_related": [],
+            "forbidden": [],
+        },
+    )
+    assert write_workspace_intent(root=tmp_path, record=foreign)
+    store = get_workspace_intent_store(tmp_path)
+    with _mock_git_porcelain(" M pkg/a.py\n M pkg/foreign.py\n"):
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+        )
+    assert hygiene.foreign_attributed_outside_scope == ("pkg/foreign.py",)
+    assert hygiene.own_unscoped_dirty == ()
+    assert hygiene.blocks_finish is False
+
+
+def test_finish_hygiene_check_blocks_unacknowledged_dirty_legacy(
+    tmp_path: Path,
+) -> None:
+    store = get_workspace_intent_store(tmp_path)
     with _mock_git_porcelain(" M pkg/a.py\n"):
         hygiene = finish_hygiene_check(
             root=tmp_path,

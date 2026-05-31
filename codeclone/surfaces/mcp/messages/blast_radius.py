@@ -10,30 +10,33 @@ from __future__ import annotations
 
 from typing import Final
 
-BOUNDARY_REASON_BASELINE_OR_STATE: Final = (
-    "baseline, CodeClone state/cache, and generated artifacts "
-    "require explicit separate changes"
-)
-BOUNDARY_REASON_EXPLICIT_FORBIDDEN: Final = "declared forbidden path"
-REVIEW_REASON_KNOWN_BASELINE_DEBT: Final = "known baseline debt outside declared origin"
-REVIEW_REASON_GOLDEN_FIXTURE_SURFACE: Final = "golden fixture clone suppression surface"
-REVIEW_REASON_SECURITY_BOUNDARY: Final = "report-only security boundary inventory"
-REVIEW_REASON_REPORT_ONLY_DESIGN: Final = "report-only design signal"
-BOUNDARY_REASON_AFFECTED_NOT_ALLOWED: Final = (
-    "affected by blast radius but outside declared edit scope"
-)
-
-GUARDRAIL_REVIEW_DEPENDENTS: Final = (
-    "review direct dependents before editing public behavior"
-)
-GUARDRAIL_CLONE_COHORT_CONTEXT: Final = (
-    "treat clone cohort members as comparison context, not automatic edit targets"
-)
-GUARDRAIL_HIGH_RADIUS_APPROVAL: Final = (
-    "high blast radius requires explicit human scope approval"
-)
-GUARDRAIL_DO_NOT_TOUCH_APPROVAL: Final = (
-    "do-not-touch paths require separate explicit approval"
+from codeclone.analysis.blast_radius import (
+    BOUNDARY_REASON_AFFECTED_NOT_ALLOWED,
+    BOUNDARY_REASON_BASELINE_OR_STATE,
+    BOUNDARY_REASON_EXPLICIT_FORBIDDEN,
+    GUARDRAIL_CLONE_COHORT_CONTEXT,
+    GUARDRAIL_DO_NOT_TOUCH_APPROVAL,
+    GUARDRAIL_HIGH_RADIUS_APPROVAL,
+    GUARDRAIL_REVIEW_DEPENDENTS,
+    REVIEW_REASON_GOLDEN_FIXTURE_SURFACE,
+    REVIEW_REASON_KNOWN_BASELINE_DEBT,
+    REVIEW_REASON_REPORT_ONLY_DESIGN,
+    REVIEW_REASON_SECURITY_BOUNDARY,
 )
 
 BLAST_SUMMARY_UNKNOWN: Final = "unknown"
+
+__all__ = [
+    "BLAST_SUMMARY_UNKNOWN",
+    "BOUNDARY_REASON_AFFECTED_NOT_ALLOWED",
+    "BOUNDARY_REASON_BASELINE_OR_STATE",
+    "BOUNDARY_REASON_EXPLICIT_FORBIDDEN",
+    "GUARDRAIL_CLONE_COHORT_CONTEXT",
+    "GUARDRAIL_DO_NOT_TOUCH_APPROVAL",
+    "GUARDRAIL_HIGH_RADIUS_APPROVAL",
+    "GUARDRAIL_REVIEW_DEPENDENTS",
+    "REVIEW_REASON_GOLDEN_FIXTURE_SURFACE",
+    "REVIEW_REASON_KNOWN_BASELINE_DEBT",
+    "REVIEW_REASON_REPORT_ONLY_DESIGN",
+    "REVIEW_REASON_SECURITY_BOUNDARY",
+]

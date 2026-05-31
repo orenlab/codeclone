@@ -48,12 +48,12 @@ Intent binds to the **before-run digest** — do not redeclare on the after-run.
 
 ### After `start` (`edit_allowed` gate)
 
-| Response         | Action                                                                                                  |
-|------------------|---------------------------------------------------------------------------------------------------------|
-| `needs_analysis` | Run step 1 for same `root`, then `start` again                                                          |
-| `queued`         | **No edits.** Wait → `manage_change_intent(promote)`. If `before_run_evicted`: step 1 → `start` again   |
+| Response         | Action                                                                                                                                                                                                                       |
+|------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `needs_analysis` | Run step 1 for same `root`, then `start` again                                                                                                                                                                               |
+| `queued`         | **No edits.** Wait → `manage_change_intent(promote)`. If `before_run_evicted`: step 1 → `start` again                                                                                                                        |
 | `blocked`        | **No edits.** Intent exists — clear via `manage_change_intent(clear)` if abandoning; follow `next_step`. If dirty scope is your own WIP with no foreign overlap, retry `start` with `dirty_scope_policy="continue_own_wip"`. |
-| `active`         | Read `blast_radius` + `budget`. Edit only if `edit_allowed=true`. Budget `gate_preview.would_fail` is advisory — edit may proceed, but verify may reject. |
+| `active`         | Read `blast_radius` + `budget`. Edit only if `edit_allowed=true`. Budget `gate_preview.would_fail` is advisory — edit may proceed, but verify may reject.                                                                    |
 
 **Edit permission:** `status == "active"` alone is not enough — require
 `edit_allowed == true`. Treat unknown start statuses as no permission.
@@ -76,34 +76,63 @@ Declare in `start`: `allowed_files`, `allowed_related`, `forbidden`, `intent`,
 new `start` with wider scope. Silent expansion = failed patch. Foreign overlap →
 `on_conflict=queue` unless immediate edit required.
 
+**Scope declaration rules:**
+
+| Path kind                         | Declare in        | Notes                                                              |
+|-----------------------------------|-------------------|--------------------------------------------------------------------|
+| Files you create or edit          | `allowed_files`   | **New modules go here**, not only `allowed_related`                |
+| Tests/docs/helpers you will touch | `allowed_related` | Finish-allowed; may show `scope: expanded`                         |
+| Paths you will not touch          | omit              | Foreign **active/stale** dirty paths outside your scope are ignored at finish |
+
 ### After edit → `finish`
 
 Evidence: **`changed_files` XOR `diff_ref`** — exactly one; both or neither is
 an error. `before_run_id` is resolved from the intent — do not pass a new declare.
+
+**Git reconciliation (automatic):** finish cross-checks agent evidence against
+the **full git working tree** — not honor-system. List every path you touched in
+`changed_files` when possible; the controller also reads git and blocks
+under-reporting or silent out-of-scope edits. You **must** declare scope wide
+enough at `start`.
+
+| `finish_block_reason` | Meaning | Agent action |
+|-----------------------|---------|--------------|
+| `missing_evidence` | Git dirty inside `allowed_files` / `allowed_related` but missing from evidence | Add paths to `changed_files` / `diff_ref` or revert |
+| `own_unscoped_dirty` | Git dirty outside declared scope, not foreign-attributed | Redeclare wider scope or revert |
+| `foreign_dirty_overlap` | Foreign **active/stale** intent previously declared same in-scope path | Coordinate with user |
+
+- Dirty paths outside your scope owned by a **foreign active/stale** intent →
+  listed in `foreign_attributed_outside_scope`, **does not block** your finish.
+- **`recoverable`** intents (dead owning PID) do **not** grant foreign
+  attribution — their dirty paths count as normal workspace dirt unless you
+  declare scope or revert.
+- On hygiene pass, scope check may use `files_for_scope_check` (evidence ∪ own
+  unscoped dirty) instead of evidence alone.
 
 ```
 finish_controlled_change(
   intent_id=...,
   changed_files=[...] | diff_ref=...,     # XOR
   after_run_id=...,                       # when verification.after_run_required
-  review_text=...,                        # optional human note, not validated
-  claims_text=...,                        # optional; validated if recommended
+  claims_text=...,                        # optional; validated when recommended
+  review_text=...,                        # optional human note; not claim-validated
 )
 ```
 
-Internal order (do not replicate manually): scope **check** → **verify** → claims
-(if `claims_text` + `claim_validation_recommended`) → receipt → clear.
+Internal order (do not replicate manually): hygiene **gate** → scope **check** →
+**verify** → claims (if `claims_text` + `claim_validation_recommended`) → receipt
+→ clear.
 
 ### After `finish`
 
-| Status                                        | Action                                                                                                 |
-|-----------------------------------------------|--------------------------------------------------------------------------------------------------------|
-| `accepted` / `accepted_with_external_changes` | Cycle complete only if `intent_cleared=true` **and** §Completion gate + §Advisory acceptance satisfied |
-| `unverified`                                  | Intent stays active. Follow `next_step` (usually after-run), then **retry same `intent_id`**           |
-| `violated` (scope)                            | Fix files or expand scope via new `start`; retry same `intent_id`                                      |
-| `expired`                                     | Before-run digest stale. Re-analyze → new `start`                                                      |
+| Status                                        | Action                                                                                                                            |
+|-----------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| `accepted` / `accepted_with_external_changes` | Cycle complete only if `intent_cleared=true` **and** §Completion gate + §Advisory acceptance satisfied                            |
+| `unverified`                                  | Intent stays active. Follow `next_step` (usually after-run), then **retry same `intent_id`**                                      |
+| `violated` (scope)                            | Fix files or expand scope via new `start`; retry same `intent_id`                                                                 |
+| `expired`                                     | Before-run digest stale. Re-analyze → new `start`                                                                                 |
 | `reason=workspace_hygiene`                    | **No atomic verify bypass.** Reconcile dirty scope/evidence → retry same `intent_id`. Queued foreign intents do not block finish. |
-| `user_action_required=true`                   | Stop; follow `next_step` or escalate                                                                   |
+| `user_action_required=true`                   | Stop; follow `next_step` or escalate                                                                                              |
 
 Do not start a new intent unless scope changed or intent expired.
 
@@ -123,16 +152,16 @@ unchanged health.
 
 Read **before** the user summary, even when `intent_cleared=true`:
 
-| Field                                        | Report when                            |
-|----------------------------------------------|----------------------------------------|
+| Field                                        | Report when                                                    |
+|----------------------------------------------|----------------------------------------------------------------|
 | `verification.structural_delta.health_delta` | `< 0` — health dropped; cite delta even when verify `accepted` |
-| `health_regression_advisory`                   | present on accepted finish when delta negative                 |
+| `health_regression_advisory`                 | present on accepted finish when delta negative                 |
 | `verification.reason: after_run_not_new`     | after-run equals before-run — re-analyze with new run_id       |
-| `verification.structural_delta.verdict`      | `regressed` or `mixed`                 |
-| `external_regressions`, `gate_worsened`      | non-empty / true                       |
-| `accepted_with_external_changes`             | name external workspace signal         |
-| `contract_violations`                        | non-empty (`relaxed` may still accept) |
-| `receipt.verdict`, `human_decision_points`   | `needs_attention` or non-empty         |
+| `verification.structural_delta.verdict`      | `regressed` or `mixed`                                         |
+| `external_regressions`, `gate_worsened`      | non-empty / true                                               |
+| `accepted_with_external_changes`             | name external workspace signal                                 |
+| `contract_violations`                        | non-empty (`relaxed` may still accept)                         |
+| `receipt.verdict`, `human_decision_points`   | `needs_attention` or non-empty                                 |
 
 **Anti-pattern:** `status: accepted` → skip reporting health drop or structural
 regressions. Contract acceptance clears the intent; structural delta is

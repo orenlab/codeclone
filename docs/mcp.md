@@ -346,10 +346,12 @@ sequenceDiagram
 | `validate_review_claims`   | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks       |
 
 ??? info "Blast radius: do_not_touch vs review_context"
-`do_not_touch` contains actionable edit prohibitions: baselines, generated
-state, forbidden paths. `review_context` contains report-only signals:
-security boundary inventory, overloaded-module candidates, known baseline
-debt. Review context is information, not an edit ban.
+Graph traversal core lives in `codeclone/analysis/blast_radius.py`; MCP and CLI
+are presentation adapters over canonical report facts. `do_not_touch` contains
+actionable edit prohibitions: baselines, generated state, forbidden paths.
+`review_context` contains report-only signals: security boundary inventory,
+overloaded-module candidates, known baseline debt. Review context is information,
+not an edit ban.
 
 ??? info "Patch contract modes"
 **Budget** reads one stored run and optional intent. Shows regression
@@ -509,11 +511,17 @@ permission = edit_allowed (with status gate)
   the preview is advisory; final verify may not accept the patch.
   Response includes `workspace.concurrent_intents`, `workspace_relations`, and
   optional scoped `workspace_hygiene`.
-- **`finish_controlled_change`:** re-checks scoped hygiene before verify. Failures
-  return `reason: "workspace_hygiene"` and keep the intent active. Accepted and
-  non-accepted verify responses include a compact `summary` and
-  `workspace_hygiene_after`; `review_text` is a human note, and only
-  `claims_text` is passed to Claim Guard.
+- **`finish_controlled_change`:** re-checks scoped hygiene before verify. Finish
+  reconciles agent `changed_files` / `diff_ref` with **git** — under-reported
+  in-scope dirty paths and own unscoped dirty edits block even when the agent
+  omits them from evidence. Foreign dirty paths outside your declared scope are
+  ignored when attributed to a foreign active/stale intent
+  (`foreign_attributed_outside_scope`). Failures return `reason:
+  "workspace_hygiene"`, optional `finish_block_reason` (`missing_evidence`,
+  `own_unscoped_dirty`, `foreign_dirty_overlap`), and keep the intent active.
+  Declare **new files** in `allowed_files` at start. Accepted and non-accepted
+  verify responses include a compact `summary` and `workspace_hygiene_after`;
+  `review_text` is a human note, and only `claims_text` is passed to Claim Guard.
 - **`manage_change_intent(list_workspace)`:** returns repo-level
   `workspace_dirty_summary` only (no scoped `blocks_edit`). When recoverable
   intents exist, includes `recovery_available` (`run_available`, per-candidate
@@ -573,12 +581,31 @@ Hygiene reads the **shared git working tree**, not per-agent sandboxes.
 |----------------------------------------------------------------------------------------------------------|---------------------------------|----------------------------------------------------------------------------------------------------------|------------------------------------------|
 | **Foreign active/stale** intent on overlapping scope                                                     | `concurrent_intents`            | `status: "blocked"` (coordination)                                                                       | —                                        |
 | **Any** uncommitted dirty file in your `allowed_files`                                                   | `workspace_hygiene.blocks_edit` | `edit_allowed: false` (unless `dirty_scope_policy="continue_own_wip"` and no live foreign dirty overlap) | —                                        |
-| Dirty in scope **not** listed in `changed_files` / `diff_ref`                                            | `unacknowledged_dirty_in_scope` | —                                                                                                        | `reason: "workspace_hygiene"`            |
-| **Live** foreign intent (`foreign_active` / `foreign_stale`) previously declared overlapping dirty paths | `foreign_dirty_overlaps`        | Contributes to `blocks_edit` context; overlap list only for live foreign                                 | `blocks_finish: true` if overlaps remain |
+| Dirty in scope **not** listed in `changed_files` / `diff_ref` (git reconciliation) | `unacknowledged_dirty_in_scope` | — | `finish_block_reason: missing_evidence` |
+| Dirty **outside** declared scope, not foreign-attributed | `own_unscoped_dirty` | — | `finish_block_reason: own_unscoped_dirty` — redeclare scope |
+| Foreign dirty **outside** your scope (other agent's paths) | `foreign_attributed_outside_scope` | — | **ignored** — does not block finish |
+| **Live** foreign intent previously declared overlapping dirty paths in your scope | `foreign_dirty_overlaps` | Contributes to `blocks_edit` context | `finish_block_reason: foreign_dirty_overlap` if overlaps remain |
 
 Recoverable, expired, terminal, or **queued** foreign records **do not**
 populate `foreign_dirty_overlaps`. A queued peer does not block finish for an
 active agent.
+
+**Foreign attribution at finish:** only **`foreign_active`** and
+**`foreign_stale`** intents (live owning PID, foreign to this session) may
+populate `foreign_attributed_outside_scope`. **`Recoverable`** intents (dead
+owning PID) do **not** grant foreign attribution — treat their dirty paths like
+ordinary workspace dirt unless scope is widened or changes reverted.
+
+**Finish hygiene payload fields** (on `workspace_hygiene` / `workspace_hygiene_after`
+when finish is hygiene-gated):
+
+| Field | Meaning |
+|-------|---------|
+| `unacknowledged_dirty_in_scope` | In-scope git dirty missing from finish evidence |
+| `own_unscoped_dirty` | Out-of-scope git dirty not foreign-attributed |
+| `foreign_attributed_outside_scope` | Out-of-scope git dirty owned by foreign active/stale intent — informational, non-blocking |
+| `files_for_scope_check` | Paths passed to scope check after hygiene pass (evidence ∪ own unscoped) |
+| `finish_block_reason` | `missing_evidence`, `own_unscoped_dirty`, or `foreign_dirty_overlap` when `blocks_finish` |
 
 **Typical two-agent overlap on `pkg/a.py`:**
 
@@ -604,7 +631,7 @@ Workflow `status` values are **not** persisted registry lifecycle states.
 | `start` → `blocked`                           | `false`        | Follow `next_step` (`message` matches); do not edit unless `continue_own_wip` was requested and returned `active` |
 | `start` → `active`                            | `true`         | Edit inside declared scope only; read `budget.gate_preview` as advisory                                           |
 | `finish` → `accepted`                         | —              | Intent cleared; optional Claim Guard on review text                                                               |
-| `finish` → `unverified` / `workspace_hygiene` | —              | Fix evidence or coordinate foreign overlap                                                                        |
+| `finish` → `unverified` / `workspace_hygiene` | —              | Read `finish_block_reason`; widen scope, fix evidence, or coordinate foreign in-scope overlap |
 | `finish` → `violated`                         | —              | Fix regressions or widen scope via new `start`                                                                    |
 
 Interactive version: open the **Change-control transitions** canvas in the IDE

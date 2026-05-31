@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -82,7 +82,11 @@ class WorkspaceHygieneResult:
     foreign_dirty_overlaps: tuple[ForeignDirtyOverlap, ...]
     blocks_edit: bool
     unacknowledged_dirty_in_scope: tuple[str, ...] = ()
+    own_unscoped_dirty: tuple[str, ...] = ()
+    foreign_attributed_outside_scope: tuple[str, ...] = ()
+    files_for_scope_check: tuple[str, ...] = ()
     blocks_finish: bool = False
+    finish_block_reason: str | None = None
 
     def to_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -98,8 +102,18 @@ class WorkspaceHygieneResult:
             payload["unacknowledged_dirty_in_scope"] = list(
                 self.unacknowledged_dirty_in_scope
             )
+        if self.own_unscoped_dirty:
+            payload["own_unscoped_dirty"] = list(self.own_unscoped_dirty)
+        if self.foreign_attributed_outside_scope:
+            payload["foreign_attributed_outside_scope"] = list(
+                self.foreign_attributed_outside_scope
+            )
+        if self.files_for_scope_check:
+            payload["files_for_scope_check"] = list(self.files_for_scope_check)
         if self.blocks_finish:
             payload["blocks_finish"] = True
+        if self.finish_block_reason is not None:
+            payload["finish_block_reason"] = self.finish_block_reason
         return payload
 
 
@@ -148,6 +162,54 @@ def workspace_dirty_summary(*, root: Path) -> dict[str, object]:
     }
 
 
+def _declared_scope_sets(
+    allowed_files: Sequence[str],
+    allowed_related: Sequence[str] | None,
+) -> tuple[set[str], set[str], set[str]]:
+    blocking_scope = {_normalize_path(path) for path in allowed_files if path.strip()}
+    related_scope = {
+        _normalize_path(path) for path in (allowed_related or ()) if path.strip()
+    } - blocking_scope
+    return blocking_scope, related_scope, blocking_scope | related_scope
+
+
+def _iter_foreign_intent_scope_matches(
+    *,
+    dirty_paths: Sequence[str],
+    store: WorkspaceIntentStore,
+    own_pid: int,
+    own_start_epoch: int,
+    own_intent_id: str | None,
+) -> Iterator[tuple[WorkspaceIntentRecord, str, tuple[str, ...]]]:
+    if not dirty_paths:
+        return
+    now = utc_now()
+    for record in store.list_records_for_hygiene():
+        if _skip_foreign_dirty_record(
+            record,
+            own_pid=own_pid,
+            own_start_epoch=own_start_epoch,
+            own_intent_id=own_intent_id,
+        ):
+            continue
+        foreign_allowed, _, _ = _scope_all_sets(record.scope)
+        ownership = classify_intent_ownership(
+            record,
+            own_pid=own_pid,
+            own_start_epoch=own_start_epoch,
+            now=now,
+        )
+        if ownership not in _FOREIGN_DIRTY_OWNERSHIP:
+            continue
+        matched = tuple(
+            sorted(
+                path for path in dirty_paths if _path_in_scope(path, foreign_allowed)
+            )
+        )
+        if matched:
+            yield record, ownership.value, matched
+
+
 def evaluate_scoped_hygiene(
     *,
     root: Path,
@@ -159,11 +221,10 @@ def evaluate_scoped_hygiene(
     own_intent_id: str | None = None,
 ) -> WorkspaceHygieneResult:
     """Evaluate scoped hygiene for start/finish workflow responses."""
-    blocking_scope = {_normalize_path(path) for path in allowed_files if path.strip()}
-    related_scope = {
-        _normalize_path(path) for path in (allowed_related or ()) if path.strip()
-    } - blocking_scope
-    evaluation_scope = blocking_scope | related_scope
+    blocking_scope, _, evaluation_scope = _declared_scope_sets(
+        allowed_files,
+        allowed_related,
+    )
     dirty_result = collect_dirty_paths(
         root,
         scoped_paths=tuple(sorted(evaluation_scope)) if evaluation_scope else None,
@@ -220,7 +281,7 @@ def finish_hygiene_check(
     own_start_epoch: int,
     own_intent_id: str,
 ) -> WorkspaceHygieneResult:
-    """Finish-time hygiene gate against declared scope and evidence."""
+    """Finish-time hygiene gate against declared scope and git evidence."""
     hygiene = evaluate_scoped_hygiene(
         root=root,
         allowed_files=allowed_files,
@@ -232,24 +293,68 @@ def finish_hygiene_check(
     )
     if not hygiene.git_available:
         return hygiene
+    all_dirty = collect_dirty_paths(root)
+    if not all_dirty.git_available:
+        return hygiene
     evidence = {_normalize_path(path) for path in resolved_files if path.strip()}
-    blocking_scope = {_normalize_path(path) for path in allowed_files if path.strip()}
-    dirty_blocking = {
-        path
-        for path in hygiene.dirty_paths_in_scope
-        if _path_in_scope(path, blocking_scope)
-    }
-    unacknowledged = tuple(sorted(dirty_blocking - evidence))
-    blocks_finish = bool(unacknowledged) or bool(hygiene.foreign_dirty_overlaps)
+    _, _, declared_scope = _declared_scope_sets(
+        allowed_files,
+        allowed_related,
+    )
+    dirty_in_declared = tuple(
+        sorted(
+            path
+            for path in all_dirty.dirty_paths
+            if _path_in_scope(path, declared_scope)
+        )
+    )
+    dirty_outside_declared = tuple(
+        sorted(
+            path
+            for path in all_dirty.dirty_paths
+            if not _path_in_scope(path, declared_scope)
+        )
+    )
+    foreign_attributed_outside = _foreign_attributed_dirty_paths(
+        dirty_paths=dirty_outside_declared,
+        store=store,
+        own_pid=own_pid,
+        own_start_epoch=own_start_epoch,
+        own_intent_id=own_intent_id,
+    )
+    own_unscoped = tuple(
+        sorted(
+            path
+            for path in dirty_outside_declared
+            if path not in foreign_attributed_outside
+        )
+    )
+    unacknowledged = tuple(sorted(set(dirty_in_declared) - evidence))
+    files_for_scope_check = tuple(sorted(evidence | set(own_unscoped)))
+    blocks_finish = False
+    finish_block_reason: str | None = None
+    if unacknowledged:
+        blocks_finish = True
+        finish_block_reason = "missing_evidence"
+    elif own_unscoped:
+        blocks_finish = True
+        finish_block_reason = "own_unscoped_dirty"
+    elif hygiene.foreign_dirty_overlaps:
+        blocks_finish = True
+        finish_block_reason = "foreign_dirty_overlap"
     return WorkspaceHygieneResult(
         git_available=hygiene.git_available,
-        dirty_paths=hygiene.dirty_paths,
-        dirty_paths_in_scope=hygiene.dirty_paths_in_scope,
-        dirty_paths_outside_scope=hygiene.dirty_paths_outside_scope,
+        dirty_paths=all_dirty.dirty_paths,
+        dirty_paths_in_scope=dirty_in_declared,
+        dirty_paths_outside_scope=dirty_outside_declared,
         foreign_dirty_overlaps=hygiene.foreign_dirty_overlaps,
         blocks_edit=hygiene.blocks_edit,
         unacknowledged_dirty_in_scope=unacknowledged,
+        own_unscoped_dirty=own_unscoped,
+        foreign_attributed_outside_scope=tuple(sorted(foreign_attributed_outside)),
+        files_for_scope_check=files_for_scope_check,
         blocks_finish=blocks_finish,
+        finish_block_reason=finish_block_reason,
     )
 
 
@@ -269,6 +374,27 @@ def _skip_foreign_dirty_record(
     return record.status == WorkspaceIntentStatus.QUEUED.value
 
 
+def _foreign_attributed_dirty_paths(
+    *,
+    dirty_paths: Sequence[str],
+    store: WorkspaceIntentStore,
+    own_pid: int,
+    own_start_epoch: int,
+    own_intent_id: str | None,
+) -> frozenset[str]:
+    """Dirty paths outside own scope that belong to a foreign active/stale intent."""
+    attributed: set[str] = set()
+    for _record, _ownership, matched in _iter_foreign_intent_scope_matches(
+        dirty_paths=dirty_paths,
+        store=store,
+        own_pid=own_pid,
+        own_start_epoch=own_start_epoch,
+        own_intent_id=own_intent_id,
+    ):
+        attributed.update(matched)
+    return frozenset(attributed)
+
+
 def _foreign_dirty_overlaps(
     *,
     dirty_paths: Sequence[str],
@@ -277,43 +403,28 @@ def _foreign_dirty_overlaps(
     own_start_epoch: int,
     own_intent_id: str | None,
 ) -> tuple[ForeignDirtyOverlap, ...]:
-    if not dirty_paths:
-        return ()
-    now = utc_now()
     overlaps: list[ForeignDirtyOverlap] = []
-    for record in store.list_records_for_hygiene():
-        if _skip_foreign_dirty_record(
-            record,
-            own_pid=own_pid,
-            own_start_epoch=own_start_epoch,
-            own_intent_id=own_intent_id,
-        ):
-            continue
-        foreign_allowed, _, _ = _scope_all_sets(record.scope)
-        scoped_dirty_paths = [
-            path for path in dirty_paths if _path_in_scope(path, foreign_allowed)
-        ]
-        ownership = classify_intent_ownership(
-            record,
-            own_pid=own_pid,
-            own_start_epoch=own_start_epoch,
-            now=now,
-        )
-        if ownership in _FOREIGN_DIRTY_OWNERSHIP:
-            overlaps.extend(
-                ForeignDirtyOverlap(
-                    path=path,
-                    foreign_intent_id=record.intent_id,
-                    foreign_persisted_status=record.status,
-                    foreign_ownership=ownership.value,
-                    foreign_agent_label=record.agent_label,
-                    message=(
-                        f"{_BASE_DIRTY_SCOPE_MESSAGE} Foreign intent "
-                        f"{record.intent_id} previously declared this path."
-                    ),
-                )
-                for path in scoped_dirty_paths
+    for record, ownership, matched in _iter_foreign_intent_scope_matches(
+        dirty_paths=dirty_paths,
+        store=store,
+        own_pid=own_pid,
+        own_start_epoch=own_start_epoch,
+        own_intent_id=own_intent_id,
+    ):
+        overlaps.extend(
+            ForeignDirtyOverlap(
+                path=path,
+                foreign_intent_id=record.intent_id,
+                foreign_persisted_status=record.status,
+                foreign_ownership=ownership,
+                foreign_agent_label=record.agent_label,
+                message=(
+                    f"{_BASE_DIRTY_SCOPE_MESSAGE} Foreign intent "
+                    f"{record.intent_id} previously declared this path."
+                ),
             )
+            for path in matched
+        )
     return tuple(sorted(overlaps, key=lambda item: (item.path, item.foreign_intent_id)))
 
 

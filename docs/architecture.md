@@ -205,6 +205,10 @@ Operational note:
   and normal CI paths do not require MCP packages.
 - `codeclone/surfaces/mcp/service.py` is the in-process adapter over the existing
   pipeline/report contracts.
+- Blast-radius graph traversal core lives in `codeclone/analysis/blast_radius.py`
+  (report `Mapping` inputs only). MCP `get_blast_radius` and CLI `--blast-radius`
+  are presentation adapters; non-MCP surfaces must not import
+  `codeclone/surfaces/mcp/_blast_radius.py`.
 
 The MCP layer is intentionally thin. It does not add a separate analysis engine;
 it adapts the existing pipeline into tools/resources such as:

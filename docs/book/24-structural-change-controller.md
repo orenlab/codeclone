@@ -113,6 +113,12 @@ values. Boolean policy gates are named `forbid_*`, for example
 
 ## Blast Radius Payload
 
+Core blast-radius graph traversal lives in `codeclone/analysis/blast_radius.py`
+(consuming canonical report `Mapping` facts). MCP (`get_blast_radius`,
+`start`/`finish` summaries) and CLI (`--blast-radius`) are presentation
+adapters over that core — non-MCP surfaces must not import
+`codeclone/surfaces/mcp/_blast_radius.py`.
+
 `get_blast_radius` separates hard edit guardrails from review context:
 
 - `do_not_touch`: actionable negative context such as baseline/cache state,
@@ -619,9 +625,37 @@ must still prove all dirty paths via `changed_files` or `diff_ref`.
 before scope check / verify. Failures return `reason: "workspace_hygiene"`,
 `intent_cleared: false`, and `user_action_required: true`. **Queued** foreign
 intents do not populate `foreign_dirty_overlaps` — a queued peer does not block
-finish for an active agent on overlapping scope. Successful and non-accepted
-verify responses also include `workspace_hygiene_after`, including the scoped
-hygiene view and a repo-level dirty summary.
+finish for an active agent on overlapping scope.
+
+Finish hygiene reconciles **agent evidence with git** (not honor-system):
+
+| `finish_block_reason` | Meaning | Agent action |
+|-----------------------|---------|--------------|
+| `missing_evidence` | Git dirty inside declared scope not listed in `changed_files` | Add paths to evidence or revert |
+| `own_unscoped_dirty` | Git dirty outside declared scope, not owned by foreign intent | Redeclare wider scope or revert |
+| `foreign_dirty_overlap` | Foreign intent previously declared same in-scope path | Coordinate with user |
+
+Dirty paths outside your declared scope that belong to a **foreign active/stale
+intent** (`foreign_attributed_outside_scope`) do **not** block your finish —
+other agents' unrelated WIP is ignored. **`Recoverable`** intents (dead owning
+PID) do **not** populate `foreign_attributed_outside_scope`; their dirty paths
+behave like ordinary workspace dirt unless you widen scope or revert.
+
+**Finish hygiene payload fields** (when present on `workspace_hygiene` /
+`workspace_hygiene_after`):
+
+| Field | Meaning |
+|-------|---------|
+| `unacknowledged_dirty_in_scope` | In-scope git dirty missing from finish evidence |
+| `own_unscoped_dirty` | Out-of-scope git dirty not foreign-attributed |
+| `foreign_attributed_outside_scope` | Out-of-scope git dirty owned by foreign active/stale intent — informational, non-blocking |
+| `files_for_scope_check` | Paths passed to scope check after hygiene pass (evidence ∪ own unscoped) |
+| `finish_block_reason` | `missing_evidence`, `own_unscoped_dirty`, or `foreign_dirty_overlap` when `blocks_finish` |
+
+Declare **new files** in `allowed_files` at `start`, not only in
+`allowed_related`. Successful and non-accepted verify responses also include
+`workspace_hygiene_after`, including the scoped hygiene view and a repo-level
+dirty summary.
 
 **List workspace:** `manage_change_intent(action="list_workspace")` attaches
 repo-level `workspace_dirty_summary` only (bounded dirty path sample). Scoped

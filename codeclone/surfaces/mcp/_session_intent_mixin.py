@@ -29,6 +29,7 @@ from ...audit import (
     EVENT_WORKSPACE_GC,
 )
 from . import _session_helpers as _helpers
+from ._blast_radius import blast_radius_to_payload
 from ._intent import (
     DEFAULT_INTENT_GUARDS,
     IntentCheckResult,
@@ -239,7 +240,7 @@ class _MCPSessionIntentMixin:
             depth="direct",
             forbidden_patterns=normalized_scope.forbidden,
         )
-        blast_payload = blast.to_payload()
+        blast_payload = blast_radius_to_payload(blast)
         blast_summary = self._blast_radius_summary(
             blast_payload=blast_payload,
             scope=normalized_scope,
