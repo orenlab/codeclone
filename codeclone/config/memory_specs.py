@@ -14,6 +14,8 @@ from .memory_defaults import (
     DEFAULT_MEMORY_BACKEND,
     DEFAULT_MEMORY_DB_PATH,
     DEFAULT_MEMORY_DRAFT_RETENTION_DAYS,
+    DEFAULT_MEMORY_GIT_HOTSPOT_MIN_CHANGES,
+    DEFAULT_MEMORY_GIT_HOTSPOT_PERIOD_DAYS,
     DEFAULT_MEMORY_MAX_BLAST_RADIUS_CACHE_ENTRIES,
     DEFAULT_MEMORY_MAX_CANDIDATES,
     DEFAULT_MEMORY_MAX_EVIDENCE_PER_RECORD,
@@ -39,6 +41,8 @@ MEMORY_CONFIG_KEY_SPECS: Final[dict[str, ConfigKeySpec]] = {
     "max_evidence_per_record": ConfigKeySpec(expected_type=int),
     "max_statement_chars": ConfigKeySpec(expected_type=int),
     "max_blast_radius_cache_entries": ConfigKeySpec(expected_type=int),
+    "git_hotspot_period_days": ConfigKeySpec(expected_type=int),
+    "git_hotspot_min_changes": ConfigKeySpec(expected_type=int),
 }
 
 MEMORY_PATH_CONFIG_KEYS: Final[frozenset[str]] = frozenset({"db_path"})
@@ -57,6 +61,8 @@ MEMORY_CONFIG_DEFAULTS: Final[dict[str, object]] = {
     "max_evidence_per_record": DEFAULT_MEMORY_MAX_EVIDENCE_PER_RECORD,
     "max_statement_chars": DEFAULT_MEMORY_MAX_STATEMENT_CHARS,
     "max_blast_radius_cache_entries": DEFAULT_MEMORY_MAX_BLAST_RADIUS_CACHE_ENTRIES,
+    "git_hotspot_period_days": DEFAULT_MEMORY_GIT_HOTSPOT_PERIOD_DAYS,
+    "git_hotspot_min_changes": DEFAULT_MEMORY_GIT_HOTSPOT_MIN_CHANGES,
 }
 
 MEMORY_NESTED_TABLE_KEY: Final = "memory"

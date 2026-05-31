@@ -23,12 +23,19 @@ from .models import (
     MemoryRevision,
     MemorySubject,
     RecordBatch,
+    UpsertAction,
     UpsertResult,
     generate_memory_id,
     parse_payload_json,
     payload_json_text,
 )
 from .schema import get_meta, open_memory_db, set_meta
+from .search_index import (
+    SearchMatchMode,
+    build_search_text,
+    fts_match_expression,
+    tokenize_query,
+)
 
 
 class SqliteEngineeringMemoryStore:
@@ -85,15 +92,29 @@ class SqliteEngineeringMemoryStore:
         self._insert_record(record)
         self._conn.commit()
 
+    def _commit_upsert_result(
+        self,
+        *,
+        action: UpsertAction,
+        record_id: str,
+        sync_fts: bool,
+        revision_written: bool = False,
+    ) -> UpsertResult:
+        self._conn.commit()
+        if sync_fts:
+            self.sync_fts_record(record_id)
+        return UpsertResult(
+            action=action,
+            record_id=record_id,
+            revision_written=revision_written,
+        )
+
     def upsert_record(self, record: MemoryRecord) -> UpsertResult:
         existing = self.find_by_identity_key(record.project_id, record.identity_key)
         now = current_report_timestamp_utc()
-        if existing is None:
-            self._insert_record(record)
-            self._conn.commit()
-            return UpsertResult(action="created", record_id=record.id)
-
-        if existing.origin == "human" or existing.approved_by:
+        if existing is not None and (
+            existing.origin == "human" or existing.approved_by
+        ):
             self._conn.execute(
                 """
                 UPDATE memory_records
@@ -112,12 +133,20 @@ class SqliteEngineeringMemoryStore:
             self._conn.commit()
             return UpsertResult(action="skipped", record_id=existing.id)
 
-        if _record_content_equal(existing, record):
+        revision_written = False
+        action: UpsertAction
+        if existing is None:
+            self._insert_record(record)
+            target_id = record.id
+            action = "created"
+        elif _record_content_equal(existing, record):
             self._conn.execute(
                 """
-                UPDATE memory_records
-                SET last_verified_at_utc=?, updated_at_utc=?,
-                    verified_on_branch=?, verified_at_commit=?
+                UPDATE memory_records SET
+                    last_verified_at_utc=?, updated_at_utc=?,
+                    verified_on_branch=?, verified_at_commit=?,
+                    report_digest=?, code_fingerprint=?,
+                    status='active', stale_reason=NULL
                 WHERE id=?
                 """,
                 (
@@ -125,60 +154,66 @@ class SqliteEngineeringMemoryStore:
                     now,
                     record.verified_on_branch,
                     record.verified_at_commit,
+                    record.report_digest,
+                    record.code_fingerprint,
                     existing.id,
                 ),
             )
-            self._conn.commit()
-            return UpsertResult(action="unchanged", record_id=existing.id)
-
-        revision_number = self._next_revision_number(existing.id)
-        self.write_revision(
-            MemoryRevision(
-                id=generate_memory_id(prefix="rev"),
-                memory_id=existing.id,
-                revision_number=revision_number,
-                previous_statement=existing.statement,
-                new_statement=record.statement,
-                previous_payload=existing.payload,
-                new_payload=record.payload,
-                reason="upsert_content_changed",
-                changed_by=record.created_by,
-                changed_at_utc=now,
-                branch=record.verified_on_branch,
-                commit=record.verified_at_commit,
+            target_id = existing.id
+            action = "unchanged"
+        else:
+            revision_number = self._next_revision_number(existing.id)
+            self.write_revision(
+                MemoryRevision(
+                    id=generate_memory_id(prefix="rev"),
+                    memory_id=existing.id,
+                    revision_number=revision_number,
+                    previous_statement=existing.statement,
+                    new_statement=record.statement,
+                    previous_payload=existing.payload,
+                    new_payload=record.payload,
+                    reason="upsert_content_changed",
+                    changed_by=record.created_by,
+                    changed_at_utc=now,
+                    branch=record.verified_on_branch,
+                    commit=record.verified_at_commit,
+                )
             )
-        )
-        self._conn.execute(
-            """
-            UPDATE memory_records SET
-                statement=?, summary=?, payload_json=?, status=?, confidence=?,
-                ingest_source=?, updated_at_utc=?, last_verified_at_utc=?,
-                report_digest=?, code_fingerprint=?, verified_on_branch=?,
-                verified_at_commit=?, schema_version=?
-            WHERE id=?
-            """,
-            (
-                record.statement,
-                record.summary,
-                payload_json_text(record.payload),
-                record.status,
-                record.confidence,
-                record.ingest_source,
-                now,
-                now,
-                record.report_digest,
-                record.code_fingerprint,
-                record.verified_on_branch,
-                record.verified_at_commit,
-                record.schema_version,
-                existing.id,
-            ),
-        )
-        self._conn.commit()
-        return UpsertResult(
-            action="updated",
-            record_id=existing.id,
-            revision_written=True,
+            self._conn.execute(
+                """
+                UPDATE memory_records SET
+                    statement=?, summary=?, payload_json=?, status=?, confidence=?,
+                    ingest_source=?, updated_at_utc=?, last_verified_at_utc=?,
+                    report_digest=?, code_fingerprint=?, verified_on_branch=?,
+                    verified_at_commit=?, schema_version=?
+                WHERE id=?
+                """,
+                (
+                    record.statement,
+                    record.summary,
+                    payload_json_text(record.payload),
+                    record.status,
+                    record.confidence,
+                    record.ingest_source,
+                    now,
+                    now,
+                    record.report_digest,
+                    record.code_fingerprint,
+                    record.verified_on_branch,
+                    record.verified_at_commit,
+                    record.schema_version,
+                    existing.id,
+                ),
+            )
+            target_id = existing.id
+            action = "updated"
+            revision_written = True
+
+        return self._commit_upsert_result(
+            action=action,
+            record_id=target_id,
+            sync_fts=True,
+            revision_written=revision_written,
         )
 
     def find_record(self, record_id: str) -> MemoryRecord | None:
@@ -233,9 +268,10 @@ class SqliteEngineeringMemoryStore:
     def list_subjects_for_memory(self, memory_id: str) -> list[MemorySubject]:
         rows = self._conn.execute(
             """
-            SELECT id, memory_id, subject_kind, subject_key, relation
+            SELECT MIN(id) AS id, memory_id, subject_kind, subject_key, relation
             FROM memory_subjects
             WHERE memory_id=?
+            GROUP BY memory_id, subject_kind, subject_key, relation
             ORDER BY subject_kind ASC, subject_key ASC, id ASC
             """,
             (memory_id,),
@@ -292,25 +328,170 @@ class SqliteEngineeringMemoryStore:
         statuses: Sequence[str] = (),
         confidences: Sequence[str] = (),
         limit: int = 100,
+        match_mode: SearchMatchMode = "any",
     ) -> list[MemoryRecord]:
+        if self._fts_available():
+            ranked = self._search_records_fts(
+                project_id=project_id,
+                statement_query=statement_query,
+                types=types,
+                statuses=statuses,
+                confidences=confidences,
+                limit=limit,
+                match_mode=match_mode,
+            )
+            if ranked is not None:
+                return ranked
+        return self._search_records_like(
+            project_id=project_id,
+            statement_query=statement_query,
+            types=types,
+            statuses=statuses,
+            confidences=confidences,
+            limit=limit,
+            match_mode=match_mode,
+        )
+
+    def sync_fts_record(self, memory_id: str) -> None:
+        if not self._fts_available():
+            return
+        record = self.find_record(memory_id)
+        if record is None:
+            self._conn.execute(
+                "DELETE FROM memory_records_fts WHERE memory_id=?",
+                (memory_id,),
+            )
+            return
+        subjects = self.list_subjects_for_memory(memory_id)
+        self._upsert_fts_record(record, subjects)
+
+    def rebuild_project_fts(self, project_id: str) -> int:
+        if not self._fts_available():
+            return 0
+        self._conn.execute(
+            "DELETE FROM memory_records_fts WHERE project_id=?",
+            (project_id,),
+        )
+        count = 0
+        for record in self.list_records_for_project(project_id):
+            subjects = self.list_subjects_for_memory(record.id)
+            self._upsert_fts_record(record, subjects)
+            count += 1
+        self._conn.commit()
+        return count
+
+    def _fts_available(self) -> bool:
+        row = self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE name='memory_records_fts'"
+        ).fetchone()
+        return row is not None
+
+    def _upsert_fts_record(
+        self,
+        record: MemoryRecord,
+        subjects: Sequence[MemorySubject],
+    ) -> None:
+        search_text = build_search_text(record=record, subjects=subjects)
+        self._conn.execute(
+            "DELETE FROM memory_records_fts WHERE memory_id=?",
+            (record.id,),
+        )
+        self._conn.execute(
+            """
+            INSERT INTO memory_records_fts(
+                memory_id, project_id, record_type, ingest_source, status, search_text
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.id,
+                record.project_id,
+                record.type,
+                record.ingest_source,
+                record.status,
+                search_text,
+            ),
+        )
+
+    def _search_records_fts(
+        self,
+        *,
+        project_id: str,
+        statement_query: str,
+        types: Sequence[str],
+        statuses: Sequence[str],
+        confidences: Sequence[str],
+        limit: int,
+        match_mode: SearchMatchMode,
+    ) -> list[MemoryRecord] | None:
+        match_expr = fts_match_expression(statement_query, match_mode=match_mode)
+        if match_expr is None:
+            return []
+        clauses = [
+            "memory_records_fts MATCH ?",
+            "memory_records_fts.project_id = ?",
+        ]
+        params: list[object] = [match_expr, project_id]
+        _append_search_filters(
+            clauses,
+            params,
+            types,
+            statuses,
+            confidences,
+            type_column="memory_records_fts.record_type",
+            status_column="memory_records_fts.status",
+            confidence_via_subquery=True,
+        )
+        where = " AND ".join(clauses)
+        rows = self._conn.execute(
+            f"""
+            SELECT memory_records.*
+            FROM memory_records_fts
+            JOIN memory_records ON memory_records.id = memory_records_fts.memory_id
+            WHERE {where}
+            ORDER BY bm25(memory_records_fts), memory_records.updated_at_utc DESC,
+                     memory_records.id ASC
+            LIMIT ?
+            """,
+            (*params, limit),
+        ).fetchall()
+        return [_record_from_row(row) for row in rows]
+
+    def _search_records_like(
+        self,
+        *,
+        project_id: str,
+        statement_query: str,
+        types: Sequence[str],
+        statuses: Sequence[str],
+        confidences: Sequence[str],
+        limit: int,
+        match_mode: SearchMatchMode,
+    ) -> list[MemoryRecord]:
+        tokens = tokenize_query(statement_query)
+        if not tokens:
+            return []
         clauses = ["project_id=?"]
         params: list[object] = [project_id]
-        tokens = [token.strip() for token in statement_query.split() if token.strip()]
+        token_clauses: list[str] = []
         for token in tokens:
-            clauses.append("statement LIKE ? ESCAPE '\\'")
-            params.append(f"%{_escape_like(token)}%")
-        if types:
-            placeholders = ", ".join("?" for _ in types)
-            clauses.append(f"type IN ({placeholders})")
-            params.extend(types)
-        if statuses:
-            placeholders = ", ".join("?" for _ in statuses)
-            clauses.append(f"status IN ({placeholders})")
-            params.extend(statuses)
-        if confidences:
-            placeholders = ", ".join("?" for _ in confidences)
-            clauses.append(f"confidence IN ({placeholders})")
-            params.extend(confidences)
+            token_clauses.append(
+                "(LOWER(statement) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(summary, '')) "
+                "LIKE ? ESCAPE '\\')"
+            )
+            escaped = _escape_like(token)
+            params.extend([f"%{escaped}%", f"%{escaped}%"])
+        joiner = " AND " if match_mode == "all" else " OR "
+        clauses.append(f"({joiner.join(token_clauses)})")
+        _append_search_filters(
+            clauses,
+            params,
+            types,
+            statuses,
+            confidences,
+            type_column="type",
+            status_column="status",
+            confidence_via_subquery=False,
+        )
         where = " AND ".join(clauses)
         rows = self._conn.execute(
             f"SELECT * FROM memory_records WHERE {where} "
@@ -320,9 +501,24 @@ class SqliteEngineeringMemoryStore:
         return [_record_from_row(row) for row in rows]
 
     def write_subject(self, subject: MemorySubject) -> None:
+        existing = self._conn.execute(
+            """
+            SELECT id FROM memory_subjects
+            WHERE memory_id=? AND subject_kind=? AND subject_key=? AND relation=?
+            LIMIT 1
+            """,
+            (
+                subject.memory_id,
+                subject.subject_kind,
+                subject.subject_key,
+                subject.relation,
+            ),
+        ).fetchone()
+        if existing is not None:
+            return
         self._conn.execute(
             """
-            INSERT OR REPLACE INTO memory_subjects(
+            INSERT INTO memory_subjects(
                 id, memory_id, subject_kind, subject_key, relation
             ) VALUES (?, ?, ?, ?, ?)
             """,
@@ -334,6 +530,26 @@ class SqliteEngineeringMemoryStore:
                 subject.relation,
             ),
         )
+
+    def prune_duplicate_subjects(self, *, commit: bool = True) -> int:
+        before = self._conn.execute("SELECT COUNT(*) FROM memory_subjects").fetchone()
+        before_count = int(before[0]) if before is not None else 0
+        self._conn.execute(
+            """
+            DELETE FROM memory_subjects
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM memory_subjects
+                GROUP BY memory_id, subject_kind, subject_key, relation
+            )
+            """
+        )
+        after = self._conn.execute("SELECT COUNT(*) FROM memory_subjects").fetchone()
+        after_count = int(after[0]) if after is not None else 0
+        removed = max(0, before_count - after_count)
+        if commit and removed:
+            self._conn.commit()
+        return removed
 
     def write_evidence(self, evidence: MemoryEvidence) -> None:
         self._conn.execute(
@@ -442,6 +658,7 @@ class SqliteEngineeringMemoryStore:
         )
         if commit:
             self._conn.commit()
+        self.sync_fts_record(record_id)
 
     def list_records_for_project(
         self,
@@ -555,6 +772,9 @@ class SqliteEngineeringMemoryStore:
             )
         for link in batch.links:
             self.write_link(link)
+        touched_ids = set(record_id_map.values())
+        for memory_id in touched_ids:
+            self.sync_fts_record(memory_id)
         self._conn.commit()
         return stats
 
@@ -647,6 +867,61 @@ class SqliteEngineeringMemoryStore:
         ).fetchone()
         current = int(row[0]) if row is not None else 0
         return current + 1
+
+
+def _append_in_filter(
+    clauses: list[str],
+    params: list[object],
+    values: Sequence[str],
+    column: str,
+) -> None:
+    if not values:
+        return
+    placeholders = ", ".join("?" for _ in values)
+    clauses.append(f"{column} IN ({placeholders})")
+    params.extend(values)
+
+
+def _append_confidence_filter(
+    clauses: list[str],
+    params: list[object],
+    confidences: Sequence[str],
+    *,
+    via_subquery: bool,
+) -> None:
+    if not confidences:
+        return
+    placeholders = ", ".join("?" for _ in confidences)
+    if via_subquery:
+        clauses.append(
+            "memory_records.id IN ("
+            f"SELECT id FROM memory_records WHERE confidence IN ({placeholders})"
+            ")"
+        )
+    else:
+        clauses.append(f"confidence IN ({placeholders})")
+    params.extend(confidences)
+
+
+def _append_search_filters(
+    clauses: list[str],
+    params: list[object],
+    types: Sequence[str],
+    statuses: Sequence[str],
+    confidences: Sequence[str],
+    *,
+    type_column: str,
+    status_column: str,
+    confidence_via_subquery: bool,
+) -> None:
+    _append_in_filter(clauses, params, types, type_column)
+    _append_in_filter(clauses, params, statuses, status_column)
+    _append_confidence_filter(
+        clauses,
+        params,
+        confidences,
+        via_subquery=confidence_via_subquery,
+    )
 
 
 def _escape_like(value: str) -> str:

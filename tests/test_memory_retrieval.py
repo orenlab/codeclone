@@ -159,3 +159,11 @@ def test_query_engineering_memory_for_path_finds_module_role(tmp_path: Path) -> 
     assert isinstance(records, list)
     assert records
     assert records[0]["type"] == "module_role"
+    subjects = records[0].get("subjects")
+    assert isinstance(subjects, list)
+    keys = {
+        (item["subject_kind"], item["subject_key"], item["relation"])
+        for item in subjects
+        if isinstance(item, dict)
+    }
+    assert len(subjects) == len(keys)

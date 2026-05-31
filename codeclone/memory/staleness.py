@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from ..utils.coerce import as_mapping, as_sequence
-from .models import RecordBatch
+from .models import MemoryEvidence, MemoryRecord, MemorySubject, RecordBatch
 from .sqlite_store import SqliteEngineeringMemoryStore, record_content_equal
 
 
@@ -50,12 +50,123 @@ def _batch_evidence_index(
     return index
 
 
+def _skip_refresh_candidate(record: MemoryRecord) -> bool:
+    return record.status == "stale" or record.origin == "human"
+
+
+def _normalize_subject_path(subject_key: str) -> str:
+    return subject_key.replace("\\", "/").strip("/")
+
+
+def _subject_inventory_stale_reason(
+    subject: MemorySubject,
+    inventory_paths: frozenset[str],
+) -> str | None:
+    if subject.subject_kind == "path":
+        path = _normalize_subject_path(subject.subject_key)
+        if path and path not in inventory_paths:
+            return "linked_path_missing"
+    elif subject.subject_kind == "test":
+        path = _normalize_subject_path(subject.subject_key)
+        if path and path not in inventory_paths:
+            return "linked_test_missing"
+    return None
+
+
+def _subject_stale_reasons(
+    subjects: Sequence[MemorySubject],
+    inventory_paths: frozenset[str],
+) -> list[str]:
+    for subject in subjects:
+        reason = _subject_inventory_stale_reason(subject, inventory_paths)
+        if reason is not None:
+            return [reason]
+    return []
+
+
+def _evidence_stale_reasons(
+    record: MemoryRecord,
+    evidence_items: Sequence[MemoryEvidence],
+    batch_evidence: dict[tuple[str, str, str], str | None],
+) -> list[str]:
+    for evidence in evidence_items:
+        key = (record.identity_key, evidence.evidence_kind, evidence.ref)
+        batch_digest = batch_evidence.get(key)
+        if batch_digest is None:
+            continue
+        if evidence.digest is not None and batch_digest != evidence.digest:
+            return ["evidence_digest_mismatch"]
+    return []
+
+
+def _collect_refresh_staleness_reasons(
+    record: MemoryRecord,
+    *,
+    batch_identity_keys: frozenset[str],
+    batch_by_identity: Mapping[str, MemoryRecord],
+    batch_evidence: dict[tuple[str, str, str], str | None],
+    inventory_paths: frozenset[str],
+    report_digest: str | None,
+    subjects: Sequence[MemorySubject],
+    evidence_items: Sequence[MemoryEvidence],
+) -> list[str]:
+    reasons: list[str] = []
+    if record.origin == "system" and record.identity_key not in batch_identity_keys:
+        reasons.append("missing_from_refresh")
+
+    incoming = batch_by_identity.get(record.identity_key)
+    if (
+        incoming is not None
+        and record.approved_by
+        and not record_content_equal(record, incoming)
+    ):
+        reasons.append("refresh_content_contradiction")
+
+    reasons.extend(_subject_stale_reasons(subjects, inventory_paths))
+    reasons.extend(_evidence_stale_reasons(record, evidence_items, batch_evidence))
+
+    if (
+        record.report_digest is not None
+        and record.identity_key not in batch_identity_keys
+        and report_digest is not None
+        and record.report_digest != report_digest
+    ):
+        reasons.append("report_digest_shift")
+    return reasons
+
+
+def _refresh_stale_primary_reason(
+    store: SqliteEngineeringMemoryStore,
+    record: MemoryRecord,
+    *,
+    batch_identity_keys: frozenset[str],
+    batch_by_identity: Mapping[str, MemoryRecord],
+    batch_evidence: dict[tuple[str, str, str], str | None],
+    inventory_paths: frozenset[str],
+    report_digest: str | None,
+) -> str | None:
+    if _skip_refresh_candidate(record):
+        return None
+    reasons = _collect_refresh_staleness_reasons(
+        record,
+        batch_identity_keys=batch_identity_keys,
+        batch_by_identity=batch_by_identity,
+        batch_evidence=batch_evidence,
+        inventory_paths=inventory_paths,
+        report_digest=report_digest,
+        subjects=store.list_subjects_for_memory(record.id),
+        evidence_items=store.list_evidence_for_memory(record.id),
+    )
+    return reasons[0] if reasons else None
+
+
 def apply_refresh_staleness(
     store: SqliteEngineeringMemoryStore,
     *,
     project_id: str,
     batch: RecordBatch,
     report_document: Mapping[str, object],
+    report_digest: str | None = None,
     commit: bool = True,
 ) -> StalenessReport:
     """Mark affected records stale after a refresh ingest."""
@@ -72,53 +183,17 @@ def apply_refresh_staleness(
         statuses=("active", "draft"),
     )
     for record in candidates:
-        if record.status == "stale":
+        primary = _refresh_stale_primary_reason(
+            store,
+            record,
+            batch_identity_keys=batch_identity_keys,
+            batch_by_identity=batch_by_identity,
+            batch_evidence=batch_evidence,
+            inventory_paths=inventory_paths,
+            report_digest=report_digest,
+        )
+        if primary is None:
             continue
-        if record.origin == "human":
-            continue
-
-        reasons: list[str] = []
-
-        if record.origin == "system" and record.identity_key not in batch_identity_keys:
-            reasons.append("missing_from_refresh")
-
-        incoming = batch_by_identity.get(record.identity_key)
-        if (
-            incoming is not None
-            and record.approved_by
-            and not record_content_equal(record, incoming)
-        ):
-            reasons.append("refresh_content_contradiction")
-
-        for subject in store.list_subjects_for_memory(record.id):
-            if subject.subject_kind == "path":
-                path = subject.subject_key.replace("\\", "/").strip("/")
-                if path and path not in inventory_paths:
-                    reasons.append("linked_path_missing")
-                    break
-            if subject.subject_kind == "test":
-                path = subject.subject_key.replace("\\", "/").strip("/")
-                if path and path not in inventory_paths:
-                    reasons.append("linked_test_missing")
-                    break
-
-        for evidence in store.list_evidence_for_memory(record.id):
-            key = (record.identity_key, evidence.evidence_kind, evidence.ref)
-            batch_digest = batch_evidence.get(key)
-            if batch_digest is None:
-                continue
-            if evidence.digest is not None and batch_digest != evidence.digest:
-                reasons.append("evidence_digest_mismatch")
-                break
-
-        if record.report_digest is not None:
-            meta_digest = store.get_meta("last_report_digest")
-            if meta_digest and meta_digest != record.report_digest:
-                reasons.append("report_digest_shift")
-
-        if not reasons:
-            continue
-        primary = reasons[0]
         store.mark_stale(record.id, primary, commit=False)
         marked += 1
         reason_counts[primary] = reason_counts.get(primary, 0) + 1

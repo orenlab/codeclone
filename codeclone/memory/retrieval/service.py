@@ -13,6 +13,7 @@ from ..enums import MemoryConfidence, MemoryRecordType, MemoryStatus
 from ..exceptions import MemoryContractError
 from ..models import MemoryEvidence, MemoryQuery, MemoryRecord, MemorySubject
 from ..paths import normalize_repo_path, repo_path_to_module_key
+from ..search_index import SearchMatchMode
 from ..sqlite_store import SqliteEngineeringMemoryStore
 from ..status_report import build_memory_status_report
 from .ranking import RankingContext, relevance_score
@@ -320,12 +321,14 @@ def _parse_filters(
     tuple[MemoryRecordType, ...],
     tuple[MemoryStatus, ...],
     tuple[MemoryConfidence, ...],
+    SearchMatchMode,
 ]:
     types: list[MemoryRecordType] = []
     statuses: list[MemoryStatus] = []
     confidences: list[MemoryConfidence] = []
+    match_mode: SearchMatchMode = "any"
     if filters is None:
-        return (), (), ()
+        return (), (), (), match_mode
     raw_types = filters.get("types")
     if isinstance(raw_types, list):
         types.extend(cast(MemoryRecordType, str(item)) for item in raw_types)
@@ -337,7 +340,264 @@ def _parse_filters(
         confidences.extend(
             cast(MemoryConfidence, str(item)) for item in raw_confidences
         )
-    return tuple(types), tuple(statuses), tuple(confidences)
+    raw_match = filters.get("match_mode")
+    if raw_match in {"all", "any"}:
+        match_mode = cast(SearchMatchMode, raw_match)
+    return tuple(types), tuple(statuses), tuple(confidences), match_mode
+
+
+def _handle_status_mode(
+    *,
+    mode: str,
+    root_path: object,
+    db_path: object,
+    backend: str,
+) -> dict[str, object]:
+    from pathlib import Path
+
+    if not isinstance(root_path, Path) or not isinstance(db_path, Path):
+        raise TypeError("root_path and db_path must be Path instances")
+    report = build_memory_status_report(
+        root_path=root_path,
+        db_path=db_path,
+        backend=backend,
+    )
+    payload = {
+        "schema_version": report.schema_version,
+        "project_id": report.project_id,
+        "project_root": report.project_root,
+        "backend": report.backend,
+        "db_path": str(report.db_path),
+        "db_exists": report.db_exists,
+        "record_count": report.record_count,
+        "records_by_type": report.records_by_type,
+        "records_by_status": report.records_by_status,
+        "last_analysis_fingerprint": report.last_analysis_fingerprint,
+        "last_init_run_id": report.last_init_run_id,
+    }
+    return {"mode": mode, "status": "ok", "payload": payload}
+
+
+def _handle_get_mode(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    mode: str,
+    project_id: str,
+    record_id: str | None,
+) -> dict[str, object]:
+    if not record_id:
+        raise MemoryContractError("mode=get requires record_id.")
+    record = store.find_record(record_id)
+    if record is None or record.project_id != project_id:
+        return {
+            "mode": mode,
+            "status": "not_found",
+            "payload": {"record_id": record_id},
+        }
+    subjects = store.list_subjects_for_memory(record.id)
+    evidence = store.list_evidence_for_memory(record.id)
+    return {
+        "mode": mode,
+        "status": "ok",
+        "payload": {
+            "record": _serialize_record_summary(
+                record=record,
+                subjects=subjects,
+                evidence_count=len(evidence),
+            ),
+            "evidence": [_serialize_evidence(item) for item in evidence],
+        },
+    }
+
+
+def _handle_stale_mode(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    mode: str,
+    project_id: str,
+    max_results: int,
+) -> dict[str, object]:
+    records = store.query_records(
+        MemoryQuery(
+            project_id=project_id,
+            statuses=("stale",),
+            limit=max_results,
+        )
+    )
+    payload_records = [
+        _serialize_record_summary(
+            record=record,
+            subjects=store.list_subjects_for_memory(record.id),
+            evidence_count=store.count_evidence_for_memory(record.id),
+        )
+        for record in records
+    ]
+    return {
+        "mode": mode,
+        "status": "ok",
+        "payload": {
+            "records": payload_records,
+            "record_count": len(payload_records),
+            "truncated": len(records) >= max_results,
+        },
+    }
+
+
+def _handle_coverage_mode(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    mode: str,
+    project_id: str,
+    scope: Sequence[str] | None,
+) -> dict[str, object]:
+    scope_paths = [normalize_repo_path(item) for item in (scope or ())]
+    coverage = _coverage_summary(
+        store,
+        project_id=project_id,
+        scope_paths=scope_paths,
+    )
+    return {"mode": mode, "status": "ok", "payload": coverage}
+
+
+def _search_statuses_for_mode(
+    mode: str,
+    *,
+    filter_statuses: tuple[MemoryStatus, ...],
+    include_stale: bool,
+    include_drafts: bool,
+) -> tuple[MemoryStatus, ...]:
+    if mode != "search":
+        return filter_statuses or _default_statuses(
+            include_stale=include_stale,
+            include_drafts=include_drafts,
+        )
+    if filter_statuses:
+        return filter_statuses
+    if include_stale:
+        return _default_statuses(include_stale=True, include_drafts=include_drafts)
+    return _default_statuses(include_stale=False, include_drafts=include_drafts)
+
+
+def _require_query_field(value: str | None, *, mode: str, field: str) -> str:
+    text = value.strip() if value else ""
+    if not text:
+        raise MemoryContractError(f"mode={mode} requires {field}.")
+    return text
+
+
+def _fetch_search_mode_records(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    query: str | None,
+    filter_types: tuple[MemoryRecordType, ...],
+    statuses: tuple[MemoryStatus, ...],
+    filter_confidences: tuple[MemoryConfidence, ...],
+    max_results: int,
+    match_mode: SearchMatchMode,
+) -> tuple[MemoryRecord, ...]:
+    statement = _require_query_field(query, mode="search", field="query")
+    return tuple(
+        store.search_records(
+            project_id=project_id,
+            statement_query=statement,
+            types=filter_types,
+            statuses=statuses,
+            confidences=filter_confidences,
+            limit=max_results + 1,
+            match_mode=match_mode,
+        )
+    )
+
+
+def _fetch_for_path_mode_records(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    path: str | None,
+    filter_types: tuple[MemoryRecordType, ...],
+    statuses: tuple[MemoryStatus, ...],
+    max_results: int,
+) -> tuple[MemoryRecord, ...]:
+    rel_path = _require_query_field(path, mode="for_path", field="path")
+    return query_records_for_repo_path(
+        store,
+        project_id=project_id,
+        rel_path=rel_path,
+        limit=max_results + 1,
+        types=filter_types,
+        statuses=statuses,
+    )
+
+
+def _fetch_for_symbol_mode_records(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    symbol: str | None,
+    filter_types: tuple[MemoryRecordType, ...],
+    statuses: tuple[MemoryStatus, ...],
+    max_results: int,
+) -> tuple[MemoryRecord, ...]:
+    symbol_key = _require_query_field(symbol, mode="for_symbol", field="symbol")
+    return tuple(
+        store.query_records(
+            MemoryQuery(
+                project_id=project_id,
+                types=filter_types,
+                statuses=statuses,
+                subject_kind="symbol",
+                subject_key=symbol_key,
+                limit=max_results + 1,
+            )
+        )
+    )
+
+
+def _records_for_list_mode(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    mode: str,
+    project_id: str,
+    path: str | None,
+    symbol: str | None,
+    query: str | None,
+    filter_types: tuple[MemoryRecordType, ...],
+    statuses: tuple[MemoryStatus, ...],
+    filter_confidences: tuple[MemoryConfidence, ...],
+    max_results: int,
+    match_mode: SearchMatchMode,
+) -> tuple[MemoryRecord, ...]:
+    if mode == "search":
+        return _fetch_search_mode_records(
+            store,
+            project_id=project_id,
+            query=query,
+            filter_types=filter_types,
+            statuses=statuses,
+            filter_confidences=filter_confidences,
+            max_results=max_results,
+            match_mode=match_mode,
+        )
+    if mode == "for_path":
+        return _fetch_for_path_mode_records(
+            store,
+            project_id=project_id,
+            path=path,
+            filter_types=filter_types,
+            statuses=statuses,
+            max_results=max_results,
+        )
+    if mode == "for_symbol":
+        return _fetch_for_symbol_mode_records(
+            store,
+            project_id=project_id,
+            symbol=symbol,
+            filter_types=filter_types,
+            statuses=statuses,
+            max_results=max_results,
+        )
+    return ()
 
 
 def query_engineering_memory(
@@ -364,140 +624,62 @@ def query_engineering_memory(
         )
 
     if mode == "status":
-        from pathlib import Path
-
-        if not isinstance(root_path, Path) or not isinstance(db_path, Path):
-            raise TypeError("root_path and db_path must be Path instances")
-        report = build_memory_status_report(
+        return _handle_status_mode(
+            mode=mode,
             root_path=root_path,
             db_path=db_path,
             backend=backend,
         )
-        payload = {
-            "schema_version": report.schema_version,
-            "project_id": report.project_id,
-            "project_root": report.project_root,
-            "backend": report.backend,
-            "db_path": str(report.db_path),
-            "db_exists": report.db_exists,
-            "record_count": report.record_count,
-            "records_by_type": report.records_by_type,
-            "records_by_status": report.records_by_status,
-            "last_analysis_fingerprint": report.last_analysis_fingerprint,
-            "last_init_run_id": report.last_init_run_id,
-        }
-        return {"mode": mode, "status": "ok", "payload": payload}
-
     if mode == "get":
-        if not record_id:
-            raise MemoryContractError("mode=get requires record_id.")
-        record = store.find_record(record_id)
-        if record is None or record.project_id != project_id:
-            return {
-                "mode": mode,
-                "status": "not_found",
-                "payload": {"record_id": record_id},
-            }
-        subjects = store.list_subjects_for_memory(record.id)
-        evidence = store.list_evidence_for_memory(record.id)
-        return {
-            "mode": mode,
-            "status": "ok",
-            "payload": {
-                "record": _serialize_record_summary(
-                    record=record,
-                    subjects=subjects,
-                    evidence_count=len(evidence),
-                ),
-                "evidence": [_serialize_evidence(item) for item in evidence],
-            },
-        }
-
-    if mode == "stale":
-        records = store.query_records(
-            MemoryQuery(
-                project_id=project_id,
-                statuses=("stale",),
-                limit=max_results,
-            )
-        )
-        payload_records = [
-            _serialize_record_summary(
-                record=record,
-                subjects=store.list_subjects_for_memory(record.id),
-                evidence_count=store.count_evidence_for_memory(record.id),
-            )
-            for record in records
-        ]
-        return {
-            "mode": mode,
-            "status": "ok",
-            "payload": {
-                "records": payload_records,
-                "record_count": len(payload_records),
-                "truncated": len(records) >= max_results,
-            },
-        }
-
-    if mode == "coverage":
-        scope_paths = [normalize_repo_path(item) for item in (scope or ())]
-        coverage = _coverage_summary(
+        return _handle_get_mode(
             store,
+            mode=mode,
             project_id=project_id,
-            scope_paths=scope_paths,
+            record_id=record_id,
         )
-        return {"mode": mode, "status": "ok", "payload": coverage}
+    if mode == "stale":
+        return _handle_stale_mode(
+            store,
+            mode=mode,
+            project_id=project_id,
+            max_results=max_results,
+        )
+    if mode == "coverage":
+        return _handle_coverage_mode(
+            store,
+            mode=mode,
+            project_id=project_id,
+            scope=scope,
+        )
 
-    filter_types, filter_statuses, filter_confidences = _parse_filters(filters)
-    statuses = filter_statuses or _default_statuses(
+    filter_types, filter_statuses, filter_confidences, match_mode = _parse_filters(
+        filters
+    )
+    statuses = _search_statuses_for_mode(
+        mode,
+        filter_statuses=filter_statuses,
         include_stale=include_stale,
         include_drafts=include_drafts,
     )
-
-    if mode == "search":
-        if not query or not query.strip():
-            raise MemoryContractError("mode=search requires query.")
-        records = store.search_records(
-            project_id=project_id,
-            statement_query=query.strip(),
-            types=filter_types,
-            statuses=statuses,
-            confidences=filter_confidences,
-            limit=max_results + 1,
-        )
-    elif mode == "for_path":
-        if not path:
-            raise MemoryContractError("mode=for_path requires path.")
-        records = query_records_for_repo_path(
-            store,
-            project_id=project_id,
-            rel_path=path,
-            limit=max_results + 1,
-            types=filter_types,
-            statuses=statuses,
-        )
-    elif mode == "for_symbol":
-        if not symbol:
-            raise MemoryContractError("mode=for_symbol requires symbol.")
-        records = store.query_records(
-            MemoryQuery(
-                project_id=project_id,
-                types=filter_types,
-                statuses=statuses,
-                subject_kind="symbol",
-                subject_key=symbol.strip(),
-                limit=max_results + 1,
-            )
-        )
-    else:
-        records = ()
-
+    records = _records_for_list_mode(
+        store,
+        mode=mode,
+        project_id=project_id,
+        path=path,
+        symbol=symbol,
+        query=query,
+        filter_types=filter_types,
+        statuses=statuses,
+        filter_confidences=filter_confidences,
+        max_results=max_results,
+        match_mode=match_mode,
+    )
     visible = [
         record
         for record in records
         if _record_visible(
             record,
-            include_stale=include_stale,
+            include_stale=include_stale or (mode == "search" and "stale" in statuses),
             include_drafts=include_drafts,
         )
     ]

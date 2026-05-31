@@ -102,3 +102,76 @@ def test_store_crud_upsert_and_revision(tmp_path: Path) -> None:
         assert reloaded.status == "stale"
     finally:
         store.close()
+
+
+def test_write_subject_is_idempotent_and_prune_removes_duplicates(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory.models import MemorySubject
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    project = resolve_project_identity(root)
+    store = SqliteEngineeringMemoryStore(tmp_path / "memory.sqlite3")
+    try:
+        store.initialize(project)
+        record = _sample_record(project_id=project.id)
+        store.upsert_record(record)
+        subject = MemorySubject(
+            id=generate_memory_id(prefix="subj"),
+            memory_id=record.id,
+            subject_kind="path",
+            subject_key="codeclone/memory/store.py",
+            relation="about",
+        )
+        store.write_subject(subject)
+        duplicate = MemorySubject(
+            id=generate_memory_id(prefix="subj"),
+            memory_id=record.id,
+            subject_kind="path",
+            subject_key="codeclone/memory/store.py",
+            relation="about",
+        )
+        store.write_subject(duplicate)
+        store.commit()
+        assert len(store.list_subjects_for_memory(record.id)) == 1
+
+        insert_subject = """
+            INSERT INTO memory_subjects(
+                id, memory_id, subject_kind, subject_key, relation
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """
+        store._conn.execute(
+            insert_subject,
+            (
+                generate_memory_id(prefix="subj"),
+                record.id,
+                "path",
+                "codeclone/memory/other.py",
+                "about",
+            ),
+        )
+        store._conn.execute(
+            insert_subject,
+            (
+                generate_memory_id(prefix="subj"),
+                record.id,
+                "path",
+                "codeclone/memory/other.py",
+                "about",
+            ),
+        )
+        store.commit()
+        row = store._conn.execute(
+            "SELECT COUNT(*) FROM memory_subjects WHERE memory_id=?",
+            (record.id,),
+        ).fetchone()
+        assert row is not None
+        assert int(row[0]) == 3
+        assert len(store.list_subjects_for_memory(record.id)) == 2
+        removed = store.prune_duplicate_subjects()
+        assert removed == 1
+        assert len(store.list_subjects_for_memory(record.id)) == 2
+    finally:
+        store.close()

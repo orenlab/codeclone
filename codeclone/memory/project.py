@@ -15,7 +15,7 @@ from ..baseline.trust import current_python_tag
 from ..config.memory import MemoryConfig, resolve_memory_config
 from ..report.meta import current_report_timestamp_utc
 from ..utils.coerce import as_mapping
-from .models import MemoryProject
+from .models import MemoryEvidence, MemoryProject, generate_memory_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,17 +56,36 @@ def compute_project_id(root_path: Path) -> str:
 def read_git_provenance(root_path: Path) -> GitProvenance:
     if not (root_path / ".git").exists():
         return GitProvenance(remote=None, branch=None, head=None, available=False)
-    try:
-        remote = _git_output(root_path, ["remote", "get-url", "origin"])
-        branch = _git_output(root_path, ["rev-parse", "--abbrev-ref", "HEAD"])
-        head = _git_output(root_path, ["rev-parse", "HEAD"])
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    branch = _git_output_optional(root_path, ["rev-parse", "--abbrev-ref", "HEAD"])
+    head = _git_output_optional(root_path, ["rev-parse", "HEAD"])
+    if not branch or not head:
         return GitProvenance(remote=None, branch=None, head=None, available=False)
+    remote = _git_output_optional(root_path, ["remote", "get-url", "origin"])
     return GitProvenance(
         remote=remote or None,
         branch=branch or None,
         head=head or None,
         available=True,
+    )
+
+
+def git_head_evidence(
+    *,
+    memory_id: str,
+    git: GitProvenance,
+    created_at_utc: str,
+) -> MemoryEvidence | None:
+    if not git.available or not git.head:
+        return None
+    return MemoryEvidence(
+        id=generate_memory_id(prefix="evid"),
+        memory_id=memory_id,
+        evidence_kind="git_commit",
+        ref=git.head,
+        locator=git.branch,
+        quote=git.remote,
+        digest=None,
+        created_at_utc=created_at_utc,
     )
 
 
@@ -90,22 +109,27 @@ def report_digest_from_report(report_document: dict[str, object]) -> str | None:
     return value or None
 
 
-def _git_output(root_path: Path, args: list[str]) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=root_path,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=5.0,
-    )
-    return completed.stdout.strip()
+def _git_output_optional(root_path: Path, args: list[str]) -> str | None:
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=root_path,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    text = completed.stdout.strip()
+    return text or None
 
 
 __all__ = [
     "GitProvenance",
     "analysis_fingerprint_from_report",
     "compute_project_id",
+    "git_head_evidence",
     "read_git_provenance",
     "report_digest_from_report",
     "resolve_memory_db_path",

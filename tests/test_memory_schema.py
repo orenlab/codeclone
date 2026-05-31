@@ -44,6 +44,25 @@ def test_create_schema_v1_is_idempotent(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_ensure_schema_migrates_1_0_to_1_1(tmp_path: Path) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        from codeclone.memory.schema import set_meta
+
+        create_schema_v1(conn)
+        set_meta(conn, "schema_version", "1.0")
+        conn.commit()
+        ensure_schema(conn)
+        assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE name='memory_records_fts'"
+        ).fetchone()
+        assert row is not None
+    finally:
+        conn.close()
+
+
 def test_ensure_schema_rejects_unsupported_version(tmp_path: Path) -> None:
     db_path = tmp_path / "memory.sqlite3"
     conn = open_memory_db(db_path)

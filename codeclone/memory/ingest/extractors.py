@@ -21,6 +21,7 @@ from ...contracts import (
 )
 from ...report.meta import current_report_timestamp_utc
 from ...utils.coerce import as_mapping, as_sequence
+from ..display import format_document_link_statement
 from ..identity import make_identity_key
 from ..models import (
     MemoryEvidence,
@@ -46,6 +47,108 @@ def _new_metrics_batch(
     )
 
 
+def _inventory_module_key(file_item: object, seen: set[str]) -> str | None:
+    file_path = str(file_item).replace("\\", "/").strip("/")
+    if not file_path.endswith(".py"):
+        return None
+    module_path = file_path.removesuffix(".py").replace("/", ".")
+    if module_path.endswith(".__init__"):
+        module_path = module_path[: -len(".__init__")]
+    if not module_path or module_path in seen:
+        return None
+    seen.add(module_path)
+    return module_path
+
+
+def _normalized_mapping_path(
+    mapping: Mapping[str, object],
+    *field_names: str,
+) -> str | None:
+    for field_name in field_names:
+        raw = mapping.get(field_name)
+        if raw is None:
+            continue
+        path = str(raw).strip()
+        if path:
+            return path
+    return None
+
+
+def _iter_mapping_paths(
+    items: Sequence[object],
+    *field_names: str,
+) -> list[tuple[Mapping[str, object], str]]:
+    pairs: list[tuple[Mapping[str, object], str]] = []
+    for item in items:
+        mapping = as_mapping(item)
+        path = _normalized_mapping_path(mapping, *field_names)
+        if path is not None:
+            pairs.append((mapping, path))
+    return pairs
+
+
+def _append_path_risk_note(
+    batch: RecordBatch,
+    *,
+    project: MemoryProject,
+    path: str,
+    now: str,
+    git: GitProvenance,
+    report_digest: str | None,
+    analysis_fingerprint: str | None,
+    discriminator: str,
+    statement: str,
+    payload: Mapping[str, object],
+    confidence: str,
+) -> None:
+    identity = make_identity_key(
+        type="risk_note",
+        subject_kind="path",
+        subject_key=path,
+        discriminator=discriminator,
+    )
+    record_id = generate_memory_id()
+    batch.records.append(
+        MemoryRecord(
+            id=record_id,
+            project_id=project.id,
+            identity_key=identity,
+            type="risk_note",
+            status="active",
+            confidence=confidence,  # type: ignore[arg-type]
+            origin="system",
+            ingest_source="analysis",
+            statement=statement,
+            summary=None,
+            payload=dict(payload),
+            created_at_utc=now,
+            updated_at_utc=now,
+            last_verified_at_utc=now,
+            expires_at_utc=None,
+            created_by="memory_init",
+            verified_by=None,
+            approved_by=None,
+            approved_at_utc=None,
+            report_digest=report_digest,
+            code_fingerprint=analysis_fingerprint,
+            stale_reason=None,
+            created_on_branch=git.branch,
+            created_at_commit=git.head,
+            verified_on_branch=git.branch,
+            verified_at_commit=git.head,
+        )
+    )
+    batch.subjects.append(
+        MemorySubject(
+            id=generate_memory_id(prefix="subj"),
+            memory_id=record_id,
+            subject_kind="path",
+            subject_key=path,
+            relation="about",
+        )
+    )
+
+
 def extract_module_roles(
     *,
     project: MemoryProject,
@@ -61,15 +164,9 @@ def extract_module_roles(
     now = current_report_timestamp_utc()
     seen: set[str] = set()
     for item in file_items:
-        file_path = str(item).replace("\\", "/").strip("/")
-        if not file_path.endswith(".py"):
+        module_path = _inventory_module_key(item, seen)
+        if module_path is None:
             continue
-        module_path = file_path.removesuffix(".py").replace("/", ".")
-        if module_path.endswith(".__init__"):
-            module_path = module_path[: -len(".__init__")]
-        if not module_path or module_path in seen:
-            continue
-        seen.add(module_path)
         identity = make_identity_key(
             type="module_role",
             subject_kind="module",
@@ -347,128 +444,56 @@ def extract_risk_notes(
     batch, now, metrics = _new_metrics_batch(report_document)
     design = as_mapping(metrics.get("design"))
     complexity_items = as_sequence(design.get("complexity_hotspots"))
-    for item in complexity_items:
-        mapping = as_mapping(item)
-        path = str(mapping.get("path") or mapping.get("file") or "").strip()
+    for mapping, path in _iter_mapping_paths(complexity_items, "path", "file"):
         value = mapping.get("value")
         threshold = mapping.get("threshold")
-        if not path:
-            continue
-        identity = make_identity_key(
-            type="risk_note",
-            subject_kind="path",
-            subject_key=path,
+        _append_path_risk_note(
+            batch,
+            project=project,
+            path=path,
+            now=now,
+            git=git,
+            report_digest=report_digest,
+            analysis_fingerprint=analysis_fingerprint,
             discriminator="high_complexity",
-        )
-        record_id = generate_memory_id()
-        batch.records.append(
-            MemoryRecord(
-                id=record_id,
-                project_id=project.id,
-                identity_key=identity,
-                type="risk_note",
-                status="active",
-                confidence="verified",
-                origin="system",
-                ingest_source="analysis",
-                statement=(
-                    f"{path} has cyclomatic complexity {value} "
-                    f"(threshold: {threshold})."
-                ),
-                summary=None,
-                payload={
-                    "risk_kind": "high_complexity",
-                    "metric_value": value,
-                    "threshold": threshold,
-                    "severity": "medium",
-                    "interpretation": "Structural complexity hotspot from analysis.",
-                },
-                created_at_utc=now,
-                updated_at_utc=now,
-                last_verified_at_utc=now,
-                expires_at_utc=None,
-                created_by="memory_init",
-                verified_by=None,
-                approved_by=None,
-                approved_at_utc=None,
-                report_digest=report_digest,
-                code_fingerprint=analysis_fingerprint,
-                stale_reason=None,
-                created_on_branch=git.branch,
-                created_at_commit=git.head,
-                verified_on_branch=git.branch,
-                verified_at_commit=git.head,
-            )
-        )
-        batch.subjects.append(
-            MemorySubject(
-                id=generate_memory_id(prefix="subj"),
-                memory_id=record_id,
-                subject_kind="path",
-                subject_key=path,
-                relation="about",
-            )
+            statement=(
+                f"{path} has cyclomatic complexity {value} (threshold: {threshold})."
+            ),
+            payload={
+                "risk_kind": "high_complexity",
+                "metric_value": value,
+                "threshold": threshold,
+                "severity": "medium",
+                "interpretation": "Structural complexity hotspot from analysis.",
+            },
+            confidence="verified",
         )
 
     security = as_mapping(metrics.get("security_surfaces"))
-    for item in as_sequence(security.get("items")):
-        mapping = as_mapping(item)
-        path = str(mapping.get("path") or "").strip()
+    for mapping, path in _iter_mapping_paths(
+        as_sequence(security.get("items")),
+        "path",
+    ):
         category = str(mapping.get("category") or "security_surface").strip()
-        if not path:
-            continue
-        identity = make_identity_key(
-            type="risk_note",
-            subject_kind="path",
-            subject_key=path,
+        _append_path_risk_note(
+            batch,
+            project=project,
+            path=path,
+            now=now,
+            git=git,
+            report_digest=report_digest,
+            analysis_fingerprint=analysis_fingerprint,
             discriminator="security_surface",
-        )
-        record_id = generate_memory_id()
-        batch.records.append(
-            MemoryRecord(
-                id=record_id,
-                project_id=project.id,
-                identity_key=identity,
-                type="risk_note",
-                status="active",
-                confidence="supported",
-                origin="system",
-                ingest_source="analysis",
-                statement=(
-                    f"{path} is in the security surface inventory ({category}). "
-                    "Report-only inventory; not a vulnerability finding."
-                ),
-                summary=None,
-                payload={
-                    "risk_kind": "security_surface",
-                    "category": category,
-                    "interpretation": "report_only_inventory",
-                },
-                created_at_utc=now,
-                updated_at_utc=now,
-                last_verified_at_utc=now,
-                expires_at_utc=None,
-                created_by="memory_init",
-                verified_by=None,
-                approved_by=None,
-                approved_at_utc=None,
-                report_digest=report_digest,
-                code_fingerprint=analysis_fingerprint,
-                stale_reason=None,
-                created_on_branch=git.branch,
-                created_at_commit=git.head,
-                verified_on_branch=git.branch,
-                verified_at_commit=git.head,
-            )
-        )
-        batch.subjects.append(
-            MemorySubject(
-                id=generate_memory_id(prefix="subj"),
-                memory_id=record_id,
-                subject_kind="path",
-                subject_key=path,
-                relation="about",
-            )
+            statement=(
+                f"{path} is in the security surface inventory ({category}). "
+                "Report-only inventory; not a vulnerability finding."
+            ),
+            payload={
+                "risk_kind": "security_surface",
+                "category": category,
+                "interpretation": "report_only_inventory",
+            },
+            confidence="supported",
         )
     return batch
 
@@ -596,7 +621,11 @@ def extract_document_links(
                         confidence="supported",
                         origin="system",
                         ingest_source="doc",
-                        statement=(f"{rel} ({heading}) references path {anchored}."),
+                        statement=format_document_link_statement(
+                            doc_file=rel,
+                            heading=heading,
+                            anchored_path=anchored,
+                        ),
                         summary=None,
                         payload={
                             "doc_file": rel,
@@ -629,6 +658,17 @@ def extract_document_links(
                         relation="documents",
                     )
                 )
+                anchored_path = anchored.replace("\\", "/").strip("/")
+                if anchored_path.endswith(".py"):
+                    batch.subjects.append(
+                        MemorySubject(
+                            id=generate_memory_id(prefix="subj"),
+                            memory_id=record_id,
+                            subject_kind="path",
+                            subject_key=anchored_path,
+                            relation="about",
+                        )
+                    )
     return batch
 
 
@@ -723,6 +763,19 @@ def extract_git_hotspots(
                 relation="about",
             )
         )
+        if git.head:
+            batch.evidence.append(
+                MemoryEvidence(
+                    id=generate_memory_id(prefix="evid"),
+                    memory_id=record_id,
+                    evidence_kind="git_commit",
+                    ref=git.head,
+                    locator=git.branch,
+                    quote=f"change_count={count}",
+                    digest=None,
+                    created_at_utc=now,
+                )
+            )
     return batch
 
 

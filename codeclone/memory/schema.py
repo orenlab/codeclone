@@ -13,16 +13,15 @@ from .. import __version__
 from ..contracts import ENGINEERING_MEMORY_SCHEMA_VERSION
 from ..report.meta import current_report_timestamp_utc
 from ..utils.sqlite_store import (
-    get_meta_value,
     initialize_schema_v1,
     open_sqlite_db,
 )
 from .exceptions import MemorySchemaError
+from .schema_fts import CREATE_MEMORY_RECORDS_FTS_SQL
+from .schema_meta import MEMORY_META_TABLE, get_meta, set_meta
 
-_MEMORY_META_TABLE = "memory_meta"
-
-_CREATE_META_SQL = """
-CREATE TABLE IF NOT EXISTS memory_meta (
+_CREATE_META_SQL = f"""
+CREATE TABLE IF NOT EXISTS {MEMORY_META_TABLE} (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 )
@@ -176,6 +175,7 @@ CREATE TABLE IF NOT EXISTS memory_blast_radius_cache (
 )
 """
 
+
 _DDL_STATEMENTS = (
     _CREATE_META_SQL,
     _CREATE_MIGRATIONS_SQL,
@@ -222,6 +222,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         create_schema_v1(conn)
         return
     if current != ENGINEERING_MEMORY_SCHEMA_VERSION:
+        from .schema_migrate import migrate_memory_schema
+
+        migrate_memory_schema(conn)
+        current = get_meta(conn, "schema_version")
+    if current != ENGINEERING_MEMORY_SCHEMA_VERSION:
         raise MemorySchemaError(
             "Unsupported engineering memory schema version: "
             f"{current!r}. Expected {ENGINEERING_MEMORY_SCHEMA_VERSION!r}."
@@ -234,7 +239,7 @@ def create_schema_v1(conn: sqlite3.Connection) -> None:
         conn,
         ddl_statements=_DDL_STATEMENTS,
         index_statements=_INDEX_SQL,
-        meta_table=_MEMORY_META_TABLE,
+        meta_table=MEMORY_META_TABLE,
         seed_meta={
             "schema_version": ENGINEERING_MEMORY_SCHEMA_VERSION,
             "created_at_utc": now,
@@ -247,19 +252,8 @@ def create_schema_v1(conn: sqlite3.Connection) -> None:
         "VALUES (?, ?)",
         (ENGINEERING_MEMORY_SCHEMA_VERSION, now),
     )
+    conn.execute(CREATE_MEMORY_RECORDS_FTS_SQL)
     conn.commit()
-
-
-def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
-    return get_meta_value(conn, meta_table=_MEMORY_META_TABLE, key=key)
-
-
-def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
-    conn.execute(
-        f"INSERT INTO {_MEMORY_META_TABLE}(key, value) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (key, value),
-    )
 
 
 __all__ = [

@@ -14,6 +14,36 @@ from ..models import MemoryProject, generate_memory_id
 from ..sqlite_store import SqliteEngineeringMemoryStore
 
 
+def _try_append_text_candidate(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project: MemoryProject,
+    record_type: str,
+    text: object,
+    created_by: str,
+    max_candidates: int,
+) -> dict[str, object] | None:
+    if not isinstance(text, str) or not text.strip():
+        return None
+    try:
+        record = record_candidate(
+            store,
+            project=project,
+            record_type=record_type,  # type: ignore[arg-type]
+            statement=text.strip()[:2000],
+            created_by=created_by,
+            max_candidates=max_candidates,
+        )
+    except Exception:
+        return None
+    return {
+        "id": record.id,
+        "type": record.type,
+        "status": record.status,
+        "statement": record.statement,
+    }
+
+
 def propose_memory_from_finish_payload(
     store: SqliteEngineeringMemoryStore,
     *,
@@ -55,48 +85,28 @@ def propose_memory_from_finish_payload(
                 )
 
     claims_text = finish_payload.get("claims_text")
-    if isinstance(claims_text, str) and claims_text.strip():
-        try:
-            record = record_candidate(
-                store,
-                project=project,
-                record_type="change_rationale",
-                statement=claims_text.strip()[:2000],
-                created_by="finish_hook",
-                max_candidates=max_candidates,
-            )
-            candidates.append(
-                {
-                    "id": record.id,
-                    "type": record.type,
-                    "status": record.status,
-                    "statement": record.statement,
-                }
-            )
-        except Exception:
-            pass
+    claims_candidate = _try_append_text_candidate(
+        store,
+        project=project,
+        record_type="change_rationale",
+        text=claims_text,
+        created_by="finish_hook",
+        max_candidates=max_candidates,
+    )
+    if claims_candidate is not None:
+        candidates.append(claims_candidate)
 
     review_text = finish_payload.get("review_text")
-    if isinstance(review_text, str) and review_text.strip():
-        try:
-            record = record_candidate(
-                store,
-                project=project,
-                record_type="architecture_decision",
-                statement=review_text.strip()[:2000],
-                created_by="finish_hook",
-                max_candidates=max_candidates,
-            )
-            candidates.append(
-                {
-                    "id": record.id,
-                    "type": record.type,
-                    "status": record.status,
-                    "statement": record.statement,
-                }
-            )
-        except Exception:
-            pass
+    review_candidate = _try_append_text_candidate(
+        store,
+        project=project,
+        record_type="architecture_decision",
+        text=review_text,
+        created_by="finish_hook",
+        max_candidates=max_candidates,
+    )
+    if review_candidate is not None:
+        candidates.append(review_candidate)
 
     verification = finish_payload.get("verification")
     if isinstance(verification, Mapping):

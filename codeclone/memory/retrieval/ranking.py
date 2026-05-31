@@ -12,6 +12,46 @@ from dataclasses import dataclass
 from ..models import MemoryRecord, MemorySubject
 
 _CONTRACT_TYPES = frozenset({"contract_note", "public_surface"})
+_TYPE_BOOST: dict[str, float] = {
+    "contract_note": 0.8,
+    "document_link": 0.65,
+    "public_surface": 0.55,
+    "risk_note": 0.5,
+    "test_anchor": 0.45,
+    "contradiction_note": 0.4,
+    "module_role": 0.15,
+}
+_INGEST_BOOST: dict[str, float] = {
+    "git": 0.35,
+    "contract": 0.3,
+    "doc": 0.25,
+    "test": 0.2,
+    "analysis": 0.1,
+}
+
+
+def _prefix_scope_boost(key: str, scope_paths: frozenset[str]) -> float:
+    for scope_path in scope_paths:
+        if key == scope_path or key.startswith(f"{scope_path}/"):
+            return 0.9
+        if scope_path.startswith((key, f"{key}/")):
+            return 0.8
+    return 0.0
+
+
+def _subject_context_boost(
+    key: str,
+    context: RankingContext,
+) -> tuple[float, bool]:
+    """Return relevance boost and whether blast-dependent scoring should be skipped."""
+    boost = 0.0
+    if key in context.symbols:
+        boost += 1.0
+    if key in context.scope_paths:
+        boost += 1.0
+        return boost, True
+    boost += _prefix_scope_boost(key, context.scope_paths)
+    return boost, False
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,23 +71,15 @@ def relevance_score(
     score = 0.0
     for subject in subjects:
         key = subject.subject_key.replace("\\", "/").strip("/")
-        if key in context.symbols:
-            score += 1.0
-        if key in context.scope_paths:
-            score += 1.0
-            continue
-        for scope_path in context.scope_paths:
-            if key == scope_path or key.startswith(f"{scope_path}/"):
-                score += 0.9
-                break
-            if scope_path.startswith((key, f"{key}/")):
-                score += 0.8
-                break
-        if key in context.blast_dependents:
+        subject_boost, skip_blast = _subject_context_boost(key, context)
+        score += subject_boost
+        if not skip_blast and key in context.blast_dependents:
             score += 0.7
 
     if record.type in _CONTRACT_TYPES:
         score += 0.6
+    score += _TYPE_BOOST.get(record.type, 0.0)
+    score += _INGEST_BOOST.get(record.ingest_source, 0.0)
     if record.confidence == "verified":
         score += 0.3
     elif record.confidence == "supported":

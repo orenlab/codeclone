@@ -32,6 +32,8 @@ class MemoryConfig:
     max_evidence_per_record: int
     max_statement_chars: int
     max_blast_radius_cache_entries: int
+    git_hotspot_period_days: int
+    git_hotspot_min_changes: int
 
 
 def _memory_int(value: object, *, key: str) -> int:
@@ -111,6 +113,14 @@ def resolve_memory_config(
         max_blast_radius_cache_entries=_memory_int(
             merged["max_blast_radius_cache_entries"],
             key="max_blast_radius_cache_entries",
+        ),
+        git_hotspot_period_days=_memory_int(
+            merged["git_hotspot_period_days"],
+            key="git_hotspot_period_days",
+        ),
+        git_hotspot_min_changes=_memory_int(
+            merged["git_hotspot_min_changes"],
+            key="git_hotspot_min_changes",
         ),
     )
 

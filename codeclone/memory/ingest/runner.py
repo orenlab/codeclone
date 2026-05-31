@@ -16,6 +16,7 @@ from ..models import IngestionRun, MemoryProject, RecordBatch, generate_memory_i
 from ..project import (
     GitProvenance,
     analysis_fingerprint_from_report,
+    git_head_evidence,
     read_git_provenance,
     report_digest_from_report,
     resolve_memory_db_path,
@@ -39,6 +40,27 @@ from .extractors import (
 )
 
 
+def enrich_batch_git_evidence(batch: RecordBatch, git: GitProvenance) -> None:
+    if not git.available:
+        return
+    now = current_report_timestamp_utc()
+    covered = {
+        evidence.memory_id
+        for evidence in batch.evidence
+        if evidence.evidence_kind == "git_commit"
+    }
+    for record in batch.records:
+        if record.id in covered:
+            continue
+        evidence = git_head_evidence(
+            memory_id=record.id,
+            git=git,
+            created_at_utc=now,
+        )
+        if evidence is not None:
+            batch.evidence.append(evidence)
+
+
 def build_init_batch(
     *,
     root_path: Path,
@@ -48,6 +70,8 @@ def build_init_batch(
     report_digest: str | None,
     analysis_fingerprint: str | None,
     options: InitOptions,
+    git_hotspot_period_days: int = 90,
+    git_hotspot_min_changes: int = 5,
 ) -> RecordBatch:
     if not isinstance(project, MemoryProject):
         raise TypeError("project must be MemoryProject")
@@ -90,6 +114,8 @@ def build_init_batch(
             git=git,
             report_digest=report_digest,
             analysis_fingerprint=analysis_fingerprint,
+            period_days=git_hotspot_period_days,
+            min_changes=git_hotspot_min_changes,
         ),
         extract_contradictions(
             project=project,
@@ -119,7 +145,9 @@ def build_init_batch(
                 analysis_fingerprint=analysis_fingerprint,
             )
         )
-    return merge_batches(batches)
+    merged = merge_batches(batches)
+    enrich_batch_git_evidence(merged, git)
+    return merged
 
 
 def planned_type_counts(batch: RecordBatch) -> dict[str, int]:
@@ -151,6 +179,8 @@ def run_memory_init(
         report_digest=report_digest,
         analysis_fingerprint=analysis_fingerprint,
         options=options,
+        git_hotspot_period_days=config.git_hotspot_period_days,
+        git_hotspot_min_changes=config.git_hotspot_min_changes,
     )
     planned = planned_type_counts(batch)
 
@@ -191,12 +221,14 @@ def run_memory_init(
             store.initialize(project)
             with store.transaction():
                 stats = store.persist_batch(batch)
+                store.prune_duplicate_subjects(commit=False)
                 if options.refresh:
                     stale_report = apply_refresh_staleness(
                         store,
                         project_id=project.id,
                         batch=batch,
                         report_document=report_document,
+                        report_digest=report_digest,
                         commit=False,
                     )
                     stale_marked = stale_report.records_marked_stale
@@ -227,6 +259,7 @@ def run_memory_init(
                     ),
                 )
                 store.write_ingestion_run(ingestion_run)
+            store.rebuild_project_fts(project.id)
             store.set_meta("last_analysis_fingerprint", analysis_fingerprint or "")
             store.set_meta("last_report_digest", report_digest or "")
             store.set_meta("last_init_run_id", ingestion_run.id)
@@ -246,4 +279,9 @@ def run_memory_init(
     )
 
 
-__all__ = ["build_init_batch", "planned_type_counts", "run_memory_init"]
+__all__ = [
+    "build_init_batch",
+    "enrich_batch_git_evidence",
+    "planned_type_counts",
+    "run_memory_init",
+]

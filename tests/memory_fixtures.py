@@ -70,6 +70,109 @@ def git_repo_with_cached_report(
     return root, report_path, report_document
 
 
+def make_module_record(
+    project_id: str,
+    module_path: str,
+    *,
+    report_digest: str | None = None,
+    code_fingerprint: str | None = None,
+) -> MemoryRecord:
+    now = current_report_timestamp_utc()
+    return MemoryRecord(
+        id=generate_memory_id(),
+        project_id=project_id,
+        identity_key=make_identity_key(
+            type="module_role",
+            subject_kind="module",
+            subject_key=module_path,
+            discriminator="inventory_module",
+        ),
+        type="module_role",
+        status="active",
+        confidence="supported",
+        origin="system",
+        ingest_source="analysis",
+        statement=f"{module_path} module",
+        summary=None,
+        payload={"module_path": module_path},
+        created_at_utc=now,
+        updated_at_utc=now,
+        last_verified_at_utc=now,
+        expires_at_utc=None,
+        created_by="test",
+        verified_by=None,
+        approved_by=None,
+        approved_at_utc=None,
+        report_digest=report_digest,
+        code_fingerprint=code_fingerprint,
+        stale_reason=None,
+        created_on_branch=None,
+        created_at_commit=None,
+        verified_on_branch=None,
+        verified_at_commit=None,
+    )
+
+
+def seed_document_link(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    doc_file: str,
+    ref_path: str,
+    statement: str,
+    heading: str = "section",
+) -> MemoryRecord:
+    now = current_report_timestamp_utc()
+    record = MemoryRecord(
+        id=generate_memory_id(),
+        project_id=project_id,
+        identity_key=make_identity_key(
+            type="document_link",
+            subject_kind="doc",
+            subject_key=doc_file,
+            discriminator=f"path:{ref_path}",
+        ),
+        type="document_link",
+        status="active",
+        confidence="supported",
+        origin="system",
+        ingest_source="doc",
+        statement=statement,
+        summary=None,
+        payload={
+            "doc_file": doc_file,
+            "heading": heading,
+            "anchored_symbols": [ref_path],
+        },
+        created_at_utc=now,
+        updated_at_utc=now,
+        last_verified_at_utc=now,
+        expires_at_utc=None,
+        created_by="test",
+        verified_by=None,
+        approved_by=None,
+        approved_at_utc=None,
+        report_digest=None,
+        code_fingerprint=None,
+        stale_reason=None,
+        created_on_branch=None,
+        created_at_commit=None,
+        verified_on_branch=None,
+        verified_at_commit=None,
+    )
+    store.upsert_record(record)
+    store.write_subject(
+        MemorySubject(
+            id=generate_memory_id(prefix="subj"),
+            memory_id=record.id,
+            subject_kind="doc",
+            subject_key=doc_file,
+            relation="documents",
+        )
+    )
+    return record
+
+
 @contextmanager
 def memory_store(
     tmp_path: Path,
