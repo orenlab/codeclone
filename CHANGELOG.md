@@ -39,6 +39,14 @@ review receipts, and workflow consolidation tools.
   metrics, `codeclone memory coverage`, `finish_controlled_change(propose_memory=true)`
   for draft candidates and coverage delta on accepted patches, and receipt-based
   memory proposals via `manage_engineering_memory(action="propose_from_receipt")`.
+- Engineering Memory search and git provenance (Phase 18.6): schema `1.1` with
+  SQLite FTS5 index, `match_mode` (`any`/`all`) for CLI and MCP search,
+  refresh-time digest reactivation for unchanged records, resilient git
+  provenance without `origin`, `git_commit` evidence on init, document→path
+  linking, git hotspot config (`git_hotspot_period_days`,
+  `git_hotspot_min_changes`), normalized document-link statements, Rich CLI
+  output for all `codeclone memory` commands, and deduplicated subject rows
+  in retrieval payloads.
 - Blast radius projection (`get_blast_radius`): direct/transitive dependents,
   clone cohorts, structural risk, do-not-touch boundaries.
 - Patch contract (`check_patch_contract`): pre-edit budget and post-edit verify
