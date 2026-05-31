@@ -254,6 +254,7 @@ class _MCPSessionWorkflowMixin:
         diff_ref: str | None = None,
         after_run_id: str | None = None,
         review_text: str | None = None,
+        claims_text: str | None = None,
         create_receipt: bool = True,
         auto_clear: bool = True,
         strictness: str = "ci",
@@ -287,7 +288,7 @@ class _MCPSessionWorkflowMixin:
             diff_ref=diff_ref,
         )
 
-        from ._workspace_hygiene import finish_hygiene_check
+        from ._workspace_hygiene import finish_hygiene_check, workspace_dirty_summary
         from ._workspace_intent_store import get_workspace_intent_store
 
         finish_hygiene = finish_hygiene_check(
@@ -300,6 +301,10 @@ class _MCPSessionWorkflowMixin:
             own_start_epoch=self._agent_start_epoch,
             own_intent_id=intent_id,
         )
+        workspace_hygiene_after = {
+            **finish_hygiene.to_payload(),
+            "workspace_dirty_summary": workspace_dirty_summary(root=record.root),
+        }
         if finish_hygiene.blocks_finish:
             return {
                 "intent_id": intent_id,
@@ -313,6 +318,7 @@ class _MCPSessionWorkflowMixin:
                 "user_action_required": True,
                 "next_step": workflow_msgs.FINISH_HYGIENE_NEXT,
                 "workspace_hygiene": finish_hygiene.to_payload(),
+                "workspace_hygiene_after": workspace_hygiene_after,
                 "message": workflow_msgs.FINISH_HYGIENE_BLOCKED,
             }
 
@@ -380,6 +386,19 @@ class _MCPSessionWorkflowMixin:
                 "claims": None,
                 "receipt": None,
                 "intent_cleared": False,
+                "workspace_hygiene_after": workspace_hygiene_after,
+                "summary": _finish_summary(
+                    verify_status=verify_status,
+                    intent_cleared=False,
+                    check_payload=check_payload,
+                    verify_payload=verify_payload,
+                    claims_payload=None,
+                    receipt_payload=None,
+                    receipt_error=None,
+                    workspace_hygiene_after=workspace_hygiene_after,
+                    review_text_present=bool(review_text),
+                    claims_text_present=bool(claims_text),
+                ),
                 "user_action_required": verify_status
                 == PatchContractStatus.VIOLATED.value,
                 "next_step": verify_payload.get("next_step"),
@@ -390,7 +409,7 @@ class _MCPSessionWorkflowMixin:
         claims_payload = self._conditional_claim_validation(
             record=record,
             verify_payload=verify_payload,
-            review_text=review_text,
+            claims_text=claims_text,
         )
 
         # 8. Receipt (after claims, before clear)
@@ -421,6 +440,19 @@ class _MCPSessionWorkflowMixin:
             "claims": claims_payload,
             "receipt": receipt_payload,
             "intent_cleared": intent_cleared,
+            "workspace_hygiene_after": workspace_hygiene_after,
+            "summary": _finish_summary(
+                verify_status=verify_status,
+                intent_cleared=intent_cleared,
+                check_payload=check_payload,
+                verify_payload=verify_payload,
+                claims_payload=claims_payload,
+                receipt_payload=receipt_payload,
+                receipt_error=receipt_error,
+                workspace_hygiene_after=workspace_hygiene_after,
+                review_text_present=bool(review_text),
+                claims_text_present=bool(claims_text),
+            ),
             "user_action_required": False,
             "message": self._finish_message(
                 verify_status=verify_status,
@@ -463,22 +495,22 @@ class _MCPSessionWorkflowMixin:
         has_ref = diff_ref is not None and str(diff_ref).strip() != ""
         if has_files and has_ref:
             raise MCPServiceContractError(workflow_msgs.FINISH_EVIDENCE_XOR)
-        if not has_files and not has_ref:
-            raise MCPServiceContractError(workflow_msgs.FINISH_EVIDENCE_REQUIRED)
         if has_ref:
-            return _helpers.coerce_repo_path_tuple(
+            return _require_non_empty_changed_evidence(
                 self._git_diff_paths(
                     root_path=root_path,
                     git_diff_ref=str(diff_ref),
                 )
             )
-        assert changed_files is not None
-        return _helpers.coerce_repo_path_tuple(
-            self._normalize_changed_paths(
-                root_path=root_path,
-                paths=changed_files,
+        if has_files:
+            assert changed_files is not None
+            return _require_non_empty_changed_evidence(
+                self._normalize_changed_paths(
+                    root_path=root_path,
+                    paths=changed_files,
+                )
             )
-        )
+        raise MCPServiceContractError(workflow_msgs.FINISH_EVIDENCE_REQUIRED)
 
     def _compute_transitive_summary(
         self,
@@ -515,10 +547,10 @@ class _MCPSessionWorkflowMixin:
         *,
         record: MCPRunRecord,
         verify_payload: dict[str, object],
-        review_text: str | None,
+        claims_text: str | None,
     ) -> dict[str, object] | None:
         """Run claim validation only when both conditions are met."""
-        if not review_text:
+        if not claims_text:
             return None
         if not verify_payload.get("claim_validation_recommended"):
             return None
@@ -530,7 +562,7 @@ class _MCPSessionWorkflowMixin:
                 patch_health_delta = health_delta
         return _helpers.coerce_object_dict(
             self.validate_review_claims(
-                text=review_text,
+                text=claims_text,
                 run_id=record.run_id,
                 patch_health_delta=patch_health_delta,
             )
@@ -608,6 +640,80 @@ def _as_conflict_list(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def _require_non_empty_changed_evidence(paths: Sequence[str]) -> tuple[str, ...]:
+    resolved = _helpers.coerce_repo_path_tuple(paths)
+    if not resolved:
+        raise MCPServiceContractError(workflow_msgs.FINISH_EVIDENCE_REQUIRED)
+    return resolved
+
+
+def _finish_summary(
+    *,
+    verify_status: str,
+    intent_cleared: bool,
+    check_payload: dict[str, object],
+    verify_payload: dict[str, object],
+    claims_payload: dict[str, object] | None,
+    receipt_payload: dict[str, object] | None,
+    receipt_error: str | None,
+    workspace_hygiene_after: dict[str, object],
+    review_text_present: bool,
+    claims_text_present: bool,
+) -> dict[str, object]:
+    structural_delta = _helpers._as_mapping(verify_payload.get("structural_delta"))
+    dirty_summary = _helpers._as_mapping(
+        workspace_hygiene_after.get("workspace_dirty_summary")
+    )
+    return {
+        "status": verify_status,
+        "scope_status": str(check_payload.get("status", "")),
+        "verification_profile": verify_payload.get("verification_profile"),
+        "structural_verdict": structural_delta.get("verdict"),
+        "health_delta": structural_delta.get("health_delta"),
+        "regressions": len(_helpers._as_sequence(structural_delta.get("regressions"))),
+        "worsened_symbols": len(_helpers._as_sequence(verify_payload.get("worsened"))),
+        "claims": _finish_claim_status(
+            claims_payload=claims_payload,
+            claims_text_present=claims_text_present,
+        ),
+        "review_note_present": review_text_present,
+        "receipt": _finish_receipt_status(
+            receipt_payload=receipt_payload,
+            receipt_error=receipt_error,
+        ),
+        "intent_cleared": intent_cleared,
+        "workspace_dirty_paths": _helpers._as_int(
+            dirty_summary.get("dirty_paths_count"),
+            0,
+        ),
+        "workspace_hygiene_blocked": bool(workspace_hygiene_after.get("blocks_finish")),
+    }
+
+
+def _finish_claim_status(
+    *,
+    claims_payload: dict[str, object] | None,
+    claims_text_present: bool,
+) -> str:
+    if not claims_text_present:
+        return "skipped_no_claims_text"
+    if claims_payload is None:
+        return "skipped_not_recommended"
+    return "valid" if claims_payload.get("valid") is True else "violated"
+
+
+def _finish_receipt_status(
+    *,
+    receipt_payload: dict[str, object] | None,
+    receipt_error: str | None,
+) -> str:
+    if receipt_error is not None:
+        return "failed"
+    if receipt_payload is None:
+        return "skipped"
+    return "created"
 
 
 def _validated_dirty_scope_policy(value: str) -> str:

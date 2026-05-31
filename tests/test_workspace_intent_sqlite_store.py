@@ -213,6 +213,27 @@ def test_sqlite_store_list_records_for_hygiene_and_find_raw(
     assert record in raw_records
 
 
+def test_sqlite_store_active_rewrite_clears_closed_at(sqlite_root: Path) -> None:
+    with _open_sqlite_store(sqlite_root) as store:
+        record = _record(intent_id="intent-reopen-001")
+        assert store.write(replace(record, status="clean"))
+        closed_row = store._conn.execute(
+            "SELECT closed_at_utc FROM workspace_intents WHERE intent_id = ?",
+            (record.intent_id,),
+        ).fetchone()
+        assert closed_row is not None
+        assert closed_row[0] is not None
+
+        assert store.write(record)
+        reopened_row = store._conn.execute(
+            "SELECT closed_at_utc FROM workspace_intents WHERE intent_id = ?",
+            (record.intent_id,),
+        ).fetchone()
+        assert reopened_row is not None
+        assert reopened_row[0] is None
+        assert store.find(record.intent_id) == record
+
+
 def test_sqlite_store_remove_rejects_invalid_intent_id(sqlite_root: Path) -> None:
     store = get_workspace_intent_store(sqlite_root)
     assert store.remove(pid=1, start_epoch=1, intent_id="not-an-intent") is False

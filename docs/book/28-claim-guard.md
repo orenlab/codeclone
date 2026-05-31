@@ -137,7 +137,8 @@ verify failure. `finish_controlled_change` also surfaces
 
 Pass `patch_health_delta` explicitly when using the atomic workflow
 (`check_patch_contract` → `validate_review_claims`). `finish_controlled_change`
-passes it automatically when `review_text` is supplied.
+passes it automatically when `claims_text` is supplied. `review_text` on
+`finish_controlled_change` is a human note and is not claim-validated.
 
 ---
 

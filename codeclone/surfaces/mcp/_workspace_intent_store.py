@@ -52,15 +52,18 @@ _STORE_CACHE: dict[
     tuple[str, str, str], FileWorkspaceIntentStore | SqliteWorkspaceIntentStore
 ] = {}
 _FILE_STORE_LOCKS: dict[str, threading.Lock] = {}
+_STORE_CACHE_LOCK = threading.Lock()
+_FILE_STORE_LOCKS_LOCK = threading.Lock()
 
 
 def _file_store_process_lock(root: Path) -> threading.Lock:
     key = str(root.resolve())
-    lock = _FILE_STORE_LOCKS.get(key)
-    if lock is None:
-        lock = threading.Lock()
-        _FILE_STORE_LOCKS[key] = lock
-    return lock
+    with _FILE_STORE_LOCKS_LOCK:
+        lock = _FILE_STORE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _FILE_STORE_LOCKS[key] = lock
+        return lock
 
 
 @contextmanager
@@ -95,9 +98,9 @@ class FileWorkspaceIntentStore:
 
     def write(self, record: WorkspaceIntentRecord) -> bool:
         with registry_transaction(self):
-            return self._write_unlocked(record)
+            return self.write_unlocked(record)
 
-    def _write_unlocked(self, record: WorkspaceIntentRecord) -> bool:
+    def write_unlocked(self, record: WorkspaceIntentRecord) -> bool:
         path = intent_path(
             root=self.root,
             pid=record.agent_pid,
@@ -148,6 +151,10 @@ class FileWorkspaceIntentStore:
         with registry_transaction(self):
             _lazy_close_eligible_records_unlocked(self)
             return self.find_raw_unlocked(intent_id)
+
+    def find_current_unlocked(self, intent_id: str) -> WorkspaceIntentRecord | None:
+        _lazy_close_eligible_records_unlocked(self)
+        return self.find_raw_unlocked(intent_id)
 
     def find_raw_unlocked(self, intent_id: str) -> WorkspaceIntentRecord | None:
         matches = [
@@ -259,10 +266,7 @@ class SqliteWorkspaceIntentStore:
                     declared_at_utc = excluded.declared_at_utc,
                     payload_json = excluded.payload_json,
                     updated_at_utc = excluded.updated_at_utc,
-                    closed_at_utc = COALESCE(
-                        workspace_intents.closed_at_utc,
-                        excluded.closed_at_utc
-                    )
+                    closed_at_utc = excluded.closed_at_utc
                 """,
                 (
                     row.agent_pid,
@@ -310,6 +314,10 @@ class SqliteWorkspaceIntentStore:
         with registry_transaction(self):
             _lazy_close_eligible_records_unlocked(self)
             return self.find_raw_unlocked(intent_id)
+
+    def find_current_unlocked(self, intent_id: str) -> WorkspaceIntentRecord | None:
+        _lazy_close_eligible_records_unlocked(self)
+        return self.find_raw_unlocked(intent_id)
 
     def find_raw_unlocked(self, intent_id: str) -> WorkspaceIntentRecord | None:
         records = [
@@ -455,20 +463,23 @@ def get_workspace_intent_store(root: Path) -> WorkspaceIntentStore:
         config.backend,
         str(config.storage_path),
     )
-    cached = _STORE_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-    store = _build_store(root_path=root_path, config=config)
-    _STORE_CACHE[cache_key] = store
-    return store
+    with _STORE_CACHE_LOCK:
+        cached = _STORE_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+        store = _build_store(root_path=root_path, config=config)
+        _STORE_CACHE[cache_key] = store
+        return store
 
 
 def clear_workspace_intent_store_cache() -> None:
-    for store in _STORE_CACHE.values():
+    with _STORE_CACHE_LOCK:
+        stores = tuple(_STORE_CACHE.values())
+        _STORE_CACHE.clear()
+    for store in stores:
         close = getattr(store, "close", None)
         if callable(close):
             close()
-    _STORE_CACHE.clear()
 
 
 def _build_store(

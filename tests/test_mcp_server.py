@@ -206,6 +206,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "structural risk boundary" in str(tools["get_blast_radius"].description)
     assert "review-only context" in str(tools["get_blast_radius"].description)
     assert "mode='budget'" in str(tools["check_patch_contract"].description)
+    assert "claims_text" in str(tools["finish_controlled_change"].description)
     assert "auditable review receipt" in str(tools["create_review_receipt"].description)
     assert "claims-not-made" in str(tools["create_review_receipt"].description)
     assert "Structural citation matching" in str(

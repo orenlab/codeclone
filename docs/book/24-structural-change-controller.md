@@ -92,7 +92,8 @@ report output flags and baseline update flags.
    mismatch.
 10. Call `check_patch_contract(mode="verify", before_run_id=...,
     after_run_id=..., intent_id=...)`.
-11. Call `validate_review_claims` before publishing a review summary.
+11. Call `validate_review_claims` before publishing claim text in the atomic
+    workflow, or pass `claims_text` to `finish_controlled_change`.
 12. Call `create_review_receipt` to collect provenance, scope, blast radius,
     reviewed findings, patch status, human decision points, and claims-not-made.
 13. Call `manage_change_intent(action="clear")` when the edit is complete.
@@ -215,7 +216,7 @@ receipt completeness only; they are not CI gates.
 
 ## Claim Guard
 
-`validate_review_claims` validates review text against stored run semantics. It
+`validate_review_claims` validates claim text against stored run semantics. It
 uses citation matching around known finding ids and metric family names. It does
 not read source files, run analysis, call an LLM, or persist state.
 
@@ -232,8 +233,8 @@ invalid. Violations make `valid=false`.
 
 When `patch_health_delta` is negative, regression-free or fully-clean structural
 claims produce a `health_regression_overclaim` violation even if patch verify
-returned `accepted`. `finish_controlled_change` passes delta automatically;
-atomic callers must pass it from verify output.
+returned `accepted`. `finish_controlled_change` passes delta automatically when
+`claims_text` is supplied; atomic callers must pass it from verify output.
 
 ## Verification Profiles
 
@@ -558,6 +559,12 @@ methods as the atomic tools and emit the same semantic audit events.
 `analyze_repository` remains a separate explicit call — workflow tools
 never run analysis implicitly.
 
+`finish_controlled_change` keeps human notes and validated claims separate:
+`review_text` is a note, while `claims_text` is the only finish parameter passed
+to Claim Guard. The response includes a compact `summary` for humans while
+retaining full `scope_check`, `verification`, `claims`, `receipt`, and
+`workspace_hygiene_after` payloads for agents.
+
 **Tool tiers:**
 
 - **Normal workflow:** `analyze_repository`, `start_controlled_change`,
@@ -612,7 +619,9 @@ must still prove all dirty paths via `changed_files` or `diff_ref`.
 before scope check / verify. Failures return `reason: "workspace_hygiene"`,
 `intent_cleared: false`, and `user_action_required: true`. **Queued** foreign
 intents do not populate `foreign_dirty_overlaps` — a queued peer does not block
-finish for an active agent on overlapping scope.
+finish for an active agent on overlapping scope. Successful and non-accepted
+verify responses also include `workspace_hygiene_after`, including the scoped
+hygiene view and a repo-level dirty summary.
 
 **List workspace:** `manage_change_intent(action="list_workspace")` attaches
 repo-level `workspace_dirty_summary` only (bounded dirty path sample). Scoped

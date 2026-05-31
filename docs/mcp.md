@@ -442,8 +442,8 @@ sequenceDiagram
         Agent ->> MCP: analyze_repository
         MCP -->> Agent: after_run_id
     end
-    Agent ->> MCP: finish_controlled_change(intent_id, changed_files, after_run_id?)
-    MCP -->> Agent: status, receipt, intent_cleared
+    Agent ->> MCP: finish_controlled_change(intent_id, changed_files, after_run_id?, claims_text?)
+    MCP -->> Agent: status, summary, workspace_hygiene_after, receipt, intent_cleared
 ```
 
 !!! info "Tool tiers"
@@ -468,7 +468,7 @@ manage_change_intent(action="list_workspace")
   -> analyze_repository                                                          # after-run
   -> manage_change_intent(action="check", intent_id=..., changed_files=[...])
   -> check_patch_contract(mode="verify", after_run_id=..., intent_id=...)
-  -> validate_review_claims(text="...", patch_health_delta=...)                    # if claim_validation_recommended; delta from verify
+  -> validate_review_claims(text="...", patch_health_delta=...)                    # explicit claims text; delta from verify
   -> create_review_receipt
   -> manage_change_intent(action="clear")
 ```
@@ -480,7 +480,7 @@ start_controlled_change(scope={...}, on_conflict="queue")                       
   -> [wait for foreign intent to clear]
   -> manage_change_intent(action="promote", intent_id=...)                       # queued → active
   -> [edit within scope]
-  -> finish_controlled_change(intent_id=..., changed_files=[...])                # verify + clear
+  -> finish_controlled_change(intent_id=..., changed_files=[...], claims_text=...) # verify + optional claims + clear
 ```
 
 ### Workspace hygiene and lazy intent closure
@@ -510,7 +510,10 @@ permission = edit_allowed (with status gate)
   Response includes `workspace.concurrent_intents`, `workspace_relations`, and
   optional scoped `workspace_hygiene`.
 - **`finish_controlled_change`:** re-checks scoped hygiene before verify. Failures
-  return `reason: "workspace_hygiene"` and keep the intent active.
+  return `reason: "workspace_hygiene"` and keep the intent active. Accepted and
+  non-accepted verify responses include a compact `summary` and
+  `workspace_hygiene_after`; `review_text` is a human note, and only
+  `claims_text` is passed to Claim Guard.
 - **`manage_change_intent(list_workspace)`:** returns repo-level
   `workspace_dirty_summary` only (no scoped `blocks_edit`). When recoverable
   intents exist, includes `recovery_available` (`run_available`, per-candidate

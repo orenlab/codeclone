@@ -287,6 +287,39 @@ def test_process_small_batch_skips_parallel_executor(
     assert result.files_skipped == 0
 
 
+def test_invoke_process_file_caches_signature_lookup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_file = _stub_process_file(expected_root=str(tmp_path))
+    monkeypatch.setattr(core_worker, "process_file", process_file)
+    core_worker._supported_process_file_kwarg_names.cache_clear()
+
+    for idx in range(2):
+        filepath = tmp_path / f"cached_{idx}.py"
+        filepath.write_text("def cached():\n    return 1\n", encoding="utf-8")
+        result = core_worker._invoke_process_file(
+            str(filepath),
+            str(tmp_path),
+            NormalizationConfig(),
+            1,
+            1,
+            collect_structural_findings=False,
+            collect_api_surface=False,
+            api_include_private_modules=False,
+            block_min_loc=20,
+            block_min_stmt=8,
+            segment_min_loc=20,
+            segment_min_stmt=10,
+        )
+        assert result.success is True
+
+    cache_info = core_worker._supported_process_file_kwarg_names.cache_info()
+    assert cache_info.misses == 1
+    assert cache_info.hits == 1
+    core_worker._supported_process_file_kwarg_names.cache_clear()
+
+
 def test_process_parallel_failure_large_batch_invokes_fallback_callback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

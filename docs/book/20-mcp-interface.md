@@ -134,7 +134,12 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 | Tool                       | Key parameters                                                                                                          | Purpose                                                                                                                                                                                                                 |
 |----------------------------|-------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `start_controlled_change`  | `root`, `scope`, `intent`, `expected_effects`, `on_conflict`, `strictness`, `blast_radius_depth`, `dirty_scope_policy`  | Pre-edit: workspace check + declare + blast radius + budget in one call. Returns `intent_id` for `finish`. `dirty_scope_policy=continue_own_wip` resumes own dirty scope when no foreign overlap. Does not run analysis |
-| `finish_controlled_change` | `intent_id`, `changed_files` or `diff_ref`, `after_run_id`, `review_text`, `create_receipt`, `auto_clear`, `strictness` | Post-edit: scope check + verify + claims + receipt + clear in one call. `after_run_id` required for Python structural / governance config profiles                                                                      |
+| `finish_controlled_change` | `intent_id`, `changed_files` or `diff_ref`, `after_run_id`, `review_text`, `claims_text`, `create_receipt`, `auto_clear`, `strictness` | Post-edit: scope check + verify + optional claim validation + receipt + clear in one call. `after_run_id` required for Python structural / governance config profiles                                                     |
+
+`finish_controlled_change` separates human notes from validated claims:
+`review_text` is an optional note, while `claims_text` is the text passed to
+Claim Guard. The response includes a compact `summary` plus the full
+`verification`, `claims`, `receipt`, and `workspace_hygiene_after` payloads.
 
 ??? info "Start/finish workspace hygiene"
 Edit permission requires `start_controlled_change` to return

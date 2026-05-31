@@ -57,7 +57,7 @@
     },
     {
       "name": "finish_controlled_change",
-      "signature": "(self, *, intent_id: 'str', changed_files: 'Sequence[str] | None' = None, diff_ref: 'str | None' = None, after_run_id: 'str | None' = None, review_text: 'str | None' = None, create_receipt: 'bool' = True, auto_clear: 'bool' = True, strictness: 'str' = 'ci') -> 'dict[str, object]'"
+      "signature": "(self, *, intent_id: 'str', changed_files: 'Sequence[str] | None' = None, diff_ref: 'str | None' = None, after_run_id: 'str | None' = None, review_text: 'str | None' = None, claims_text: 'str | None' = None, create_receipt: 'bool' = True, auto_clear: 'bool' = True, strictness: 'str' = 'ci') -> 'dict[str, object]'"
     },
     {
       "name": "generate_pr_summary",

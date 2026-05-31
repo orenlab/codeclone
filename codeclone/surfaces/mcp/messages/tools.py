@@ -188,7 +188,8 @@ START_CONTROLLED_CHANGE: Final = (
 FINISH_CONTROLLED_CHANGE: Final = (
     "Post-edit verify, receipt, and intent clear. Pass after_run_id "
     "when verification.verification_profile requires it. Read "
-    "verification.verification_profile for applied checks."
+    "verification.verification_profile for applied checks. Use claims_text "
+    "for claim validation; review_text is an optional human note."
 )
 
 MANAGE_CHANGE_INTENT: Final = (

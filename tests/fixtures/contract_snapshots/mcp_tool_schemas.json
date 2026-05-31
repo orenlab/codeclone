@@ -1320,7 +1320,6 @@
         "review_text": {
           "anyOf": [
             {
-              "description": "Review claims text to validate against the run.",
               "type": "string"
             },
             {
@@ -1328,7 +1327,21 @@
             }
           ],
           "default": null,
+          "description": "Optional human review note for finish output; not claim-validated. Use claims_text for text that should be checked.",
           "title": "Review Text"
+        },
+        "claims_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional claims text to validate against the run.",
+          "title": "Claims Text"
         },
         "create_receipt": {
           "default": true,

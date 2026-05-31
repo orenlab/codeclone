@@ -56,6 +56,7 @@ from ._session_shared import (
     Mapping,
     MCPAnalysisRequest,
     MCPGateRequest,
+    MCPRunNotFoundError,
     MCPRunRecord,
     MCPServiceContractError,
     MetricGateConfig,
@@ -1130,10 +1131,12 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
 
     def clear_session_runs(self) -> dict[str, object]:
         workspace_targets: list[tuple[Path, str]] = []
-        for intent in self._active_intents.values():
+        with self._state_lock:
+            intent_snapshot = tuple(self._active_intents.values())
+        for intent in intent_snapshot:
             try:
                 record = self._runs.get(intent.run_id)
-            except MCPServiceContractError:
+            except (MCPRunNotFoundError, MCPServiceContractError):
                 continue
             workspace_targets.append((record.root, intent.intent_id))
         removed_run_ids = self._runs.clear()

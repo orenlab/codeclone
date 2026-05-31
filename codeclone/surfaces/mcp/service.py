@@ -13,7 +13,6 @@ from .session import (
     DEFAULT_MCP_HISTORY_LIMIT,
     MCPAnalysisRequest,
     MCPGateRequest,
-    MCPServiceContractError,
     MCPSession,
 )
 from .tools._base import run_kw
@@ -180,7 +179,7 @@ class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
             for intent_id, intent in snapshot.items():
                 try:
                     run = self._runs.get(intent.run_id)
-                except (MCPServiceContractError, Exception):
+                except Exception:
                     continue
                 safe_remove_own_intent(
                     root=run.root,
@@ -188,6 +187,34 @@ class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
                     start_epoch=self._agent_start_epoch,
                     intent_id=intent_id,
                 )
+        except Exception:
+            pass
+        self._shutdown_close_resources()
+
+    def _shutdown_close_resources(self) -> None:
+        """Best-effort close of passive stores owned by this service."""
+        try:
+            writers = tuple(self._audit_writers.values())
+            self._audit_writers.clear()
+            override = self._audit_writer_override
+            self._audit_writer_override = None
+            if override is not None:
+                writers = (*writers, override)
+            seen: set[int] = set()
+            for writer in writers:
+                writer_id = id(writer)
+                if writer_id in seen:
+                    continue
+                seen.add(writer_id)
+                close = getattr(writer, "close", None)
+                if callable(close):
+                    close()
+        except Exception:
+            pass
+        try:
+            from ._workspace_intent_store import clear_workspace_intent_store_cache
+
+            clear_workspace_intent_store_cache()
         except Exception:
             pass
 
@@ -378,6 +405,7 @@ def _apply_public_method_signatures() -> None:
             _kwonly("diff_ref", "str | None", None),
             _kwonly("after_run_id", "str | None", None),
             _kwonly("review_text", "str | None", None),
+            _kwonly("claims_text", "str | None", None),
             _kwonly("create_receipt", "bool", True),
             _kwonly("auto_clear", "bool", True),
             _kwonly("strictness", "str", "ci"),

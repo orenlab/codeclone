@@ -241,13 +241,21 @@ def update_workspace_intent_status(
     new_status: str,
     ttl_seconds: int | None = None,
 ) -> bool:
-    record = find_workspace_intent(root=root, intent_id=intent_id)
-    if record is None:
-        return False
-    if record.agent_pid != pid or record.agent_start_epoch != start_epoch:
-        return False
-    updated = _updated_record(record, new_status=new_status, ttl_seconds=ttl_seconds)
-    return bool(_intent_store(root).write(updated))
+    from ._workspace_intent_store import registry_transaction
+
+    store = _intent_store(root)
+    with registry_transaction(store):
+        record = store.find_current_unlocked(intent_id)
+        if record is None:
+            return False
+        if record.agent_pid != pid or record.agent_start_epoch != start_epoch:
+            return False
+        updated = _updated_record(
+            record,
+            new_status=new_status,
+            ttl_seconds=ttl_seconds,
+        )
+        return bool(store.write_unlocked(updated))
 
 
 def renew_workspace_intent_lease(
@@ -258,24 +266,28 @@ def renew_workspace_intent_lease(
     intent_id: str,
     lease_seconds: int | None = None,
 ) -> bool:
-    record = find_workspace_intent(root=root, intent_id=intent_id)
-    if record is None:
-        return False
-    if record.agent_pid != pid or record.agent_start_epoch != start_epoch:
-        return False
-    now = utc_now()
-    expires = _parse_utc(record.expires_at_utc)
-    if expires is None or expires <= now:
-        return False
-    new_lease = (
-        resolved_lease_seconds(lease_seconds)
-        if lease_seconds is not None
-        else record.lease_seconds
-    )
-    updated = replace(
-        record, lease_renewed_at_utc=format_utc(now), lease_seconds=new_lease
-    )
-    return bool(_intent_store(root).write(updated))
+    from ._workspace_intent_store import registry_transaction
+
+    store = _intent_store(root)
+    with registry_transaction(store):
+        record = store.find_current_unlocked(intent_id)
+        if record is None:
+            return False
+        if record.agent_pid != pid or record.agent_start_epoch != start_epoch:
+            return False
+        now = utc_now()
+        expires = _parse_utc(record.expires_at_utc)
+        if expires is None or expires <= now:
+            return False
+        new_lease = (
+            resolved_lease_seconds(lease_seconds)
+            if lease_seconds is not None
+            else record.lease_seconds
+        )
+        updated = replace(
+            record, lease_renewed_at_utc=format_utc(now), lease_seconds=new_lease
+        )
+        return bool(store.write_unlocked(updated))
 
 
 def remove_workspace_intent(

@@ -24,7 +24,12 @@ def open_sqlite_db(
     ensure_schema: Callable[[sqlite3.Connection], None],
 ) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), isolation_level="DEFERRED", timeout=5.0)
+    conn = sqlite3.connect(
+        str(path),
+        isolation_level="DEFERRED",
+        timeout=5.0,
+        check_same_thread=False,
+    )
     try:
         for statement in _SQLITE_PRAGMAS:
             conn.execute(statement)

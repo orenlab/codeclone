@@ -86,12 +86,13 @@ finish_controlled_change(
   intent_id=...,
   changed_files=[...] | diff_ref=...,     # XOR
   after_run_id=...,                       # when verification.after_run_required
-  review_text=...,                        # optional; validated if recommended
+  review_text=...,                        # optional human note, not validated
+  claims_text=...,                        # optional; validated if recommended
 )
 ```
 
 Internal order (do not replicate manually): scope **check** → **verify** → claims
-(if `review_text` + `claim_validation_recommended`) → receipt → clear.
+(if `claims_text` + `claim_validation_recommended`) → receipt → clear.
 
 ### After `finish`
 

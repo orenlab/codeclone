@@ -113,6 +113,19 @@ ReviewTextParam = Annotated[
     str,
     Field(description="Review claims text to validate against the run."),
 ]
+FinishReviewTextParam = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Optional human review note for finish output; not claim-validated. "
+            "Use claims_text for text that should be checked."
+        ),
+    ),
+]
+ClaimsTextParam = Annotated[
+    str | None,
+    Field(description="Optional claims text to validate against the run."),
+]
 RequireCitationsParam = Annotated[
     bool,
     Field(description="Require finding ids or metric citations in text."),

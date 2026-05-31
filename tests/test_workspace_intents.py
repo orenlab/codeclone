@@ -335,7 +335,7 @@ def test_workspace_intent_io_failure_paths(
 
     from codeclone.surfaces.mcp._workspace_intent_store import FileWorkspaceIntentStore
 
-    monkeypatch.setattr(FileWorkspaceIntentStore, "write", fail_write)
+    monkeypatch.setattr(FileWorkspaceIntentStore, "write_unlocked", fail_write)
     assert (
         workspace_intents.write_workspace_intent(root=tmp_path, record=_record())
         is False

@@ -75,6 +75,17 @@ def _analysis_request(root: str) -> MCPAnalysisRequest:
     return MCPAnalysisRequest(root=root)
 
 
+class _ClosingWriter:
+    def __init__(self) -> None:
+        self.closed = 0
+
+    def emit(self, _event: object) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed += 1
+
+
 # ---------------------------------------------------------------------------
 # _is_safe_intent_path
 # ---------------------------------------------------------------------------
@@ -347,6 +358,45 @@ def test_shutdown_cleanup_skips_on_run_error(
         lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     svc.shutdown_cleanup()  # must not raise
+
+
+def test_shutdown_cleanup_closes_audit_writers_and_store_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import codeclone.surfaces.mcp._workspace_intent_store as intent_store_mod
+
+    svc = _svc()
+    writer = _ClosingWriter()
+    svc._audit_writers[tmp_path.resolve()] = writer
+    cache_cleared: list[bool] = []
+    monkeypatch.setattr(
+        intent_store_mod,
+        "clear_workspace_intent_store_cache",
+        lambda: cache_cleared.append(True),
+    )
+
+    svc.shutdown_cleanup()
+
+    assert writer.closed == 1
+    assert cache_cleared == [True]
+
+
+def test_clear_session_runs_handles_missing_intent_run(tmp_path: Path) -> None:
+    svc = _svc()
+    run_id = str(svc.analyze_repository(_analysis_request(str(tmp_path)))["run_id"])
+    svc.manage_change_intent(
+        action="declare",
+        run_id=run_id,
+        root=str(tmp_path),
+        scope={"allowed_files": ["pkg/d.py"], "allowed_related": [], "forbidden": []},
+        intent="missing run cleanup",
+    )
+    svc._runs.clear()
+
+    result = svc.clear_session_runs()
+
+    assert result["cleared_intents"] == 1
 
 
 # ---------------------------------------------------------------------------

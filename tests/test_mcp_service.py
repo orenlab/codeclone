@@ -8182,6 +8182,8 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         )
     with pytest.raises(MCPServiceContractError, match="changed_files or diff_ref"):
         service.finish_controlled_change(intent_id=intent_id)
+    with pytest.raises(MCPServiceContractError, match="changed_files or diff_ref"):
+        service.finish_controlled_change(intent_id=intent_id, changed_files=[""])
 
     monkeypatch.setattr(
         service,
@@ -8292,11 +8294,34 @@ def test_mcp_workflow_finish_python_structural_and_receipt_edges(
     claims_run = docs_service.finish_controlled_change(
         intent_id=docs_intent,
         changed_files=["README.md"],
-        review_text="F-1 reviewed.",
+        review_text="Implementation note, not a claim.",
+        claims_text="F-1 reviewed.",
         create_receipt=False,
         auto_clear=False,
     )
     assert cast("dict[str, object]", claims_run["claims"])["valid"] is True
+    assert cast("dict[str, object]", claims_run["summary"])["claims"] == "valid"
+    assert "workspace_hygiene_after" in claims_run
+
+    def fail_validate_review_claims(**_: object) -> dict[str, object]:
+        raise AssertionError("review_text must not trigger claim validation")
+
+    monkeypatch.setattr(
+        docs_service,
+        "validate_review_claims",
+        fail_validate_review_claims,
+    )
+    note_only_run = docs_service.finish_controlled_change(
+        intent_id=docs_intent,
+        changed_files=["README.md"],
+        review_text="Implementation note without review claims.",
+        create_receipt=False,
+        auto_clear=False,
+    )
+    assert note_only_run["claims"] is None
+    note_summary = cast("dict[str, object]", note_only_run["summary"])
+    assert note_summary["claims"] == "skipped_no_claims_text"
+    assert note_summary["review_note_present"] is True
 
 
 def test_mcp_workflow_helper_messages_and_validators() -> None:
@@ -8372,7 +8397,16 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
             service,
             record=record,
             verify_payload={"claim_validation_recommended": False},
-            review_text="F-1 reviewed.",
+            claims_text="F-1 reviewed.",
+        )
+        is None
+    )
+    assert (
+        workflow_mod._MCPSessionWorkflowMixin._conditional_claim_validation(
+            service,
+            record=record,
+            verify_payload={"claim_validation_recommended": True},
+            claims_text=None,
         )
         is None
     )
@@ -8396,7 +8430,7 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
                 "claim_validation_recommended": True,
                 "structural_delta": {"health_delta": -2},
             },
-            review_text="Health unchanged.",
+            claims_text="Health unchanged.",
         )
         assert claims == {"valid": True}
         assert validate.call_args.kwargs["patch_health_delta"] == -2
@@ -8409,7 +8443,7 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
                     "claim_validation_recommended": True,
                     "structural_delta": {"health_delta": "not-an-int"},
                 },
-                review_text="Health unchanged.",
+                claims_text="Health unchanged.",
             )
         )
         assert claims_without_delta == {"valid": True}
