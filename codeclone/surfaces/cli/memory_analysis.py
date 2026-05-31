@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from ... import __version__
 from ...cache.store import Cache
@@ -19,6 +21,7 @@ from ...core.discovery import discover
 from ...core.parallelism import process
 from ...core.pipeline import analyze
 from ...core.reporting import report
+from ...memory.report_trust import assess_cached_report_trust
 from ...report.html import build_html_report
 from ...utils.json_io import read_json_object
 from . import baseline_state as cli_baseline_state
@@ -31,6 +34,15 @@ from . import startup as cli_startup
 from . import state as cli_state
 from .console import PlainConsole
 from .types import require_status_console
+
+ReportSource = Literal["explicit_report", "trusted_cache", "fresh_analysis"]
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedMemoryReport:
+    document: dict[str, object]
+    source: ReportSource
+    rejected_cache_reason: str | None = None
 
 
 def _rich_progress_symbols() -> tuple[type, type, type, type, type]:
@@ -49,13 +61,36 @@ def load_report_for_memory_init(
     *,
     root_path: Path,
     from_report: Path | None,
-) -> dict[str, object]:
+) -> LoadedMemoryReport:
     if from_report is not None:
-        return read_json_object(from_report.resolve())
+        return LoadedMemoryReport(
+            document=read_json_object(from_report.resolve()),
+            source="explicit_report",
+        )
+
     default_path = root_path / DEFAULT_JSON_REPORT_PATH
     if default_path.is_file():
-        return read_json_object(default_path)
-    return run_memory_analysis_report(root_path=root_path)
+        report_document = read_json_object(default_path)
+        trust = assess_cached_report_trust(
+            root_path=root_path,
+            report_path=default_path,
+            report_document=report_document,
+        )
+        if trust.trusted:
+            return LoadedMemoryReport(
+                document=report_document,
+                source="trusted_cache",
+            )
+        return LoadedMemoryReport(
+            document=run_memory_analysis_report(root_path=root_path),
+            source="fresh_analysis",
+            rejected_cache_reason=trust.reason,
+        )
+
+    return LoadedMemoryReport(
+        document=run_memory_analysis_report(root_path=root_path),
+        source="fresh_analysis",
+    )
 
 
 def run_memory_analysis_report(*, root_path: Path) -> dict[str, object]:
@@ -188,4 +223,9 @@ def run_memory_analysis_report(*, root_path: Path) -> dict[str, object]:
     return artifacts.report_document
 
 
-__all__ = ["load_report_for_memory_init", "run_memory_analysis_report"]
+__all__ = [
+    "LoadedMemoryReport",
+    "ReportSource",
+    "load_report_for_memory_init",
+    "run_memory_analysis_report",
+]

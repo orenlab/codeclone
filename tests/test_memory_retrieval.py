@@ -8,67 +8,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codeclone.memory.identity import make_identity_key
-from codeclone.memory.models import MemoryRecord, MemorySubject, generate_memory_id
-from codeclone.memory.project import resolve_project_identity
+from codeclone.memory.models import MemoryRecord, MemorySubject
 from codeclone.memory.retrieval import get_relevant_memory, query_engineering_memory
 from codeclone.memory.retrieval.ranking import RankingContext, relevance_score
-from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.report.meta import current_report_timestamp_utc
 
-
-def _seed_record(
-    store: SqliteEngineeringMemoryStore,
-    *,
-    project_id: str,
-    path: str,
-    statement: str,
-) -> MemoryRecord:
-    now = current_report_timestamp_utc()
-    record = MemoryRecord(
-        id=generate_memory_id(),
-        project_id=project_id,
-        identity_key=make_identity_key(
-            type="module_role",
-            subject_kind="module",
-            subject_key=path.replace("/", ".").removesuffix(".py"),
-            discriminator="inventory_module",
-        ),
-        type="module_role",
-        status="active",
-        confidence="supported",
-        origin="system",
-        ingest_source="analysis",
-        statement=statement,
-        summary=None,
-        payload={"module_path": path.replace("/", ".").removesuffix(".py")},
-        created_at_utc=now,
-        updated_at_utc=now,
-        last_verified_at_utc=now,
-        expires_at_utc=None,
-        created_by="test",
-        verified_by=None,
-        approved_by=None,
-        approved_at_utc=None,
-        report_digest=None,
-        code_fingerprint=None,
-        stale_reason=None,
-        created_on_branch=None,
-        created_at_commit=None,
-        verified_on_branch=None,
-        verified_at_commit=None,
-    )
-    store.upsert_record(record)
-    store.write_subject(
-        MemorySubject(
-            id=generate_memory_id(prefix="subj"),
-            memory_id=record.id,
-            subject_kind="path",
-            subject_key=path,
-            relation="about",
-        )
-    )
-    return record
+from .memory_fixtures import (
+    memory_store,
+    seed_module_role,
+    seed_path_subject_record,
+)
 
 
 def test_relevance_score_prefers_scope_path_match() -> None:
@@ -124,19 +73,14 @@ def test_relevance_score_prefers_scope_path_match() -> None:
 
 
 def test_get_relevant_memory_ranks_scope_records(tmp_path: Path) -> None:
-    root = tmp_path / "repo"
-    root.mkdir()
-    project = resolve_project_identity(root)
-    store = SqliteEngineeringMemoryStore(tmp_path / "memory.sqlite3")
-    try:
-        store.initialize(project)
-        _seed_record(
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        seed_path_subject_record(
             store,
             project_id=project.id,
             path="codeclone/memory/sqlite_store.py",
             statement="sqlite store module",
         )
-        _seed_record(
+        seed_path_subject_record(
             store,
             project_id=project.id,
             path="codeclone/other.py",
@@ -149,8 +93,6 @@ def test_get_relevant_memory_ranks_scope_records(tmp_path: Path) -> None:
             scope_resolved_from="explicit",
             max_records=5,
         )
-    finally:
-        store.close()
 
     assert result["scope_resolved_from"] == "explicit"
     records = result["records"]
@@ -160,14 +102,8 @@ def test_get_relevant_memory_ranks_scope_records(tmp_path: Path) -> None:
 
 
 def test_query_engineering_memory_search_and_status(tmp_path: Path) -> None:
-    root = tmp_path / "repo"
-    root.mkdir()
-    project = resolve_project_identity(root)
-    db_path = tmp_path / "memory.sqlite3"
-    store = SqliteEngineeringMemoryStore(db_path)
-    try:
-        store.initialize(project)
-        _seed_record(
+    with memory_store(tmp_path) as (root, project, store, db_path):
+        seed_path_subject_record(
             store,
             project_id=project.id,
             path="codeclone/memory/service.py",
@@ -190,8 +126,6 @@ def test_query_engineering_memory_search_and_status(tmp_path: Path) -> None:
             db_path=db_path,
             mode="status",
         )
-    finally:
-        store.close()
 
     search_payload = search["payload"]
     assert isinstance(search_payload, dict)
@@ -199,3 +133,29 @@ def test_query_engineering_memory_search_and_status(tmp_path: Path) -> None:
     status_payload = status["payload"]
     assert isinstance(status_payload, dict)
     assert status_payload["db_exists"] is True
+
+
+def test_query_engineering_memory_for_path_finds_module_role(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (root, project, store, db_path):
+        seed_module_role(
+            store,
+            project_id=project.id,
+            file_path="codeclone/memory/sqlite_store.py",
+            statement="codeclone.memory.sqlite_store is an analyzed Python module.",
+        )
+        result = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root,
+            backend="sqlite",
+            db_path=db_path,
+            mode="for_path",
+            path="codeclone/memory/sqlite_store.py",
+        )
+
+    payload = result["payload"]
+    assert isinstance(payload, dict)
+    records = payload.get("records")
+    assert isinstance(records, list)
+    assert records
+    assert records[0]["type"] == "module_role"

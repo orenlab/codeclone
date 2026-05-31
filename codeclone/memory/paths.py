@@ -18,4 +18,11 @@ def normalize_repo_path(raw_path: str) -> str:
     return path.as_posix()
 
 
-__all__ = ["normalize_repo_path"]
+def repo_path_to_module_key(rel_path: str) -> str:
+    module_path = normalize_repo_path(rel_path).removesuffix(".py").replace("/", ".")
+    if module_path.endswith(".__init__"):
+        module_path = module_path[: -len(".__init__")]
+    return module_path
+
+
+__all__ = ["normalize_repo_path", "repo_path_to_module_key"]

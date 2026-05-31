@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import cast
 
 from ...config.memory import MemoryConfig, resolve_memory_config
@@ -18,7 +18,7 @@ from ...memory.ingest.runner import run_memory_init
 from ...memory.models import MemoryProject, MemoryQuery
 from ...memory.paths import normalize_repo_path
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
-from ...memory.retrieval import query_engineering_memory
+from ...memory.retrieval import query_engineering_memory, query_records_for_repo_path
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from ...memory.status_report import build_memory_status_report
 from ...memory.vacuum import run_memory_vacuum
@@ -189,13 +189,23 @@ def _run_init(
     args: argparse.Namespace,
 ) -> int:
     try:
-        report_document = load_report_for_memory_init(
+        loaded = load_report_for_memory_init(
             root_path=root_path,
             from_report=Path(args.from_report) if args.from_report else None,
         )
     except Exception as exc:
         console.print(f"Unable to load analysis report for memory init: {exc}")
         return int(ExitCode.CONTRACT_ERROR)
+
+    if loaded.rejected_cache_reason:
+        console.print(
+            "  note: cached report rejected; running fresh analysis "
+            f"({loaded.rejected_cache_reason})"
+        )
+    elif loaded.source == "fresh_analysis":
+        console.print("  note: no trusted cached report; running fresh analysis")
+    elif loaded.source == "trusted_cache":
+        console.print("  note: reusing trusted cached report")
 
     options = InitOptions(
         dry_run=bool(args.dry_run),
@@ -206,7 +216,7 @@ def _run_init(
     try:
         result = run_memory_init(
             root_path=root_path,
-            report_document=report_document,
+            report_document=loaded.document,
             options=options,
         )
     except Exception as exc:
@@ -250,23 +260,12 @@ def _run_for_path(
     project = resolve_project_identity(root_path)
     store = SqliteEngineeringMemoryStore(db_path)
     try:
-        records = store.query_records(
-            MemoryQuery(
-                project_id=project.id,
-                subject_kind="path",
-                subject_key_prefix=rel_path,
-                limit=max(1, int(args.limit)),
-            )
+        records = query_records_for_repo_path(
+            store,
+            project_id=project.id,
+            rel_path=rel_path,
+            limit=max(1, int(args.limit)),
         )
-        if not records:
-            records = store.query_records(
-                MemoryQuery(
-                    project_id=project.id,
-                    subject_kind="module",
-                    subject_key_prefix=PurePosixPath(rel_path).parent.as_posix(),
-                    limit=max(1, int(args.limit)),
-                )
-            )
     finally:
         store.close()
 

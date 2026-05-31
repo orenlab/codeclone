@@ -7,11 +7,15 @@
 from .service import (
     QUERY_MODES,
     get_relevant_memory,
+    path_has_memory,
     query_engineering_memory,
+    query_records_for_repo_path,
 )
 
 __all__ = [
     "QUERY_MODES",
     "get_relevant_memory",
+    "path_has_memory",
     "query_engineering_memory",
+    "query_records_for_repo_path",
 ]

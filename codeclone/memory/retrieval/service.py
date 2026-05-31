@@ -7,13 +7,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from pathlib import PurePosixPath
 from typing import Literal, cast
 
 from ..enums import MemoryConfidence, MemoryRecordType, MemoryStatus
 from ..exceptions import MemoryContractError
 from ..models import MemoryEvidence, MemoryQuery, MemoryRecord, MemorySubject
-from ..paths import normalize_repo_path
+from ..paths import normalize_repo_path, repo_path_to_module_key
 from ..sqlite_store import SqliteEngineeringMemoryStore
 from ..status_report import build_memory_status_report
 from .ranking import RankingContext, relevance_score
@@ -37,6 +36,69 @@ QUERY_MODES: tuple[str, ...] = (
     "coverage",
     "status",
 )
+
+
+def query_records_for_repo_path(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    rel_path: str,
+    limit: int,
+    types: tuple[MemoryRecordType, ...] = (),
+    statuses: tuple[MemoryStatus, ...] = ("active", "stale"),
+) -> tuple[MemoryRecord, ...]:
+    normalized = normalize_repo_path(rel_path)
+    records = store.query_records(
+        MemoryQuery(
+            project_id=project_id,
+            types=types,
+            statuses=statuses,
+            subject_kind="path",
+            subject_key_prefix=normalized,
+            limit=limit,
+        )
+    )
+    if len(records) >= limit:
+        return tuple(records[:limit])
+
+    module_key = repo_path_to_module_key(normalized)
+    module_records = store.query_records(
+        MemoryQuery(
+            project_id=project_id,
+            types=types,
+            statuses=statuses,
+            subject_kind="module",
+            subject_key_prefix=module_key,
+            limit=limit,
+        )
+    )
+    seen = {record.id for record in records}
+    merged = list(records)
+    for record in module_records:
+        if record.id in seen:
+            continue
+        merged.append(record)
+        seen.add(record.id)
+        if len(merged) >= limit:
+            break
+    return tuple(merged[:limit])
+
+
+def path_has_memory(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    rel_path: str,
+) -> bool:
+    return bool(
+        query_records_for_repo_path(
+            store,
+            project_id=project_id,
+            rel_path=rel_path,
+            limit=1,
+            statuses=("active", "stale"),
+        )
+    )
 
 
 def _default_statuses(
@@ -165,30 +227,12 @@ def _coverage_summary(
         }
     with_memory = 0
     for raw_path in scope_paths:
-        path = normalize_repo_path(raw_path)
-        records = store.query_records(
-            MemoryQuery(
-                project_id=project_id,
-                subject_kind="path",
-                subject_key_prefix=path,
-                limit=1,
-            )
-        )
-        if records:
+        if path_has_memory(
+            store,
+            project_id=project_id,
+            rel_path=raw_path,
+        ):
             with_memory += 1
-            continue
-        module_prefix = PurePosixPath(path).parent.as_posix()
-        if module_prefix and module_prefix != ".":
-            records = store.query_records(
-                MemoryQuery(
-                    project_id=project_id,
-                    subject_kind="module",
-                    subject_key_prefix=module_prefix.replace("/", "."),
-                    limit=1,
-                )
-            )
-            if records:
-                with_memory += 1
     total = len(scope_paths)
     percent = round(with_memory * 100 / total) if total else 100
     return {
@@ -424,33 +468,14 @@ def query_engineering_memory(
     elif mode == "for_path":
         if not path:
             raise MemoryContractError("mode=for_path requires path.")
-        normalized = normalize_repo_path(path)
-        records = store.query_records(
-            MemoryQuery(
-                project_id=project_id,
-                types=filter_types,
-                statuses=statuses,
-                subject_kind="path",
-                subject_key_prefix=normalized,
-                limit=max_results + 1,
-            )
+        records = query_records_for_repo_path(
+            store,
+            project_id=project_id,
+            rel_path=path,
+            limit=max_results + 1,
+            types=filter_types,
+            statuses=statuses,
         )
-        if len(records) < max_results + 1:
-            module_key = PurePosixPath(normalized).as_posix().replace("/", ".")
-            module_records = store.query_records(
-                MemoryQuery(
-                    project_id=project_id,
-                    types=filter_types,
-                    statuses=statuses,
-                    subject_kind="module",
-                    subject_key_prefix=module_key,
-                    limit=max_results + 1,
-                )
-            )
-            seen = {record.id for record in records}
-            for record in module_records:
-                if record.id not in seen:
-                    records = (*records, record)
     elif mode == "for_symbol":
         if not symbol:
             raise MemoryContractError("mode=for_symbol requires symbol.")
@@ -502,5 +527,7 @@ __all__ = [
     "QueryMode",
     "get_relevant_memory",
     "normalize_repo_path",
+    "path_has_memory",
     "query_engineering_memory",
+    "query_records_for_repo_path",
 ]

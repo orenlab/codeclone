@@ -9,8 +9,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from .models import MemoryQuery
 from .paths import normalize_repo_path
+from .retrieval.service import path_has_memory
 from .sqlite_store import SqliteEngineeringMemoryStore
 
 
@@ -33,16 +33,11 @@ def compute_scope_coverage(
     with_memory = 0
     uncovered: list[str] = []
     for scope_path in normalized:
-        records = store.query_records(
-            MemoryQuery(
-                project_id=project_id,
-                statuses=("active", "stale"),
-                subject_kind="path",
-                subject_key_prefix=scope_path,
-                limit=1,
-            )
-        )
-        if records:
+        if path_has_memory(
+            store,
+            project_id=project_id,
+            rel_path=scope_path,
+        ):
             with_memory += 1
         else:
             uncovered.append(scope_path)
