@@ -150,6 +150,10 @@ All clients use the same server. Only the registration format differs.
     }
     ```
 
+    For intent-first edits with IDE enforcement, use the bundled
+    [Cursor plugin](cursor-plugin.md): install project hooks so `preToolUse`
+    reads the same workspace intent registry (file or SQLite) as MCP.
+
 === "Claude Desktop"
 
     A local `.mcpb` bundle ships in `extensions/claude-desktop-codeclone/`.
@@ -192,9 +196,9 @@ codeclone-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 ```
 
 !!! warning "Remote exposure is opt-in"
-Non-loopback hosts require `--allow-remote`. The built-in HTTP server
-has no authentication. Use it only on trusted networks or behind an
-authenticated reverse proxy.
+    Non-loopback hosts require `--allow-remote`. The built-in HTTP server
+    has no authentication. Use it only on trusted networks or behind an
+    authenticated reverse proxy.
 
 ### Run retention
 
@@ -236,8 +240,8 @@ stored runs.
 | `compare_runs`          | Run-to-run delta: regressions, improvements, health change |
 
 !!! tip "Start here"
-After analysis, call `get_run_summary` or `get_production_triage` first.
-Prefer `list_hotspots` or `check_*` before broad `list_findings` calls.
+    After analysis, call `get_run_summary` or `get_production_triage` first.
+    Prefer `list_hotspots` or `check_*` before broad `list_findings` calls.
 
 ### Workspace hygiene tips
 
@@ -337,41 +341,41 @@ sequenceDiagram
     M ->> D: close intent (file: delete row; sqlite: status=clean)
 ```
 
-| Tool                       | Purpose                                                                                                              |
-|----------------------------|----------------------------------------------------------------------------------------------------------------------|
-| `start_controlled_change`  | Pre-edit workflow: workspace check + declare + blast radius + budget (`dirty_scope_policy` for known WIP)            |
-| `finish_controlled_change` | Post-edit workflow: scope check + verify + claims + receipt + clear (`propose_memory` for draft candidates on accept) |
-| `manage_change_intent`     | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace |
-| `get_blast_radius`         | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                    |
-| `get_relevant_memory`      | Ranked engineering memory for declared edit scope. **Requires `root`**; pass `scope` and/or active `intent_id`       |
-| `query_engineering_memory`   | Mode router: search, get, for_path, for_symbol, stale, coverage, status. Search supports `filters.match_mode` (`any`\|`all`) |
-| `manage_engineering_memory`  | Agent memory governance: `record_candidate`, `validate_claims`, `propose_from_receipt`, `refresh_from_run`. Human approve/reject/archive use the CodeClone VS Code **Memory** view (IDE channel only; not available to agents).    |
-| `check_patch_contract`     | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                               |
-| `create_review_receipt`    | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile               |
-| `validate_review_claims`   | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks       |
+| Tool                        | Purpose                                                                                                                                                                                                                         |
+|-----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `start_controlled_change`   | Pre-edit workflow: workspace check + declare + blast radius + budget (`dirty_scope_policy` for known WIP)                                                                                                                       |
+| `finish_controlled_change`  | Post-edit workflow: scope check + verify + claims + receipt + clear (`propose_memory` for draft candidates on accept)                                                                                                           |
+| `manage_change_intent`      | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace                                                                                                            |
+| `get_blast_radius`          | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                                                                                                                               |
+| `get_relevant_memory`       | Ranked engineering memory for declared edit scope. **Requires `root`**; pass `scope` and/or active `intent_id`                                                                                                                  |
+| `query_engineering_memory`  | Mode router: search, get, for_path, for_symbol, stale, coverage, status. Search supports `filters.match_mode` (`any`\|`all`)                                                                                                    |
+| `manage_engineering_memory` | Agent memory governance: `record_candidate`, `validate_claims`, `propose_from_receipt`, `refresh_from_run`. Human approve/reject/archive use the CodeClone VS Code **Memory** view (IDE channel only; not available to agents). |
+| `check_patch_contract`      | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                                                                                                                                          |
+| `create_review_receipt`     | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile                                                                                                                          |
+| `validate_review_claims`    | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks                                                                                                                  |
 
 ??? info "Blast radius: do_not_touch vs review_context"
-Graph traversal core lives in `codeclone/analysis/blast_radius.py`; MCP and CLI
-are presentation adapters over canonical report facts. `do_not_touch` contains
-actionable edit prohibitions: baselines, generated state, forbidden paths.
-`review_context` contains report-only signals: security boundary inventory,
-overloaded-module candidates, known baseline debt. Review context is information,
-not an edit ban.
+    Graph traversal core lives in `codeclone/analysis/blast_radius.py`; MCP and CLI
+    are presentation adapters over canonical report facts. `do_not_touch` contains
+    actionable edit prohibitions: baselines, generated state, forbidden paths.
+    `review_context` contains report-only signals: security boundary inventory,
+    overloaded-module candidates, known baseline debt. Review context is information,
+    not an edit ban.
 
 ??? info "Patch contract modes"
-**Budget** reads one stored run and optional intent. Shows regression
-headroom per quality dimension before editing. Queued intents return
-`edit_allowed=false`. **Verify** compares explicit before/after stored
-runs, previews gates, validates scope, and reports baseline-abuse signals.
-When `intent_id` is provided but `before_run_id` is omitted, verify
-auto-resolves the before-run from the intent record. Verify derives a
-**verification profile** from changed files — docs-only and non-Python
-patches skip structural checks; Python source changes require a full
-after-run. Identical before/after runs for `python_structural` and
-`governance_config` return `reason: after_run_not_new`. Non-accepted responses include a `next_step` hint and
-`claim_validation_recommended` flag. Missing runs return
-`status=unverified`. Accepted verify with negative `health_delta` may
-include `health_regression_advisory`.
+    **Budget** reads one stored run and optional intent. Shows regression
+    headroom per quality dimension before editing. Queued intents return
+    `edit_allowed=false`. **Verify** compares explicit before/after stored
+    runs, previews gates, validates scope, and reports baseline-abuse signals.
+    When `intent_id` is provided but `before_run_id` is omitted, verify
+    auto-resolves the before-run from the intent record. Verify derives a
+    **verification profile** from changed files — docs-only and non-Python
+    patches skip structural checks; Python source changes require a full
+    after-run. Identical before/after runs for `python_structural` and
+    `governance_config` return `reason: after_run_not_new`. Non-accepted responses include a `next_step` hint and
+    `claim_validation_recommended` flag. Missing runs return
+    `status=unverified`. Accepted verify with negative `health_delta` may
+    include `health_regression_advisory`.
 
 ### Engineering Memory
 
@@ -388,11 +392,11 @@ Default policy `mcp_sync_policy = "bootstrap_if_missing"` auto-creates the store
 from the latest MCP analysis run on first `get_relevant_memory` — no separate CLI
 init required for agents.
 
-| Policy | Auto on `get_relevant_memory` | Explicit refresh |
-|--------|-------------------------------|------------------|
-| `bootstrap_if_missing` (default) | Create DB when missing | `manage_engineering_memory(action="refresh_from_run")` |
-| `refresh_when_stale` | Re-ingest when report digest changed | same |
-| `off` | Disabled | `refresh_from_run` still works |
+| Policy                           | Auto on `get_relevant_memory`        | Explicit refresh                                       |
+|----------------------------------|--------------------------------------|--------------------------------------------------------|
+| `bootstrap_if_missing` (default) | Create DB when missing               | `manage_engineering_memory(action="refresh_from_run")` |
+| `refresh_when_stale`             | Re-ingest when report digest changed | same                                                   |
+| `off`                            | Disabled                             | `refresh_from_run` still works                         |
 
 CLI init remains available for CI and offline bootstrap:
 
@@ -431,13 +435,13 @@ sequenceDiagram
     M-->>A: memory_candidates, memory_staleness, memory_coverage_delta
 ```
 
-| When | Tool | Why |
-|------|------|-----|
-| After `start`, before edit | `get_relevant_memory(root, scope \| intent_id)` | Ranked scope context |
-| One path / symbol | `query_engineering_memory(mode=for_path\|for_symbol)` | Targeted lookup |
-| Keyword discovery | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` | FTS search |
-| Refresh system facts | `manage_engineering_memory(action=refresh_from_run, run_id?)` | Force ingest from MCP run |
-| Unclear semantics | `help(topic="engineering_memory")` | Compact playbook |
+| When                       | Tool                                                                     | Why                       |
+|----------------------------|--------------------------------------------------------------------------|---------------------------|
+| After `start`, before edit | `get_relevant_memory(root, scope \| intent_id)`                          | Ranked scope context      |
+| One path / symbol          | `query_engineering_memory(mode=for_path\|for_symbol)`                    | Targeted lookup           |
+| Keyword discovery          | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` | FTS search                |
+| Refresh system facts       | `manage_engineering_memory(action=refresh_from_run, run_id?)`            | Force ingest from MCP run |
+| Unclear semantics          | `help(topic="engineering_memory")`                                       | Compact playbook          |
 
 Defaults exclude **stale** records. Keyword search excludes drafts unless
 `include_drafts=true`; scoped `get_relevant_memory` and `for_path` /
@@ -447,15 +451,16 @@ they signal changed context.
 
 #### Agent write path (draft only)
 
-| Action | Tool | Result |
-|--------|------|--------|
+| Action                    | Tool                                                          | Result                        |
+|---------------------------|---------------------------------------------------------------|-------------------------------|
 | Refresh from analysis run | `manage_engineering_memory(action=refresh_from_run, run_id?)` | System ingest from MCP report |
-| Observation during edit | `manage_engineering_memory(action=record_candidate, …)` | `draft` record |
-| Validate finish claims | `manage_engineering_memory(action=validate_claims, text=…)` | warnings/errors |
-| Post-edit proposals | `finish_controlled_change(propose_memory=true)` | draft candidates + staleness |
-| Atomic fallback | `manage_engineering_memory(action=propose_from_receipt, …)` | draft proposals |
+| Observation during edit   | `manage_engineering_memory(action=record_candidate, …)`       | `draft` record                |
+| Validate finish claims    | `manage_engineering_memory(action=validate_claims, text=…)`   | warnings/errors               |
+| Post-edit proposals       | `finish_controlled_change(propose_memory=true)`               | draft candidates + staleness  |
+| Atomic fallback           | `manage_engineering_memory(action=propose_from_receipt, …)`   | draft proposals               |
 
-**Human promote:** CodeClone VS Code **Memory** view (approve with confirmation) — agents cannot activate records through MCP
+**Human promote:** CodeClone VS Code **Memory** view (approve with confirmation) — agents cannot activate records
+through MCP
 drafts via MCP.
 
 #### Trust boundaries
@@ -548,8 +553,8 @@ sequenceDiagram
         Agent ->> MCP: analyze_repository
         MCP -->> Agent: after_run_id
     end
-    Agent ->> MCP: finish_controlled_change(intent_id, changed_files, after_run_id?, claims_text?)
-    MCP -->> Agent: status, summary, workspace_hygiene_after, receipt, intent_cleared
+    Agent ->> MCP: finish_controlled_change(intent_id, changed_files|diff_ref, after_run_id?, claims_text?)
+    MCP -->> Agent: status (accepted|accepted_with_external_changes|…), summary, workspace_hygiene_after, external_changes?, intent_cleared
 ```
 
 !!! info "Tool tiers"
@@ -616,21 +621,18 @@ permission = edit_allowed (with status gate)
   the preview is advisory; final verify may not accept the patch.
   Response includes `workspace.concurrent_intents`, `workspace_relations`, and
   optional scoped `workspace_hygiene`.
-- **`finish_controlled_change`:** re-checks scoped hygiene before verify. Finish
-  reconciles agent `changed_files` / `diff_ref` with **git** and the
-  start-time dirty snapshot — under-reported in-scope dirty paths and
-  new/modified/unknown unattributed out-of-scope dirt block even when the agent
-  omits them from evidence. Unchanged preexisting out-of-scope dirt is advisory.
-  Foreign dirty paths outside your declared scope are ignored when attributed to
-  a foreign active/stale intent (`foreign_attributed_outside_scope`). Failures
-  return `reason: "workspace_hygiene"`, optional `finish_block_reason`
-  (`missing_evidence`, `new_unattributed_unscoped_dirty`,
-  `modified_unattributed_unscoped_dirty`,
-  `unknown_unattributed_unscoped_dirty`, `foreign_dirty_overlap`; legacy
-  `own_unscoped_dirty` can appear as an alias), and keep the intent active.
-  Declare **new files** in `allowed_files` at start. Accepted and non-accepted
-  verify responses include a compact `summary` and `workspace_hygiene_after`;
-  `review_text` is a human note, and only `claims_text` is passed to Claim Guard.
+- **`finish_controlled_change`:** fixed pipeline (hygiene → check → verify →
+  optional claims → receipt → clear). See
+  [Structural Change Controller — finish_controlled_change](book/24-structural-change-controller.md#finish_controlled_change).
+  Finish reconciles `changed_files` / `diff_ref` with **git** and the start-time
+  dirty snapshot. **Only** `missing_evidence` (in-scope dirty not listed) and
+  `foreign_dirty_overlap` (live foreign intent on overlapping in-scope paths)
+  block finish (`reason: workspace_hygiene`). Out-of-scope unattributed dirt
+  (`new_` / `modified_` / `unknown_unattributed_unscoped_dirty`) is **advisory**
+  — report it, but it does not fail hygiene. Plain `accepted` verify with
+  out-of-scope dirty elevates top-level status to `accepted_with_external_changes`
+  and adds `external_changes`. `review_text` is a human note; only `claims_text`
+  goes to Claim Guard. Responses include `summary` and `workspace_hygiene_after`.
 - **`manage_change_intent(list_workspace)`:** returns repo-level
   `workspace_dirty_summary` only (no scoped `blocks_edit`). When recoverable
   intents exist, includes `recovery_available` (`run_available`, per-candidate
@@ -686,17 +688,17 @@ claims when `patch_health_delta < 0` (passed automatically by
 
 Hygiene reads the **shared git working tree**, not per-agent sandboxes.
 
-| Actor                                                                                                    | Trigger                         | Start                                                                                                    | Finish                                   |
-|----------------------------------------------------------------------------------------------------------|---------------------------------|----------------------------------------------------------------------------------------------------------|------------------------------------------|
-| **Foreign active/stale** intent on overlapping scope                                                     | `concurrent_intents`            | `status: "blocked"` (coordination)                                                                       | —                                        |
-| **Any** uncommitted dirty file in your `allowed_files`                                                   | `workspace_hygiene.blocks_edit` | `edit_allowed: false` (unless `dirty_scope_policy="continue_own_wip"` and no live foreign dirty overlap) | —                                        |
-| Dirty in scope **not** listed in `changed_files` / `diff_ref` (git reconciliation) | `unacknowledged_dirty_in_scope` | — | `finish_block_reason: missing_evidence` |
-| Dirty **outside** declared scope, already dirty at `start` and unchanged | `preexisting_unscoped_dirty` | — | Advisory only |
-| Dirty **outside** declared scope, appeared after `start`, not foreign-attributed | `new_unattributed_unscoped_dirty` | — | Hygiene block — redeclare scope or revert |
-| Dirty **outside** declared scope, changed after `start`, not foreign-attributed | `modified_unattributed_unscoped_dirty` | — | Hygiene block — redeclare scope or reconcile |
-| Dirty **outside** declared scope, no usable start snapshot | `unknown_unattributed_unscoped_dirty` | — | Conservative hygiene block |
-| Foreign dirty **outside** your scope (other agent's paths) | `foreign_attributed_outside_scope` | — | **ignored** — does not block finish |
-| **Live** foreign intent previously declared overlapping dirty paths in your scope | `foreign_dirty_overlaps` | Contributes to `blocks_edit` context | `finish_block_reason: foreign_dirty_overlap` if overlaps remain |
+| Actor                                                                              | Trigger                                | Start                                                                                                    | Finish                                                           |
+|------------------------------------------------------------------------------------|----------------------------------------|----------------------------------------------------------------------------------------------------------|------------------------------------------------------------------|
+| **Foreign active/stale** intent on overlapping scope                               | `concurrent_intents`                   | `status: "blocked"` (coordination)                                                                       | —                                                                |
+| **Any** uncommitted dirty file in your `allowed_files`                             | `workspace_hygiene.blocks_edit`        | `edit_allowed: false` (unless `dirty_scope_policy="continue_own_wip"` and no live foreign dirty overlap) | —                                                                |
+| Dirty in scope **not** listed in `changed_files` / `diff_ref` (git reconciliation) | `unacknowledged_dirty_in_scope`        | —                                                                                                        | **`finish_block_reason: missing_evidence`** (blocks finish)      |
+| Dirty **outside** declared scope, already dirty at `start` and unchanged           | `preexisting_unscoped_dirty`           | —                                                                                                        | Advisory only                                                    |
+| Dirty **outside** declared scope, appeared after `start`, not foreign-attributed   | `new_unattributed_unscoped_dirty`      | —                                                                                                        | Advisory — may appear in `external_changes`                      |
+| Dirty **outside** declared scope, changed after `start`, not foreign-attributed    | `modified_unattributed_unscoped_dirty` | —                                                                                                        | Advisory — may appear in `external_changes`                      |
+| Dirty **outside** declared scope, no usable start snapshot                         | `unknown_unattributed_unscoped_dirty`  | —                                                                                                        | Advisory classification only                                     |
+| Foreign dirty **outside** your scope (other agent's paths)                         | `foreign_attributed_outside_scope`     | —                                                                                                        | **ignored** — does not block finish                              |
+| **Live** foreign intent previously declared overlapping dirty paths in your scope  | `foreign_dirty_overlaps`               | Contributes to `blocks_edit` at start                                                                    | **`finish_block_reason: foreign_dirty_overlap`** (blocks finish) |
 
 Recoverable, expired, terminal, or **queued** foreign records **do not**
 populate `foreign_dirty_overlaps`. A queued peer does not block finish for an
@@ -711,20 +713,21 @@ ordinary workspace dirt unless scope is widened or changes reverted.
 **Finish hygiene payload fields** (on `workspace_hygiene` / `workspace_hygiene_after`
 when finish is hygiene-gated):
 
-| Field | Meaning |
-|-------|---------|
-| `unacknowledged_dirty_in_scope` | In-scope git dirty missing from finish evidence |
-| `preexisting_unscoped_dirty` | Out-of-scope git dirty that existed at `start` and did not change — informational, non-blocking |
-| `unattributed_unscoped_dirty` | Out-of-scope blocking dirt not attributed to a live foreign intent |
-| `own_unscoped_dirty` | Legacy alias for `unattributed_unscoped_dirty`; not proof of current-agent ownership |
-| `new_unattributed_unscoped_dirty` | Out-of-scope dirty path appeared after `start` |
-| `modified_unattributed_unscoped_dirty` | Out-of-scope dirty path existed at `start` but changed afterward |
-| `unknown_unattributed_unscoped_dirty` | Out-of-scope dirty path cannot be compared with a start snapshot |
-| `foreign_attributed_outside_scope` | Out-of-scope git dirty owned by foreign active/stale intent — informational, non-blocking |
-| `dirty_attribution` | Per-path attribution detail: scope relation, evidence, start state, foreign attribution, classification |
-| `dirty_snapshot` / `dirty_snapshot_status` | Compact current snapshot summary and whether a start snapshot was available |
-| `files_for_scope_check` | Paths passed to scope check after hygiene pass (evidence ∪ unattributed blocking dirt) |
-| `finish_block_reason` | `missing_evidence`, one of the unattributed unscoped reasons, or `foreign_dirty_overlap` when `blocks_finish` |
+| Field                                      | Meaning                                                                                                                                 |
+|--------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
+| `unacknowledged_dirty_in_scope`            | In-scope git dirty missing from finish evidence                                                                                         |
+| `preexisting_unscoped_dirty`               | Out-of-scope git dirty that existed at `start` and did not change — informational, non-blocking                                         |
+| `unattributed_unscoped_dirty`              | Union of unattributed out-of-scope paths — **advisory**, not blocking                                                                   |
+| `own_unscoped_dirty`                       | Legacy alias for `unattributed_unscoped_dirty`; not proof of ownership                                                                  |
+| `new_unattributed_unscoped_dirty`          | Out-of-scope dirty path appeared after `start`                                                                                          |
+| `modified_unattributed_unscoped_dirty`     | Out-of-scope dirty path existed at `start` but changed afterward                                                                        |
+| `unknown_unattributed_unscoped_dirty`      | Out-of-scope dirty path cannot be compared with a start snapshot                                                                        |
+| `foreign_attributed_outside_scope`         | Out-of-scope git dirty owned by foreign active/stale intent — informational, non-blocking                                               |
+| `dirty_attribution`                        | Per-path attribution detail: scope relation, evidence, start state, foreign attribution, classification                                 |
+| `dirty_snapshot` / `dirty_snapshot_status` | Compact current snapshot summary and whether a start snapshot was available                                                             |
+| `files_for_scope_check`                    | Agent evidence only — paths passed to scope `check` (out-of-scope dirt does not expand scope)                                           |
+| `finish_block_reason`                      | `missing_evidence` or `foreign_dirty_overlap` when `blocks_finish` is true                                                              |
+| `external_changes`                         | On finish response when verify is `accepted` but out-of-scope dirty remains — top-level status becomes `accepted_with_external_changes` |
 
 **Typical two-agent overlap on `pkg/a.py`:**
 
@@ -749,9 +752,11 @@ Workflow `status` values are **not** persisted registry lifecycle states.
 | `start` → `queued`                            | `false`        | Wait → `promote`; re-analyze if `before_run_evicted`                                                              |
 | `start` → `blocked`                           | `false`        | Follow `next_step` (`message` matches); do not edit unless `continue_own_wip` was requested and returned `active` |
 | `start` → `active`                            | `true`         | Edit inside declared scope only; read `budget.gate_preview` as advisory                                           |
-| `finish` → `accepted`                         | —              | Intent cleared; optional Claim Guard on review text                                                               |
-| `finish` → `unverified` / `workspace_hygiene` | —              | Read `finish_block_reason`; widen scope, fix evidence, or coordinate foreign in-scope overlap |
+| `finish` → `accepted`                         | —              | Intent cleared (if receipt ok); no out-of-scope dirty in hygiene view                                             |
+| `finish` → `accepted_with_external_changes`   | —              | Patch accepted; report `external_changes` — other paths dirty outside declared scope                              |
+| `finish` → `unverified` / `workspace_hygiene` | —              | Fix `missing_evidence` or coordinate `foreign_dirty_overlap` — out-of-scope dirt alone does not cause this        |
 | `finish` → `violated`                         | —              | Fix regressions or widen scope via new `start`                                                                    |
+| `finish` → `expired`                          | —              | Re-analyze → new `start` (digest mismatch)                                                                        |
 
 Interactive version: open the **Change-control transitions** canvas in the IDE
 (alongside this doc).
@@ -800,16 +805,16 @@ Separate accepted baseline debt from new regressions.
 
 !!! tip "Best practices"
 
-- Use `analyze_changed_paths` for PRs, not full analysis.
-- Prefer `get_run_summary` or `get_production_triage` as the first pass.
-- Prefer `list_hotspots` or narrow `check_*` tools before broad `list_findings`.
-- Use `get_finding` / `get_remediation` for one finding instead of raising
-  `detail_level` on larger lists.
-- Pass an absolute `root` — MCP rejects relative roots like `.`.
-- Use `coverage_xml` only with `analysis_mode="full"`.
-- Use `source_kind="production"` (or `tests`, `fixtures`, `mixed`, `other`) to
-  cut test/fixture noise.
-- Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
+    - Use `analyze_changed_paths` for PRs, not full analysis.
+    - Prefer `get_run_summary` or `get_production_triage` as the first pass.
+    - Prefer `list_hotspots` or narrow `check_*` tools before broad `list_findings`.
+    - Use `get_finding` / `get_remediation` for one finding instead of raising
+      `detail_level` on larger lists.
+    - Pass an absolute `root` — MCP rejects relative roots like `.`.
+    - Use `coverage_xml` only with `analysis_mode="full"`.
+    - Use `source_kind="production"` (or `tests`, `fixtures`, `mixed`, `other`) to
+      cut test/fixture noise.
+    - Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
 
 ---
 

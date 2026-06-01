@@ -12,7 +12,7 @@ it intends to change, CodeClone maps the structural blast radius, verifies the
 patch against the declared boundary, and generates an auditable review receipt.
 
 !!! note "Licensing"
-Source code: MPL-2.0. Documentation and docs-site content: MIT.
+    Source code: MPL-2.0. Documentation and docs-site content: MIT.
 
 ---
 
@@ -147,5 +147,5 @@ uv run python scripts/build_docs_example_report.py --output-dir site/examples/re
 ```
 
 !!! note "Generated output"
-`site/` is generated output used for local preview and GitHub Pages publishing.
-It is not committed to git.
+    `site/` is generated output used for local preview and GitHub Pages publishing.
+    It is not committed to git.

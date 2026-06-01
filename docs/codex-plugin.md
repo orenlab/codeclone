@@ -6,16 +6,16 @@ distribution repo `orenlab/codeclone-codex`.
 
 ## What ships in the plugin
 
-| File | Purpose |
-|------|---------|
-| `.codex-plugin/plugin.json` | Plugin metadata, prompts, instructions |
-| `.mcp.json` | Workspace-first MCP launcher definition |
-| `scripts/launch_mcp` | Shell-free launcher wrapper for Codex |
-| `skills/codeclone-review/` | Conservative-first full review skill |
-| `skills/codeclone-hotspots/` | Quick hotspot discovery skill |
-| `skills/codeclone-change-control/` | Intent-first change workflow skill |
-| `skills/codeclone-engineering-memory/` | Engineering memory read/write skill |
-| `assets/` | Plugin branding |
+| File                                   | Purpose                                 |
+|----------------------------------------|-----------------------------------------|
+| `.codex-plugin/plugin.json`            | Plugin metadata, prompts, instructions  |
+| `.mcp.json`                            | Workspace-first MCP launcher definition |
+| `scripts/launch_mcp`                   | Shell-free launcher wrapper for Codex   |
+| `skills/codeclone-review/`             | Conservative-first full review skill    |
+| `skills/codeclone-hotspots/`           | Quick hotspot discovery skill           |
+| `skills/codeclone-change-control/`     | Intent-first change workflow skill      |
+| `skills/codeclone-engineering-memory/` | Engineering memory read/write skill     |
+| `assets/`                              | Plugin branding                         |
 
 ## Install
 
@@ -88,8 +88,8 @@ install path.
 
 Repository truth stays read-only: MCP must not mutate source files, baselines,
 analysis cache, or canonical report artifacts. Change-control and session tools
-may write ephemeral coordination state under `.cache/codeclone/intents/` and
-optional audit records when enabled.
+may write ephemeral coordination state through the configured workspace intent
+registry (file or SQLite backend) and optional audit records when enabled.
 
 ## Current limits
 

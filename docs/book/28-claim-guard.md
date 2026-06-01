@@ -49,11 +49,11 @@ The pipeline is fully deterministic:
 
 ## Parameters
 
-| Parameter           | Type          | Default  | Meaning                                                         |
-|---------------------|---------------|----------|-----------------------------------------------------------------|
-| `text`              | `str`         | required | Markdown, plain text, or JSON string to validate                |
-| `run_id`            | `str \| None` | latest   | Stored MCP run whose report semantics are used                  |
-| `require_citations` | `bool`        | `true`   | Warn when no known finding IDs or metric family names are cited |
+| Parameter            | Type          | Default  | Meaning                                                                                                                                   |
+|----------------------|---------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| `text`               | `str`         | required | Markdown, plain text, or JSON string to validate                                                                                          |
+| `run_id`             | `str \| None` | latest   | Stored MCP run whose report semantics are used                                                                                            |
+| `require_citations`  | `bool`        | `true`   | Warn when no known finding IDs or metric family names are cited                                                                           |
 | `patch_health_delta` | `int \| None` | omitted  | Optional `health_after - health_before` from verify. When negative, flags regression-free or fully-clean claims even if verify `accepted` |
 
 !!! info "Text limits"
@@ -139,6 +139,11 @@ Pass `patch_health_delta` explicitly when using the atomic workflow
 (`check_patch_contract` → `validate_review_claims`). `finish_controlled_change`
 passes it automatically when `claims_text` is supplied. `review_text` on
 `finish_controlled_change` is a human note and is not claim-validated.
+
+Finish top-level `status: accepted_with_external_changes` still runs Claim Guard
+when `claims_text` is provided — external workspace dirt is advisory, not a
+verify failure. Do not claim "clean working tree" when `external_changes` is
+non-empty unless the user explicitly scoped to ignore peer WIP.
 
 ---
 

@@ -6,9 +6,9 @@ Define observable CLI behavior: argument handling, summaries, output writing,
 and exit routing.
 
 !!! note "Observable surface only"
-This chapter covers scripting-visible behavior and user-facing CLI output
-categories. Rich styling details may evolve as long as markers, exit
-semantics, and deterministic output contracts stay stable.
+    This chapter covers scripting-visible behavior and user-facing CLI output
+    categories. Rich styling details may evolve as long as markers, exit
+    semantics, and deterministic output contracts stay stable.
 
 ## Public surface
 
@@ -153,25 +153,25 @@ Refs:
 ## Failure modes
 
 !!! warning "Failure precedence"
-Contract failures take precedence over gating failures. In CI and scripted
-flows, invalid config or unreadable sources must surface as exit `2` before
-any clone or metrics gate can fail with exit `3`.
+    Contract failures take precedence over gating failures. In CI and scripted
+    flows, invalid config or unreadable sources must surface as exit `2` before
+    any clone or metrics gate can fail with exit `3`.
 
-| Condition                                                         | User-facing category | Exit |
-|-------------------------------------------------------------------|----------------------|------|
-| Invalid CLI flag                                                  | contract             | `2`  |
-| Invalid output extension/path                                     | contract             | `2`  |
-| Invalid changed-scope flag combination                            | contract             | `2`  |
-| Invalid controller query flag combination                         | contract             | `2`  |
-| `--audit` with `audit_enabled=false`                              | contract             | `2`  |
-| `--patch-verify` without trusted baseline                         | contract             | `2`  |
-| Baseline untrusted in CI/gating                                   | contract             | `2`  |
-| Coverage/API regression gate without required baseline capability | contract             | `2`  |
-| Unreadable source in CI/gating                                    | contract             | `2`  |
-| New clones with `--fail-on-new`                                   | gating               | `3`  |
-| Blocking `--patch-verify` contract violation                      | gating               | `3`  |
-| Threshold or metrics gate exceeded                                | gating               | `3`  |
-| Unexpected exception                                              | internal             | `5`  |
+    | Condition                                                         | User-facing category | Exit |
+    |-------------------------------------------------------------------|----------------------|------|
+    | Invalid CLI flag                                                  | contract             | `2`  |
+    | Invalid output extension/path                                     | contract             | `2`  |
+    | Invalid changed-scope flag combination                            | contract             | `2`  |
+    | Invalid controller query flag combination                         | contract             | `2`  |
+    | `--audit` with `audit_enabled=false`                              | contract             | `2`  |
+    | `--patch-verify` without trusted baseline                         | contract             | `2`  |
+    | Baseline untrusted in CI/gating                                   | contract             | `2`  |
+    | Coverage/API regression gate without required baseline capability | contract             | `2`  |
+    | Unreadable source in CI/gating                                    | contract             | `2`  |
+    | New clones with `--fail-on-new`                                   | gating               | `3`  |
+    | Blocking `--patch-verify` contract violation                      | gating               | `3`  |
+    | Threshold or metrics gate exceeded                                | gating               | `3`  |
+    | Unexpected exception                                              | internal             | `5`  |
 
 ## Determinism / canonicalization
 

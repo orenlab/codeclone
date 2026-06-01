@@ -32,10 +32,11 @@ queries:
 
 - The canonical report remains the source of truth.
 - Intent truth is **session-local** for the active MCP process; the optional
-  workspace registry under `.cache/codeclone/intents/` provides advisory,
-  TTL/lease-bound cross-process visibility only.
-- MCP may write ephemeral workspace coordination records under
-  `.cache/codeclone/intents/` and optional audit records under
+  workspace registry (file backend under `.cache/codeclone/intents/` or SQLite
+  per `[tool.codeclone]`) provides advisory, TTL/lease-bound cross-process
+  visibility only.
+- MCP may write ephemeral workspace coordination records through the configured
+  intent registry backend and optional audit records under
   `.cache/codeclone/db/` when enabled.
 - MCP must not mutate source files, baselines, reports, or analysis cache data.
 - Tools derive responses from existing run/report facts rather than LLM
@@ -192,6 +193,27 @@ states.
     user; CodeClone does not ask agents to kill the owning process. Only
     `recoverable` intents (dead PID) can be reclaimed without user
     coordination.
+
+### Cursor local enforcement (optional)
+
+The Cursor plugin can install project hooks (`.cursor/hooks.json`) that run a
+fail-closed `preToolUse` gate before `Write`, `StrReplace`, `ApplyPatch`, and
+`Shell`. The gate calls the read-only API
+`codeclone.workspace_intent.evaluate_workspace_edit_gate`, which loads the same
+registry backend as MCP (`file` or `sqlite` per `[tool.codeclone]`). It does not
+lazy-close records, create registry files, or read plugin-local marker files.
+
+| Registry signal                                                       | Hook behavior                                                       |
+|-----------------------------------------------------------------------|---------------------------------------------------------------------|
+| Live `active` intent (any agent; lease/TTL rules match MCP ownership) | Authorize repository writes and non–read-only shell                 |
+| `queued` only                                                         | Deny — queued intents are visible but not editable locally          |
+| No active intent / registry error                                     | Deny file tools; allow only read-only Git inspection shell commands |
+
+Hooks require `codeclone` in the Python interpreter referenced by
+`.cursor/hooks.json` (typically the project venv). Install:
+`plugins/cursor-codeclone/scripts/install-project-hooks.py`. See
+[Cursor plugin guide](../cursor-plugin.md) and
+[Cursor plugin contract](25-cursor-plugin.md).
 
 ## Review Receipt Payload
 
@@ -585,6 +607,118 @@ The same semantic audit events are preserved regardless of which
 approach the agent uses. Atomic tools remain available for backward
 compatibility and advanced use cases.
 
+## `finish_controlled_change`
+
+Post-edit workflow tool. It runs a **fixed pipeline** over the same atomic
+primitives as the manual path; agents must not skip hygiene, check, or verify
+and call `clear` alone.
+
+### Preconditions
+
+- Intent is **active** in the current MCP session (not `queued`).
+- **Evidence:** exactly one of `changed_files` or `diff_ref` (non-empty). Both
+  or neither is a contract error.
+- **`after_run_id`** when the derived `verification_profile` requires it
+  (Python structural and governance config patches).
+
+`review_text` is a human note only. **`claims_text`** is the only finish input
+passed to Claim Guard (when `claim_validation_recommended` is true).
+
+### Execution order (do not reorder manually)
+
+```text
+resolve intent
+  → resolve changed_files | diff_ref (git-expanded)
+  → finish_hygiene_check (git + start dirty snapshot)
+  → manage_change_intent(check)  # uses files_for_scope_check = evidence only
+  → check_patch_contract(verify) # before_run_id from intent when omitted
+  → validate_review_claims (optional, if claims_text + recommended)
+  → create_review_receipt (default true)
+  → manage_change_intent(clear)  # auto_clear when accepted and receipt ok
+  → elevate status if out-of-scope dirty remains (external_changes)
+```
+
+Early exits (intent stays active unless noted):
+
+| Step                | Top-level `status`                             | `reason` (typical)      | `intent_cleared`                          |
+|---------------------|------------------------------------------------|-------------------------|-------------------------------------------|
+| Queued intent       | `unverified`                                   | `intent_not_active`     | `false`                                   |
+| Hygiene gate        | `unverified`                                   | `workspace_hygiene`     | `false`                                   |
+| Scope check         | `expired` / `violated`                         | digest / scope          | `false`                                   |
+| Verify not accepted | `unverified` / `violated`                      | verify-specific         | `false`                                   |
+| Receipt failure     | `accepted` or `accepted_with_external_changes` | —                       | `false` (verify passed but clear skipped) |
+| Success             | `accepted` or `accepted_with_external_changes` | verify reason or `null` | `true` when `auto_clear` and receipt ok   |
+
+### Top-level `status` semantics
+
+| `status`                         | Meaning for agents                                                                                                                            |
+|----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| `accepted`                       | Patch contract passed for declared scope; no out-of-scope dirty paths in the hygiene view                                                     |
+| `accepted_with_external_changes` | Patch contract passed; **other** git-dirty paths exist outside declared scope — report `external_changes` to the user; intent may still clear |
+| `unverified`                     | Hygiene block, verify failure, missing after-run, `after_run_not_new`, etc. — follow `next_step`                                              |
+| `violated`                       | Scope expansion or structural/gate violations attributable to the patch                                                                       |
+| `expired`                        | Before-run digest no longer matches intent — re-analyze and `start` again                                                                     |
+
+`accepted` / `accepted_with_external_changes` mean the **patch contract** passed
+for the declared scope. They do **not** mean “no structural regressions” or
+unchanged repository health — read `verification.structural_delta` and
+`health_regression_advisory` when present.
+
+### Finish hygiene: what blocks vs what informs
+
+Finish hygiene reconciles **agent evidence with git** and the **start-time dirty
+snapshot**. It is not honor-system.
+
+**Blocking** (`blocks_finish: true`, top-level `reason: workspace_hygiene`,
+`user_action_required: true`) happens only for:
+
+| `finish_block_reason`   | Meaning                                                                                      | Agent action                                                                               |
+|-------------------------|----------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|
+| `missing_evidence`      | Git is dirty inside declared scope but the path is missing from `changed_files` / `diff_ref` | Add every in-scope dirty path to evidence or revert                                        |
+| `foreign_dirty_overlap` | A **live** foreign active/stale intent previously declared the same **in-scope** path        | Coordinate (queue/promote/clear foreign intent), stash/commit foreign WIP, or narrow scope |
+
+**Non-blocking (advisory)** — surfaced on `workspace_hygiene_after` and in
+`dirty_attribution`, but **do not** set `finish_block_reason` and **do not**
+feed `files_for_scope_check`:
+
+| Field                                  | Meaning                                                                                 |
+|----------------------------------------|-----------------------------------------------------------------------------------------|
+| `preexisting_unscoped_dirty`           | Out-of-scope dirty at `start`, unchanged since — informational                          |
+| `new_unattributed_unscoped_dirty`      | Out-of-scope dirty appeared after `start`, not foreign-attributed — peer/context signal |
+| `modified_unattributed_unscoped_dirty` | Out-of-scope dirty existed at `start` but content changed — peer/context signal         |
+| `unknown_unattributed_unscoped_dirty`  | No usable start snapshot for comparison — conservative classification only              |
+| `foreign_attributed_outside_scope`     | Out-of-scope dirty owned by foreign active/stale intent — ignored for your finish       |
+| `dirty_paths_outside_scope`            | All out-of-scope dirty paths — drives `external_changes` when verify is `accepted`      |
+
+`own_unscoped_dirty` and `unattributed_unscoped_dirty` are **legacy aliases** for
+the union of unattributed out-of-scope paths. They are **not** proof that the
+current agent owns those edits and **do not** block finish.
+
+**Recoverable** foreign intents (dead PID) do **not** populate
+`foreign_attributed_outside_scope`. **Queued** foreign intents do **not**
+populate `foreign_dirty_overlaps`.
+
+When verify returns plain `accepted` but `dirty_paths_outside_scope` is
+non-empty, finish elevates the top-level status to
+`accepted_with_external_changes` and attaches:
+
+```json
+"external_changes": {"count": N, "sample": ["path", "..."], "truncated": false}
+```
+
+### Response payloads agents should read
+
+| Field                           | Use                                                                                                   |
+|---------------------------------|-------------------------------------------------------------------------------------------------------|
+| `summary`                       | Compact dashboard (`scope_status`, `verification_profile`, `receipt`, `intent_cleared`, dirty counts) |
+| `scope_check`                   | Declared vs actual files from check                                                                   |
+| `verification`                  | Full verify payload including `structural_delta`, `next_step`                                         |
+| `workspace_hygiene_after`       | Post-finish hygiene; use `counts` and `dirty_attribution` (`detail_level`)                            |
+| `health_regression_advisory`    | On accepted verify when `health_delta < 0` — user-facing, not auto-fail                               |
+| `claims`                        | Claim Guard result when `claims_text` was validated                                                   |
+| `receipt` / `receipt_error`     | Receipt body; `receipt_error` prevents `auto_clear`                                                   |
+| `propose_memory` / memory hooks | When `propose_memory=true` on accept                                                                  |
+
 ## Workspace hygiene and registry consistency
 
 Three independent contours (do not collapse):
@@ -622,55 +756,16 @@ Finish must still prove all declared-scope dirty paths via `changed_files` or
 `edit_allowed: false`, and populated `workspace` / `workspace_hygiene` payloads.
 `blocked` is workflow-only — never persisted registry lifecycle status.
 
-**Finish hygiene gate:** `finish_controlled_change` re-checks scoped hygiene
-before scope check / verify. Failures return `reason: "workspace_hygiene"`,
-`intent_cleared: false`, and `user_action_required: true`. **Queued** foreign
-intents do not populate `foreign_dirty_overlaps` — a queued peer does not block
-finish for an active agent on overlapping scope.
-
-Finish hygiene reconciles **agent evidence with git** and the start-time dirty
-snapshot (not honor-system):
-
-| `finish_block_reason` | Meaning | Agent action |
-|-----------------------|---------|--------------|
-| `missing_evidence` | Git dirty inside declared scope not listed in `changed_files` | Add paths to evidence or revert |
-| `new_unattributed_unscoped_dirty` | Out-of-scope dirty path appeared after `start`, not foreign-attributed | Redeclare wider scope or revert |
-| `modified_unattributed_unscoped_dirty` | Out-of-scope dirty path existed at `start` but changed after `start`, not foreign-attributed | Redeclare wider scope or reconcile |
-| `unknown_unattributed_unscoped_dirty` | Out-of-scope dirty path cannot be compared with a start snapshot | Reconcile tree, restart with a fresh intent, or redeclare |
-| `foreign_dirty_overlap` | Foreign intent previously declared same in-scope path | Coordinate with user |
-
-Dirty paths outside your declared scope that belong to a **foreign active/stale
-intent** (`foreign_attributed_outside_scope`) do **not** block your finish —
-other agents' unrelated WIP is ignored. Dirty paths outside your declared scope
-that existed at `start` and did not change are `preexisting_unscoped_dirty` and
-also do **not** block finish. **`Recoverable`** intents (dead owning PID) do
-**not** populate `foreign_attributed_outside_scope`; their dirty paths behave
-like ordinary workspace dirt unless you widen scope or revert. Legacy
-`own_unscoped_dirty` may appear as a compatibility alias for unattributed
-blocking dirt; it is not proof that the current agent owns the edit.
-
-**Finish hygiene payload fields** (when present on `workspace_hygiene` /
-`workspace_hygiene_after`):
-
-| Field | Meaning |
-|-------|---------|
-| `unacknowledged_dirty_in_scope` | In-scope git dirty missing from finish evidence |
-| `preexisting_unscoped_dirty` | Out-of-scope git dirty that existed at `start` and did not change — informational, non-blocking |
-| `unattributed_unscoped_dirty` | Out-of-scope blocking dirt not attributed to a live foreign intent |
-| `own_unscoped_dirty` | Legacy alias for `unattributed_unscoped_dirty` |
-| `new_unattributed_unscoped_dirty` | Out-of-scope dirty path appeared after `start` |
-| `modified_unattributed_unscoped_dirty` | Out-of-scope dirty path existed at `start` but changed afterward |
-| `unknown_unattributed_unscoped_dirty` | Out-of-scope dirty path cannot be compared with a start snapshot |
-| `foreign_attributed_outside_scope` | Out-of-scope git dirty owned by foreign active/stale intent — informational, non-blocking |
-| `dirty_attribution` | Per-path attribution detail: scope relation, evidence, start state, foreign attribution, classification |
-| `dirty_snapshot` / `dirty_snapshot_status` | Compact current snapshot summary and whether a start snapshot was available |
-| `files_for_scope_check` | Paths passed to scope check after hygiene pass (evidence ∪ unattributed blocking dirt) |
-| `finish_block_reason` | `missing_evidence`, one of the unattributed unscoped reasons, or `foreign_dirty_overlap` when `blocks_finish` |
+**Finish hygiene gate:** see [`finish_controlled_change`](#finish_controlled_change)
+for the full pipeline. Only `missing_evidence` and `foreign_dirty_overlap` set
+`blocks_finish`. Out-of-scope unattributed dirt is advisory and may elevate the
+top-level status to `accepted_with_external_changes` without failing verify.
+**Queued** foreign intents do not populate `foreign_dirty_overlaps`.
 
 Declare **new files** in `allowed_files` at `start`, not only in
-`allowed_related`. Successful and non-accepted verify responses also include
-`workspace_hygiene_after`, including the scoped hygiene view and a repo-level
-dirty summary.
+`allowed_related`. Finish always attaches `workspace_hygiene_after` (scoped
+hygiene + repo-level `workspace_dirty_summary`) on verify paths that reach
+hygiene evaluation.
 
 **List workspace:** `manage_change_intent(action="list_workspace")` attaches
 repo-level `workspace_dirty_summary` only (bounded dirty path sample). Scoped

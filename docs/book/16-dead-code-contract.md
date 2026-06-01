@@ -165,8 +165,10 @@ Refs:
 
 - `tests/test_extractor.py::test_dead_code_marks_symbol_dead_when_referenced_only_by_tests`
 - `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[skip_pep562_hooks]`
-- `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[inline_suppression_per_declaration]`
-- `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[suppression_binding_scoped_to_target]`
+-
+`tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[inline_suppression_per_declaration]`
+-
+`tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[suppression_binding_scoped_to_target]`
 - `tests/test_extractor.py::test_dead_code_uses_fastapi_route_and_dependency_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_fastapi_annotated_dependency_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_fastapi_route_decorator_factory_reachability`

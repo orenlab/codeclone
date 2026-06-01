@@ -8,14 +8,14 @@ governed human/agent notes — then surfaces them to AI agents **before and duri
 controlled edits.
 
 !!! note "Not a second analyzer"
-Memory reads from the same canonical report, contracts, docs, tests, and git
-facts as CodeClone analysis. It does **not** run a separate LLM inference
-path, mutate source files, or override structural findings.
+    Memory reads from the same canonical report, contracts, docs, tests, and git
+    facts as CodeClone analysis. It does **not** run a separate LLM inference
+    path, mutate source files, or override structural findings.
 
 !!! note "Not analysis cache"
-The SQLite database under `.cache/codeclone/memory/` is a **governed memory
-contract**, separate from analysis cache (`cache.json`) and baselines
-(`codeclone.baseline.json`).
+    The SQLite database under `.cache/codeclone/memory/` is a **governed memory
+    contract**, separate from analysis cache (`cache.json`) and baselines
+    (`codeclone.baseline.json`).
 
 ---
 
@@ -29,7 +29,7 @@ contract**, separate from analysis cache (`cache.json`) and baselines
 | 18.4  | Draft governance, claim validation                            | MCP `manage_engineering_memory`; CLI `review-candidates\|approve\|reject\|archive` |
 | 18.5  | Scope coverage, finish proposals                              | `finish_controlled_change(propose_memory=true)`                                    |
 | 18.6  | FTS search (`match_mode`), git hotspots, schema 1.1, Rich CLI | CLI `--match`; MCP `filters.match_mode`                                            |
-| 18.7  | MCP sync from analysis runs                                     | `mcp_sync_policy`; auto bootstrap on `get_relevant_memory`; `refresh_from_run`     |
+| 18.7  | MCP sync from analysis runs                                   | `mcp_sync_policy`; auto bootstrap on `get_relevant_memory`; `refresh_from_run`     |
 
 Schema version constant: `ENGINEERING_MEMORY_SCHEMA_VERSION` in
 `codeclone/contracts/__init__.py` (currently **`1.1`**).
@@ -125,7 +125,7 @@ end
 
 AgentCan --> Store[(Memory DB)]
 HumanCI --> Store
-McpSync -->|ingest system records| Store
+McpSync -->|ingest system records|Store
 Never -.->|blocked|Store
 ```
 
@@ -207,11 +207,11 @@ sequenceDiagram
 Policy key: `mcp_sync_policy` in `[tool.codeclone.memory]` (default
 `bootstrap_if_missing`).
 
-| Policy                 | Auto behavior on `get_relevant_memory`              | Explicit `refresh_from_run` |
-|------------------------|-----------------------------------------------------|-----------------------------|
-| `off`                  | No auto sync; DB must exist                         | Always runs ingest          |
-| `bootstrap_if_missing` | Create store from latest MCP run when DB missing    | Always runs ingest          |
-| `refresh_when_stale`   | Re-ingest when stored digest ≠ current run digest   | Always runs ingest          |
+| Policy                 | Auto behavior on `get_relevant_memory`            | Explicit `refresh_from_run` |
+|------------------------|---------------------------------------------------|-----------------------------|
+| `off`                  | No auto sync; DB must exist                       | Always runs ingest          |
+| `bootstrap_if_missing` | Create store from latest MCP run when DB missing  | Always runs ingest          |
+| `refresh_when_stale`   | Re-ingest when stored digest ≠ current run digest | Always runs ingest          |
 
 ```mermaid
 sequenceDiagram
@@ -219,24 +219,23 @@ sequenceDiagram
     participant M as MCP
     participant S as mcp_sync
     participant DB as SQLite store
-
-    A->>M: analyze_repository
-    M-->>A: run_id
-    A->>M: start_controlled_change
-    M-->>A: edit_allowed=true
-    A->>M: get_relevant_memory(root, intent_id)
-    M->>S: decide + execute (policy)
+    A ->> M: analyze_repository
+    M -->> A: run_id
+    A ->> M: start_controlled_change
+    M -->> A: edit_allowed=true
+    A ->> M: get_relevant_memory(root, intent_id)
+    M ->> S: decide + execute (policy)
     alt missing DB + bootstrap_if_missing
-        S->>DB: init ingest from run report
-        S-->>M: memory_sync completed
+        S ->> DB: init ingest from run report
+        S -->> M: memory_sync completed
     else digest changed + refresh_when_stale
-        S->>DB: refresh ingest + staleness
-        S-->>M: memory_sync completed
+        S ->> DB: refresh ingest + staleness
+        S -->> M: memory_sync completed
     else unchanged
-        S-->>M: skip (no memory_sync field)
+        S -->> M: skip (no memory_sync field)
     end
-    M->>DB: ranked scope query
-    M-->>A: records + optional memory_sync
+    M ->> DB: ranked scope query
+    M -->> A: records + optional memory_sync
 ```
 
 **Explicit refresh:** `manage_engineering_memory(action="refresh_from_run", run_id?)`
@@ -334,13 +333,13 @@ Refs:
 
 Ranked, scope-aware context for the **declared edit scope**.
 
-| Parameter                         | Purpose                                                       |
-|-----------------------------------|---------------------------------------------------------------|
-| `root`                            | **Required.** Absolute repository root (same as `analyze_repository`) |
-| `scope`                           | Explicit repo-relative paths                                  |
-| `intent_id`                       | Active intent from `start_controlled_change` (resolves scope) |
-| `symbols`                         | Optional qualname keys for boost                              |
-| `max_records`                     | Cap (default 20)                                              |
+| Parameter                         | Purpose                                                                                                         |
+|-----------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `root`                            | **Required.** Absolute repository root (same as `analyze_repository`)                                           |
+| `scope`                           | Explicit repo-relative paths                                                                                    |
+| `intent_id`                       | Active intent from `start_controlled_change` (resolves scope)                                                   |
+| `symbols`                         | Optional qualname keys for boost                                                                                |
+| `max_records`                     | Cap (default 20)                                                                                                |
 | `include_stale`, `include_drafts` | `include_stale` defaults false; drafts are automatic for scoped retrieval / path / symbol and opt-in for search |
 
 When neither `scope` nor `intent_id` is passed, returns a **project summary**
@@ -392,18 +391,18 @@ CLI equivalent: `codeclone memory search QUERY --match any|all`.
 
 IDE channel only (VS Code launches MCP with `--ide-governance-channel`):
 
-| `action`                   | Purpose                                                                 |
-|----------------------------|-------------------------------------------------------------------------|
-| `register_ide_governance`  | Bind session HMAC key + client attestation                              |
-| `prepare_governance`       | Issue ticket + nonce + `statement_digest` (protocol v2)                 |
-| `commit_governance`        | Human confirm with HMAC proof → approve/reject/archive                  |
+| `action`                  | Purpose                                                 |
+|---------------------------|---------------------------------------------------------|
+| `register_ide_governance` | Bind session HMAC key + client attestation              |
+| `prepare_governance`      | Issue ticket + nonce + `statement_digest` (protocol v2) |
+| `commit_governance`       | Human confirm with HMAC proof → approve/reject/archive  |
 
 Agent calls to `approve`, `reject`, or `archive` return `governance_mode_unavailable`
 with `next_step` pointing to the VS Code Memory view (never CLI instructions).
 
 #### `finish_controlled_change(propose_memory=true)`
 
-On **accepted** finish:
+On **accepted** or **accepted_with_external_changes** finish:
 
 - proposes draft memory candidates from changed scope, claims, review text
 - marks scope-linked **active** records stale
@@ -449,7 +448,7 @@ style G fill: #fef9c3
 
 | Moment                           | Tool                                                                     | Why                                           |
 |----------------------------------|--------------------------------------------------------------------------|-----------------------------------------------|
-| After `start`, before first edit | `get_relevant_memory(root=abs, scope=… \| intent_id=…)`                 | Ranked context for declared scope             |
+| After `start`, before first edit | `get_relevant_memory(root=abs, scope=… \| intent_id=…)`                  | Ranked context for declared scope             |
 | Need one path deep-dive          | `query_engineering_memory(mode=for_path, path=…)`                        | Targeted lookup                               |
 | Need keyword across store        | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` | FTS discovery                                 |
 | Before writing claims in finish  | `manage_engineering_memory(action=validate_claims, text=…)`              | Catch overclaims vs memory                    |
@@ -457,13 +456,13 @@ style G fill: #fef9c3
 
 ### When to write memory
 
-| Situation                        | Action                                   | Notes                               |
-|----------------------------------|------------------------------------------|-------------------------------------|
-| Stable observation during edit   | `record_candidate`                       | Draft only; cite scope in statement |
-| Patch accepted, workflow finish  | `propose_memory=true`                    | Preferred batch proposal            |
-| Atomic fallback (no finish hook) | `propose_from_receipt`                   | Same receipt shape as finish        |
-| System facts changed in repo     | `refresh_from_run` or ask human for `memory init --refresh` | Explicit MCP refresh always available |
-| Promote draft to trusted fact    | **Not agent** — VS Code Memory view or `codeclone memory approve` | Required for active/verified |
+| Situation                        | Action                                                            | Notes                                 |
+|----------------------------------|-------------------------------------------------------------------|---------------------------------------|
+| Stable observation during edit   | `record_candidate`                                                | Draft only; cite scope in statement   |
+| Patch accepted, workflow finish  | `propose_memory=true`                                             | Preferred batch proposal              |
+| Atomic fallback (no finish hook) | `propose_from_receipt`                                            | Same receipt shape as finish          |
+| System facts changed in repo     | `refresh_from_run` or ask human for `memory init --refresh`       | Explicit MCP refresh always available |
+| Promote draft to trusted fact    | **Not agent** — VS Code Memory view or `codeclone memory approve` | Required for active/verified          |
 
 ### When **not** to use memory
 
@@ -558,15 +557,15 @@ graph LR
 
 ## Failure modes
 
-| Condition                | Behavior                                                                       |
-|--------------------------|--------------------------------------------------------------------------------|
-| DB missing, policy `off` | MCP error: run `refresh_from_run` or CLI init                                  |
-| DB missing, default policy | Auto bootstrap on `get_relevant_memory` when MCP run exists                  |
-| No MCP run for sync      | Auto sync skipped; DB missing → contract error                                 |
-| At `max_candidates`      | `record_candidate` raises capacity error       |
-| At `max_records`         | Init upsert skips or rejects per store policy  |
-| No cached report on init | Init runs analysis or fails with clear message |
-| Git unavailable          | Init proceeds; git evidence/hotspots skipped   |
+| Condition                  | Behavior                                                    |
+|----------------------------|-------------------------------------------------------------|
+| DB missing, policy `off`   | MCP error: run `refresh_from_run` or CLI init               |
+| DB missing, default policy | Auto bootstrap on `get_relevant_memory` when MCP run exists |
+| No MCP run for sync        | Auto sync skipped; DB missing → contract error              |
+| At `max_candidates`        | `record_candidate` raises capacity error                    |
+| At `max_records`           | Init upsert skips or rejects per store policy               |
+| No cached report on init   | Init runs analysis or fails with clear message              |
+| Git unavailable            | Init proceeds; git evidence/hotspots skipped                |
 
 ---
 

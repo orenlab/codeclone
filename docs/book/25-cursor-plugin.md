@@ -48,23 +48,28 @@ The plugin currently provides:
 
 - `.cursor-plugin/plugin.json` — plugin manifest
 - `mcp.json` — local stdio MCP server definition
-- five bundled skills:
+- six bundled skills:
     - `codeclone-production-triage` — fast production-focused first pass
     - `codeclone-hotspots` — quick health snapshot
     - `codeclone-blast-radius` — standalone structural impact inspection
     - `codeclone-review` — full structural review session
     - `codeclone-change-control` — intent-first change workflow
+    - `codeclone-engineering-memory` — scope-aware memory retrieval and candidates
 - one agent:
     - `codeclone-structural-reviewer` (`agents/structural-reviewer.md`) —
       deterministic code reviewer backed by MCP tools
 - two rules:
     - `codeclone-workflow.mdc` — MCP discipline (always active)
     - `codeclone-python.mdc` — Python file context (glob-triggered)
-- three hooks (Python scripts under `hooks/`; advisory reminders only, no MCP calls):
-    - `postToolUse` (matcher `Write|StrReplace|ApplyPatch`) — injects
+- three hooks (Python scripts under `hooks/`; no MCP calls):
+    - `preToolUse` (matcher `Write|StrReplace|ApplyPatch|Shell`, `failClosed`) —
+      blocks repository writes and non–read-only shell when the workspace registry
+      has no live **active** intent (reads `codeclone.workspace_intent` for file
+      and SQLite backends)
+    - `postToolUse` (matcher `Write|StrReplace|ApplyPatch`) — advisory
       `additional_context` after Python source writes
-    - `stop` (`loop_limit: 1`) — `followup_message` when workflow intents look
-      unclosed in the session transcript
+    - `stop` (`loop_limit: 1`) — advisory `followup_message` when workflow
+      intents look unclosed in the session transcript
 
 ## Runtime model
 
@@ -75,7 +80,8 @@ The plugin surface is additive:
   the launcher does not filter tools — agents receive the full 31-tool MCP surface
 - the skills contribute workflow guidance and starter prompts
 - the rules enforce MCP-first discipline and Python-aware context
-- the hooks provide automated reminders for re-analysis and intent hygiene
+- the hooks enforce change control at tool time (`preToolUse`) and provide
+  advisory reminders (`postToolUse`, `stop`)
 - the agent provides a structured review protocol backed by MCP tools
 - Cursor remains free to use direct MCP configuration alongside or instead of
   the plugin
@@ -155,8 +161,8 @@ The structural reviewer agent:
   do not create new findings.
 - **Rule discipline**: rules enforce MCP-first usage and prevent fallback to
   CLI or manual reinterpretation.
-- **Hook safety**: `preToolUse` is fail-closed for repository writes; follow-up
-  hooks stay advisory and non-blocking.
+- **Hook safety**: `preToolUse` is fail-closed for repository writes and
+  non–read-only shell; `postToolUse` and `stop` stay advisory and non-blocking.
 - **Agent honesty**: the structural reviewer reports deterministic evidence, not
   opinions.
 - **No hidden installation side effects**: the plugin does not patch Cursor

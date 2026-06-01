@@ -85,11 +85,14 @@ Refs:
 - `tests/test_suppressions.py::test_extract_suppression_directives_supports_inline_and_leading_forms`
 - `tests/test_suppressions.py::test_extract_suppression_directives_ignores_invalid_forms[unknown_and_malformed]`
 - `tests/test_suppressions.py::test_bind_suppressions_targets_expected_declaration_scope[adjacent_leading_only]`
-- `tests/test_suppressions.py::test_bind_suppressions_targets_expected_declaration_scope[class_inline_does_not_propagate]`
+-
+`tests/test_suppressions.py::test_bind_suppressions_targets_expected_declaration_scope[class_inline_does_not_propagate]`
 - `tests/test_suppressions.py::test_bind_suppressions_targets_expected_declaration_scope[method_target]`
 - `tests/test_suppressions.py::test_build_suppression_index_deduplicates_rules_stably`
-- `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[inline_suppression_per_declaration]`
-- `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[suppression_binding_scoped_to_target]`
+-
+`tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[inline_suppression_per_declaration]`
+-
+`tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[suppression_binding_scoped_to_target]`
 - `tests/test_metrics_modules.py::test_find_unused_applies_inline_dead_code_suppression`
 - `tests/test_metrics_modules.py::test_find_suppressed_unused_returns_actionable_suppressed_candidates`
 - `tests/test_report.py::test_report_json_dead_code_suppressed_items_are_reported_separately`

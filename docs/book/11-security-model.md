@@ -32,8 +32,10 @@ Security-relevant input classes:
 - MCP is read-only with respect to source files, baselines, analysis cache
   (`cache.json`), and canonical report artifacts.
 - Allowed repo-local writes are limited to ephemeral controller coordination
-  (`.cache/codeclone/intents/`) and optional audit trail
-  (`.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true`).
+  (workspace intent registry: file backend under `.cache/codeclone/intents/`,
+  or SQLite under `.cache/codeclone/db/intents.sqlite3` when configured) and
+  optional audit trail (`.cache/codeclone/db/audit.sqlite3` when
+  `audit_enabled=true`).
 - Session-local review markers and in-memory run history do not survive
   process restart.
 - Five session/coordination tools are marked `destructiveHint` in MCP metadata
@@ -79,16 +81,23 @@ Refs:
 
 ### Workspace change intents
 
-Files under `.cache/codeclone/intents/` coordinate concurrent edits between
-processes running as the same local UID on the same host. They are advisory,
-TTL-bound (default 1 hour, lease 5 minutes), gitignored, and not signed.
-A same-UID process with repository write access can forge or delete intent
-records; that UID can already modify source files and baselines directly.
-Document and treat intents as coordination hints, not cryptographic proof of
-agent identity.
+The workspace intent registry coordinates concurrent edits between processes
+running as the same local UID on the same host (file backend:
+`.cache/codeclone/intents/`; SQLite backend: `.cache/codeclone/db/intents.sqlite3`
+when configured). Records are advisory, TTL-bound (default 1 hour, lease 5
+minutes), gitignored, and integrity-checked (SHA-256 over canonical JSON) but not
+cryptographically authenticated. A same-UID process with repository write access
+can forge or delete intent records; that UID can already modify source files and
+baselines directly. Treat intents as coordination hints, not proof of agent
+identity.
+
+The Cursor plugin may enforce `preToolUse` by **reading** this registry through
+`codeclone.workspace_intent` (read-only; no lazy-close or writes). That reduces
+accidental edits without intent; it does not stop a hostile same-UID process.
 
 Refs:
 
+- `codeclone/workspace_intent/gate.py`
 - `codeclone/surfaces/mcp/_workspace_intents.py`
 - `codeclone/surfaces/mcp/_session_workflow_mixin.py`
 

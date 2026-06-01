@@ -2,24 +2,25 @@
 
 **Structural Change Controller for AI-assisted Python development** — native
 Cursor plugin. Source lives in `plugins/cursor-codeclone/`; the plugin bundles
-an MCP server definition, five skills, one agent, two rules, and three hooks.
+an MCP server definition, six skills, one agent, two rules, and three hooks.
 
 ## What ships in the plugin
 
-| Component | Path | Purpose |
-|-----------|------|---------|
-| `.cursor-plugin/plugin.json` | Manifest | Plugin metadata and component declarations |
-| `mcp.json` | MCP server | Local stdio `codeclone-mcp` server definition |
-| `skills/codeclone-review/` | Skill | Conservative-first full structural review |
-| `skills/codeclone-hotspots/` | Skill | Quick hotspot discovery and health snapshot |
-| `skills/codeclone-change-control/` | Skill | Intent-first change workflow with blast radius and verification |
-| `skills/blast-radius/` | Skill | Standalone blast radius inspection before edits |
-| `skills/production-triage/` | Skill | Fast production-focused triage and next-action recommendation |
-| `agents/structural-reviewer.md` | Agent | Deterministic structural code reviewer backed by MCP tools |
-| `rules/codeclone-workflow.mdc` | Rule | MCP workflow discipline (always active) |
-| `rules/codeclone-python.mdc` | Rule | Python file context (auto-triggers on `**/*.py`) |
-| `hooks/hooks.json` | Hooks | `preToolUse` change-control gate, `postToolUse` reminder, `stop` cleanup |
-| `assets/` | Branding | Plugin logo and icon |
+| Component                              | Path       | Purpose                                                                  |
+|----------------------------------------|------------|--------------------------------------------------------------------------|
+| `.cursor-plugin/plugin.json`           | Manifest   | Plugin metadata and component declarations                               |
+| `mcp.json`                             | MCP server | Local stdio `codeclone-mcp` server definition                            |
+| `skills/codeclone-review/`             | Skill      | Conservative-first full structural review                                |
+| `skills/codeclone-hotspots/`           | Skill      | Quick hotspot discovery and health snapshot                              |
+| `skills/codeclone-change-control/`     | Skill      | Intent-first change workflow with blast radius and verification          |
+| `skills/codeclone-engineering-memory/` | Skill      | Engineering memory retrieval and candidate recording around edits        |
+| `skills/blast-radius/`                 | Skill      | Standalone blast radius inspection before edits                          |
+| `skills/production-triage/`            | Skill      | Fast production-focused triage and next-action recommendation            |
+| `agents/structural-reviewer.md`        | Agent      | Deterministic structural code reviewer backed by MCP tools               |
+| `rules/codeclone-workflow.mdc`         | Rule       | MCP workflow discipline (always active)                                  |
+| `rules/codeclone-python.mdc`           | Rule       | Python file context (auto-triggers on `**/*.py`)                         |
+| `hooks/hooks.json`                     | Hooks      | `preToolUse` change-control gate, `postToolUse` reminder, `stop` cleanup |
+| `assets/`                              | Branding   | Plugin logo and icon                                                     |
 
 ## Install
 
@@ -63,10 +64,10 @@ Add `.cursor/` to `.gitignore` if it is not already there.
     That file is Codex-only for local monorepo development. Install from
     `plugins/cursor-codeclone/` via symlinks or Cursor local plugin discovery.
 
-The bundled `mcp.json` runs `python3 ./scripts/launch_mcp.py`, which resolves
-`.venv` → Poetry env → `PATH`. In the monorepo that entrypoint delegates to
-`plugins/codeclone/scripts/launch_mcp.py`; standalone plugin releases must ship
-the full launcher body.
+    The bundled `mcp.json` runs `python3 ./scripts/launch_mcp.py`, which resolves
+    `.venv` → Poetry env → `PATH`. In the monorepo that entrypoint delegates to
+    `plugins/codeclone/scripts/launch_mcp.py`; standalone plugin releases must ship
+    the full launcher body.
 
 ### Personal (global) setup
 
@@ -107,6 +108,13 @@ editing, maps blast radius, verifies the patch against the contract, generates
 a review receipt, and validates cited review claims. This is the governance
 skill — use it whenever the task requires changing files.
 
+### codeclone-engineering-memory
+
+Scope-aware engineering memory: ranked context before edits (`get_relevant_memory`
+with absolute `root`), path/symbol/search queries, and candidate recording before
+`finish_controlled_change`. Complements change control; does not replace intent
+declaration or patch verification.
+
 ## Agent
 
 ### structural-reviewer
@@ -131,10 +139,10 @@ intent.
 
 The Hooks panel counts **project** and **user** hook files only:
 
-| Source | Path | Shown in Hooks UI |
-|--------|------|-------------------|
-| Project | `.cursor/hooks.json` | yes |
-| User | `~/.cursor/hooks.json` | yes |
+| Source          | Path                                 | Shown in Hooks UI                                                             |
+|-----------------|--------------------------------------|-------------------------------------------------------------------------------|
+| Project         | `.cursor/hooks.json`                 | yes                                                                           |
+| User            | `~/.cursor/hooks.json`               | yes                                                                           |
 | Plugin manifest | `hooks/hooks.json` in the plugin dir | **no** (may still run when the plugin is enabled; do not rely on the counter) |
 
 For the CodeClone repository, commit `.cursor/hooks.json` (see
@@ -148,12 +156,13 @@ projects, run that script once per repo (`python`, not bash — Windows-safe).
   workspace intent registry has no live active intent. The hook calls the public
   `codeclone.workspace_intent` read-only API, so file and SQLite registry
   backends behave the same. Scope is configured per project:
-  - `python` (default): `.py` / `.pyi` only
-  - `repo`: any file under the workspace root, including `.git/**`
-  Configure via `.cursor/codeclone-hooks.json` (`enforce_scope`) or
-  `CODECLONE_HOOKS_ENFORCE_SCOPE`. Without an authorized intent, only read-only
-  Git inspection shell commands are allowed; `git apply`, commits, and direct
-  `.git/**` file writes are blocked. Install: `uv run python
+    - `python` (default): `.py` / `.pyi` only
+    - `repo`: any path under the workspace root (including `.git/**`) — all are
+      gated; none are exempt from the intent requirement
+      Configure via `.cursor/codeclone-hooks.json` (`enforce_scope`) or
+      `CODECLONE_HOOKS_ENFORCE_SCOPE`. Without an authorized intent, only read-only
+      Git inspection shell commands are allowed; `git apply`, commits, and direct
+      `.git/**` file writes are blocked. Install: `uv run python
   plugins/cursor-codeclone/scripts/install-project-hooks.py --enforce-scope
   repo`. There is no env bypass for this gate.
 - **postToolUse** (matcher `Write|StrReplace|ApplyPatch`) — after Agent writes
@@ -166,7 +175,7 @@ projects, run that script once per repo (`python`, not bash — Windows-safe).
 
 ## Runtime model
 
-Additive — the plugin provides a local MCP definition, five skills, one agent,
+Additive — the plugin provides a local MCP definition, six skills, one agent,
 two rules, and three hooks. New canonical MCP surfaces from the local
 `codeclone-mcp` version flow through directly; the bundled launcher does not
 filter tools (full 31-tool passthrough). The plugin does not install a

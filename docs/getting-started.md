@@ -136,12 +136,12 @@ repos:
 
 ### Exit codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Success |
-| `2` | Contract error — untrusted baseline, invalid config |
-| `3` | Gating failure — new clones or threshold exceeded |
-| `5` | Internal error |
+| Code | Meaning                                             |
+|------|-----------------------------------------------------|
+| `0`  | Success                                             |
+| `2`  | Contract error — untrusted baseline, invalid config |
+| `3`  | Gating failure — new clones or threshold exceeded   |
+| `5`  | Internal error                                      |
 
 Contract errors (`2`) take precedence over gating failures (`3`).
 See [Exit codes](book/03-contracts-exit-codes.md).

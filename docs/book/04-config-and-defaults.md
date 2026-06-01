@@ -145,11 +145,11 @@ Controller audit trail:
 
 Workspace intent registry:
 
-| Key                       | Type  | Default                               | Meaning                                                      | Requires / Implies                              |
-|---------------------------|-------|---------------------------------------|--------------------------------------------------------------|-------------------------------------------------|
-| `intent_registry_backend` | `str` | `file`                                | Workspace intent storage backend: `file` or `sqlite`         | MCP workspace coordination                      |
-| `intent_registry_path`    | `str` | `.cache/codeclone/db/intents.sqlite3` | SQLite registry database path, relative to the analysis root | Used only when `intent_registry_backend=sqlite` |
-| `intent_registry_retention_days` | `int` | `7`                          | Retention window for closed SQLite intent rows (max `14` in open source) | Used only when `intent_registry_backend=sqlite` |
+| Key                              | Type  | Default                               | Meaning                                                                  | Requires / Implies                              |
+|----------------------------------|-------|---------------------------------------|--------------------------------------------------------------------------|-------------------------------------------------|
+| `intent_registry_backend`        | `str` | `file`                                | Workspace intent storage backend: `file` or `sqlite`                     | MCP workspace coordination                      |
+| `intent_registry_path`           | `str` | `.cache/codeclone/db/intents.sqlite3` | SQLite registry database path, relative to the analysis root             | Used only when `intent_registry_backend=sqlite` |
+| `intent_registry_retention_days` | `int` | `7`                                   | Retention window for closed SQLite intent rows (max `14` in open source) | Used only when `intent_registry_backend=sqlite` |
 
 Values above `14` are contract errors in the open-source edition. See
 [Plans and Retention](../plans-and-retention.md) for Team (up to 30 days) and
@@ -160,100 +160,100 @@ This is the exact accepted `[tool.codeclone]` key set from
 keys are contract errors.
 
 !!! note "Pyproject keys vs CLI flags"
-The tables above list `[tool.codeclone]` keys, not CLI flag spellings.
-CLI flags may map to the same internal destination under a different name.
-Example: `coverage_xml` in `pyproject.toml` corresponds to CLI
-`--coverage FILE`. The same pattern applies to report outputs such as
-`html_out` ↔ `--html` and `json_out` ↔ `--json`.
+    The tables above list `[tool.codeclone]` keys, not CLI flag spellings.
+    CLI flags may map to the same internal destination under a different name.
+    Example: `coverage_xml` in `pyproject.toml` corresponds to CLI
+    `--coverage FILE`. The same pattern applies to report outputs such as
+    `html_out` ↔ `--html` and `json_out` ↔ `--json`.
 
-CLI-only flags (no `[tool.codeclone]` key; authoritative spelling in
-`tests/fixtures/contract_snapshots/cli_help.txt`):
+    CLI-only flags (no `[tool.codeclone]` key; authoritative spelling in
+    `tests/fixtures/contract_snapshots/cli_help.txt`):
 
-| CLI flag                         | Group         | Meaning                                                                            |
-|----------------------------------|---------------|------------------------------------------------------------------------------------|
-| `--changed-only`                 | Analysis      | Limit clone gating/summaries to git-selected files                                 |
-| `--diff-against GIT_REF`         | Analysis      | Resolve changed files from `git diff --name-only <REF>`; requires `--changed-only` |
-| `--paths-from-git-diff GIT_REF`  | Analysis      | Shorthand for `--changed-only` + git diff selection                                |
-| `--blast-radius FILE [FILE ...]` | Analysis      | Render structural blast radius for given files after analysis                      |
-| `--patch-verify`                 | Analysis      | Verify current patch against trusted clone baseline budget                         |
-| `--strictness LEVEL`             | Analysis      | `ci`, `strict`, or `relaxed`; valid only with `--patch-verify` (default: `ci`)     |
-| `--session-stats`                | Analysis      | Show workspace session status; read-only                                           |
-| `--audit`                        | Analysis      | Show local Controller audit trail; requires `audit_enabled=true`                   |
-| `--audit-json`                   | Analysis      | JSON audit footprint; implies `--audit`                                            |
-| `--cache-dir [FILE]`             | Analysis      | Legacy alias for `--cache-path`                                                    |
-| `--timestamped-report-paths`     | Reporting     | Append UTC timestamp to default report filenames                                   |
-| `--open-html-report`             | Output and UI | Open generated HTML in browser; requires `--html`                                  |
-| `--progress`                     | Output and UI | Force-enable progress output                                                       |
-| `--color`                        | Output and UI | Force-enable ANSI colors                                                           |
+    | CLI flag                         | Group         | Meaning                                                                            |
+    |----------------------------------|---------------|------------------------------------------------------------------------------------|
+    | `--changed-only`                 | Analysis      | Limit clone gating/summaries to git-selected files                                 |
+    | `--diff-against GIT_REF`         | Analysis      | Resolve changed files from `git diff --name-only <REF>`; requires `--changed-only` |
+    | `--paths-from-git-diff GIT_REF`  | Analysis      | Shorthand for `--changed-only` + git diff selection                                |
+    | `--blast-radius FILE [FILE ...]` | Analysis      | Render structural blast radius for given files after analysis                      |
+    | `--patch-verify`                 | Analysis      | Verify current patch against trusted clone baseline budget                         |
+    | `--strictness LEVEL`             | Analysis      | `ci`, `strict`, or `relaxed`; valid only with `--patch-verify` (default: `ci`)     |
+    | `--session-stats`                | Analysis      | Show workspace session status; read-only                                           |
+    | `--audit`                        | Analysis      | Show local Controller audit trail; requires `audit_enabled=true`                   |
+    | `--audit-json`                   | Analysis      | JSON audit footprint; implies `--audit`                                            |
+    | `--cache-dir [FILE]`             | Analysis      | Legacy alias for `--cache-path`                                                    |
+    | `--timestamped-report-paths`     | Reporting     | Append UTC timestamp to default report filenames                                   |
+    | `--open-html-report`             | Output and UI | Open generated HTML in browser; requires `--html`                                  |
+    | `--progress`                     | Output and UI | Force-enable progress output                                                       |
+    | `--color`                        | Output and UI | Force-enable ANSI colors                                                           |
 
-Canonical help text, defaults, and exit-code epilog are locked by
-`tests/test_cli_help_snapshot.py` and `tests/test_cli_unit.py::test_cli_help_text_consistency`.
+    Canonical help text, defaults, and exit-code epilog are locked by
+    `tests/test_cli_help_snapshot.py` and `tests/test_cli_unit.py::test_cli_help_text_consistency`.
 
 !!! warning "Metrics-mode conflicts are enforced"
-Metrics update/gating flags are runtime contracts, not hints. Combinations
-such as `skip_metrics=true` together with metrics gating or metrics
-baseline update flags are contract errors.
+    Metrics update/gating flags are runtime contracts, not hints. Combinations
+    such as `skip_metrics=true` together with metrics gating or metrics
+    baseline update flags are contract errors.
 
-Notes:
+    Notes:
 
-- `skip_metrics=false*`: parser default is `false`, but runtime may auto-enable
-  it when no metrics work is requested and no metrics baseline exists.
-- Report output keys default to `null`; bare CLI flags still write to the
-  deterministic `.cache/codeclone/report.*` paths listed above.
+    - `skip_metrics=false*`: parser default is `false`, but runtime may auto-enable
+      it when no metrics work is requested and no metrics baseline exists.
+    - Report output keys default to `null`; bare CLI flags still write to the
+      deterministic `.cache/codeclone/report.*` paths listed above.
 
-CLI always has precedence when option is explicitly provided, including boolean
-overrides via `--foo/--no-foo` (e.g. `--no-skip-metrics`).
+    CLI always has precedence when option is explicitly provided, including boolean
+    overrides via `--foo/--no-foo` (e.g. `--no-skip-metrics`).
 
-Path values loaded from `pyproject.toml` are normalized relative to resolved
-scan root when provided as relative paths.
+    Path values loaded from `pyproject.toml` are normalized relative to resolved
+    scan root when provided as relative paths.
 
-`golden_fixture_paths` is different:
+    `golden_fixture_paths` is different:
 
-- entries are repo-relative glob patterns, not filesystem paths
-- they are not normalized to absolute paths
-- they must target `tests/` or `tests/fixtures/`
-- a clone group is excluded only when every occurrence matches the configured
-  golden-fixture scope
+    - entries are repo-relative glob patterns, not filesystem paths
+    - they are not normalized to absolute paths
+    - they must target `tests/` or `tests/fixtures/`
+    - a clone group is excluded only when every occurrence matches the configured
+      golden-fixture scope
 
-Current-run coverage join config:
+    Current-run coverage join config:
 
-- `coverage_xml` is the `[tool.codeclone]` key; the equivalent CLI flag is
-  `--coverage FILE`.
-- `coverage_xml` may be set in `pyproject.toml`; relative paths resolve from
-  the scan root like other configured paths.
-- `coverage_min` and `fail_on_untested_hotspots` follow the same precedence
-  rules as CLI flags.
-- Coverage join remains current-run only and does not persist to baseline.
+    - `coverage_xml` is the `[tool.codeclone]` key; the equivalent CLI flag is
+      `--coverage FILE`.
+    - `coverage_xml` may be set in `pyproject.toml`; relative paths resolve from
+      the scan root like other configured paths.
+    - `coverage_min` and `fail_on_untested_hotspots` follow the same precedence
+      rules as CLI flags.
+    - Coverage join remains current-run only and does not persist to baseline.
 
-Dependency depth config note:
+    Dependency depth config note:
 
-- `dependency_max_depth` is an observed metric in reports/baselines, not a
-  CLI or `pyproject.toml` option.
-- Dependency depth now uses an internal adaptive profile based on
-  `avg_depth`, `p95_depth`, and `max_depth` for the internal module graph.
-- There is no user-facing knob to tune that model in the current `2.x` release
-  line.
+    - `dependency_max_depth` is an observed metric in reports/baselines, not a
+      CLI or `pyproject.toml` option.
+    - Dependency depth now uses an internal adaptive profile based on
+      `avg_depth`, `p95_depth`, and `max_depth` for the internal module graph.
+    - There is no user-facing knob to tune that model in the current `2.x` release
+      line.
 
-Metrics baseline path selection contract:
+    Metrics baseline path selection contract:
 
-- Relative `baseline` / `metrics_baseline` paths coming from defaults or
-  `pyproject.toml` resolve from the analysis root.
-- If `--metrics-baseline` is explicitly set, that path is used.
-- If `metrics_baseline` in `pyproject.toml` differs from parser default, that
-  configured path is used even without explicit CLI flag.
-- Otherwise, metrics baseline defaults to the clone baseline path.
-- In other words, metrics do **not** live in a separate file by default:
-  the default unified flow uses the same `codeclone.baseline.json` path for
-  clone and metrics comparison state.
+    - Relative `baseline` / `metrics_baseline` paths coming from defaults or
+      `pyproject.toml` resolve from the analysis root.
+    - If `--metrics-baseline` is explicitly set, that path is used.
+    - If `metrics_baseline` in `pyproject.toml` differs from parser default, that
+      configured path is used even without explicit CLI flag.
+    - Otherwise, metrics baseline defaults to the clone baseline path.
+    - In other words, metrics do **not** live in a separate file by default:
+      the default unified flow uses the same `codeclone.baseline.json` path for
+      clone and metrics comparison state.
 
-Refs:
+    Refs:
 
-- `codeclone/config/spec.py`
-- `codeclone/config/argparse_builder.py:build_parser`
-- `codeclone/config/pyproject_loader.py:load_pyproject_config`
-- `codeclone/config/resolver.py:resolve_config`
-- `codeclone/surfaces/cli/workflow.py:_main_impl`
-- `codeclone/surfaces/cli/runtime.py:_configure_metrics_mode`
+    - `codeclone/config/spec.py`
+    - `codeclone/config/argparse_builder.py:build_parser`
+    - `codeclone/config/pyproject_loader.py:load_pyproject_config`
+    - `codeclone/config/resolver.py:resolve_config`
+    - `codeclone/surfaces/cli/workflow.py:_main_impl`
+    - `codeclone/surfaces/cli/runtime.py:_configure_metrics_mode`
 
 ## Contracts
 

@@ -235,8 +235,10 @@ Security boundaries:
 - Read-only with respect to source files, baselines, analysis cache
   (`cache.json`), and canonical report artifacts.
 - Allowed repo-local writes are limited to ephemeral controller coordination
-  (`.cache/codeclone/intents/`) and optional audit trail
-  (`.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true`).
+  (workspace intent registry: file backend under `.cache/codeclone/intents/`,
+  or SQLite backend under `.cache/codeclone/db/intents.sqlite3` when configured)
+  and optional audit trail (`.cache/codeclone/db/audit.sqlite3` when
+  `audit_enabled=true`).
 - Session-local review markers and in-memory run history do not survive
   process restart.
 - `--allow-remote` guard required for non-local transports; default is `stdio`.

@@ -35,6 +35,10 @@ The docs workflow follows this order:
 
 1. install project dependencies
 2. build the MkDocs site with `mkdocs build --strict`
+3. validate `!!!` / `???` admonition indentation with
+   `python3 scripts/lint_mkdocs_admonitions.py docs/`
+   (PyCharm table formatting often strips the required 4-space body indent;
+   pass `--fix` to repair)
 3. generate a live sample report into `site/examples/report/live`
 4. upload the built site as a GitHub Pages artifact
 5. deploy on pushes to `main`

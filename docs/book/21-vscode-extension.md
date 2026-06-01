@@ -144,27 +144,27 @@ Reviewed markers:
     local git access, and local MCP startup remain disabled until the workspace
     is trusted.
 
-The extension runs as a workspace extension and requires:
+    The extension runs as a workspace extension and requires:
 
-- VS Code `1.100.0` or newer
-- local filesystem access
-- local git access for changed-files review
-- a local `codeclone-mcp` launcher, or an explicitly configured launcher
-- CodeClone `2.0.0` or newer
+    - VS Code `1.100.0` or newer
+    - local filesystem access
+    - local git access for changed-files review
+    - a local `codeclone-mcp` launcher, or an explicitly configured launcher
+    - CodeClone `2.0.0` or newer
 
-In `auto` mode, launcher resolution prefers the current workspace virtualenv
-before `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.
+    In `auto` mode, launcher resolution prefers the current workspace virtualenv
+    before `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.
 
-Launcher override settings (`codeclone.mcp.command`, `codeclone.mcp.args`) are
-machine-scoped. Analysis-depth settings are resource-scoped so they can vary by
-workspace or folder.
+    Launcher override settings (`codeclone.mcp.command`, `codeclone.mcp.args`) are
+    machine-scoped. Analysis-depth settings are resource-scoped so they can vary by
+    workspace or folder.
 
-For this reason:
+    For this reason:
 
-- Restricted Mode support is `limited`
-- untrusted workspaces may show setup/onboarding/help surfaces only
-- local analysis and local MCP startup remain disabled until trust is granted
-- virtual workspaces are unsupported
+    - Restricted Mode support is `limited`
+    - untrusted workspaces may show setup/onboarding/help surfaces only
+    - local analysis and local MCP startup remain disabled until trust is granted
+    - virtual workspaces are unsupported
 
 ## Design rules
 

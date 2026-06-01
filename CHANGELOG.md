@@ -80,6 +80,10 @@ review receipts, and workflow consolidation tools.
   (LCOM4 cohesion change due to Protocol/Pydantic exclusions).
 - Extract UI/message strings into focused submodules: `ui_messages/*`,
   `report/messages/*`, `surfaces/mcp/messages/*`.
+- Cursor plugin (`plugins/cursor-codeclone/`): fail-closed `preToolUse`
+  change-control gate via read-only `codeclone.workspace_intent` (file and SQLite
+  registry backends), project hook installer, `enforce_scope` (`python` |
+  `repo`), and bundled `codeclone-engineering-memory` skill.
 
 ### Changed
 
@@ -100,13 +104,14 @@ review receipts, and workflow consolidation tools.
 
 ### Fixed
 
-- `finish_controlled_change` reconciles finish evidence with the **full git
-  working tree**: under-reported in-scope dirty paths block with
-  `finish_block_reason: missing_evidence`; own edits outside declared scope
-  block with `own_unscoped_dirty`. Foreign dirty paths outside your scope are
-  ignored when attributed to a **foreign active/stale** intent
-  (`foreign_attributed_outside_scope`); **recoverable** (dead PID) intents do
-  not grant foreign attribution.
+- `finish_controlled_change` hygiene gate blocks finish only on
+  `missing_evidence` (in-scope git dirty not listed in evidence) and
+  `foreign_dirty_overlap` (live foreign intent on overlapping in-scope paths).
+  Out-of-scope unattributed dirt is advisory and may elevate top-level status to
+  `accepted_with_external_changes` via `external_changes` without failing verify.
+  Scope `check` uses agent evidence only (`files_for_scope_check`). Foreign
+  dirty outside declared scope is ignored when attributed to **foreign
+  active/stale** intents; **recoverable** intents do not grant attribution.
 - Blast-radius graph core moved to `codeclone/analysis/blast_radius.py`; MCP and
   CLI surfaces consume it as presentation adapters (fixes CLI→MCP import
   violation).

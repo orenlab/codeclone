@@ -9,9 +9,9 @@ pipeline/report contracts as the CLI. It does not create a second analysis
 engine or a second persistence model.
 
 !!! note "Integration surface, not a second analyzer"
-MCP composes over the canonical report and run state shared by CLI, HTML,
-and SARIF. It never mutates source files, baselines, analysis cache, or
-report artifacts.
+    MCP composes over the canonical report and run state shared by CLI, HTML,
+    and SARIF. It never mutates source files, baselines, analysis cache, or
+    report artifacts.
 
 ---
 
@@ -63,9 +63,9 @@ Current server characteristics:
   [Plans and Retention](../plans-and-retention.md).
 
 !!! warning "Absolute roots and remote exposure"
-Analysis tools require an absolute repository root. HTTP exposure beyond
-loopback requires explicit `--allow-remote` and has no built-in
-authentication.
+    Analysis tools require an absolute repository root. HTTP exposure beyond
+    loopback requires explicit `--allow-remote` and has no built-in
+    authentication.
 
 ---
 
@@ -131,68 +131,70 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 
 ### Workflow tools (preferred)
 
-| Tool                       | Key parameters                                                                                                          | Purpose                                                                                                                                                                                                                 |
-|----------------------------|-------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `start_controlled_change`  | `root`, `scope`, `intent`, `expected_effects`, `on_conflict`, `strictness`, `blast_radius_depth`, `dirty_scope_policy`  | Pre-edit: workspace check + declare + blast radius + budget in one call. Returns `intent_id` for `finish`. `dirty_scope_policy=continue_own_wip` resumes known dirty scope when no foreign overlap. Does not run analysis |
-| `finish_controlled_change` | `intent_id`, `changed_files` or `diff_ref`, `after_run_id`, `review_text`, `claims_text`, `propose_memory`, `create_receipt`, `auto_clear`, `strictness` | Post-edit: scope check + verify + optional claim validation + receipt + clear in one call. `after_run_id` required for Python structural / governance config profiles. Set `propose_memory=true` to attach draft memory candidates on accept |
+| Tool                       | Key parameters                                                                                                                                                           | Purpose                                                                                                                                                                                                                                                                                                                                                   |
+|----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `start_controlled_change`  | `root`, `scope`, `intent`, `expected_effects`, `on_conflict`, `strictness`, `blast_radius_depth`, `dirty_scope_policy`                                                   | Pre-edit: workspace check + declare + blast radius + budget in one call. Returns `intent_id` for `finish`. `dirty_scope_policy=continue_own_wip` resumes known dirty scope when no foreign overlap. Does not run analysis                                                                                                                                 |
+| `finish_controlled_change` | `intent_id`, `changed_files` or `diff_ref`, `after_run_id`, `review_text`, `claims_text`, `propose_memory`, `create_receipt`, `auto_clear`, `strictness`, `detail_level` | Post-edit pipeline: hygiene gate → scope check → verify → optional claims → receipt → clear. `after_run_id` required for Python structural / governance config profiles. Top-level `status` may be `accepted_with_external_changes` when verify passes but out-of-scope git dirt remains. Set `propose_memory=true` for draft memory candidates on accept |
 
 `finish_controlled_change` separates human notes from validated claims:
 `review_text` is an optional note, while `claims_text` is the text passed to
 Claim Guard. The response includes a compact `summary` plus the full
-`verification`, `claims`, `receipt`, and `workspace_hygiene_after` payloads.
+`scope_check`, `verification`, `claims`, `receipt`, and `workspace_hygiene_after`
+payloads. When `create_receipt` fails, verify may still be `accepted` but
+`intent_cleared` stays `false`.
 
 ??? info "Start/finish workspace hygiene"
     Edit permission requires `start_controlled_change` to return
     `status == "active"` **and** `edit_allowed == true`. Workflow
     `status: "blocked"` is not persisted registry lifecycle. Start may attach
-    scoped `workspace_hygiene`; finish may fail with `reason:
-    "workspace_hygiene"`.
-    Finish **reconciles agent evidence with the full git tree** and the
-    start-time dirty snapshot (not honor-system): under-reported in-scope dirty
-    → `finish_block_reason: missing_evidence`; new/modified/unknown
-    unattributed dirty outside declared scope → hygiene block; unchanged
-    preexisting unscoped dirty → advisory only; foreign active/stale dirty
+    scoped `workspace_hygiene`; finish runs `finish_hygiene_check` before check/verify.
+    **Blocking finish** (`reason: workspace_hygiene`, `blocks_finish: true`) happens
+    only for `finish_block_reason` `missing_evidence` (in-scope git dirty not in
+    evidence) or `foreign_dirty_overlap` (live foreign intent on overlapping
+    in-scope paths). Out-of-scope unattributed dirt is **advisory** — it may
+    surface as `external_changes` and elevate top-level status to
+    `accepted_with_external_changes` without failing verify. Unchanged
+    preexisting out-of-scope dirty is informational. Foreign active/stale dirt
     outside your scope → `foreign_attributed_outside_scope` (ignored).
-    **Recoverable** (dead PID) intents do not grant foreign attribution. Queued
-    foreign intents do not populate `foreign_dirty_overlaps`. Legacy
-    `own_unscoped_dirty` may appear as an alias for unattributed blocking dirt,
-    not as proof of ownership. Lazy close on read and `gc_workspace` use
-    different predicates — see book/24.
+    **Recoverable** intents do not grant foreign attribution. Queued foreign
+    intents do not populate `foreign_dirty_overlaps`. `files_for_scope_check` is
+    agent evidence only. Full pipeline and field reference:
+    [finish_controlled_change](24-structural-change-controller.md#finish_controlled_change).
     `manage_change_intent(list_workspace)` returns repo-level
-    `workspace_dirty_summary` only. See
+    `workspace_dirty_summary` only. Registry lazy close vs `gc_workspace`: see
     [Workspace hygiene and registry consistency](24-structural-change-controller.md#workspace-hygiene-and-registry-consistency).
 
 ### Atomic change control tools (advanced / diagnostic)
 
-| Tool                     | Key parameters                                                                                                                 | Purpose                                                                                                                                                                                 |
-|--------------------------|--------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `manage_change_intent`   | `action`, `root`, `run_id`, `intent_id`, `scope`, `on_conflict`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace. Use for queue/promote/recover operations alongside workflow tools |
-| `get_blast_radius`       | `run_id`, `files`, `depth`, `include`                                                                                          | Pre-change risk boundary: full transitive graph, custom include filters                                                                                                                 |
-| `get_relevant_memory`    | `root`, `scope`, `intent_id`, `symbols`, `max_records`, `include_stale`, `include_drafts`                                    | Ranked engineering memory for declared edit scope. Auto-bootstraps store when `mcp_sync_policy=bootstrap_if_missing` (default). See [Engineering Memory](26-engineering-memory.md) |
-| `query_engineering_memory` | `root`, `mode`, `record_id`, `path`, `symbol`, `query`, `scope`, `filters`, `max_results`, `include_stale`, `include_drafts` | Mode router: search, get, for_path, for_symbol, stale, coverage, status. `filters` supports `types`, `statuses`, `confidences`, and `match_mode` (`any`\|`all`) for search. See [Engineering Memory](26-engineering-memory.md) |
-| `manage_engineering_memory` | `root`, `action`, … | Agent-side: `refresh_from_run`, `record_candidate`, `validate_claims`, `propose_from_receipt`. Human approve/reject/archive: VS Code **Memory** view via IDE governance channel (`register_ide_governance`, `prepare_governance`, `commit_governance` with `--ide-governance-channel`). Agents calling `approve`/`reject`/`archive` receive `governance_mode_unavailable`. See [Engineering Memory](26-engineering-memory.md) |
-| `check_patch_contract`   | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref`                    | Manual budget query or step-by-step verification                                                                                                                                        |
-| `create_review_receipt`  | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                                              | Manual receipt generation                                                                                                                                                               |
-| `validate_review_claims` | `text`, `run_id`, `require_citations`, `patch_health_delta`                                                                    | Standalone citation-based overclaim detection; pass `patch_health_delta` from verify when using the atomic workflow                                                                     |
+| Tool                        | Key parameters                                                                                                                 | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|-----------------------------|--------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `manage_change_intent`      | `action`, `root`, `run_id`, `intent_id`, `scope`, `on_conflict`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace. Use for queue/promote/recover operations alongside workflow tools                                                                                                                                                                                                                                       |
+| `get_blast_radius`          | `run_id`, `files`, `depth`, `include`                                                                                          | Pre-change risk boundary: full transitive graph, custom include filters                                                                                                                                                                                                                                                                                                                                                       |
+| `get_relevant_memory`       | `root`, `scope`, `intent_id`, `symbols`, `max_records`, `include_stale`, `include_drafts`                                      | Ranked engineering memory for declared edit scope. Auto-bootstraps store when `mcp_sync_policy=bootstrap_if_missing` (default). See [Engineering Memory](26-engineering-memory.md)                                                                                                                                                                                                                                            |
+| `query_engineering_memory`  | `root`, `mode`, `record_id`, `path`, `symbol`, `query`, `scope`, `filters`, `max_results`, `include_stale`, `include_drafts`   | Mode router: search, get, for_path, for_symbol, stale, coverage, status. `filters` supports `types`, `statuses`, `confidences`, and `match_mode` (`any`\|`all`) for search. See [Engineering Memory](26-engineering-memory.md)                                                                                                                                                                                                |
+| `manage_engineering_memory` | `root`, `action`, …                                                                                                            | Agent-side: `refresh_from_run`, `record_candidate`, `validate_claims`, `propose_from_receipt`. Human approve/reject/archive: VS Code **Memory** view via IDE governance channel (`register_ide_governance`, `prepare_governance`, `commit_governance` with `--ide-governance-channel`). Agents calling `approve`/`reject`/`archive` receive `governance_mode_unavailable`. See [Engineering Memory](26-engineering-memory.md) |
+| `check_patch_contract`      | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref`                    | Manual budget query or step-by-step verification                                                                                                                                                                                                                                                                                                                                                                              |
+| `create_review_receipt`     | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                                              | Manual receipt generation                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `validate_review_claims`    | `text`, `run_id`, `require_citations`, `patch_health_delta`                                                                    | Standalone citation-based overclaim detection; pass `patch_health_delta` from verify when using the atomic workflow                                                                                                                                                                                                                                                                                                           |
 
 ??? info "Blast radius: do_not_touch vs review_context"
-`do_not_touch` is limited to actionable negative context: baselines,
-generated CodeClone state, explicit forbidden paths. Report-only signals
-such as security boundary inventory and overloaded-module candidates are
-returned as `review_context` — information, not edit prohibitions. Long
-context sections include `total`, `shown`, and `truncated` summaries.
+    `do_not_touch` is limited to actionable negative context: baselines,
+    generated CodeClone state, explicit forbidden paths. Report-only signals
+    such as security boundary inventory and overloaded-module candidates are
+    returned as `review_context` — information, not edit prohibitions. Long
+    context sections include `total`, `shown`, and `truncated` summaries.
 
 ??? info "Patch contract modes"
-**Budget** reads one stored run and optional intent. Shows regression
-headroom per quality dimension before editing. Queued intents return
-`edit_allowed=false`. **Verify** compares explicit before/after stored
-runs, previews gates, validates scope, and reports baseline-abuse
-signals. When `intent_id` is provided but `before_run_id` is omitted,
-verify auto-resolves the before-run from the intent record. Missing runs
-return `status="unverified"`. Identical before/after runs for
-`python_structural` / `governance_config` return
-`reason="after_run_not_new"`. Non-accepted responses include a
-`next_step` hint and `claim_validation_recommended` flag.
+    **Budget** reads one stored run and optional intent. Shows regression
+    headroom per quality dimension before editing. Queued intents return
+    `edit_allowed=false`. **Verify** compares explicit before/after stored
+    runs, previews gates, validates scope, and reports baseline-abuse
+    signals. When `intent_id` is provided but `before_run_id` is omitted,
+    verify auto-resolves the before-run from the intent record. Missing runs
+    return `status="unverified"`. Identical before/after runs for
+    `python_structural` / `governance_config` return
+    `reason="after_run_not_new"`. Non-accepted responses include a
+    `next_step` hint and `claim_validation_recommended` flag.
 
     When a change intent is active, verify mode attributes regressions and
     gate changes to the declared scope. Intent-scope regressions produce
