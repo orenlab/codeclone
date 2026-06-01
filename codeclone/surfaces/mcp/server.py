@@ -1025,6 +1025,7 @@ def build_mcp_server(
         auto_clear: AutoClearParam = True,
         strictness: StrictnessParam = "ci",
         propose_memory: ProposeMemoryParam = False,
+        detail_level: DetailLevelParam = "summary",
     ) -> dict[str, object]:
         return service.finish_controlled_change(
             intent_id=intent_id,
@@ -1037,6 +1038,7 @@ def build_mcp_server(
             auto_clear=auto_clear,
             strictness=strictness,
             propose_memory=propose_memory,
+            detail_level=detail_level,
         )
 
     @tool(

@@ -1323,6 +1323,12 @@
           "title": "Create Receipt",
           "type": "boolean"
         },
+        "detail_level": {
+          "default": "summary",
+          "description": "summary, normal, or full detail level.",
+          "title": "Detail Level",
+          "type": "string"
+        },
         "diff_ref": {
           "anyOf": [
             {

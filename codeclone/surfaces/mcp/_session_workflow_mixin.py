@@ -264,6 +264,7 @@ class _MCPSessionWorkflowMixin:
         auto_clear: bool = True,
         strictness: str = "ci",
         propose_memory: bool = False,
+        detail_level: str = "summary",
     ) -> dict[str, object]:
         # 1. Resolve intent
         record, active_intent = self._resolve_intent(
@@ -318,7 +319,7 @@ class _MCPSessionWorkflowMixin:
             start_dirty_snapshot=start_dirty_snapshot,
         )
         workspace_hygiene_after = {
-            **finish_hygiene.to_payload(),
+            **finish_hygiene.to_payload(detail_level=detail_level),
             "workspace_dirty_summary": workspace_dirty_summary(root=record.root),
         }
         if finish_hygiene.blocks_finish:

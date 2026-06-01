@@ -20,6 +20,7 @@ import pytest
 from codeclone.surfaces.mcp import _workspace_hygiene as hygiene_mod
 from codeclone.surfaces.mcp._workspace_hygiene import (
     DIRTY_SCOPE_POLICY_CONTINUE_OWN_WIP,
+    DirtyAttribution,
     DirtySnapshot,
     DirtySnapshotEntry,
     ForeignDirtyOverlap,
@@ -97,8 +98,48 @@ def test_workspace_hygiene_result_to_payload_includes_finish_fields() -> None:
         blocks_finish=True,
     )
     payload = hygiene.to_payload()
+    counts = cast("dict[str, int]", payload["counts"])
     assert payload["blocks_finish"] is True
     assert payload["unacknowledged_dirty_in_scope"] == ["pkg/a.py"]
+    assert counts["missing_evidence"] == 1
+
+
+def test_workspace_hygiene_to_payload_summary_omits_per_path_detail() -> None:
+    # Summary (default) carries counts + blocking subset only; the derived
+    # classification arrays and full per-path attribution are detail=full.
+    hygiene = WorkspaceHygieneResult(
+        git_available=True,
+        dirty_paths=("pkg/a.py", "other/x.py"),
+        dirty_paths_in_scope=("pkg/a.py",),
+        dirty_paths_outside_scope=("other/x.py",),
+        foreign_dirty_overlaps=(),
+        blocks_edit=True,
+        new_unattributed_unscoped_dirty=("other/x.py",),
+        dirty_attribution=(
+            DirtyAttribution(
+                path="other/x.py",
+                scope_relation="outside",
+                evidence="absent",
+                start_state="absent",
+                intent_attribution="none",
+                classification="new_unattributed_unscoped_dirty",
+                blocking=False,
+            ),
+        ),
+    )
+    summary = hygiene.to_payload()
+    summary_counts = cast("dict[str, int]", summary["counts"])
+    assert summary_counts["outside_scope"] == 1
+    assert summary_counts["new_unattributed_unscoped"] == 1
+    assert "dirty_attribution" not in summary
+    assert "new_unattributed_unscoped_dirty" not in summary
+    assert "dirty_paths_outside_scope" not in summary
+
+    full = hygiene.to_payload(detail_level="full")
+    assert full["new_unattributed_unscoped_dirty"] == ["other/x.py"]
+    assert full["dirty_paths_outside_scope"] == ["other/x.py"]
+    assert isinstance(full["dirty_attribution"], list)
+    assert len(full["dirty_attribution"]) == 1
 
 
 def test_collect_dirty_paths_when_git_unavailable(tmp_path: Path) -> None:

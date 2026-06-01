@@ -185,20 +185,56 @@ class WorkspaceHygieneResult:
     blocks_finish: bool = False
     finish_block_reason: str | None = None
 
-    def to_payload(self) -> dict[str, object]:
+    def _counts(self) -> dict[str, int]:
+        return {
+            "in_scope": len(self.dirty_paths_in_scope),
+            "outside_scope": len(self.dirty_paths_outside_scope),
+            "missing_evidence": len(self.unacknowledged_dirty_in_scope),
+            "preexisting_unscoped": len(self.preexisting_unscoped_dirty),
+            "new_unattributed_unscoped": len(self.new_unattributed_unscoped_dirty),
+            "modified_unattributed_unscoped": len(
+                self.modified_unattributed_unscoped_dirty
+            ),
+            "unknown_unattributed_unscoped": len(
+                self.unknown_unattributed_unscoped_dirty
+            ),
+            "foreign_attributed_outside_scope": len(
+                self.foreign_attributed_outside_scope
+            ),
+        }
+
+    def to_payload(self, *, detail_level: str = "summary") -> dict[str, object]:
+        # Summary-first: the agent acts on the blocking subset and counts.
+        # Full per-path attribution + the derived classification arrays are
+        # available with detail_level="full" (they are all derivable from
+        # dirty_attribution, so they are not emitted twice by default).
         payload: dict[str, object] = {
             "git_available": self.git_available,
-            "dirty_paths_in_scope": list(self.dirty_paths_in_scope),
-            "dirty_paths_outside_scope": list(self.dirty_paths_outside_scope),
+            "blocks_edit": self.blocks_edit,
+            "counts": self._counts(),
             "foreign_dirty_overlaps": [
                 item.to_payload() for item in self.foreign_dirty_overlaps
             ],
-            "blocks_edit": self.blocks_edit,
         }
+        if self.unacknowledged_dirty_in_scope:
+            payload["unacknowledged_dirty_in_scope"] = list(
+                self.unacknowledged_dirty_in_scope
+            )
+        if self.dirty_snapshot is not None:
+            payload["dirty_snapshot"] = self.dirty_snapshot.summary_payload()
+        if self.dirty_snapshot_status is not None:
+            payload["dirty_snapshot_status"] = self.dirty_snapshot_status
+        if self.blocks_finish:
+            payload["blocks_finish"] = True
+        if self.finish_block_reason is not None:
+            payload["finish_block_reason"] = self.finish_block_reason
+        if detail_level != "full":
+            return payload
+        payload["dirty_paths_in_scope"] = list(self.dirty_paths_in_scope)
+        payload["dirty_paths_outside_scope"] = list(self.dirty_paths_outside_scope)
         _attach_optional_path_lists(
             payload,
             (
-                ("unacknowledged_dirty_in_scope", self.unacknowledged_dirty_in_scope),
                 ("own_unscoped_dirty", self.own_unscoped_dirty),
                 ("unattributed_unscoped_dirty", self.unattributed_unscoped_dirty),
                 ("preexisting_unscoped_dirty", self.preexisting_unscoped_dirty),
@@ -224,16 +260,8 @@ class WorkspaceHygieneResult:
             payload["dirty_attribution"] = [
                 item.to_payload() for item in self.dirty_attribution
             ]
-        if self.dirty_snapshot is not None:
-            payload["dirty_snapshot"] = self.dirty_snapshot.summary_payload()
-        if self.dirty_snapshot_status is not None:
-            payload["dirty_snapshot_status"] = self.dirty_snapshot_status
         if self.files_for_scope_check:
             payload["files_for_scope_check"] = list(self.files_for_scope_check)
-        if self.blocks_finish:
-            payload["blocks_finish"] = True
-        if self.finish_block_reason is not None:
-            payload["finish_block_reason"] = self.finish_block_reason
         return payload
 
 
