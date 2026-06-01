@@ -36,9 +36,42 @@ The gate is **OFF** only when:
    `clean` or `expanded`.
 6. **No MCP/CLI workaround** for human-only actions (for example memory
    approve/reject) — direct the user to the documented IDE path.
+7. **No `finish` after a non-trivial cycle without a durable memory note** — see
+   [Before finish: incident / complexity memory](#before-finish-incident--complexity-memory).
 
 If the gate is ON and a required MCP call fails: respond **`BLOCKED`**, state the
 missing step and `intent_id` if any — **do not** edit “anyway”.
+
+## Before finish: incident / complexity memory
+
+Session **chat is ephemeral** — it is not Engineering Memory. If the edit cycle
+involved anything worth remembering next time, **write it through MCP before**
+`finish_controlled_change` (not only in the final chat message).
+
+**Record when any of these applied:**
+
+- **Incident** — surprise error, failed verify/hygiene, recovery path, workaround,
+  blocked step then unblocked, foreign intent / scope friction.
+- **Complexity** — non-obvious root cause, multi-step debug, coupling across files,
+  near `do_not_touch`, contradiction or stale memory warnings you acted on.
+- **Decision** — non-default tradeoff the next agent should not rediscover.
+
+**Skip only** for truly trivial edits (typo, one-line obvious fix, no learning).
+
+**How to write (pick one):**
+
+```text
+manage_engineering_memory(
+  action=record_candidate,
+  record_type=risk_note | change_rationale,
+  statement="<what happened, what we learned, what to do next time>",
+  subject_path="<main repo-relative path you touched>"
+)
+```
+
+Or batch via `finish_controlled_change(..., propose_memory=true)` when several
+notes belong together. Human **approve** stays in VS Code Memory view — agents do
+not approve via MCP.
 
 ## Required sequence (every edit cycle)
 
@@ -48,6 +81,7 @@ start_controlled_change(...)       # before the first file write
 get_relevant_memory(...)           # after edit_allowed=true, when applicable
 <edit only inside declared scope>
 analyze_repository(...)            # after-run when finish profile requires it
+record_candidate / propose_memory  # REQUIRED before finish if incident/complexity
 finish_controlled_change(...)      # same intent_id; pass changed_files / after_run_id
 ```
 

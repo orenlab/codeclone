@@ -59,6 +59,11 @@ diagnostics.
 
 ### Write rules
 
+- **Session chat is ephemeral** — durable notes require `record_candidate` or
+  `finish(..., propose_memory=true)`; never rely on the assistant message alone.
+- Before `finish_controlled_change`, if the cycle had an **incident**, **complexity**,
+  or a **decision** worth remembering, write at least one `record_candidate` (see
+  `change-control-gate` and `codeclone-change-control` §Incident memory).
 - Agents **never** approve, reject, or archive via MCP
 - Ask the user to approve drafts in the CodeClone VS Code **Memory** view (agents
   cannot approve through MCP)
@@ -84,6 +89,7 @@ analyze_repository
 → get_relevant_memory          # after edit_allowed=true
 → edit in scope
 → analyze_repository           # when after_run required
+→ record_candidate             # before finish if incident/complexity/decision
 → finish_controlled_change     # optional propose_memory=true
 ```
 

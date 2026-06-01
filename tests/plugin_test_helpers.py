@@ -60,8 +60,10 @@ def assert_cursor_change_control_rules(
         gate_text,
         "start_controlled_change",
         "finish_controlled_change",
+        "record_candidate",
         "BLOCKED",
     )
+    assert "chat is ephemeral" in gate_text.lower()
     assert "Run CodeClone analysis before making structural changes." in python_text
 
 

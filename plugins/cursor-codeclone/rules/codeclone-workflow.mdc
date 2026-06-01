@@ -39,3 +39,8 @@ write and before claiming the task is complete.
 Details: `codeclone-change-control` skill (profiles, queue/promote, atomic
 fallback) and `codeclone-engineering-memory` skill (retrieval, drafts, human
 approve boundaries).
+
+Before `finish_controlled_change`, if the cycle had an incident, non-trivial
+complexity, or a decision worth keeping: call
+`manage_engineering_memory(action=record_candidate, …)` — chat text does not
+persist in Engineering Memory.

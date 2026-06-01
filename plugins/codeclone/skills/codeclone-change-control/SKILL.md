@@ -41,7 +41,8 @@ One edit cycle:
 3. get_relevant_memory(scope=... or intent_id=...)  # after edit_allowed=true
 4. edit inside declared scope only
 5. analyze_repository(root=abs)           # after-run ONLY if finish will require it
-6. finish_controlled_change(...)          # see decision table — same intent_id
+6. record engineering memory (MCP)        # REQUIRED before finish if §Incident memory
+7. finish_controlled_change(...)          # see decision table — same intent_id
    # optional: propose_memory=true on accept for draft memory candidates
 ```
 
@@ -69,6 +70,22 @@ drafts — agents cannot activate records via MCP.
 
 Do not use memory to expand scope, override findings, or justify `do_not_touch`
 edits. Surface `contradiction_note` and stale warnings to the user.
+
+### Incident memory (before step 7)
+
+**Chat does not persist.** If the cycle had an incident, non-trivial complexity, or
+a decision the next agent should not rediscover, call
+`manage_engineering_memory(action=record_candidate, …)` **before**
+`finish_controlled_change` — or use `propose_memory=true` on finish for a batch.
+
+| Write when | Examples |
+|------------|----------|
+| Incident | verify/hygiene surprise, recovery, workaround, blocked then unblocked |
+| Complexity | non-obvious root cause, multi-file debug, acted on stale/contradiction |
+| Decision | tradeoff, “do not repeat X”, integration quirk |
+
+Skip for trivial one-liner fixes only. See `change-control-gate` rule and
+`codeclone-engineering-memory` skill.
 
 ### After `start` (`edit_allowed` gate)
 
