@@ -35,22 +35,98 @@ _FORBIDDEN_LITERALS = (
     "edit allowed",
     "do_not_touch cleared",
     "gate passed because memory",
+    "scope expanded because memory",
+    "expanded scope because memory",
 )
 
-_FORBIDDEN_NEGATABLE = ("override finding",)
+_FORBIDDEN_NEGATABLE = (
+    "override finding",
+    "override findings",
+    "overrides finding",
+    "overrides findings",
+)
 
-_FORBIDDEN_PATTERNS = (
+_FORBIDDEN_APPROVE_DRAFT_PATTERNS = (
     re.compile(r"\b(?:mcp|memory)\b[^.]{0,80}\bapprove\b[^.]{0,80}\bdraft", re.I),
     re.compile(
         r"\bapprove\b[^.]{0,80}\b(?:memory|draft)\b[^.]{0,80}\b(?:active|policy|verified)\b",
         re.I,
     ),
 )
+_FORBIDDEN_OTHER_PATTERNS = (
+    re.compile(
+        r"\b(?:engineering )?memory\b[^.]{0,60}\b(?:allows?|permits?|authoriz\w+)\b"
+        r"[^.]{0,40}\b(?:edit\w*|chang\w*|touch\w*)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:scope|intent)\b[^.]{0,50}\b(?:expand|widened|broadened)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:findings?|codeclone|structural)\b[^.]{0,50}"
+        r"\b(?:clear\w*|resolved|gone|passed|clean\w*)\b",
+        re.I,
+    ),
+)
+_FORBIDDEN_PATTERNS = _FORBIDDEN_APPROVE_DRAFT_PATTERNS + _FORBIDDEN_OTHER_PATTERNS
+
+_VS_CODE_CHANNEL_RE = re.compile(r"\bvs\s*code\b|\bvscode\b", re.IGNORECASE)
+_HUMAN_GOVERNANCE_MARKERS = (
+    "human",
+    "operator",
+    "maintainer",
+    "ide channel",
+    "human review",
+    "not mcp",
+    "not available through mcp",
+)
+
+
+def _is_vscode_human_approval_descriptor(text: str) -> bool:
+    """Describe IDE human governance, not agent/MCP self-grant of approval power."""
+    lowered = text.lower()
+    if _VS_CODE_CHANNEL_RE.search(text) is None:
+        return False
+    if "memory view" not in lowered:
+        return False
+    if "approve" not in lowered or "draft" not in lowered:
+        return False
+    return any(marker in lowered for marker in _HUMAN_GOVERNANCE_MARKERS)
 
 
 def _phrase_is_negated(text: str, phrase: str, *, start: int) -> bool:
+    del phrase
+    return _match_is_negated(text, start=start)
+
+
+def _match_is_negated(text: str, *, start: int) -> bool:
     window = text[max(0, start - 48) : start]
     return _NEGATION_WINDOW.search(window) is not None
+
+
+_PERMISSION_VERB_IN_MATCH = re.compile(
+    r"\b(approve\w*|allow\w*|permits?\w*|authoriz\w+|clear\w*|"
+    r"expand\w*|widened|broadened|resolved|gone|passed|clean\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _pattern_matches_unnegated(text: str, pattern: re.Pattern[str]) -> bool:
+    for match in pattern.finditer(text):
+        span_start, span_end = match.span()
+        segment = text[span_start:span_end]
+        anchors = list(_PERMISSION_VERB_IN_MATCH.finditer(segment))
+        if not anchors:
+            if not _match_is_negated(text, start=span_start):
+                return True
+            continue
+        if any(
+            not _match_is_negated(text, start=span_start + anchor.start())
+            for anchor in anchors
+        ):
+            return True
+    return False
 
 
 def _contains_unnegated_phrase(text: str, phrase: str) -> bool:
@@ -79,10 +155,15 @@ def _forbidden_claim_errors(text: str) -> tuple[str, ...]:
         for phrase in _FORBIDDEN_NEGATABLE
         if _contains_unnegated_phrase(lowered, phrase)
     )
+    approve_patterns = (
+        ()
+        if _is_vscode_human_approval_descriptor(text)
+        else _FORBIDDEN_APPROVE_DRAFT_PATTERNS
+    )
     errors.extend(
         f"Claim may grant permission memory cannot provide: {pattern.pattern!r}"
-        for pattern in _FORBIDDEN_PATTERNS
-        if pattern.search(text)
+        for pattern in approve_patterns + _FORBIDDEN_OTHER_PATTERNS
+        if _pattern_matches_unnegated(text, pattern)
     )
     return tuple(errors)
 
@@ -147,6 +228,7 @@ def approve_record(
     *,
     record_id: str,
     approved_by: str,
+    revision_reason: str = "human_approve",
 ) -> MemoryRecord:
     record = _require_record(store, record_id)
     if record.status not in {"draft", "stale"}:
@@ -164,7 +246,7 @@ def approve_record(
         store,
         record,
         record_id=record_id,
-        reason="human_approve",
+        reason=revision_reason,
         changed_by=approved_by,
         now=now,
     )
@@ -177,6 +259,7 @@ def reject_record(
     record_id: str,
     rejected_by: str,
     reason: str | None = None,
+    revision_reason: str | None = None,
 ) -> MemoryRecord:
     record = _require_record(store, record_id)
     if record.status != "draft":
@@ -192,7 +275,7 @@ def reject_record(
         store,
         record,
         record_id=record_id,
-        reason=reason or "human_reject",
+        reason=revision_reason or reason or "human_reject",
         changed_by=rejected_by,
         now=now,
     )
@@ -204,6 +287,7 @@ def archive_record(
     *,
     record_id: str,
     archived_by: str,
+    revision_reason: str = "human_archive",
 ) -> MemoryRecord:
     record = _require_record(store, record_id)
     if record.status != "active":
@@ -215,7 +299,7 @@ def archive_record(
         store,
         record,
         record_id=record_id,
-        reason="human_archive",
+        reason=revision_reason,
         changed_by=archived_by,
         now=now,
     )
@@ -307,6 +391,7 @@ def record_candidate(
                 relation="about",
             )
         )
+    store.sync_fts_record(record.id)
     store.commit()
     return record
 

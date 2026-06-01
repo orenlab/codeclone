@@ -26,6 +26,7 @@ from ...audit import (
 )
 from ...cache.store import resolve_cache_status
 from ...config.pyproject_loader import ConfigValidationError, load_pyproject_config
+from ...memory.ide_governance import IdeGovernanceSessionState
 from ...report.meta import build_report_meta as _build_report_meta
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
 from . import _session_helpers as _helpers
@@ -118,8 +119,12 @@ class MCPSession(
         *,
         history_limit: int = DEFAULT_MCP_HISTORY_LIMIT,
         audit_writer: AuditWriter | None = None,
+        ide_governance_channel: bool = False,
     ) -> None:
         self._runs = CodeCloneMCPRunStore(history_limit=history_limit)
+        self._ide_governance = IdeGovernanceSessionState(
+            channel_enabled=ide_governance_channel
+        )
         self._state_lock = RLock()
         self._review_state: dict[str, OrderedDict[str, str | None]] = {}
         self._last_gate_results: dict[str, dict[str, object]] = {}

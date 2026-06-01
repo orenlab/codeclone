@@ -336,7 +336,9 @@ MemorySymbolsParam = Annotated[
 MemoryQueryModeParam = Annotated[
     str,
     Field(
-        description=("search, get, for_path, for_symbol, stale, coverage, or status."),
+        description=(
+            "search, get, for_path, for_symbol, stale, drafts, coverage, or status."
+        ),
     ),
 ]
 MemorySearchQueryParam = Annotated[
@@ -345,7 +347,7 @@ MemorySearchQueryParam = Annotated[
 ]
 MemoryRecordIdParam = Annotated[
     str | None,
-    Field(description="Record id for mode=get."),
+    Field(description="Record id for mode=get or IDE governance actions."),
 ]
 MemoryPathParam = Annotated[
     str | None,
@@ -370,7 +372,14 @@ IncludeStaleParam = Annotated[
 ]
 IncludeDraftsParam = Annotated[
     bool,
-    Field(description="Include draft engineering memory records."),
+    Field(
+        description=(
+            "Include draft engineering memory records. Defaults false for search; "
+            "get_relevant_memory with scope or intent_id includes drafts "
+            "automatically; query_engineering_memory for_path/for_symbol includes "
+            "drafts without setting this flag."
+        ),
+    ),
 ]
 MemoryMaxRecordsParam = Annotated[
     int,
@@ -380,10 +389,52 @@ ManageMemoryActionParam = Annotated[
     str,
     Field(
         description=(
-            "record_candidate, validate_claims, propose_from_receipt, "
-            "or refresh_from_run."
+            "Agent: record_candidate, validate_claims, propose_from_receipt, "
+            "refresh_from_run. IDE channel only (VS Code): register_ide_governance, "
+            "prepare_governance, commit_governance. approve/reject/archive are not "
+            "available through MCP."
         ),
     ),
+]
+GovernanceDecisionParam = Annotated[
+    str | None,
+    Field(description="IDE governance decision: approve, reject, or archive."),
+]
+IdeGovernanceKeyParam = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Session-bound IDE governance key (hex, >=32 bytes). VS Code only."
+        ),
+    ),
+]
+IdeGovernanceClientNameParam = Annotated[
+    str | None,
+    Field(description="IDE client name for register_ide_governance."),
+]
+IdeGovernanceClientVersionParam = Annotated[
+    str | None,
+    Field(description="IDE client version for register_ide_governance."),
+]
+GovernanceTicketParam = Annotated[
+    str | None,
+    Field(description="Single-use governance ticket from prepare_governance."),
+]
+ConfirmationNonceParam = Annotated[
+    str | None,
+    Field(description="Nonce from prepare_governance; required for commit."),
+]
+GovernanceProofParam = Annotated[
+    str | None,
+    Field(description="HMAC proof for commit_governance (protocol v2)."),
+]
+GovernanceActorParam = Annotated[
+    str | None,
+    Field(description="Human actor label stored on the memory revision."),
+]
+GovernanceProtocolParam = Annotated[
+    int | None,
+    Field(description="IDE attestation protocol version (currently 2)."),
 ]
 MemoryRecordTypeParam = Annotated[
     str | None,

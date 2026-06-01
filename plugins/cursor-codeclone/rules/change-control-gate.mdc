@@ -1,0 +1,65 @@
+---
+description: "HARD GATE: CodeClone MCP connected — start before any file write, finish before done"
+alwaysApply: true
+---
+
+# CodeClone change-control gate
+
+This rule applies in **any workspace** where the CodeClone MCP server is
+connected. It is not tied to a particular repository layout or language.
+
+## When this gate is active
+
+The gate is **ON** when CodeClone MCP tools are available in the session (for
+example `start_controlled_change` / `finish_controlled_change` appear in the
+tool list).
+
+The gate is **OFF** only when:
+
+- the task is **read-only** (analysis, review, research, answering questions), or
+- the user explicitly says **no repository edits**, **analysis-only**, or
+  **skip change control** for this task.
+
+“Implement”, “fix”, “refactor”, and “add feature” **do not** disable this gate.
+
+## Hard prohibitions (gate ON)
+
+1. **No first edit** until `start_controlled_change` returns `status: "active"`
+   with `edit_allowed: true` for the workspace `root` (absolute path).
+2. **No scope expansion** — if you need another file, stop and call `start` again
+   with expanded `scope` before touching it.
+3. **No edits** while `status: "queued"` — promote or wait; do not patch.
+4. **No edits** while `status: "blocked"` — follow `next_step` or report BLOCKED.
+5. **No completion claims** (`done`, `implemented`, `verified`, `ready`, etc.)
+   until `finish_controlled_change` returns `status: "accepted"` or
+   `"accepted_with_external_changes"`, `intent_cleared: true`, and scope check is
+   `clean` or `expanded`.
+6. **No MCP/CLI workaround** for human-only actions (for example memory
+   approve/reject) — direct the user to the documented IDE path.
+
+If the gate is ON and a required MCP call fails: respond **`BLOCKED`**, state the
+missing step and `intent_id` if any — **do not** edit “anyway”.
+
+## Required sequence (every edit cycle)
+
+```
+analyze_repository(root=<abs>)     # skip if valid recent run exists
+start_controlled_change(...)       # before the first file write
+get_relevant_memory(...)           # after edit_allowed=true, when applicable
+<edit only inside declared scope>
+analyze_repository(...)            # after-run when finish profile requires it
+finish_controlled_change(...)      # same intent_id; pass changed_files / after_run_id
+```
+
+Use the **`codeclone-change-control`** skill for scope shapes, queue/promote,
+verification profiles, and atomic fallback when workflow tools are missing.
+
+## MCP unavailable
+
+If repository files must change but CodeClone MCP cannot be called: **`BLOCKED`**
+— do not substitute CLI reports, local HTML/JSON, or silent edits.
+
+## Priority
+
+If this gate conflicts with speed, brevity, or an implied “just patch it” request,
+**this gate wins** unless the user explicitly exempts this task (see above).

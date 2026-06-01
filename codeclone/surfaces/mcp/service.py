@@ -151,8 +151,16 @@ class _QueryServiceMixin:
 
 
 class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
-    def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
-        super().__init__(history_limit=history_limit)
+    def __init__(
+        self,
+        *,
+        history_limit: int = DEFAULT_MCP_HISTORY_LIMIT,
+        ide_governance_channel: bool = False,
+    ) -> None:
+        super().__init__(
+            history_limit=history_limit,
+            ide_governance_channel=ide_governance_channel,
+        )
         self._session_cls = MCPSession
         # Keep a stable seam for tests and monkeypatch-based callers while the
         # service itself now owns the real MCP session state.
@@ -448,6 +456,17 @@ def _apply_public_method_signatures() -> None:
             _kwonly("text", "str | None", None),
             _kwonly("intent_id", "str | None", None),
             _kwonly("run_id", "str | None", None),
+            _kwonly("record_id", "str | None", None),
+            _kwonly("decision", "str | None", None),
+            _kwonly("ide_governance_key", "str | None", None),
+            _kwonly("client_name", "str | None", None),
+            _kwonly("client_version", "str | None", None),
+            _kwonly("governance_ticket", "str | None", None),
+            _kwonly("confirmation_nonce", "str | None", None),
+            _kwonly("proof", "str | None", None),
+            _kwonly("actor", "str | None", None),
+            _kwonly("protocol", "int | None", None),
+            _kwonly("reject_reason", "str | None", None),
         ),
         "finish_controlled_change": (
             _kwonly("intent_id", "str"),

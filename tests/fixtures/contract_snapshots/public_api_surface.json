@@ -117,7 +117,7 @@
     },
     {
       "name": "manage_engineering_memory",
-      "signature": "(self, *, root: 'str', action: 'str', record_type: 'str | None' = None, statement: 'str | None' = None, subject_path: 'str | None' = None, text: 'str | None' = None, intent_id: 'str | None' = None, run_id: 'str | None' = None) -> 'dict[str, object]'"
+      "signature": "(self, *, root: 'str', action: 'str', record_type: 'str | None' = None, statement: 'str | None' = None, subject_path: 'str | None' = None, text: 'str | None' = None, intent_id: 'str | None' = None, run_id: 'str | None' = None, record_id: 'str | None' = None, decision: 'str | None' = None, ide_governance_key: 'str | None' = None, client_name: 'str | None' = None, client_version: 'str | None' = None, governance_ticket: 'str | None' = None, confirmation_nonce: 'str | None' = None, proof: 'str | None' = None, actor: 'str | None' = None, protocol: 'int | None' = None, reject_reason: 'str | None' = None) -> 'dict[str, object]'"
     },
     {
       "name": "mark_finding_reviewed",

@@ -90,6 +90,10 @@ def relevance_score(
         score += 0.1
     if evidence_count > 0:
         score += min(0.1, evidence_count * 0.02)
+    if record.status == "draft":
+        score += 0.3
+        if record.origin == "agent":
+            score += 0.05
     if record.status == "stale":
         score -= 0.5
     return round(score, 4)

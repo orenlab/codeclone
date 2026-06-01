@@ -33,16 +33,9 @@ You have access to CodeClone through the local CodeClone MCP server.
 
 ## Change control
 
-Before **any** repo edit when MCP is available (including `tests/`, `docs/`,
-config):
+**Hard gate:** follow the always-on rule `change-control-gate` before any file
+write and before claiming the task is complete.
 
-1. `analyze_repository` — skip if valid recent run exists
-2. `start_controlled_change` — `status: active` before first edit
-3. `get_relevant_memory` — after `edit_allowed=true` (default policy auto-bootstraps
-   from latest MCP run; else `refresh_from_run` or CLI init)
-4. edit in declared scope
-5. `finish_controlled_change` — optional `propose_memory=true` on accept
-
-Read the `codeclone-change-control` skill for profiles, queue/promote, and
-atomic fallback. Read `codeclone-engineering-memory` for retrieval, draft
-writes, and human approve boundaries.
+Details: `codeclone-change-control` skill (profiles, queue/promote, atomic
+fallback) and `codeclone-engineering-memory` skill (retrieval, drafts, human
+approve boundaries).

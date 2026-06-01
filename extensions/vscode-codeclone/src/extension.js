@@ -82,8 +82,14 @@ const {
     renderTriageMarkdown,
 } = require("./renderers");
 const {fetchProductionTriage, loadRunArtifacts, shouldUseCachedTriage} = require("./runArtifacts");
+const {MemoryController, recordStatement} = require("./memoryController");
+const {
+    ensureIdeGovernanceRegistered,
+    withIdeGovernanceChannel,
+} = require("./memoryGovernance");
 const {
     HotspotsTreeProvider,
+    MemoryTreeProvider,
     OverviewTreeProvider,
     ReviewCodeLensProvider,
     ReviewFileDecorationProvider,
@@ -130,6 +136,7 @@ class CodeCloneController {
             log: true,
         });
         this.client = new CodeCloneMcpClient(this.outputChannel);
+        this.memoryController = new MemoryController(this);
         this.states = new Map();
         this.hotspotFocusMode = this.loadHotspotFocusMode();
         const storedHelpTopic = this.context.workspaceState.get(
@@ -167,6 +174,7 @@ class CodeCloneController {
         this.overviewProvider = new OverviewTreeProvider(this);
         this.hotspotsProvider = new HotspotsTreeProvider(this);
         this.sessionProvider = new SessionTreeProvider(this);
+        this.memoryProvider = new MemoryTreeProvider(this);
         this.reviewCodeLensProvider = new ReviewCodeLensProvider(this);
         this.reviewFileDecorationProvider = new ReviewFileDecorationProvider(this);
         this.overviewView = vscode.window.createTreeView("codeclone.overview", {
@@ -180,6 +188,10 @@ class CodeCloneController {
         this.sessionView = vscode.window.createTreeView("codeclone.session", {
             treeDataProvider: this.sessionProvider,
             showCollapseAll: false,
+        });
+        this.memoryView = vscode.window.createTreeView("codeclone.memory", {
+            treeDataProvider: this.memoryProvider,
+            showCollapseAll: true,
         });
         this.onClientState = (state) => {
             if (this.disposed) {
@@ -216,6 +228,8 @@ class CodeCloneController {
             this.overviewProvider,
             this.hotspotsProvider,
             this.sessionProvider,
+            this.memoryProvider,
+            this.memoryView,
             this.reviewCodeLensProvider,
             this.reviewFileDecorationProvider,
             this.overviewView,
@@ -388,6 +402,24 @@ class CodeCloneController {
             vscode.commands.registerCommand("codeclone.copyBlastRadiusBrief", () =>
                 this.copyBlastRadiusBrief()
             ),
+            vscode.commands.registerCommand("codeclone.refreshMemory", () =>
+                this.refreshMemoryView()
+            ),
+            vscode.commands.registerCommand("codeclone.syncMemoryFromRun", () =>
+                this.syncMemoryFromRun()
+            ),
+            vscode.commands.registerCommand("codeclone.approveMemoryRecord", (node) =>
+                this.governMemoryRecord(node, "approve")
+            ),
+            vscode.commands.registerCommand("codeclone.rejectMemoryRecord", (node) =>
+                this.governMemoryRecord(node, "reject")
+            ),
+            vscode.commands.registerCommand("codeclone.openMemoryRecord", (node) =>
+                this.openMemoryRecord(node)
+            ),
+            vscode.commands.registerCommand("codeclone.openMemoryView", () =>
+                vscode.commands.executeCommand("codeclone.memory.focus")
+            ),
         ];
         this.context.subscriptions.push(...subscriptions);
     }
@@ -398,6 +430,15 @@ class CodeCloneController {
             this.states.set(key, new WorkspaceState(folder));
         }
         return this.states.get(key);
+    }
+
+    getMemoryWorkspaceFolder() {
+        const state = this.getPrimaryState();
+        if (state?.folder) {
+            return state.folder;
+        }
+        const folders = vscode.workspace.workspaceFolders;
+        return folders && folders.length > 0 ? folders[0] : undefined;
     }
 
     getPrimaryState() {
@@ -651,10 +692,13 @@ class CodeCloneController {
         const config = vscode.workspace.getConfiguration("codeclone", folder.uri);
         const configuredCommand = config.get("mcp.command", "auto");
         const configuredArgs = config.get("mcp.args", []);
+        const governanceArgs = withIdeGovernanceChannel(
+            Array.isArray(configuredArgs) ? configuredArgs : []
+        );
         if (configuredCommand && configuredCommand !== "auto") {
             return normalizedLaunchSpec({
                 command: configuredCommand,
-                args: Array.isArray(configuredArgs) ? configuredArgs : [],
+                args: governanceArgs,
                 cwd: folder.uri.fsPath,
                 source: "configured",
             });
@@ -673,14 +717,14 @@ class CodeCloneController {
         ) {
             return normalizedLaunchSpec({
                 command: localLauncher,
-                args: Array.isArray(configuredArgs) ? configuredArgs : [],
+                args: governanceArgs,
                 cwd: folder.uri.fsPath,
                 source: "workspaceLocal",
             });
         }
         const primary = /** @type {any} */ (normalizedLaunchSpec({
             command: "codeclone-mcp",
-            args: Array.isArray(configuredArgs) ? configuredArgs : [],
+            args: governanceArgs,
             cwd: folder.uri.fsPath,
             source: "path",
         }));
@@ -754,8 +798,29 @@ class CodeCloneController {
                 )
             );
         }
+        try {
+            const registration = await ensureIdeGovernanceRegistered(
+                this.client,
+                this.context,
+                effectiveLaunchSpec.cwd
+            );
+            if (registration.status !== "ok") {
+                logChannelMessage(
+                    this.outputChannel,
+                    "warn",
+                    `[codeclone] IDE governance registration returned ${registration.status}.`
+                );
+            }
+        } catch (error) {
+            logChannelMessage(
+                this.outputChannel,
+                "warn",
+                `[codeclone] IDE governance registration failed: ${error.message}`
+            );
+        }
         this.updateContextKeys();
         this.updateStatusBar();
+        this.memoryProvider.refresh();
         return connection;
     }
 
@@ -3690,6 +3755,147 @@ class CodeCloneController {
         return [];
     }
 
+    async getMemoryChildren(node) {
+        const folder = this.getMemoryWorkspaceFolder();
+        try {
+            return await this.memoryController.getChildren(folder, node);
+        } catch (error) {
+            return [
+                {
+                    nodeType: "message",
+                    label: `Error: ${error.message}`,
+                    icon: new vscode.ThemeIcon("error"),
+                },
+            ];
+        }
+    }
+
+    async refreshMemoryView() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        this.memoryController.invalidate(folder);
+        this.memoryProvider.refresh();
+        this.updateViewChrome();
+    }
+
+    async syncMemoryFromRun() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Syncing engineering memory from analysis run",
+                },
+                async () => {
+                    await this.ensureConnected(folder);
+                    await this.client.callTool("manage_engineering_memory", {
+                        root: folder.uri.fsPath,
+                        action: "refresh_from_run",
+                    });
+                }
+            );
+            this.memoryController.invalidate(folder);
+            this.memoryProvider.refresh();
+            this.updateViewChrome();
+            await vscode.window.showInformationMessage(
+                "Engineering memory synced from the latest analysis run."
+            );
+        } catch (error) {
+            this.handleError(error, "Could not sync engineering memory.");
+        }
+    }
+
+    async governMemoryRecord(node, decision) {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder || !node) {
+            return;
+        }
+        const record = safeObject(node.record);
+        const recordId = String(record.id || "");
+        if (!recordId) {
+            this.handleError(
+                new Error("Memory record is missing an id."),
+                "Could not update the memory record."
+            );
+            return;
+        }
+        const labels = {
+            approve: {verb: "Approve", gerund: "Approving", past: "approved"},
+            reject: {verb: "Reject", gerund: "Rejecting", past: "rejected"},
+            archive: {verb: "Archive", gerund: "Archiving", past: "archived"},
+        };
+        const label = labels[decision] || labels.approve;
+        // Validate status and confirm with the user *before* any progress
+        // notification, so the spinner only covers the actual server work.
+        try {
+            this.memoryController.assertGovernanceAllowed(
+                String(record.status || "draft"),
+                decision
+            );
+        } catch (error) {
+            await vscode.window.showWarningMessage(
+                error instanceof Error ? error.message : String(error)
+            );
+            return;
+        }
+        const statement = recordStatement(record);
+        const confirm = await vscode.window.showWarningMessage(
+            `${label.verb} this memory record?`,
+            {modal: true, detail: statement || recordId},
+            label.verb
+        );
+        if (confirm !== label.verb) {
+            return;
+        }
+        try {
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: `${label.gerund} memory record`,
+                    cancellable: true,
+                },
+                async (progress, token) => {
+                    await this.ensureConnected(folder);
+                    return this.memoryController.runGovernance(folder, node, decision, {
+                        progress,
+                        token,
+                    });
+                }
+            );
+            if (!result) {
+                return;
+            }
+            this.memoryController.invalidate(folder);
+            this.memoryProvider.refresh();
+            this.updateViewChrome();
+            await vscode.window.showInformationMessage(
+                `Memory record ${label.past}.`
+            );
+        } catch (error) {
+            if (error instanceof Error && error.message === "Canceled") {
+                return;
+            }
+            this.handleError(error, "Could not update the memory record.");
+        }
+    }
+
+    async openMemoryRecord(node) {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder || !node) {
+            return;
+        }
+        try {
+            await this.memoryController.openRecordDetail(folder, node);
+        } catch (error) {
+            this.handleError(error, "Could not open the memory record.");
+        }
+    }
+
     async getHotspotGroupChildren(state, groupId) {
         if (state.groupCache.has(groupId)) {
             return state.groupCache.get(groupId);
@@ -4059,6 +4265,41 @@ class CodeCloneController {
                 };
                 break;
             }
+            case "memoryDraft": {
+                item = new vscode.TreeItem(
+                    node.label,
+                    vscode.TreeItemCollapsibleState.Collapsed
+                );
+                item.id = node.id;
+                item.description = node.description;
+                item.tooltip = node.tooltip;
+                item.iconPath = node.icon;
+                item.contextValue = node.contextValue || "codeclone.memoryDraft";
+                item.command = node.command;
+                break;
+            }
+            case "memoryStale": {
+                item = new vscode.TreeItem(
+                    node.label,
+                    vscode.TreeItemCollapsibleState.Collapsed
+                );
+                item.id = node.id;
+                item.description = node.description;
+                item.tooltip = node.tooltip;
+                item.iconPath = node.icon;
+                item.contextValue = node.contextValue || "codeclone.memoryStale";
+                item.command = node.command;
+                break;
+            }
+            case "action": {
+                item = new vscode.TreeItem(
+                    node.label,
+                    vscode.TreeItemCollapsibleState.None
+                );
+                item.iconPath = node.icon;
+                item.command = node.command;
+                break;
+            }
             case "detail": {
                 item = new vscode.TreeItem(
                     node.label,
@@ -4091,6 +4332,7 @@ class CodeCloneController {
         this.overviewProvider.refresh();
         this.hotspotsProvider.refresh();
         this.sessionProvider.refresh();
+        this.memoryProvider.refresh();
         this.reviewCodeLensProvider.refresh();
         this.updateViewChrome();
     }
@@ -4199,6 +4441,19 @@ class CodeCloneController {
             this.sessionView.badge = undefined;
             this.sessionView.description =
                 state && state.reviewed.length > 0 ? `${state.reviewed.length} reviewed` : undefined;
+        }
+        if (this.memoryView) {
+            const folder = this.getMemoryWorkspaceFolder();
+            const draftCount = folder ? this.memoryController.draftCount(folder) : 0;
+            this.memoryView.badge =
+                draftCount > 0
+                    ? {
+                        value: draftCount,
+                        tooltip: `${draftCount} draft memory record(s) awaiting review`,
+                    }
+                    : undefined;
+            this.memoryView.description =
+                draftCount > 0 ? `${draftCount} draft` : undefined;
         }
     }
 

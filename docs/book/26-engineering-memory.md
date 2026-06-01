@@ -313,7 +313,9 @@ All commands live under `codeclone memory` and accept `--root` (default `.`).
 | `reject RECORD_ID [--reason TEXT]`                            | Reject draft                                 |
 | `archive RECORD_ID [--reason TEXT]`                           | Archive record                               |
 
-Human governance (`approve`, `reject`, `archive`) is **CLI-only** by design.
+Human governance (`approve`, `reject`, `archive`) is available through the
+**CodeClone VS Code Memory** view (IDE governance channel) and the `codeclone memory`
+CLI. MCP agents cannot call `approve`/`reject`/`archive` on `manage_engineering_memory`.
 
 Refs:
 
@@ -382,6 +384,17 @@ CLI equivalent: `codeclone memory search QUERY --match any|all`.
 | `validate_claims`      | `text`                                              | Memory-layer claim guard (warnings/errors)                 |
 | `propose_from_receipt` | optional `text`, `intent_id`                        | Draft proposals from finish-like payload (atomic fallback) |
 
+IDE channel only (VS Code launches MCP with `--ide-governance-channel`):
+
+| `action`                   | Purpose                                                                 |
+|----------------------------|-------------------------------------------------------------------------|
+| `register_ide_governance`  | Bind session HMAC key + client attestation                              |
+| `prepare_governance`       | Issue ticket + nonce + `statement_digest` (protocol v2)                 |
+| `commit_governance`        | Human confirm with HMAC proof → approve/reject/archive                  |
+
+Agent calls to `approve`, `reject`, or `archive` return `governance_mode_unavailable`
+with `next_step` pointing to the VS Code Memory view (never CLI instructions).
+
 #### `finish_controlled_change(propose_memory=true)`
 
 On **accepted** finish:
@@ -444,7 +457,7 @@ style G fill: #fef9c3
 | Patch accepted, workflow finish  | `propose_memory=true`                    | Preferred batch proposal            |
 | Atomic fallback (no finish hook) | `propose_from_receipt`                   | Same receipt shape as finish        |
 | System facts changed in repo     | `refresh_from_run` or ask human for `memory init --refresh` | Explicit MCP refresh always available |
-| Promote draft to trusted fact    | **Not agent** — human `memory approve`   | Required for active/verified        |
+| Promote draft to trusted fact    | **Not agent** — VS Code Memory view or `codeclone memory approve` | Required for active/verified |
 
 ### When **not** to use memory
 
@@ -530,7 +543,7 @@ graph LR
 - Memory store path defaults under `.cache/codeclone/memory/` — not baseline or analysis cache.
 - Init ingest is deterministic given identical report + git inputs.
 - MCP memory tools are read-only except draft writes through governance actions.
-- Human approve/reject/archive never exposed on MCP.
+- MCP agents cannot approve/reject/archive; IDE channel + CLI only.
 - Subject rows deduplicated in retrieval payloads (one row per logical subject key).
 - FTS rebuilt after init/refresh ingest completes.
 - Schema migration is forward-only through `schema_migrate.py`.

@@ -60,7 +60,8 @@ diagnostics.
 ### Write rules
 
 - Agents **never** approve, reject, or archive via MCP
-- Ask user to run `codeclone memory approve RECORD_ID` to promote drafts
+- Ask the user to approve drafts in the CodeClone VS Code **Memory** view (agents
+  cannot approve through MCP)
 - Ask user to run `codeclone memory init --refresh` when policy is `off` and facts drift
 - Or call `refresh_from_run` when an MCP run is available
 - Memory writes do **not** satisfy change-control scope or verify requirements

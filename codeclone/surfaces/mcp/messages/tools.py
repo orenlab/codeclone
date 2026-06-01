@@ -52,14 +52,17 @@ GET_RELEVANT_MEMORY: Final = (
 
 QUERY_ENGINEERING_MEMORY: Final = (
     "Mode-based engineering memory inspection router. Modes: search, get, "
-    "for_path, for_symbol, stale, coverage, status. Read-only."
+    "for_path, for_symbol, stale, drafts, coverage, status. Read-only."
 )
 
 MANAGE_ENGINEERING_MEMORY: Final = (
-    "Governance router for engineering memory. Actions: refresh_from_run "
+    "Governance router for engineering memory. Agent actions: refresh_from_run "
     "(ingest from MCP run report), record_candidate (draft agent memory), "
     "validate_claims (memory-layer claim guard), propose_from_receipt "
-    "(atomic fallback for finish hook)."
+    "(atomic fallback for finish hook). Human approve/reject/archive use the "
+    "CodeClone VS Code Memory view (IDE channel: register_ide_governance, "
+    "prepare_governance, commit_governance when the server is launched with "
+    "--ide-governance-channel). Agents cannot approve records through this tool."
 )
 
 CHECK_PATCH_CONTRACT: Final = (

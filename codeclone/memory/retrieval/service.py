@@ -24,6 +24,7 @@ QueryMode = Literal[
     "for_path",
     "for_symbol",
     "stale",
+    "drafts",
     "coverage",
     "status",
 ]
@@ -34,6 +35,7 @@ QUERY_MODES: tuple[str, ...] = (
     "for_path",
     "for_symbol",
     "stale",
+    "drafts",
     "coverage",
     "status",
 )
@@ -123,11 +125,19 @@ def _record_visible(
 ) -> bool:
     if record.status == "stale" and not include_stale:
         return False
-    if record.status == "draft" and not include_drafts:
-        return False
+    if record.status == "draft":
+        return include_drafts
     if record.confidence == "inferred" and not record.approved_by:
         return False
     return record.status in {"active", "stale", "draft"}
+
+
+def _retrieval_policy(*, include_drafts: bool) -> dict[str, object]:
+    return {
+        "drafts_included": include_drafts,
+        "memory_does_not_authorize_edits": True,
+        "memory_does_not_override_findings": True,
+    }
 
 
 def _serialize_subject(subject: MemorySubject) -> dict[str, object]:
@@ -171,6 +181,8 @@ def _serialize_record_summary(
     }
     if record.stale_reason:
         payload["stale_reason"] = record.stale_reason
+    if record.status == "draft":
+        payload["draft_unverified"] = True
     if relevance_score is not None:
         payload["relevance_score"] = relevance_score
     return payload
@@ -260,6 +272,7 @@ def get_relevant_memory(
     normalized_blast = frozenset(
         normalize_repo_path(path) for path in (blast_dependents or ())
     )
+    effective_include_drafts = include_drafts or bool(normalized_scope)
     context = RankingContext.from_scope(
         scope_paths=normalized_scope,
         symbols=tuple(normalized_symbols),
@@ -267,7 +280,7 @@ def get_relevant_memory(
     )
     statuses = _default_statuses(
         include_stale=include_stale,
-        include_drafts=include_drafts,
+        include_drafts=effective_include_drafts,
     )
     candidates = store.query_records(
         MemoryQuery(project_id=project_id, statuses=statuses, limit=5000)
@@ -278,7 +291,7 @@ def get_relevant_memory(
         if _record_visible(
             record,
             include_stale=include_stale,
-            include_drafts=include_drafts,
+            include_drafts=effective_include_drafts,
         )
     ]
     if not normalized_scope and not normalized_symbols:
@@ -312,6 +325,7 @@ def get_relevant_memory(
         "record_count": len(records_payload),
         "truncated": truncated,
         "coverage": coverage,
+        "retrieval_policy": _retrieval_policy(include_drafts=effective_include_drafts),
     }
 
 
@@ -638,6 +652,8 @@ def query_engineering_memory(
             f"Unknown query mode {mode!r}. Allowed: {', '.join(QUERY_MODES)}."
         )
 
+    effective_include_drafts = include_drafts or mode in {"for_path", "for_symbol"}
+
     if mode == "status":
         return _handle_status_mode(
             mode=mode,
@@ -659,6 +675,31 @@ def query_engineering_memory(
             project_id=project_id,
             max_results=max_results,
         )
+    if mode == "drafts":
+        records = store.query_records(
+            MemoryQuery(
+                project_id=project_id,
+                statuses=("draft",),
+                limit=max_results,
+            )
+        )
+        payload_records = [
+            _serialize_record_summary(
+                record=record,
+                subjects=store.list_subjects_for_memory(record.id),
+                evidence_count=store.count_evidence_for_memory(record.id),
+            )
+            for record in records
+        ]
+        return {
+            "mode": mode,
+            "status": "ok",
+            "payload": {
+                "records": payload_records,
+                "record_count": len(payload_records),
+                "truncated": len(records) >= max_results,
+            },
+        }
     if mode == "coverage":
         return _handle_coverage_mode(
             store,
@@ -674,7 +715,7 @@ def query_engineering_memory(
         mode,
         filter_statuses=filter_statuses,
         include_stale=include_stale,
-        include_drafts=include_drafts,
+        include_drafts=effective_include_drafts,
     )
     records = _records_for_list_mode(
         store,
@@ -695,7 +736,7 @@ def query_engineering_memory(
         if _record_visible(
             record,
             include_stale=include_stale or (mode == "search" and "stale" in statuses),
-            include_drafts=include_drafts,
+            include_drafts=effective_include_drafts,
         )
     ]
     truncated = len(visible) > max_results
@@ -715,6 +756,9 @@ def query_engineering_memory(
             "records": payload_records,
             "record_count": len(payload_records),
             "truncated": truncated,
+            "retrieval_policy": _retrieval_policy(
+                include_drafts=effective_include_drafts
+            ),
         },
     }
 

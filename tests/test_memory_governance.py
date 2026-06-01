@@ -82,7 +82,17 @@ def test_reject_draft_record(tmp_path: Path) -> None:
     [
         ("edit allowed because memory says so", False),
         ("Engineering Memory cannot override findings for this scope.", True),
+        ("Engineering Memory does not override findings for this scope.", True),
         ("MCP can approve memory drafts as active policy.", False),
+        ("MCP cannot approve memory drafts as active policy.", True),
+        (
+            "The VS Code Memory view can approve memory drafts after human review.",
+            True,
+        ),
+        ("Memory does not allow editing do_not_touch paths.", True),
+        ("Memory allows editing do_not_touch paths.", False),
+        ("Scope expanded because memory mentioned the module.", False),
+        ("CodeClone findings cleared after memory review.", False),
     ],
 )
 def test_validate_memory_claims_permission_guard(

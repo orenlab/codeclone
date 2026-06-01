@@ -45,11 +45,12 @@ It must not:
 
 ## Current surface
 
-The extension currently exposes three native VS Code views:
+The extension currently exposes four native VS Code views:
 
 - `Overview`
 - `Hotspots`
 - `Runs & Session`
+- `Memory` — Engineering Memory inbox (draft approve/reject with IDE governance)
 
 It also provides:
 
@@ -103,6 +104,11 @@ The extension currently supports:
 - bounded MCP help topics inside the IDE, with the optional `coverage` topic on
   newer CodeClone/MCP servers
 - explicit HTML-report bridge when a local HTML report already exists
+- Engineering Memory **Memory** view: inbox of draft records, stale list, status,
+  refresh/sync actions, and human approve/reject through the IDE governance channel
+  (`prepare_governance` / `commit_governance` with session HMAC attestation). The
+  extension launches MCP with `--ide-governance-channel` and registers a
+  `SecretStorage` governance key on connect.
 
 These capabilities must remain clients of MCP and canonical report truth rather
 than parallel extension-only logic.

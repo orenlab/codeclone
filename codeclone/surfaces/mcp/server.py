@@ -34,6 +34,7 @@ from .messages.params import (
     ClaimsTextParam,
     CloneTypeParam,
     CompareFocusParam,
+    ConfirmationNonceParam,
     CoverageMinParam,
     CoverageXmlParam,
     CreateReceiptParam,
@@ -50,9 +51,17 @@ from .messages.params import (
     GateBoolParam,
     GateIntParam,
     GitDiffRefParam,
+    GovernanceActorParam,
+    GovernanceDecisionParam,
+    GovernanceProofParam,
+    GovernanceProtocolParam,
+    GovernanceTicketParam,
     HelpDetailParam,
     HelpTopicParam,
     HotspotKindParam,
+    IdeGovernanceClientNameParam,
+    IdeGovernanceClientVersionParam,
+    IdeGovernanceKeyParam,
     IncludeBlastRadiusParam,
     IncludeDraftsParam,
     IncludeParam,
@@ -216,11 +225,15 @@ def build_mcp_server(
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = (
         DEFAULT_MCP_LOG_LEVEL
     ),
+    ide_governance_channel: bool = False,
 ) -> FastMCP:
     """Build and register the local read-only CodeClone FastMCP server."""
 
     runtime_fastmcp, read_only_tool, analysis_tool, session_tool = _load_mcp_runtime()
-    service = CodeCloneMCPService(history_limit=_validated_history_limit(history_limit))
+    service = CodeCloneMCPService(
+        history_limit=_validated_history_limit(history_limit),
+        ide_governance_channel=ide_governance_channel,
+    )
 
     @asynccontextmanager
     async def _lifespan(_app: FastMCP) -> AsyncIterator[dict[str, object]]:
@@ -507,6 +520,16 @@ def build_mcp_server(
         text: MemoryClaimsTextParam = None,
         intent_id: OptionalIntentIdParam = None,
         run_id: RunIdParam = None,
+        record_id: MemoryRecordIdParam = None,
+        decision: GovernanceDecisionParam = None,
+        ide_governance_key: IdeGovernanceKeyParam = None,
+        client_name: IdeGovernanceClientNameParam = None,
+        client_version: IdeGovernanceClientVersionParam = None,
+        governance_ticket: GovernanceTicketParam = None,
+        confirmation_nonce: ConfirmationNonceParam = None,
+        proof: GovernanceProofParam = None,
+        actor: GovernanceActorParam = None,
+        protocol: GovernanceProtocolParam = None,
     ) -> dict[str, object]:
         return service.manage_engineering_memory(
             root=root,
@@ -517,6 +540,16 @@ def build_mcp_server(
             text=text,
             intent_id=intent_id,
             run_id=run_id,
+            record_id=record_id,
+            decision=decision,
+            ide_governance_key=ide_governance_key,
+            client_name=client_name,
+            client_version=client_version,
+            governance_ticket=governance_ticket,
+            confirmation_nonce=confirmation_nonce,
+            proof=proof,
+            actor=actor,
+            protocol=protocol,
         )
 
     @tool(
@@ -1223,6 +1256,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MCP_LOG_LEVEL,
         help="FastMCP server log level.",
     )
+    parser.add_argument(
+        "--ide-governance-channel",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Enable the VS Code IDE governance channel for human "
+            "approve/reject/archive via manage_engineering_memory. "
+            "Agent launchers must not pass this flag."
+        ),
+    )
     return parser
 
 
@@ -1286,6 +1329,7 @@ def main() -> None:
             stateless_http=args.stateless_http,
             debug=args.debug,
             log_level=args.log_level,
+            ide_governance_channel=args.ide_governance_channel,
         )
     except MCPDependencyError as exc:
         print(str(exc), file=sys.stderr)

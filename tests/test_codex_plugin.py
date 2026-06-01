@@ -5,12 +5,9 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-
-def _load_json(path: Path) -> object:
-    return json.loads(path.read_text(encoding="utf-8"))
+from tests.plugin_test_helpers import assert_codex_manifest_interface, load_json
 
 
 def _assert_contains_all(text: str, needles: tuple[str, ...]) -> None:
@@ -28,8 +25,8 @@ def _codeclone_package_version(root: Path) -> str:
 def test_codex_plugin_manifest_is_consistent() -> None:
     root = Path(__file__).resolve().parents[1]
     plugin_root = root / "plugins" / "codeclone"
-    manifest = _load_json(plugin_root / ".codex-plugin" / "plugin.json")
-    marketplace = _load_json(root / ".agents" / "plugins" / "marketplace.json")
+    manifest = load_json(plugin_root / ".codex-plugin" / "plugin.json")
+    marketplace = load_json(root / ".agents" / "plugins" / "marketplace.json")
     package_version = _codeclone_package_version(root)
 
     assert isinstance(manifest, dict)
@@ -54,34 +51,14 @@ def test_codex_plugin_manifest_is_consistent() -> None:
         "category": "Developer Tools",
         "websiteURL": manifest["homepage"],
     }
-    assert (
-        interface["privacyPolicyURL"]
-        == "https://orenlab.github.io/codeclone/privacy-policy/"
-    )
-    assert (
-        interface["termsOfServiceURL"]
-        == "https://orenlab.github.io/codeclone/terms-of-use/"
-    )
-    assert interface["composerIcon"] == "./assets/icon.png"
-    assert interface["logo"] == "./assets/logo.png"
-    assert "engineering-memory skills" in interface["longDescription"]
-    assert (
-        "Structural Change Controller for AI-assisted Python development"
-        in (interface["shortDescription"])
-    )
-    assert (plugin_root / "assets" / "icon.png").is_file()
-    assert (plugin_root / "assets" / "logo.png").is_file()
-    prompts = interface["defaultPrompt"]
-    assert isinstance(prompts, list)
-    assert len(prompts) == 4
-    assert all(isinstance(prompt, str) and 0 < len(prompt) <= 128 for prompt in prompts)
+    assert_codex_manifest_interface(interface, plugin_root=plugin_root)
 
 
 def test_codex_plugin_marketplace_and_mcp_config_are_aligned() -> None:
     root = Path(__file__).resolve().parents[1]
     plugin_root = root / "plugins" / "codeclone"
-    marketplace = _load_json(root / ".agents" / "plugins" / "marketplace.json")
-    mcp_config = _load_json(plugin_root / ".mcp.json")
+    marketplace = load_json(root / ".agents" / "plugins" / "marketplace.json")
+    mcp_config = load_json(plugin_root / ".mcp.json")
 
     assert isinstance(marketplace, dict)
     assert marketplace["name"] == "orenlab-local"
@@ -122,7 +99,7 @@ def test_codex_plugin_skill_exists() -> None:
     skill_text = skill_path.read_text(encoding="utf-8")
     hotspot_skill_text = hotspot_skill_path.read_text(encoding="utf-8")
     change_control_skill_text = change_control_skill_path.read_text(encoding="utf-8")
-    manifest = _load_json(plugin_root / ".codex-plugin" / "plugin.json")
+    manifest = load_json(plugin_root / ".codex-plugin" / "plugin.json")
     assert isinstance(manifest, dict)
 
     _assert_contains_all(
@@ -151,7 +128,7 @@ def test_codex_plugin_skill_exists() -> None:
         change_control_skill_text,
         (
             "name: codeclone-change-control",
-            "Mandatory before any repository file edit",
+            "MANDATORY HARD GATE before ANY repository file write",
             "target Python repository",
             "Normal pipeline",
             "Tool tiers",

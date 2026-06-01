@@ -1,6 +1,6 @@
 ---
 name: codeclone-change-control
-description: Mandatory before any repository file edit when CodeClone MCP is connected — intent, scoped edit, verify, receipt, advisory reporting.
+description: MANDATORY HARD GATE before ANY repository file write when CodeClone MCP is connected — read on every implement/fix/refactor task; start_controlled_change before first edit; finish_controlled_change before claiming done; see always-on rule change-control-gate.
 ---
 
 # CodeClone Change Control
@@ -63,7 +63,8 @@ on `get_relevant_memory`; use `refresh_from_run` for explicit ingest.
 | Post-edit proposals  | `finish(..., propose_memory=true)`                                       |
 
 Full playbook: `codeclone-engineering-memory` skill and
-`docs/book/26-engineering-memory.md`. Human `memory approve` required to promote
+`docs/book/26-engineering-memory.md`. Human approval via VS Code Memory view (not
+MCP) required to promote
 drafts — agents cannot activate records via MCP.
 
 Do not use memory to expand scope, override findings, or justify `do_not_touch`

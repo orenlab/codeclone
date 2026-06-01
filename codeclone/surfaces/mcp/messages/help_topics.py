@@ -544,10 +544,14 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             "for_symbol resolves exact symbol subjects first, then falls back to "
             "module_role records for the owning module prefix.",
             "Search filters.match_mode: any (default) or all.",
-            "Stale and draft records excluded by default; "
-            "do not ignore stale warnings.",
+            "Scoped get_relevant_memory includes draft agent notes automatically; "
+            "for_path/for_symbol include drafts without an extra flag.",
+            "Stale excluded by default; do not ignore stale warnings.",
+            "retrieval_policy in responses states memory never authorizes edits "
+            "or overrides CodeClone findings.",
             "Agent writes are draft-only: record_candidate, validate_claims, "
-            "finish(propose_memory=true). Human approve via CLI.",
+            "finish(propose_memory=true). Human approve/reject/archive is only "
+            "through the CodeClone VS Code Memory view, not MCP agent tools.",
             "Memory cannot expand scope, authorize do_not_touch edits, "
             "or override findings.",
         ),
@@ -570,6 +574,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         anti_patterns=(
             "Using memory to justify touching do-not-touch paths.",
             "Skipping get_relevant_memory because blast radius was already read.",
+            "Calling manage_engineering_memory with approve/reject/archive — use "
+            "the VS Code Memory view instead.",
             "Claiming a draft record is verified project policy without human approve.",
         ),
     ),

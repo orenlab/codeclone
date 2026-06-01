@@ -5,29 +5,21 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
-
-def _load_json(path: Path) -> object:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _frontmatter(text: str) -> dict[str, str]:
-    match = re.match(r"^---\n(?P<body>.*?)\n---\n", text, re.DOTALL)
-    assert match is not None
-    fields: dict[str, str] = {}
-    for line in match.group("body").splitlines():
-        key, value = line.split(":", 1)
-        fields[key.strip()] = value.strip().strip('"')
-    return fields
+from tests.plugin_test_helpers import (
+    assert_cursor_change_control_rules,
+    assert_plugin_branding_assets,
+    load_json,
+    parse_frontmatter,
+)
 
 
 def test_cursor_plugin_json_is_valid() -> None:
     root = Path(__file__).resolve().parents[1]
     plugin_root = root / "plugins" / "cursor-codeclone"
-    manifest = _load_json(plugin_root / ".cursor-plugin" / "plugin.json")
+    manifest = load_json(plugin_root / ".cursor-plugin" / "plugin.json")
 
     assert isinstance(manifest, dict)
     assert manifest["name"] == "codeclone"
@@ -37,14 +29,13 @@ def test_cursor_plugin_json_is_valid() -> None:
     assert manifest["skills"] == "skills/"
     assert manifest["mcpServers"] == "mcp.json"
     assert manifest["logo"] == "assets/logo.png"
-    assert (plugin_root / "assets" / "logo.png").is_file()
-    assert (plugin_root / "assets" / "icon.png").is_file()
+    assert_plugin_branding_assets(plugin_root)
 
 
 def test_cursor_mcp_json_is_valid() -> None:
     root = Path(__file__).resolve().parents[1]
     plugin_root = root / "plugins" / "cursor-codeclone"
-    mcp_config = _load_json(plugin_root / "mcp.json")
+    mcp_config = load_json(plugin_root / "mcp.json")
 
     assert isinstance(mcp_config, dict)
     server = mcp_config["mcpServers"]["codeclone"]
@@ -60,15 +51,19 @@ def test_cursor_rules_have_valid_frontmatter() -> None:
     rules_root = root / "plugins" / "cursor-codeclone" / "rules"
     workflow = (rules_root / "codeclone-workflow.mdc").read_text(encoding="utf-8")
     python = (rules_root / "codeclone-python.mdc").read_text(encoding="utf-8")
+    gate = (rules_root / "change-control-gate.mdc").read_text(encoding="utf-8")
 
-    workflow_fields = _frontmatter(workflow)
-    python_fields = _frontmatter(python)
-    assert workflow_fields["alwaysApply"] == "true"
-    assert "CodeClone MCP integration rules" in workflow_fields["description"]
-    assert python_fields["globs"] == "**/*.py"
-    assert "Use MCP tools only" in workflow
-    assert "Do not fall back to CLI or local report files." in workflow
-    assert "Run CodeClone analysis before making structural changes." in python
+    workflow_fields = parse_frontmatter(workflow)
+    python_fields = parse_frontmatter(python)
+    gate_fields = parse_frontmatter(gate)
+    assert_cursor_change_control_rules(
+        workflow_fields=workflow_fields,
+        gate_fields=gate_fields,
+        python_fields=python_fields,
+        workflow_text=workflow,
+        gate_text=gate,
+        python_text=python,
+    )
 
 
 def test_cursor_skills_match_codex_skills() -> None:
@@ -87,13 +82,13 @@ def test_cursor_skills_match_codex_skills() -> None:
         codex_text = (codex_skills / skill_name / "SKILL.md").read_text(
             encoding="utf-8"
         )
-        assert _frontmatter(cursor_text) == _frontmatter(codex_text)
+        assert parse_frontmatter(cursor_text) == parse_frontmatter(codex_text)
 
 
 def test_cursor_plugin_version_is_semver() -> None:
     """Plugin has its own version lifecycle, independent of pyproject."""
     root = Path(__file__).resolve().parents[1]
-    manifest = _load_json(
+    manifest = load_json(
         root / "plugins" / "cursor-codeclone" / ".cursor-plugin" / "plugin.json"
     )
     assert isinstance(manifest, dict)

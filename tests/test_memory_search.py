@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from codeclone.memory.governance import record_candidate
 from codeclone.memory.retrieval import query_engineering_memory
 from tests.memory_fixtures import (
     make_module_record,
@@ -46,6 +47,38 @@ def test_fts_search_matches_any_token(tmp_path: Path) -> None:
     assert isinstance(records, list)
     assert records
     assert records[0]["type"] == "document_link"
+
+
+def test_search_finds_agent_draft_after_record_candidate(tmp_path: Path) -> None:
+    unique = "long agent draft phrase about paths normalization policy"
+    with memory_store(tmp_path) as (root, project, store, db_path):
+        record_candidate(
+            store,
+            project=project,
+            record_type="change_rationale",
+            statement=unique,
+            subject_path="codeclone/memory/paths.py",
+            max_candidates=10,
+        )
+        result = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root,
+            backend="sqlite",
+            db_path=db_path,
+            mode="search",
+            query=unique,
+            include_drafts=True,
+            filters={"match_mode": "all"},
+        )
+
+    payload = result["payload"]
+    assert isinstance(payload, dict)
+    records = payload.get("records")
+    assert isinstance(records, list)
+    assert any(
+        item.get("statement") == unique for item in records if isinstance(item, dict)
+    )
 
 
 def test_upsert_reactivates_unchanged_record_on_digest_shift(tmp_path: Path) -> None:

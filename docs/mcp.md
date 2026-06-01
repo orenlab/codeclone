@@ -345,7 +345,7 @@ sequenceDiagram
 | `get_blast_radius`         | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                    |
 | `get_relevant_memory`      | Ranked engineering memory for declared edit scope (explicit scope or active intent_id)                               |
 | `query_engineering_memory`   | Mode router: search, get, for_path, for_symbol, stale, coverage, status. Search supports `filters.match_mode` (`any`\|`all`) |
-| `manage_engineering_memory`  | Agent memory governance: `record_candidate`, `validate_claims`, `propose_from_receipt` (approve/reject/archive are CLI-only)    |
+| `manage_engineering_memory`  | Agent memory governance: `record_candidate`, `validate_claims`, `propose_from_receipt`, `refresh_from_run`. Human approve/reject/archive use the CodeClone VS Code **Memory** view (IDE channel only; not available to agents).    |
 | `check_patch_contract`     | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                               |
 | `create_review_receipt`    | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile               |
 | `validate_review_claims`   | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks       |
@@ -452,7 +452,7 @@ present — they signal changed context.
 | Post-edit proposals | `finish_controlled_change(propose_memory=true)` | draft candidates + staleness |
 | Atomic fallback | `manage_engineering_memory(action=propose_from_receipt, …)` | draft proposals |
 
-**Human promote:** `codeclone memory approve RECORD_ID` — agents cannot activate
+**Human promote:** CodeClone VS Code **Memory** view (approve with confirmation) — agents cannot activate records through MCP
 drafts via MCP.
 
 #### Trust boundaries

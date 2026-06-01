@@ -2,7 +2,7 @@
   "name": "codeclone",
   "displayName": "CodeClone",
   "description": "Structural Change Controller for AI-assisted Python development — baseline-aware, triage-first structural review in VS Code, powered by codeclone-mcp.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "orenlab",
   "license": "MPL-2.0",
   "repository": {
@@ -48,7 +48,7 @@
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
     "typecheck": "tsc -p jsconfig.json --noEmit",
-    "check": "npm run build && npm run typecheck && node --check src/constants.js && node --check src/formatters.js && node --check src/runtime.js && node --check src/renderers.js && node --check src/providers.js && node --check src/support.js && node --check src/runArtifacts.js && node --check src/mcpClient.js && node --check src/extension.js",
+    "check": "npm run build && npm run typecheck && node --check src/constants.js && node --check src/formatters.js && node --check src/runtime.js && node --check src/renderers.js && node --check src/providers.js && node --check src/support.js && node --check src/runArtifacts.js && node --check src/memoryGovernance.js && node --check src/memoryController.js && node --check src/mcpClient.js && node --check src/extension.js",
     "test": "node --test test/*.test.js",
     "test:host": "npm run build && node test/runExtensionHost.js",
     "vscode:prepublish": "npm run build"
@@ -62,6 +62,7 @@
     "onView:codeclone.overview",
     "onView:codeclone.hotspots",
     "onView:codeclone.session",
+    "onView:codeclone.memory",
     "onCommand:codeclone.connectMcp",
     "onCommand:codeclone.analyzeWorkspace",
     "onCommand:codeclone.analyzeChangedFiles",
@@ -83,7 +84,12 @@
     "onCommand:codeclone.copyCoverageJoinBrief",
     "onCommand:codeclone.openSecuritySurface",
     "onCommand:codeclone.copySecuritySurfaceBrief",
-    "onCommand:codeclone.manageWorkspaceTrust"
+    "onCommand:codeclone.manageWorkspaceTrust",
+    "onCommand:codeclone.refreshMemory",
+    "onCommand:codeclone.syncMemoryFromRun",
+    "onCommand:codeclone.approveMemoryRecord",
+    "onCommand:codeclone.rejectMemoryRecord",
+    "onCommand:codeclone.openMemoryRecord"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -115,6 +121,12 @@
           "name": "Runs & Session",
           "type": "tree",
           "icon": "media/view-session.svg"
+        },
+        {
+          "id": "codeclone.memory",
+          "name": "Memory",
+          "type": "tree",
+          "icon": "media/view-memory.svg"
         }
       ]
     },
@@ -158,6 +170,21 @@
         "view": "codeclone.session",
         "when": "isWorkspaceTrusted && codeclone.connected && !codeclone.hasRun",
         "contents": "The local CodeClone server is ready. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) or [Review Changes](command:codeclone.analyzeChangedFiles) to create the first run."
+      },
+      {
+        "view": "codeclone.memory",
+        "when": "!isWorkspaceTrusted",
+        "contents": "Engineering Memory requires a trusted workspace.\n\nOpen [Manage Workspace Trust](command:codeclone.manageWorkspaceTrust) to review and approve draft memory records."
+      },
+      {
+        "view": "codeclone.memory",
+        "when": "isWorkspaceTrusted && !codeclone.connected",
+        "contents": "Connect CodeClone to load Engineering Memory.\n\nRun [Analyze Workspace](command:codeclone.analyzeWorkspace) or [Verify Local Server](command:codeclone.connectMcp), then [Sync from latest run](command:codeclone.syncMemoryFromRun) to ingest system facts."
+      },
+      {
+        "view": "codeclone.memory",
+        "when": "isWorkspaceTrusted && codeclone.connected",
+        "contents": "Review draft memory records in **Inbox**, then approve or reject with explicit confirmation.\n\n[Refresh memory](command:codeclone.refreshMemory) · [Sync from latest run](command:codeclone.syncMemoryFromRun)"
       }
     ],
     "commands": [
@@ -372,6 +399,42 @@
         "icon": "$(copy)"
       },
       {
+        "command": "codeclone.refreshMemory",
+        "title": "Refresh Memory",
+        "category": "CodeClone",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codeclone.syncMemoryFromRun",
+        "title": "Sync Memory From Run",
+        "category": "CodeClone",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "codeclone.approveMemoryRecord",
+        "title": "Approve Memory Record",
+        "category": "CodeClone",
+        "icon": "$(check)"
+      },
+      {
+        "command": "codeclone.rejectMemoryRecord",
+        "title": "Reject Memory Record",
+        "category": "CodeClone",
+        "icon": "$(close)"
+      },
+      {
+        "command": "codeclone.openMemoryRecord",
+        "title": "Open Memory Record",
+        "category": "CodeClone",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "codeclone.openMemoryView",
+        "title": "Open Memory View",
+        "category": "CodeClone",
+        "icon": "$(inbox)"
+      },
+      {
         "command": "codeclone.clearSessionState",
         "title": "Clear Session",
         "category": "CodeClone",
@@ -565,6 +628,41 @@
           "command": "codeclone.showHelpTopic",
           "when": "view == codeclone.session && isWorkspaceTrusted",
           "group": "secondary@1"
+        },
+        {
+          "command": "codeclone.refreshMemory",
+          "when": "view == codeclone.memory && isWorkspaceTrusted",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.syncMemoryFromRun",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.connected",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codeclone.manageWorkspaceTrust",
+          "when": "view == codeclone.memory && !isWorkspaceTrusted",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.connectMcp",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && !codeclone.connected",
+          "group": "secondary@1"
+        },
+        {
+          "command": "codeclone.approveMemoryRecord",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryDraft",
+          "group": "inline@1"
+        },
+        {
+          "command": "codeclone.rejectMemoryRecord",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryDraft",
+          "group": "inline@2"
+        },
+        {
+          "command": "codeclone.openMemoryRecord",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryDraft",
+          "group": "1_memory@1"
         },
         {
           "command": "codeclone.openSetupHelp",

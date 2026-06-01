@@ -11,6 +11,13 @@ from pathlib import Path
 
 from ...config.memory import MemoryConfig, resolve_memory_config
 from ...memory.exceptions import MemoryContractError
+from ...memory.ide_governance import (
+    IdeGovernanceSessionState,
+    _governance_rejected,
+    commit_governance,
+    prepare_governance,
+    register_ide_governance,
+)
 from ...memory.ingest.mcp_sync import execute_mcp_memory_sync
 from ...memory.models import MemoryProject
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
@@ -29,6 +36,7 @@ from ._session_shared import (
 class _MCPSessionMemoryMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
+    _ide_governance: IdeGovernanceSessionState
 
     def get_relevant_memory(
         self,
@@ -47,6 +55,7 @@ class _MCPSessionMemoryMixin:
             scope=scope,
             intent_id=intent_id,
         )
+        effective_include_drafts = include_drafts or bool(scope_paths)
         store, _db_path, _config, project = self._open_memory_store(root_path)
         try:
             blast_dependents = self._memory_blast_dependents(root_path, scope_paths)
@@ -59,7 +68,7 @@ class _MCPSessionMemoryMixin:
                 scope_resolved_from=scope_resolved_from,
                 max_records=max_records,
                 include_stale=include_stale,
-                include_drafts=include_drafts,
+                include_drafts=effective_include_drafts,
             )
             if memory_sync is not None:
                 result = dict(result)
@@ -119,12 +128,84 @@ class _MCPSessionMemoryMixin:
         text: str | None = None,
         intent_id: str | None = None,
         run_id: str | None = None,
+        record_id: str | None = None,
+        decision: str | None = None,
+        ide_governance_key: str | None = None,
+        client_name: str | None = None,
+        client_version: str | None = None,
+        governance_ticket: str | None = None,
+        confirmation_nonce: str | None = None,
+        proof: str | None = None,
+        actor: str | None = None,
+        protocol: int | None = None,
+        reject_reason: str | None = None,
     ) -> dict[str, object]:
         from ...memory.exceptions import MemoryCapacityError, MemoryContractError
 
         root_path = _helpers._resolve_root(root)
         try:
             normalized = action.strip().lower()
+            if normalized in {"approve", "reject", "archive"}:
+                return _governance_rejected(normalized)
+            if normalized == "register_ide_governance":
+                if not ide_governance_key or not client_name:
+                    raise MCPServiceContractError(
+                        "register_ide_governance requires ide_governance_key and "
+                        "client_name."
+                    )
+                return register_ide_governance(
+                    self._ide_governance,
+                    ide_governance_key=ide_governance_key,
+                    client_name=client_name,
+                    client_version=client_version,
+                )
+            if normalized == "prepare_governance":
+                if not record_id or not decision:
+                    raise MCPServiceContractError(
+                        "prepare_governance requires record_id and decision."
+                    )
+                store, _db_path, _config, project = self._open_memory_store(root_path)
+                try:
+                    return prepare_governance(
+                        self._ide_governance,
+                        store,
+                        project_id=project.id,
+                        root_path=str(root_path),
+                        record_id=record_id,
+                        decision=decision,
+                    )
+                finally:
+                    store.close()
+            if normalized == "commit_governance":
+                if (
+                    not record_id
+                    or not decision
+                    or not governance_ticket
+                    or not confirmation_nonce
+                    or not proof
+                    or protocol is None
+                ):
+                    raise MCPServiceContractError(
+                        "commit_governance requires record_id, decision, "
+                        "governance_ticket, confirmation_nonce, proof, and protocol."
+                    )
+                store, _db_path, _config, project = self._open_memory_store(root_path)
+                try:
+                    return commit_governance(
+                        self._ide_governance,
+                        store,
+                        project_id=project.id,
+                        root_path=str(root_path),
+                        record_id=record_id,
+                        decision=decision,
+                        governance_ticket=governance_ticket,
+                        confirmation_nonce=confirmation_nonce,
+                        proof=proof,
+                        actor=actor or "",
+                        protocol=protocol,
+                    )
+                finally:
+                    store.close()
             if normalized == "refresh_from_run":
                 return self._manage_memory_refresh_from_run(
                     root_path,
@@ -170,6 +251,9 @@ class _MCPSessionMemoryMixin:
                 "validate_claims",
                 "propose_from_receipt",
                 "refresh_from_run",
+                "register_ide_governance",
+                "prepare_governance",
+                "commit_governance",
             )
             raise MCPServiceContractError(
                 f"Unknown manage_engineering_memory action: {action!r}. "

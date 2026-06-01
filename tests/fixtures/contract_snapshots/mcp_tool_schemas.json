@@ -1562,7 +1562,7 @@
       "properties": {
         "include_drafts": {
           "default": false,
-          "description": "Include draft engineering memory records.",
+          "description": "Include draft engineering memory records. Defaults false for search; get_relevant_memory with scope or intent_id includes drafts automatically; query_engineering_memory for_path/for_symbol includes drafts without setting this flag.",
           "title": "Include Drafts",
           "type": "boolean"
         },
@@ -2212,9 +2212,100 @@
     "input_schema": {
       "properties": {
         "action": {
-          "description": "record_candidate, validate_claims, propose_from_receipt, or refresh_from_run.",
+          "description": "Agent: record_candidate, validate_claims, propose_from_receipt, refresh_from_run. IDE channel only (VS Code): register_ide_governance, prepare_governance, commit_governance. approve/reject/archive are not available through MCP.",
           "title": "Action",
           "type": "string"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Human actor label stored on the memory revision.",
+          "title": "Actor"
+        },
+        "client_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "IDE client name for register_ide_governance.",
+          "title": "Client Name"
+        },
+        "client_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "IDE client version for register_ide_governance.",
+          "title": "Client Version"
+        },
+        "confirmation_nonce": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nonce from prepare_governance; required for commit.",
+          "title": "Confirmation Nonce"
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "IDE governance decision: approve, reject, or archive.",
+          "title": "Decision"
+        },
+        "governance_ticket": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Single-use governance ticket from prepare_governance.",
+          "title": "Governance Ticket"
+        },
+        "ide_governance_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Session-bound IDE governance key (hex, >=32 bytes). VS Code only.",
+          "title": "Ide Governance Key"
         },
         "intent_id": {
           "anyOf": [
@@ -2228,6 +2319,45 @@
           "default": null,
           "description": "Active or queued intent id when required by action.",
           "title": "Intent Id"
+        },
+        "proof": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "HMAC proof for commit_governance (protocol v2).",
+          "title": "Proof"
+        },
+        "protocol": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "IDE attestation protocol version (currently 2).",
+          "title": "Protocol"
+        },
+        "record_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Record id for mode=get or IDE governance actions.",
+          "title": "Record Id"
         },
         "record_type": {
           "anyOf": [
@@ -2371,7 +2501,7 @@
         },
         "include_drafts": {
           "default": false,
-          "description": "Include draft engineering memory records.",
+          "description": "Include draft engineering memory records. Defaults false for search; get_relevant_memory with scope or intent_id includes drafts automatically; query_engineering_memory for_path/for_symbol includes drafts without setting this flag.",
           "title": "Include Drafts",
           "type": "boolean"
         },
@@ -2388,7 +2518,7 @@
           "type": "integer"
         },
         "mode": {
-          "description": "search, get, for_path, for_symbol, stale, coverage, or status.",
+          "description": "search, get, for_path, for_symbol, stale, drafts, coverage, or status.",
           "title": "Mode",
           "type": "string"
         },
@@ -2428,7 +2558,7 @@
             }
           ],
           "default": null,
-          "description": "Record id for mode=get.",
+          "description": "Record id for mode=get or IDE governance actions.",
           "title": "Record Id"
         },
         "root": {

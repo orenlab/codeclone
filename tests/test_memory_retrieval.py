@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from codeclone.memory.governance import record_candidate
 from codeclone.memory.identity import make_identity_key
 from codeclone.memory.models import MemoryRecord, MemorySubject, generate_memory_id
 from codeclone.memory.retrieval import get_relevant_memory, query_engineering_memory
@@ -314,3 +315,71 @@ def test_query_engineering_memory_for_path_finds_module_role(tmp_path: Path) -> 
         if isinstance(item, dict)
     }
     assert len(subjects) == len(keys)
+
+
+def test_get_relevant_memory_includes_scoped_draft_agent_note(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        seed_path_subject_record(
+            store,
+            project_id=project.id,
+            path="codeclone/memory/retrieval/ranking.py",
+            statement="approved active note",
+        )
+        record_candidate(
+            store,
+            project=project,
+            record_type="risk_note",
+            statement="agent draft for ranking module",
+            subject_path="codeclone/memory/retrieval/ranking.py",
+            max_candidates=100,
+        )
+        result = get_relevant_memory(
+            store,
+            project_id=project.id,
+            scope_paths=("codeclone/memory/retrieval/ranking.py",),
+            scope_resolved_from="explicit",
+            max_records=5,
+        )
+
+    policy = result["retrieval_policy"]
+    assert isinstance(policy, dict)
+    assert policy["drafts_included"] is True
+    assert policy["memory_does_not_authorize_edits"] is True
+    records = result["records"]
+    assert isinstance(records, list)
+    statements = [item["statement"] for item in records if isinstance(item, dict)]
+    assert "agent draft for ranking module" in statements
+
+
+def test_query_for_path_includes_draft_without_include_drafts_flag(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (root, project, store, db_path):
+        record_candidate(
+            store,
+            project=project,
+            record_type="change_rationale",
+            statement="draft note on sqlite store",
+            subject_path="codeclone/memory/sqlite_store.py",
+            max_candidates=100,
+        )
+        result = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root,
+            backend="sqlite",
+            db_path=db_path,
+            mode="for_path",
+            path="codeclone/memory/sqlite_store.py",
+            include_drafts=False,
+        )
+
+    payload = result["payload"]
+    assert isinstance(payload, dict)
+    records = payload.get("records")
+    assert isinstance(records, list)
+    assert any(
+        item.get("statement") == "draft note on sqlite store"
+        for item in records
+        if isinstance(item, dict)
+    )
