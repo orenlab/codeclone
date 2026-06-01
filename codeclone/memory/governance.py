@@ -15,6 +15,7 @@ from .enums import MemoryRecordType
 from .exceptions import MemoryCapacityError, MemoryContractError
 from .identity import make_identity_key
 from .models import (
+    MemoryEvidence,
     MemoryProject,
     MemoryQuery,
     MemoryRecord,
@@ -223,6 +224,42 @@ def _finalize_governance_record(
     return updated
 
 
+def _ensure_approval_evidence(
+    store: SqliteEngineeringMemoryStore,
+    record: MemoryRecord,
+    *,
+    record_id: str,
+    approved_by: str,
+    now: str,
+) -> None:
+    """Record the human approval as the warrant for an evidence-less record.
+
+    Every active record must carry at least one evidence link. Agent
+    candidates are approved with no ingested evidence, so the approval itself
+    is the recorded warrant — keeping the store evidence-linked rather than
+    leaving active records with no provenance. Records that already carry
+    evidence (system-ingested facts that went stale and are re-approved) are
+    left untouched.
+    """
+    if store.count_evidence_for_memory(record_id) > 0:
+        return
+    branch = record.verified_on_branch or ""
+    commit = record.verified_at_commit or ""
+    locator = f"{branch}@{commit}".strip("@") or None
+    store.write_evidence(
+        MemoryEvidence(
+            id=generate_memory_id(prefix="evid"),
+            memory_id=record_id,
+            evidence_kind="audit_event",
+            ref=f"human_approval:{approved_by}",
+            locator=locator,
+            quote=None,
+            digest=None,
+            created_at_utc=now,
+        )
+    )
+
+
 def approve_record(
     store: SqliteEngineeringMemoryStore,
     *,
@@ -241,6 +278,13 @@ def approve_record(
         approved_by=approved_by,
         approved_at_utc=now,
         stale_reason=None,
+    )
+    _ensure_approval_evidence(
+        store,
+        record,
+        record_id=record_id,
+        approved_by=approved_by,
+        now=now,
     )
     _write_governance_revision(
         store,

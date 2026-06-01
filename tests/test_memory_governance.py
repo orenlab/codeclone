@@ -52,6 +52,34 @@ def test_record_candidate_and_approve_cycle(tmp_path: Path) -> None:
         store.close()
 
 
+def test_approve_attaches_warrant_evidence(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    project = resolve_project_identity(root)
+    store = SqliteEngineeringMemoryStore(tmp_path / "memory.sqlite3")
+    try:
+        store.initialize(project)
+        draft = record_candidate(
+            store,
+            project=project,
+            record_type="architecture_decision",
+            statement="Memory init runs analysis with api_surface enabled.",
+            max_candidates=100,
+        )
+        # Agent candidates carry subjects but no evidence while draft.
+        assert store.count_evidence_for_memory(draft.id) == 0
+        approve_record(store, record_id=draft.id, approved_by="maintainer")
+        # Every active record must carry at least one evidence link; the
+        # human approval is recorded as the warrant.
+        evidence = store.list_evidence_for_memory(draft.id)
+        assert len(evidence) >= 1
+        warrant = evidence[0]
+        assert warrant.evidence_kind == "audit_event"
+        assert warrant.ref == "human_approval:maintainer"
+    finally:
+        store.close()
+
+
 def test_reject_draft_record(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
