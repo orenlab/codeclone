@@ -49,6 +49,15 @@ VALID_DIRTY_SCOPE_POLICIES: frozenset[str] = frozenset(
 )
 
 
+def _attach_optional_path_lists(
+    payload: dict[str, object],
+    fields: Sequence[tuple[str, tuple[str, ...]]],
+) -> None:
+    for key, paths in fields:
+        if paths:
+            payload[key] = list(paths)
+
+
 @dataclass(frozen=True, slots=True)
 class DirtyPathsResult:
     git_available: bool
@@ -186,36 +195,31 @@ class WorkspaceHygieneResult:
             ],
             "blocks_edit": self.blocks_edit,
         }
-        if self.unacknowledged_dirty_in_scope:
-            payload["unacknowledged_dirty_in_scope"] = list(
-                self.unacknowledged_dirty_in_scope
-            )
-        if self.own_unscoped_dirty:
-            payload["own_unscoped_dirty"] = list(self.own_unscoped_dirty)
-        if self.unattributed_unscoped_dirty:
-            payload["unattributed_unscoped_dirty"] = list(
-                self.unattributed_unscoped_dirty
-            )
-        if self.preexisting_unscoped_dirty:
-            payload["preexisting_unscoped_dirty"] = list(
-                self.preexisting_unscoped_dirty
-            )
-        if self.new_unattributed_unscoped_dirty:
-            payload["new_unattributed_unscoped_dirty"] = list(
-                self.new_unattributed_unscoped_dirty
-            )
-        if self.modified_unattributed_unscoped_dirty:
-            payload["modified_unattributed_unscoped_dirty"] = list(
-                self.modified_unattributed_unscoped_dirty
-            )
-        if self.unknown_unattributed_unscoped_dirty:
-            payload["unknown_unattributed_unscoped_dirty"] = list(
-                self.unknown_unattributed_unscoped_dirty
-            )
-        if self.foreign_attributed_outside_scope:
-            payload["foreign_attributed_outside_scope"] = list(
-                self.foreign_attributed_outside_scope
-            )
+        _attach_optional_path_lists(
+            payload,
+            (
+                ("unacknowledged_dirty_in_scope", self.unacknowledged_dirty_in_scope),
+                ("own_unscoped_dirty", self.own_unscoped_dirty),
+                ("unattributed_unscoped_dirty", self.unattributed_unscoped_dirty),
+                ("preexisting_unscoped_dirty", self.preexisting_unscoped_dirty),
+                (
+                    "new_unattributed_unscoped_dirty",
+                    self.new_unattributed_unscoped_dirty,
+                ),
+                (
+                    "modified_unattributed_unscoped_dirty",
+                    self.modified_unattributed_unscoped_dirty,
+                ),
+                (
+                    "unknown_unattributed_unscoped_dirty",
+                    self.unknown_unattributed_unscoped_dirty,
+                ),
+                (
+                    "foreign_attributed_outside_scope",
+                    self.foreign_attributed_outside_scope,
+                ),
+            ),
+        )
         if self.dirty_attribution:
             payload["dirty_attribution"] = [
                 item.to_payload() for item in self.dirty_attribution
