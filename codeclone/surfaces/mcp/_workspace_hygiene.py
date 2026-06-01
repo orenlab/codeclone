@@ -544,21 +544,21 @@ def finish_hygiene_check(
         sorted(new_unattributed + modified_unattributed + unknown_unattributed)
     )
     unacknowledged = tuple(sorted(set(dirty_in_declared) - evidence))
-    files_for_scope_check = tuple(sorted(evidence | set(unattributed_unscoped)))
+    # Scope check covers only the agent's declared patch (its evidence).
+    # Out-of-scope unattributed dirt is external context, not part of this
+    # patch's scope assertion, so it must not be fed into the scope check
+    # (doing so would mislabel a peer's dirt as a scope violation).
+    files_for_scope_check = tuple(sorted(evidence))
+    # Finish blocks ONLY on proven problems with the agent's own patch:
+    # in-scope dirt missing from evidence, or a live foreign intent
+    # overlapping the declared scope. New/modified/unknown unattributed dirt
+    # outside the declared scope is non-blocking advisory (surfaced via
+    # dirty_paths_outside_scope and the attribution detail).
     blocks_finish = False
     finish_block_reason: str | None = None
     if unacknowledged:
         blocks_finish = True
         finish_block_reason = "missing_evidence"
-    elif new_unattributed:
-        blocks_finish = True
-        finish_block_reason = "new_unattributed_unscoped_dirty"
-    elif modified_unattributed:
-        blocks_finish = True
-        finish_block_reason = "modified_unattributed_unscoped_dirty"
-    elif unknown_unattributed:
-        blocks_finish = True
-        finish_block_reason = "unknown_unattributed_unscoped_dirty"
     elif hygiene.foreign_dirty_overlaps:
         blocks_finish = True
         finish_block_reason = "foreign_dirty_overlap"
@@ -686,15 +686,22 @@ def _dirty_classification(
         if evidence_state == "absent":
             return "missing_evidence", True
         return "declared_scope_dirty", False
+    # Scope-aware finish hygiene: finish verifies the agent's OWN patch
+    # (declared scope ∩ evidence), it does not police the whole dirty tree.
+    # Dirt outside the declared scope with no foreign-intent attribution is
+    # surfaced as a non-blocking advisory, not a block — otherwise a peer
+    # agent's undeclared concurrent edits (or undigestible directory paths)
+    # would fail an innocent finisher. The write-gate is the primary defense
+    # against unmanaged writes; finish hygiene is only the backstop.
     if intent_attribution == "foreign_active_or_stale":
         return "foreign_attributed_outside_scope", False
     if start_state == "present_same":
         return "preexisting_unscoped_dirty", False
     if start_state == "absent":
-        return "new_unattributed_unscoped_dirty", True
+        return "new_unattributed_unscoped_dirty", False
     if start_state == "present_changed":
-        return "modified_unattributed_unscoped_dirty", True
-    return "unknown_unattributed_unscoped_dirty", True
+        return "modified_unattributed_unscoped_dirty", False
+    return "unknown_unattributed_unscoped_dirty", False
 
 
 def _classified_paths(

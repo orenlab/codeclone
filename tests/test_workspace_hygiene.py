@@ -213,9 +213,11 @@ def test_finish_hygiene_check_allows_preexisting_unscoped_dirty(
     assert hygiene.blocks_finish is False
 
 
-def test_finish_hygiene_check_blocks_new_unattributed_unscoped_dirty(
+def test_finish_hygiene_check_treats_new_unattributed_as_advisory(
     tmp_path: Path,
 ) -> None:
+    # Scope-aware finish hygiene: out-of-scope dirt with no foreign-intent
+    # attribution is classified for diagnostics but does NOT block finish.
     store = get_workspace_intent_store(tmp_path)
     start_snapshot = DirtySnapshot(
         git_available=True,
@@ -242,14 +244,16 @@ def test_finish_hygiene_check_blocks_new_unattributed_unscoped_dirty(
             start_dirty_snapshot=start_snapshot,
         )
     assert hygiene.new_unattributed_unscoped_dirty == ("pkg/extra.py",)
-    assert hygiene.unattributed_unscoped_dirty == ("pkg/extra.py",)
-    assert hygiene.blocks_finish is True
-    assert hygiene.finish_block_reason == "new_unattributed_unscoped_dirty"
+    assert hygiene.dirty_paths_outside_scope == ("pkg/extra.py",)
+    assert hygiene.blocks_finish is False
+    assert hygiene.finish_block_reason is None
 
 
-def test_finish_hygiene_check_legacy_snapshot_blocks_unknown_unscoped_dirty(
+def test_finish_hygiene_check_legacy_snapshot_treats_unknown_as_advisory(
     tmp_path: Path,
 ) -> None:
+    # Undigestible/legacy 'unknown' start state (e.g. directories) must never
+    # block finish — authorship cannot be proven, so it is advisory only.
     store = get_workspace_intent_store(tmp_path)
     with _mock_git_porcelain(" M pkg/a.py\n M pkg/extra.py\n"):
         hygiene = finish_hygiene_check(
@@ -264,13 +268,16 @@ def test_finish_hygiene_check_legacy_snapshot_blocks_unknown_unscoped_dirty(
         )
     assert hygiene.unknown_unattributed_unscoped_dirty == ("pkg/extra.py",)
     assert hygiene.dirty_snapshot_status == "missing_legacy_conservative"
-    assert hygiene.blocks_finish is True
-    assert hygiene.finish_block_reason == "unknown_unattributed_unscoped_dirty"
+    assert hygiene.blocks_finish is False
+    assert hygiene.finish_block_reason is None
 
 
-def test_finish_hygiene_check_blocks_modified_unattributed_unscoped_dirty(
+def test_finish_hygiene_check_treats_modified_unattributed_as_advisory(
     tmp_path: Path,
 ) -> None:
+    # An out-of-scope path that changed since start, with no foreign-intent
+    # attribution, is advisory — a peer's concurrent edit must not block the
+    # innocent finisher whose own declared scope is clean.
     store = get_workspace_intent_store(tmp_path)
     start_snapshot = DirtySnapshot(
         git_available=True,
@@ -297,8 +304,8 @@ def test_finish_hygiene_check_blocks_modified_unattributed_unscoped_dirty(
             start_dirty_snapshot=start_snapshot,
         )
     assert hygiene.modified_unattributed_unscoped_dirty == ("pkg/extra.py",)
-    assert hygiene.blocks_finish is True
-    assert hygiene.finish_block_reason == "modified_unattributed_unscoped_dirty"
+    assert hygiene.blocks_finish is False
+    assert hygiene.finish_block_reason is None
 
 
 def test_finish_hygiene_check_ignores_foreign_unscoped_dirty(

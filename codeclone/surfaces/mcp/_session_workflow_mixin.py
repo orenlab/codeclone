@@ -323,18 +323,11 @@ class _MCPSessionWorkflowMixin:
         }
         if finish_hygiene.blocks_finish:
             block_reason = finish_hygiene.finish_block_reason or ""
+            # Only proven patch/scope conflicts block finish: in-scope dirt
+            # missing from evidence, or a live foreign intent overlapping the
+            # declared scope. Out-of-scope unattributed dirt is advisory.
             detail_message = {
                 "missing_evidence": workflow_msgs.FINISH_HYGIENE_MISSING_EVIDENCE,
-                "own_unscoped_dirty": workflow_msgs.FINISH_HYGIENE_OWN_UNSCOPED,
-                "new_unattributed_unscoped_dirty": (
-                    workflow_msgs.FINISH_HYGIENE_NEW_UNATTRIBUTED
-                ),
-                "modified_unattributed_unscoped_dirty": (
-                    workflow_msgs.FINISH_HYGIENE_MODIFIED_UNATTRIBUTED
-                ),
-                "unknown_unattributed_unscoped_dirty": (
-                    workflow_msgs.FINISH_HYGIENE_UNKNOWN_UNATTRIBUTED
-                ),
                 "foreign_dirty_overlap": workflow_msgs.FINISH_HYGIENE_FOREIGN_DIRTY,
             }.get(block_reason, workflow_msgs.FINISH_HYGIENE_BLOCKED)
             return {
@@ -348,7 +341,6 @@ class _MCPSessionWorkflowMixin:
                 "intent_cleared": False,
                 "user_action_required": True,
                 "next_step": workflow_msgs.FINISH_HYGIENE_NEXT,
-                "workspace_hygiene": finish_hygiene.to_payload(),
                 "workspace_hygiene_after": workspace_hygiene_after,
                 "message": detail_message,
             }
@@ -467,10 +459,18 @@ class _MCPSessionWorkflowMixin:
             self._clear_change_intent(intent_id=intent_id)
             intent_cleared = True
 
+        # External workspace changes (dirty outside the declared scope) are
+        # advisory, never blocking; a clean accepted verdict is elevated to
+        # accepted_with_external_changes. See _external_change_advisory.
+        effective_status, external_advisory = _external_change_advisory(
+            verify_status,
+            finish_hygiene.dirty_paths_outside_scope,
+        )
+
         # 10. Compose response
         result: dict[str, object] = {
             "intent_id": intent_id,
-            "status": verify_status,
+            "status": effective_status,
             "reason": verify_payload.get("reason"),
             "scope_check": check_payload,
             "verification": verify_payload,
@@ -499,6 +499,8 @@ class _MCPSessionWorkflowMixin:
         }
         if receipt_error is not None:
             result["receipt_error"] = receipt_error
+        if external_advisory is not None:
+            result["external_changes"] = external_advisory
         if isinstance(health_regression_advisory, dict):
             result["health_regression_advisory"] = health_regression_advisory
         if propose_memory and verify_status in _ACCEPTED_STATUSES:
@@ -695,6 +697,31 @@ def _require_non_empty_changed_evidence(paths: Sequence[str]) -> tuple[str, ...]
     if not resolved:
         raise MCPServiceContractError(workflow_msgs.FINISH_EVIDENCE_REQUIRED)
     return resolved
+
+
+def _external_change_advisory(
+    verify_status: str,
+    external_paths: Sequence[str],
+) -> tuple[str, dict[str, object] | None]:
+    """Elevate a clean accepted verdict when external workspace dirt exists.
+
+    ``external_paths`` are dirty paths outside the declared scope — advisory
+    only, never blocking. Returns ``(effective_status, advisory_or_None)``: a
+    plain ``accepted`` becomes ``accepted_with_external_changes`` and a compact
+    advisory is produced; any other status is returned unchanged.
+    """
+    external = list(external_paths)
+    if not external:
+        return verify_status, None
+    effective_status = verify_status
+    if verify_status == PatchContractStatus.ACCEPTED.value:
+        effective_status = PatchContractStatus.ACCEPTED_EXTERNAL.value
+    advisory = {
+        "count": len(external),
+        "sample": external[:10],
+        "truncated": len(external) > 10,
+    }
+    return effective_status, advisory
 
 
 def _finish_summary(
