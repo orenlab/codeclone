@@ -49,12 +49,16 @@ Before editing any repository files:
    — if `concurrent_intents` non-empty without queue, narrow scope or ask
    — if start blocks on your own dirty scope with no foreign overlap, retry with
    `dirty_scope_policy="continue_own_wip"`; finish must still prove scope
-3. Edit within declared scope only
-4. `analyze_repository(root="<abs_path>")`
+3. `get_relevant_memory(root=..., scope=... or intent_id=...)` — after
+   `edit_allowed=true` (see **Memory-aware workflow**)
+4. Edit within declared scope only
+5. `analyze_repository(root="<abs_path>")`
    — after-run; required for Python structural and governance config changes.
    May be skipped for documentation-only and other non-Python patches when
    `finish` can verify from changed-file evidence
-5. `finish_controlled_change(intent_id=..., changed_files=[...], after_run_id=...)`
+6. **Engineering Memory write (MCP) when required** — before step 7, not in chat
+   (see **Before `finish`: incident / complexity memory**)
+7. `finish_controlled_change(intent_id=..., changed_files=[...], after_run_id=...)`
    — returns scope check, verification, receipt, and clears intent
    — finish **reconciles evidence with the full git tree**: under-reported
    in-scope dirty → `finish_block_reason: missing_evidence`; own unscoped dirty
@@ -74,9 +78,11 @@ Before editing any repository files:
 Workflow profiles determine which steps are needed:
 
 - **Python structural / governance config**:
-  `analyze` → `start` → edit → `analyze` → `finish(after_run_id=...)`
+  `analyze` → `start` → `get_relevant_memory` → edit → `analyze` →
+  `record_candidate` (if required) → `finish(after_run_id=...)`
 - **Documentation-only / non-Python**:
-  `analyze` → `start` → edit → `finish(changed_files=[...])`
+  `analyze` → `start` → `get_relevant_memory` → edit →
+  `record_candidate` (if required) → `finish(changed_files=[...])`
   For `non_python_patch`, report controller-stated limitations and do not
   present the result as full structural verification.
 
@@ -86,10 +92,15 @@ Engineering Memory is a local SQLite store of evidence-linked repository facts.
 Full playbook: `docs/book/26-engineering-memory.md`. MCP help:
 `help(topic="engineering_memory")`.
 
+**Chat is not memory.** Text in this conversation is ephemeral (context shrink,
+new session, new MCP process). Anything the next agent must remember belongs in
+Engineering Memory via MCP — never “I noted it in the summary” alone.
+
 **Bootstrap:** default `mcp_sync_policy=bootstrap_if_missing` auto-creates the
 store from the latest MCP run on `get_relevant_memory`. Explicit refresh:
 `manage_engineering_memory(action="refresh_from_run")`. CLI `memory init` remains
-for CI/offline. Human approve still required for agent drafts.
+for CI/offline. Human approve still required for agent drafts (VS Code Memory
+view — not MCP, not `codeclone memory approve`).
 
 After `start_controlled_change` returns `edit_allowed: true`:
 
@@ -101,16 +112,43 @@ After `start_controlled_change` returns `edit_allowed: true`:
 6. If memory contains a `contradiction_note` for your scope, surface it to
    the user before editing
 
-**Optional writes (draft only — human approve required for active facts):**
+### Before `finish`: incident / complexity memory (MANDATORY)
 
-| When | Tool |
-|------|------|
-| Stable observation during edit | `manage_engineering_memory(action=record_candidate, record_type, statement, subject_path?)` |
-| Before finish claims | `manage_engineering_memory(action=validate_claims, text=…)` |
-| After accepted patch | `finish_controlled_change(..., propose_memory=true)` → review `memory_candidates` |
+**Do not call `finish_controlled_change` until this check passes.**
 
-Agents **cannot** call `memory approve/reject/archive` via MCP. Ask the user to
-promote drafts when a record should become trusted project memory.
+If the edit cycle involved **any** of the following, you **must** write at least
+one durable note through MCP **before** step 7 (`finish`):
+
+| Trigger | Examples |
+|---------|----------|
+| **Incident** | verify/hygiene surprise, `unverified`/`violated` recovery, workaround, blocked step, foreign intent friction |
+| **Complexity** | non-obvious root cause, multi-file debug, near `do_not_touch`, acted on stale/contradiction memory |
+| **Decision** | tradeoff, integration quirk, “next agent must not repeat X” |
+
+**Skip** only trivial edits (typo, one obvious line, nothing to relearn).
+
+**How to write (MCP only):**
+
+```text
+manage_engineering_memory(
+  action=record_candidate,
+  record_type=risk_note | change_rationale,
+  statement="<what happened, what we learned, what to do next time>",
+  subject_path="<main repo-relative file you touched>"
+)
+```
+
+Or batch several notes with `finish_controlled_change(..., propose_memory=true)`.
+Optional: `manage_engineering_memory(action=validate_claims, text=...)` on
+`claims_text` before finish.
+
+| Other writes | Tool |
+|--------------|------|
+| During edit (stable observation) | `record_candidate` (same as above) |
+| After accepted patch | `finish(..., propose_memory=true)` → `memory_candidates` |
+
+Agents **cannot** call `approve` / `reject` / `archive` via MCP. Ask the user to
+use the CodeClone VS Code **Memory** view to promote drafts.
 
 Memory cannot authorize edits, expand scope, or override findings.
 
@@ -162,6 +200,10 @@ verification in one cycle.
   a completed task.
 - Live foreign intent means **stop**, not kill. Never suggest killing
   a process without explicit user confirmation that the PID is abandoned.
+- **MUST NOT** call `finish_controlled_change` after a non-trivial cycle without
+  `record_candidate` (or `propose_memory=true`) when incident/complexity/decision
+  triggers applied — chat summaries do not count.
+- **MUST NOT** treat assistant chat text as Engineering Memory.
 
 ### User escalation policy
 
