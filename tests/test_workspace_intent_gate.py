@@ -147,3 +147,50 @@ def test_gate_does_not_create_missing_sqlite_registry(
     assert decision.allowed is False
     assert decision.reason == "no_active_intent"
     assert not db_path.exists()
+
+
+def test_gate_closes_sqlite_read_connection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CODECLONE_INTENT_REGISTRY_BACKEND", "sqlite")
+    monkeypatch.setenv(
+        "CODECLONE_INTENT_REGISTRY_PATH",
+        DEFAULT_INTENT_REGISTRY_DB_PATH,
+    )
+    clear_workspace_intent_store_cache()
+    db_path = tmp_path / DEFAULT_INTENT_REGISTRY_DB_PATH
+    db_path.parent.mkdir(parents=True)
+    db_path.touch()
+    seen: dict[str, object] = {}
+
+    class _FakeConnection:
+        closed = False
+
+        def execute(self, sql: str) -> _FakeConnection:
+            seen["sql"] = sql
+            return self
+
+        def fetchall(self) -> list[tuple[str]]:
+            return []
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake = _FakeConnection()
+
+    def _connect(database: str, *, uri: bool) -> _FakeConnection:
+        seen["uri"] = database
+        seen["uri_flag"] = uri
+        return fake
+
+    monkeypatch.setattr("codeclone.workspace_intent.gate.sqlite3.connect", _connect)
+
+    decision = evaluate_workspace_edit_gate(tmp_path)
+
+    assert decision.allowed is False
+    assert decision.reason == "no_active_intent"
+    assert fake.closed is True
+    assert seen["uri_flag"] is True
+    assert str(seen["uri"]).endswith("?mode=ro")
+    assert "SELECT payload_json" in str(seen["sql"])

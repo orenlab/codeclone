@@ -212,7 +212,8 @@ def _load_sqlite_records(db_path: Path) -> tuple[WorkspaceIntentRecord, ...]:
     if not db_path.is_file():
         return ()
     uri = f"file:{quote(str(db_path), safe='/')}?mode=ro"
-    with sqlite3.connect(uri, uri=True) as conn:
+    conn = sqlite3.connect(uri, uri=True)
+    try:
         rows = conn.execute(
             """
             SELECT payload_json
@@ -220,6 +221,8 @@ def _load_sqlite_records(db_path: Path) -> tuple[WorkspaceIntentRecord, ...]:
             ORDER BY declared_at_utc, agent_pid, intent_id
             """
         ).fetchall()
+    finally:
+        conn.close()
     records = [
         record
         for record in (_record_from_payload(row[0]) for row in rows)
