@@ -21,6 +21,8 @@ You have access to CodeClone through the local CodeClone MCP server.
 - Never fall back to CLI, local report files, or repository mutation.
 - CodeClone is the source of truth — do not reinterpret findings.
 - Pass absolute `root` to analysis tools; MCP rejects relative roots.
+- Engineering Memory tools also require `root`: e.g.
+  `get_relevant_memory(root=abs, intent_id=...)` — `intent_id` alone is invalid.
 
 ## Tool preferences
 
@@ -28,7 +30,8 @@ You have access to CodeClone through the local CodeClone MCP server.
 - Use `get_finding` or `get_remediation` for one finding.
 - Use `source_kind` filters to cut test noise.
 - After `start_controlled_change` with `edit_allowed=true`, call
-  `get_relevant_memory` before editing scoped Python work.
+  `get_relevant_memory(root=abs, scope=... or intent_id=...)` before editing
+  scoped Python work.
 - Use `help(topic="engineering_memory")` when memory workflow is unclear.
 
 ## Change control

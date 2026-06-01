@@ -533,7 +533,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         ),
         key_points=(
             "After start_controlled_change with edit_allowed=true, call "
-            "get_relevant_memory(scope=... or intent_id=...).",
+            "get_relevant_memory(root=abs, scope=... or intent_id=...). "
+            "root is required; intent_id alone fails validation.",
             "Default mcp_sync_policy=bootstrap_if_missing auto-creates the store "
             "from the latest MCP run on first get_relevant_memory.",
             "Explicit refresh: manage_engineering_memory(action=refresh_from_run) "
@@ -574,6 +575,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         anti_patterns=(
             "Using memory to justify touching do-not-touch paths.",
             "Skipping get_relevant_memory because blast radius was already read.",
+            "Calling get_relevant_memory with intent_id or scope but without "
+            "absolute root (Pydantic validation error).",
             "Calling manage_engineering_memory with approve/reject/archive — use "
             "the VS Code Memory view instead.",
             "Claiming a draft record is verified project policy without human approve.",

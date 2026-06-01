@@ -224,7 +224,7 @@ sequenceDiagram
     M-->>A: run_id
     A->>M: start_controlled_change
     M-->>A: edit_allowed=true
-    A->>M: get_relevant_memory(intent_id)
+    A->>M: get_relevant_memory(root, intent_id)
     M->>S: decide + execute (policy)
     alt missing DB + bootstrap_if_missing
         S->>DB: init ingest from run report
@@ -336,7 +336,7 @@ Ranked, scope-aware context for the **declared edit scope**.
 
 | Parameter                         | Purpose                                                       |
 |-----------------------------------|---------------------------------------------------------------|
-| `root`                            | Absolute repository root                                      |
+| `root`                            | **Required.** Absolute repository root (same as `analyze_repository`) |
 | `scope`                           | Explicit repo-relative paths                                  |
 | `intent_id`                       | Active intent from `start_controlled_change` (resolves scope) |
 | `symbols`                         | Optional qualname keys for boost                              |
@@ -345,6 +345,10 @@ Ranked, scope-aware context for the **declared edit scope**.
 
 When neither `scope` nor `intent_id` is passed, returns a **project summary**
 — useful for orientation, not pre-edit context.
+
+`intent_id` or `scope` without `root` fails MCP argument validation (Pydantic).
+Always pass the same absolute `root` used for `analyze_repository` and
+`start_controlled_change`.
 
 When auto-sync runs, the response includes a `memory_sync` object (`status`,
 `trigger`, `run_id`, `report_digest`, ingest stats). Omitted when sync was skipped
@@ -445,7 +449,7 @@ style G fill: #fef9c3
 
 | Moment                           | Tool                                                                     | Why                                           |
 |----------------------------------|--------------------------------------------------------------------------|-----------------------------------------------|
-| After `start`, before first edit | `get_relevant_memory(scope=… \| intent_id=…)`                            | Ranked context for declared scope             |
+| After `start`, before first edit | `get_relevant_memory(root=abs, scope=… \| intent_id=…)`                 | Ranked context for declared scope             |
 | Need one path deep-dive          | `query_engineering_memory(mode=for_path, path=…)`                        | Targeted lookup                               |
 | Need keyword across store        | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` | FTS discovery                                 |
 | Before writing claims in finish  | `manage_engineering_memory(action=validate_claims, text=…)`              | Catch overclaims vs memory                    |

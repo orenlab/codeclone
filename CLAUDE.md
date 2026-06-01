@@ -108,7 +108,8 @@ view — not MCP, not `codeclone memory approve`).
 
 After `start_controlled_change` returns `edit_allowed: true`:
 
-1. Call `get_relevant_memory` with explicit `scope` or the active `intent_id`
+1. Call `get_relevant_memory(root="<abs_path>", scope=... or intent_id=...)`.
+   **`root` is required** — `intent_id` alone fails MCP validation.
 2. Read contract warnings, stale decisions, and `contradiction_note` alerts
 3. Use `query_engineering_memory(mode=for_path)` or `mode=search` for drill-down
 4. Do NOT ignore stale memory warnings — they indicate changed context

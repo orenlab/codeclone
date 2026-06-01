@@ -85,7 +85,7 @@ not approve via MCP.
 ```
 analyze_repository(root=<abs>)     # skip if valid recent run exists
 start_controlled_change(...)       # before the first file write
-get_relevant_memory(...)           # after edit_allowed=true, when applicable
+get_relevant_memory(root=abs, ...) # root required; after edit_allowed=true
 <edit only inside declared scope>
 analyze_repository(...)            # after-run when finish profile requires it
 record_candidate / propose_memory  # REQUIRED before finish if incident/complexity

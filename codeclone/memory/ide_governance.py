@@ -12,7 +12,7 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NoReturn
 
 from .exceptions import MemoryContractError
 from .governance import approve_record, archive_record, reject_record
@@ -106,25 +106,109 @@ def compute_governance_proof(
     return hmac.new(key, message, hashlib.sha256).hexdigest()
 
 
+def _raise_memory_contract(
+    message: str,
+    *,
+    cause: BaseException | None = None,
+) -> NoReturn:
+    if cause is None:
+        raise MemoryContractError(message)
+    raise MemoryContractError(message) from cause
+
+
 def _parse_governance_key(raw_key: str) -> bytes:
     cleaned = raw_key.strip().lower()
     if cleaned.startswith("0x"):
         cleaned = cleaned[2:]
-    if len(cleaned) < IDE_GOVERNANCE_MIN_KEY_BYTES * 2:
-        msg = "ide_governance_key must be at least 32 bytes (64 hex characters)."
-        raise MemoryContractError(msg)
     if len(cleaned) % 2 != 0:
-        msg = "ide_governance_key hex length must be even."
-        raise MemoryContractError(msg)
+        _raise_memory_contract("ide_governance_key hex length must be even.")
     try:
         key = bytes.fromhex(cleaned)
     except ValueError as exc:
-        msg = "ide_governance_key must be valid hexadecimal."
-        raise MemoryContractError(msg) from exc
+        _raise_memory_contract(
+            "ide_governance_key must be valid hexadecimal.",
+            cause=exc,
+        )
     if len(key) < IDE_GOVERNANCE_MIN_KEY_BYTES:
-        msg = "ide_governance_key must be at least 32 bytes."
-        raise MemoryContractError(msg)
+        _raise_memory_contract(
+            "ide_governance_key must be at least 32 bytes (64 hex characters)."
+        )
     return key
+
+
+def _validate_ide_governance_protocol(protocol: int) -> None:
+    if protocol != IDE_GOVERNANCE_PROTOCOL_VERSION:
+        _raise_memory_contract(
+            f"Unsupported ide_attestation protocol {protocol!r}. "
+            f"Expected {IDE_GOVERNANCE_PROTOCOL_VERSION}."
+        )
+
+
+def _governance_key_or_reject(
+    state: IdeGovernanceSessionState,
+    *,
+    action: str,
+) -> bytes | dict[str, object]:
+    key = state.governance_key
+    if key is None:
+        return _governance_rejected(
+            action,
+            reason="governance_key_missing",
+        )
+    return key
+
+
+def _assert_ticket_request_matches(
+    ticket: IdeGovernanceTicket,
+    *,
+    record_id: str,
+    decision: GovernanceDecision,
+    project_id: str,
+    statement_digest: str,
+) -> None:
+    if (
+        ticket.record_id != record_id
+        or ticket.decision != decision
+        or ticket.project_id != project_id
+        or ticket.statement_digest != statement_digest
+    ):
+        _raise_memory_contract("Governance ticket does not match the commit request.")
+
+
+def _require_matching_confirmation_nonce(
+    ticket: IdeGovernanceTicket,
+    confirmation_nonce: str,
+) -> None:
+    if confirmation_nonce != ticket.confirmation_nonce:
+        _raise_memory_contract(
+            "confirmation_nonce does not match the prepared governance ticket."
+        )
+
+
+def _require_valid_governance_proof(
+    *,
+    key: bytes,
+    ticket_id: str,
+    record_id: str,
+    decision: GovernanceDecision,
+    confirmation_nonce: str,
+    project_id: str,
+    statement_digest: str,
+    protocol: int,
+    proof: str,
+) -> None:
+    expected_proof = compute_governance_proof(
+        key,
+        ticket_id=ticket_id,
+        record_id=record_id,
+        decision=decision,
+        confirmation_nonce=confirmation_nonce,
+        project_id=project_id,
+        statement_digest=statement_digest,
+        protocol=protocol,
+    )
+    if not hmac.compare_digest(expected_proof, proof.strip().lower()):
+        _raise_memory_contract("Invalid IDE governance proof.")
 
 
 def _resolve_client_label(state: IdeGovernanceSessionState) -> str:
@@ -177,8 +261,9 @@ def _require_governance_channel(
 def _validate_repository_project(project_id: str, root_path: str | Path) -> None:
     expected_project_id = compute_project_id(Path(root_path))
     if project_id != expected_project_id:
-        msg = "Memory project identity does not match the requested repository root."
-        raise MemoryContractError(msg)
+        _raise_memory_contract(
+            "Memory project identity does not match the requested repository root."
+        )
 
 
 def _find_project_record(
@@ -196,8 +281,7 @@ def _find_project_record(
 def _validate_decision(decision: str) -> GovernanceDecision:
     normalized = decision.strip().lower()
     if normalized not in {"approve", "reject", "archive"}:
-        msg = f"Unknown governance decision: {decision!r}"
-        raise MemoryContractError(msg)
+        _raise_memory_contract(f"Unknown governance decision: {decision!r}")
     return normalized  # type: ignore[return-value]
 
 
@@ -206,11 +290,9 @@ def _validate_record_for_decision(
     decision: GovernanceDecision,
 ) -> None:
     if decision in {"approve", "reject"} and record.status not in {"draft", "stale"}:
-        msg = f"Cannot {decision} record in status '{record.status}'"
-        raise MemoryContractError(msg)
+        _raise_memory_contract(f"Cannot {decision} record in status '{record.status}'")
     if decision == "archive" and record.status != "active":
-        msg = f"Cannot archive record in status '{record.status}'"
-        raise MemoryContractError(msg)
+        _raise_memory_contract(f"Cannot archive record in status '{record.status}'")
 
 
 def register_ide_governance(
@@ -317,23 +399,21 @@ def _consume_ticket(
 ) -> IdeGovernanceTicket:
     ticket = state.tickets.get(ticket_id)
     if ticket is None:
-        msg = f"Unknown or expired governance ticket: {ticket_id!r}"
-        raise MemoryContractError(msg)
+        _raise_memory_contract(f"Unknown or expired governance ticket: {ticket_id!r}")
     if ticket.consumed:
-        msg = "Governance ticket was already used."
-        raise MemoryContractError(msg)
+        _raise_memory_contract("Governance ticket was already used.")
     if time.time() > ticket.expires_at_unix:
         state.tickets.pop(ticket_id, None)
-        msg = "Governance ticket expired. Prepare governance again from the IDE."
-        raise MemoryContractError(msg)
-    if (
-        ticket.record_id != record_id
-        or ticket.decision != decision
-        or ticket.project_id != project_id
-        or ticket.statement_digest != statement_digest
-    ):
-        msg = "Governance ticket does not match the commit request."
-        raise MemoryContractError(msg)
+        _raise_memory_contract(
+            "Governance ticket expired. Prepare governance again from the IDE."
+        )
+    _assert_ticket_request_matches(
+        ticket,
+        record_id=record_id,
+        decision=decision,
+        project_id=project_id,
+        statement_digest=statement_digest,
+    )
     ticket.consumed = True
     return ticket
 
@@ -355,18 +435,14 @@ def commit_governance(
     rejected = _require_governance_channel(state, action="commit_governance")
     if rejected is not None:
         return rejected
-    if protocol != IDE_GOVERNANCE_PROTOCOL_VERSION:
-        msg = (
-            f"Unsupported ide_attestation protocol {protocol!r}. "
-            f"Expected {IDE_GOVERNANCE_PROTOCOL_VERSION}."
-        )
-        raise MemoryContractError(msg)
-    key = state.governance_key
-    if key is None:
-        return _governance_rejected(
-            "commit_governance",
-            reason="governance_key_missing",
-        )
+    _validate_ide_governance_protocol(protocol)
+    key_or_rejected = _governance_key_or_reject(
+        state,
+        action="commit_governance",
+    )
+    if isinstance(key_or_rejected, dict):
+        return key_or_rejected
+    key = key_or_rejected
     normalized_decision = _validate_decision(decision)
     record = _find_project_record(
         store,
@@ -389,11 +465,9 @@ def commit_governance(
         project_id=project_id,
         statement_digest=statement_digest,
     )
-    if confirmation_nonce != ticket.confirmation_nonce:
-        msg = "confirmation_nonce does not match the prepared governance ticket."
-        raise MemoryContractError(msg)
-    expected_proof = compute_governance_proof(
-        key,
+    _require_matching_confirmation_nonce(ticket, confirmation_nonce)
+    _require_valid_governance_proof(
+        key=key,
         ticket_id=governance_ticket,
         record_id=record_id,
         decision=normalized_decision,
@@ -401,10 +475,8 @@ def commit_governance(
         project_id=project_id,
         statement_digest=statement_digest,
         protocol=protocol,
+        proof=proof,
     )
-    if not hmac.compare_digest(expected_proof, proof.strip().lower()):
-        msg = "Invalid IDE governance proof."
-        raise MemoryContractError(msg)
     _validate_record_for_decision(record, normalized_decision)
     actor_label = actor.strip() or _resolve_client_label(state)
     if normalized_decision == "approve":

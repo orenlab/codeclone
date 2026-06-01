@@ -19,7 +19,7 @@ class MemoryController {
      */
     constructor(extension) {
         this.extension = extension;
-        /** @type {Map<string, {loadedAt: number, connected: boolean, status: object|null, drafts: object[], stale: object[]}>} */
+        /** @type {Map<string, {loadedAt: number, connected: boolean, memorySupported: boolean, status: object|null, drafts: object[], stale: object[]}>} */
         this.cacheByRoot = new Map();
     }
 
@@ -49,6 +49,28 @@ class MemoryController {
             const snapshot = {
                 loadedAt: now,
                 connected: false,
+                memorySupported: true,
+                status: null,
+                drafts: [],
+                stale: [],
+            };
+            this.cacheByRoot.set(key, snapshot);
+            return snapshot;
+        }
+        // Engineering Memory tools exist only on CodeClone 2.1.0a1+. The
+        // extension's minimum-version gate (2.0.0) still admits older servers,
+        // so detect the capability from the connected server's advertised tool
+        // list rather than guessing from a version string. Without this, the
+        // Memory view would call missing tools and surface a misleading
+        // "not initialized" state on older servers.
+        const toolNames = safeArray(
+            this.extension.client.getConnectionSnapshot().toolNames
+        ).map((name) => String(name));
+        if (!toolNames.includes("query_engineering_memory")) {
+            const snapshot = {
+                loadedAt: now,
+                connected: true,
+                memorySupported: false,
                 status: null,
                 drafts: [],
                 stale: [],
@@ -90,7 +112,14 @@ class MemoryController {
         } catch {
             stale = [];
         }
-        const snapshot = {loadedAt: now, connected: true, status, drafts, stale};
+        const snapshot = {
+            loadedAt: now,
+            connected: true,
+            memorySupported: true,
+            status,
+            drafts,
+            stale,
+        };
         this.cacheByRoot.set(key, snapshot);
         return snapshot;
     }
@@ -118,6 +147,18 @@ class MemoryController {
         const snapshot = await this.ensureSnapshot(folder);
         if (!snapshot.connected) {
             return [];
+        }
+        if (!snapshot.memorySupported) {
+            if (node) {
+                return [];
+            }
+            return [
+                {
+                    nodeType: "message",
+                    label: "Engineering Memory requires CodeClone 2.1.0a1 or newer.",
+                    icon: new vscode.ThemeIcon("info"),
+                },
+            ];
         }
         if (!node) {
             const children = [

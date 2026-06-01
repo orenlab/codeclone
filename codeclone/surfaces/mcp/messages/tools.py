@@ -45,9 +45,9 @@ GET_BLAST_RADIUS: Final = (
 
 GET_RELEVANT_MEMORY: Final = (
     "Return ranked, evidence-linked engineering memory for the declared "
-    "edit scope. Pass explicit scope paths or an active intent_id from "
-    "start_controlled_change. Read-only; does not mutate the memory "
-    "database."
+    "edit scope. Requires absolute root (same as analyze_repository). "
+    "Pass scope paths and/or an active intent_id from start_controlled_change; "
+    "intent_id alone is invalid. Read-only; does not mutate the memory database."
 )
 
 QUERY_ENGINEERING_MEMORY: Final = (

@@ -38,7 +38,7 @@ One edit cycle:
 ```
 1. analyze_repository(root=abs)           # before-run; skip if valid recent run
 2. start_controlled_change(...)           # see decision table — before first edit
-3. get_relevant_memory(scope=... or intent_id=...)  # after edit_allowed=true
+3. get_relevant_memory(root=abs, scope=... or intent_id=...)  # root required
 4. edit inside declared scope only
 5. analyze_repository(root=abs)           # after-run ONLY if finish will require it
 6. record engineering memory (MCP)        # REQUIRED before finish if §Incident memory
@@ -52,12 +52,14 @@ Intent binds to the **before-run digest** — do not redeclare on the after-run.
 ### Engineering Memory (step 3)
 
 After `edit_allowed=true`, call `get_relevant_memory` before the first edit.
-Requires `analyze_repository` before memory reads. Default policy auto-bootstraps
-on `get_relevant_memory`; use `refresh_from_run` for explicit ingest.
+**Always pass absolute `root`** (same as `analyze_repository`); `intent_id` or
+`scope` alone fails MCP validation. Requires `analyze_repository` before memory
+reads. Default policy auto-bootstraps on `get_relevant_memory`; use
+`refresh_from_run` for explicit ingest.
 
 | Need                 | Tool                                                                     |
 |----------------------|--------------------------------------------------------------------------|
-| Ranked scope context | `get_relevant_memory(scope=… \| intent_id=…)`                            |
+| Ranked scope context | `get_relevant_memory(root=abs, scope=… \| intent_id=…)`                  |
 | One path             | `query_engineering_memory(mode=for_path, path=…)`                        |
 | Keyword search       | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` |
 | Draft observation    | `manage_engineering_memory(action=record_candidate, …)`                  |

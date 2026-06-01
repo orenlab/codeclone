@@ -343,7 +343,7 @@ sequenceDiagram
 | `finish_controlled_change` | Post-edit workflow: scope check + verify + claims + receipt + clear (`propose_memory` for draft candidates on accept) |
 | `manage_change_intent`     | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace |
 | `get_blast_radius`         | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                    |
-| `get_relevant_memory`      | Ranked engineering memory for declared edit scope (explicit scope or active intent_id)                               |
+| `get_relevant_memory`      | Ranked engineering memory for declared edit scope. **Requires `root`**; pass `scope` and/or active `intent_id`       |
 | `query_engineering_memory`   | Mode router: search, get, for_path, for_symbol, stale, coverage, status. Search supports `filters.match_mode` (`any`\|`all`) |
 | `manage_engineering_memory`  | Agent memory governance: `record_candidate`, `validate_claims`, `propose_from_receipt`, `refresh_from_run`. Human approve/reject/archive use the CodeClone VS Code **Memory** view (IDE channel only; not available to agents).    |
 | `check_patch_contract`     | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                               |
@@ -433,7 +433,7 @@ sequenceDiagram
 
 | When | Tool | Why |
 |------|------|-----|
-| After `start`, before edit | `get_relevant_memory(scope \| intent_id)` | Ranked scope context |
+| After `start`, before edit | `get_relevant_memory(root, scope \| intent_id)` | Ranked scope context |
 | One path / symbol | `query_engineering_memory(mode=for_path\|for_symbol)` | Targeted lookup |
 | Keyword discovery | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` | FTS search |
 | Refresh system facts | `manage_engineering_memory(action=refresh_from_run, run_id?)` | Force ingest from MCP run |

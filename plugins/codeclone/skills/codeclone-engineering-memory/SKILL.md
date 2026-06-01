@@ -18,7 +18,7 @@ latest MCP analysis run on first `get_relevant_memory` after `analyze_repository
 
 | Need | Tool |
 |------|------|
-| Auto bootstrap (default) | `analyze_repository` → `get_relevant_memory` |
+| Auto bootstrap (default) | `analyze_repository(root=abs)` → `get_relevant_memory(root=abs, …)` |
 | Explicit refresh | `manage_engineering_memory(action=refresh_from_run, run_id?)` |
 | CI / offline bootstrap | `codeclone memory init [--refresh]` |
 
@@ -30,7 +30,7 @@ Do not invent memory from local files or report dumps.
 
 | Moment                           | Tool                       | Parameters                                                  |
 |----------------------------------|----------------------------|-------------------------------------------------------------|
-| After `start`, before first edit | `get_relevant_memory`      | `scope` or `intent_id` from active intent                   |
+| After `start`, before first edit | `get_relevant_memory`      | **`root` required**; `scope` or `intent_id` from active intent |
 | One file deep-dive               | `query_engineering_memory` | `mode=for_path`, `path`                                     |
 | Symbol context                   | `query_engineering_memory` | `mode=for_symbol`, `symbol`                                 |
 | Keyword discovery                | `query_engineering_memory` | `mode=search`, `query`, `filters={match_mode:"any"\|"all"}` |
