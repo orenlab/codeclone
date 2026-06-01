@@ -67,10 +67,42 @@ deterministic findings with file paths and evidence, not opinions.
 
 ## Hooks
 
-- **Post-edit reminder** (`afterFileEdit`) — when a Python file is edited,
-  reminds the agent to re-run analysis and check intent status.
-- **Session cleanup** (`stop`) — at session end, warns if change intents were
-  declared but not cleared.
+Cursor **Settings → Hooks** lists only **project** (`.cursor/hooks.json`) and
+**user** (`~/.cursor/hooks.json`) configs — not plugin-manifest hooks. Install
+project hooks so the IDE shows them and they run in this repo:
+
+```bash
+# from the codeclone repo root (creates .cursor/hooks.json + codeclone-hooks.json)
+uv run python plugins/cursor-codeclone/scripts/install-project-hooks.py
+
+# gate all repository files (not only Python)
+uv run python plugins/cursor-codeclone/scripts/install-project-hooks.py --enforce-scope repo
+
+# any other Python project
+uv run python plugins/cursor-codeclone/scripts/install-project-hooks.py /path/to/project
+```
+
+**Enforcement scope** (`.cursor/codeclone-hooks.json` or `CODECLONE_HOOKS_ENFORCE_SCOPE`):
+
+| Mode | Value | Blocks without `start_controlled_change` |
+|------|-------|------------------------------------------|
+| Python only | `python` (default) | `.py` / `.pyi` under the workspace |
+| Full repo | `repo` | any write under the workspace root |
+
+Hook behavior:
+
+- **Change-control gate** (`preToolUse`, `failClosed`) — `permission: deny` when
+  CodeClone's configured workspace intent registry has no live active intent.
+  The hook uses the public `codeclone.workspace_intent` read-only API, so file
+  and SQLite registry backends behave the same. Without an authorized intent,
+  direct repository file writes are blocked, including `.git/**`; only read-only
+  Git inspection shell commands are allowed.
+- **Python write reminder** (`postToolUse`) — advisory `additional_context` after
+  `.py` / `.pyi` writes.
+- **Session cleanup** (`stop`) — optional `followup_message` for unclosed intents.
+
+Reload Cursor or reopen the workspace after installing. Project hooks require a
+**trusted** workspace.
 
 ---
 

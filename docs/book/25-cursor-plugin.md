@@ -60,9 +60,11 @@ The plugin currently provides:
 - two rules:
     - `codeclone-workflow.mdc` — MCP discipline (always active)
     - `codeclone-python.mdc` — Python file context (glob-triggered)
-- two hooks (Python scripts under `hooks/`; advisory reminders only, no MCP calls):
-    - `afterFileEdit` — post-edit re-analysis reminder
-    - `stop` — session-end intent cleanup check
+- three hooks (Python scripts under `hooks/`; advisory reminders only, no MCP calls):
+    - `postToolUse` (matcher `Write|StrReplace|ApplyPatch`) — injects
+      `additional_context` after Python source writes
+    - `stop` (`loop_limit: 1`) — `followup_message` when workflow intents look
+      unclosed in the session transcript
 
 ## Runtime model
 
@@ -108,14 +110,31 @@ contains the full workflow, rules, and non-goals.
 
 ## Hook contract
 
+### Project vs plugin registration
+
+Cursor’s **Hooks** settings page lists hooks from `.cursor/hooks.json` (project)
+and `~/.cursor/hooks.json` (user) only. Hooks declared in the plugin manifest
+(`hooks/hooks.json` via `plugin.json`) are not included in that count.
+
+Ship or install a **project** `.cursor/hooks.json` that invokes the plugin
+scripts (see `plugins/cursor-codeclone/scripts/install-project-hooks.py`). The
+CodeClone monorepo commits `.cursor/hooks.json` invoking
+`python …/hooks/run_hook.py` (cross-platform; no shell scripts).
+
 Hooks follow these invariants:
 
-- **Non-blocking** — hooks return quickly (5-second timeout) and do not block
-  agent execution
-- **Advisory only** — hooks return `followup_message` suggestions, not
-  mandatory actions
+- **Bounded** — hooks return quickly (5-second timeout)
+- **Deterministic gate** — `preToolUse` is fail-closed and reads the configured
+  CodeClone workspace intent registry through the public `codeclone.workspace_intent`
+  API; it does not parse plugin-local marker files or assume a file backend
+- **Advisory follow-up** — `postToolUse` returns `additional_context`; `stop` may
+  return `followup_message` (not mandatory actions)
+- **Cursor contract** — use `file_path` / `tool_input.path` from hook payloads;
+  `afterFileEdit` does not accept `followup_message` in current Cursor docs
 - **Deterministic** — hooks use simple pattern matching, not heuristic analysis
-- **Fail-open** — hook failures do not prevent the agent from continuing
+- **No file-tool tunnels** — without an authorized intent, direct writes inside
+  the repository root are blocked, including `.git/**`; only read-only Git
+  inspection shell commands are allowed
 
 ## Agent contract
 
@@ -136,7 +155,8 @@ The structural reviewer agent:
   do not create new findings.
 - **Rule discipline**: rules enforce MCP-first usage and prevent fallback to
   CLI or manual reinterpretation.
-- **Hook safety**: hooks are advisory, non-blocking, and fail-open.
+- **Hook safety**: `preToolUse` is fail-closed for repository writes; follow-up
+  hooks stay advisory and non-blocking.
 - **Agent honesty**: the structural reviewer reports deterministic evidence, not
   opinions.
 - **No hidden installation side effects**: the plugin does not patch Cursor

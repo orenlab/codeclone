@@ -3,7 +3,7 @@
   "hooks": {
     "preToolUse": [
       {
-        "command": "python \"${CURSOR_PLUGIN_ROOT}/hooks/run_hook.py\" pre-tool-use-gate",
+        "command": "\"/Users/denrozhnovskiy/PycharmProjects/codeclone/.venv/bin/python3\" plugins/cursor-codeclone/hooks/run_hook.py pre-tool-use-gate",
         "type": "command",
         "timeout": 5,
         "matcher": "Write|StrReplace|ApplyPatch|Shell",
@@ -12,7 +12,7 @@
     ],
     "postToolUse": [
       {
-        "command": "python \"${CURSOR_PLUGIN_ROOT}/hooks/run_hook.py\" post-tool-use",
+        "command": "\"/Users/denrozhnovskiy/PycharmProjects/codeclone/.venv/bin/python3\" plugins/cursor-codeclone/hooks/run_hook.py post-tool-use",
         "type": "command",
         "timeout": 5,
         "matcher": "Write|StrReplace|ApplyPatch"
@@ -20,7 +20,7 @@
     ],
     "stop": [
       {
-        "command": "python \"${CURSOR_PLUGIN_ROOT}/hooks/run_hook.py\" session-cleanup",
+        "command": "\"/Users/denrozhnovskiy/PycharmProjects/codeclone/.venv/bin/python3\" plugins/cursor-codeclone/hooks/run_hook.py session-cleanup",
         "type": "command",
         "timeout": 5,
         "loop_limit": 1

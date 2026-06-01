@@ -28,7 +28,9 @@ site/
 # IDE
 .idea/
 .vscode/
-.cursor/
+.cursor/*
+!.cursor/hooks.json
+!.cursor/codeclone-hooks.json
 
 # OS
 .DS_Store

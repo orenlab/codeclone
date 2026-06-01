@@ -2,7 +2,7 @@
 
 **Structural Change Controller for AI-assisted Python development** — native
 Cursor plugin. Source lives in `plugins/cursor-codeclone/`; the plugin bundles
-an MCP server definition, five skills, one agent, two rules, and two hooks.
+an MCP server definition, five skills, one agent, two rules, and three hooks.
 
 ## What ships in the plugin
 
@@ -18,7 +18,7 @@ an MCP server definition, five skills, one agent, two rules, and two hooks.
 | `agents/structural-reviewer.md` | Agent | Deterministic structural code reviewer backed by MCP tools |
 | `rules/codeclone-workflow.mdc` | Rule | MCP workflow discipline (always active) |
 | `rules/codeclone-python.mdc` | Rule | Python file context (auto-triggers on `**/*.py`) |
-| `hooks/hooks.json` | Hooks | Post-edit re-analysis reminder and session cleanup check |
+| `hooks/hooks.json` | Hooks | `preToolUse` change-control gate, `postToolUse` reminder, `stop` cleanup |
 | `assets/` | Branding | Plugin logo and icon |
 
 ## Install
@@ -127,15 +127,47 @@ intent.
 
 ## Hooks
 
-- **afterFileEdit** — when a Python file is edited, reminds the agent to
-  re-run analysis and check intent status.
-- **stop** — at session end, warns if change intents were declared but not
-  cleared.
+### Why Settings → Hooks can show “Configured Hooks (0)”
+
+The Hooks panel counts **project** and **user** hook files only:
+
+| Source | Path | Shown in Hooks UI |
+|--------|------|-------------------|
+| Project | `.cursor/hooks.json` | yes |
+| User | `~/.cursor/hooks.json` | yes |
+| Plugin manifest | `hooks/hooks.json` in the plugin dir | **no** (may still run when the plugin is enabled; do not rely on the counter) |
+
+For the CodeClone repository, commit `.cursor/hooks.json` (see
+`plugins/cursor-codeclone/scripts/install-project-hooks.py`). For other
+projects, run that script once per repo (`python`, not bash — Windows-safe).
+
+### Hook events
+
+- **preToolUse** (matcher `Write|StrReplace|ApplyPatch|Shell`,
+  `failClosed: true`) — **blocks** Agent writes when the configured CodeClone
+  workspace intent registry has no live active intent. The hook calls the public
+  `codeclone.workspace_intent` read-only API, so file and SQLite registry
+  backends behave the same. Scope is configured per project:
+  - `python` (default): `.py` / `.pyi` only
+  - `repo`: any file under the workspace root, including `.git/**`
+  Configure via `.cursor/codeclone-hooks.json` (`enforce_scope`) or
+  `CODECLONE_HOOKS_ENFORCE_SCOPE`. Without an authorized intent, only read-only
+  Git inspection shell commands are allowed; `git apply`, commits, and direct
+  `.git/**` file writes are blocked. Install: `uv run python
+  plugins/cursor-codeclone/scripts/install-project-hooks.py --enforce-scope
+  repo`. There is no env bypass for this gate.
+- **postToolUse** (matcher `Write|StrReplace|ApplyPatch`) — after Agent writes
+  `.py` / `.pyi`, injects `additional_context` with the change-control reminder
+  (`analyze_repository`, `finish_controlled_change`, `get_relevant_memory` with
+  absolute `root`).
+- **stop** (`loop_limit: 1`) — when the session transcript shows
+  `start_controlled_change` without matching `finish` / `intent_cleared`, emits
+  an optional `followup_message`.
 
 ## Runtime model
 
 Additive — the plugin provides a local MCP definition, five skills, one agent,
-two rules, and two hooks. New canonical MCP surfaces from the local
+two rules, and three hooks. New canonical MCP surfaces from the local
 `codeclone-mcp` version flow through directly; the bundled launcher does not
 filter tools (full 31-tool passthrough). The plugin does not install a
 second server binary or mutate Cursor settings.
@@ -144,8 +176,9 @@ second server binary or mutate Cursor settings.
 
 Repository truth stays read-only: MCP must not mutate source files, baselines,
 analysis cache, or canonical report artifacts. Change-control and session tools
-may write ephemeral coordination state under `.cache/codeclone/intents/` and
-optional audit records when enabled.
+may write ephemeral coordination state through the configured workspace intent
+registry (file backend default: `.cache/codeclone/intents/`; SQLite supported)
+and optional audit records when enabled.
 
 ## Current limits
 
@@ -153,9 +186,11 @@ optional audit records when enabled.
   keep only one setup path to avoid duplicate MCP surfaces.
 - The bundled `mcp.json` expects `codeclone-mcp` on `PATH` or configured with
   an absolute path.
-- Hooks are Python scripts (`hooks/post-edit-reminder.py`,
-  `hooks/session-cleanup-check.py`) bundled with the plugin; they emit advisory
-  reminders only and do not call MCP directly.
+- Hooks are Python scripts (`hooks/pre_tool_use_change_control.py`,
+  `hooks/post-tool-use-python-edit.py`, `hooks/session-cleanup-check.py`)
+  bundled with the plugin; `preToolUse` reads workspace intent state through
+  `codeclone.workspace_intent`, not plugin-local marker files or file-only
+  globs. The hooks do not call MCP directly.
 
 ## Further reading
 
