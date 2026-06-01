@@ -7,9 +7,9 @@ description: MANDATORY HARD GATE before ANY repository file write when CodeClone
 
 Edit pipeline for the **target Python repository** (source, `tests/`, docs, config).
 CodeClone MCP available → follow this pipeline. Coverage/CI/docs labels do **not**
-skip intent. Resume your own uncommitted WIP with
-`dirty_scope_policy="continue_own_wip"` when start would otherwise block on dirty
-scope alone — finish must still prove scope via `changed_files` or `diff_ref`.
+skip intent. Use `dirty_scope_policy="continue_own_wip"` only to resume known
+uncommitted WIP in declared scope when start would otherwise block on dirty scope
+alone — finish still proves scope via `changed_files` or `diff_ref`.
 
 **Skip pipeline** only when: no files will change; analysis-only; MCP unavailable
 (edits → BLOCKED). Not for read-only review (`codeclone-review`) or snapshots
@@ -93,7 +93,7 @@ Skip for trivial one-liner fixes only. See `change-control-gate` rule and
 |------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `needs_analysis` | Run step 1 for same `root`, then `start` again                                                                                                                                                                               |
 | `queued`         | **No edits.** Wait → `manage_change_intent(promote)`. If `before_run_evicted`: step 1 → `start` again                                                                                                                        |
-| `blocked`        | **No edits.** Intent exists — clear via `manage_change_intent(clear)` if abandoning; follow `next_step`. If dirty scope is your own WIP with no foreign overlap, retry `start` with `dirty_scope_policy="continue_own_wip"`. |
+| `blocked`        | **No edits.** Intent exists — clear via `manage_change_intent(clear)` if abandoning; follow `next_step`. If dirty scope is known WIP with no foreign overlap, retry `start` with `dirty_scope_policy="continue_own_wip"`. |
 | `active`         | Read `blast_radius` + `budget`. Edit only if `edit_allowed=true`. Budget `gate_preview.would_fail` is advisory — edit may proceed, but verify may reject.                                                                    |
 
 **Edit permission:** `status == "active"` alone is not enough — require
@@ -131,24 +131,32 @@ Evidence: **`changed_files` XOR `diff_ref`** — exactly one; both or neither is
 an error. `before_run_id` is resolved from the intent — do not pass a new declare.
 
 **Git reconciliation (automatic):** finish cross-checks agent evidence against
-the **full git working tree** — not honor-system. List every path you touched in
-`changed_files` when possible; the controller also reads git and blocks
-under-reporting or silent out-of-scope edits. You **must** declare scope wide
-enough at `start`.
+the **full git working tree** and the dirty snapshot captured at `start` — not
+honor-system. List every path you touched in `changed_files` when possible; the
+controller also reads git and blocks under-reporting or silent out-of-scope
+edits. You **must** declare scope wide enough at `start`.
 
-| `finish_block_reason`   | Meaning                                                                        | Agent action                                        |
-|-------------------------|--------------------------------------------------------------------------------|-----------------------------------------------------|
-| `missing_evidence`      | Git dirty inside `allowed_files` / `allowed_related` but missing from evidence | Add paths to `changed_files` / `diff_ref` or revert |
-| `own_unscoped_dirty`    | Git dirty outside declared scope, not foreign-attributed                       | Redeclare wider scope or revert                     |
-| `foreign_dirty_overlap` | Foreign **active/stale** intent previously declared same in-scope path         | Coordinate with user                                |
+| `finish_block_reason` | Meaning | Agent action |
+|---|---|---|
+| `missing_evidence` | Git dirty inside `allowed_files` / `allowed_related` but missing from evidence | Add paths to `changed_files` / `diff_ref` or revert |
+| `new_unattributed_unscoped_dirty` | Out-of-scope dirty path appeared after `start` and is not foreign-attributed | Redeclare wider scope or revert |
+| `modified_unattributed_unscoped_dirty` | Out-of-scope dirty path existed at `start` but changed after `start` and is not foreign-attributed | Redeclare wider scope or reconcile |
+| `unknown_unattributed_unscoped_dirty` | Out-of-scope dirty path cannot be compared to a start snapshot; legacy/missing snapshot is conservative | Reconcile tree, restart with fresh intent, or redeclare |
+| `foreign_dirty_overlap` | Foreign **active/stale** intent previously declared same in-scope path | Coordinate with user |
 
 - Dirty paths outside your scope owned by a **foreign active/stale** intent →
   listed in `foreign_attributed_outside_scope`, **does not block** your finish.
+- Dirty paths outside your scope that were already dirty at `start` and did not
+  change are listed in `preexisting_unscoped_dirty`, **does not block** your
+  finish.
 - **`recoverable`** intents (dead owning PID) do **not** grant foreign
   attribution — their dirty paths count as normal workspace dirt unless you
   declare scope or revert.
-- On hygiene pass, scope check may use `files_for_scope_check` (evidence ∪ own
-  unscoped dirty) instead of evidence alone.
+- Legacy `own_unscoped_dirty` may appear as a compatibility alias for
+  unattributed blocking dirt. Treat it as **unattributed**, not proof that the
+  current agent owns the edit.
+- On hygiene pass, scope check may use `files_for_scope_check` (evidence ∪
+  unattributed blocking dirt) instead of evidence alone.
 
 ```
 finish_controlled_change(

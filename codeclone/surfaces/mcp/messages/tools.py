@@ -201,7 +201,7 @@ START_CONTROLLED_CHANGE: Final = (
     "return patch budget — all in one call. Requires an existing "
     "analysis run for the given root; call analyze_repository "
     "first if needed. Returns intent_id for finish_controlled_change. "
-    "Use dirty_scope_policy=continue_own_wip to resume your own "
+    "Use dirty_scope_policy=continue_own_wip to resume known "
     "uncommitted work in declared scope when no foreign dirty overlap "
     "exists; finish must still prove scope via changed_files or diff_ref. "
     "Does not run analysis implicitly."

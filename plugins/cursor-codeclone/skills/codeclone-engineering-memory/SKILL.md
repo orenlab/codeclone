@@ -37,8 +37,10 @@ Do not invent memory from local files or report dumps.
 | Store health                     | `query_engineering_memory` | `mode=status`                                               |
 | Stale inventory                  | `query_engineering_memory` | `mode=stale`                                                |
 
-Defaults exclude **stale** and **draft**. Pass `include_stale=true` only for
-diagnostics.
+Defaults exclude **stale**. Keyword `search` excludes drafts unless
+`include_drafts=true`; scoped `get_relevant_memory` and `for_path` /
+`for_symbol` include draft agent notes automatically so handoffs are visible.
+Draft records remain non-authoritative.
 
 ### Read checklist
 

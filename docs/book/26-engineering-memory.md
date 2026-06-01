@@ -164,8 +164,10 @@ stateDiagram-v2
 (`system`, `agent`, `human`) are separate axes. Agents must treat `draft` and
 `inferred` as non-authoritative.
 
-Default retrieval excludes `stale` and `draft` unless
-`include_stale=true` / `include_drafts=true`.
+Default retrieval excludes `stale`. Keyword `search` excludes `draft` unless
+`include_drafts=true`; scoped `get_relevant_memory` and `for_path` /
+`for_symbol` include draft agent notes automatically so handoffs are visible.
+Draft records remain non-authoritative.
 
 ---
 
@@ -339,7 +341,7 @@ Ranked, scope-aware context for the **declared edit scope**.
 | `intent_id`                       | Active intent from `start_controlled_change` (resolves scope) |
 | `symbols`                         | Optional qualname keys for boost                              |
 | `max_records`                     | Cap (default 20)                                              |
-| `include_stale`, `include_drafts` | Default `false`                                               |
+| `include_stale`, `include_drafts` | `include_stale` defaults false; drafts are automatic for scoped retrieval / path / symbol and opt-in for search |
 
 When neither `scope` nor `intent_id` is passed, returns a **project summary**
 — useful for orientation, not pre-edit context.

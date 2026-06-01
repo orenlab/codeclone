@@ -45,9 +45,10 @@ class WorkspaceIntentRecord:
     lease_renewed_at_utc: str
     lease_seconds: int
     report_digest: str
+    dirty_snapshot: dict[str, object] | None = None
 
     def unsigned_payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "registry_version": REGISTRY_VERSION,
             "intent_id": self.intent_id,
             "agent_pid": self.agent_pid,
@@ -66,6 +67,9 @@ class WorkspaceIntentRecord:
             "lease_seconds": self.lease_seconds,
             "report_digest": self.report_digest,
         }
+        if self.dirty_snapshot is not None:
+            payload["dirty_snapshot"] = self.dirty_snapshot
+        return payload
 
 
 def compute_scope_digest(scope: Mapping[str, object]) -> str:

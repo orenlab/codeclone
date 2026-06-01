@@ -280,6 +280,13 @@ class _MCPSessionIntentMixin:
             intent=record_payload,
             ttl_seconds=ttl,
         )
+        from ._workspace_hygiene import collect_dirty_snapshot
+
+        dirty_snapshot = collect_dirty_snapshot(record.root)
+        workspace_record = replace(
+            workspace_record,
+            dirty_snapshot=dirty_snapshot.to_payload(),
+        )
         for replaced_intent in replaced_intents:
             remove_workspace_intent(
                 root=record.root,
@@ -326,6 +333,7 @@ class _MCPSessionIntentMixin:
         )
         _apply_blast_context(payload, blast_payload)
         payload["workspace_registered"] = workspace_registered
+        payload["dirty_snapshot"] = dirty_snapshot.summary_payload()
         payload["concurrent_intents"] = concurrent_intents
         payload["workspace_relations"] = workspace_relations
         if queued_context:

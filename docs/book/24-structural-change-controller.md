@@ -609,11 +609,12 @@ concepts, but **not** an identical close predicate.
 Registry I/O is serialized with cross-process locks; SQLite `gc()` is one
 atomic scan→close→purge transaction.
 
-**Continuing own WIP:** when uncommitted changes already overlap your declared
+**Continuing known WIP:** when uncommitted changes already overlap your declared
 scope, default `dirty_scope_policy="block"` returns workflow `status: "blocked"`.
-Pass `dirty_scope_policy="continue_own_wip"` to resume your own dirty scope when
-**no** live foreign dirty overlap exists (`foreign_dirty_overlaps` empty). Finish
-must still prove all dirty paths via `changed_files` or `diff_ref`.
+Pass `dirty_scope_policy="continue_own_wip"` only to resume known dirty scope
+when **no** live foreign dirty overlap exists (`foreign_dirty_overlaps` empty).
+Finish must still prove all declared-scope dirty paths via `changed_files` or
+`diff_ref`.
 
 **Start blocking:** when foreign active/stale scope overlap is unresolved
 (without `on_conflict="queue"`) or scoped hygiene detects dirty paths in
@@ -627,19 +628,26 @@ before scope check / verify. Failures return `reason: "workspace_hygiene"`,
 intents do not populate `foreign_dirty_overlaps` — a queued peer does not block
 finish for an active agent on overlapping scope.
 
-Finish hygiene reconciles **agent evidence with git** (not honor-system):
+Finish hygiene reconciles **agent evidence with git** and the start-time dirty
+snapshot (not honor-system):
 
 | `finish_block_reason` | Meaning | Agent action |
 |-----------------------|---------|--------------|
 | `missing_evidence` | Git dirty inside declared scope not listed in `changed_files` | Add paths to evidence or revert |
-| `own_unscoped_dirty` | Git dirty outside declared scope, not owned by foreign intent | Redeclare wider scope or revert |
+| `new_unattributed_unscoped_dirty` | Out-of-scope dirty path appeared after `start`, not foreign-attributed | Redeclare wider scope or revert |
+| `modified_unattributed_unscoped_dirty` | Out-of-scope dirty path existed at `start` but changed after `start`, not foreign-attributed | Redeclare wider scope or reconcile |
+| `unknown_unattributed_unscoped_dirty` | Out-of-scope dirty path cannot be compared with a start snapshot | Reconcile tree, restart with a fresh intent, or redeclare |
 | `foreign_dirty_overlap` | Foreign intent previously declared same in-scope path | Coordinate with user |
 
 Dirty paths outside your declared scope that belong to a **foreign active/stale
 intent** (`foreign_attributed_outside_scope`) do **not** block your finish —
-other agents' unrelated WIP is ignored. **`Recoverable`** intents (dead owning
-PID) do **not** populate `foreign_attributed_outside_scope`; their dirty paths
-behave like ordinary workspace dirt unless you widen scope or revert.
+other agents' unrelated WIP is ignored. Dirty paths outside your declared scope
+that existed at `start` and did not change are `preexisting_unscoped_dirty` and
+also do **not** block finish. **`Recoverable`** intents (dead owning PID) do
+**not** populate `foreign_attributed_outside_scope`; their dirty paths behave
+like ordinary workspace dirt unless you widen scope or revert. Legacy
+`own_unscoped_dirty` may appear as a compatibility alias for unattributed
+blocking dirt; it is not proof that the current agent owns the edit.
 
 **Finish hygiene payload fields** (when present on `workspace_hygiene` /
 `workspace_hygiene_after`):
@@ -647,10 +655,17 @@ behave like ordinary workspace dirt unless you widen scope or revert.
 | Field | Meaning |
 |-------|---------|
 | `unacknowledged_dirty_in_scope` | In-scope git dirty missing from finish evidence |
-| `own_unscoped_dirty` | Out-of-scope git dirty not foreign-attributed |
+| `preexisting_unscoped_dirty` | Out-of-scope git dirty that existed at `start` and did not change — informational, non-blocking |
+| `unattributed_unscoped_dirty` | Out-of-scope blocking dirt not attributed to a live foreign intent |
+| `own_unscoped_dirty` | Legacy alias for `unattributed_unscoped_dirty` |
+| `new_unattributed_unscoped_dirty` | Out-of-scope dirty path appeared after `start` |
+| `modified_unattributed_unscoped_dirty` | Out-of-scope dirty path existed at `start` but changed afterward |
+| `unknown_unattributed_unscoped_dirty` | Out-of-scope dirty path cannot be compared with a start snapshot |
 | `foreign_attributed_outside_scope` | Out-of-scope git dirty owned by foreign active/stale intent — informational, non-blocking |
-| `files_for_scope_check` | Paths passed to scope check after hygiene pass (evidence ∪ own unscoped) |
-| `finish_block_reason` | `missing_evidence`, `own_unscoped_dirty`, or `foreign_dirty_overlap` when `blocks_finish` |
+| `dirty_attribution` | Per-path attribution detail: scope relation, evidence, start state, foreign attribution, classification |
+| `dirty_snapshot` / `dirty_snapshot_status` | Compact current snapshot summary and whether a start snapshot was available |
+| `files_for_scope_check` | Paths passed to scope check after hygiene pass (evidence ∪ unattributed blocking dirt) |
+| `finish_block_reason` | `missing_evidence`, one of the unattributed unscoped reasons, or `foreign_dirty_overlap` when `blocks_finish` |
 
 Declare **new files** in `allowed_files` at `start`, not only in
 `allowed_related`. Successful and non-accepted verify responses also include

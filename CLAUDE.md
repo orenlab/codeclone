@@ -47,7 +47,8 @@ Before editing any repository files:
    — if `status: "needs_analysis"`, run `analyze_repository` first
    — if `status: "queued"`, do not edit; wait for promotion
    — if `concurrent_intents` non-empty without queue, narrow scope or ask
-   — if start blocks on your own dirty scope with no foreign overlap, retry with
+   — if start blocks only because declared scope is already dirty and you are
+   resuming known WIP with no foreign overlap, retry with
    `dirty_scope_policy="continue_own_wip"`; finish must still prove scope
 3. `get_relevant_memory(root=..., scope=... or intent_id=...)` — after
    `edit_allowed=true` (see **Memory-aware workflow**)
@@ -60,11 +61,14 @@ Before editing any repository files:
    (see **Before `finish`: incident / complexity memory**)
 7. `finish_controlled_change(intent_id=..., changed_files=[...], after_run_id=...)`
    — returns scope check, verification, receipt, and clears intent
-   — finish **reconciles evidence with the full git tree**: under-reported
-   in-scope dirty → `finish_block_reason: missing_evidence`; own unscoped dirty
-   → `own_unscoped_dirty`; foreign active/stale dirty outside your scope →
-   `foreign_attributed_outside_scope` (ignored). **Recoverable** (dead PID)
-   intents do not grant foreign attribution
+   — finish **reconciles evidence with the start-time dirty snapshot and the
+   full git tree**: under-reported in-scope dirty →
+   `finish_block_reason: missing_evidence`; new/modified/unknown unattributed
+   dirty outside declared scope → hygiene block; unchanged preexisting
+   unscoped dirty → advisory only; foreign active/stale dirty outside your scope
+   → `foreign_attributed_outside_scope` (ignored). **Recoverable** (dead PID)
+   intents do not grant foreign attribution. Legacy `own_unscoped_dirty` means
+   unattributed blocking dirt, not proven agent ownership
    — if `status: "unverified"`, the intent stays active; follow `next_step`
    (e.g. run `analyze_repository` with a **new** run_id — identical before/after
    runs return `after_run_not_new` for Python structural patches), then call
@@ -229,9 +233,12 @@ Routine controller work is automatic. Boundary decisions require the user.
 `edit_allowed == true`. Workflow `status: "blocked"` is not persisted
 registry lifecycle — clear abandoned blocked intents via
 `manage_change_intent(action="clear")`. Finish `reason=workspace_hygiene` means
-evidence/scope/git disagree — read `finish_block_reason` (`missing_evidence`,
-`own_unscoped_dirty`, `foreign_dirty_overlap`); widen scope, fix evidence, or
-coordinate foreign in-scope overlap. Do not bypass with atomic verify.
+evidence/scope/git/start snapshot disagree — read `finish_block_reason`
+(`missing_evidence`, `new_unattributed_unscoped_dirty`,
+`modified_unattributed_unscoped_dirty`, `unknown_unattributed_unscoped_dirty`,
+`foreign_dirty_overlap`; legacy `own_unscoped_dirty` may appear as an alias);
+widen scope, fix evidence, reconcile the tree, or coordinate foreign in-scope
+overlap. Do not bypass with atomic verify.
 
 ### Completion gate
 

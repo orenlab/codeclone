@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 from pydantic import ValidationError
@@ -113,10 +114,43 @@ def test_workspace_intent_document_rejects_naive_timestamp() -> None:
     assert parse_workspace_document(payload) is None
 
 
+def test_workspace_intent_document_rejects_invalid_dirty_snapshot() -> None:
+    from tests.test_workspace_intents import _record
+
+    record = replace(
+        _record(),
+        dirty_snapshot={
+            "git_available": True,
+            "captured_at_utc": "2026-05-29T20:00:00Z",
+            "entries": {
+                "../outside.py": {
+                    "status_xy": " M",
+                    "digest": "a" * 64,
+                    "digest_status": "ok",
+                }
+            },
+        },
+    )
+    assert parse_workspace_document(signed_payload_dict_from_record(record)) is None
+
+
 def test_signed_payload_json_roundtrip_via_pydantic() -> None:
     from tests.test_workspace_intents import _record
 
-    record = _record()
+    record = replace(
+        _record(),
+        dirty_snapshot={
+            "git_available": True,
+            "captured_at_utc": "2026-05-29T20:00:00Z",
+            "entries": {
+                "pkg/a.py": {
+                    "status_xy": " M",
+                    "digest": "a" * 64,
+                    "digest_status": "ok",
+                }
+            },
+        },
+    )
     payload_json = signed_payload_json_from_record(record)
     document = parse_workspace_document(json.loads(payload_json))
     assert document is not None

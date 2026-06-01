@@ -8938,6 +8938,8 @@ def test_mcp_start_continue_own_wip_allows_dirty_scope(
     assert continued["status"] == "active"
     assert continued["edit_allowed"] is True
     assert continued["dirty_scope_policy"] == "continue_own_wip"
+    dirty_snapshot = cast("dict[str, object]", continued["dirty_snapshot"])
+    assert dirty_snapshot["git_available"] is False
     hygiene = cast("dict[str, object]", continued["workspace_hygiene"])
     assert hygiene.get("continuing_own_wip") is True
     assert "Continuing own uncommitted work" in str(continued["message"])

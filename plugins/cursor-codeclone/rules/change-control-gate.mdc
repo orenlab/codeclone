@@ -42,6 +42,13 @@ The gate is **OFF** only when:
 If the gate is ON and a required MCP call fails: respond **`BLOCKED`**, state the
 missing step and `intent_id` if any — **do not** edit “anyway”.
 
+`finish_controlled_change` is allowed to inspect the full git tree. It blocks
+only dirty paths that are missing from evidence, new/modified/unknown
+unattributed outside the declared scope, or still overlap a live foreign
+in-scope intent. Unchanged dirty paths that already existed at `start` are
+advisory (`preexisting_unscoped_dirty`), and legacy `own_unscoped_dirty` is only
+a compatibility alias for unattributed blocking dirt.
+
 ## Before finish: incident / complexity memory
 
 Session **chat is ephemeral** — it is not Engineering Memory. If the edit cycle

@@ -112,23 +112,25 @@ class _MCPSessionWorkflowMixin:
         # Queued: no blast radius or budget
         if declare_status == IntentStatus.QUEUED.value:
             workspace_after = self._list_workspace_intents(root=root)
+            queued_payload: dict[str, object] = {
+                "intent_id": intent_id,
+                "status": "queued",
+                "run_id": _helpers._short_run_id(record.run_id),
+                "blocked_by": declare_payload.get("blocked_by", []),
+                "queue_position": declare_payload.get("queue_position", 1),
+                "before_run_pinned": declare_payload.get("before_run_pinned", False),
+                "edit_allowed": False,
+                "workspace": _workspace_summary_from_declare(
+                    workspace_after,
+                    declare_payload,
+                ),
+                "message": workflow_msgs.START_QUEUED,
+            }
+            dirty_snapshot = declare_payload.get("dirty_snapshot")
+            if isinstance(dirty_snapshot, dict):
+                queued_payload["dirty_snapshot"] = dirty_snapshot
             return _helpers.attach_workspace_hygiene_tips(
-                {
-                    "intent_id": intent_id,
-                    "status": "queued",
-                    "run_id": _helpers._short_run_id(record.run_id),
-                    "blocked_by": declare_payload.get("blocked_by", []),
-                    "queue_position": declare_payload.get("queue_position", 1),
-                    "before_run_pinned": declare_payload.get(
-                        "before_run_pinned", False
-                    ),
-                    "edit_allowed": False,
-                    "workspace": _workspace_summary_from_declare(
-                        workspace_after,
-                        declare_payload,
-                    ),
-                    "message": workflow_msgs.START_QUEUED,
-                },
+                queued_payload,
                 root=root_path,
             )
 
@@ -228,6 +230,9 @@ class _MCPSessionWorkflowMixin:
                 continuing_own_wip=continuing_own_wip,
             ),
         }
+        dirty_snapshot = declare_payload.get("dirty_snapshot")
+        if isinstance(dirty_snapshot, dict):
+            payload["dirty_snapshot"] = dirty_snapshot
         if hygiene.git_available or hygiene.blocks_edit:
             hygiene_payload = hygiene.to_payload()
             if continuing_own_wip:
@@ -289,18 +294,28 @@ class _MCPSessionWorkflowMixin:
             diff_ref=diff_ref,
         )
 
-        from ._workspace_hygiene import finish_hygiene_check, workspace_dirty_summary
+        from ._workspace_hygiene import (
+            dirty_snapshot_from_payload,
+            finish_hygiene_check,
+            workspace_dirty_summary,
+        )
         from ._workspace_intent_store import get_workspace_intent_store
 
+        intent_store = get_workspace_intent_store(record.root)
+        workspace_record = intent_store.find_raw(intent_id)
+        start_dirty_snapshot = dirty_snapshot_from_payload(
+            workspace_record.dirty_snapshot if workspace_record is not None else None
+        )
         finish_hygiene = finish_hygiene_check(
             root=record.root,
             allowed_files=active_intent.scope.allowed_files,
             allowed_related=active_intent.scope.allowed_related,
             resolved_files=resolved_files,
-            store=get_workspace_intent_store(record.root),
+            store=intent_store,
             own_pid=self._agent_pid,
             own_start_epoch=self._agent_start_epoch,
             own_intent_id=intent_id,
+            start_dirty_snapshot=start_dirty_snapshot,
         )
         workspace_hygiene_after = {
             **finish_hygiene.to_payload(),
@@ -311,6 +326,15 @@ class _MCPSessionWorkflowMixin:
             detail_message = {
                 "missing_evidence": workflow_msgs.FINISH_HYGIENE_MISSING_EVIDENCE,
                 "own_unscoped_dirty": workflow_msgs.FINISH_HYGIENE_OWN_UNSCOPED,
+                "new_unattributed_unscoped_dirty": (
+                    workflow_msgs.FINISH_HYGIENE_NEW_UNATTRIBUTED
+                ),
+                "modified_unattributed_unscoped_dirty": (
+                    workflow_msgs.FINISH_HYGIENE_MODIFIED_UNATTRIBUTED
+                ),
+                "unknown_unattributed_unscoped_dirty": (
+                    workflow_msgs.FINISH_HYGIENE_UNKNOWN_UNATTRIBUTED
+                ),
                 "foreign_dirty_overlap": workflow_msgs.FINISH_HYGIENE_FOREIGN_DIRTY,
             }.get(block_reason, workflow_msgs.FINISH_HYGIENE_BLOCKED)
             return {

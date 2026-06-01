@@ -46,6 +46,7 @@ _VALID_STATUSES = frozenset(
         "orphaned",
     }
 )
+_VALID_DIRTY_DIGEST_STATUSES = frozenset({"ok", "unavailable"})
 
 
 def _scope_path_violation(path: str) -> str | None:
@@ -84,6 +85,47 @@ def _is_hex_digest(value: str) -> bool:
     if len(value) != _HEX_DIGEST_LENGTH:
         return False
     return all(char in "0123456789abcdef" for char in value.lower())
+
+
+def _validate_dirty_snapshot_payload(
+    value: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    git_available = value.get("git_available")
+    captured_at = value.get("captured_at_utc")
+    entries = value.get("entries")
+    if not isinstance(git_available, bool):
+        raise ValueError("dirty_snapshot.git_available must be boolean")
+    if not isinstance(captured_at, str) or _parse_utc(captured_at) is None:
+        raise ValueError("dirty_snapshot.captured_at_utc must be valid UTC ISO-8601")
+    if not isinstance(entries, dict):
+        raise ValueError("dirty_snapshot.entries must be an object")
+    for raw_path, raw_entry in entries.items():
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError("dirty_snapshot entry path must be a non-empty string")
+        violation = _scope_path_violation(raw_path)
+        if violation is not None:
+            raise ValueError(violation)
+        if not isinstance(raw_entry, dict):
+            raise ValueError("dirty_snapshot entry must be an object")
+        status_xy = raw_entry.get("status_xy")
+        digest = raw_entry.get("digest")
+        digest_status = raw_entry.get("digest_status")
+        if not isinstance(status_xy, str) or len(status_xy) != 2:
+            raise ValueError("dirty_snapshot.status_xy must be two characters")
+        if digest is not None and (
+            not isinstance(digest, str) or not _is_hex_digest(digest)
+        ):
+            raise ValueError("dirty_snapshot.digest must be null or 64-char hex")
+        if (
+            not isinstance(digest_status, str)
+            or digest_status not in _VALID_DIRTY_DIGEST_STATUSES
+        ):
+            raise ValueError("dirty_snapshot.digest_status is invalid")
+        if digest_status == "ok" and digest is None:
+            raise ValueError("dirty_snapshot.digest is required when status is ok")
+    return value
 
 
 class IntentScopeModel(BaseModel):
@@ -140,7 +182,16 @@ class WorkspaceIntentDocument(BaseModel):
     lease_renewed_at_utc: str | None = None
     lease_seconds: PositiveInt | None = None
     report_digest: str | None = None
+    dirty_snapshot: dict[str, Any] | None = None
     integrity: IntentIntegrityModel
+
+    @field_validator("dirty_snapshot")
+    @classmethod
+    def validate_dirty_snapshot(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        return _validate_dirty_snapshot_payload(value)
 
     def _contract_violations(self) -> tuple[str, ...]:
         violations: list[str] = []
@@ -281,6 +332,8 @@ def unsigned_document_payload(document: WorkspaceIntentDocument) -> dict[str, ob
         payload["lease_renewed_at_utc"] = lease_renewed_at_utc
         payload["lease_seconds"] = lease_seconds
         payload["report_digest"] = report_digest
+    if document.dirty_snapshot is not None:
+        payload["dirty_snapshot"] = document.dirty_snapshot
     return payload
 
 
@@ -323,6 +376,7 @@ def document_to_record_fields(document: WorkspaceIntentDocument) -> dict[str, ob
         "lease_renewed_at_utc": lease_renewed_at_utc,
         "lease_seconds": lease_seconds,
         "report_digest": report_digest,
+        "dirty_snapshot": document.dirty_snapshot,
     }
 
 
@@ -348,6 +402,7 @@ def record_from_document(document: WorkspaceIntentDocument) -> WorkspaceIntentRe
         lease_renewed_at_utc=lease_renewed_at_utc,
         lease_seconds=lease_seconds,
         report_digest=report_digest,
+        dirty_snapshot=document.dirty_snapshot,
     )
 
 

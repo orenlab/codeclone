@@ -133,7 +133,7 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 
 | Tool                       | Key parameters                                                                                                          | Purpose                                                                                                                                                                                                                 |
 |----------------------------|-------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `start_controlled_change`  | `root`, `scope`, `intent`, `expected_effects`, `on_conflict`, `strictness`, `blast_radius_depth`, `dirty_scope_policy`  | Pre-edit: workspace check + declare + blast radius + budget in one call. Returns `intent_id` for `finish`. `dirty_scope_policy=continue_own_wip` resumes own dirty scope when no foreign overlap. Does not run analysis |
+| `start_controlled_change`  | `root`, `scope`, `intent`, `expected_effects`, `on_conflict`, `strictness`, `blast_radius_depth`, `dirty_scope_policy`  | Pre-edit: workspace check + declare + blast radius + budget in one call. Returns `intent_id` for `finish`. `dirty_scope_policy=continue_own_wip` resumes known dirty scope when no foreign overlap. Does not run analysis |
 | `finish_controlled_change` | `intent_id`, `changed_files` or `diff_ref`, `after_run_id`, `review_text`, `claims_text`, `propose_memory`, `create_receipt`, `auto_clear`, `strictness` | Post-edit: scope check + verify + optional claim validation + receipt + clear in one call. `after_run_id` required for Python structural / governance config profiles. Set `propose_memory=true` to attach draft memory candidates on accept |
 
 `finish_controlled_change` separates human notes from validated claims:
@@ -142,20 +142,25 @@ Claim Guard. The response includes a compact `summary` plus the full
 `verification`, `claims`, `receipt`, and `workspace_hygiene_after` payloads.
 
 ??? info "Start/finish workspace hygiene"
-Edit permission requires `start_controlled_change` to return
-`status == "active"` **and** `edit_allowed == true`. Workflow
-`status: "blocked"` is not persisted registry lifecycle. Start may attach
-scoped `workspace_hygiene`; finish may fail with `reason: "workspace_hygiene"`.
-Finish **reconciles agent evidence with the full git tree** (not honor-system):
-under-reported in-scope dirty → `finish_block_reason: missing_evidence`; own
-unscoped dirty → `own_unscoped_dirty`; foreign active/stale dirty outside your
-scope → `foreign_attributed_outside_scope` (ignored). **Recoverable** (dead PID)
-intents do not grant foreign attribution. Queued foreign intents do not populate
-`foreign_dirty_overlaps`. Lazy close on read and `gc_workspace` use different
-predicates — see book/24.
-`manage_change_intent(list_workspace)` returns repo-level
-`workspace_dirty_summary` only. See
-[Workspace hygiene and registry consistency](24-structural-change-controller.md#workspace-hygiene-and-registry-consistency).
+    Edit permission requires `start_controlled_change` to return
+    `status == "active"` **and** `edit_allowed == true`. Workflow
+    `status: "blocked"` is not persisted registry lifecycle. Start may attach
+    scoped `workspace_hygiene`; finish may fail with `reason:
+    "workspace_hygiene"`.
+    Finish **reconciles agent evidence with the full git tree** and the
+    start-time dirty snapshot (not honor-system): under-reported in-scope dirty
+    → `finish_block_reason: missing_evidence`; new/modified/unknown
+    unattributed dirty outside declared scope → hygiene block; unchanged
+    preexisting unscoped dirty → advisory only; foreign active/stale dirty
+    outside your scope → `foreign_attributed_outside_scope` (ignored).
+    **Recoverable** (dead PID) intents do not grant foreign attribution. Queued
+    foreign intents do not populate `foreign_dirty_overlaps`. Legacy
+    `own_unscoped_dirty` may appear as an alias for unattributed blocking dirt,
+    not as proof of ownership. Lazy close on read and `gc_workspace` use
+    different predicates — see book/24.
+    `manage_change_intent(list_workspace)` returns repo-level
+    `workspace_dirty_summary` only. See
+    [Workspace hygiene and registry consistency](24-structural-change-controller.md#workspace-hygiene-and-registry-consistency).
 
 ### Atomic change control tools (advanced / diagnostic)
 

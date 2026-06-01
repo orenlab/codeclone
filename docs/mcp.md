@@ -339,7 +339,7 @@ sequenceDiagram
 
 | Tool                       | Purpose                                                                                                              |
 |----------------------------|----------------------------------------------------------------------------------------------------------------------|
-| `start_controlled_change`  | Pre-edit workflow: workspace check + declare + blast radius + budget (`dirty_scope_policy` for own WIP)              |
+| `start_controlled_change`  | Pre-edit workflow: workspace check + declare + blast radius + budget (`dirty_scope_policy` for known WIP)            |
 | `finish_controlled_change` | Post-edit workflow: scope check + verify + claims + receipt + clear (`propose_memory` for draft candidates on accept) |
 | `manage_change_intent`     | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace |
 | `get_blast_radius`         | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                    |
@@ -439,8 +439,11 @@ sequenceDiagram
 | Refresh system facts | `manage_engineering_memory(action=refresh_from_run, run_id?)` | Force ingest from MCP run |
 | Unclear semantics | `help(topic="engineering_memory")` | Compact playbook |
 
-Defaults exclude **stale** and **draft** records. Surface stale warnings when
-present — they signal changed context.
+Defaults exclude **stale** records. Keyword search excludes drafts unless
+`include_drafts=true`; scoped `get_relevant_memory` and `for_path` /
+`for_symbol` include draft agent notes automatically so handoffs are visible.
+Draft records remain non-authoritative. Surface stale warnings when present —
+they signal changed context.
 
 #### Agent write path (draft only)
 
@@ -604,8 +607,9 @@ permission = edit_allowed (with status gate)
   records in one transaction. Lazy close and GC share lifecycle concepts but use
   **different** close predicates (`for_lazy_close` vs full GC removal).
 - **`dirty_scope_policy`:** default `block` when scoped hygiene detects dirty
-  paths in `allowed_files`. `continue_own_wip` allows start when dirty scope is
-  yours alone (no live `foreign_dirty_overlaps`); finish still requires evidence.
+  paths in `allowed_files`. `continue_own_wip` allows start for known WIP in the
+  declared scope when no live `foreign_dirty_overlaps` exist; finish still
+  requires evidence.
 - **`start_controlled_change`:** may return workflow `status: "blocked"` with
   `edit_allowed: false` when foreign scope overlap or scoped hygiene blocks.
   When `budget.gate_preview.would_fail` is true, edit may still be allowed —
@@ -613,13 +617,17 @@ permission = edit_allowed (with status gate)
   Response includes `workspace.concurrent_intents`, `workspace_relations`, and
   optional scoped `workspace_hygiene`.
 - **`finish_controlled_change`:** re-checks scoped hygiene before verify. Finish
-  reconciles agent `changed_files` / `diff_ref` with **git** — under-reported
-  in-scope dirty paths and own unscoped dirty edits block even when the agent
-  omits them from evidence. Foreign dirty paths outside your declared scope are
-  ignored when attributed to a foreign active/stale intent
-  (`foreign_attributed_outside_scope`). Failures return `reason:
-  "workspace_hygiene"`, optional `finish_block_reason` (`missing_evidence`,
-  `own_unscoped_dirty`, `foreign_dirty_overlap`), and keep the intent active.
+  reconciles agent `changed_files` / `diff_ref` with **git** and the
+  start-time dirty snapshot — under-reported in-scope dirty paths and
+  new/modified/unknown unattributed out-of-scope dirt block even when the agent
+  omits them from evidence. Unchanged preexisting out-of-scope dirt is advisory.
+  Foreign dirty paths outside your declared scope are ignored when attributed to
+  a foreign active/stale intent (`foreign_attributed_outside_scope`). Failures
+  return `reason: "workspace_hygiene"`, optional `finish_block_reason`
+  (`missing_evidence`, `new_unattributed_unscoped_dirty`,
+  `modified_unattributed_unscoped_dirty`,
+  `unknown_unattributed_unscoped_dirty`, `foreign_dirty_overlap`; legacy
+  `own_unscoped_dirty` can appear as an alias), and keep the intent active.
   Declare **new files** in `allowed_files` at start. Accepted and non-accepted
   verify responses include a compact `summary` and `workspace_hygiene_after`;
   `review_text` is a human note, and only `claims_text` is passed to Claim Guard.
@@ -683,7 +691,10 @@ Hygiene reads the **shared git working tree**, not per-agent sandboxes.
 | **Foreign active/stale** intent on overlapping scope                                                     | `concurrent_intents`            | `status: "blocked"` (coordination)                                                                       | —                                        |
 | **Any** uncommitted dirty file in your `allowed_files`                                                   | `workspace_hygiene.blocks_edit` | `edit_allowed: false` (unless `dirty_scope_policy="continue_own_wip"` and no live foreign dirty overlap) | —                                        |
 | Dirty in scope **not** listed in `changed_files` / `diff_ref` (git reconciliation) | `unacknowledged_dirty_in_scope` | — | `finish_block_reason: missing_evidence` |
-| Dirty **outside** declared scope, not foreign-attributed | `own_unscoped_dirty` | — | `finish_block_reason: own_unscoped_dirty` — redeclare scope |
+| Dirty **outside** declared scope, already dirty at `start` and unchanged | `preexisting_unscoped_dirty` | — | Advisory only |
+| Dirty **outside** declared scope, appeared after `start`, not foreign-attributed | `new_unattributed_unscoped_dirty` | — | Hygiene block — redeclare scope or revert |
+| Dirty **outside** declared scope, changed after `start`, not foreign-attributed | `modified_unattributed_unscoped_dirty` | — | Hygiene block — redeclare scope or reconcile |
+| Dirty **outside** declared scope, no usable start snapshot | `unknown_unattributed_unscoped_dirty` | — | Conservative hygiene block |
 | Foreign dirty **outside** your scope (other agent's paths) | `foreign_attributed_outside_scope` | — | **ignored** — does not block finish |
 | **Live** foreign intent previously declared overlapping dirty paths in your scope | `foreign_dirty_overlaps` | Contributes to `blocks_edit` context | `finish_block_reason: foreign_dirty_overlap` if overlaps remain |
 
@@ -703,10 +714,17 @@ when finish is hygiene-gated):
 | Field | Meaning |
 |-------|---------|
 | `unacknowledged_dirty_in_scope` | In-scope git dirty missing from finish evidence |
-| `own_unscoped_dirty` | Out-of-scope git dirty not foreign-attributed |
+| `preexisting_unscoped_dirty` | Out-of-scope git dirty that existed at `start` and did not change — informational, non-blocking |
+| `unattributed_unscoped_dirty` | Out-of-scope blocking dirt not attributed to a live foreign intent |
+| `own_unscoped_dirty` | Legacy alias for `unattributed_unscoped_dirty`; not proof of current-agent ownership |
+| `new_unattributed_unscoped_dirty` | Out-of-scope dirty path appeared after `start` |
+| `modified_unattributed_unscoped_dirty` | Out-of-scope dirty path existed at `start` but changed afterward |
+| `unknown_unattributed_unscoped_dirty` | Out-of-scope dirty path cannot be compared with a start snapshot |
 | `foreign_attributed_outside_scope` | Out-of-scope git dirty owned by foreign active/stale intent — informational, non-blocking |
-| `files_for_scope_check` | Paths passed to scope check after hygiene pass (evidence ∪ own unscoped) |
-| `finish_block_reason` | `missing_evidence`, `own_unscoped_dirty`, or `foreign_dirty_overlap` when `blocks_finish` |
+| `dirty_attribution` | Per-path attribution detail: scope relation, evidence, start state, foreign attribution, classification |
+| `dirty_snapshot` / `dirty_snapshot_status` | Compact current snapshot summary and whether a start snapshot was available |
+| `files_for_scope_check` | Paths passed to scope check after hygiene pass (evidence ∪ unattributed blocking dirt) |
+| `finish_block_reason` | `missing_evidence`, one of the unattributed unscoped reasons, or `foreign_dirty_overlap` when `blocks_finish` |
 
 **Typical two-agent overlap on `pkg/a.py`:**
 
@@ -715,7 +733,7 @@ when finish is hygiene-gated):
    (`foreign_active`) **and** **hygiene** (`blocks_edit` because the tree is
    dirty in scope). B should not edit.
 3. Agent A calls `finish` with `changed_files` including `pkg/a.py` → passes
-   own dirty acknowledgment. Finish fails on **live** foreign dirty overlap only
+   declared-scope dirty acknowledgment. Finish fails on **live** foreign dirty overlap only
    (`foreign_active` / `foreign_stale`). **Queued** foreign peers do not
    appear in `foreign_dirty_overlaps`.
 4. Resolution: coordinate (queue/promote/clear **active** foreign intent),

@@ -20,9 +20,13 @@ import pytest
 from codeclone.surfaces.mcp import _workspace_hygiene as hygiene_mod
 from codeclone.surfaces.mcp._workspace_hygiene import (
     DIRTY_SCOPE_POLICY_CONTINUE_OWN_WIP,
+    DirtySnapshot,
+    DirtySnapshotEntry,
     ForeignDirtyOverlap,
     WorkspaceHygieneResult,
     collect_dirty_paths,
+    collect_dirty_snapshot,
+    dirty_snapshot_from_payload,
     evaluate_scoped_hygiene,
     finish_hygiene_check,
     workspace_dirty_summary,
@@ -124,6 +128,14 @@ def test_collect_dirty_paths_scoped_filter() -> None:
     assert result.dirty_paths == ("pkg/a.py",)
 
 
+def test_collect_dirty_snapshot_roundtrip() -> None:
+    with _mock_git_porcelain(" M pkg/a.py\n"):
+        snapshot = collect_dirty_snapshot(Path("/tmp/root"))
+    assert snapshot.git_available is True
+    assert snapshot.paths == ("pkg/a.py",)
+    assert dirty_snapshot_from_payload(snapshot.to_payload()) == snapshot
+
+
 def test_workspace_dirty_summary_without_git(tmp_path: Path) -> None:
     with patch.object(hygiene_mod, "_git_available", return_value=False):
         summary = workspace_dirty_summary(root=tmp_path)
@@ -179,7 +191,65 @@ def test_finish_hygiene_check_blocks_unacknowledged_dirty(tmp_path: Path) -> Non
     assert hygiene.finish_block_reason == "missing_evidence"
 
 
-def test_finish_hygiene_check_blocks_own_unscoped_dirty(tmp_path: Path) -> None:
+def test_finish_hygiene_check_allows_preexisting_unscoped_dirty(
+    tmp_path: Path,
+) -> None:
+    store = get_workspace_intent_store(tmp_path)
+    with _mock_git_porcelain(" M pkg/a.py\n M pkg/extra.py\n"):
+        snapshot = collect_dirty_snapshot(tmp_path)
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+            start_dirty_snapshot=snapshot,
+        )
+    assert hygiene.preexisting_unscoped_dirty == ("pkg/extra.py",)
+    assert hygiene.unattributed_unscoped_dirty == ()
+    assert hygiene.blocks_finish is False
+
+
+def test_finish_hygiene_check_blocks_new_unattributed_unscoped_dirty(
+    tmp_path: Path,
+) -> None:
+    store = get_workspace_intent_store(tmp_path)
+    start_snapshot = DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-01-01T00:00:00Z",
+        entries=(
+            DirtySnapshotEntry(
+                path="pkg/a.py",
+                status_xy=" M",
+                digest="start-a",
+                digest_status="ok",
+            ),
+        ),
+    )
+    with _mock_git_porcelain(" M pkg/a.py\n M pkg/extra.py\n"):
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+            start_dirty_snapshot=start_snapshot,
+        )
+    assert hygiene.new_unattributed_unscoped_dirty == ("pkg/extra.py",)
+    assert hygiene.unattributed_unscoped_dirty == ("pkg/extra.py",)
+    assert hygiene.blocks_finish is True
+    assert hygiene.finish_block_reason == "new_unattributed_unscoped_dirty"
+
+
+def test_finish_hygiene_check_legacy_snapshot_blocks_unknown_unscoped_dirty(
+    tmp_path: Path,
+) -> None:
     store = get_workspace_intent_store(tmp_path)
     with _mock_git_porcelain(" M pkg/a.py\n M pkg/extra.py\n"):
         hygiene = finish_hygiene_check(
@@ -192,9 +262,43 @@ def test_finish_hygiene_check_blocks_own_unscoped_dirty(tmp_path: Path) -> None:
             own_start_epoch=400,
             own_intent_id="intent-own-001",
         )
-    assert hygiene.own_unscoped_dirty == ("pkg/extra.py",)
+    assert hygiene.unknown_unattributed_unscoped_dirty == ("pkg/extra.py",)
+    assert hygiene.dirty_snapshot_status == "missing_legacy_conservative"
     assert hygiene.blocks_finish is True
-    assert hygiene.finish_block_reason == "own_unscoped_dirty"
+    assert hygiene.finish_block_reason == "unknown_unattributed_unscoped_dirty"
+
+
+def test_finish_hygiene_check_blocks_modified_unattributed_unscoped_dirty(
+    tmp_path: Path,
+) -> None:
+    store = get_workspace_intent_store(tmp_path)
+    start_snapshot = DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-01-01T00:00:00Z",
+        entries=(
+            DirtySnapshotEntry(
+                path="pkg/extra.py",
+                status_xy=" M",
+                digest="old-digest",
+                digest_status="ok",
+            ),
+        ),
+    )
+    with _mock_git_porcelain(" M pkg/a.py\n M pkg/extra.py\n"):
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+            start_dirty_snapshot=start_snapshot,
+        )
+    assert hygiene.modified_unattributed_unscoped_dirty == ("pkg/extra.py",)
+    assert hygiene.blocks_finish is True
+    assert hygiene.finish_block_reason == "modified_unattributed_unscoped_dirty"
 
 
 def test_finish_hygiene_check_ignores_foreign_unscoped_dirty(

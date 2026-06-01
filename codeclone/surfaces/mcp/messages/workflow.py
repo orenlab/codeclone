@@ -95,8 +95,8 @@ START_COMBINED_BLOCK: Final = (
 FINISH_HYGIENE_BLOCKED: Final = "Finish blocked by workspace hygiene."
 
 FINISH_HYGIENE_NEXT: Final = (
-    "Finish evidence does not match git dirty paths in declared scope, or uncommitted "
-    "changes exist outside declared scope without a foreign intent attribution. "
+    "Finish evidence does not match dirty paths in declared scope, or new/modified "
+    "unattributed dirty paths appeared outside declared scope after intent start. "
     "List every touched path in changed_files, redeclare scope, or reconcile the tree."
 )
 
@@ -105,8 +105,23 @@ FINISH_HYGIENE_MISSING_EVIDENCE: Final = (
 )
 
 FINISH_HYGIENE_OWN_UNSCOPED: Final = (
-    "Git shows uncommitted changes outside declared scope that are not attributed to "
-    "a foreign workspace intent. Redeclare scope to include them or revert those edits."
+    "Git shows unattributed uncommitted changes outside declared scope. "
+    "Redeclare scope to include them or revert those edits."
+)
+
+FINISH_HYGIENE_NEW_UNATTRIBUTED: Final = (
+    "Git shows new unattributed dirty paths outside declared scope since intent start. "
+    "Redeclare scope to include them or revert those edits."
+)
+
+FINISH_HYGIENE_MODIFIED_UNATTRIBUTED: Final = (
+    "Git shows preexisting dirty paths outside declared scope changed since intent "
+    "start. Redeclare scope to include them or reconcile those edits."
+)
+
+FINISH_HYGIENE_UNKNOWN_UNATTRIBUTED: Final = (
+    "Git shows unattributed dirty paths outside declared scope, but their start-time "
+    "snapshot is unavailable. Reconcile the tree or redeclare scope."
 )
 
 FINISH_HYGIENE_UNACKNOWLEDGED_DIRTY: Final = (
