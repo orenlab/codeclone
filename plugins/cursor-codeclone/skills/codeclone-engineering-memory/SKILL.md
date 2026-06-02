@@ -53,7 +53,7 @@ Draft records remain non-authoritative.
 
 | Situation                       | Tool                                                                                        | Notes                        |
 |---------------------------------|---------------------------------------------------------------------------------------------|------------------------------|
-| Durable observation during edit | `manage_engineering_memory(action=record_candidate, record_type, statement, subject_path?)` | Creates **draft**            |
+| Durable observation during edit | `manage_engineering_memory(action=record_candidate, record_type, statement, subject_path)` | Creates **draft** — **subject_path required** |
 | Validate claims before finish   | `manage_engineering_memory(action=validate_claims, text=…)`                                 | Memory-layer guard           |
 | Post-edit batch proposal        | `finish_controlled_change(..., propose_memory=true)`                                        | On **accept** only           |
 | Refresh system facts from run   | `manage_engineering_memory(action=refresh_from_run, run_id?)`                               | Force ingest                 |
@@ -72,6 +72,11 @@ Draft records remain non-authoritative.
 - Ask user to run `codeclone memory init --refresh` when policy is `off` and facts drift
 - Or call `refresh_from_run` when an MCP run is available
 - Memory writes do **not** satisfy change-control scope or verify requirements
+- **Never** use project root as memory scope (`"."`, `""`, unscoped retrieval)
+- Compress observations before `record_candidate`: one durable fact, target
+  ≤300 chars; rewrite if >500; hard reject >1000
+- List responses are compact by default — use `mode=get` or `detail_level=full`
+  for complete statements
 
 ## When NOT to use memory
 

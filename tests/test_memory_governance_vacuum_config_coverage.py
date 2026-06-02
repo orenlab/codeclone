@@ -90,6 +90,7 @@ def test_governance_reject_and_archive_invalid_status_branches(tmp_path: Path) -
             project=project,
             record_type="change_rationale",
             statement="status validation",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         with pytest.raises(

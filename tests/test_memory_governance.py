@@ -38,6 +38,7 @@ def test_record_candidate_and_approve_cycle(tmp_path: Path) -> None:
             project=project,
             record_type="architecture_decision",
             statement="Prefer sqlite backend for local memory.",
+            subject_path="codeclone/memory/sqlite_store.py",
             max_candidates=100,
         )
         assert draft.status == "draft"
@@ -64,6 +65,7 @@ def test_approve_attaches_warrant_evidence(tmp_path: Path) -> None:
             project=project,
             record_type="architecture_decision",
             statement="Memory init runs analysis with api_surface enabled.",
+            subject_path="codeclone/memory/ingest/runner.py",
             max_candidates=100,
         )
         # Agent candidates carry subjects but no evidence while draft.
@@ -92,6 +94,7 @@ def test_reject_draft_record(tmp_path: Path) -> None:
             project=project,
             record_type="change_rationale",
             statement="Temporary hypothesis.",
+            subject_path="codeclone/memory/governance.py",
             max_candidates=100,
         )
         rejected = reject_record(
@@ -201,6 +204,7 @@ def test_cannot_approve_active_record(tmp_path: Path) -> None:
             project=project,
             record_type="human_note",
             statement="note",
+            subject_path="codeclone/memory/governance.py",
             max_candidates=100,
         )
         approve_record(store, record_id=draft.id, approved_by="human")
@@ -208,3 +212,66 @@ def test_cannot_approve_active_record(tmp_path: Path) -> None:
             approve_record(store, record_id=draft.id, approved_by="human")
     finally:
         store.close()
+
+
+def test_record_candidate_rejects_root_subject_path(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    project = resolve_project_identity(root)
+    store = SqliteEngineeringMemoryStore(tmp_path / "memory.sqlite3")
+    try:
+        store.initialize(project)
+        with pytest.raises(MemoryContractError, match="Project root is not a valid"):
+            record_candidate(
+                store,
+                project=project,
+                record_type="risk_note",
+                statement="Root scope note.",
+                subject_path=".",
+                max_candidates=100,
+            )
+    finally:
+        store.close()
+
+
+def test_record_candidate_rejects_statement_over_hard_limit(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    project = resolve_project_identity(root)
+    store = SqliteEngineeringMemoryStore(tmp_path / "memory.sqlite3")
+    try:
+        store.initialize(project)
+        with pytest.raises(MemoryContractError, match="too long for a durable card"):
+            record_candidate(
+                store,
+                project=project,
+                record_type="risk_note",
+                statement="x" * 1001,
+                subject_path="pkg/mod.py",
+                max_candidates=100,
+                max_statement_chars=1000,
+            )
+    finally:
+        store.close()
+
+
+def test_validate_memory_claims_warns_on_long_statement() -> None:
+    result = validate_memory_claims(
+        _EmptyStubStore(),  # type: ignore[arg-type]
+        project_id="proj",
+        text="x" * 600,
+    )
+    assert result.valid is True
+    assert any("soft limit" in warning for warning in result.warnings)
+
+
+def test_validate_memory_claims_errors_use_human_labels_not_regex() -> None:
+    result = validate_memory_claims(
+        _EmptyStubStore(),  # type: ignore[arg-type]
+        project_id="proj",
+        text="Memory allows editing do_not_touch paths because the agent decided so.",
+    )
+    assert result.valid is False
+    assert len(result.errors) == 1
+    assert "\\b" not in result.errors[0]
+    assert "memory authorizing edits, changes, or touching paths" in result.errors[0]

@@ -1566,6 +1566,12 @@
   {
     "input_schema": {
       "properties": {
+        "detail_level": {
+          "default": "compact",
+          "description": "compact (default) returns statement previews without payload; full returns complete statement and payload. mode=get always returns full.",
+          "title": "Detail Level",
+          "type": "string"
+        },
         "include_drafts": {
           "default": false,
           "description": "Include draft engineering memory records. Defaults false for search; get_relevant_memory with scope or intent_id includes drafts automatically; query_engineering_memory for_path/for_symbol includes drafts without setting this flag.",
@@ -2491,6 +2497,12 @@
   {
     "input_schema": {
       "properties": {
+        "detail_level": {
+          "default": "compact",
+          "description": "compact (default) returns statement previews without payload; full returns complete statement and payload. mode=get always returns full.",
+          "title": "Detail Level",
+          "type": "string"
+        },
         "filters": {
           "anyOf": [
             {

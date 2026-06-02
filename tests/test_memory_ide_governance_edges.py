@@ -45,6 +45,7 @@ def test_prepare_governance_rejects_when_channel_enabled_but_key_missing(
             project=project,
             record_type="architecture_decision",
             statement="Use IDE governance.",
+            subject_path="pkg/mod.py",
             max_candidates=100,
         )
 
@@ -152,6 +153,7 @@ def test_commit_governance_archive_decision(tmp_path: Path) -> None:
             project=project,
             record_type="change_rationale",
             statement="Archive via IDE governance.",
+            subject_path="pkg/mod.py",
             max_candidates=100,
         )
         # archive is allowed only for active records

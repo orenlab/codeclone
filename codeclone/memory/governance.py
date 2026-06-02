@@ -9,7 +9,13 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
+from typing import TypeAlias
 
+from ..config.memory_defaults import (
+    DEFAULT_MEMORY_MAX_STATEMENT_CHARS,
+    DEFAULT_MEMORY_SOFT_STATEMENT_CHARS,
+    DEFAULT_MEMORY_TARGET_STATEMENT_CHARS,
+)
 from ..report.meta import current_report_timestamp_utc
 from .enums import MemoryRecordType
 from .exceptions import MemoryCapacityError, MemoryContractError
@@ -23,7 +29,7 @@ from .models import (
     MemorySubject,
     generate_memory_id,
 )
-from .paths import normalize_repo_path
+from .paths import normalize_memory_scope_path
 from .sqlite_store import SqliteEngineeringMemoryStore
 
 _NEGATION_WINDOW = re.compile(
@@ -47,30 +53,56 @@ _FORBIDDEN_NEGATABLE = (
     "overrides findings",
 )
 
-_FORBIDDEN_APPROVE_DRAFT_PATTERNS = (
-    re.compile(r"\b(?:mcp|memory)\b[^.]{0,80}\bapprove\b[^.]{0,80}\bdraft", re.I),
-    re.compile(
-        r"\bapprove\b[^.]{0,80}\b(?:memory|draft)\b[^.]{0,80}\b(?:active|policy|verified)\b",
-        re.I,
+_ForbiddenClaimRule: TypeAlias = tuple[str, re.Pattern[str]]
+
+_FORBIDDEN_APPROVE_DRAFT_RULES: tuple[_ForbiddenClaimRule, ...] = (
+    (
+        "agent or MCP self-approving memory drafts as active policy",
+        re.compile(
+            r"\b(?:mcp|memory)\b[^.]{0,80}\bapprove\b[^.]{0,80}\bdraft",
+            re.I,
+        ),
+    ),
+    (
+        "approving memory drafts as active or verified policy",
+        re.compile(
+            r"\bapprove\b[^.]{0,80}\b(?:memory|draft)\b[^.]{0,80}"
+            r"\b(?:active|policy|verified)\b",
+            re.I,
+        ),
     ),
 )
-_FORBIDDEN_OTHER_PATTERNS = (
-    re.compile(
-        r"\b(?:engineering )?memory\b[^.]{0,60}\b(?:allows?|permits?|authoriz\w+)\b"
-        r"[^.]{0,40}\b(?:edit\w*|chang\w*|touch\w*)\b",
-        re.I,
+_FORBIDDEN_OTHER_RULES: tuple[_ForbiddenClaimRule, ...] = (
+    (
+        "memory authorizing edits, changes, or touching paths",
+        re.compile(
+            r"\b(?:engineering )?memory\b[^.]{0,60}\b(?:allows?|permits?|authoriz\w+)\b"
+            r"[^.]{0,40}\b(?:edit\w*|chang\w*|touch\w*)\b",
+            re.I,
+        ),
     ),
-    re.compile(
-        r"\b(?:scope|intent)\b[^.]{0,50}\b(?:expand|widened|broadened)\b",
-        re.I,
+    (
+        "scope or intent expansion via memory",
+        re.compile(
+            r"\b(?:scope|intent)\b[^.]{0,50}\b(?:expand|widened|broadened)\b",
+            re.I,
+        ),
     ),
-    re.compile(
-        r"\b(?:findings?|codeclone|structural)\b[^.]{0,50}"
-        r"\b(?:clear\w*|resolved|gone|passed|clean\w*)\b",
-        re.I,
+    (
+        "findings or structural checks cleared by memory",
+        re.compile(
+            r"\b(?:findings?|codeclone|structural)\b[^.]{0,50}"
+            r"\b(?:clear\w*|resolved|gone|passed|clean\w*)\b",
+            re.I,
+        ),
     ),
 )
-_FORBIDDEN_PATTERNS = _FORBIDDEN_APPROVE_DRAFT_PATTERNS + _FORBIDDEN_OTHER_PATTERNS
+
+MEMORY_STATEMENT_TOO_LONG_ERROR = (
+    "Memory candidate is too long for a durable card. "
+    "Compress it into one evidence-linked conclusion; store details in "
+    "receipt/spec/docs."
+)
 
 _VS_CODE_CHANNEL_RE = re.compile(r"\bvs\s*code\b|\bvscode\b", re.IGNORECASE)
 _HUMAN_GOVERNANCE_MARKERS = (
@@ -144,26 +176,30 @@ def _contains_unnegated_phrase(text: str, phrase: str) -> bool:
     return False
 
 
+def _permission_claim_error(description: str) -> str:
+    return f"Claim may grant permission memory cannot provide: {description}."
+
+
 def _forbidden_claim_errors(text: str) -> tuple[str, ...]:
     lowered = text.lower()
     errors = [
-        f"Claim may grant permission memory cannot provide: {phrase!r}"
+        _permission_claim_error(phrase)
         for phrase in _FORBIDDEN_LITERALS
         if phrase in lowered
     ]
     errors.extend(
-        f"Claim may grant permission memory cannot provide: {phrase!r}"
+        _permission_claim_error(f"unnegated '{phrase}'")
         for phrase in _FORBIDDEN_NEGATABLE
         if _contains_unnegated_phrase(lowered, phrase)
     )
-    approve_patterns = (
+    approve_rules = (
         ()
         if _is_vscode_human_approval_descriptor(text)
-        else _FORBIDDEN_APPROVE_DRAFT_PATTERNS
+        else _FORBIDDEN_APPROVE_DRAFT_RULES
     )
     errors.extend(
-        f"Claim may grant permission memory cannot provide: {pattern.pattern!r}"
-        for pattern in approve_patterns + _FORBIDDEN_OTHER_PATTERNS
+        _permission_claim_error(label)
+        for label, pattern in approve_rules + _FORBIDDEN_OTHER_RULES
         if _pattern_matches_unnegated(text, pattern)
     )
     return tuple(errors)
@@ -350,6 +386,25 @@ def archive_record(
     return _finalize_governance_record(store, record_id)
 
 
+def _statement_length_warnings(
+    length: int,
+    *,
+    target_limit: int = DEFAULT_MEMORY_TARGET_STATEMENT_CHARS,
+    soft_limit: int = DEFAULT_MEMORY_SOFT_STATEMENT_CHARS,
+) -> tuple[str, ...]:
+    if length > soft_limit:
+        return (
+            f"Statement length {length} exceeds soft limit ({soft_limit} chars); "
+            "compress to one durable fact before record_candidate.",
+        )
+    if length > target_limit:
+        return (
+            f"Statement length {length} exceeds target ({target_limit} chars); "
+            "prefer <= 300 chars for durable cards.",
+        )
+    return ()
+
+
 def record_candidate(
     store: SqliteEngineeringMemoryStore,
     *,
@@ -359,25 +414,32 @@ def record_candidate(
     subject_path: str | None = None,
     created_by: str = "agent",
     max_candidates: int,
+    max_statement_chars: int = DEFAULT_MEMORY_MAX_STATEMENT_CHARS,
 ) -> MemoryRecord:
-    if len(statement.strip()) == 0:
+    stripped = statement.strip()
+    if not stripped:
         raise MemoryContractError("Candidate statement must not be empty.")
+    if len(stripped) > max_statement_chars:
+        raise MemoryContractError(MEMORY_STATEMENT_TOO_LONG_ERROR)
+    if subject_path is None or not subject_path.strip():
+        raise MemoryContractError(
+            "record_candidate requires subject_path linking the observation to a "
+            "repo file."
+        )
     draft_count = store.count_records_by_status(project.id, "draft")
     if draft_count >= max_candidates:
         raise MemoryCapacityError(
             f"max_candidates_reached: {draft_count}/{max_candidates}"
         )
     now = current_report_timestamp_utc()
-    normalized_path = (
-        normalize_repo_path(subject_path) if subject_path is not None else None
-    )
+    normalized_path = normalize_memory_scope_path(subject_path)
     statement_digest = hashlib.sha256(statement.strip().encode("utf-8")).hexdigest()[
         :12
     ]
-    subject_key = normalized_path or "general"
+    subject_key = normalized_path
     identity = make_identity_key(
         type=record_type,
-        subject_kind="path" if normalized_path else "module",
+        subject_kind="path",
         subject_key=subject_key.replace("/", ".").removesuffix(".py"),
         discriminator=f"agent_candidate:{statement_digest}",
     )
@@ -394,9 +456,9 @@ def record_candidate(
         confidence="inferred",
         origin="agent",
         ingest_source="agent",
-        statement=statement.strip(),
+        statement=stripped,
         summary=None,
-        payload={"subject_path": normalized_path} if normalized_path else None,
+        payload={"subject_path": normalized_path},
         created_at_utc=now,
         updated_at_utc=now,
         last_verified_at_utc=now,
@@ -414,27 +476,26 @@ def record_candidate(
         verified_at_commit=None,
     )
     store.write_record(record)
-    if normalized_path:
-        from .paths import repo_path_to_module_key
+    from .paths import repo_path_to_module_key
 
-        store.write_subject(
-            MemorySubject(
-                id=generate_memory_id(prefix="subj"),
-                memory_id=record.id,
-                subject_kind="path",
-                subject_key=normalized_path,
-                relation="about",
-            )
+    store.write_subject(
+        MemorySubject(
+            id=generate_memory_id(prefix="subj"),
+            memory_id=record.id,
+            subject_kind="path",
+            subject_key=normalized_path,
+            relation="about",
         )
-        store.write_subject(
-            MemorySubject(
-                id=generate_memory_id(prefix="subj"),
-                memory_id=record.id,
-                subject_kind="module",
-                subject_key=repo_path_to_module_key(normalized_path),
-                relation="about",
-            )
+    )
+    store.write_subject(
+        MemorySubject(
+            id=generate_memory_id(prefix="subj"),
+            memory_id=record.id,
+            subject_kind="module",
+            subject_key=repo_path_to_module_key(normalized_path),
+            relation="about",
         )
+    )
     store.sync_fts_record(record.id)
     store.commit()
     return record
@@ -446,7 +507,7 @@ def validate_memory_claims(
     project_id: str,
     text: str,
 ) -> ClaimValidationResult:
-    warnings: list[str] = []
+    warnings: list[str] = list(_statement_length_warnings(len(text.strip())))
     lowered = text.lower()
     errors = list(_forbidden_claim_errors(text))
     if "inferred" in lowered and "established fact" in lowered:
@@ -468,6 +529,7 @@ def validate_memory_claims(
 
 
 __all__ = [
+    "MEMORY_STATEMENT_TOO_LONG_ERROR",
     "ClaimValidationResult",
     "approve_record",
     "archive_record",

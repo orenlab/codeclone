@@ -449,6 +449,12 @@ Defaults exclude **stale** records. Keyword search excludes drafts unless
 Draft records remain non-authoritative. Surface stale warnings when present —
 they signal changed context.
 
+**Scope and token hygiene:** project root is not a valid memory scope; unscoped
+`get_relevant_memory` is rejected (use `status`/`search` for orientation). List
+responses default to compact statement previews; use `mode=get` or
+`detail_level=full` for complete text. Agent `record_candidate` requires
+`subject_path` and rejects statements above `max_statement_chars` (default 1000).
+
 #### Agent write path (draft only)
 
 | Action                    | Tool                                                          | Result                        |

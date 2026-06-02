@@ -62,6 +62,7 @@ def test_ide_governance_prepare_and_commit_approve(tmp_path: Path) -> None:
             project=project,
             record_type="architecture_decision",
             statement="Use IDE governance for human approval.",
+            subject_path="pkg/mod.py",
             max_candidates=100,
         )
         registered = register_ide_governance(
@@ -127,6 +128,7 @@ def test_ide_governance_rejects_without_channel(tmp_path: Path) -> None:
             project=project,
             record_type="change_rationale",
             statement="Draft only.",
+            subject_path="pkg/mod.py",
             max_candidates=100,
         )
         payload = prepare_governance(
@@ -157,6 +159,7 @@ def test_ide_governance_commit_rejects_bad_proof(tmp_path: Path) -> None:
             project=project,
             record_type="change_rationale",
             statement="Needs valid proof.",
+            subject_path="pkg/mod.py",
             max_candidates=100,
         )
         register_ide_governance(
@@ -205,6 +208,7 @@ def test_ide_governance_prepare_and_commit_reject(tmp_path: Path) -> None:
             project=project,
             record_type="change_rationale",
             statement="Reject after review.",
+            subject_path="pkg/mod.py",
             max_candidates=100,
         )
         register_ide_governance(

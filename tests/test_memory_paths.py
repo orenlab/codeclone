@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import pytest
 
+from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.paths import (
+    MEMORY_ROOT_SCOPE_ERROR,
     expand_scope_paths,
+    is_root_scope_path,
+    normalize_memory_scope_path,
     normalize_repo_path,
     repo_path_to_module_key,
     subject_matches_scope,
@@ -30,6 +34,17 @@ def test_repo_path_to_module_key_trims_init_module() -> None:
 def test_normalize_repo_path_rejects_traversal() -> None:
     with pytest.raises(ValueError, match="traversal"):
         normalize_repo_path("../secret.py")
+
+
+@pytest.mark.parametrize("raw_path", [".", "", "./"])
+def test_is_root_scope_path_detects_project_root_markers(raw_path: str) -> None:
+    normalized = normalize_repo_path(raw_path)
+    assert is_root_scope_path(normalized)
+
+
+def test_normalize_memory_scope_path_rejects_project_root() -> None:
+    with pytest.raises(MemoryContractError, match=MEMORY_ROOT_SCOPE_ERROR):
+        normalize_memory_scope_path(".")
 
 
 def test_expand_scope_paths_includes_module_key() -> None:

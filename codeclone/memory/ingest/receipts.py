@@ -20,19 +20,23 @@ def _try_append_text_candidate(
     project: MemoryProject,
     record_type: str,
     text: object,
+    subject_path: str | None,
     created_by: str,
     max_candidates: int,
+    max_statement_chars: int,
 ) -> dict[str, object] | None:
-    if not isinstance(text, str) or not text.strip():
+    if not isinstance(text, str) or not text.strip() or not subject_path:
         return None
     try:
         record = record_candidate(
             store,
             project=project,
             record_type=record_type,  # type: ignore[arg-type]
-            statement=text.strip()[:2000],
+            statement=text.strip()[:max_statement_chars],
+            subject_path=subject_path,
             created_by=created_by,
             max_candidates=max_candidates,
+            max_statement_chars=max_statement_chars,
         )
     except Exception:
         return None
@@ -50,9 +54,11 @@ def propose_memory_from_finish_payload(
     project: MemoryProject,
     finish_payload: Mapping[str, object],
     max_candidates: int,
+    max_statement_chars: int,
 ) -> list[dict[str, object]]:
     """Extract draft memory candidates from a neutral finish payload."""
     candidates: list[dict[str, object]] = []
+    primary_subject_path: str | None = None
     scope_check = finish_payload.get("scope_check")
     if isinstance(scope_check, Mapping):
         declared = scope_check.get("declared_scope")
@@ -60,6 +66,8 @@ def propose_memory_from_finish_payload(
             for path in declared[:10]:
                 if not isinstance(path, str) or not path.endswith(".py"):
                     continue
+                if primary_subject_path is None:
+                    primary_subject_path = path
                 try:
                     record = record_candidate(
                         store,
@@ -72,6 +80,7 @@ def propose_memory_from_finish_payload(
                         subject_path=path,
                         created_by="finish_hook",
                         max_candidates=max_candidates,
+                        max_statement_chars=max_statement_chars,
                     )
                 except Exception:
                     continue
@@ -90,8 +99,10 @@ def propose_memory_from_finish_payload(
         project=project,
         record_type="change_rationale",
         text=claims_text,
+        subject_path=primary_subject_path,
         created_by="finish_hook",
         max_candidates=max_candidates,
+        max_statement_chars=max_statement_chars,
     )
     if claims_candidate is not None:
         candidates.append(claims_candidate)
@@ -102,8 +113,10 @@ def propose_memory_from_finish_payload(
         project=project,
         record_type="architecture_decision",
         text=review_text,
+        subject_path=primary_subject_path,
         created_by="finish_hook",
         max_candidates=max_candidates,
+        max_statement_chars=max_statement_chars,
     )
     if review_candidate is not None:
         candidates.append(review_candidate)
@@ -135,6 +148,7 @@ def propose_memory_from_changed_paths(
     review_text: str | None,
     verification_profile: str | None,
     max_candidates: int,
+    max_statement_chars: int,
 ) -> list[dict[str, object]]:
     payload: dict[str, object] = {
         "scope_check": {"declared_scope": list(changed_paths)},
@@ -147,6 +161,7 @@ def propose_memory_from_changed_paths(
         project=project,
         finish_payload=payload,
         max_candidates=max_candidates,
+        max_statement_chars=max_statement_chars,
     )
 
 

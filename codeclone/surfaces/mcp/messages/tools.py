@@ -47,12 +47,17 @@ GET_RELEVANT_MEMORY: Final = (
     "Return ranked, evidence-linked engineering memory for the declared "
     "edit scope. Requires absolute root (same as analyze_repository). "
     "Pass scope paths and/or an active intent_id from start_controlled_change; "
-    "intent_id alone is invalid. Read-only; does not mutate the memory database."
+    "symbols-only retrieval is also supported. Unscoped project-wide retrieval "
+    "is rejected — use query_engineering_memory(mode=status|search) instead. "
+    "List responses default to compact statement previews; pass detail_level=full "
+    "for complete statements. Read-only; does not mutate the memory database."
 )
 
 QUERY_ENGINEERING_MEMORY: Final = (
     "Mode-based engineering memory inspection router. Modes: search, get, "
-    "for_path, for_symbol, stale, drafts, coverage, status. Read-only."
+    "for_path, for_symbol, stale, drafts, coverage, status. List modes default "
+    "to compact previews; mode=get and detail_level=full return complete "
+    "statements. Project root is not a valid path or coverage scope. Read-only."
 )
 
 MANAGE_ENGINEERING_MEMORY: Final = (

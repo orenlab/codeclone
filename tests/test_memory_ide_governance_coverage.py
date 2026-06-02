@@ -177,6 +177,7 @@ def test_prepare_governance_rejects_invalid_decision(tmp_path: Path) -> None:
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="bad decision",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         with pytest.raises(MemoryContractError, match="Unknown governance decision"):
@@ -212,6 +213,7 @@ def test_prepare_governance_raises_when_record_status_invalid_for_approve(
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="invalid status for approve",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         approve_record(store, record_id=draft.id, approved_by="maintainer")
@@ -250,6 +252,7 @@ def test_prepare_governance_raises_when_record_status_invalid_for_archive(
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="invalid status for archive",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         with pytest.raises(
@@ -286,6 +289,7 @@ def test_prepare_governance_rejected_for_disallowed_client_name(tmp_path: Path) 
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="client mismatch",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         payload = prepare_governance(
@@ -324,6 +328,7 @@ def test_prepare_governance_raises_when_repository_project_mismatch(
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="project mismatch",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         with pytest.raises(
@@ -358,6 +363,7 @@ def test_commit_governance_raises_on_unsupported_protocol(tmp_path: Path) -> Non
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="protocol mismatch",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         prepared = prepare_governance(
@@ -416,6 +422,7 @@ def test_commit_governance_raises_on_ticket_record_id_mismatch(tmp_path: Path) -
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="ticket for draft1",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         draft2 = record_candidate(
@@ -423,6 +430,7 @@ def test_commit_governance_raises_on_ticket_record_id_mismatch(tmp_path: Path) -
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="ticket mismatch draft2",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         prepared = prepare_governance(
@@ -484,6 +492,7 @@ def test_commit_governance_raises_on_confirmation_nonce_mismatch(
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="nonce mismatch",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         prepared = prepare_governance(
@@ -544,6 +553,7 @@ def test_commit_governance_ticket_errors_for_unknown_consumed_and_expired(
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="ticket errors",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         prepared = prepare_governance(
@@ -642,6 +652,7 @@ def test_commit_governance_actor_label_resolves_from_client_name_and_version(
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="actor label uses version",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         prepared = prepare_governance(
@@ -704,6 +715,7 @@ def test_commit_governance_actor_label_resolves_without_version(tmp_path: Path) 
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="actor label uses only name",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         prepared = prepare_governance(
@@ -757,6 +769,7 @@ def test_commit_governance_rejected_when_channel_disabled(tmp_path: Path) -> Non
             project=project,  # type: ignore[arg-type]
             record_type="change_rationale",
             statement="channel disabled",
+            subject_path="pkg/mod.py",
             max_candidates=10,
         )
         payload = commit_governance(

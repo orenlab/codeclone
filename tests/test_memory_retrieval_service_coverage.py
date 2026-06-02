@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -166,3 +167,31 @@ def test_for_symbol_and_unknown_mode_paths() -> None:
         match_mode="any",
     )
     assert fallback == ()
+
+
+def test_normalize_detail_level_and_compact_serialization() -> None:
+    assert retrieval_service._normalize_detail_level("full") == "full"
+    assert retrieval_service._normalize_detail_level("compact") == "compact"
+    assert retrieval_service._normalize_detail_level("summary") == "compact"
+
+    with pytest.raises(MemoryContractError, match="detail_level must be"):
+        retrieval_service._normalize_detail_level("verbose")
+
+    record = replace(_record(), statement="x" * 200)
+    compact = retrieval_service._serialize_record_summary(
+        record=record,
+        subjects=[],
+        evidence_count=0,
+        detail_level="compact",
+    )
+    full = retrieval_service._serialize_record_summary(
+        record=record,
+        subjects=[],
+        evidence_count=0,
+        detail_level="full",
+    )
+    assert compact["statement_length"] == 200
+    assert compact["statement_truncated"] is True
+    assert "payload" not in compact
+    assert full["statement"] == "x" * 200
+    assert full["payload"] is None

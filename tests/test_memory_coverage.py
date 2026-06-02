@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from codeclone.memory.coverage import compute_scope_coverage, coverage_delta
+from codeclone.memory.exceptions import MemoryContractError
 
 from .memory_fixtures import (
     memory_store,
@@ -52,3 +55,15 @@ def test_scope_coverage_falls_back_to_module_subject(tmp_path: Path) -> None:
         )
         assert report.scope_paths_with_memory == 1
         assert report.uncovered_paths == ()
+
+
+def test_scope_coverage_rejects_empty_scope(tmp_path: Path) -> None:
+    with (
+        memory_store(tmp_path) as (_root, project, store, _db_path),
+        pytest.raises(MemoryContractError, match="requires one or more"),
+    ):
+        compute_scope_coverage(
+            store,
+            project_id=project.id,
+            scope_paths=(),
+        )

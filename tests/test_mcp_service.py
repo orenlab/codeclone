@@ -1299,7 +1299,10 @@ def test_mcp_service_get_relevant_memory_requires_db_without_run(
 ) -> None:
     service = CodeCloneMCPService(history_limit=2)
     with pytest.raises(MCPServiceContractError, match="not found"):
-        service.get_relevant_memory(root=str(tmp_path.resolve()))
+        service.get_relevant_memory(
+            root=str(tmp_path.resolve()),
+            scope=["pkg/mod.py"],
+        )
 
 
 def test_mcp_service_get_relevant_memory_bootstraps_from_run(
@@ -1311,7 +1314,10 @@ def test_mcp_service_get_relevant_memory_bootstraps_from_run(
         py_source="def f():\n    return 1\n",
     )
 
-    result = service.get_relevant_memory(root=str(root.resolve()))
+    result = service.get_relevant_memory(
+        root=str(root.resolve()),
+        scope=["pkg/mod.py"],
+    )
     memory_sync = cast("dict[str, object]", result["memory_sync"])
     assert memory_sync["status"] == "completed"
     assert memory_sync["reason"] == "missing_db"

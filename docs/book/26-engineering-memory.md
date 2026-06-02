@@ -341,9 +341,13 @@ Ranked, scope-aware context for the **declared edit scope**.
 | `symbols`                         | Optional qualname keys for boost                                                                                |
 | `max_records`                     | Cap (default 20)                                                                                                |
 | `include_stale`, `include_drafts` | `include_stale` defaults false; drafts are automatic for scoped retrieval / path / symbol and opt-in for search |
+| `detail_level`                    | `compact` (default) or `full` — compact returns statement previews without payload                            |
 
-When neither `scope` nor `intent_id` is passed, returns a **project summary**
-— useful for orientation, not pre-edit context.
+Unscoped `get_relevant_memory` is **rejected**. Pass `scope`, `intent_id`, or
+`symbols`. For project-wide orientation use
+`query_engineering_memory(mode=status|search)` — not root scope (`"."`, `""`).
+
+Project root is never a valid memory scope for `scope`, `path`, or `coverage`.
 
 `intent_id` or `scope` without `root` fails MCP argument validation (Pydantic).
 Always pass the same absolute `root` used for `analyze_repository` and
@@ -364,8 +368,12 @@ Mode router for inspection and search.
 | `for_path`   | `path`          | Path-linked records                 |
 | `for_symbol` | `symbol`        | Symbol-linked records               |
 | `stale`      | —               | Stale inventory                     |
-| `coverage`   | `scope`         | Coverage metrics for paths          |
+| `coverage`   | `scope` (non-empty, not project root) | Coverage metrics for paths          |
 | `status`     | —               | Store status (like CLI `status`)    |
+
+List modes (`search`, `stale`, `drafts`, scoped `get_relevant_memory`) default
+to **compact** payloads: statement preview, `statement_length`, no `payload`.
+Use `mode=get` or `detail_level=full` for complete statements and payload.
 
 **Filters** (`filters` object):
 
@@ -543,6 +551,21 @@ graph LR
 
 ---
 
+## Scope and token hygiene
+
+Engineering Memory stores **short, evidence-linked cards** — not chat transcripts
+or project-wide dumps.
+
+| Rule | Contract |
+|------|----------|
+| Root scope forbidden | No `scope=["."]`, `path="."`, empty scope for `coverage`, or repo root as subject |
+| Scoped retrieval | `get_relevant_memory` requires `scope`, `intent_id`, or `symbols`; use `status`/`search` for orientation |
+| Compact lists | Default `detail_level=compact`: statement preview + `statement_length`; full text via `mode=get` or `detail_level=full` |
+| Agent writes | `record_candidate` requires `subject_path`; target ≤300 chars, soft warn >500, hard reject >1000 (`max_statement_chars`) |
+| One fact per card | Compress observations before write; store details in receipt/spec/docs |
+
+---
+
 ## Invariants (MUST)
 
 - Memory store path defaults under `.cache/codeclone/memory/` — not baseline or analysis cache.
@@ -566,6 +589,9 @@ graph LR
 | At `max_records`           | Init upsert skips or rejects per store policy               |
 | No cached report on init   | Init runs analysis or fails with clear message              |
 | Git unavailable            | Init proceeds; git evidence/hotspots skipped                |
+| Root scope path            | `MemoryContractError`: use status/search for orientation    |
+| Unscoped retrieval         | `get_relevant_memory` rejected without scope/intent/symbols |
+| Statement too long         | `record_candidate` rejected above `max_statement_chars`     |
 
 ---
 

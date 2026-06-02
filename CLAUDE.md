@@ -117,6 +117,11 @@ After `start_controlled_change` returns `edit_allowed: true`:
 6. If memory contains a `contradiction_note` for your scope, surface it to
    the user before editing
 
+**Scope and token hygiene:** never use project root as memory scope. Compress
+`record_candidate` statements to one durable fact (target ≤300 chars;
+`validate_claims` warns above 500; hard limit 1000). List responses default to
+compact previews — use `mode=get` or `detail_level=full` for complete text.
+
 ### Before `finish`: incident / complexity memory (MANDATORY)
 
 **Do not call `finish_controlled_change` until this check passes.**

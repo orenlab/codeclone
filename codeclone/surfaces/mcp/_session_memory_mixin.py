@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from ...config.memory import MemoryConfig, resolve_memory_config
-from ...memory.exceptions import MemoryContractError
+from ...memory.exceptions import MemoryCapacityError, MemoryContractError
 from ...memory.ide_governance import (
     IdeGovernanceSessionState,
     _governance_rejected,
@@ -20,6 +20,7 @@ from ...memory.ide_governance import (
 )
 from ...memory.ingest.mcp_sync import execute_mcp_memory_sync
 from ...memory.models import MemoryProject
+from ...memory.paths import normalize_memory_scope_path
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.retrieval import get_relevant_memory, query_engineering_memory
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
@@ -48,13 +49,23 @@ class _MCPSessionMemoryMixin:
         max_records: int = 20,
         include_stale: bool = False,
         include_drafts: bool = False,
+        detail_level: str = "compact",
     ) -> dict[str, object]:
         root_path = _helpers._resolve_root(root)
         memory_sync = self._maybe_auto_sync_memory(root_path)
-        scope_paths, scope_resolved_from = self._resolve_memory_scope_paths(
-            scope=scope,
-            intent_id=intent_id,
-        )
+        if not scope and not intent_id and not symbols:
+            raise MCPServiceContractError(
+                "get_relevant_memory requires scope, intent_id, or symbols. "
+                "Use query_engineering_memory(mode=status|search) for project "
+                "orientation."
+            )
+        if scope or intent_id:
+            scope_paths, scope_resolved_from = self._resolve_memory_scope_paths(
+                scope=scope,
+                intent_id=intent_id,
+            )
+        else:
+            scope_paths, scope_resolved_from = (), "symbols"
         effective_include_drafts = include_drafts or bool(scope_paths)
         store, _db_path, _config, project = self._open_memory_store(root_path)
         try:
@@ -69,11 +80,14 @@ class _MCPSessionMemoryMixin:
                 max_records=max_records,
                 include_stale=include_stale,
                 include_drafts=effective_include_drafts,
+                detail_level=detail_level,
             )
             if memory_sync is not None:
                 result = dict(result)
                 result["memory_sync"] = memory_sync
             return result
+        except MemoryContractError as exc:
+            raise MCPServiceContractError(str(exc)) from exc
         finally:
             store.close()
 
@@ -91,6 +105,7 @@ class _MCPSessionMemoryMixin:
         max_results: int = 20,
         include_stale: bool = False,
         include_drafts: bool = False,
+        detail_level: str = "compact",
     ) -> dict[str, object]:
         root_path = _helpers._resolve_root(root)
         store, db_path, config, project = self._open_memory_store(root_path)
@@ -111,6 +126,7 @@ class _MCPSessionMemoryMixin:
                 max_results=max_results,
                 include_stale=include_stale,
                 include_drafts=include_drafts,
+                detail_level=detail_level,
             )
         except MemoryContractError as exc:
             raise MCPServiceContractError(str(exc)) from exc
@@ -140,7 +156,7 @@ class _MCPSessionMemoryMixin:
         protocol: int | None = None,
         reject_reason: str | None = None,
     ) -> dict[str, object]:
-        from ...memory.exceptions import MemoryCapacityError, MemoryContractError
+        from ...memory.exceptions import MemoryContractError
 
         root_path = _helpers._resolve_root(root)
         try:
@@ -287,6 +303,7 @@ class _MCPSessionMemoryMixin:
             statement=statement,
             subject_path=subject_path,
             max_candidates=config.max_candidates,
+            max_statement_chars=config.max_statement_chars,
         )
         return {
             "action": "record_candidate",
@@ -344,6 +361,7 @@ class _MCPSessionMemoryMixin:
             project=project,
             finish_payload=payload,
             max_candidates=config.max_candidates,
+            max_statement_chars=config.max_statement_chars,
         )
         return {"action": "propose_from_receipt", "memory_candidates": candidates}
 
@@ -439,6 +457,7 @@ class _MCPSessionMemoryMixin:
                 review_text=review_text,
                 verification_profile=verification_profile,
                 max_candidates=config.max_candidates,
+                max_statement_chars=config.max_statement_chars,
             )
             stale_report = apply_scope_staleness(
                 store,
@@ -486,7 +505,10 @@ class _MCPSessionMemoryMixin:
         intent_id: str | None,
     ) -> tuple[tuple[str, ...], str]:
         if scope:
-            return tuple(scope), "explicit"
+            return (
+                tuple(normalize_memory_scope_path(path) for path in scope),
+                "explicit",
+            )
         if intent_id:
             intent = self._active_intents.get(intent_id)
             if intent is None:
@@ -494,8 +516,18 @@ class _MCPSessionMemoryMixin:
                     f"Intent '{intent_id}' is not active in this MCP session. "
                     "Pass explicit scope or re-run start_controlled_change."
                 )
-            return intent.scope.allowed_files, "intent"
-        return (), "project_summary"
+            return (
+                tuple(
+                    normalize_memory_scope_path(path)
+                    for path in intent.scope.allowed_files
+                ),
+                "intent",
+            )
+        raise MCPServiceContractError(
+            "get_relevant_memory requires scope or intent_id. "
+            "Use query_engineering_memory(mode=status|search) for project "
+            "orientation."
+        )
 
     def _memory_blast_dependents(
         self,

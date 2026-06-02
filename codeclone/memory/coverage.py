@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from .paths import normalize_repo_path
+from .paths import normalize_memory_scope_paths
 from .retrieval.service import path_has_memory
 from .sqlite_store import SqliteEngineeringMemoryStore
 
@@ -29,7 +29,7 @@ def compute_scope_coverage(
     project_id: str,
     scope_paths: Sequence[str],
 ) -> ScopeCoverageReport:
-    normalized = tuple(normalize_repo_path(path) for path in scope_paths if path)
+    normalized = normalize_memory_scope_paths(scope_paths)
     with_memory = 0
     uncovered: list[str] = []
     for scope_path in normalized:
@@ -70,5 +70,4 @@ __all__ = [
     "ScopeCoverageReport",
     "compute_scope_coverage",
     "coverage_delta",
-    "normalize_repo_path",
 ]

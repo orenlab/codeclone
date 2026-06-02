@@ -78,6 +78,7 @@ from .messages.params import (
     MaxSizeMbParam,
     MaxSuggestionsParam,
     MemoryClaimsTextParam,
+    MemoryDetailLevelParam,
     MemoryFiltersParam,
     MemoryMaxRecordsParam,
     MemoryPathParam,
@@ -461,6 +462,7 @@ def build_mcp_server(
         max_records: MemoryMaxRecordsParam = 20,
         include_stale: IncludeStaleParam = False,
         include_drafts: IncludeDraftsParam = False,
+        detail_level: MemoryDetailLevelParam = "compact",
     ) -> dict[str, object]:
         return service.get_relevant_memory(
             root=root,
@@ -470,6 +472,7 @@ def build_mcp_server(
             max_records=max_records,
             include_stale=include_stale,
             include_drafts=include_drafts,
+            detail_level=detail_level,
         )
 
     @tool(
@@ -490,6 +493,7 @@ def build_mcp_server(
         max_results: MemoryMaxRecordsParam = 20,
         include_stale: IncludeStaleParam = False,
         include_drafts: IncludeDraftsParam = False,
+        detail_level: MemoryDetailLevelParam = "compact",
     ) -> dict[str, object]:
         return service.query_engineering_memory(
             root=root,
@@ -503,6 +507,7 @@ def build_mcp_server(
             max_results=max_results,
             include_stale=include_stale,
             include_drafts=include_drafts,
+            detail_level=detail_level,
         )
 
     @tool(

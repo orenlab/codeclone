@@ -90,6 +90,7 @@ def test_approve_record_skips_warrant_evidence_when_evidence_already_present(
             project=project,
             record_type="human_note",
             statement="Pre-approved draft, evidence already present.",
+            subject_path="pkg/mod.py",
             max_candidates=100,
         )
         evidence = MemoryEvidence(

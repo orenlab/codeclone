@@ -60,6 +60,7 @@ def test_memory_cli_for_path_and_governance(tmp_path: Path) -> None:
             project=project,
             record_type="architecture_decision",
             statement="approve via CLI",
+            subject_path="pkg/mod.py",
             max_candidates=100,
         )
         draft_id = draft.id
@@ -81,6 +82,7 @@ def test_memory_cli_for_path_and_governance(tmp_path: Path) -> None:
             project=project2,
             record_type="change_rationale",
             statement="reject me",
+            subject_path="pkg/mod.py",
             max_candidates=100,
         )
         reject_id = rejected.id
@@ -107,6 +109,7 @@ def test_memory_cli_for_path_and_governance(tmp_path: Path) -> None:
             project=project3,
             record_type="change_rationale",
             statement="archive me",
+            subject_path="pkg/mod.py",
             max_candidates=100,
         )
         from codeclone.memory.governance import approve_record

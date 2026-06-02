@@ -80,6 +80,7 @@ def test_mcp_manage_memory_ide_governance_flow(tmp_path: Path) -> None:
             action="record_candidate",
             record_type="architecture_decision",
             statement="IDE governance via MCP",
+            subject_path="pkg/mod.py",
         )
         record_id = str(recorded["record_id"])
         key_hex = secrets.token_hex(32)
@@ -346,10 +347,10 @@ def test_mcp_resolve_memory_scope_paths_and_blast_dependents_edges(
 ) -> None:
     with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
         service = CodeCloneMCPService(history_limit=2)
-        assert service._resolve_memory_scope_paths(scope=None, intent_id=None) == (
-            (),
-            "project_summary",
-        )
+        with pytest.raises(
+            MCPServiceContractError, match="requires scope or intent_id"
+        ):
+            service._resolve_memory_scope_paths(scope=None, intent_id=None)
         with pytest.raises(MCPServiceContractError, match="is not active"):
             service._resolve_memory_scope_paths(scope=None, intent_id="intent-missing")
 

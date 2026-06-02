@@ -325,6 +325,15 @@ LeaseSecondsParam = Annotated[
     int | None,
     Field(description="Lease renewal seconds for renew action."),
 ]
+MemoryDetailLevelParam = Annotated[
+    str,
+    Field(
+        description=(
+            "compact (default) returns statement previews without payload; "
+            "full returns complete statement and payload. mode=get always returns full."
+        ),
+    ),
+]
 MemoryScopeListParam = Annotated[
     list[str] | None,
     Field(description="Repo-relative scope paths for engineering memory retrieval."),

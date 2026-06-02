@@ -31,6 +31,7 @@ def test_propose_memory_from_finish_payload_with_scope_and_text(
                 "verification": {"verification_profile": "python_structural"},
             },
             max_candidates=20,
+            max_statement_chars=1000,
         )
     assert candidates
     types = {item["type"] for item in candidates if isinstance(item, dict)}
@@ -50,6 +51,7 @@ def test_propose_memory_from_changed_paths(tmp_path: Path) -> None:
             review_text=None,
             verification_profile="documentation_only",
             max_candidates=10,
+            max_statement_chars=1000,
         )
     assert any(
         isinstance(item, dict) and item.get("type") == "contract_note"
@@ -68,6 +70,7 @@ def test_propose_memory_skips_invalid_text_candidates(tmp_path: Path) -> None:
                 "review_text": 42,
             },
             max_candidates=5,
+            max_statement_chars=1000,
         )
     assert candidates == []
 
@@ -79,6 +82,7 @@ def test_propose_memory_module_role_from_py_scope(tmp_path: Path) -> None:
             project=project,
             record_type="architecture_decision",
             statement="existing draft",
+            subject_path="pkg/mod.py",
             max_candidates=100,
         )
         candidates = propose_memory_from_finish_payload(
@@ -88,5 +92,6 @@ def test_propose_memory_module_role_from_py_scope(tmp_path: Path) -> None:
                 "scope_check": {"declared_scope": ["pkg/mod.py"]},
             },
             max_candidates=1,
+            max_statement_chars=1000,
         )
     assert candidates == [] or candidates[0]["id"] != record.id

@@ -13,11 +13,12 @@ from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
 from ...contracts import ExitCode
 from ...memory.embedding import resolve_embedding_provider
+from ...memory.exceptions import MemoryContractError
 from ...memory.governance import approve_record, archive_record, reject_record
 from ...memory.ingest import InitOptions
 from ...memory.ingest.runner import run_memory_init
 from ...memory.models import MemoryProject, MemoryQuery
-from ...memory.paths import normalize_repo_path
+from ...memory.paths import normalize_memory_scope_path
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.retrieval import query_engineering_memory, query_records_for_repo_path
 from ...memory.semantic import (
@@ -46,6 +47,19 @@ from .memory_render import (
     render_vacuum_report,
 )
 from .types import PrinterLike
+
+
+def _print_memory_contract_error(console: PrinterLike, exc: MemoryContractError) -> int:
+    console.print(str(exc))
+    return int(ExitCode.CONTRACT_ERROR)
+
+
+def _normalize_memory_cli_path(console: PrinterLike, raw_path: str) -> str | None:
+    try:
+        return normalize_memory_scope_path(raw_path)
+    except MemoryContractError as exc:
+        _print_memory_contract_error(console, exc)
+        return None
 
 
 def memory_main(argv: list[str]) -> int:
@@ -280,16 +294,14 @@ def _run_init(
 def _run_for_path(
     *, console: PrinterLike, root_path: Path, args: argparse.Namespace
 ) -> int:
-    rel_path = normalize_repo_path(args.path)
-    config = resolve_memory_config(root_path)
-    db_path = resolve_memory_db_path(root_path, config)
-    if not db_path.exists():
-        console.print(f"Engineering memory database not found: {db_path}")
-        console.print("Run: codeclone memory init")
+    rel_path = _normalize_memory_cli_path(console, args.path)
+    if rel_path is None:
         return int(ExitCode.CONTRACT_ERROR)
-
-    project = resolve_project_identity(root_path)
-    store = SqliteEngineeringMemoryStore(db_path)
+    try:
+        store, _config, project = _open_store(root_path)
+    except FileNotFoundError as exc:
+        console.print(f"Engineering memory database not found: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
     try:
         records = query_records_for_repo_path(
             store,
@@ -307,22 +319,18 @@ def _run_for_path(
 def _run_search(
     *, console: PrinterLike, root_path: Path, args: argparse.Namespace
 ) -> int:
-    config = resolve_memory_config(root_path)
-    db_path = resolve_memory_db_path(root_path, config)
-    if not db_path.exists():
-        console.print(f"Engineering memory database not found: {db_path}")
-        console.print("Run: codeclone memory init")
+    try:
+        store, config, project = _open_store(root_path)
+    except FileNotFoundError as exc:
+        console.print(f"Engineering memory database not found: {exc}")
         return int(ExitCode.CONTRACT_ERROR)
-
-    project = resolve_project_identity(root_path)
-    store = SqliteEngineeringMemoryStore(db_path)
     try:
         result = query_engineering_memory(
             store,
             project_id=project.id,
             root_path=root_path,
             backend=config.backend,
-            db_path=db_path,
+            db_path=resolve_memory_db_path(root_path, config),
             mode="search",
             query=str(args.query),
             filters={"match_mode": str(args.match)},
@@ -412,6 +420,8 @@ def _run_coverage(
             project_id=project.id,
             scope_paths=args.paths,
         )
+    except MemoryContractError as exc:
+        return _print_memory_contract_error(console, exc)
     finally:
         store.close()
     render_coverage_report(console=console, report=report)

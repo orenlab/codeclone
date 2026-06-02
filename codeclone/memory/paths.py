@@ -6,7 +6,25 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import PurePosixPath
+
+from .exceptions import MemoryContractError
+
+MEMORY_ROOT_SCOPE_ERROR = (
+    "Engineering Memory requires a file, symbol, or declared intent scope. "
+    "Project root is not a valid memory scope. Use status/search for project "
+    "orientation."
+)
+
+MEMORY_RETRIEVAL_SCOPE_REQUIRED_ERROR = (
+    "get_relevant_memory requires scope, intent_id, or symbols. "
+    "Use query_engineering_memory(mode=status|search) for project orientation."
+)
+
+MEMORY_COVERAGE_SCOPE_REQUIRED_ERROR = (
+    "mode=coverage requires one or more repo-relative scope paths."
+)
 
 
 def normalize_repo_path(raw_path: str) -> str:
@@ -16,6 +34,23 @@ def normalize_repo_path(raw_path: str) -> str:
         msg = "path must be repo-relative without traversal"
         raise ValueError(msg)
     return path.as_posix()
+
+
+def is_root_scope_path(normalized_path: str) -> bool:
+    return normalized_path in {"", "."}
+
+
+def normalize_memory_scope_path(raw_path: str) -> str:
+    normalized = normalize_repo_path(raw_path)
+    if is_root_scope_path(normalized):
+        raise MemoryContractError(MEMORY_ROOT_SCOPE_ERROR)
+    return normalized
+
+
+def normalize_memory_scope_paths(raw_paths: Sequence[str]) -> tuple[str, ...]:
+    if not raw_paths:
+        raise MemoryContractError(MEMORY_COVERAGE_SCOPE_REQUIRED_ERROR)
+    return tuple(normalize_memory_scope_path(item) for item in raw_paths)
 
 
 def repo_path_to_module_key(rel_path: str) -> str:
@@ -28,7 +63,7 @@ def repo_path_to_module_key(rel_path: str) -> str:
 def expand_scope_paths(scope_paths: frozenset[str]) -> frozenset[str]:
     expanded: set[str] = set()
     for raw_path in scope_paths:
-        normalized = normalize_repo_path(raw_path)
+        normalized = normalize_memory_scope_path(raw_path)
         expanded.add(normalized)
         expanded.add(repo_path_to_module_key(normalized))
     return frozenset(expanded)
@@ -42,7 +77,7 @@ def subject_matches_scope(
     key = subject_key.replace("\\", "/").strip("/")
     best = 0.0
     for scope_path in scope_paths:
-        normalized = normalize_repo_path(scope_path)
+        normalized = normalize_memory_scope_path(scope_path)
         module_key = repo_path_to_module_key(normalized)
         if key in {normalized, module_key}:
             return 1.0
@@ -54,7 +89,13 @@ def subject_matches_scope(
 
 
 __all__ = [
+    "MEMORY_COVERAGE_SCOPE_REQUIRED_ERROR",
+    "MEMORY_RETRIEVAL_SCOPE_REQUIRED_ERROR",
+    "MEMORY_ROOT_SCOPE_ERROR",
     "expand_scope_paths",
+    "is_root_scope_path",
+    "normalize_memory_scope_path",
+    "normalize_memory_scope_paths",
     "normalize_repo_path",
     "repo_path_to_module_key",
     "subject_matches_scope",

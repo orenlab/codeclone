@@ -9,10 +9,17 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Literal, cast
 
+from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
 from ..enums import MemoryConfidence, MemoryRecordType, MemoryStatus
 from ..exceptions import MemoryContractError
 from ..models import MemoryEvidence, MemoryQuery, MemoryRecord, MemorySubject
-from ..paths import normalize_repo_path, repo_path_to_module_key
+from ..paths import (
+    MEMORY_RETRIEVAL_SCOPE_REQUIRED_ERROR,
+    normalize_memory_scope_path,
+    normalize_memory_scope_paths,
+    normalize_repo_path,
+    repo_path_to_module_key,
+)
 from ..search_index import SearchMatchMode
 from ..sqlite_store import SqliteEngineeringMemoryStore
 from ..status_report import build_memory_status_report
@@ -39,6 +46,27 @@ QUERY_MODES: tuple[str, ...] = (
     "coverage",
     "status",
 )
+
+MemoryDetailLevel = Literal["compact", "full"]
+
+
+def _normalize_detail_level(detail_level: str) -> MemoryDetailLevel:
+    if detail_level == "full":
+        return "full"
+    if detail_level in {"compact", "summary", "normal"}:
+        return "compact"
+    raise MemoryContractError("detail_level must be compact, summary, normal, or full.")
+
+
+def _statement_preview(
+    statement: str,
+    *,
+    max_chars: int = DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS,
+) -> str:
+    if len(statement) <= max_chars:
+        return statement
+    trimmed = statement[: max_chars - 1].rstrip()
+    return f"{trimmed}…"
 
 
 def query_records_for_repo_path(
@@ -166,19 +194,29 @@ def _serialize_record_summary(
     subjects: Sequence[MemorySubject],
     evidence_count: int,
     relevance_score: float | None = None,
+    detail_level: MemoryDetailLevel = "compact",
 ) -> dict[str, object]:
+    statement_length = len(record.statement)
+    if detail_level == "full":
+        statement_value: str = record.statement
+    else:
+        statement_value = _statement_preview(record.statement)
     payload: dict[str, object] = {
         "id": record.id,
         "type": record.type,
         "status": record.status,
         "confidence": record.confidence,
         "approved": record.approved_by is not None,
-        "statement": record.statement,
-        "payload": record.payload,
+        "statement": statement_value,
+        "statement_length": statement_length,
         "subjects": [_serialize_subject(item) for item in subjects],
         "evidence_count": evidence_count,
         "stale": record.status == "stale",
     }
+    if detail_level == "full":
+        payload["payload"] = record.payload
+    elif detail_level == "compact" and statement_length > len(statement_value):
+        payload["statement_truncated"] = True
     if record.stale_reason:
         payload["stale_reason"] = record.stale_reason
     if record.status == "draft":
@@ -195,6 +233,7 @@ def _rank_records(
     candidates: Sequence[MemoryRecord],
     context: RankingContext,
     max_records: int,
+    detail_level: MemoryDetailLevel,
 ) -> tuple[list[dict[str, object]], bool]:
     scored: list[tuple[float, str, dict[str, object]]] = []
     for record in candidates:
@@ -217,6 +256,7 @@ def _rank_records(
                     subjects=subjects,
                     evidence_count=evidence_count,
                     relevance_score=score,
+                    detail_level=detail_level,
                 ),
             )
         )
@@ -232,21 +272,16 @@ def _coverage_summary(
     project_id: str,
     scope_paths: Sequence[str],
 ) -> dict[str, object]:
-    if not scope_paths:
-        return {
-            "scope_paths_with_memory": 0,
-            "scope_paths_total": 0,
-            "coverage_percent": 100,
-        }
+    normalized = normalize_memory_scope_paths(scope_paths)
     with_memory = 0
-    for raw_path in scope_paths:
+    for raw_path in normalized:
         if path_has_memory(
             store,
             project_id=project_id,
             rel_path=raw_path,
         ):
             with_memory += 1
-    total = len(scope_paths)
+    total = len(normalized)
     percent = round(with_memory * 100 / total) if total else 100
     return {
         "scope_paths_with_memory": with_memory,
@@ -266,11 +301,16 @@ def get_relevant_memory(
     max_records: int = 20,
     include_stale: bool = False,
     include_drafts: bool = False,
+    detail_level: str = "compact",
 ) -> dict[str, object]:
-    normalized_scope = tuple(normalize_repo_path(path) for path in (scope_paths or ()))
+    normalized_detail = _normalize_detail_level(detail_level)
+    raw_scope = scope_paths or ()
     normalized_symbols = frozenset(symbols or ())
+    if not raw_scope and not normalized_symbols:
+        raise MemoryContractError(MEMORY_RETRIEVAL_SCOPE_REQUIRED_ERROR)
+    normalized_scope = tuple(normalize_memory_scope_path(path) for path in raw_scope)
     normalized_blast = frozenset(
-        normalize_repo_path(path) for path in (blast_dependents or ())
+        normalize_memory_scope_path(path) for path in (blast_dependents or ())
     )
     effective_include_drafts = include_drafts or bool(normalized_scope)
     context = RankingContext.from_scope(
@@ -294,30 +334,28 @@ def get_relevant_memory(
             include_drafts=effective_include_drafts,
         )
     ]
-    if not normalized_scope and not normalized_symbols:
-        visible.sort(key=lambda item: (item.updated_at_utc, item.id), reverse=True)
-        records_payload = [
-            _serialize_record_summary(
-                record=record,
-                subjects=store.list_subjects_for_memory(record.id),
-                evidence_count=store.count_evidence_for_memory(record.id),
-            )
-            for record in visible[:max_records]
-        ]
-        truncated = len(visible) > max_records
-    else:
-        records_payload, truncated = _rank_records(
-            store,
-            project_id=project_id,
-            candidates=visible,
-            context=context,
-            max_records=max_records,
-        )
-    coverage = _coverage_summary(
+    records_payload, truncated = _rank_records(
         store,
         project_id=project_id,
-        scope_paths=normalized_scope,
+        candidates=visible,
+        context=context,
+        max_records=max_records,
+        detail_level=normalized_detail,
     )
+    coverage: dict[str, object]
+    if normalized_scope:
+        coverage = _coverage_summary(
+            store,
+            project_id=project_id,
+            scope_paths=normalized_scope,
+        )
+    else:
+        coverage = {
+            "scope_paths_with_memory": 0,
+            "scope_paths_total": 0,
+            "coverage_percent": None,
+            "coverage_note": "symbol_scoped_retrieval",
+        }
     return {
         "project_id": project_id,
         "scope_resolved_from": scope_resolved_from,
@@ -325,6 +363,7 @@ def get_relevant_memory(
         "record_count": len(records_payload),
         "truncated": truncated,
         "coverage": coverage,
+        "detail_level": normalized_detail,
         "retrieval_policy": _retrieval_policy(include_drafts=effective_include_drafts),
     }
 
@@ -413,15 +452,34 @@ def _handle_get_mode(
     return {
         "mode": mode,
         "status": "ok",
+        "detail_level": "full",
         "payload": {
             "record": _serialize_record_summary(
                 record=record,
                 subjects=subjects,
                 evidence_count=len(evidence),
+                detail_level="full",
             ),
             "evidence": [_serialize_evidence(item) for item in evidence],
         },
     }
+
+
+def _serialize_list_mode_records(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    records: Sequence[MemoryRecord],
+    detail_level: MemoryDetailLevel,
+) -> list[dict[str, object]]:
+    return [
+        _serialize_record_summary(
+            record=record,
+            subjects=store.list_subjects_for_memory(record.id),
+            evidence_count=store.count_evidence_for_memory(record.id),
+            detail_level=detail_level,
+        )
+        for record in records
+    ]
 
 
 def _handle_stale_mode(
@@ -430,6 +488,7 @@ def _handle_stale_mode(
     mode: str,
     project_id: str,
     max_results: int,
+    detail_level: MemoryDetailLevel,
 ) -> dict[str, object]:
     records = store.query_records(
         MemoryQuery(
@@ -438,17 +497,15 @@ def _handle_stale_mode(
             limit=max_results,
         )
     )
-    payload_records = [
-        _serialize_record_summary(
-            record=record,
-            subjects=store.list_subjects_for_memory(record.id),
-            evidence_count=store.count_evidence_for_memory(record.id),
-        )
-        for record in records
-    ]
+    payload_records = _serialize_list_mode_records(
+        store,
+        records=records,
+        detail_level=detail_level,
+    )
     return {
         "mode": mode,
         "status": "ok",
+        "detail_level": detail_level,
         "payload": {
             "records": payload_records,
             "record_count": len(payload_records),
@@ -464,7 +521,7 @@ def _handle_coverage_mode(
     project_id: str,
     scope: Sequence[str] | None,
 ) -> dict[str, object]:
-    scope_paths = [normalize_repo_path(item) for item in (scope or ())]
+    scope_paths = normalize_memory_scope_paths(scope or ())
     coverage = _coverage_summary(
         store,
         project_id=project_id,
@@ -533,7 +590,9 @@ def _fetch_for_path_mode_records(
     statuses: tuple[MemoryStatus, ...],
     max_results: int,
 ) -> tuple[MemoryRecord, ...]:
-    rel_path = _require_query_field(path, mode="for_path", field="path")
+    rel_path = normalize_memory_scope_path(
+        _require_query_field(path, mode="for_path", field="path")
+    )
     return query_records_for_repo_path(
         store,
         project_id=project_id,
@@ -646,12 +705,14 @@ def query_engineering_memory(
     max_results: int = 20,
     include_stale: bool = False,
     include_drafts: bool = False,
+    detail_level: str = "compact",
 ) -> dict[str, object]:
     if mode not in QUERY_MODES:
         raise MemoryContractError(
             f"Unknown query mode {mode!r}. Allowed: {', '.join(QUERY_MODES)}."
         )
 
+    normalized_detail = _normalize_detail_level(detail_level)
     effective_include_drafts = include_drafts or mode in {"for_path", "for_symbol"}
 
     if mode == "status":
@@ -674,6 +735,7 @@ def query_engineering_memory(
             mode=mode,
             project_id=project_id,
             max_results=max_results,
+            detail_level=normalized_detail,
         )
     if mode == "drafts":
         records = store.query_records(
@@ -683,17 +745,15 @@ def query_engineering_memory(
                 limit=max_results,
             )
         )
-        payload_records = [
-            _serialize_record_summary(
-                record=record,
-                subjects=store.list_subjects_for_memory(record.id),
-                evidence_count=store.count_evidence_for_memory(record.id),
-            )
-            for record in records
-        ]
+        payload_records = _serialize_list_mode_records(
+            store,
+            records=records,
+            detail_level=normalized_detail,
+        )
         return {
             "mode": mode,
             "status": "ok",
+            "detail_level": normalized_detail,
             "payload": {
                 "records": payload_records,
                 "record_count": len(payload_records),
@@ -741,17 +801,15 @@ def query_engineering_memory(
     ]
     truncated = len(visible) > max_results
     selected = visible[:max_results]
-    payload_records = [
-        _serialize_record_summary(
-            record=record,
-            subjects=store.list_subjects_for_memory(record.id),
-            evidence_count=store.count_evidence_for_memory(record.id),
-        )
-        for record in selected
-    ]
+    payload_records = _serialize_list_mode_records(
+        store,
+        records=selected,
+        detail_level=normalized_detail,
+    )
     return {
         "mode": mode,
         "status": "ok",
+        "detail_level": normalized_detail,
         "payload": {
             "records": payload_records,
             "record_count": len(payload_records),
@@ -765,6 +823,7 @@ def query_engineering_memory(
 
 __all__ = [
     "QUERY_MODES",
+    "MemoryDetailLevel",
     "QueryMode",
     "get_relevant_memory",
     "normalize_repo_path",

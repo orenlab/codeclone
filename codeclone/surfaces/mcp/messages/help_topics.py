@@ -555,6 +555,10 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             "through the CodeClone VS Code Memory view, not MCP agent tools.",
             "Memory cannot expand scope, authorize do_not_touch edits, "
             "or override findings.",
+            "Engineering Memory is scoped and compact: never use project root as "
+            "scope/path; compress record_candidate statements to one durable fact "
+            "(target <= 300 chars); list responses default to compact previews — "
+            "use mode=get or detail_level=full for complete statements.",
         ),
         recommended_tools=(
             "help",
@@ -575,6 +579,9 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         anti_patterns=(
             "Using memory to justify touching do-not-touch paths.",
             "Skipping get_relevant_memory because blast radius was already read.",
+            "Calling get_relevant_memory without scope, intent_id, or symbols.",
+            "Using scope=['.'], path='.', or project root for memory retrieval.",
+            "Writing long chat transcripts into record_candidate statements.",
             "Calling get_relevant_memory with intent_id or scope but without "
             "absolute root (Pydantic validation error).",
             "Calling manage_engineering_memory with approve/reject/archive — use "

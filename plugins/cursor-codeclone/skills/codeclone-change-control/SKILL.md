@@ -89,6 +89,9 @@ a decision the next agent should not rediscover, call
 Skip for trivial one-liner fixes only. See `change-control-gate` rule and
 `codeclone-engineering-memory` skill.
 
+Before `record_candidate`, compress to one durable fact with `subject_path` set;
+target ≤300 chars (hard reject above `max_statement_chars`, default 1000).
+
 ### After `start` (`edit_allowed` gate)
 
 | Response         | Action                                                                                                                                                                                                                       |
