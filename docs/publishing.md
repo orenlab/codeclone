@@ -31,17 +31,18 @@ The published site contains:
 
 ## Build flow
 
-The docs workflow follows this order:
+The docs workflow (`.github/workflows/docs.yml`) follows this order:
 
 1. install project dependencies
 2. build the MkDocs site with `mkdocs build --strict`
-3. validate `!!!` / `???` admonition indentation with
-   `python3 scripts/lint_mkdocs_admonitions.py docs/`
-   (PyCharm table formatting often strips the required 4-space body indent;
-   pass `--fix` to repair)
 3. generate a live sample report into `site/examples/report/live`
 4. upload the built site as a GitHub Pages artifact
 5. deploy on pushes to `main`
+
+Admonition indentation (`!!!` / `???` body must be indented 4 spaces) is enforced
+in the main test workflow via `tests/test_docs_mkdocs_admonitions.py`, not in
+`docs.yml`. Repair locally with
+`python3 scripts/lint_mkdocs_admonitions.py docs/ --fix`.
 
 Relevant files:
 

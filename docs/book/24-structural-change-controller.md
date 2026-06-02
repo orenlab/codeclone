@@ -543,6 +543,10 @@ Each audit event row includes three optional fields:
 The estimation input is the full original payload (what the MCP client
 receives), not the compact audit storage form.
 
+With `audit_payloads=compact`, stored JSON drops large structured fields, but
+`intent.declared` keeps bounded `intent_description`. The SQLite `summary` column
+always stores a short essence via `event_summary()`, independent of payload mode.
+
 ### CLI visibility
 
 The `--audit` Rich TUI renderer shows token columns when data is available:
@@ -664,6 +668,14 @@ for the declared scope. They do **not** mean “no structural regressions” or
 unchanged repository health — read `verification.structural_delta` and
 `health_regression_advisory` when present.
 
+### Hygiene payload `detail_level`
+
+On `start_controlled_change` / `finish_controlled_change`, hygiene uses
+`detail_level` as binary size control: `summary` and `normal` are equivalent
+(`counts`, `foreign_dirty_overlaps`, blocking flags). `detail_level="full"` adds
+`dirty_attribution`, path classification arrays, and expanded `dirty_snapshot`.
+Findings/hotspots tools still honor all three levels.
+
 ### Finish hygiene: what blocks vs what informs
 
 Finish hygiene reconciles **agent evidence with git** and the **start-time dirty
@@ -677,9 +689,9 @@ snapshot**. It is not honor-system.
 | `missing_evidence`      | Git is dirty inside declared scope but the path is missing from `changed_files` / `diff_ref` | Add every in-scope dirty path to evidence or revert                                        |
 | `foreign_dirty_overlap` | A **live** foreign active/stale intent previously declared the same **in-scope** path        | Coordinate (queue/promote/clear foreign intent), stash/commit foreign WIP, or narrow scope |
 
-**Non-blocking (advisory)** — surfaced on `workspace_hygiene_after` and in
-`dirty_attribution`, but **do not** set `finish_block_reason` and **do not**
-feed `files_for_scope_check`:
+**Non-blocking (advisory)** — surfaced on `workspace_hygiene_after` (path lists in
+`dirty_attribution` when `detail_level="full"`), but **do not** set
+`finish_block_reason` and **do not** feed `files_for_scope_check`:
 
 | Field                                  | Meaning                                                                                 |
 |----------------------------------------|-----------------------------------------------------------------------------------------|
@@ -713,7 +725,7 @@ non-empty, finish elevates the top-level status to
 | `summary`                       | Compact dashboard (`scope_status`, `verification_profile`, `receipt`, `intent_cleared`, dirty counts) |
 | `scope_check`                   | Declared vs actual files from check                                                                   |
 | `verification`                  | Full verify payload including `structural_delta`, `next_step`                                         |
-| `workspace_hygiene_after`       | Post-finish hygiene; use `counts` and `dirty_attribution` (`detail_level`)                            |
+| `workspace_hygiene_after`       | Post-finish hygiene; `counts` always; `dirty_attribution` only when `detail_level="full"`           |
 | `health_regression_advisory`    | On accepted verify when `health_delta < 0` — user-facing, not auto-fail                               |
 | `claims`                        | Claim Guard result when `claims_text` was validated                                                   |
 | `receipt` / `receipt_error`     | Receipt body; `receipt_error` prevents `auto_clear`                                                   |

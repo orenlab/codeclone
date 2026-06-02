@@ -110,7 +110,7 @@ Reload Cursor or reopen the workspace after installing. Project hooks require a
 
 The plugin bundles a stdio-based `codeclone-mcp` server configuration via
 `python3 ./scripts/launch_mcp.py` (workspace `.venv` → Poetry env → `PATH`).
-The server exposes all 28 MCP tools (full passthrough). Skills and rules steer
+The server exposes all 31 MCP tools (full passthrough). Skills and rules steer
 agents toward the documented workflow; the plugin does not filter tools at the
 transport layer.
 

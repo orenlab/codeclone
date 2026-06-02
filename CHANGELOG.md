@@ -84,6 +84,8 @@ review receipts, and workflow consolidation tools.
   change-control gate via read-only `codeclone.workspace_intent` (file and SQLite
   registry backends), project hook installer, `enforce_scope` (`python` |
   `repo`), and bundled `codeclone-engineering-memory` skill.
+- MkDocs admonition lint (`scripts/lint_mkdocs_admonitions.py`) with contract test
+  `tests/test_docs_mkdocs_admonitions.py`.
 
 ### Changed
 
@@ -101,6 +103,13 @@ review receipts, and workflow consolidation tools.
 - MCP session state is process-local; workspace intent files are ephemeral
   coordination state, not analysis cache or report truth. Queued intents do
   not pin runs; pinning happens at promotion.
+- Workspace hygiene MCP payloads: path-level fields (`dirty_attribution`,
+  classification arrays) only when `finish_controlled_change(detail_level="full")`;
+  `summary`/`normal` return counts and blocking fields.
+- Audit `intent.declared` in `audit_payloads=compact` retains bounded
+  `intent_description`; SQLite `summary` column always stores event essence.
+- Repository test coverage gate raised to `>=99%` (`pyproject.toml` `fail_under`,
+  CI `--cov-fail-under=99`).
 
 ### Fixed
 

@@ -142,6 +142,20 @@ Hooks follow these invariants:
   the repository root are blocked, including `.git/**`; only read-only Git
   inspection shell commands are allowed
 
+### `enforce_scope`
+
+`preToolUse` gate breadth (default `python`):
+
+| Mode     | Gated without active intent                                      |
+|----------|------------------------------------------------------------------|
+| `python` | `.py` / `.pyi` writes and matching shell                         |
+| `repo`   | Any path under the workspace root, including `.git/**`           |
+
+Set via `.cursor/codeclone-hooks.json` (`enforce_scope`) or
+`CODECLONE_HOOKS_ENFORCE_SCOPE`. Installer:
+`uv run python plugins/cursor-codeclone/scripts/install-project-hooks.py --enforce-scope repo`.
+Details: [Cursor plugin guide](../cursor-plugin.md).
+
 ## Agent contract
 
 The structural reviewer agent:

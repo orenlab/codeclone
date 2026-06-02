@@ -91,6 +91,9 @@ Run these locally before proposing changes:
 uv run pre-commit run --all-files
 ```
 
+Full `pytest` runs enforce package coverage `>=99%` (`fail_under` in
+`pyproject.toml`; CI uses `--cov-fail-under=99`).
+
 If you touched baseline/cache/report contracts or CLI/MCP audit surfaces, also exercise the CLI audit path
 (`--audit` / `codeclone/surfaces/cli/audit.py`) or the relevant audit/MCP tests.
 If you touched `docs/`, `mkdocs.yml`, docs publishing workflow, or sample-report generation, also run:

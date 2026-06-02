@@ -713,6 +713,11 @@ ordinary workspace dirt unless scope is widened or changes reverted.
 **Finish hygiene payload fields** (on `workspace_hygiene` / `workspace_hygiene_after`
 when finish is hygiene-gated):
 
+For hygiene, `detail_level` is effectively binary: `summary` and `normal` return
+`counts`, overlap lists, and blocking fields only; pass `detail_level="full"` for
+`dirty_attribution`, path classification arrays, and expanded `dirty_snapshot`.
+(Other tools such as `list_findings` use all three levels independently.)
+
 | Field                                      | Meaning                                                                                                                                 |
 |--------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
 | `unacknowledged_dirty_in_scope`            | In-scope git dirty missing from finish evidence                                                                                         |
@@ -723,8 +728,8 @@ when finish is hygiene-gated):
 | `modified_unattributed_unscoped_dirty`     | Out-of-scope dirty path existed at `start` but changed afterward                                                                        |
 | `unknown_unattributed_unscoped_dirty`      | Out-of-scope dirty path cannot be compared with a start snapshot                                                                        |
 | `foreign_attributed_outside_scope`         | Out-of-scope git dirty owned by foreign active/stale intent — informational, non-blocking                                               |
-| `dirty_attribution`                        | Per-path attribution detail: scope relation, evidence, start state, foreign attribution, classification                                 |
-| `dirty_snapshot` / `dirty_snapshot_status` | Compact current snapshot summary and whether a start snapshot was available                                                             |
+| `dirty_attribution`                        | Per-path attribution (`detail_level="full"` only)                                                                                       |
+| `dirty_snapshot` / `dirty_snapshot_status` | Snapshot summary; expanded detail with `detail_level="full"`                                                                            |
 | `files_for_scope_check`                    | Agent evidence only — paths passed to scope `check` (out-of-scope dirt does not expand scope)                                           |
 | `finish_block_reason`                      | `missing_evidence` or `foreign_dirty_overlap` when `blocks_finish` is true                                                              |
 | `external_changes`                         | On finish response when verify is `accepted` but out-of-scope dirty remains — top-level status becomes `accepted_with_external_changes` |

@@ -140,7 +140,7 @@ Controller audit trail:
 |------------------------|--------|-------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------|
 | `audit_enabled`        | `bool` | `false`                             | Enable the optional local controller audit trail                                                                                       | Required for `--audit` output       |
 | `audit_path`           | `str`  | `.cache/codeclone/db/audit.sqlite3` | SQLite audit database path, relative to the analysis root; stored under `db/` to separate controller state from report/cache artifacts | Used only when `audit_enabled=true` |
-| `audit_payloads`       | `str`  | `compact`                           | Audit payload mode: `off`, `compact`, or `full`                                                                                        | Used only when `audit_enabled=true` |
+| `audit_payloads`       | `str`  | `compact`                           | Audit payload mode: `off`, `compact`, or `full`. Compact omits large fields but keeps `intent_description` on `intent.declared`; row `summary` always stores a short essence | Used only when `audit_enabled=true` |
 | `audit_retention_days` | `int`  | `30`                                | Retention window for audit rows                                                                                                        | Used only when `audit_enabled=true` |
 
 Workspace intent registry:
