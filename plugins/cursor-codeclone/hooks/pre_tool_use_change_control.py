@@ -35,60 +35,72 @@ from _hook_io import (
 _WRITE_TOOLS = frozenset({"Write", "StrReplace", "ApplyPatch"})
 
 
+def _denial_payload(
+    *,
+    workspace_root: str,
+    target_path: str,
+    enforce_scope: str,
+    blocked_kind: str,
+) -> dict[str, object]:
+    return change_control_denial_payload(
+        workspace_root=workspace_root,
+        target_path=target_path,
+        enforce_scope=enforce_scope,
+        blocked_kind=blocked_kind,
+    )
+
+
 def main() -> None:
     payload: dict[str, object] | None = None
     data = parse_hook_input(read_bounded_stdin())
     if data is None:
-        emit_hook_payload(payload)
-        return
+        return emit_hook_payload(payload)
 
     workspace_root = workspace_root_from_hook(data)
     if not workspace_root:
-        emit_hook_payload(payload)
-        return
+        return emit_hook_payload(payload)
 
     repo_root = Path(workspace_root)
     enforce_scope = resolve_enforce_scope(repo_root)
     try:
         gate_decision = evaluate_workspace_intent_gate(repo_root)
     except WorkspaceIntentGateUnavailable as exc:
-        emit_hook_payload(
-            change_control_denial_payload(
+        return emit_hook_payload(
+            _denial_payload(
                 workspace_root=workspace_root,
                 target_path=str(exc) or "CodeClone gate API unavailable",
                 enforce_scope=enforce_scope,
                 blocked_kind="registry",
             )
         )
-        return
     if gate_decision.allowed:
-        emit_hook_payload(payload)
-        return
+        return emit_hook_payload(payload)
 
     tool_name = str(data.get("tool_name", ""))
+    blocked_kind: str | None = None
+    blocked_target: str | None = None
+    blocked = False
 
     if tool_name == "Shell":
-        command = shell_command_from_hook(data)
-        if should_gate_shell_command(command=command):
-            payload = change_control_denial_payload(
-                workspace_root=workspace_root,
-                target_path=command,
-                enforce_scope=enforce_scope,
-                blocked_kind="shell",
-            )
+        blocked_kind = "shell"
+        blocked_target = shell_command_from_hook(data)
+        blocked = should_gate_shell_command(command=blocked_target)
     elif tool_name in _WRITE_TOOLS:
-        target_path = edited_path_from_pre_tool_use(data)
-        if target_path and should_gate_edit_path(
-            target_path=target_path,
+        blocked_kind = "file"
+        blocked_target = edited_path_from_pre_tool_use(data)
+        blocked = bool(blocked_target) and should_gate_edit_path(
+            target_path=blocked_target,
             workspace_root=workspace_root,
             enforce_scope=enforce_scope,
-        ):
-            payload = change_control_denial_payload(
-                workspace_root=workspace_root,
-                target_path=target_path,
-                enforce_scope=enforce_scope,
-                blocked_kind="file",
-            )
+        )
+
+    if blocked and blocked_kind and blocked_target:
+        payload = _denial_payload(
+            workspace_root=workspace_root,
+            target_path=blocked_target,
+            enforce_scope=enforce_scope,
+            blocked_kind=blocked_kind,
+        )
 
     emit_hook_payload(payload)
 

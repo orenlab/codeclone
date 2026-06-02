@@ -13,6 +13,7 @@ from unittest.mock import patch
 from codeclone.contracts import DEFAULT_JSON_REPORT_PATH
 from codeclone.memory.report_trust import CachedReportTrust
 from codeclone.surfaces.cli.memory_analysis import (
+    _rich_progress_symbols,
     load_report_for_memory_init,
     run_memory_analysis_report,
 )
@@ -83,3 +84,21 @@ def test_run_memory_analysis_report_on_small_repo(tmp_path: Path) -> None:
     )
     document = run_memory_analysis_report(root_path=root)
     assert isinstance(document.get("meta"), dict)
+
+
+def test_load_report_without_cached_file_runs_fresh(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    with patch(
+        "codeclone.surfaces.cli.memory_analysis.run_memory_analysis_report",
+        return_value={"meta": {"scan_root": str(root)}},
+    ) as fresh:
+        loaded = load_report_for_memory_init(root_path=root, from_report=None)
+    assert loaded.source == "fresh_analysis"
+    assert loaded.rejected_cache_reason is None
+    fresh.assert_called_once_with(root_path=root)
+
+
+def test_rich_progress_symbols_exports_types() -> None:
+    symbols = _rich_progress_symbols()
+    assert len(symbols) == 5

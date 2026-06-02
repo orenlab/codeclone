@@ -48,10 +48,7 @@ def _fix_admonition_block(lines: list[str], start: int) -> tuple[list[str], int,
     fixes = 0
     fixed_body: list[str] = []
     for line in body:
-        if not line.strip():
-            fixed_body.append(line)
-            continue
-        if line.startswith("    "):
+        if not line.strip() or line.startswith("    "):
             fixed_body.append(line)
             continue
         fixes += 1

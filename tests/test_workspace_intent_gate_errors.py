@@ -7,9 +7,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
+from codeclone.config.intent_registry import IntentRegistryConfig
+from codeclone.workspace_intent import gate as gate_mod
+from tests.test_workspace_intents import _record
 from tests.workspace_intent_gate_helpers import assert_gate_denied
 
 
@@ -50,3 +54,31 @@ def test_gate_sqlite_load_error_is_fail_closed(
     )
     decision = assert_gate_denied(tmp_path, reason="registry_error")
     assert decision.registry_backend == "sqlite"
+
+
+def test_gate_unsupported_backend_and_payload_type_edges() -> None:
+    class _Config:
+        backend = "unknown"
+        storage_path = Path("x")
+
+    with pytest.raises(ValueError, match="Unsupported intent registry backend"):
+        gate_mod._load_registry_records_read_only(
+            Path("."),
+            cast(IntentRegistryConfig, _Config()),
+        )
+
+    assert gate_mod._record_from_payload(123) is None
+
+
+def test_gate_decision_ignores_terminal_and_non_active_records() -> None:
+    records = [
+        _record(status="accepted"),
+        _record(status="blocked"),
+    ]
+    decision = gate_mod._decision_from_records(
+        records,
+        registry_backend="file",
+        registry_path=".cache/codeclone/intents",
+    )
+    assert decision.allowed is False
+    assert decision.reason == "no_active_intent"

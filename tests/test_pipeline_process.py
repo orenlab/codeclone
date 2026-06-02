@@ -37,7 +37,8 @@ from codeclone.core.parallelism import (
 )
 from codeclone.core.pipeline import analyze
 from codeclone.core.reporting import report
-from codeclone.models import HealthScore, ProjectMetrics
+from codeclone.metrics.coverage_join import CoverageJoinParseError
+from codeclone.models import DepGraph, HealthScore, ProjectMetrics
 
 
 class _FailExec:
@@ -618,3 +619,59 @@ def test_analyze_skips_suppressed_dead_code_scan_when_dead_code_is_disabled(
     analysis = analyze(boot=boot, discovery=discovery, processing=processing)
     assert analysis.project_metrics == project_metrics
     assert analysis.suppressed_dead_code_items == 0
+
+
+def test_analyze_coverage_join_parse_error_sets_invalid_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boot, discovery, processing, _analysis = _build_report_case(tmp_path)
+    boot.args.skip_metrics = False
+    boot.args.skip_dead_code = True
+    boot.args.skip_dependencies = True
+    boot.args.coverage_xml = "coverage.xml"
+    boot.args.coverage_min = 88
+
+    project_metrics = ProjectMetrics(
+        complexity_avg=0.0,
+        complexity_max=0,
+        high_risk_functions=(),
+        coupling_avg=0.0,
+        coupling_max=0,
+        high_risk_classes=(),
+        cohesion_avg=0.0,
+        cohesion_max=0,
+        low_cohesion_classes=(),
+        dependency_modules=0,
+        dependency_edges=0,
+        dependency_edge_list=(),
+        dependency_cycles=(),
+        dependency_max_depth=0,
+        dependency_longest_chains=(),
+        dead_code=(),
+        health=HealthScore(total=100, grade="A", dimensions={"overall": 100}),
+    )
+    monkeypatch.setattr(
+        core_pipeline,
+        "compute_project_metrics",
+        lambda **kwargs: (
+            project_metrics,
+            DepGraph(frozenset(), (), (), 0, 0.0, 0, ()),
+            (),
+        ),
+    )
+    monkeypatch.setattr(core_pipeline, "compute_suggestions", lambda **kwargs: ())
+    monkeypatch.setattr(
+        core_pipeline,
+        "build_metrics_report_payload",
+        lambda **kwargs: {"health": {"score": 100, "grade": "A", "dimensions": {}}},
+    )
+    monkeypatch.setattr(
+        core_pipeline,
+        "build_coverage_join",
+        lambda **kwargs: (_ for _ in ()).throw(CoverageJoinParseError("bad xml")),
+    )
+
+    result = analyze(boot=boot, discovery=discovery, processing=processing)
+    assert result.coverage_join is not None
+    assert result.coverage_join.status == "invalid"

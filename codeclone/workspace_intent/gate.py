@@ -135,38 +135,36 @@ def _decision_from_records(
     queued: WorkspaceIntentRecord | None = None
     ignored_count = 0
     for record in sorted(records, key=record_sort_key):
-        if is_terminal_workspace_intent_status(record.status):
+        if not is_terminal_workspace_intent_status(record.status):
+            ownership = workspace_intents.classify_intent_ownership(
+                record,
+                own_pid=0,
+                own_start_epoch=0,
+                now=current_time,
+            )
+            if record.status == WorkspaceIntentStatus.QUEUED.value:
+                queued = queued or record
+                continue
+            if (
+                record.status == WorkspaceIntentStatus.ACTIVE.value
+                and ownership in _ALLOWING_OWNERSHIP
+            ):
+                return WorkspaceEditGateDecision(
+                    allowed=True,
+                    reason="active_intent",
+                    intent_id=record.intent_id,
+                    status=record.status,
+                    ownership=ownership.value,
+                    agent_label=record.agent_label,
+                    registry_backend=registry_backend,
+                    registry_path=registry_path,
+                    details={
+                        "run_id": record.run_id[:8],
+                        "lease_seconds": record.lease_seconds,
+                    },
+                )
+        if record.status != WorkspaceIntentStatus.QUEUED.value:
             ignored_count += 1
-            continue
-        ownership = workspace_intents.classify_intent_ownership(
-            record,
-            own_pid=0,
-            own_start_epoch=0,
-            now=current_time,
-        )
-        if record.status == WorkspaceIntentStatus.QUEUED.value:
-            queued = queued or record
-            continue
-        if record.status != WorkspaceIntentStatus.ACTIVE.value:
-            ignored_count += 1
-            continue
-        if ownership not in _ALLOWING_OWNERSHIP:
-            ignored_count += 1
-            continue
-        return WorkspaceEditGateDecision(
-            allowed=True,
-            reason="active_intent",
-            intent_id=record.intent_id,
-            status=record.status,
-            ownership=ownership.value,
-            agent_label=record.agent_label,
-            registry_backend=registry_backend,
-            registry_path=registry_path,
-            details={
-                "run_id": record.run_id[:8],
-                "lease_seconds": record.lease_seconds,
-            },
-        )
     if queued is not None:
         return WorkspaceEditGateDecision(
             allowed=False,

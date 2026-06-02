@@ -10,7 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from codeclone.memory.models import MemorySubject, RecordBatch, generate_memory_id
-from codeclone.memory.staleness import apply_refresh_staleness
+from codeclone.memory.staleness import apply_refresh_staleness, apply_scope_staleness
 from tests.memory_fixtures import make_module_record, memory_store
 
 
@@ -90,3 +90,36 @@ def test_refresh_does_not_stale_batch_records_on_digest_shift(tmp_path: Path) ->
         loaded = store.find_by_identity_key(project.id, existing.identity_key)
         assert loaded is not None
         assert loaded.status == "active"
+
+
+def test_refresh_marks_evidence_digest_mismatch_and_digest_shift(
+    tmp_path: Path,
+) -> None:
+    report = {"inventory": {"file_registry": {"items": ["pkg/mod.py"]}}}
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        existing = make_module_record(project.id, "pkg.mod", report_digest="digest-a")
+        store.upsert_record(existing)
+        for evidence in RecordBatch(records=[existing]).evidence:
+            store.write_evidence(evidence)
+
+        report_result = apply_refresh_staleness(
+            store,
+            project_id=project.id,
+            batch=RecordBatch(records=[]),
+            report_document=report,
+            report_digest="digest-b",
+        )
+        assert report_result.records_marked_stale >= 1
+
+
+def test_scope_staleness_skips_already_stale_records(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        rec = make_module_record(project.id, "pkg.mod")
+        store.upsert_record(rec)
+        store.mark_stale(rec.id, "seed", commit=True)
+        result = apply_scope_staleness(
+            store,
+            project_id=project.id,
+            changed_paths=("pkg/mod.py",),
+        )
+        assert result.records_marked_stale == 0

@@ -12,11 +12,13 @@ from dataclasses import replace
 import pytest
 from pydantic import ValidationError
 
+from codeclone.surfaces.mcp import _workspace_intent_models as workspace_intent_models
 from codeclone.surfaces.mcp import _workspace_intents as workspace_intents
 from codeclone.surfaces.mcp._workspace_intent_models import (
     IntentIntegrityModel,
     IntentScopeModel,
     WorkspaceIntentRowModel,
+    document_to_record_fields,
     parse_workspace_document,
     parse_workspace_document_json,
     record_from_document,
@@ -134,6 +136,61 @@ def test_workspace_intent_document_rejects_invalid_dirty_snapshot() -> None:
     assert parse_workspace_document(signed_payload_dict_from_record(record)) is None
 
 
+@pytest.mark.parametrize(
+    "dirty_snapshot",
+    (
+        (
+            {
+                "git_available": "yes",
+                "captured_at_utc": "2026-05-29T20:00:00Z",
+                "entries": {},
+            }
+        ),
+        (
+            {
+                "git_available": True,
+                "captured_at_utc": "not-utc",
+                "entries": {},
+            }
+        ),
+        (
+            {
+                "git_available": True,
+                "captured_at_utc": "2026-05-29T20:00:00Z",
+                "entries": {"pkg/a.py": {"status_xy": "M", "digest_status": "ok"}},
+            }
+        ),
+        (
+            {
+                "git_available": True,
+                "captured_at_utc": "2026-05-29T20:00:00Z",
+                "entries": {"pkg/a.py": {"status_xy": " M", "digest_status": "ok"}},
+            }
+        ),
+        (
+            {
+                "git_available": True,
+                "captured_at_utc": "2026-05-29T20:00:00Z",
+                "entries": {
+                    "pkg/a.py": {
+                        "status_xy": " M",
+                        "digest": "a" * 64,
+                        "digest_status": "bad",
+                    }
+                },
+            }
+        ),
+    ),
+)
+def test_workspace_intent_document_dirty_snapshot_validation_messages(
+    dirty_snapshot: dict[str, object],
+) -> None:
+    from tests.test_workspace_intents import _record
+
+    record = replace(_record(), dirty_snapshot=dirty_snapshot)
+    assert parse_workspace_document(signed_payload_dict_from_record(record)) is None
+
+
 def test_signed_payload_json_roundtrip_via_pydantic() -> None:
     from tests.test_workspace_intents import _record
 
@@ -195,4 +252,46 @@ def test_workspace_intent_row_model_rejects_unsafe_intent_id() -> None:
             declared_at_utc=record.declared_at_utc,
             payload_json=signed_payload_json_from_record(record),
             updated_at_utc=record.declared_at_utc,
+        )
+
+
+def test_workspace_intent_document_to_record_fields_includes_lease_values() -> None:
+    from tests.test_workspace_intents import _record
+
+    payload = signed_payload_dict_from_record(_record())
+    document = parse_workspace_document(payload)
+    assert document is not None
+    fields = document_to_record_fields(document)
+    assert fields["lease_renewed_at_utc"] == document.lease_renewed_at_utc
+    assert fields["lease_seconds"] == document.lease_seconds
+    assert fields["report_digest"] == document.report_digest
+
+
+def test_validate_dirty_snapshot_payload_private_edges() -> None:
+    validate = workspace_intent_models._validate_dirty_snapshot_payload
+
+    assert validate(None) is None
+    with pytest.raises(ValueError, match=r"dirty_snapshot\.entries must be an object"):
+        validate(
+            {
+                "git_available": True,
+                "captured_at_utc": "2026-05-29T20:00:00Z",
+                "entries": [],
+            }
+        )
+    with pytest.raises(ValueError, match="entry path must be a non-empty string"):
+        validate(
+            {
+                "git_available": True,
+                "captured_at_utc": "2026-05-29T20:00:00Z",
+                "entries": {"": {"status_xy": " M", "digest_status": "unavailable"}},
+            }
+        )
+    with pytest.raises(ValueError, match="entry must be an object"):
+        validate(
+            {
+                "git_available": True,
+                "captured_at_utc": "2026-05-29T20:00:00Z",
+                "entries": {"pkg/a.py": "bad"},
+            }
         )

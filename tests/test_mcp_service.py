@@ -8560,7 +8560,6 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
         "gate_preview"
     ] == {"would_fail": True}
     from codeclone.surfaces.mcp._workspace_hygiene import (
-        ForeignDirtyOverlap,
         WorkspaceHygieneResult,
     )
 
@@ -8632,6 +8631,273 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
         )
         is None
     )
+
+    effective, advisory = workflow_mod._external_change_advisory(
+        "accepted",
+        [f"p{i}.py" for i in range(12)],
+    )
+    assert effective == "accepted_with_external_changes"
+    assert isinstance(advisory, dict)
+    assert advisory["truncated"] is True
+
+    passthrough, none_advisory = workflow_mod._external_change_advisory(
+        "violated",
+        [],
+    )
+    assert passthrough == "violated"
+    assert none_advisory is None
+    passthrough_with_advisory, advisory_nonaccepted = (
+        workflow_mod._external_change_advisory("violated", ["x.py"])
+    )
+    assert passthrough_with_advisory == "violated"
+    assert isinstance(advisory_nonaccepted, dict)
+
+    summary = workflow_mod._finish_summary(
+        verify_status="accepted",
+        intent_cleared=True,
+        check_payload={"status": "clean"},
+        verify_payload={"structural_delta": {"verdict": "stable", "health_delta": 0}},
+        claims_payload=None,
+        receipt_payload=None,
+        receipt_error=None,
+        workspace_hygiene_after={"workspace_dirty_summary": {"dirty_paths_count": 0}},
+        review_text_present=False,
+        claims_text_present=True,
+    )
+    assert summary["claims"] == "skipped_not_recommended"
+
+
+def test_mcp_finish_controlled_change_external_health_and_memory_hook(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.mcp._workspace_hygiene import WorkspaceHygieneResult
+
+    docs_service, docs_intent = _seed_docs_intent(tmp_path)
+    monkeypatch.setattr(
+        docs_service,
+        "_patch_contract_verify",
+        lambda **_: {
+            "status": "accepted",
+            "reason": None,
+            "verification_profile": "documentation_only",
+            "structural_delta": {
+                "verdict": "stable",
+                "health_delta": -1,
+                "regressions": [],
+            },
+            "worsened": [],
+            "claim_validation_recommended": False,
+            "health_regression_advisory": {
+                "health_delta": -1,
+                "message": "health changed negatively by 1 point",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        mcp_workspace_hygiene_mod,
+        "finish_hygiene_check",
+        lambda **_: WorkspaceHygieneResult(
+            git_available=True,
+            dirty_paths=("README.md", "scratch.txt"),
+            dirty_paths_in_scope=("README.md",),
+            dirty_paths_outside_scope=("scratch.txt",),
+            foreign_dirty_overlaps=(),
+            blocks_edit=False,
+        ),
+    )
+    monkeypatch.setattr(
+        docs_service,
+        "finish_propose_memory",
+        lambda **_: {"memory_candidates": [{"id": "mem-1"}]},
+    )
+    finished = docs_service.finish_controlled_change(
+        intent_id=docs_intent,
+        changed_files=["README.md"],
+        create_receipt=False,
+        auto_clear=False,
+        propose_memory=True,
+    )
+    assert finished["status"] == "accepted_with_external_changes"
+    assert cast("dict[str, object]", finished["external_changes"])["count"] == 1
+    assert (
+        cast("dict[str, object]", finished["health_regression_advisory"])[
+            "health_delta"
+        ]
+        == -1
+    )
+    assert cast("list[dict[str, object]]", finished["memory_candidates"])[0]["id"] == (
+        "mem-1"
+    )
+
+
+def test_mcp_finish_controlled_change_propose_memory_empty_hook(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.mcp._workspace_hygiene import WorkspaceHygieneResult
+
+    docs_service, docs_intent = _seed_docs_intent(tmp_path)
+    monkeypatch.setattr(
+        docs_service,
+        "_patch_contract_verify",
+        lambda **_: {
+            "status": "accepted",
+            "reason": None,
+            "verification_profile": "documentation_only",
+            "structural_delta": {
+                "verdict": "stable",
+                "health_delta": 0,
+                "regressions": [],
+            },
+            "worsened": [],
+            "claim_validation_recommended": False,
+        },
+    )
+    monkeypatch.setattr(
+        mcp_workspace_hygiene_mod,
+        "finish_hygiene_check",
+        lambda **_: WorkspaceHygieneResult(
+            git_available=True,
+            dirty_paths=("README.md",),
+            dirty_paths_in_scope=("README.md",),
+            dirty_paths_outside_scope=(),
+            foreign_dirty_overlaps=(),
+            blocks_edit=False,
+        ),
+    )
+    monkeypatch.setattr(docs_service, "finish_propose_memory", lambda **_: {})
+    finished = docs_service.finish_controlled_change(
+        intent_id=docs_intent,
+        changed_files=["README.md"],
+        create_receipt=False,
+        auto_clear=False,
+        propose_memory=True,
+    )
+    assert "memory_candidates" not in finished
+
+
+def test_mcp_intent_helper_edges_and_renew_paths(tmp_path: Path) -> None:
+    from codeclone.surfaces.mcp._workspace_hygiene import (
+        ForeignDirtyOverlap,
+        WorkspaceHygieneResult,
+    )
+    from codeclone.surfaces.mcp.messages import intent as intent_msgs
+
+    service = CodeCloneMCPService(history_limit=2)
+    assert (
+        mcp_session_intent_mod._declare_conflict_next_step(
+            [{"ownership": "foreign_stale"}]
+        )
+        == intent_msgs.DECLARE_FOREIGN_STALE_OVERLAP
+    )
+    assert (
+        mcp_session_intent_mod._declare_conflict_next_step([{"ownership": "other"}])
+        == intent_msgs.DECLARE_FOREIGN_OVERLAP
+    )
+    assert (
+        mcp_session_intent_mod._MCPSessionIntentMixin._compute_queue_position(
+            intent_id="missing",
+            workspace_records=(),
+        )
+        == 1
+    )
+    assert (
+        mcp_session_intent_mod._MCPSessionIntentMixin._compute_queue_position(
+            intent_id="q-1",
+            workspace_records=(
+                mcp_workspace_intents_mod.WorkspaceIntentRecord(
+                    intent_id="q-1",
+                    agent_pid=9,
+                    agent_start_epoch=1,
+                    agent_label="x",
+                    run_id="run-1",
+                    declared_at_utc="2026-01-01T00:00:00Z",
+                    expires_at_utc="2026-01-01T01:00:00Z",
+                    ttl_seconds=3600,
+                    report_digest="digest",
+                    status="queued",
+                    intent="queued",
+                    scope={"allowed_files": ["pkg/a.py"]},
+                    scope_digest="digest",
+                    blast_radius_summary={},
+                    lease_renewed_at_utc="2026-01-01T00:00:00Z",
+                    lease_seconds=60,
+                ),
+            ),
+        )
+        == 1
+    )
+
+    with pytest.raises(NotImplementedError):
+        mcp_session_intent_mod._MCPSessionIntentMixin()._audit_emit(
+            root=tmp_path,
+            event_type="x",
+            severity="info",
+        )
+
+    queued_overlap = service._queued_context_from_workspace(
+        scope=mcp_intent_mod.IntentScope(
+            allowed_files=("pkg/a.py",),
+            allowed_related=(),
+            forbidden=(),
+        ),
+        workspace_existing=(
+            mcp_workspace_intents_mod.WorkspaceIntentRecord(
+                intent_id="q-1",
+                agent_pid=9999,
+                agent_start_epoch=1,
+                agent_label="other",
+                run_id="run-1",
+                declared_at_utc="2026-01-01T00:00:00Z",
+                expires_at_utc="2026-01-01T01:00:00Z",
+                ttl_seconds=3600,
+                report_digest="digest",
+                status="queued",
+                intent="queued",
+                scope={"allowed_files": ["pkg/a.py", "pkg/b.py"]},
+                scope_digest="digest",
+                blast_radius_summary={},
+                lease_renewed_at_utc="2026-01-01T00:00:00Z",
+                lease_seconds=60,
+            ),
+        ),
+    )
+    assert queued_overlap and queued_overlap[0]["intent_id"] == "q-1"
+    assert (
+        service._recovery_rejection_message(
+            mcp_workspace_intents_mod.IntentOwnership.FOREIGN_STALE
+        )
+        == intent_msgs.RECOVERY_FOREIGN_STALE
+    )
+
+    run_record = _blast_radius_run_record(tmp_path)
+    service._runs.register(run_record)
+    declared = service.manage_change_intent(
+        action="declare",
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="renew edge",
+    )
+    intent_id = str(declared["intent_id"])
+    renewed = service.manage_change_intent(action="renew")
+    assert renewed["intent_id"] == intent_id
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(
+            mcp_session_intent_mod,
+            "renew_workspace_intent_lease",
+            lambda **_kwargs: False,
+        )
+        renewed_false = service.manage_change_intent(
+            action="renew",
+            intent_id=intent_id,
+            lease_seconds=120,
+        )
+        assert renewed_false["lease_renewed"] is False
+        assert renewed_false["lease_expires_at_utc"] is None
+    finally:
+        monkeypatch.undo()
     claims_record = _patch_contract_run_record(
         Path("/tmp/root"),
         run_id="claimhealth123456",
@@ -8725,12 +8991,41 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
         dirty_scope_policy="block",
     )
     assert "foreign" in combined_message.lower() or combined_message
+    fallback_foreign_message = workflow_mod._start_next_step(
+        concurrent_intents=[{"ownership": "unknown"}],
+        hygiene=dirty_hygiene,
+        dirty_scope_policy="block",
+    )
+    assert fallback_foreign_message
     dirty_message = workflow_mod._start_next_step(
         concurrent_intents=[],
         hygiene=dirty_hygiene,
         dirty_scope_policy="block",
     )
     assert dirty_message
+    assert (
+        workflow_mod._start_next_step(
+            concurrent_intents=[],
+            hygiene=dirty_hygiene,
+            dirty_scope_policy="continue_own_wip",
+        )
+        == ""
+    )
+    patched = pytest.MonkeyPatch()
+    try:
+        patched.setattr(
+            mcp_workspace_hygiene_mod,
+            "hygiene_blocks_start_edit",
+            lambda *_args, **_kwargs: True,
+        )
+        own_wip_forced = workflow_mod._start_next_step(
+            concurrent_intents=[],
+            hygiene=dirty_hygiene,
+            dirty_scope_policy="continue_own_wip",
+        )
+        assert own_wip_forced
+    finally:
+        patched.undo()
     foreign_dirty = WorkspaceHygieneResult(
         git_available=True,
         dirty_paths=("pkg/a.py",),
@@ -8764,6 +9059,82 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
         )
         is False
     )
+
+
+def test_mcp_service_shutdown_close_resources_edges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    closed: list[str] = []
+
+    class _Writer:
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+        def emit(self, event: AuditEvent) -> None:
+            _ = event
+
+        def close(self) -> None:
+            closed.append(self.label)
+
+    shared = _Writer("shared")
+    extra = _Writer("extra")
+    service._audit_writers = {Path("/tmp/audit-a.sqlite3"): shared}
+    service._audit_writer_override = shared
+    service._shutdown_close_resources()
+    assert closed == ["shared"]
+    closed.clear()
+
+    service._audit_writers = {Path("/tmp/audit-b.sqlite3"): extra}
+    service._audit_writer_override = None
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp._workspace_intent_store."
+        "clear_workspace_intent_store_cache",
+        lambda: (_ for _ in ()).throw(RuntimeError("cache fail")),
+    )
+    service._shutdown_close_resources()
+    assert closed == ["extra"]
+
+    class _ExplodingWriter(_Writer):
+        def close(self) -> None:
+            raise RuntimeError("close failed")
+
+    service._audit_writers = {Path("/tmp/audit-c.sqlite3"): _ExplodingWriter("boom")}
+    service._audit_writer_override = None
+    # Best-effort shutdown must swallow close failures.
+    service._shutdown_close_resources()
+
+
+def test_mcp_workflow_start_queued_keeps_dirty_snapshot(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    record = _patch_contract_run_record(
+        tmp_path,
+        run_id="queued1234567890",
+        digest="queued-digest",
+        include_regression=False,
+        complexity=6,
+        health=90,
+    )
+    service._runs.register(record)
+
+    def _declare_queued(**_: object) -> dict[str, object]:
+        return {
+            "intent_id": "intent-queued-1",
+            "status": "queued",
+            "blocked_by": [],
+            "queue_position": 1,
+            "before_run_pinned": False,
+            "dirty_snapshot": {"git_available": True, "paths_count": 1},
+        }
+
+    service._declare_change_intent = _declare_queued  # type: ignore[method-assign]
+    queued = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="queued flow",
+    )
+    assert queued["status"] == "queued"
+    assert cast("dict[str, object]", queued["dirty_snapshot"])["paths_count"] == 1
 
 
 def test_mcp_workspace_hygiene_gitignore_tip(tmp_path: Path) -> None:
