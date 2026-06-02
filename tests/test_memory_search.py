@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from codeclone.memory.governance import record_candidate
 from codeclone.memory.retrieval import query_engineering_memory
@@ -104,3 +105,23 @@ def test_upsert_reactivates_unchanged_record_on_digest_shift(tmp_path: Path) -> 
         assert loaded.status == "active"
         assert loaded.report_digest == "digest-b"
         assert loaded.stale_reason is None
+
+
+def test_search_like_fallback_when_fts_unavailable(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        seed_document_link(
+            store,
+            project_id=project.id,
+            doc_file="docs/guide.md",
+            ref_path="pkg/mod.py",
+            statement="like fallback search token alpha",
+        )
+        with patch.object(store, "_fts_available", return_value=False):
+            hits = store.search_records(
+                project_id=project.id,
+                statement_query="fallback alpha",
+                match_mode="all",
+                limit=5,
+            )
+    assert hits
+    assert hits[0].statement.startswith("like fallback")

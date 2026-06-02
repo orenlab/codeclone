@@ -1358,24 +1358,17 @@ def test_mcp_service_query_engineering_memory_bootstraps_from_run(
 def test_mcp_service_get_relevant_memory_resolves_intent_scope(
     tmp_path: Path,
 ) -> None:
-    from codeclone.config.memory import resolve_memory_config
     from codeclone.memory.identity import make_identity_key
     from codeclone.memory.models import MemoryRecord, MemorySubject, generate_memory_id
-    from codeclone.memory.project import (
-        resolve_memory_db_path,
-        resolve_project_identity,
-    )
     from codeclone.memory.schema import create_schema_v1, open_memory_db
     from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
     from codeclone.report.meta import current_report_timestamp_utc
+    from tests.memory_fixtures import memory_project_db_paths
 
     root = tmp_path / "repo"
     root.mkdir()
     allowed = "pkg/module.py"
-    config = resolve_memory_config(root)
-    db_path = resolve_memory_db_path(root, config)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    project = resolve_project_identity(root)
+    project, db_path = memory_project_db_paths(root)
     conn = open_memory_db(db_path)
     try:
         create_schema_v1(conn)

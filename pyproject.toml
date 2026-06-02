@@ -131,6 +131,11 @@ addopts = "-ra"
 [tool.coverage.run]
 branch = true
 source = ["codeclone"]
+omit = [
+    # Protocol-only interface. Concrete memory stores are covered by shared
+    # store contract tests. Do not add behavior to this module while omitted.
+    "codeclone/memory/store.py",
+]
 
 [tool.codeclone]
 baseline = "codeclone.baseline.json"

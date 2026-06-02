@@ -44,14 +44,17 @@ _RICH_MARKUP_TAG_RE = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_ .#:-]*]")
 class PlainConsole:
     """Lightweight console for quiet/no-progress mode."""
 
-    @staticmethod
     def print(
+        self,
         *objects: object,
-        sep: str = " ",
-        end: str = "\n",
-        markup: bool = True,
-        **_: object,
+        **kwargs: object,
     ) -> None:
+        sep_obj = kwargs.get("sep", " ")
+        end_obj = kwargs.get("end", "\n")
+        markup_obj = kwargs.get("markup", True)
+        sep = sep_obj if isinstance(sep_obj, str) else " "
+        end = end_obj if isinstance(end_obj, str) else "\n"
+        markup = markup_obj if isinstance(markup_obj, bool) else True
         text = sep.join(str(obj) for obj in objects)
         if markup:
             text = _RICH_MARKUP_TAG_RE.sub("", text)

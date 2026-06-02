@@ -23,6 +23,7 @@ from codeclone.workspace_intent.gate import (
     has_blocking_workspace_intent,
 )
 from tests.test_workspace_intents import _record
+from tests.workspace_intent_gate_helpers import assert_gate_denied
 
 _PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
 
@@ -186,10 +187,7 @@ def test_gate_closes_sqlite_read_connection(
 
     monkeypatch.setattr("codeclone.workspace_intent.gate.sqlite3.connect", _connect)
 
-    decision = evaluate_workspace_edit_gate(tmp_path)
-
-    assert decision.allowed is False
-    assert decision.reason == "no_active_intent"
+    assert_gate_denied(tmp_path, reason="no_active_intent")
     assert fake.closed is True
     assert seen["uri_flag"] is True
     assert str(seen["uri"]).endswith("?mode=ro")

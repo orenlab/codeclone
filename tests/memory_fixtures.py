@@ -13,6 +13,8 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from codeclone.config.memory import resolve_memory_config
+from codeclone.memory.governance import record_candidate
 from codeclone.memory.identity import make_identity_key
 from codeclone.memory.models import (
     MemoryProject,
@@ -20,9 +22,68 @@ from codeclone.memory.models import (
     MemorySubject,
     generate_memory_id,
 )
-from codeclone.memory.project import resolve_project_identity
+from codeclone.memory.project import (
+    resolve_memory_db_path,
+    resolve_project_identity,
+)
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.report.meta import current_report_timestamp_utc
+from codeclone.utils.json_io import read_json_object
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def memory_project_db_paths(root: Path) -> tuple[MemoryProject, Path]:
+    config = resolve_memory_config(root)
+    db_path = resolve_memory_db_path(root, config)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    project = resolve_project_identity(root)
+    return project, db_path
+
+
+def load_memory_init_report_document(
+    *,
+    registry_items: list[str] | None = None,
+    fallback_root: Path | None = None,
+) -> dict[str, object]:
+    report_path = REPO_ROOT / ".cache" / "codeclone" / "report.json"
+    if report_path.is_file():
+        loaded = read_json_object(report_path)
+        if registry_items is not None:
+            inventory = loaded.get("inventory")
+            if isinstance(inventory, dict):
+                registry = inventory.get("file_registry")
+                if isinstance(registry, dict):
+                    registry["items"] = registry_items
+        return loaded
+    if fallback_root is None:
+        msg = "cached report.json not available and no fallback_root provided"
+        raise FileNotFoundError(msg)
+    items = registry_items or ["pkg/a.py"]
+    first_item = items[0]
+    return {
+        "meta": {"scan_root": str(fallback_root.resolve())},
+        "integrity": {
+            "digest": {
+                "value": "a" * 64,
+                "algorithm": "sha256",
+                "verified": True,
+            }
+        },
+        "inventory": {"file_registry": {"items": items}},
+        "metrics": {
+            "api_surface": {
+                "items": [
+                    {
+                        "path": first_item,
+                        "symbol": "f",
+                        "kind": "function",
+                    }
+                ]
+            }
+        },
+        "findings": {"groups": {}},
+    }
 
 
 def init_git_repo(root: Path) -> None:
@@ -333,3 +394,37 @@ def seed_path_subject_record(
         )
     )
     return record
+
+
+@contextmanager
+def cli_memory_repo(
+    tmp_path: Path,
+    *,
+    with_draft: bool = True,
+) -> Iterator[tuple[Path, MemoryProject, SqliteEngineeringMemoryStore]]:
+    """Repository root with engineering memory DB at the configured default path."""
+    root = tmp_path / "repo"
+    root.mkdir(parents=True, exist_ok=True)
+    project, db_path = memory_project_db_paths(root)
+    config = resolve_memory_config(root)
+    store = SqliteEngineeringMemoryStore(db_path)
+    store.initialize(project)
+    try:
+        seed_path_linked_module_role(
+            store,
+            project_id=project.id,
+            file_path="pkg/mod.py",
+            statement="fixture module for CLI coverage",
+        )
+        if with_draft:
+            record_candidate(
+                store,
+                project=project,
+                record_type="change_rationale",
+                statement="draft candidate for review-candidates CLI",
+                subject_path="pkg/mod.py",
+                max_candidates=config.max_candidates,
+            )
+        yield root, project, store
+    finally:
+        store.close()

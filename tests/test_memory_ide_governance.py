@@ -189,3 +189,64 @@ def test_ide_governance_commit_rejects_bad_proof(tmp_path: Path) -> None:
             )
     finally:
         store.close()
+
+
+def test_ide_governance_prepare_and_commit_reject(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    project = resolve_project_identity(root)
+    store = SqliteEngineeringMemoryStore(tmp_path / "memory.sqlite3")
+    state = IdeGovernanceSessionState(channel_enabled=True)
+    key_hex = _governance_key_hex()
+    try:
+        store.initialize(project)
+        draft = record_candidate(
+            store,
+            project=project,
+            record_type="change_rationale",
+            statement="Reject after review.",
+            max_candidates=100,
+        )
+        register_ide_governance(
+            state,
+            ide_governance_key=key_hex,
+            client_name="CodeClone VS Code",
+            client_version="0.3.0",
+        )
+        prepared = prepare_governance(
+            state,
+            store,
+            project_id=project.id,
+            root_path=str(root),
+            record_id=draft.id,
+            decision="reject",
+        )
+        proof = compute_governance_proof(
+            bytes.fromhex(key_hex),
+            ticket_id=str(prepared["governance_ticket"]),
+            record_id=draft.id,
+            decision="reject",
+            confirmation_nonce=str(prepared["confirmation_nonce"]),
+            project_id=project.id,
+            statement_digest=str(prepared["statement_digest"]),
+            protocol=IDE_GOVERNANCE_PROTOCOL_VERSION,
+        )
+        committed = commit_governance(
+            state,
+            store,
+            project_id=project.id,
+            root_path=str(root),
+            record_id=draft.id,
+            decision="reject",
+            governance_ticket=str(prepared["governance_ticket"]),
+            confirmation_nonce=str(prepared["confirmation_nonce"]),
+            proof=proof,
+            actor="vscode-test",
+            protocol=IDE_GOVERNANCE_PROTOCOL_VERSION,
+        )
+        assert committed["status"] == "ok"
+        updated = store.find_record(draft.id)
+        assert updated is not None
+        assert updated.status == "rejected"
+    finally:
+        store.close()
