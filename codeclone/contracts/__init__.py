@@ -16,6 +16,11 @@ CACHE_VERSION: Final = "2.8"
 REPORT_SCHEMA_VERSION: Final = "2.11"
 METRICS_BASELINE_SCHEMA_VERSION: Final = "1.2"
 ENGINEERING_MEMORY_SCHEMA_VERSION: Final = "1.1"
+# Semantic retrieval index (Phase 20). Derived, rebuildable sidecar — NOT
+# covered by ENGINEERING_MEMORY_SCHEMA_VERSION. Bump to invalidate the index
+# on an incompatible projection/row-format change (forces a rebuild, not a
+# SQLite migration).
+SEMANTIC_INDEX_FORMAT_VERSION: Final = "1"
 
 DEFAULT_COMPLEXITY_THRESHOLD: Final = 20
 DEFAULT_COUPLING_THRESHOLD: Final = 10
@@ -138,6 +143,7 @@ __all__ = [
     "METRICS_BASELINE_SCHEMA_VERSION",
     "REPORT_SCHEMA_VERSION",
     "REPOSITORY_URL",
+    "SEMANTIC_INDEX_FORMAT_VERSION",
     "ExitCode",
     "cli_help_epilog",
 ]

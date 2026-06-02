@@ -27,10 +27,20 @@ class MemoryCapacityError(MemoryContractError):
     """Raised when memory store capacity limits are exceeded."""
 
 
+class MemorySemanticUnavailableError(MemoryError):
+    """Raised when a semantic provider/backend is required but unavailable.
+
+    Read paths never raise this — they degrade to FTS/structural and report
+    ``semantic.used=false``. It is raised only by explicit semantic operations
+    (e.g. resolving a real embedding provider whose dependency is missing).
+    """
+
+
 __all__ = [
     "MemoryCapacityError",
     "MemoryContractError",
     "MemoryError",
     "MemoryInitLockError",
     "MemorySchemaError",
+    "MemorySemanticUnavailableError",
 ]

@@ -1,0 +1,93 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
+from __future__ import annotations
+
+import hashlib
+import math
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Protocol
+
+from ..exceptions import MemorySemanticUnavailableError
+
+if TYPE_CHECKING:
+    from ...config.memory import SemanticConfig
+
+DIAGNOSTIC_EMBEDDING_MODEL_ID = "diagnostic-hash-v1"
+
+
+class EmbeddingProvider(Protocol):
+    """Maps text to fixed-dimension vectors. Real providers are optional and
+    loaded lazily by the factory; the diagnostic provider is always available.
+    """
+
+    model_id: str
+    dimension: int
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
+
+
+class DeterministicHashEmbeddingProvider:
+    """Diagnostic/test-only embedding: deterministic sha256-derived vectors.
+
+    Stable (same text -> same vector, across runs and platforms) so the test
+    suite stays fully deterministic, but it carries NO semantic meaning. Its
+    hits must never be presented as real-model recall — callers surface
+    ``provider="diagnostic"`` in status/envelope.
+    """
+
+    model_id = DIAGNOSTIC_EMBEDDING_MODEL_ID
+
+    def __init__(self, *, dimension: int) -> None:
+        if dimension <= 0:
+            raise ValueError("embedding dimension must be positive")
+        self.dimension = dimension
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        return [self._embed_one(text) for text in texts]
+
+    def _embed_one(self, text: str) -> list[float]:
+        values: list[float] = []
+        counter = 0
+        while len(values) < self.dimension:
+            digest = hashlib.sha256(f"{text}\x00{counter}".encode()).digest()
+            for offset in range(0, len(digest), 4):
+                if len(values) >= self.dimension:
+                    break
+                chunk = int.from_bytes(digest[offset : offset + 4], "big")
+                values.append((chunk / 0xFFFFFFFF) * 2.0 - 1.0)
+            counter += 1
+        norm = math.sqrt(sum(value * value for value in values)) or 1.0
+        return [value / norm for value in values]
+
+
+def resolve_embedding_provider(config: SemanticConfig) -> EmbeddingProvider:
+    """Resolve the embedding provider for the given config.
+
+    ``diagnostic`` is always available (no deps). ``local_model`` and ``api``
+    are real providers wired in Phase 20.6 (lazy import of an optional model
+    dependency); until then they fail clear via MemorySemanticUnavailableError.
+    """
+    kind = config.embedding_provider
+    if kind == "diagnostic":
+        return DeterministicHashEmbeddingProvider(dimension=config.dimension)
+    if kind == "local_model":
+        raise MemorySemanticUnavailableError(
+            "local_model embedding provider is not available yet (Phase 20.6); "
+            "use embedding_provider='diagnostic' or wait for the model backend"
+        )
+    raise MemorySemanticUnavailableError(
+        "api embedding provider is not available yet (Phase 20.6); "
+        "use embedding_provider='diagnostic'"
+    )
+
+
+__all__ = [
+    "DIAGNOSTIC_EMBEDDING_MODEL_ID",
+    "DeterministicHashEmbeddingProvider",
+    "EmbeddingProvider",
+    "resolve_embedding_provider",
+]

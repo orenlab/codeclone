@@ -10,6 +10,8 @@ from typing import Final, Literal
 
 MemoryBackend = Literal["sqlite", "postgres"]
 MemoryMcpSyncPolicy = Literal["off", "bootstrap_if_missing", "refresh_when_stale"]
+SemanticBackend = Literal["lancedb"]
+SemanticEmbeddingProvider = Literal["diagnostic", "local_model", "api"]
 
 DEFAULT_MEMORY_BACKEND: Final[MemoryBackend] = "sqlite"
 DEFAULT_MEMORY_DB_PATH: Final = ".cache/codeclone/memory/engineering_memory.sqlite3"
@@ -28,7 +30,23 @@ DEFAULT_MEMORY_GIT_HOTSPOT_PERIOD_DAYS: Final = 90
 DEFAULT_MEMORY_GIT_HOTSPOT_MIN_CHANGES: Final = 5
 DEFAULT_MEMORY_MCP_SYNC_POLICY: Final[MemoryMcpSyncPolicy] = "bootstrap_if_missing"
 
+# Semantic retrieval index (Phase 20). Default OFF + "diagnostic" keep the
+# community default zero-extra-dependency and offline; a real recall model is
+# opt-in (local_model/api).
+DEFAULT_SEMANTIC_ENABLED: Final = False
+DEFAULT_SEMANTIC_BACKEND: Final[SemanticBackend] = "lancedb"
+DEFAULT_SEMANTIC_INDEX_PATH: Final = ".cache/codeclone/memory/semantic_index.lance"
+DEFAULT_SEMANTIC_EMBEDDING_PROVIDER: Final[SemanticEmbeddingProvider] = "diagnostic"
+DEFAULT_SEMANTIC_DIMENSION: Final = 256
+DEFAULT_SEMANTIC_MAX_RESULTS: Final = 20
+DEFAULT_SEMANTIC_INDEX_AUDIT: Final = True
+
 MEMORY_ENV_DB_PATH: Final = "CODECLONE_MEMORY_DB_PATH"
+MEMORY_ENV_SEMANTIC_ENABLED: Final = "CODECLONE_MEMORY_SEMANTIC_ENABLED"
+MEMORY_ENV_SEMANTIC_EMBEDDING_PROVIDER: Final = (
+    "CODECLONE_MEMORY_SEMANTIC_EMBEDDING_PROVIDER"
+)
+MEMORY_ENV_SEMANTIC_INDEX_PATH: Final = "CODECLONE_MEMORY_SEMANTIC_INDEX_PATH"
 
 __all__ = [
     "DEFAULT_MEMORY_ACTIVE_RETENTION_DAYS",
@@ -47,7 +65,19 @@ __all__ = [
     "DEFAULT_MEMORY_RECEIPT_RETENTION_DAYS",
     "DEFAULT_MEMORY_REJECTED_RETENTION_DAYS",
     "DEFAULT_MEMORY_STALE_RETENTION_DAYS",
+    "DEFAULT_SEMANTIC_BACKEND",
+    "DEFAULT_SEMANTIC_DIMENSION",
+    "DEFAULT_SEMANTIC_EMBEDDING_PROVIDER",
+    "DEFAULT_SEMANTIC_ENABLED",
+    "DEFAULT_SEMANTIC_INDEX_AUDIT",
+    "DEFAULT_SEMANTIC_INDEX_PATH",
+    "DEFAULT_SEMANTIC_MAX_RESULTS",
     "MEMORY_ENV_DB_PATH",
+    "MEMORY_ENV_SEMANTIC_EMBEDDING_PROVIDER",
+    "MEMORY_ENV_SEMANTIC_ENABLED",
+    "MEMORY_ENV_SEMANTIC_INDEX_PATH",
     "MemoryBackend",
     "MemoryMcpSyncPolicy",
+    "SemanticBackend",
+    "SemanticEmbeddingProvider",
 ]

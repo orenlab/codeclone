@@ -18,6 +18,7 @@ from .memory_specs import (
     MEMORY_CONFIG_KEY_SPECS,
     MEMORY_NESTED_TABLE_KEY,
     MEMORY_PATH_CONFIG_KEYS,
+    SEMANTIC_NESTED_TABLE_KEY,
 )
 from .spec import CONFIG_KEY_SPECS, PATH_CONFIG_KEYS, ConfigKeySpec
 
@@ -166,13 +167,19 @@ def _validate_nested_memory_table(
             "Invalid pyproject payload at "
             f"{config_path}: 'tool.codeclone.memory' must be object"
         )
-    unknown = sorted(set(memory_obj.keys()) - set(MEMORY_CONFIG_KEY_SPECS))
+    unknown = sorted(
+        set(memory_obj.keys())
+        - set(MEMORY_CONFIG_KEY_SPECS)
+        - {SEMANTIC_NESTED_TABLE_KEY}
+    )
     if unknown:
         raise ConfigValidationError(
             "Unknown key(s) in tool.codeclone.memory: " + ", ".join(unknown)
         )
     validated: dict[str, object] = {}
     for key in sorted(memory_obj.keys()):
+        if key == SEMANTIC_NESTED_TABLE_KEY:
+            continue
         value = validate_config_value(
             key=key,
             value=memory_obj[key],
@@ -184,7 +191,29 @@ def _validate_nested_memory_table(
             root_path=root_path,
             path_config_keys=MEMORY_PATH_CONFIG_KEYS,
         )
+    semantic_obj = memory_obj.get(SEMANTIC_NESTED_TABLE_KEY)
+    if semantic_obj is not None:
+        validated[SEMANTIC_NESTED_TABLE_KEY] = _validate_nested_semantic_table(
+            semantic_obj=semantic_obj,
+            config_path=config_path,
+        )
     return validated
+
+
+def _validate_nested_semantic_table(
+    *,
+    semantic_obj: object,
+    config_path: Path,
+) -> dict[str, object]:
+    # Structural boundary only: ensure it is a table. Field-level validation
+    # (allowed keys, types, literals, ranges) is owned by the pydantic
+    # SemanticConfig in resolve_memory_config — one validation authority.
+    if not isinstance(semantic_obj, dict):
+        raise ConfigValidationError(
+            "Invalid pyproject payload at "
+            f"{config_path}: 'tool.codeclone.memory.semantic' must be object"
+        )
+    return dict(semantic_obj)
 
 
 def normalize_path_config_value(

@@ -70,9 +70,16 @@ MEMORY_CONFIG_DEFAULTS: Final[dict[str, object]] = {
 
 MEMORY_NESTED_TABLE_KEY: Final = "memory"
 
+# Nested sub-table under [tool.codeclone.memory]. Field-level validation is
+# owned by the pydantic SemanticConfig (codeclone/config/memory.py), so there
+# is intentionally no flat SEMANTIC_CONFIG_KEY_SPECS here — a single
+# validation authority, no duplicated key specs.
+SEMANTIC_NESTED_TABLE_KEY: Final = "semantic"
+
 __all__ = [
     "MEMORY_CONFIG_DEFAULTS",
     "MEMORY_CONFIG_KEY_SPECS",
     "MEMORY_NESTED_TABLE_KEY",
     "MEMORY_PATH_CONFIG_KEYS",
+    "SEMANTIC_NESTED_TABLE_KEY",
 ]

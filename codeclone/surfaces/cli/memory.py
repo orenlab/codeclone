@@ -9,8 +9,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
 from ...contracts import ExitCode
+from ...memory.embedding import resolve_embedding_provider
 from ...memory.governance import approve_record, archive_record, reject_record
 from ...memory.ingest import InitOptions
 from ...memory.ingest.runner import run_memory_init
@@ -18,6 +20,14 @@ from ...memory.models import MemoryProject, MemoryQuery
 from ...memory.paths import normalize_repo_path
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.retrieval import query_engineering_memory, query_records_for_repo_path
+from ...memory.semantic import (
+    AuditIndexSource,
+    IndexSource,
+    MemoryIndexSource,
+    rebuild_semantic_index,
+    resolve_semantic_index,
+    resolve_semantic_index_writer,
+)
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from ...memory.status_report import build_memory_status_report
 from ...memory.vacuum import run_memory_vacuum
@@ -68,6 +78,8 @@ def memory_main(argv: list[str]) -> int:
         return _run_reject(console=console, root_path=root_path, args=args)
     if args.command == "archive":
         return _run_archive(console=console, root_path=root_path, args=args)
+    if args.command == "semantic":
+        return _run_semantic(console=console, root_path=root_path, args=args)
     parser.print_help()
     return int(ExitCode.CONTRACT_ERROR)
 
@@ -174,6 +186,22 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_root(archive_parser)
     archive_parser.add_argument("record_id")
     archive_parser.add_argument("--by", default="human")
+
+    semantic_parser = subparsers.add_parser(
+        "semantic",
+        help="Semantic retrieval index (status / rebuild / search).",
+    )
+    semantic_sub = semantic_parser.add_subparsers(dest="semantic_action", required=True)
+    sem_status = semantic_sub.add_parser("status", help="Show semantic index status.")
+    _add_root(sem_status)
+    sem_rebuild = semantic_sub.add_parser("rebuild", help="Rebuild the semantic index.")
+    _add_root(sem_rebuild)
+    sem_search = semantic_sub.add_parser(
+        "search", help="Semantic free-text search over memory."
+    )
+    _add_root(sem_search)
+    sem_search.add_argument("query", help="Free-text query.")
+    sem_search.add_argument("--limit", type=int, default=10)
 
     return parser
 
@@ -495,6 +523,109 @@ def _run_archive(
         detail=f"Archived {record.id}",
     )
     return int(ExitCode.SUCCESS)
+
+
+def _semantic_unavailable(console: PrinterLike, message: str) -> int:
+    console.print(message)
+    console.print(
+        "Enable memory.semantic and install: pip install 'codeclone[semantic-lancedb]'",
+        markup=False,
+    )
+    return int(ExitCode.CONTRACT_ERROR)
+
+
+def _run_semantic(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    action = str(args.semantic_action)
+    if action == "status":
+        return _run_semantic_status(console=console, root_path=root_path)
+    if action == "rebuild":
+        return _run_semantic_rebuild(console=console, root_path=root_path)
+    return _run_semantic_search(console=console, root_path=root_path, args=args)
+
+
+def _run_semantic_status(*, console: PrinterLike, root_path: Path) -> int:
+    config = resolve_memory_config(root_path)
+    status = resolve_semantic_index(config.semantic).status()
+    state = "available" if status.available else "unavailable"
+    console.print(f"semantic index: {state}")
+    if status.reason:
+        console.print(f"  reason: {status.reason}")
+    console.print(f"  enabled: {config.semantic.enabled}")
+    console.print(
+        f"  embedding: {config.semantic.embedding_provider} "
+        f"(dim {config.semantic.dimension})"
+    )
+    return int(ExitCode.SUCCESS)
+
+
+def _run_semantic_rebuild(*, console: PrinterLike, root_path: Path) -> int:
+    config = resolve_memory_config(root_path)
+    writer = resolve_semantic_index_writer(config.semantic)
+    if writer is None:
+        return _semantic_unavailable(
+            console, "Semantic index is not available for writing."
+        )
+    db_path = resolve_memory_db_path(root_path, config)
+    if not db_path.exists():
+        console.print(f"Engineering memory database not found: {db_path}")
+        console.print("Run: codeclone memory init")
+        return int(ExitCode.CONTRACT_ERROR)
+    project = resolve_project_identity(root_path)
+    store = SqliteEngineeringMemoryStore(db_path)
+    try:
+        report = rebuild_semantic_index(
+            writer=writer,
+            provider=resolve_embedding_provider(config.semantic),
+            sources=_semantic_sources(root_path, config, store, project),
+        )
+    finally:
+        store.close()
+    console.print(
+        f"Rebuilt semantic index: {report.indexed} indexed, {report.deleted} pruned."
+    )
+    for name, count in sorted(report.by_source.items()):
+        console.print(f"  {name}: {count}")
+    return int(ExitCode.SUCCESS)
+
+
+def _run_semantic_search(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    config = resolve_memory_config(root_path)
+    index = resolve_semantic_index(config.semantic)
+    status = index.status()
+    if not status.available:
+        return _semantic_unavailable(
+            console, f"Semantic search unavailable: {status.reason}."
+        )
+    provider = resolve_embedding_provider(config.semantic)
+    (vector,) = provider.embed([str(args.query)])
+    hits = index.search(vector, k=max(1, int(args.limit)))
+    if not hits:
+        console.print(f"No semantic matches for: {args.query}")
+        return int(ExitCode.SUCCESS)
+    console.print(f"Semantic matches for: {args.query}")
+    for hit in hits:
+        console.print(
+            f"  {hit.source}/{hit.source_id}  score={hit.score:.3f}", markup=False
+        )
+    return int(ExitCode.SUCCESS)
+
+
+def _semantic_sources(
+    root_path: Path,
+    config: MemoryConfig,
+    store: SqliteEngineeringMemoryStore,
+    project: MemoryProject,
+) -> list[IndexSource]:
+    audit_db_path = resolve_audit_path(root_path=root_path, value=DEFAULT_AUDIT_PATH)
+    sources: list[IndexSource] = [
+        MemoryIndexSource(store, project_id=project.id),
+        AuditIndexSource(enabled=config.semantic.index_audit, db_path=audit_db_path),
+    ]
+    return sources
 
 
 __all__ = ["memory_main"]

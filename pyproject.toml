@@ -71,6 +71,9 @@ mcp = [
 token-bench = [
     "tiktoken>=0.13.0",
 ]
+semantic-lancedb = [
+    "lancedb>=0.33.0",
+]
 dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
@@ -156,6 +159,8 @@ audit_path = ".cache/codeclone/db/audit.sqlite3"
 audit_payloads = "full"    # "off" | "compact" | "full"
 audit_retention_days = 30
 
+[tool.codeclone.memory.semantic]
+enabled = true
 
 [tool.coverage.report]
 show_missing = true
